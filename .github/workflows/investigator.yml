@@ -1,0 +1,135 @@
+name: Investigator
+
+on:
+  workflow_run:
+    workflows: ["Flaker"]
+    types: [completed]
+
+concurrency:
+  group: investigator
+  cancel-in-progress: false
+
+jobs:
+  investigate:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    name: Investigate Failure
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+
+    - name: Download failed run logs
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        mkdir -p /tmp/failed-logs
+        gh run view ${{ github.event.workflow_run.id }} \
+          --repo ${{ github.repository }} \
+          --log-failed > /tmp/failed-logs/failed.log 2>/dev/null || \
+        gh run view ${{ github.event.workflow_run.id }} \
+          --repo ${{ github.repository }} \
+          --log > /tmp/failed-logs/full.log
+
+    - name: Investigate with Claude Code
+      uses: anthropics/claude-code-action@v1
+      with:
+        claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        allowed_tools: "Bash,Edit,Write,Read,Grep,Glob"
+        prompt: |
+          Integration test workflow "Flaker" (run id ${{ github.event.workflow_run.id }}, url ${{ github.event.workflow_run.html_url }}) failed on commit ${{ github.event.workflow_run.head_sha }}.
+          Failure logs: /tmp/failed-logs/.
+
+          ## Conventions
+
+          - Investigator **PRs** use branch prefix `flake/` and include a `Signature:` line in the body.
+          - Investigator **issues** use title prefix `flake:` and include a `Signature:` line in the body.
+          - A `Signature:` is a short stable string like `wallet-peg-in-timeout-after-dkg` — designed to be grep-matchable across occurrences.
+
+          ## Dedup (do this first)
+
+          List prior investigator PRs and issues:
+          ```
+          gh pr list --state all --limit 100 \
+            --json number,title,body,state,headRefName,mergedAt,closedAt \
+            | jq '[.[] | select(.headRefName | startswith("flake/"))]'
+
+          gh issue list --state all --limit 100 --search "flake: in:title" \
+            --json number,title,body,state,closedAt
+          ```
+
+          Compare each candidate's `Signature:` + failure description to the current failure.
+
+          - **Match against an OPEN PR** → `gh pr comment <n> --body "..."` with: new failure run URL, any new signal (especially if that PR adds logging now producing output), local reproduction rate if you ran it. Exit.
+          - **Match against an OPEN issue** → `gh issue comment <n> --body "..."` with the new failure run URL and any new logs/info. Exit.
+          - **Match against a MERGED PR within last 30 days** → recurrence. Open a NEW PR titled `recurrence: <signature>` after full investigation. Link the original.
+          - **Match against a CLOSED-not-merged PR or CLOSED issue** → treat as stale, proceed.
+          - **Older merged PR (>30 days)** → use as background, proceed.
+
+          Also skim `git log --oneline -50` for merges of `flake/*` branches as additional context.
+
+          If no match, proceed.
+
+          ## Investigate — confidence is the goal
+
+          You have ~5 hours of wall-clock budget on this runner. Use it. The **first** `./test-integration.sh` takes ~15 min (cold `cargo build --workspace`); **subsequent runs in this same job reuse the warm build cache and finish in ~2–3 min each**. That gives you room for 50+ repeated runs after the first — enough for reliable reproduction rates, falsification experiments, and fix verification across many trials. Do not rush to open a PR from a single log read — PR = claim of understanding, not a guess.
+
+          1. Form a hypothesis from the logs. Be specific: name the failing assertion, panic site, timeout, or error kind. Derive a stable `Signature:`.
+
+             Also check whether a recent change may have introduced the flake:
+             ```
+             git log --oneline --since="2 weeks ago" main
+             gh pr list --state merged --limit 30 --json number,title,mergedAt,files
+             ```
+             If the failure implicates a specific module or file, `git blame` / `git log -p` that area for recent touches. A PR merged shortly before the first occurrence of this signature is a strong suspect and should be called out in your hypothesis.
+
+          2. Sanity check: run `./test-integration.sh` **once** on unmodified main. That's it — do not burn budget on blind reruns. The goal of this setup is to get the hunter to a ~1/100 failure rate, so once we're doing our job blind reproduction is expected to fail. If the one sanity run happens to hit, great, note it. Either way, move on.
+
+          3. Build evidence — this is where the real time goes. The hypothesis has to be probed actively. Any of:
+             - **Add instrumentation** (logging, extra `dbg!`, temporary `println!`) at the suspect site, rerun, confirm the new output pins the cause. Keep the instrumentation compiling; don't just read logs passively.
+             - **Tilt the race** — if you suspect a timing bug, add `tokio::time::sleep` / `std::thread::sleep` to widen the window and confirm the symptom frequency changes. Remove before committing if the goal is a fix, or keep (as a commented note) if the goal is logging only.
+             - **Binary-search the trigger** — if the flake only hits in certain conditions, narrow them: different module, different sequence, different value. Reduce the repro surface.
+
+          4. Amplify the flake into something reliable. The point of step 3 is to end up with a branch where **the flake hits deterministically or near-deterministically** (e.g. 5/5 with a tilt sleep, or every time under a specific narrowed condition). If you can't get to reliable reproduction under *any* probe, your hypothesis is probably wrong or the cause is elsewhere — go back to step 1 or downgrade to an issue.
+
+          5. Falsify yourself. With the flake now reliable under your tilt/narrowing, modify the code in a way that *should* remove it under your hypothesis. If the flake drops to 0/5 under the same tilt, hypothesis is supported. If it still hits, hypothesis is wrong — back to step 1.
+
+          6. Verify the output:
+             - *Fix PR*: with your tilt still applied, confirm the fix brings the rate to 0. Then **remove the tilt** and confirm the test still passes (no tilt, no flake, no regression). Commit only the fix, not the tilt.
+             - *Logging-only PR*: confirm the added logging fires on a tilted-reliable reproduction and the output would have pinned the root cause for the original failure. The committed code includes the logging but **not** the tilt.
+
+          Low confidence — no reliable reproduction, falsification didn't support the hypothesis, or you can't point at a concrete site — is a signal to downgrade to an issue, never to ship a PR anyway.
+
+          ## Decide the output: PR or issue?
+
+          **Open a PR** (only) if you achieved reliable local reproduction via step 4 AND verified per step 6:
+
+          - *Fix PR* — tilted reproduction went from reliable-fail to reliable-pass under the fix, and the test still passes with the tilt removed. Branch `flake/<slug>`, commit (fix only, no tilt), push, `gh pr create`.
+          - *Logging-only PR* — you couldn't produce a fix but the added logging, confirmed to fire under your tilted reproduction, would have pinned the root cause on the original failure. Commit the logging only. Same branch/PR flow.
+
+          PR body (in order): `Signature:`, failure run URL, how you amplified the flake (tilt / narrowing used in step 4), fix-PR rate change (e.g. "under a 500ms sleep at X: 5/5 fail → 0/5 fail after fix") or logging-PR evidence, "fix" or "logging-only" tag, 1–3 sentence description of the actual committed change.
+
+          **Open an issue** (no PR) if any of the below:
+
+          - You could not amplify the flake into a reliable reproduction via any probe in step 3.
+          - You amplified it but falsification (step 5) did not support any hypothesis.
+          - The root cause is outside this repo (infra, upstream dep, network) and no code change here would help.
+
+          `gh issue create --title "flake: <signature>" --body "..."` with: `Signature:`, failure run URL, what you tried in step 3 and why each probe failed to amplify, the leading hypotheses that couldn't be confirmed, why you're not opening a PR.
+
+          The issue stays open so future occurrences attach via comments and a human can prioritize.
+
+          ## Hard rules
+
+          - Never open a PR without local verification (fix confirmed, or logging confirmed to compile + run).
+          - Never open both a PR and an issue for the same investigation — one or the other.
+          - If unsure which, prefer the issue.
