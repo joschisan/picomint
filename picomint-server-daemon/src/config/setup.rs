@@ -281,7 +281,7 @@ impl SetupApi {
             iroh_sk: local_params.iroh_sk,
             peers: (0..)
                 .map(|i| PeerId::from(i as u8))
-                .zip(state.setup_codes.clone().into_iter())
+                .zip(state.setup_codes.clone())
                 .collect(),
             meta: BTreeMap::from_iter(vec![(
                 META_FEDERATION_NAME_KEY.to_string(),
