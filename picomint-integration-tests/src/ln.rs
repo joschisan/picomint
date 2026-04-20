@@ -589,6 +589,13 @@ async fn test_lnurl_recurringd_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
         }
     }
 
+    // The ?wait long-poll guarantees the gateway has logged ReceiveSuccessEvent
+    // before we do the non-wait check below. Without this ordering the non-wait
+    // GET races against the gateway's threshold decryption (which requires a
+    // network round trip to all guardians) and can return settled=false even
+    // though the client scanner already fired ReceiveEvent locally.
+    let waited = wait_task.await?.map_err(anyhow::Error::msg)?;
+
     // Post-payment: verify endpoint reflects the preimage, which hashes
     // back to the invoice's payment hash.
     let post = verify_invoice(&verify_url)
@@ -605,8 +612,6 @@ async fn test_lnurl_recurringd_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
         sha256::Hash::hash(&preimage) == *invoice_response.pr.payment_hash(),
         "preimage doesn't match invoice hash"
     );
-
-    let waited = wait_task.await?.map_err(anyhow::Error::msg)?;
 
     assert_eq!(waited, post);
 
