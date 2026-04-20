@@ -17,16 +17,20 @@ Picomint is a minimalist fork of Fedimint — two binaries (federation guardian 
 ## Architecture
 
 ### Crates
-- `picomint-core` — shared types, encoding, networking primitives, db traits
+- `picomint-core` — shared types, encoding, wire protocol, `ConsensusConfig`, and the per-module common types for `mint`/`ln`/`wallet`
+- `picomint-encoding` / `picomint-derive` — `Encodable`/`Decodable` traits and derive macros
 - `picomint-server-daemon` — federation guardian binary (consensus via AlephBFT); owns the concrete mint/ln/wallet server-side module code under `src/consensus/{mint,ln,wallet}/`
-- `picomint-server-cli` — admin CLI for the server daemon (HTTP-over-localhost)
+- `picomint-server-cli` / `picomint-server-cli-core` — admin CLI for the server daemon (HTTP-over-Unix-socket) + shared route/request types
 - `picomint-gateway-daemon` — Lightning gateway binary with embedded LDK node
-- `picomint-gateway-cli` — admin CLI for the gateway daemon
-- `picomint-client` — client library
-- `picomint-client-module` — client module traits + per-module state machines
+- `picomint-gateway-cli` / `picomint-gateway-cli-core` — admin CLI for the gateway daemon + shared route/request types
+- `picomint-client` — client library; owns the concrete per-module client state machines
 - `picomint-redb` — redb-based database layer
-- `picomint-api-client` — client-side API transport (Iroh-only)
-- `modules/picomint-{mint,wallet,ln,gw}-{common,client}` — per-module wire types and client-side logic
+- `picomint-eventlog` — append-only client event log
+- `picomint-bitcoin-rpc` — bitcoind RPC client used by the wallet module
+- `picomint-recurring-daemon` — standalone recurring-payment helper daemon
+- `picomint-lnurl` / `picomint-base32` / `picomint-logging` — small shared utility crates
+- `picomint-integration-tests` — end-to-end integration tests (used by `test-integration.sh`)
+- `picomint-startos` — StartOS packaging support
 
 ### Wire + storage
 - Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-core::encoding`
