@@ -1,77 +1,67 @@
-# Picomint
+# Picomint - Alpha
 
-A minimal implementation of a federated Chaumian ecash mint on Bitcoin. Picomint ships a small, deployment-focused codebase with two binaries — a federation guardian and a Lightning gateway — that you can run via Docker in a single `docker-compose up`, with no pluggability layers, trait towers, setup flows, legacy modules, or deployment knobs beyond what is strictly required.
+A minimal implementation of a federated Chaumian ecash mint on Bitcoin.
 
-Picomint runs over [Iroh](https://iroh.computer/) (QUIC + hole-punching), uses [redb](https://github.com/cberner/redb) for storage, and ships without migrations, backups, or version negotiation.
+## Deploy Guardian
 
-> ⚠️ **Beta / experimental.** Not recommended for real funds.
-
-## Features
-
-- **Two binaries, two roles** — `picomint-server-daemon` (federation guardian) and `picomint-gateway-daemon` (Lightning gateway with embedded LDK node).
-- **Iroh-native networking** — no public IP, domain, or TLS configuration required.
-- **Static module set** — mint, wallet, lightning (v2 only). No dyn-module plumbing.
-- **redb storage** — single file per daemon, no migrations.
-- **Admin CLIs shipped in the container** — `picomint-server-cli` and `picomint-gateway-cli` reach the daemon over a localhost-only HTTP socket.
-
-## Deploy a federation guardian
-
-Download the reference compose file:
+Download the compose file:
 
 ```bash
 curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-server/docker-compose.yml
 ```
 
-Edit `UI_PASSWORD` to a strong password, then:
+And then run:
 
 ```bash
 docker-compose up -d
 ```
 
-Day-to-day admin actions (including DKG setup) go through `picomint-server-cli`, running inside the container:
+Admin actions including setup either go through the CLI running inside the container:
 
 ```bash
 docker exec -it picomint-server picomint-server-cli setup status
 ```
 
-### Optional: Web UI
-
-The Web UI is off by default. To enable it, uncomment `UI_ADDR` and `UI_PASSWORD` in `docker-compose.yml` (plus the `127.0.0.1:3000:3000` port mapping) and restart the container. Then forward it over SSH if the daemon runs remotely:
+You can also enable the Web UI -- uncomment `UI_ADDR` and `UI_PASSWORD` in `docker-compose.yml` plus the `127.0.0.1:3000:3000` port mapping and restart the container. Never expose the UI to the public internet without TLS - if you dont run on a local machine you can either configure a domain or forward the port over SSH to a port on your local machine:
 
 ```bash
 ssh -NL 3000:127.0.0.1:3000 <your_server>
 ```
 
-Never expose the UI to the public internet without TLS — run it behind a reverse proxy that terminates HTTPS.
+### Setup Ceremony
 
-## Deploy a Lightning gateway
-
-```bash
-curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-gateway/docker-compose.yml
-docker-compose up -d
-```
-
-## Admin CLI
-
-Both CLIs are included in their respective images and available on the container `PATH`. Open a shell inside the container:
+Before the federation can start processing transactions, guardians run a one-time setup ceremony. The Web UI walks you through it in a setup wizard; the CLI does the same thing:
 
 ```bash
-docker exec -it picomint-server bash
-picomint-server-cli --help
+picomint-server-cli setup set-local-params <name> [--federation-name X] [--federation-size N]
+picomint-server-cli setup add-peer <setup-code>
+picomint-server-cli setup start-dkg
+picomint-server-cli setup status
 ```
 
-Or run commands one-shot:
+Exactly one guardian sets the global federation config and passes `--federation-name` and `--federation-size`; the others pass only their own `<name>`. Each guardian's `set-local-params` returns a setup code. Every guardian then calls `add-peer` once per peer with that peer's setup code. Once every guardian has added every peer, everyone has to run `start-dkg`. Run `setup status` to see your progress.
+
+### Invite Users
+
+Users join the federation with an invite code and any guardian can create one:
 
 ```bash
-docker exec picomint-server picomint-server-cli invite
-docker exec picomint-gateway picomint-gateway-cli info
+picomint-server-cli invite
 ```
 
-The admin CLI speaks over a Unix socket inside `DATA_DIR`, never over TCP. `docker exec` reaches it from inside the container; the host and network cannot.
+The client can use this invite to download and verify the federation config from the guardian that generated it.
 
-## Interfaces
+### Configure Gateways
 
-### Server daemon (`picomint-server-daemon`)
+The federation maintains an explicit list of recommended Lightning gateways. Any guardian can add a gateway and clients will priorititze gateways by the number of guardians recommending them.
+
+```bash
+picomint-server-cli module ln gateway add <url>
+picomint-server-cli module ln gateway remove <url>
+picomint-server-cli module ln gateway list
+```
+
+### Interfaces
 
 | Port | Purpose                      | Safe to expose? |
 |------|------------------------------|-----------------|
@@ -82,19 +72,7 @@ The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
 network exposure. Reach it with `docker exec -it picomint-server
 picomint-server-cli …`.
 
-### Gateway daemon (`picomint-gateway-daemon`)
-
-| Port | Purpose                      | Safe to expose? |
-|------|------------------------------|-----------------|
-| 8080 | Public API (HTTP)            | Yes             |
-| 9735 | LDK Lightning P2P (BOLT)     | Yes             |
-
-The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — same pattern
-as the server daemon.
-
-## Configuration reference
-
-### Server daemon
+### Configuration
 
 | Env                          | Required | Default           | Description                                |
 |------------------------------|----------|-------------------|--------------------------------------------|
@@ -110,7 +88,101 @@ as the server daemon.
 
 *Either `ESPLORA_URL` or `BITCOIND_URL` must be set, but not both.*
 
-### Gateway daemon
+## Deploy Gateway
+
+Download the compose file:
+
+```bash
+curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-gateway/docker-compose.yml
+```
+
+And then run:
+
+```bash
+docker-compose up -d
+```
+
+Admin actions go through `picomint-gateway-cli`, running inside the container:
+
+```bash
+docker exec -it picomint-gateway picomint-gateway-cli info
+```
+
+```json
+{
+  "public_key": "02abfe4a99f1ed8f67c1f07e5d47f3ab3d2e9c5b8a1c8e7f2a6d4b7e9c1f5a3e8d",
+  "alias": "picomint-gateway-daemon",
+  "network": "bitcoin",
+  "block_height": 842195,
+  "synced_to_chain": true
+}
+```
+
+### Open Channels
+
+To route payments on behalf of federations the gateway needs Lightning channels — specifically inbound liquidity, since a fresh node cannot receive payments. The usual approach is to buy an inbound channel from a Lightning Service Provider (LSP) such as [LN Big](https://lnbig.com). LSPs will ask for the node's `public_key` from `info` above and may require you to connect to them before they open the channel:
+
+```bash
+picomint-gateway-cli ldk peer connect <lsp-pubkey> <lsp-host>
+```
+
+You can also open outbound channels yourself but first the gateway's embedded LDK node needs onchain bitcoin to open channels. Generate a receive address:
+
+```bash
+picomint-gateway-cli ldk onchain receive
+```
+
+Send bitcoin to it, then check the result:
+
+```bash
+picomint-gateway-cli ldk balances
+```
+
+Once the onchain balance is available connect to a node and open a channel with
+
+```bash
+picomint-gateway-cli ldk channel open <pubkey> <host> <channel-size-sats>
+```
+
+Running a second outbound channel alongside the LSP's inbound one is worthwhile: with only one channel, outgoing payments can fail once user balances drain toward the counterparty's channel reserve. Monitor channel state with:
+
+```bash
+picomint-gateway-cli ldk channel list
+```
+
+### Join Federations
+
+The gateway can serve mutliple Federations simultanously. Join one with an invite code (see [Invite Users](#invite-users) above for how guardians produce these):
+
+```bash
+picomint-gateway-cli federation join <invite>
+picomint-gateway-cli federation list
+```
+
+For the gateway to actually route payments on behalf of a federation, its guardians also need to add the gateway's URL to their recommended list — see [Configure Gateways](#configure-gateways) above.
+
+### Recovery
+
+If your gateway deployment is ever corrupted you can recover your onchain funds and ecash from your twelve word mnemonic:
+
+```bash
+picomint-gateway-cli mnemonic
+```
+
+The mnemonic can be used with any Bip 39 compatible wallet to recover the onchain funds and with any Picomint wallet to recover the funds in the federations.  **The balance in your open lightning channels is lost.**
+
+### Interfaces
+
+| Port | Purpose                      | Safe to expose? |
+|------|------------------------------|-----------------|
+| 8080 | Public API (HTTP)            | Yes             |
+| 9735 | LDK Lightning P2P (BOLT)     | Yes             |
+
+The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
+network exposure. Reach it with `docker exec -it picomint-gateway
+picomint-gateway-cli …`.
+
+### Configuration
 
 | Env                        | Required | Default           | Description                                 |
 |----------------------------|----------|-------------------|---------------------------------------------|
@@ -126,60 +198,6 @@ as the server daemon.
 | `ROUTING_FEE_PPM`          | no       | `3000`            | Lightning routing fee rate (ppm)            |
 | `TRANSACTION_FEE_BASE_MSAT`| no       | `2000`            | Federation transaction base fee (msat)      |
 | `TRANSACTION_FEE_PPM`      | no       | `3000`            | Federation transaction fee rate (ppm)       |
-
-## Server CLI
-
-```bash
-picomint-server-cli setup status
-picomint-server-cli setup set-local-params <name> [--federation-name X] [--federation-size N]
-picomint-server-cli setup add-peer <setup-code>
-picomint-server-cli setup start-dkg
-
-picomint-server-cli invite
-picomint-server-cli audit
-
-picomint-server-cli module wallet total-value
-picomint-server-cli module wallet block-count
-picomint-server-cli module wallet feerate
-picomint-server-cli module wallet tx-chain
-picomint-server-cli module wallet pending-tx-chain
-
-picomint-server-cli module ln gateway add <url>
-picomint-server-cli module ln gateway remove <url>
-picomint-server-cli module ln gateway list
-```
-
-## Gateway CLI
-
-```bash
-picomint-gateway-cli info
-picomint-gateway-cli mnemonic
-
-picomint-gateway-cli ldk balances
-picomint-gateway-cli ldk onchain receive
-picomint-gateway-cli ldk onchain send --address <addr> --amount <amt> --sats-per-vbyte <n>
-picomint-gateway-cli ldk channel open <pubkey> <host> <channel-size-sats> [--push-amount-sats N]
-picomint-gateway-cli ldk channel close <pubkey> [--force] [--sats-per-vbyte N]
-picomint-gateway-cli ldk channel list
-picomint-gateway-cli ldk peer connect <pubkey> <host>
-picomint-gateway-cli ldk peer disconnect <pubkey>
-picomint-gateway-cli ldk peer list
-picomint-gateway-cli ldk invoice create <amount-msats> [--expiry-secs N] [--description S]
-picomint-gateway-cli ldk invoice pay <bolt11>
-
-picomint-gateway-cli federation join <invite>
-picomint-gateway-cli federation list
-picomint-gateway-cli federation config <federation-id>
-picomint-gateway-cli federation invite <federation-id>
-picomint-gateway-cli federation balance <federation-id>
-
-picomint-gateway-cli module <federation-id> mint count
-picomint-gateway-cli module <federation-id> mint send <amount>
-picomint-gateway-cli module <federation-id> mint receive <ecash>
-picomint-gateway-cli module <federation-id> wallet receive
-picomint-gateway-cli module <federation-id> wallet send <address> <amount> [--fee F]
-picomint-gateway-cli module <federation-id> wallet send-fee
-```
 
 ## License
 
