@@ -1,0 +1,62 @@
+[package]
+authors = { workspace = true }
+description = "picomint-server-daemon facilitates federated consensus with atomic broadcast and distributed configuration. Produces the `picomint-server-daemon` binary."
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-server-daemon"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[package.metadata.docs.rs]
+rustc-args = ["--cfg", "tokio_unstable"]
+
+[lib]
+name = "picomint_server_daemon"
+path = "src/lib.rs"
+
+[features]
+default = []
+
+[dependencies]
+aleph-bft = { workspace = true }
+anyhow = { workspace = true }
+async-channel = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true, features = ["macros", "multipart"] }
+axum-extra = { workspace = true, features = ["cookie", "form"] }
+bitcoin = { workspace = true }
+bls12_381 = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+group = { workspace = true }
+iroh = { workspace = true, default-features = false }
+iroh-base = { workspace = true, default-features = false, features = ["key"] }
+maud = { workspace = true }
+miniscript = { workspace = true }
+parity-scale-codec = { workspace = true }
+picomint-base32 = { workspace = true }
+picomint-bitcoin-rpc = { workspace = true }
+picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
+picomint-logging = { workspace = true }
+picomint-redb = { workspace = true }
+picomint-server-cli-core = { workspace = true }
+qrcode = { workspace = true }
+rand = { workspace = true }
+secp256k1 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tbs = { workspace = true }
+threshold_crypto = { workspace = true }
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }
+tpe = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+test-log = { workspace = true }
+
+[lints]
+workspace = true

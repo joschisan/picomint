@@ -1,0 +1,21 @@
+services:
+  picomint-gateway:
+    image: ghcr.io/joschisan/picomint-gateway:main
+    container_name: picomint-gateway
+    restart: unless-stopped
+    ports:
+      # Public API
+      - "8080:8080"
+      # LDK lightning P2P (BOLT default port)
+      - "9735:9735"
+    volumes:
+      - picomint_gateway_data:/data
+    environment:
+      - DATA_DIR=/data
+      - BITCOIN_NETWORK=bitcoin
+      - ESPLORA_URL=https://mempool.space/api
+      - API_ADDR=0.0.0.0:8080
+      - LDK_ADDR=0.0.0.0:9735
+
+volumes:
+  picomint_gateway_data:

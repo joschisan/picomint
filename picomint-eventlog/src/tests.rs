@@ -1,0 +1,62 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicU8;
+
+use anyhow::bail;
+use futures::StreamExt as _;
+use picomint_redb::Database;
+use tokio::try_join;
+use tracing::info;
+
+use super::{EVENT_LOG, EventKind, log_event_raw, subscribe_operation_events};
+
+#[test_log::test(tokio::test)]
+async fn sanity_subscribe_operation_events() {
+    let db = Database::open_in_memory();
+    let event_notify = db.notify_for_table(&EVENT_LOG);
+
+    let operation_id = picomint_core::core::OperationId::new_random();
+    let counter = Arc::new(AtomicU8::new(0));
+
+    let _ = try_join!(
+        {
+            let counter = counter.clone();
+            let db = db.clone();
+            let event_notify = event_notify.clone();
+            async move {
+                let mut stream =
+                    Box::pin(subscribe_operation_events(db, event_notify, operation_id));
+                while let Some(entry) = stream.next().await {
+                    info!("{entry:?}");
+                    assert_eq!(
+                        entry.kind,
+                        EventKind::from(format!(
+                            "{}",
+                            counter.load(std::sync::atomic::Ordering::Relaxed)
+                        ))
+                    );
+                    if counter.load(std::sync::atomic::Ordering::Relaxed) == 4 {
+                        bail!("Time to wrap up");
+                    }
+                    counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                Ok(())
+            }
+        },
+        async {
+            for i in 0..=4 {
+                let dbtx = db.begin_write();
+                log_event_raw(
+                    &dbtx.as_ref(),
+                    EventKind::from(format!("{i}")),
+                    None,
+                    Some(operation_id),
+                    vec![],
+                );
+
+                dbtx.commit();
+            }
+
+            Ok(())
+        }
+    );
+}

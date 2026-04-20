@@ -1,0 +1,111 @@
+id: picomint
+title: "Picomint"
+version: 0.10.0
+release-notes: |
+  Read more about the release [here](https://github.com/joschisan/picomint/releases/tag/v0.10.0)
+license: MIT
+wrapper-repo: "https://github.com/joschisan/picomint/tree/main/picomint-startos"
+upstream-repo: "https://github.com/joschisan/picomint"
+support-site: "https://github.com/joschisan/picomint/issues"
+marketing-site: "https://github.com/joschisan/picomint"
+build: ["make"]
+description:
+  short: Federated Ecash Mint
+  long: |
+    Picomint is a federated Chaumian Ecash Mint to custody and transact bitcoin in a community.
+assets:
+  license: LICENSE
+  icon: icon.png
+  instructions: instructions.md
+main:
+  type: docker
+  image: main
+  entrypoint: "/docker_entrypoint.sh"
+  args: []
+  mounts:
+    main: /start-os
+    picomint: /picomint
+hardware-requirements:
+  arch:
+    - x86_64
+    - aarch64
+health-checks:
+  web-ui:
+    name: Web Interface
+    success-message: Guardian dashboard is available
+    type: docker
+    image: main
+    entrypoint: "check-web.sh"
+    args: []
+    inject: true
+    system: false
+    io-format: json
+config:
+  get:
+    type: script
+  set:
+    type: script
+properties: ~
+volumes:
+  main:
+    type: data
+  picomint:
+    type: data
+interfaces:
+  main:
+    name: Guardian Interface
+    description: Initial setup and dashboard for this guardian
+    tor-config:
+      port-mapping:
+        80: "3000"
+    lan-config:
+      443:
+        ssl: true
+        internal: 3000
+    ui: true
+    protocols:
+      - http
+      - tcp
+dependencies:
+  bitcoind:
+    version: ">=0.21.0.0 <31.0.0"
+    requirement:
+      type: "opt-in"
+      how: "Install Bitcoin Core from the Start9 marketplace and select it in Picomint's config"
+    description: "Provides private, self-hosted blockchain data instead of relying on external Esplora APIs"
+backup:
+  create:
+    type: docker
+    image: compat
+    system: true
+    entrypoint: compat
+    args:
+      - duplicity
+      - create
+      - /mnt/backup
+      - /picomint
+    mounts:
+      BACKUP: "/mnt/backup"
+      picomint: "/picomint"
+  restore:
+    type: docker
+    image: compat
+    system: true
+    entrypoint: compat
+    args:
+      - duplicity
+      - restore
+      - /mnt/backup
+      - /picomint
+    mounts:
+      BACKUP: "/mnt/backup"
+      picomint: "/picomint"
+migrations:
+  from:
+    "*":
+      type: script
+      args: ["from"]
+  to:
+    "*":
+      type: script
+      args: ["to"]

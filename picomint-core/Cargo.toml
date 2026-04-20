@@ -1,0 +1,79 @@
+[package]
+authors = { workspace = true }
+description = "picomint-core provides common code used by both client and server."
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-core"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[package.metadata.cargo-udeps.ignore]
+development = ["tokio-test"]
+
+[lib]
+name = "picomint_core"
+path = "src/lib.rs"
+
+[features]
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+backon = { workspace = true }
+bech32 = { workspace = true }
+bitcoin = { workspace = true }
+bitcoin-units = { workspace = true }
+bitcoin_hashes = { workspace = true }
+bls12_381 = { workspace = true }
+futures = { workspace = true }
+group = { workspace = true }
+hex = { workspace = true, features = ["serde"] }
+iroh-base = { workspace = true, default-features = false }
+itertools = { workspace = true }
+jsonrpsee-core = { workspace = true, features = ["client"] }
+lightning-invoice = { workspace = true }
+miniscript = { workspace = true, features = ["serde"] }
+picomint-base32 = { workspace = true }
+picomint-derive = { workspace = true }
+picomint-encoding = { workspace = true }
+picomint-logging = { workspace = true }
+picomint-redb = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+redb = { workspace = true }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+subtle = { workspace = true }
+tbs = { workspace = true }
+thiserror = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
+tpe = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true, features = ["serde"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, features = ["full", "tracing"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+async-lock = { workspace = true }
+futures-util = { workspace = true }
+# getrandom is transitive dependency of rand
+# on wasm, we need to enable the js backend
+# see https://docs.rs/getrandom/latest/getrandom/#indirect-dependencies and https://docs.rs/getrandom/latest/getrandom/#webassembly-support
+getrandom = { workspace = true, features = ["wasm_js"] }
+gloo-timers = { workspace = true, features = ["futures"] }
+js-sys = { workspace = true }
+# enable lowmemory for better bundle size
+secp256k1 = { workspace = true, features = ["lowmemory"] }
+tokio = { workspace = true, features = ["io-util"] }
+wasm-bindgen-futures = { workspace = true }
+
+[dev-dependencies]
+assert_matches = { workspace = true }
+test-log = { workspace = true }
+tokio-test = { workspace = true }
+
+[lints]
+workspace = true

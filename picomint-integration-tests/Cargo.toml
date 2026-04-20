@@ -1,0 +1,40 @@
+[package]
+authors = { workspace = true }
+description = "Standalone integration tests using in-process clients"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-integration-tests"
+publish = false
+version = { workspace = true }
+
+[[bin]]
+name = "picomint-integration-tests"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-stream = { workspace = true }
+axum = { workspace = true }
+bitcoin = { workspace = true }
+bitcoincore-rpc = { workspace = true }
+futures = { workspace = true }
+iroh = { workspace = true, default-features = false }
+ldk-node = { workspace = true }
+lightning-invoice = { workspace = true }
+lightning-types = { workspace = true }
+picomint-client = { workspace = true }
+picomint-core = { workspace = true }
+picomint-eventlog = { workspace = true }
+picomint-gateway-cli-core = { workspace = true }
+picomint-lnurl = { workspace = true }
+picomint-logging = { workspace = true }
+picomint-redb = { workspace = true }
+picomint-server-cli-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

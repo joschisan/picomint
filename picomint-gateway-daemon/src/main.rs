@@ -1,0 +1,328 @@
+#![warn(missing_docs)]
+//! This crate provides the Picomint gateway binary.
+//!
+//! The binary contains logic for sending/receiving Lightning payments on behalf
+//! of Picomint clients in one or more connected Federations.
+//!
+//! It runs a webserver with a REST API that can be used by Picomint
+//! clients to request routing of payments through the Lightning Network.
+//! The API also has endpoints for managing the gateway.
+
+use std::collections::BTreeMap;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use bitcoin::Network;
+use bitcoin::hashes::{Hash as _, sha256};
+use clap::{ArgGroup, Parser};
+use lightning::types::payment::PaymentHash;
+use picomint_core::Amount;
+use picomint_core::ln::gateway_api::PaymentFee;
+use picomint_core::util::SafeUrl;
+use picomint_gateway_daemon::client::GatewayClientFactory;
+use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
+use picomint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
+use rand::rngs::OsRng;
+use tokio::sync::RwLock;
+use tracing::{info, warn};
+
+/// Command line parameters for starting the gateway.
+#[derive(Parser)]
+#[command(version)]
+#[command(
+    group(
+        ArgGroup::new("bitcoind_password_auth")
+           .args(["bitcoind_password"])
+           .multiple(false)
+    ),
+    group(
+        ArgGroup::new("bitcoind_auth")
+            .args(["bitcoind_url"])
+            .requires("bitcoind_password_auth")
+            .requires_all(["bitcoind_username", "bitcoind_url"])
+    ),
+    group(
+        ArgGroup::new("bitcoin_rpc")
+            .required(true)
+            .multiple(true)
+            .args(["bitcoind_url", "esplora_url"])
+    )
+)]
+pub struct GatewayOpts {
+    /// Path to folder containing gateway config and data files
+    #[arg(long = "data-dir", env = "DATA_DIR")]
+    pub data_dir: PathBuf,
+
+    /// Bitcoin network this gateway will be running on
+    #[arg(long = "network", env = "BITCOIN_NETWORK")]
+    pub network: Network,
+
+    /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
+    #[arg(long, env = "ESPLORA_URL")]
+    pub esplora_url: Option<SafeUrl>,
+
+    /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
+    #[arg(long, env = "BITCOIND_URL")]
+    pub bitcoind_url: Option<SafeUrl>,
+
+    /// The username to use when connecting to bitcoind
+    #[arg(long, env = "BITCOIND_USERNAME")]
+    pub bitcoind_username: Option<String>,
+
+    /// The password to use when connecting to bitcoind
+    #[arg(long, env = "BITCOIND_PASSWORD")]
+    pub bitcoind_password: Option<String>,
+
+    /// Public API listen address
+    #[arg(long = "api-addr", env = "API_ADDR", default_value = "0.0.0.0:8080")]
+    pub api_addr: SocketAddr,
+
+    /// Network address and port for the lightning P2P interface (BOLT)
+    #[arg(long = "ldk-addr", env = "LDK_ADDR", default_value = "0.0.0.0:9735")]
+    pub ldk_addr: SocketAddr,
+
+    /// Base routing fee in millisatoshis for Lightning payments
+    #[arg(long, env = "ROUTING_FEE_BASE_MSAT", default_value_t = 2000)]
+    pub routing_fee_base_msat: u64,
+
+    /// Routing fee rate in parts per million for Lightning payments
+    #[arg(long, env = "ROUTING_FEE_PPM", default_value_t = 3000)]
+    pub routing_fee_ppm: u64,
+
+    /// Base transaction fee in millisatoshis for federation transactions
+    #[arg(long, env = "TRANSACTION_FEE_BASE_MSAT", default_value_t = 2000)]
+    pub transaction_fee_base_msat: u64,
+
+    /// Transaction fee rate in parts per million for federation transactions
+    #[arg(long, env = "TRANSACTION_FEE_PPM", default_value_t = 3000)]
+    pub transaction_fee_ppm: u64,
+}
+
+fn main() -> anyhow::Result<()> {
+    TracingSetup::default().init()?;
+
+    // 1. Parse CLI args
+    let opts = GatewayOpts::parse();
+
+    let runtime = Arc::new(tokio::runtime::Runtime::new()?);
+
+    // 2. Open database
+    tokio_rustls::rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+
+    let gateway_db = picomint_redb::Database::open(opts.data_dir.join(DB_FILE))?;
+
+    // 3. Load or init client factory (mnemonic)
+    let client_factory =
+        match runtime.block_on(GatewayClientFactory::try_load(gateway_db.clone()))? {
+            Some(factory) => factory,
+            None => runtime.block_on(GatewayClientFactory::init(
+                gateway_db.clone(),
+                picomint_client::random_mnemonic(&mut OsRng),
+            ))?,
+        };
+
+    let mnemonic = client_factory.mnemonic().clone();
+
+    // 4. Build LDK node
+    let ldk_data_dir = opts
+        .data_dir
+        .join(LDK_NODE_DB_FOLDER)
+        .to_str()
+        .expect("Invalid data dir path")
+        .to_string();
+
+    let mut node_builder = ldk_node::Builder::new();
+
+    node_builder.set_runtime(runtime.handle().clone());
+    node_builder.set_network(opts.network);
+    node_builder.set_node_alias("picomint-gateway-daemon".to_string())?;
+    node_builder.set_listening_addresses(vec![opts.ldk_addr.into()])?;
+    node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
+    node_builder.set_storage_dir_path(ldk_data_dir);
+
+    match (opts.bitcoind_url.clone(), opts.esplora_url.clone()) {
+        (Some(url), _) => {
+            node_builder.set_chain_source_bitcoind_rpc(
+                url.host_str().expect("Missing bitcoind host").to_string(),
+                url.port().expect("Missing bitcoind port"),
+                opts.bitcoind_username
+                    .clone()
+                    .expect("BITCOIND_USERNAME is required"),
+                opts.bitcoind_password
+                    .clone()
+                    .expect("BITCOIND_PASSWORD is required"),
+            );
+        }
+        (None, Some(url)) => {
+            node_builder.set_chain_source_esplora(url.to_string(), None);
+        }
+        _ => unreachable!("ArgGroup enforces at least one chain source"),
+    }
+
+    info!(target: LOG_LIGHTNING, "Starting LDK Node...");
+
+    let node = Arc::new(node_builder.build()?);
+
+    node.start()?;
+
+    info!("Successfully started LDK Node");
+
+    // 5. Construct AppState
+    let state = AppState {
+        clients: Arc::new(RwLock::new(BTreeMap::new())),
+        node: node.clone(),
+        client_factory,
+        gateway_db,
+        api_addr: opts.api_addr,
+        data_dir: opts.data_dir.clone(),
+        network: opts.network,
+        routing_fees: PaymentFee {
+            base: Amount::from_msats(opts.routing_fee_base_msat),
+            parts_per_million: opts.routing_fee_ppm,
+        },
+        transaction_fees: PaymentFee {
+            base: Amount::from_msats(opts.transaction_fee_base_msat),
+            parts_per_million: opts.transaction_fee_ppm,
+        },
+        outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
+    };
+
+    // 8. Load federation clients
+    runtime.block_on(state.load_clients())?;
+
+    // 9. Create task group for graceful shutdown
+    let task_group = picomint_core::task::TaskGroup::new();
+
+    // 10. Spawn tasks
+    let public_task = runtime.spawn(public::run_public(state.clone(), task_group.make_handle()));
+    let cli_task = runtime.spawn(cli::run_cli(state.clone(), task_group.make_handle()));
+    let events_task = runtime.spawn(process_ldk_events(state.clone(), task_group.make_handle()));
+
+    // 11. Wait for shutdown signal
+    runtime.block_on(shutdown_signal());
+
+    info!(target: LOG_GATEWAY, "Gatewayd shutting down...");
+
+    runtime.block_on(task_group.shutdown_join_all(None))?;
+
+    if let Err(e) = runtime.block_on(public_task) {
+        warn!(target: LOG_GATEWAY, err = %e, "Failed to join public webserver task");
+    }
+
+    if let Err(e) = runtime.block_on(cli_task) {
+        warn!(target: LOG_GATEWAY, err = %e, "Failed to join CLI webserver task");
+    }
+
+    if let Err(e) = runtime.block_on(events_task) {
+        warn!(target: LOG_GATEWAY, err = %e, "Failed to join LDK events task");
+    }
+
+    info!(target: LOG_GATEWAY, "Gatewayd exiting...");
+
+    Ok(())
+}
+
+async fn shutdown_signal() {
+    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("Failed to install SIGTERM handler")
+        .recv()
+        .await;
+}
+
+// ---------------------------------------------------------------------------
+// LDK event loop
+// ---------------------------------------------------------------------------
+
+async fn process_ldk_events(state: AppState, handle: picomint_core::task::TaskHandle) {
+    loop {
+        let event = tokio::select! {
+            event = state.node.next_event_async() => event,
+            () = handle.make_shutdown_rx() => break,
+        };
+
+        process_ldk_event(&state, event).await;
+
+        if let Err(e) = state.node.event_handled() {
+            warn!(
+                target: LOG_LIGHTNING,
+                err = %e,
+                "Failed to mark event handled",
+            );
+        }
+    }
+}
+
+async fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
+    if let ldk_node::Event::PaymentClaimable {
+        payment_hash,
+        claimable_amount_msat,
+        ..
+    } = event
+    {
+        handle_lightning_payment(state, payment_hash.0, claimable_amount_msat).await;
+    }
+}
+
+/// Handles an intercepted lightning payment. If the payment is part of an
+/// incoming payment to a federation, spawns a state machine and hands the
+/// payment off to it. Otherwise, fails the HTLC since forwarding is not
+/// supported.
+async fn handle_lightning_payment(state: &AppState, payment_hash: [u8; 32], amount_msat: u64) {
+    if try_handle_lightning_payment_ln(state, payment_hash, amount_msat)
+        .await
+        .is_ok()
+    {
+        return;
+    }
+
+    if let Err(err) = state
+        .node
+        .bolt11_payment()
+        .fail_for_hash(PaymentHash(payment_hash))
+    {
+        warn!(
+            target: LOG_GATEWAY,
+            err = %err,
+            "Error failing unmatched HTLC",
+        );
+    }
+}
+
+async fn try_handle_lightning_payment_ln(
+    state: &AppState,
+    payment_hash: [u8; 32],
+    amount_msat: u64,
+) -> anyhow::Result<()> {
+    use picomint_core::ln::contracts::PaymentImage;
+
+    let hash = sha256::Hash::from_byte_array(payment_hash);
+
+    let (contract, client) = state
+        .get_registered_incoming_contract_and_client(PaymentImage::Hash(hash), amount_msat)
+        .await?;
+
+    if let Err(err) = client
+        .gw()
+        .relay_incoming_htlc(hash, 0, 0, contract, amount_msat)
+        .await
+    {
+        warn!(target: LOG_GATEWAY, err = %format_args!("{err:#}"), "Error relaying incoming lightning payment");
+
+        if let Err(err) = state
+            .node
+            .bolt11_payment()
+            .fail_for_hash(PaymentHash(payment_hash))
+        {
+            warn!(
+                target: LOG_GATEWAY,
+                err = %err,
+                "Error failing HTLC after relay error",
+            );
+        }
+    }
+
+    Ok(())
+}

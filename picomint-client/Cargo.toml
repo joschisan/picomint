@@ -1,0 +1,60 @@
+[package]
+description = "Library for sending transactions to the Picomint federation."
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+name = "picomint-client"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[package.metadata.cargo-udeps.ignore]
+# cargo udeps can't detect that one
+normal = ["aquamarine"]
+
+[package.metadata.docs.rs]
+rustc-args = ["--cfg", "tokio_unstable"]
+
+[lib]
+name = "picomint_client"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-channel = { workspace = true }
+async-stream = { workspace = true }
+async-trait = { workspace = true }
+bip39 = { workspace = true, features = ["rand"] }
+bitcoin = { workspace = true, features = ["rand-std"] }
+bitcoin_hashes = { workspace = true }
+futures = { workspace = true }
+iroh = { workspace = true, default-features = false }
+iroh-base = { workspace = true, default-features = false }
+lightning-invoice = { workspace = true }
+picomint-base32 = { workspace = true }
+picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
+picomint-eventlog = { workspace = true }
+picomint-lnurl = { workspace = true }
+picomint-logging = { workspace = true }
+picomint-redb = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+secp256k1 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tbs = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time", "macros", "rt"] }
+tokio-stream = { workspace = true }
+tpe = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+assert_matches = { workspace = true }
+serde_json = { workspace = true }
+tracing-test = { workspace = true }
+
+[lints]
+workspace = true

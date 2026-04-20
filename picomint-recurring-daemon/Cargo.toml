@@ -1,0 +1,32 @@
+[package]
+description = "Stateless service that allows picomint clients to receive payments via LNURL"
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+name = "picomint-recurring-daemon"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+bitcoin = { workspace = true, features = ["serde"] }
+clap = { workspace = true }
+lightning-invoice = { workspace = true }
+picomint-base32 = { workspace = true }
+picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
+picomint-lnurl = { workspace = true }
+picomint-logging = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+tpe = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
