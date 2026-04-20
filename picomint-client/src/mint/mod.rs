@@ -624,7 +624,7 @@ impl MintClientModule {
     ) -> Option<ECash> {
         let mut sorted: Vec<SpendableNote> =
             dbtx.iter(&NOTE, |r| r.map(|(note, ())| note).collect());
-        sorted.sort_by(|a, b| b.denomination.cmp(&a.denomination));
+        sorted.sort_by_key(|n| std::cmp::Reverse(n.denomination));
 
         let mut notes = vec![];
 
