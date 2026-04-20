@@ -111,7 +111,6 @@ impl Client {
         let task_group = TaskGroup::new();
 
         let mint_context = crate::module::ClientContext::new(
-            ModuleKind::Mint,
             api.clone(),
             ApiScope::Mint,
             db.clone(),
@@ -130,7 +129,6 @@ impl Client {
         );
 
         let wallet_context = crate::module::ClientContext::new(
-            ModuleKind::Wallet,
             api.clone(),
             ApiScope::Wallet,
             db.clone(),
@@ -152,7 +150,6 @@ impl Client {
         let ln = match ln_choice {
             LnChoice::Regular => {
                 let ln_context = crate::module::ClientContext::new(
-                    ModuleKind::Ln,
                     api.clone(),
                     ApiScope::Ln,
                     db.clone(),
@@ -173,7 +170,6 @@ impl Client {
             }
             LnChoice::Gateway(gateway) => {
                 let gw_context = crate::module::ClientContext::new(
-                    ModuleKind::Ln,
                     api.clone(),
                     ApiScope::Ln,
                     db.clone(),

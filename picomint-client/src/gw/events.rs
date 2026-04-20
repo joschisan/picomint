@@ -1,11 +1,8 @@
-use picomint_core::core::ModuleKind;
 use picomint_core::ln::LightningInvoice;
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::{Amount, OutPoint, TransactionId};
-use picomint_eventlog::{Event, EventKind};
+use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
-
-const KIND: ModuleKind = picomint_core::ln::KIND;
 
 // --- Outgoing payment ---
 
@@ -18,7 +15,7 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Gw;
     const KIND: EventKind = EventKind::from_static("send");
 }
 
@@ -30,7 +27,7 @@ pub struct SendSuccessEvent {
 }
 
 impl Event for SendSuccessEvent {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Gw;
     const KIND: EventKind = EventKind::from_static("send-success");
 }
 
@@ -41,7 +38,7 @@ pub struct SendCancelEvent {
 }
 
 impl Event for SendCancelEvent {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Gw;
     const KIND: EventKind = EventKind::from_static("send-cancel");
 }
 
@@ -55,7 +52,7 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Gw;
     const KIND: EventKind = EventKind::from_static("receive");
 }
 
@@ -66,7 +63,7 @@ pub struct ReceiveSuccessEvent {
 }
 
 impl Event for ReceiveSuccessEvent {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Gw;
     const KIND: EventKind = EventKind::from_static("receive-success");
 }
 
@@ -75,7 +72,7 @@ impl Event for ReceiveSuccessEvent {
 pub struct ReceiveFailureEvent;
 
 impl Event for ReceiveFailureEvent {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Gw;
     const KIND: EventKind = EventKind::from_static("receive-failure");
 }
 
@@ -87,7 +84,7 @@ pub struct ReceiveRefundEvent {
 }
 
 impl Event for ReceiveRefundEvent {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Gw;
     const KIND: EventKind = EventKind::from_static("receive-refund");
 }
 
@@ -99,6 +96,6 @@ impl Event for ReceiveRefundEvent {
 pub struct CompleteEvent;
 
 impl Event for CompleteEvent {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Gw;
     const KIND: EventKind = EventKind::from_static("complete");
 }

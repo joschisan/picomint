@@ -35,6 +35,9 @@ pub const ROUTE_FEDERATION_CONFIG: &str = "/federation/config";
 pub const ROUTE_FEDERATION_INVITE: &str = "/federation/invite";
 pub const ROUTE_FEDERATION_BALANCE: &str = "/federation/balance";
 
+// Analytics
+pub const ROUTE_QUERY: &str = "/query";
+
 // Per-federation module commands
 pub const ROUTE_MODULE_MINT_COUNT: &str = "/module/mint/count";
 pub const ROUTE_MODULE_MINT_SEND: &str = "/module/mint/send";
@@ -43,6 +46,13 @@ pub const ROUTE_MODULE_WALLET_INFO: &str = "/module/wallet/info";
 pub const ROUTE_MODULE_WALLET_SEND_FEE: &str = "/module/wallet/send-fee";
 pub const ROUTE_MODULE_WALLET_SEND: &str = "/module/wallet/send";
 pub const ROUTE_MODULE_WALLET_RECEIVE: &str = "/module/wallet/receive";
+
+// --- /query ---
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct QueryRequest {
+    pub sql: String,
+}
 
 // --- /info ---
 

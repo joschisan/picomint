@@ -1,7 +1,6 @@
 use picomint_core::Amount;
 use picomint_core::TransactionId;
-use picomint_core::core::ModuleKind;
-use picomint_eventlog::{Event, EventKind};
+use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
 /// Emitted when a send operation is created.
@@ -13,7 +12,7 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const MODULE: Option<ModuleKind> = Some(picomint_core::ln::KIND);
+    const SOURCE: EventSource = EventSource::Ln;
     const KIND: EventKind = EventKind::from_static("send");
 }
 
@@ -24,7 +23,7 @@ pub struct SendSuccessEvent {
 }
 
 impl Event for SendSuccessEvent {
-    const MODULE: Option<ModuleKind> = Some(picomint_core::ln::KIND);
+    const SOURCE: EventSource = EventSource::Ln;
     const KIND: EventKind = EventKind::from_static("send-success");
 }
 
@@ -35,7 +34,7 @@ pub struct SendRefundEvent {
 }
 
 impl Event for SendRefundEvent {
-    const MODULE: Option<ModuleKind> = Some(picomint_core::ln::KIND);
+    const SOURCE: EventSource = EventSource::Ln;
     const KIND: EventKind = EventKind::from_static("send-refund");
 }
 
@@ -47,6 +46,6 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const MODULE: Option<ModuleKind> = Some(picomint_core::ln::KIND);
+    const SOURCE: EventSource = EventSource::Ln;
     const KIND: EventKind = EventKind::from_static("receive");
 }

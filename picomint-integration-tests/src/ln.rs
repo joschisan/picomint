@@ -28,6 +28,7 @@ use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, OutPoint, wire};
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_invoice};
+use serde_json::Value;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -71,7 +72,7 @@ fn ln_event_stream(
 fn try_parse_ln_event(
     entry: &EventLogEntry,
 ) -> Option<(picomint_core::core::OperationId, LnEvent)> {
-    let op = entry.operation_id?;
+    let op = entry.operation_id;
     if let Some(e) = entry.to_event() {
         return Some((op, LnEvent::Send(e)));
     }
@@ -101,6 +102,92 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     test_unilateral_refund(env, client_send, mock_gw).await?;
 
     test_lnurl_recurringd_roundtrip(env).await?;
+
+    test_analytics_query(env).await?;
+
+    Ok(())
+}
+
+/// Asserts exact row counts in the gateway's in-memory analytics tables
+/// after all real-gateway-driven scenarios in `run_tests` have completed.
+///
+/// Expected events (module = Ln, emitted by the gateway's gw-module):
+///  - `test_payments` outgoing success  → 1 send, 1 send_success
+///  - `test_payments` incoming success  → 1 receive, 1 receive_success, 1 complete
+///  - `test_payments` outgoing cancel   → 1 send, 1 send_cancel
+///  - `test_lnurl_recurringd_roundtrip` → 1 receive, 1 receive_success, 1 complete
+///
+/// The mock-gateway tests and `test_direct_ln_payments` don't drive the real
+/// gateway's gw module, so they produce no rows here.
+async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
+    info!("ln: test_analytics_query");
+
+    let count = |sql: &str| -> anyhow::Result<u64> {
+        cli::gateway_query(&env.gw_data_dir, sql)?
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|r| r.get("n"))
+            .and_then(Value::as_u64)
+            .ok_or_else(|| anyhow::anyhow!("unexpected query shape for: {sql}"))
+    };
+
+    // Raw event tables
+    assert_eq!(count("SELECT COUNT(*) AS n FROM send")?, 2);
+    assert_eq!(count("SELECT COUNT(*) AS n FROM send_success")?, 1);
+    assert_eq!(count("SELECT COUNT(*) AS n FROM send_cancel")?, 1);
+    assert_eq!(count("SELECT COUNT(*) AS n FROM receive")?, 2);
+    assert_eq!(count("SELECT COUNT(*) AS n FROM receive_success")?, 2);
+    assert_eq!(count("SELECT COUNT(*) AS n FROM receive_failure")?, 0);
+    assert_eq!(count("SELECT COUNT(*) AS n FROM receive_refund")?, 0);
+    assert_eq!(count("SELECT COUNT(*) AS n FROM complete")?, 2);
+
+    // `payments` view stitches sends/receives into one row per operation
+    assert_eq!(count("SELECT COUNT(*) AS n FROM payments")?, 4);
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) AS n FROM payments WHERE direction='outgoing' AND status='success'"
+        )?,
+        1
+    );
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) AS n FROM payments WHERE direction='outgoing' AND status='cancelled'"
+        )?,
+        1
+    );
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) AS n FROM payments WHERE direction='incoming' AND status='success'"
+        )?,
+        2
+    );
+
+    // Join key sanity — `operation_id` must match across event tables
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) AS n FROM send s \
+             INNER JOIN send_success ss USING (operation_id)"
+        )?,
+        1
+    );
+
+    // Amount extraction from the invoice payload
+    let sum = cli::gateway_query(
+        &env.gw_data_dir,
+        "SELECT SUM(amount_msat) AS n FROM payments \
+         WHERE direction='outgoing' AND status='success'",
+    )?
+    .as_array()
+    .and_then(|a| a.first())
+    .and_then(|r| r.get("n"))
+    .and_then(Value::as_u64)
+    .ok_or_else(|| anyhow::anyhow!("unexpected sum query shape"))?;
+    assert_eq!(sum, 1_000_000);
+
+    // Bad SQL surfaces as CLI error
+    assert!(cli::gateway_query(&env.gw_data_dir, "SELECT * FROM does_not_exist").is_err());
+
+    info!("ln: test_analytics_query passed");
 
     Ok(())
 }

@@ -1,8 +1,6 @@
 use picomint_core::Amount;
 use picomint_core::TransactionId;
-use picomint_core::core::ModuleKind;
-use picomint_core::mint::KIND;
-use picomint_eventlog::{Event, EventKind};
+use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
 /// Emitted when ecash is sent out-of-band.
@@ -13,7 +11,7 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Mint;
     const KIND: EventKind = EventKind::from_static("send");
 }
 
@@ -25,7 +23,7 @@ pub struct ReissueEvent {
 }
 
 impl Event for ReissueEvent {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Mint;
     const KIND: EventKind = EventKind::from_static("reissue");
 }
 
@@ -37,7 +35,7 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Mint;
     const KIND: EventKind = EventKind::from_static("receive");
 }
 
@@ -48,7 +46,7 @@ pub(crate) struct IssuanceComplete {
 }
 
 impl Event for IssuanceComplete {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Mint;
     const KIND: EventKind = EventKind::from_static("issuance-complete");
 }
 
@@ -57,6 +55,6 @@ impl Event for IssuanceComplete {
 pub struct OutputFailureEvent;
 
 impl Event for OutputFailureEvent {
-    const MODULE: Option<ModuleKind> = Some(KIND);
+    const SOURCE: EventSource = EventSource::Mint;
     const KIND: EventKind = EventKind::from_static("output-failure");
 }

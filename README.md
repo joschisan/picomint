@@ -30,16 +30,31 @@ ssh -NL 3000:127.0.0.1:3000 <your_server>
 
 ### Setup Ceremony
 
-Before the federation can start processing transactions, guardians run a one-time setup ceremony. The Web UI walks you through it in a setup wizard; the CLI does the same thing:
+Before the federation can start processing transactions, guardians run a one-time setup ceremony. The Web UI walks you through it in a setup wizard; the CLI does the same thing.
+
+Exactly one guardian sets the global federation config and passes `--federation-name` and `--federation-size`; the others pass only their own `<name>`:
 
 ```bash
 picomint-server-cli setup set-local-params <name> [--federation-name X] [--federation-size N]
-picomint-server-cli setup add-peer <setup-code>
-picomint-server-cli setup start-dkg
-picomint-server-cli setup status
 ```
 
-Exactly one guardian sets the global federation config and passes `--federation-name` and `--federation-size`; the others pass only their own `<name>`. Each guardian's `set-local-params` returns a setup code. Every guardian then calls `add-peer` once per peer with that peer's setup code. Once every guardian has added every peer, everyone has to run `start-dkg`. Run `setup status` to see your progress.
+`set-local-params` returns a setup code. Every guardian then calls `add-peer` once per peer with that peer's setup code:
+
+```bash
+picomint-server-cli setup add-peer <setup-code>
+```
+
+Once every guardian has added every peer, everyone runs:
+
+```bash
+picomint-server-cli setup start-dkg
+```
+
+Check your progress with:
+
+```bash
+picomint-server-cli setup status
+```
 
 ### Invite Users
 
@@ -55,9 +70,21 @@ The client can use this invite to download and verify the federation config from
 
 The federation maintains an explicit list of recommended Lightning gateways. Any guardian can add a gateway and clients will priorititze gateways by the number of guardians recommending them.
 
+Add a gateway:
+
 ```bash
 picomint-server-cli module ln gateway add <url>
+```
+
+Remove one:
+
+```bash
 picomint-server-cli module ln gateway remove <url>
+```
+
+List the current recommendations:
+
+```bash
 picomint-server-cli module ln gateway list
 ```
 
@@ -108,6 +135,8 @@ Admin actions go through `picomint-gateway-cli`, running inside the container:
 docker exec -it picomint-gateway picomint-gateway-cli info
 ```
 
+Your info will look like
+
 ```json
 {
   "public_key": "02abfe4a99f1ed8f67c1f07e5d47f3ab3d2e9c5b8a1c8e7f2a6d4b7e9c1f5a3e8d",
@@ -156,6 +185,11 @@ The gateway can serve mutliple Federations simultanously. Join one with an invit
 
 ```bash
 picomint-gateway-cli federation join <invite>
+```
+
+List joined federations:
+
+```bash
 picomint-gateway-cli federation list
 ```
 
@@ -170,6 +204,39 @@ picomint-gateway-cli mnemonic
 ```
 
 The mnemonic can be used with any Bip 39 compatible wallet to recover the onchain funds and with any Picomint wallet to recover the funds in the federations.  **The balance in your open lightning channels is lost.**
+
+### Analytics
+
+Run SQL against the gateway's payment history to answer operational questions. See the ten most recent payments:
+
+```bash
+picomint-gateway-cli query "SELECT * FROM payments ORDER BY started_at DESC LIMIT 10"
+```
+
+Get a breakdown by status:
+
+```bash
+picomint-gateway-cli query "SELECT status, COUNT(*) FROM payments GROUP BY status"
+```
+
+Total processed volume per federation, in sats:
+
+```bash
+picomint-gateway-cli query "SELECT federation_id, SUM(amount_msat)/1000 AS sats FROM payments WHERE status='success' GROUP BY federation_id"
+```
+
+Each row in `payments` is one incoming or outgoing operation. The SQL dialect is DataFusion.
+
+| Column          | Type           | Notes                                                                                                    |
+|-----------------|----------------|----------------------------------------------------------------------------------------------------------|
+| `federation_id` | string         | Hex-encoded federation id                                                                                |
+| `operation_id`  | string         | Hex-encoded operation id; unique within direction                                                        |
+| `direction`     | string         | `incoming` or `outgoing`                                                                                 |
+| `status`        | string         | `pending`, `success`, `cancelled` (outgoing only), `failure` (incoming only), `refunded` (incoming only) |
+| `started_at`    | timestamp (µs) | When the operation was initiated                                                                         |
+| `completed_at`  | timestamp (µs) | NULL while `status = 'pending'`                                                                          |
+| `amount_msat`   | uint64         | Millisatoshis; NULL on outgoing rows that pay an amountless bolt11 invoice                               |
+| `preimage`      | string         | Hex-encoded; NULL unless `status = 'success'`                                                            |
 
 ### Interfaces
 

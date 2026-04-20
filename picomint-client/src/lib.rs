@@ -59,7 +59,7 @@ pub use picomint_core::core::{ModuleKind, OperationId};
 pub use secret::{Mnemonic, random as random_mnemonic};
 
 use picomint_core::TransactionId;
-use picomint_eventlog::{Event, EventKind};
+use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -68,7 +68,7 @@ pub struct TxAcceptEvent {
 }
 
 impl Event for TxAcceptEvent {
-    const MODULE: Option<ModuleKind> = None;
+    const SOURCE: EventSource = EventSource::Core;
     const KIND: EventKind = EventKind::from_static("tx-accept");
 }
 
@@ -78,7 +78,7 @@ pub struct TxRejectEvent {
     pub error: String,
 }
 impl Event for TxRejectEvent {
-    const MODULE: Option<ModuleKind> = None;
+    const SOURCE: EventSource = EventSource::Core;
     const KIND: EventKind = EventKind::from_static("tx-reject");
 }
 

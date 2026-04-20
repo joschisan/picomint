@@ -19,15 +19,15 @@ use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, FederationBalanceRequest, FederationConfigRequest, FederationJoinRequest,
     LdkChannelCloseRequest, LdkChannelOpenRequest, LdkInvoiceCreateRequest, LdkInvoicePayRequest,
     LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest, MintCountRequest,
-    MintReceiveRequest, MintSendRequest, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
-    ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_INFO,
-    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
-    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
-    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
-    ROUTE_MNEMONIC, ROUTE_MODULE_MINT_COUNT, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND,
-    ROUTE_MODULE_WALLET_INFO, ROUTE_MODULE_WALLET_RECEIVE, ROUTE_MODULE_WALLET_SEND,
-    ROUTE_MODULE_WALLET_SEND_FEE, WalletInfoRequest, WalletReceiveRequest, WalletSendFeeRequest,
-    WalletSendRequest,
+    MintReceiveRequest, MintSendRequest, QueryRequest, ROUTE_FEDERATION_BALANCE,
+    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
+    ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST,
+    ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY,
+    ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT,
+    ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_COUNT,
+    ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_INFO,
+    ROUTE_MODULE_WALLET_RECEIVE, ROUTE_MODULE_WALLET_SEND, ROUTE_MODULE_WALLET_SEND_FEE,
+    ROUTE_QUERY, WalletInfoRequest, WalletReceiveRequest, WalletSendFeeRequest, WalletSendRequest,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -65,6 +65,11 @@ enum Commands {
         federation_id: FederationId,
         #[command(subcommand)]
         module: ModuleCommands,
+    },
+    /// Run a SQL query against the in-memory gw-event analytics tables
+    Query {
+        /// SQL query (e.g. `SELECT * FROM payments LIMIT 10`)
+        sql: String,
     },
 }
 
@@ -280,6 +285,7 @@ async fn main() -> Result<()> {
     let d = &cli.data_dir;
 
     let result = match cli.command {
+        Commands::Query { sql } => request(d, ROUTE_QUERY, QueryRequest { sql }).await?,
         Commands::Info => request(d, ROUTE_INFO, ()).await?,
         Commands::Mnemonic => request(d, ROUTE_MNEMONIC, ()).await?,
         Commands::Ldk(cmd) => match cmd {
