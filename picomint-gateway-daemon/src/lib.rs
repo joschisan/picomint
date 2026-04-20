@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod client;
 pub mod db;
+pub mod kvstore;
 pub mod public;
 
 use std::collections::BTreeMap;
@@ -52,9 +53,6 @@ pub const DEFAULT_NETWORK: Network = Network::Regtest;
 
 /// Name of the gateway's database.
 pub const DB_FILE: &str = "database.redb";
-
-/// Name of the folder for LDK node data.
-pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 
 #[derive(Clone)]
 pub struct AppState {

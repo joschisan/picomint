@@ -21,7 +21,8 @@ use picomint_core::Amount;
 use picomint_core::ln::gateway_api::PaymentFee;
 use picomint_core::util::SafeUrl;
 use picomint_gateway_daemon::client::GatewayClientFactory;
-use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
+use picomint_gateway_daemon::kvstore::RedbKvStore;
+use picomint_gateway_daemon::{AppState, DB_FILE, cli, public};
 use picomint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use rand::rngs::OsRng;
 use tokio::sync::RwLock;
@@ -127,13 +128,6 @@ fn main() -> anyhow::Result<()> {
     let mnemonic = client_factory.mnemonic().clone();
 
     // 4. Build LDK node
-    let ldk_data_dir = opts
-        .data_dir
-        .join(LDK_NODE_DB_FOLDER)
-        .to_str()
-        .expect("Invalid data dir path")
-        .to_string();
-
     let mut node_builder = ldk_node::Builder::new();
 
     node_builder.set_runtime(runtime.handle().clone());
@@ -141,7 +135,9 @@ fn main() -> anyhow::Result<()> {
     node_builder.set_node_alias("picomint-gateway-daemon".to_string())?;
     node_builder.set_listening_addresses(vec![opts.ldk_addr.into()])?;
     node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
-    node_builder.set_storage_dir_path(ldk_data_dir);
+    // Non-KV scratch path (log file lives here; KV state goes to the redb
+    // `ldk-node` table via `build_with_store`).
+    node_builder.set_storage_dir_path(opts.data_dir.display().to_string());
 
     match (opts.bitcoind_url.clone(), opts.esplora_url.clone()) {
         (Some(url), _) => {
@@ -164,7 +160,8 @@ fn main() -> anyhow::Result<()> {
 
     info!(target: LOG_LIGHTNING, "Starting LDK Node...");
 
-    let node = Arc::new(node_builder.build()?);
+    let kv_store = Arc::new(RedbKvStore::new(gateway_db.clone()));
+    let node = Arc::new(node_builder.build_with_store(kv_store)?);
 
     node.start()?;
 

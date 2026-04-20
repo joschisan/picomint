@@ -22,6 +22,12 @@ table!(
     "registered-incoming-contract",
 );
 
+table!(
+    LDK_NODE,
+    (String, String, String) => Vec<u8>,
+    "ldk-node",
+);
+
 #[derive(Debug, Encodable, Decodable)]
 pub struct RegisteredIncomingContract {
     pub federation_id: FederationId,
