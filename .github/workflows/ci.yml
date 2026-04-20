@@ -46,7 +46,7 @@ jobs:
     - run: cargo install cargo-machete
     - run: cargo machete
 
-  integration-tests:
+  integration:
     name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
