@@ -9,6 +9,9 @@ concurrency:
   group: flaker
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   integration:
     name: Integration Tests

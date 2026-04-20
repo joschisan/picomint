@@ -6,6 +6,13 @@ on:
   push:
     branches: [ main ]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
 jobs:
   fmt:
     name: Cargo Format
@@ -34,7 +41,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
-    - run: cargo install cargo-sort
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-sort
     - run: cargo sort --check
 
   machete:
@@ -43,7 +52,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
-    - run: cargo install cargo-machete
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-machete
     - run: cargo machete
 
   integration:
