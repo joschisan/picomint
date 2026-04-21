@@ -11,7 +11,6 @@ use bitcoincore_rpc::RpcApi;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use picomint_client::{Client, Mnemonic};
-use picomint_core::Amount;
 use picomint_core::invite_code::InviteCode;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
@@ -212,33 +211,6 @@ impl TestEnv {
             self.bitcoind
                 .send_to_address(addr, amount, None, None, None, None, None, None)
         })?)
-    }
-
-    pub async fn pegin(&self, client: &Arc<Client>, amount: bitcoin::Amount) -> anyhow::Result<()> {
-        let wallet = client.wallet();
-        let addr = wallet.receive().await;
-        info!(%addr, "Pegin address ready");
-
-        let txid = self.send_to_address(&addr, amount)?;
-
-        retry("pegin tx in mempool", || async {
-            block_in_place(|| self.bitcoind.get_mempool_entry(&txid))
-                .map(|_| ())
-                .context("pegin tx not in mempool yet")
-        })
-        .await?;
-
-        self.mine_blocks(10);
-
-        retry("pegin balance", || async {
-            let balance = client.get_balance().await?;
-            ensure!(balance > Amount::ZERO, "balance is zero");
-            Ok(())
-        })
-        .await?;
-
-        info!("Pegged in to {addr}");
-        Ok(())
     }
 }
 

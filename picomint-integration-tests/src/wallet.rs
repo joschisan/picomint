@@ -1,12 +1,13 @@
 use std::pin::pin;
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{Context, ensure};
 use async_stream::stream;
 use bitcoincore_rpc::RpcApi;
 use futures::StreamExt;
 use picomint_client::wallet::events::{ReceiveEvent, SendConfirmEvent, SendEvent};
 use picomint_client::{Client, TxRejectEvent};
+use picomint_core::Amount;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use tokio::task::block_in_place;
 use tracing::info;
@@ -71,13 +72,35 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     let mut send_events = pin!(wallet_event_stream(client_send));
 
-    env.pegin(client_send, bitcoin::Amount::from_sat(100_000_000))
-        .await?;
+    let pegin_addr = client_send.wallet().receive().await;
+    info!(addr = %pegin_addr, "Pegin address ready");
+
+    let pegin_txid = env.send_to_address(&pegin_addr, bitcoin::Amount::from_sat(100_000_000))?;
+
+    retry("pegin tx in mempool", || async {
+        block_in_place(|| env.bitcoind.get_mempool_entry(&pegin_txid))
+            .map(|_| ())
+            .context("pegin tx not in mempool yet")
+    })
+    .await?;
+
+    env.mine_blocks(10);
 
     // Drain the wallet events emitted by the pegin itself.
     let Some((_, WalletEvent::Receive(_))) = send_events.next().await else {
         panic!("Expected pegin Receive event");
     };
+
+    info!(addr = %pegin_addr, "Pegin Receive Event");
+
+    retry("pegin balance", || async {
+        let balance = client_send.get_balance().await?;
+        ensure!(balance > Amount::ZERO, "Balance is zero");
+        Ok(())
+    })
+    .await?;
+
+    info!(addr = %pegin_addr, "Pegin Balance is available");
 
     let external_address = block_in_place(|| env.bitcoind.get_new_address(None, None))?
         .require_network(bitcoin::Network::Regtest)?;
