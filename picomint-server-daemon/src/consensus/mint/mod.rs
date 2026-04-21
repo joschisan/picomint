@@ -4,7 +4,6 @@ mod rpc;
 use std::collections::BTreeMap;
 
 use anyhow::ensure;
-use picomint_core::core::ModuleKind;
 use picomint_core::mint::config::{
     MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
 };
@@ -16,7 +15,6 @@ use picomint_core::mint::{
     Denomination, MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError,
     RecoveryItem, verify_note,
 };
-use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::{Amount, InPoint, OutPoint, PeerId};
 use picomint_encoding::Encodable;
@@ -211,18 +209,11 @@ impl Mint {
         })
     }
 
-    pub async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
-        let items = dbtx.iter(&ISSUANCE_COUNTER, |r| {
-            r.map(|(denomination, count)| {
-                (
-                    format!("IssuanceCounter({denomination:?})"),
-                    -((denomination.amount().msats * count) as i64),
-                )
-            })
-            .collect::<Vec<_>>()
-        });
-
-        audit.add_items(ModuleKind::Mint, items);
+    pub async fn audit(&self, dbtx: &WriteTxRef<'_>) -> i64 {
+        dbtx.iter(&ISSUANCE_COUNTER, |r| {
+            r.map(|(denomination, count)| -((denomination.amount().msats * count) as i64))
+                .sum()
+        })
     }
 
     pub async fn handle_api(

@@ -8,7 +8,7 @@ use picomint_core::config::ConsensusConfig;
 use picomint_core::endpoint_constants::{
     CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
 };
-use picomint_core::module::audit::{Audit, AuditSummary};
+use picomint_core::module::audit::AuditSummary;
 use picomint_core::module::{ApiError, ApiRequestErased};
 use picomint_core::transaction::{ConsensusItem, Transaction, TransactionError};
 
@@ -124,12 +124,7 @@ impl ConsensusApi {
         // Modules read their own tables during `audit`; we open a write tx and
         // drop it without commit after building the audit view.
         let tx = self.db.begin_write();
-
-        let mut audit = Audit::default();
-
-        self.server.audit(&tx, &mut audit).await;
-
-        AuditSummary::from_audit(&audit)
+        self.server.audit(&tx).await
     }
 }
 

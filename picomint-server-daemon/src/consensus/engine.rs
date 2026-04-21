@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use async_channel::Receiver;
-use picomint_core::module::audit::Audit;
 use picomint_core::secp256k1::schnorr;
 use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use picomint_core::task::{TaskGroup, TaskHandle};
@@ -610,16 +609,11 @@ impl ConsensusEngine {
                 debug!(target: LOG_CONSENSUS, %txid,  "Transaction accepted");
                 tx.insert(&ACCEPTED_TRANSACTION, &txid, &());
 
-                let mut audit = Audit::default();
-                self.server.audit(tx, &mut audit).await;
+                let audit = self.server.audit(tx).await;
 
                 assert!(
-                    audit
-                        .net_assets()
-                        .expect("Overflow while checking balance sheet")
-                        .milli_sat
-                        >= 0,
-                    "Balance sheet of the fed has gone negative, this should never happen! {audit}"
+                    audit.total >= 0,
+                    "Balance sheet of the fed has gone negative, this should never happen! {audit:?}"
                 );
 
                 Ok(())

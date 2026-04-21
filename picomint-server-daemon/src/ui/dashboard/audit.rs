@@ -2,13 +2,19 @@ use maud::{Markup, html};
 use picomint_core::module::audit::AuditSummary;
 
 pub fn render(audit_summary: &AuditSummary) -> Markup {
+    let rows = [
+        ("Mint", audit_summary.mint),
+        ("Ln", audit_summary.ln),
+        ("Wallet", audit_summary.wallet),
+    ];
+
     html! {
         div class="card h-100" {
             div class="card-header dashboard-header" { "Audit Summary" }
             div class="card-body" {
                 div class="mb-3" {
                     div class="alert alert-info" {
-                        "Total Net Assets: " strong { (format!("{} msat", audit_summary.net_assets)) }
+                        "Total Net Assets: " strong { (format!("{} msat", audit_summary.total)) }
                     }
                 }
 
@@ -20,10 +26,10 @@ pub fn render(audit_summary: &AuditSummary) -> Markup {
                         }
                     }
                     tbody {
-                        @for (kind, module_summary) in audit_summary.module_summaries.iter() {
+                        @for (kind, net_assets) in rows {
                             tr {
                                 td { (kind) }
-                                td { (module_summary.net_assets) }
+                                td { (net_assets) }
                             }
                         }
                     }

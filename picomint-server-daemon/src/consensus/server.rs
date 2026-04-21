@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use picomint_core::module::InputMeta;
-use picomint_core::module::audit::Audit;
+use picomint_core::module::audit::AuditSummary;
 use picomint_core::transaction::Transaction;
 use picomint_core::wire;
 use picomint_core::{InPoint, OutPoint, PeerId};
@@ -106,14 +106,14 @@ impl Server {
         }
     }
 
-    pub async fn audit(&self, dbtx: &WriteTransaction, audit: &mut Audit) {
-        self.mint
-            .audit(&dbtx.isolate(MINT_NS.to_string()), audit)
+    pub async fn audit(&self, dbtx: &WriteTransaction) -> AuditSummary {
+        let mint = self.mint.audit(&dbtx.isolate(MINT_NS.to_string())).await;
+        let ln = self.ln.audit(&dbtx.isolate(LN_NS.to_string())).await;
+        let wallet = self
+            .wallet
+            .audit(&dbtx.isolate(WALLET_NS.to_string()))
             .await;
-        self.ln.audit(&dbtx.isolate(LN_NS.to_string()), audit).await;
-        self.wallet
-            .audit(&dbtx.isolate(WALLET_NS.to_string()), audit)
-            .await;
+        AuditSummary::new(mint, ln, wallet)
     }
 }
 

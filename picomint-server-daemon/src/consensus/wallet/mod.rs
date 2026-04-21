@@ -19,8 +19,6 @@ use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletOutput};
 use miniscript::descriptor::Wsh;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::backoff::{Retryable, networking_backoff};
-use picomint_core::core::ModuleKind;
-use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::task::TaskGroup;
 use picomint_core::wallet as common;
@@ -467,18 +465,9 @@ impl Wallet {
         })
     }
 
-    pub async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
-        let items = dbtx.iter(&FEDERATION_WALLET, |r| {
-            r.map(|((), wallet)| {
-                (
-                    "FederationWallet".to_string(),
-                    1000 * wallet.value.to_sat() as i64,
-                )
-            })
-            .collect::<Vec<_>>()
-        });
-
-        audit.add_items(ModuleKind::Wallet, items);
+    pub async fn audit(&self, dbtx: &WriteTxRef<'_>) -> i64 {
+        dbtx.get(&FEDERATION_WALLET, &())
+            .map_or(0, |wallet| 1000 * wallet.value.to_sat() as i64)
     }
 
     pub async fn handle_api(
