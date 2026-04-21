@@ -35,7 +35,7 @@ use tracing::{info, warn};
 use crate::config::ServerConfig;
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::engine::ConsensusEngine;
-use crate::consensus::server::{LN_NS, MINT_NS, Server, WALLET_NS};
+use crate::consensus::server::Server;
 use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
 
 /// How many txs can be stored in memory before blocking the API
@@ -78,20 +78,20 @@ pub async fn run(
     info!(target: LOG_CORE, "Initialise module mint...");
     let mint = Arc::new(crate::consensus::mint::Mint::new(
         cfg.mint_config(),
-        db.isolate(MINT_NS.to_string()),
+        db.clone(),
     ));
 
     info!(target: LOG_CORE, "Initialise module ln...");
     let ln = Arc::new(crate::consensus::ln::Lightning::new(
         cfg.ln_config(),
-        db.isolate(LN_NS.to_string()),
+        db.clone(),
         bitcoin_rpc_connection.clone(),
     ));
 
     info!(target: LOG_CORE, "Initialise module wallet...");
     let wallet = Arc::new(crate::consensus::wallet::Wallet::new(
         cfg.wallet_config(),
-        db.isolate(WALLET_NS.to_string()),
+        db.clone(),
         task_group,
         bitcoin_rpc_connection.clone(),
     ));
@@ -144,31 +144,19 @@ pub async fn run(
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             while !task_handle.is_shutting_down() {
                 let tx = db.begin_read();
-                for item in server
-                    .mint
-                    .consensus_proposal(&tx.isolate(MINT_NS.to_string()))
-                    .await
-                {
+                for item in server.mint.consensus_proposal(&tx.as_ref()).await {
                     submission_sender
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Mint(item)))
                         .await
                         .ok();
                 }
-                for item in server
-                    .ln
-                    .consensus_proposal(&tx.isolate(LN_NS.to_string()))
-                    .await
-                {
+                for item in server.ln.consensus_proposal(&tx.as_ref()).await {
                     submission_sender
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
                         .await
                         .ok();
                 }
-                for item in server
-                    .wallet
-                    .consensus_proposal(&tx.isolate(WALLET_NS.to_string()))
-                    .await
-                {
+                for item in server.wallet.consensus_proposal(&tx.as_ref()).await {
                     submission_sender
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
                             item,

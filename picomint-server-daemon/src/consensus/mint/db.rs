@@ -15,29 +15,29 @@ picomint_redb::consensus_key!(NoteNonceKey);
 table!(
     NOTE_NONCE,
     NoteNonceKey => (),
-    "note-nonce",
+    "mint-note-nonce",
 );
 
 table!(
     BLINDED_SIGNATURE_SHARE,
     OutPoint => BlindedSignatureShare,
-    "blinded-signature-share",
+    "mint-blinded-signature-share",
 );
 
 table!(
     BLINDED_SIGNATURE_SHARE_RECOVERY,
     BlindedMessage => BlindedSignatureShare,
-    "blinded-signature-share-recovery",
+    "mint-blinded-signature-share-recovery",
 );
 
 table!(
     ISSUANCE_COUNTER,
     Denomination => u64,
-    "issuance-counter",
+    "mint-issuance-counter",
 );
 
 table!(
     RECOVERY_ITEM,
     u64 => RecoveryItem,
-    "recovery-item",
+    "mint-recovery-item",
 );
