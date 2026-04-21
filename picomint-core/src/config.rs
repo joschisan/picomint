@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::str::FromStr;
 
 use bitcoin::hashes::{Hash as BitcoinHash, sha256};
-use derive_more::Display;
+use derive_more::{Display, FromStr};
 use serde::{Deserialize, Serialize};
 
 use crate::PeerId;
@@ -40,6 +39,7 @@ pub struct PeerEndpoint {
     Encodable,
     Decodable,
     Display,
+    FromStr,
 )]
 pub struct FederationId(pub sha256::Hash);
 
@@ -49,14 +49,6 @@ impl FederationId {
     /// Random dummy id for testing
     pub fn dummy() -> Self {
         Self(sha256::Hash::from_byte_array([42; 32]))
-    }
-}
-
-impl FromStr for FederationId {
-    type Err = <sha256::Hash as FromStr>::Err;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.parse()?))
     }
 }
 

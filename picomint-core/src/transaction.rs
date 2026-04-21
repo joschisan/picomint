@@ -4,8 +4,7 @@
 //! Input/Output/ConsensusItem enums without creating a cycle through
 //! picomint-core.
 
-use std::fmt;
-
+use bitcoin::hashes::Hash as _;
 use picomint_encoding::{Decodable, Encodable};
 use thiserror::Error;
 
@@ -18,22 +17,11 @@ use crate::{Amount, TransactionId};
 /// of the inputs, to prevent creating funds out of thin air. In some cases, the
 /// value of the inputs and outputs can both be 0 e.g. when creating an offer to
 /// a Lightning Gateway.
-#[derive(Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct Transaction {
     pub inputs: Vec<wire::Input>,
     pub outputs: Vec<wire::Output>,
     pub signatures: Vec<crate::secp256k1::schnorr::Signature>,
-}
-
-impl fmt::Debug for Transaction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Transaction")
-            .field("txid", &self.tx_hash())
-            .field("inputs", &self.inputs)
-            .field("outputs", &self.outputs)
-            .field("signatures", &self.signatures)
-            .finish()
-    }
 }
 
 impl Transaction {
@@ -44,7 +32,7 @@ impl Transaction {
     }
 
     pub fn tx_hash_from_parts(inputs: &[wire::Input], outputs: &[wire::Output]) -> TransactionId {
-        (inputs, outputs).consensus_hash::<TransactionId>()
+        TransactionId((inputs, outputs).consensus_hash_sha256())
     }
 
     pub fn validate_signatures(
@@ -58,7 +46,7 @@ impl Transaction {
         }
 
         let txid = self.tx_hash();
-        let msg = secp256k1::Message::from_digest_slice(&txid[..]).expect("txid has right length");
+        let msg = secp256k1::Message::from_digest(*txid.0.as_byte_array());
 
         for (pk, signature) in pub_keys.iter().zip(&self.signatures) {
             if secp256k1::global::SECP256K1

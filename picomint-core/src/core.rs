@@ -45,7 +45,18 @@ picomint_redb::consensus_key!(OperationId);
 /// Discriminants are also used as the `ChildId` input for per-module secret
 /// derivation and as the stable wire tag. Order matters — do not reorder.
 #[derive(
-    Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Encodable, Decodable,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Encodable,
+    Decodable,
 )]
 pub enum ModuleKind {
     Mint,
@@ -64,12 +75,6 @@ impl ModuleKind {
 }
 
 impl fmt::Display for ModuleKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl fmt::Debug for ModuleKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }

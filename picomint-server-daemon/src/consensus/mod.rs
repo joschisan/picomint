@@ -1,7 +1,6 @@
 pub mod aleph_bft;
 pub mod api;
 pub mod db;
-pub mod debug;
 pub mod engine;
 pub mod ln;
 pub mod mint;

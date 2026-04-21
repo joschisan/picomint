@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::fmt::{self, Formatter};
 use std::sync::Arc;
 
 use crate::Endpoint;
@@ -358,13 +357,6 @@ impl Client {
             self.event_notify(),
             operation_id,
         ))
-    }
-}
-
-// TODO: impl `Debug` for `Client` and derive here
-impl fmt::Debug for Client {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Client")
     }
 }
 

@@ -29,7 +29,6 @@ use crate::consensus::aleph_bft::spawner::Spawner;
 use crate::consensus::db::{
     ACCEPTED_ITEM, ACCEPTED_TRANSACTION, ALEPH_UNITS, SIGNED_SESSION_OUTCOME,
 };
-use crate::consensus::debug::DebugConsensusItem;
 use crate::consensus::server::process_transaction_with_server;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
@@ -522,7 +521,7 @@ impl ConsensusEngine {
         trace!(
             target: LOG_CONSENSUS,
             %peer,
-            item = ?DebugConsensusItem(&item),
+            item = ?item,
             "Processing consensus item"
         );
 
@@ -554,7 +553,7 @@ impl ConsensusEngine {
                 trace!(
                     target: LOG_CONSENSUS,
                     %peer,
-                    item = ?DebugConsensusItem(&item),
+                    item = ?item,
                     err = %format_args!("{err:#}"),
                     "Rejected consensus item"
                 );
@@ -572,7 +571,7 @@ impl ConsensusEngine {
         debug!(
             target: LOG_CONSENSUS,
             %peer,
-            item = ?DebugConsensusItem(&item),
+            item = ?item,
             "Processed consensus item"
         );
 

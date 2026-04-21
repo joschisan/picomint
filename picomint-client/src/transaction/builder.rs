@@ -86,7 +86,7 @@ impl TransactionBuilder {
 
         let txid = Transaction::tx_hash_from_parts(&inputs, &outputs);
 
-        let message = secp256k1::Message::from_digest(txid.as_raw_hash().to_byte_array());
+        let message = secp256k1::Message::from_digest(txid.0.to_byte_array());
 
         let signatures = self
             .inputs

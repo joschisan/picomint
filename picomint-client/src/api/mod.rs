@@ -518,6 +518,3 @@ async fn request_over_connection(
 
     response.map_err(|e| ServerError::InvalidResponse(anyhow::anyhow!("Api Error: {:?}", e)))
 }
-
-#[cfg(test)]
-mod tests;

@@ -67,57 +67,25 @@ pub mod wallet;
 /// Static wire enums over the fixed module set.
 pub mod wire;
 
-// It's necessary to wrap `hash_newtype!` in a module because the generated code
-// references a module called "core", but we export a conflicting module in this
-// file.
-mod txid {
-    use bitcoin::hashes::hash_newtype;
-    use bitcoin::hashes::sha256::Hash as Sha256;
+/// A transaction id for peg-ins, peg-outs and reissuances.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Eq,
+    PartialEq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Encodable,
+    Decodable,
+    derive_more::Display,
+)]
+pub struct TransactionId(pub bitcoin::hashes::sha256::Hash);
 
-    hash_newtype!(
-        /// A transaction id for peg-ins, peg-outs and reissuances
-        pub struct TransactionId(Sha256);
-    );
-}
-pub use txid::TransactionId;
-
-impl redb::Value for TransactionId {
-    type SelfType<'a>
-        = Self
-    where
-        Self: 'a;
-    type AsBytes<'a>
-        = [u8; 32]
-    where
-        Self: 'a;
-    fn fixed_width() -> Option<usize> {
-        Some(32)
-    }
-    fn from_bytes<'a>(data: &'a [u8]) -> Self
-    where
-        Self: 'a,
-    {
-        use bitcoin::hashes::Hash as _;
-        let bytes: [u8; 32] = data.try_into().expect("sha256 hash is always 32 bytes");
-        Self::from_byte_array(bytes)
-    }
-    fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
-    where
-        Self: 'b,
-    {
-        use bitcoin::hashes::Hash as _;
-        value.to_byte_array()
-    }
-    fn type_name() -> redb::TypeName {
-        redb::TypeName::new("picomint::TransactionId")
-    }
-}
-
-impl redb::Key for TransactionId {
-    fn compare(data1: &[u8], data2: &[u8]) -> std::cmp::Ordering {
-        data1.cmp(data2)
-    }
-}
+picomint_redb::consensus_key!(TransactionId);
 
 /// `InPoint` represents a globally unique input in a transaction
 ///
@@ -182,19 +150,3 @@ impl std::fmt::Display for OutPoint {
 }
 
 picomint_redb::consensus_key!(OutPoint);
-
-impl Encodable for TransactionId {
-    fn consensus_encode<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        let bytes = &self[..];
-        writer.write_all(bytes)?;
-        Ok(())
-    }
-}
-
-impl Decodable for TransactionId {
-    fn consensus_decode<R: std::io::Read>(r: &mut R) -> std::io::Result<Self> {
-        let mut bytes = [0u8; 32];
-        r.read_exact(&mut bytes)?;
-        Ok(Self::from_byte_array(bytes))
-    }
-}

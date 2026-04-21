@@ -508,7 +508,9 @@ async fn federation_join(
             CliError::bad_request(format!("Invalid federation member string {e:?}"))
         })?;
 
-    let federation_id = invite_code.federation_id();
+    let federation_id = invite_code.federation_id().ok_or_else(|| {
+        CliError::bad_request("Invite code is missing a federation id".to_string())
+    })?;
 
     if state.clients.read().await.contains_key(&federation_id) {
         return Err(CliError::bad_request(

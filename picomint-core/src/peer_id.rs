@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
-use std::str::FromStr;
 
+use derive_more::{Display, FromStr};
 use serde::{Deserialize, Serialize};
 
 use picomint_encoding::{Decodable, Encodable};
@@ -20,6 +20,8 @@ use picomint_redb::consensus_key;
     Deserialize,
     Encodable,
     Decodable,
+    Display,
+    FromStr,
 )]
 pub struct PeerId(u8);
 
@@ -28,20 +30,6 @@ consensus_key!(PeerId);
 impl PeerId {
     pub fn to_usize(self) -> usize {
         self.0 as usize
-    }
-}
-
-impl std::fmt::Display for PeerId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl FromStr for PeerId {
-    type Err = <u8 as FromStr>::Err;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse().map(PeerId)
     }
 }
 
