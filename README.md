@@ -195,6 +195,48 @@ picomint-gateway-cli federation list
 
 For the gateway to actually route payments on behalf of a federation, its guardians also need to add the gateway's URL to their recommended list — see [Configure Gateways](#configure-gateways) above.
 
+### Manage Federation Liquidity
+
+The gateway holds its own ecash balance in every federation it has joined. Check it with:
+
+```bash
+picomint-gateway-cli federation balance <federation-id>
+```
+
+You can move funds in and out either onchain or as an ecash string.
+
+**Receive Onchain:** generate a federation deposit address and send bitcoin to it. When the transaction confirms the federation mints ecash to the gateway.
+
+```bash
+picomint-gateway-cli module wallet receive <federation-id>
+```
+
+**Send Onchain:** burn ecash in exchange for an onchain transfer to the given address. The federation picks a feerate; check what it will charge first:
+
+```bash
+picomint-gateway-cli module wallet send-fee <federation-id>
+```
+
+Then send:
+
+```bash
+picomint-gateway-cli module wallet send <federation-id> <address> <amount>
+```
+
+Passing `--fee <amount>` overrides the feerate with an exact value; otherwise whatever `send-fee` currently reports is used.
+
+**Send Ecash:** spend part of the federation balance as a base32-encoded ecash string you can hand to another client:
+
+```bash
+picomint-gateway-cli module mint send <federation-id> <amount>
+```
+
+**Receive Ecash:** reissue an ecash string produced by `mint send` (on this gateway or any other client) into your balance:
+
+```bash
+picomint-gateway-cli module mint receive <ecash>
+```
+
 ### Recovery
 
 If your gateway deployment is ever corrupted you can recover your onchain funds and ecash from your twelve word mnemonic:
