@@ -15,7 +15,6 @@ use crate::transaction::{Output, TransactionBuilder};
 use anyhow::{anyhow, ensure};
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
-use bitcoin::secp256k1::Message;
 use events::{
     CompleteEvent, ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent,
     SendCancelEvent, SendEvent, SendSuccessEvent,
@@ -161,15 +160,10 @@ impl GatewayClientModule {
 
         // This prevents DOS attacks where an attacker submits a different invoice.
         ensure!(
-            secp256k1::SECP256K1
-                .verify_schnorr(
-                    &payload.auth,
-                    &Message::from_digest(
-                        *payload.invoice.consensus_hash::<sha256::Hash>().as_ref()
-                    ),
-                    &payload.contract.refund_pk.x_only_public_key().0,
-                )
-                .is_ok(),
+            payload.contract.verify_invoice_auth(
+                payload.invoice.consensus_hash::<sha256::Hash>(),
+                &payload.auth,
+            ),
             "Invalid auth signature for the invoice data"
         );
 
