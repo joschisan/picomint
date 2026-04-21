@@ -200,7 +200,7 @@ For the gateway to actually route payments on behalf of a federation, its guardi
 The gateway holds its own ecash balance in every federation it has joined. Check it with:
 
 ```bash
-picomint-gateway-cli federation balance <federation-id>
+picomint-gateway-cli federation balance
 ```
 
 You can move funds in and out either onchain or as an ecash string.
@@ -208,19 +208,19 @@ You can move funds in and out either onchain or as an ecash string.
 **Receive Onchain:** generate a federation deposit address and send bitcoin to it. When the transaction confirms the federation mints ecash to the gateway.
 
 ```bash
-picomint-gateway-cli module wallet receive <federation-id>
+picomint-gateway-cli federation module wallet receive
 ```
 
 **Send Onchain:** burn ecash in exchange for an onchain transfer to the given address. The federation picks a feerate; check what it will charge first:
 
 ```bash
-picomint-gateway-cli module wallet send-fee <federation-id>
+picomint-gateway-cli federation module wallet send-fee
 ```
 
 Then send:
 
 ```bash
-picomint-gateway-cli module wallet send <federation-id> <address> <amount>
+picomint-gateway-cli federation module wallet send <address> <amount>
 ```
 
 Passing `--fee <amount>` overrides the feerate with an exact value; otherwise whatever `send-fee` currently reports is used.
@@ -228,14 +228,16 @@ Passing `--fee <amount>` overrides the feerate with an exact value; otherwise wh
 **Send Ecash:** spend part of the federation balance as a base32-encoded ecash string you can hand to another client:
 
 ```bash
-picomint-gateway-cli module mint send <federation-id> <amount>
+picomint-gateway-cli federation module mint send <amount>
 ```
 
 **Receive Ecash:** reissue an ecash string produced by `mint send` (on this gateway or any other client) into your balance:
 
 ```bash
-picomint-gateway-cli module mint receive <ecash>
+picomint-gateway-cli federation module mint receive <ecash>
 ```
+
+Every command above accepts `--id <federation-id>` to target a specific federation. When exactly one federation is joined (the common case) the flag can be omitted and that federation is used.
 
 ### Recovery
 

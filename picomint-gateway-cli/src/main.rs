@@ -13,17 +13,19 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, FederationBalanceRequest, FederationConfigRequest, FederationJoinRequest,
+    FederationMintCountRequest, FederationMintReceiveRequest, FederationMintSendRequest,
+    FederationWalletReceiveRequest, FederationWalletSendFeeRequest, FederationWalletSendRequest,
     LdkChannelCloseRequest, LdkChannelOpenRequest, LdkInvoiceCreateRequest, LdkInvoicePayRequest,
-    LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest, MintCountRequest,
-    MintReceiveRequest, MintSendRequest, QueryRequest, ROUTE_FEDERATION_BALANCE,
-    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
-    ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST,
-    ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY,
-    ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT,
-    ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_COUNT,
-    ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_INFO,
-    ROUTE_MODULE_WALLET_RECEIVE, ROUTE_MODULE_WALLET_SEND, ROUTE_MODULE_WALLET_SEND_FEE,
-    ROUTE_QUERY, WalletInfoRequest, WalletReceiveRequest, WalletSendFeeRequest, WalletSendRequest,
+    LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest, QueryRequest,
+    ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
+    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
+    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
+    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
+    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    ROUTE_MNEMONIC, ROUTE_QUERY,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -55,9 +57,6 @@ enum Commands {
     /// Federation management
     #[command(subcommand)]
     Federation(FederationCommands),
-    /// Per-federation module commands
-    #[command(subcommand)]
-    Module(ModuleCommands),
     /// Run a SQL query against the in-memory gw-event analytics tables
     Query(QueryRequest),
 }
@@ -128,6 +127,9 @@ enum FederationCommands {
     Invite,
     /// Get a federation's ecash balance
     Balance(FederationBalanceRequest),
+    /// Per-federation module commands
+    #[command(subcommand)]
+    Module(ModuleCommands),
 }
 
 #[derive(Subcommand)]
@@ -143,23 +145,21 @@ enum ModuleCommands {
 #[derive(Subcommand)]
 enum MintCommands {
     /// Count ecash notes by denomination
-    Count(MintCountRequest),
+    Count(FederationMintCountRequest),
     /// Send ecash
-    Send(MintSendRequest),
+    Send(FederationMintSendRequest),
     /// Receive ecash
-    Receive(MintReceiveRequest),
+    Receive(FederationMintReceiveRequest),
 }
 
 #[derive(Subcommand)]
 enum WalletCommands {
-    /// Query wallet info
-    Info(WalletInfoRequest),
     /// Get send fee estimate
-    SendFee(WalletSendFeeRequest),
+    SendFee(FederationWalletSendFeeRequest),
     /// Send onchain from federation wallet
-    Send(WalletSendRequest),
+    Send(FederationWalletSendRequest),
     /// Get receive address
-    Receive(WalletReceiveRequest),
+    Receive(FederationWalletReceiveRequest),
 }
 
 /// Tiny connector that dials a fixed Unix socket path, ignoring the URI
@@ -271,23 +271,29 @@ async fn main() -> Result<()> {
             FederationCommands::Config(req) => request(d, ROUTE_FEDERATION_CONFIG, req).await?,
             FederationCommands::Invite => request(d, ROUTE_FEDERATION_INVITE, ()).await?,
             FederationCommands::Balance(req) => request(d, ROUTE_FEDERATION_BALANCE, req).await?,
-        },
-
-        Commands::Module(cmd) => match cmd {
-            ModuleCommands::Mint(cmd) => match cmd {
-                MintCommands::Count(req) => request(d, ROUTE_MODULE_MINT_COUNT, req).await?,
-                MintCommands::Send(req) => request(d, ROUTE_MODULE_MINT_SEND, req).await?,
-                MintCommands::Receive(req) => request(d, ROUTE_MODULE_MINT_RECEIVE, req).await?,
-            },
-            ModuleCommands::Wallet(cmd) => match cmd {
-                WalletCommands::Info(req) => request(d, ROUTE_MODULE_WALLET_INFO, req).await?,
-                WalletCommands::SendFee(req) => {
-                    request(d, ROUTE_MODULE_WALLET_SEND_FEE, req).await?
-                }
-                WalletCommands::Send(req) => request(d, ROUTE_MODULE_WALLET_SEND, req).await?,
-                WalletCommands::Receive(req) => {
-                    request(d, ROUTE_MODULE_WALLET_RECEIVE, req).await?
-                }
+            FederationCommands::Module(cmd) => match cmd {
+                ModuleCommands::Mint(cmd) => match cmd {
+                    MintCommands::Count(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_MINT_COUNT, req).await?
+                    }
+                    MintCommands::Send(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_MINT_SEND, req).await?
+                    }
+                    MintCommands::Receive(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_MINT_RECEIVE, req).await?
+                    }
+                },
+                ModuleCommands::Wallet(cmd) => match cmd {
+                    WalletCommands::SendFee(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, req).await?
+                    }
+                    WalletCommands::Send(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_WALLET_SEND, req).await?
+                    }
+                    WalletCommands::Receive(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, req).await?
+                    }
+                },
             },
         },
     };
