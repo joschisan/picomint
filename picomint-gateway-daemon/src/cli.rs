@@ -592,7 +592,7 @@ async fn federation_balance(
     State(state): State<AppState>,
     Json(payload): Json<FederationBalanceRequest>,
 ) -> Result<Json<FederationBalanceResponse>, CliError> {
-    let (_, client) = resolve_client(&state, payload.federation_id).await?;
+    let client = resolve_client(&state, payload.federation_id).await?;
 
     let balance_msat = client
         .get_balance()
@@ -621,7 +621,7 @@ async fn federation_invite(
 async fn resolve_client(
     state: &AppState,
     id: Option<FederationId>,
-) -> Result<(FederationId, Arc<Client>), CliError> {
+) -> Result<Arc<Client>, CliError> {
     let clients = state.clients.read().await;
     let id = match id {
         Some(id) => id,
@@ -640,11 +640,10 @@ async fn resolve_client(
             }
         }
     };
-    let client = clients
+    clients
         .get(&id)
         .cloned()
-        .ok_or_else(|| CliError::bad_request("Federation not connected"))?;
-    Ok((id, client))
+        .ok_or_else(|| CliError::bad_request("Federation not connected"))
 }
 
 /// Count held ecash notes by denomination
@@ -653,7 +652,7 @@ async fn federation_module_mint_count(
     State(state): State<AppState>,
     Json(payload): Json<FederationMintCountRequest>,
 ) -> Result<Json<FederationMintCountResponse>, CliError> {
-    let (_, client) = resolve_client(&state, payload.federation_id).await?;
+    let client = resolve_client(&state, payload.federation_id).await?;
     let counts = client.mint().get_count_by_denomination();
     Ok(Json(FederationMintCountResponse { counts }))
 }
@@ -664,7 +663,7 @@ async fn federation_module_mint_send(
     State(state): State<AppState>,
     Json(payload): Json<FederationMintSendRequest>,
 ) -> Result<Json<FederationMintSendResponse>, CliError> {
-    let (_, client) = resolve_client(&state, payload.federation_id).await?;
+    let client = resolve_client(&state, payload.federation_id).await?;
 
     let ecash = client
         .mint()
@@ -708,7 +707,7 @@ async fn federation_module_wallet_send_fee(
     State(state): State<AppState>,
     Json(payload): Json<FederationWalletSendFeeRequest>,
 ) -> Result<Json<FederationWalletSendFeeResponse>, CliError> {
-    let (_, client) = resolve_client(&state, payload.federation_id).await?;
+    let client = resolve_client(&state, payload.federation_id).await?;
     let fee = client
         .wallet()
         .send_fee()
@@ -723,7 +722,7 @@ async fn federation_module_wallet_send(
     State(state): State<AppState>,
     Json(payload): Json<FederationWalletSendRequest>,
 ) -> Result<Json<FederationWalletSendResponse>, CliError> {
-    let (_, client) = resolve_client(&state, payload.federation_id).await?;
+    let client = resolve_client(&state, payload.federation_id).await?;
     let operation_id = client
         .wallet()
         .send(payload.address, payload.amount, payload.fee)
@@ -738,7 +737,7 @@ async fn federation_module_wallet_receive(
     State(state): State<AppState>,
     Json(payload): Json<FederationWalletReceiveRequest>,
 ) -> Result<Json<FederationWalletReceiveResponse>, CliError> {
-    let (_, client) = resolve_client(&state, payload.federation_id).await?;
+    let client = resolve_client(&state, payload.federation_id).await?;
     let address = client.wallet().receive().await;
     Ok(Json(FederationWalletReceiveResponse {
         address: address.as_unchecked().clone(),
