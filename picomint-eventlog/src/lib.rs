@@ -224,6 +224,14 @@ pub fn log_event_raw(
     operation_id: OperationId,
     payload: Vec<u8>,
 ) {
+    tracing::info!(
+        kind = %kind,
+        source = ?source,
+        operation_id = %operation_id,
+        payload = %String::from_utf8_lossy(&payload),
+        "event",
+    );
+
     let id = next_event_log_id(dbtx);
     let ts_usecs = u64::try_from(duration_since_epoch().as_micros()).unwrap_or(u64::MAX);
     let entry = EventLogEntry {
