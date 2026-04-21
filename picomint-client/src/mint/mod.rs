@@ -665,12 +665,12 @@ impl MintClientModule {
     pub fn receive(&self, ecash: &ECash) -> Result<OperationId, ReceiveECashError> {
         let operation_id = OperationId::from_encodable(ecash);
 
-        if ecash.mint() != Some(self.federation_id) {
+        if ecash.mint != self.federation_id {
             return Err(ReceiveECashError::WrongFederation);
         }
 
         if ecash
-            .notes()
+            .notes
             .iter()
             .any(|note| note.amount() <= self.cfg.input_fee)
         {
@@ -678,7 +678,7 @@ impl MintClientModule {
         }
 
         let mut tx_builder = TransactionBuilder::new();
-        for note in ecash.notes() {
+        for note in &ecash.notes {
             tx_builder.add_input(Input {
                 input: wire::Input::Mint(MintInput { note: note.note() }),
                 keypair: note.keypair,

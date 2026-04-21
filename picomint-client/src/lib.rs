@@ -42,7 +42,7 @@ pub mod wallet;
 
 use std::collections::BTreeMap;
 
-use anyhow::{Context as _, bail};
+use anyhow::bail;
 use api::{FederationApi, ServerError};
 pub use iroh::Endpoint;
 use picomint_core::PeerId;
@@ -93,14 +93,12 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
     debug!(
         target: LOG_CLIENT_NET,
         invite = %picomint_base32::encode(invite),
-        peers = ?invite.peers(),
+        peers = ?invite.peers,
         "Downloading client config via invite code"
     );
 
-    let federation_id = invite
-        .federation_id()
-        .context("Invite code is missing a federation id")?;
-    let api_from_invite = FederationApi::new(endpoint.clone(), invite.peers());
+    let federation_id = invite.federation_id;
+    let api_from_invite = FederationApi::new(endpoint.clone(), invite.peers.clone());
 
     let query_strategy = FilterMap::new(move |cfg: ConsensusConfig| {
         if federation_id != cfg.calculate_federation_id() {

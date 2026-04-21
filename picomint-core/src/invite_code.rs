@@ -7,52 +7,20 @@ use crate::PeerId;
 use crate::config::FederationId;
 use picomint_encoding::{Decodable, Encodable};
 
-/// Can be used to download the configs and bootstrap a client.
-#[derive(Clone, Debug, Eq, PartialEq, Encodable, Decodable, Hash, Ord, PartialOrd)]
-pub struct InviteCode(Vec<InviteCodePart>);
+/// Everything a client needs to download the federation config and bootstrap.
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable)]
+pub struct InviteCode {
+    pub federation_id: FederationId,
+    pub peers: BTreeMap<PeerId, PublicKey>,
+}
 
 impl InviteCode {
     pub fn new(node_id: PublicKey, peer: PeerId, federation_id: FederationId) -> Self {
-        Self(vec![
-            InviteCodePart::FederationId(federation_id),
-            InviteCodePart::Peer { peer, node_id },
-        ])
+        Self {
+            federation_id,
+            peers: BTreeMap::from([(peer, node_id)]),
+        }
     }
-
-    /// Get all peer node ids in the [`InviteCode`].
-    pub fn peers(&self) -> BTreeMap<PeerId, PublicKey> {
-        self.0
-            .iter()
-            .filter_map(|entry| match entry {
-                InviteCodePart::Peer { peer, node_id } => Some((*peer, *node_id)),
-                InviteCodePart::FederationId(_) => None,
-            })
-            .collect()
-    }
-
-    /// Returns the federation's ID that can be used to authenticate the config
-    /// downloaded from the API.
-    pub fn federation_id(&self) -> Option<FederationId> {
-        self.0.iter().find_map(|data| match data {
-            InviteCodePart::FederationId(federation_id) => Some(*federation_id),
-            InviteCodePart::Peer { .. } => None,
-        })
-    }
-}
-
-/// For extendability [`InviteCode`] consists of parts, where client can ignore
-/// ones they don't understand.
-#[derive(Clone, Debug, Eq, PartialEq, Encodable, Decodable, Hash, Ord, PartialOrd)]
-enum InviteCodePart {
-    /// Authentication id for the federation
-    FederationId(FederationId),
-    /// API endpoint of one of the guardians
-    Peer {
-        /// Peer id of the host from the node id
-        peer: PeerId,
-        /// Iroh public key of the peer's API endpoint
-        node_id: PublicKey,
-    },
 }
 
 impl Serialize for InviteCode {

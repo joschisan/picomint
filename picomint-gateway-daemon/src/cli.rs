@@ -508,11 +508,7 @@ async fn federation_join(
             CliError::bad_request(format!("Invalid federation member string {e:?}"))
         })?;
 
-    let federation_id = invite_code.federation_id().ok_or_else(|| {
-        CliError::bad_request("Invite code is missing a federation id".to_string())
-    })?;
-
-    if state.clients.read().await.contains_key(&federation_id) {
+    if state.clients.read().await.contains_key(&invite_code.federation_id) {
         return Err(CliError::bad_request(
             "Federation has already been registered",
         ));
@@ -529,16 +525,16 @@ async fn federation_join(
         .clients
         .write()
         .await
-        .insert(federation_id, client.clone());
+        .insert(invite_code.federation_id, client.clone());
 
     crate::query::spawn_tail(
         &state.task_group,
         client,
-        federation_id,
+        invite_code.federation_id,
         state.query_state.clone(),
     );
 
-    debug!(target: LOG_GATEWAY, %federation_id, "Federation connected");
+    debug!(target: LOG_GATEWAY, federation_id = %invite_code.federation_id, "Federation connected");
 
     Ok(Json(()))
 }
@@ -626,12 +622,8 @@ async fn module_mint_receive(
     let ecash: picomint_client::mint::ECash = picomint_base32::decode(&payload.notes)
         .map_err(|e| CliError::bad_request(format!("Invalid ECash: {e}")))?;
 
-    let federation_id = ecash
-        .mint()
-        .ok_or_else(|| CliError::bad_request("ECash does not contain federation id"))?;
-
     let client = state
-        .select_client(federation_id)
+        .select_client(ecash.mint)
         .await
         .ok_or(CliError::bad_request("Federation not connected"))?;
 

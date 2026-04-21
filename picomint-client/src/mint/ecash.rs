@@ -5,47 +5,17 @@ use picomint_encoding::{Decodable, Encodable};
 use super::SpendableNote;
 
 #[derive(Clone, Debug, Encodable, Decodable)]
-pub struct ECash(Vec<ECashField>);
-
-#[derive(Clone, Debug, Decodable, Encodable)]
-enum ECashField {
-    Mint(FederationId),
-    Note(SpendableNote),
+pub struct ECash {
+    pub mint: FederationId,
+    pub notes: Vec<SpendableNote>,
 }
 
 impl ECash {
     pub fn new(mint: FederationId, notes: Vec<SpendableNote>) -> Self {
-        Self(
-            std::iter::once(ECashField::Mint(mint))
-                .chain(notes.into_iter().map(ECashField::Note))
-                .collect(),
-        )
+        Self { mint, notes }
     }
 
     pub fn amount(&self) -> Amount {
-        self.0
-            .iter()
-            .filter_map(|field| match field {
-                ECashField::Note(note) => Some(note.amount()),
-                ECashField::Mint(_) => None,
-            })
-            .sum()
-    }
-
-    pub fn mint(&self) -> Option<FederationId> {
-        self.0.iter().find_map(|field| match field {
-            ECashField::Mint(mint) => Some(*mint),
-            ECashField::Note(_) => None,
-        })
-    }
-
-    pub fn notes(&self) -> Vec<SpendableNote> {
-        self.0
-            .iter()
-            .filter_map(|field| match field {
-                ECashField::Note(note) => Some(note.clone()),
-                ECashField::Mint(_) => None,
-            })
-            .collect()
+        self.notes.iter().map(SpendableNote::amount).sum()
     }
 }
