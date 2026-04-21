@@ -46,6 +46,27 @@ jobs:
             --log > /tmp/failed-logs/full.log
         fi
 
+    - name: Download original-run temp dir
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: flake-artifact
+        path: /tmp/original-failure
+        run-id: ${{ github.event.workflow_run.id }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract original-run temp dir
+      run: |
+        if [ -f /tmp/original-failure/temp-dir.tar.gz ]; then
+          mkdir -p /tmp/original-failure/extracted
+          tar -xzf /tmp/original-failure/temp-dir.tar.gz \
+            -C /tmp/original-failure/extracted
+          echo "Extracted contents:"
+          ls -la /tmp/original-failure/extracted
+        else
+          echo "No temp-dir artifact attached to the failing run."
+        fi
+
     - name: Investigate with Claude Code
       uses: anthropics/claude-code-action@v1
       with:
@@ -53,7 +74,13 @@ jobs:
         claude_args: "--model claude-opus-4-7 --allowed-tools Bash,Edit,Write,Read,Grep,Glob"
         prompt: |
           Integration test workflow "Flaker" (run id ${{ github.event.workflow_run.id }}, url ${{ github.event.workflow_run.html_url }}) failed on commit ${{ github.event.workflow_run.head_sha }}.
-          Failure logs: /tmp/failed-logs/.
+
+          Artifacts from the failing run (read these *first* before forming a hypothesis):
+          - `/tmp/failed-logs/` — the job's streamed stdout/stderr (`--log-failed` dump). Coarse-grained harness tracing.
+          - `/tmp/original-failure/extracted/<tmpdir>/` — the **failing iteration's temp data directory**, preserved from the original runner. Inside you'll find `server-0.log` … `server-3.log`, `gw.log`, `ldk.log`, `recurring-daemon.log` — the full per-daemon stdout/stderr. These are **far** more detailed than the harness stream and are where the actual root cause usually shows up. Also present: guardian/gateway/LDK data dirs (redb, LDK KVStore) for inspecting on-disk state at the moment of failure.
+          - `/tmp/original-failure/iter.log` — the streamed log of *just* the failing iteration, useful for finding the exact "Test data directory:" path.
+
+          If `/tmp/original-failure/extracted/` is missing, the artifact upload didn't fire — fall back to `/tmp/failed-logs/` only and note this in your report.
 
           ## Conventions
 
@@ -88,6 +115,8 @@ jobs:
           ## Investigate — confidence is the goal
 
           You have ~5 hours of wall-clock budget on this runner. Use it. The **first** `./test-integration.sh` takes ~15 min (cold `cargo build --workspace`); **subsequent runs in this same job reuse the warm build cache and finish in ~2–3 min each**. That gives you room for 50+ repeated runs after the first — enough for reliable reproduction rates, falsification experiments, and fix verification across many trials. Do not rush to open a PR from a single log read — PR = claim of understanding, not a guess.
+
+          **Per-daemon logs on your own repros.** Every `./test-integration.sh` you run in this job prints `Test data directory: <path>` near the top. Inside that dir you'll find the same `server-*.log` / `gw.log` / `ldk.log` / `recurring-daemon.log` files described above — read those directly when investigating your own reproductions, not just the streamed harness output.
 
           1. Form a hypothesis from the logs. Be specific: name the failing assertion, panic site, timeout, or error kind. Derive a stable `Signature:`.
 

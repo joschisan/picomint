@@ -28,15 +28,37 @@ jobs:
 
     - name: Loop integration tests until failure or deadline
       run: |
-        set -u
+        set -uo pipefail
+        mkdir -p /tmp/flake-artifact
         DEADLINE=$(($(date +%s) + 10800))  # 3h
+        LOG=/tmp/flake-artifact/iter.log
         i=0
+        extract_dir() {
+          grep -oE 'Test data directory: .+' "$LOG" | tail -1 | sed 's/^Test data directory: //'
+        }
         while [ "$(date +%s)" -lt "$DEADLINE" ]; do
           i=$((i + 1))
           echo "=== iteration $i ==="
-          if ! timeout 600 ./test-integration.sh; then
+          if ! timeout 600 ./test-integration.sh 2>&1 | tee "$LOG"; then
             echo "FAILED on iteration $i"
+            DIR=$(extract_dir)
+            if [ -n "$DIR" ] && [ -d "$DIR" ]; then
+              echo "Archiving failing temp dir: $DIR"
+              tar -czf /tmp/flake-artifact/temp-dir.tar.gz \
+                -C "$(dirname "$DIR")" "$(basename "$DIR")" || true
+            fi
             exit 1
           fi
+          # Reclaim disk from the passing iteration's temp dir.
+          DIR=$(extract_dir)
+          [ -n "$DIR" ] && [ -d "$DIR" ] && rm -rf "$DIR"
         done
         echo "Completed $i iterations within budget."
+
+    - name: Upload flake artifact
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: flake-artifact
+        path: /tmp/flake-artifact
+        if-no-files-found: warn
