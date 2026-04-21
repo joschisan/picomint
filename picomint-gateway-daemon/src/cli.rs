@@ -26,10 +26,11 @@ use picomint_gateway_cli_core::{
     FederationWalletSendFeeResponse, FederationWalletSendRequest, FederationWalletSendResponse,
     InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelCloseResponse,
     LdkChannelListResponse, LdkChannelOpenRequest, LdkInvoiceCreateRequest,
-    LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse, LdkOnchainReceiveResponse,
-    LdkOnchainSendRequest, LdkOnchainSendResponse, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
-    LdkPeerListResponse, MnemonicResponse, PeerInfo, QueryRequest, ROUTE_FEDERATION_BALANCE,
-    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
+    LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
+    LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
+    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
+    PeerInfo, QueryRequest, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
+    ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
     ROUTE_FEDERATION_MODULE_MINT_COUNT, ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
     ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
     ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
@@ -536,7 +537,12 @@ async fn federation_join(
             CliError::bad_request(format!("Invalid federation member string {e:?}"))
         })?;
 
-    if state.clients.read().await.contains_key(&invite_code.federation_id) {
+    if state
+        .clients
+        .read()
+        .await
+        .contains_key(&invite_code.federation_id)
+    {
         return Err(CliError::bad_request(
             "Federation has already been registered",
         ));

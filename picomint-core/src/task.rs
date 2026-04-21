@@ -212,4 +212,3 @@ impl Future for TaskShutdownToken {
         self.0.as_mut().poll(cx)
     }
 }
-

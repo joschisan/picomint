@@ -111,16 +111,10 @@ pub struct ApiError {
 
 impl ApiError {
     pub fn not_found(message: String) -> Self {
-        Self {
-            code: 404,
-            message,
-        }
+        Self { code: 404, message }
     }
 
     pub fn bad_request(message: String) -> Self {
-        Self {
-            code: 400,
-            message,
-        }
+        Self { code: 400, message }
     }
 }

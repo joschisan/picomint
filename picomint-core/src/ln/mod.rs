@@ -102,4 +102,3 @@ pub enum LightningConsensusItem {
     BlockCountVote(u64),
     UnixTimeVote(u64),
 }
-

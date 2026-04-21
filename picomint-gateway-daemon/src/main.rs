@@ -19,7 +19,6 @@ use clap::{ArgGroup, Parser};
 use lightning::types::payment::PaymentHash;
 use picomint_core::Amount;
 use picomint_core::ln::gateway_api::PaymentFee;
-use url::Url;
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::kvstore::RedbKvStore;
 use picomint_gateway_daemon::{AppState, DB_FILE, cli, public};
@@ -27,6 +26,7 @@ use picomint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use rand::rngs::OsRng;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
+use url::Url;
 
 /// Command line parameters for starting the gateway.
 #[derive(Parser)]

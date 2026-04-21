@@ -512,10 +512,7 @@ async fn test_mock_wrong_network(client: &Arc<Client>, mock_gw: String) -> anyho
     Ok(())
 }
 
-async fn test_claim_outgoing_contract(
-    client: &Arc<Client>,
-    mock_gw: String,
-) -> anyhow::Result<()> {
+async fn test_claim_outgoing_contract(client: &Arc<Client>, mock_gw: String) -> anyhow::Result<()> {
     info!("ln: test_claim_outgoing_contract");
 
     let ln = client.ln();

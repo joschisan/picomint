@@ -15,10 +15,10 @@ use futures::FutureExt as _;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoindClient, EsploraClient};
 use picomint_core::task::TaskGroup;
 use picomint_logging::{LOG_CORE, TracingSetup};
-use url::Url;
 use picomint_server_daemon::config::ConfigGenSettings;
 use picomint_server_daemon::{DB_FILE, run_server};
 use tracing::{debug, error, info};
+use url::Url;
 
 /// Time we will wait before forcefully shutting down tasks on exit.
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);

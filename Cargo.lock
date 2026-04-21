@@ -3944,34 +3944,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonrpsee-core"
-version = "0.24.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "456196007ca3a14db478346f58c7238028d55ee15c1df15115596e411ff27925"
-dependencies = [
- "async-trait",
- "futures-util",
- "jsonrpsee-types",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "jsonrpsee-types"
-version = "0.24.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08a8e70baf945b6b5752fc8eb38c918a48f1234daf11355e07106d963f860089"
-dependencies = [
- "http",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5226,7 +5198,6 @@ dependencies = [
  "async-lock",
  "backon",
  "bitcoin",
- "bitcoin-units",
  "bitcoin_hashes",
  "bls12_381",
  "derive_more 2.1.1",
@@ -5237,13 +5208,10 @@ dependencies = [
  "group",
  "hex",
  "iroh-base",
- "itertools 0.14.0",
  "js-sys",
- "jsonrpsee-core",
  "lightning-invoice",
  "miniscript",
  "picomint-base32",
- "picomint-derive",
  "picomint-encoding",
  "picomint-logging",
  "picomint-redb",
@@ -5251,10 +5219,8 @@ dependencies = [
  "picomint-tpe",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
- "redb",
  "secp256k1",
  "serde",
- "serde_json",
  "subtle",
  "test-log",
  "thiserror 2.0.18",
@@ -5313,13 +5279,10 @@ name = "picomint-gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bitcoin",
  "clap",
  "http-body-util",
  "hyper",
  "hyper-util",
- "lightning-invoice",
- "picomint-core",
  "picomint-gateway-cli-core",
  "serde",
  "serde_json",
@@ -5476,7 +5439,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower-service",
- "url",
 ]
 
 [[package]]
