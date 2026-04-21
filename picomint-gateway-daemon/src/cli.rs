@@ -503,8 +503,10 @@ async fn federation_join(
     State(state): State<AppState>,
     Json(payload): Json<FederationJoinRequest>,
 ) -> Result<Json<()>, CliError> {
-    let invite_code = picomint_core::invite_code::InviteCode::from_str(&payload.invite)
-        .map_err(|e| CliError::bad_request(format!("Invalid federation member string {e:?}")))?;
+    let invite_code: picomint_core::invite_code::InviteCode =
+        picomint_base32::decode(&payload.invite).map_err(|e| {
+            CliError::bad_request(format!("Invalid federation member string {e:?}"))
+        })?;
 
     let federation_id = invite_code.federation_id();
 

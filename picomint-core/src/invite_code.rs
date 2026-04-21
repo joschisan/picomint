@@ -1,12 +1,6 @@
-use core::fmt;
-use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::fmt::{Display, Formatter};
 use std::io::Read;
-use std::str::FromStr;
 
-use anyhow::ensure;
-use bech32::{Bech32m, Hrp};
 use iroh_base::PublicKey;
 use serde::{Deserialize, Serialize};
 
@@ -149,43 +143,12 @@ enum InviteCodePart {
     FederationId(FederationId),
 }
 
-/// We can represent client invite code as a bech32 string for compactness and
-/// error-checking.
-const BECH32_HRP: Hrp = Hrp::parse_unchecked("fed1");
-
-impl FromStr for InviteCode {
-    type Err = anyhow::Error;
-
-    fn from_str(encoded: &str) -> Result<Self, Self::Err> {
-        if let Ok(invite_code) = picomint_base32::decode(encoded) {
-            return Ok(invite_code);
-        }
-
-        let (hrp, data) = bech32::decode(encoded)?;
-
-        ensure!(hrp == BECH32_HRP, "Invalid HRP in bech32 encoding");
-
-        let invite = Self::consensus_decode_exact(&data)?;
-
-        Ok(invite)
-    }
-}
-
-/// Parses the invite code from a bech32 string
-impl Display for InviteCode {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        let data = self.consensus_encode_to_vec();
-        let encode = bech32::encode::<Bech32m>(BECH32_HRP, &data).map_err(|_| fmt::Error)?;
-        formatter.write_str(&encode)
-    }
-}
-
 impl Serialize for InviteCode {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        String::serialize(&self.to_string(), serializer)
+        picomint_base32::encode(self).serialize(serializer)
     }
 }
 
@@ -194,8 +157,8 @@ impl<'de> Deserialize<'de> for InviteCode {
     where
         D: serde::Deserializer<'de>,
     {
-        let string = Cow::<str>::deserialize(deserializer)?;
-        Self::from_str(&string).map_err(serde::de::Error::custom)
+        let string = String::deserialize(deserializer)?;
+        picomint_base32::decode(&string).map_err(serde::de::Error::custom)
     }
 }
 
@@ -224,8 +187,8 @@ mod tests {
         ];
         let invite_code = InviteCode(parts.clone());
 
-        let encoded = invite_code.to_string();
-        let decoded = InviteCode::from_str(&encoded).expect("roundtrip parses");
+        let encoded = picomint_base32::encode(&invite_code);
+        let decoded: InviteCode = picomint_base32::decode(&encoded).expect("roundtrip parses");
         assert_eq!(decoded.0, parts);
     }
 }

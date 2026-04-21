@@ -90,7 +90,7 @@ async fn dashboard_view(
         .iter()
         .map(|(peer, receiver)| (*peer, receiver.borrow().clone()))
         .collect();
-    let invite_code = api.cfg.get_invite_code().to_string();
+    let invite_code = picomint_base32::encode(&api.cfg.get_invite_code());
     let audit_summary = api.federation_audit().await;
     let bitcoin_rpc_url = api.bitcoin_rpc_connection.url();
     let bitcoin_rpc_status = api.bitcoin_rpc_connection.status();

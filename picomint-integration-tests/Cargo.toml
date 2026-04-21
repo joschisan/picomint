@@ -22,6 +22,7 @@ iroh = { workspace = true, default-features = false }
 ldk-node = { workspace = true }
 lightning-invoice = { workspace = true }
 lightning-types = { workspace = true }
+picomint-base32 = { workspace = true }
 picomint-client = { workspace = true }
 picomint-core = { workspace = true }
 picomint-eventlog = { workspace = true }

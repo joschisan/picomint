@@ -21,7 +21,7 @@ fn main() -> anyhow::Result<()> {
     let (env, client_send) = env::TestEnv::setup(runtime.clone())?;
 
     info!("Test environment ready!");
-    info!("Invite code: {}", env.invite_code);
+    info!("Invite code: {}", picomint_base32::encode(&env.invite_code));
     info!("Gateway: {}", env.gw_data_dir.display());
 
     info!("Running wallet tests...");

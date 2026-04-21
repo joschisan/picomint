@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::str::FromStr as _;
 
 use iroh_base::{PublicKey, SecretKey};
 use picomint_core::config::FederationId;
@@ -14,13 +13,13 @@ fn test_node_id(byte: u8) -> PublicKey {
 fn converts_invite_code() {
     let connect = InviteCode::new(test_node_id(0x11), PeerId::from(1), FederationId::dummy());
 
-    let bech32 = connect.to_string();
-    let connect_parsed = InviteCode::from_str(&bech32).expect("parses");
+    let encoded = picomint_base32::encode(&connect);
+    let connect_parsed: InviteCode = picomint_base32::decode(&encoded).expect("parses");
     assert_eq!(connect, connect_parsed);
 
     let json = serde_json::to_string(&connect).unwrap();
     let connect_as_string: String = serde_json::from_str(&json).unwrap();
-    assert_eq!(connect_as_string, bech32);
+    assert_eq!(connect_as_string, encoded);
     let connect_parsed_json: InviteCode = serde_json::from_str(&json).unwrap();
     assert_eq!(connect_parsed_json, connect_parsed);
 }
