@@ -1,7 +1,7 @@
 //! Freestanding API handlers for [`super::Mint`].
 //!
 //! Each function matches one endpoint constant in
-//! `picomint_core::mint::endpoint_constants` and is dispatched from
+//! `picomint_core::mint::methods` and is dispatched from
 //! `Mint::handle_api` via the `handler!` macro.
 
 use bitcoin::hashes::sha256;

@@ -8,7 +8,7 @@ use anyhow::anyhow;
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInput;
 use picomint_core::ln::contracts::IncomingContract;
-use picomint_core::ln::endpoint_constants::DECRYPTION_KEY_SHARE_ENDPOINT;
+use picomint_core::ln::methods::METHOD_DECRYPTION_KEY_SHARE;
 use picomint_core::module::ApiRequestErased;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::wire;
@@ -71,7 +71,7 @@ impl StateMachine for ReceiveStateMachine {
                     },
                     ctx.client_ctx.global_api().all_peers().to_num_peers(),
                 ),
-                DECRYPTION_KEY_SHARE_ENDPOINT.to_owned(),
+                METHOD_DECRYPTION_KEY_SHARE.to_owned(),
                 ApiRequestErased::new(self.outpoint),
             )
             .await;

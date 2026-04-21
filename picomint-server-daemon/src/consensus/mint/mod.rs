@@ -7,9 +7,9 @@ use anyhow::ensure;
 use picomint_core::mint::config::{
     MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
 };
-use picomint_core::mint::endpoint_constants::{
-    RECOVERY_COUNT_ENDPOINT, RECOVERY_SLICE_ENDPOINT, RECOVERY_SLICE_HASH_ENDPOINT,
-    SIGNATURE_SHARES_ENDPOINT, SIGNATURE_SHARES_RECOVERY_ENDPOINT,
+use picomint_core::mint::methods::{
+    METHOD_RECOVERY_COUNT, METHOD_RECOVERY_SLICE, METHOD_RECOVERY_SLICE_HASH,
+    METHOD_SIGNATURE_SHARES, METHOD_SIGNATURE_SHARES_RECOVERY,
 };
 use picomint_core::mint::{
     Denomination, MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError,
@@ -222,13 +222,13 @@ impl Mint {
         req: ApiRequestErased,
     ) -> Result<Vec<u8>, ApiError> {
         match method {
-            SIGNATURE_SHARES_ENDPOINT => handler_async!(signature_shares, self, req).await,
-            SIGNATURE_SHARES_RECOVERY_ENDPOINT => {
+            METHOD_SIGNATURE_SHARES => handler_async!(signature_shares, self, req).await,
+            METHOD_SIGNATURE_SHARES_RECOVERY => {
                 handler!(signature_shares_recovery, self, req).await
             }
-            RECOVERY_SLICE_ENDPOINT => handler!(recovery_slice, self, req).await,
-            RECOVERY_SLICE_HASH_ENDPOINT => handler!(recovery_slice_hash, self, req).await,
-            RECOVERY_COUNT_ENDPOINT => handler!(recovery_count, self, req).await,
+            METHOD_RECOVERY_SLICE => handler!(recovery_slice, self, req).await,
+            METHOD_RECOVERY_SLICE_HASH => handler!(recovery_slice_hash, self, req).await,
+            METHOD_RECOVERY_COUNT => handler!(recovery_count, self, req).await,
             other => Err(ApiError::not_found(other.to_string())),
         }
     }

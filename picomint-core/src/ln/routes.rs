@@ -1,0 +1,9 @@
+//! Gateway public HTTP routes. These are axum paths — leading slash is
+//! required by `Router::route`, so it belongs to the constant. Joiners
+//! trim the base's trailing slash only:
+//! `format!("{}{}", base.trim_end_matches('/'), route)`.
+
+pub const ROUTE_CREATE_BOLT11_INVOICE: &str = "/create_bolt11_invoice";
+pub const ROUTE_VERIFY_BOLT11_PREIMAGE: &str = "/verify_bolt11_preimage";
+pub const ROUTE_ROUTING_INFO: &str = "/routing_info";
+pub const ROUTE_SEND_PAYMENT: &str = "/send_payment";

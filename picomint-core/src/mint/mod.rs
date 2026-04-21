@@ -11,7 +11,7 @@ use crate::core::ModuleKind;
 use crate::secp256k1::PublicKey;
 
 pub mod config;
-pub mod endpoint_constants;
+pub mod methods;
 
 pub const KIND: ModuleKind = ModuleKind::Mint;
 

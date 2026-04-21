@@ -37,13 +37,14 @@ pub mod backoff;
 pub mod config;
 /// Fundamental types
 pub mod core;
-pub mod endpoint_constants;
 /// Common environment variables
 pub mod envs;
 /// Federation invite code
 pub mod invite_code;
 /// Lightning module wire types / helpers (shared between client and server).
 pub mod ln;
+/// Guardian wire method names dispatched over Iroh.
+pub mod methods;
 /// Mint module wire types / helpers (shared between client and server).
 pub mod mint;
 /// Extendable module sysystem

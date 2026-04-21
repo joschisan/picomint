@@ -47,8 +47,8 @@ use api::{FederationApi, ServerError};
 pub use iroh::Endpoint;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
-use picomint_core::endpoint_constants::CLIENT_CONFIG_ENDPOINT;
 use picomint_core::invite_code::InviteCode;
+use picomint_core::methods::METHOD_CLIENT_CONFIG;
 use picomint_core::module::ApiRequestErased;
 use picomint_logging::LOG_CLIENT_NET;
 use query::FilterMap;
@@ -113,7 +113,7 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
     let api_endpoints: BTreeMap<PeerId, picomint_core::config::PeerEndpoint> = api_from_invite
         .request_with_strategy(
             query_strategy,
-            CLIENT_CONFIG_ENDPOINT.to_owned(),
+            METHOD_CLIENT_CONFIG.to_owned(),
             ApiRequestErased::default(),
         )
         .await
@@ -129,7 +129,7 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
     let api_full = FederationApi::new(endpoint.clone(), api_endpoints);
     let client_config = api_full
         .request_current_consensus::<ConsensusConfig>(
-            CLIENT_CONFIG_ENDPOINT.to_owned(),
+            METHOD_CLIENT_CONFIG.to_owned(),
             ApiRequestErased::default(),
         )
         .await

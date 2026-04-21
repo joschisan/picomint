@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod config;
-pub mod endpoint_constants;
+pub mod methods;
 
 pub const KIND: ModuleKind = ModuleKind::Wallet;
 

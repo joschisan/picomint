@@ -12,11 +12,9 @@ use lightning_invoice::Bolt11Invoice;
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
-use picomint_core::ln::endpoint_constants::{
-    CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT,
-};
 use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, PaymentFee, RoutingInfo};
 use picomint_core::ln::lnurl::LnurlRequest;
+use picomint_core::ln::routes::{ROUTE_CREATE_BOLT11_INVOICE, ROUTE_ROUTING_INFO};
 use picomint_core::ln::{
     Bolt11InvoiceDescription, IncomingContractPath, MINIMUM_INCOMING_CONTRACT_AMOUNT,
 };
@@ -217,7 +215,7 @@ async fn create_contract_and_fetch_invoice(
 
     let invoice: Bolt11Invoice = gateway_request(
         &gateway,
-        CREATE_BOLT11_INVOICE_ENDPOINT,
+        ROUTE_CREATE_BOLT11_INVOICE,
         &CreateBolt11InvoicePayload {
             federation_id,
             contract: contract.clone(),
@@ -246,12 +244,9 @@ async fn select_gateway(
     federation_id: FederationId,
 ) -> anyhow::Result<(RoutingInfo, String)> {
     for gateway in gateways {
-        if let Ok(routing_info) = gateway_request::<_, Option<RoutingInfo>>(
-            &gateway,
-            ROUTING_INFO_ENDPOINT,
-            &federation_id,
-        )
-        .await
+        if let Ok(routing_info) =
+            gateway_request::<_, Option<RoutingInfo>>(&gateway, ROUTE_ROUTING_INFO, &federation_id)
+                .await
             && let Some(routing_info) = routing_info
         {
             return Ok((routing_info, gateway));
@@ -268,11 +263,7 @@ async fn gateway_request<P: Serialize, T: DeserializeOwned>(
     route: &str,
     payload: &P,
 ) -> anyhow::Result<T> {
-    let url = format!(
-        "{}/{}",
-        base_url.trim_end_matches('/'),
-        route.trim_start_matches('/')
-    );
+    let url = format!("{}{route}", base_url.trim_end_matches('/'));
 
     let response = reqwest::Client::new()
         .request(Method::POST, url)

@@ -10,9 +10,9 @@ use picomint_core::bitcoin::Network;
 use picomint_core::ln::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
-use picomint_core::ln::endpoint_constants::{
-    AWAIT_INCOMING_CONTRACTS_ENDPOINT, AWAIT_PREIMAGE_ENDPOINT, CONSENSUS_BLOCK_COUNT_ENDPOINT,
-    DECRYPTION_KEY_SHARE_ENDPOINT, GATEWAYS_ENDPOINT, OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
+use picomint_core::ln::methods::{
+    METHOD_AWAIT_INCOMING_CONTRACTS, METHOD_AWAIT_PREIMAGE, METHOD_CONSENSUS_BLOCK_COUNT,
+    METHOD_DECRYPTION_KEY_SHARE, METHOD_GATEWAYS, METHOD_OUTGOING_CONTRACT_EXPIRATION,
 };
 use picomint_core::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
@@ -290,16 +290,16 @@ impl Lightning {
         req: ApiRequestErased,
     ) -> Result<Vec<u8>, ApiError> {
         match method {
-            CONSENSUS_BLOCK_COUNT_ENDPOINT => handler!(consensus_block_count, self, req).await,
-            AWAIT_PREIMAGE_ENDPOINT => handler_async!(await_preimage, self, req).await,
-            DECRYPTION_KEY_SHARE_ENDPOINT => handler!(decryption_key_share, self, req).await,
-            OUTGOING_CONTRACT_EXPIRATION_ENDPOINT => {
+            METHOD_CONSENSUS_BLOCK_COUNT => handler!(consensus_block_count, self, req).await,
+            METHOD_AWAIT_PREIMAGE => handler_async!(await_preimage, self, req).await,
+            METHOD_DECRYPTION_KEY_SHARE => handler!(decryption_key_share, self, req).await,
+            METHOD_OUTGOING_CONTRACT_EXPIRATION => {
                 handler!(outgoing_contract_expiration, self, req).await
             }
-            AWAIT_INCOMING_CONTRACTS_ENDPOINT => {
+            METHOD_AWAIT_INCOMING_CONTRACTS => {
                 handler_async!(await_incoming_contracts, self, req).await
             }
-            GATEWAYS_ENDPOINT => handler!(gateways, self, req).await,
+            METHOD_GATEWAYS => handler!(gateways, self, req).await,
             other => Err(ApiError::not_found(other.to_string())),
         }
     }

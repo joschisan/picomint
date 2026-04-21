@@ -1,7 +1,7 @@
 use crate::api::{FederationApi, FederationResult};
 use picomint_core::OutPoint;
 use picomint_core::ln::ContractId;
-use picomint_core::ln::endpoint_constants::OUTGOING_CONTRACT_EXPIRATION_ENDPOINT;
+use picomint_core::ln::methods::METHOD_OUTGOING_CONTRACT_EXPIRATION;
 use picomint_core::module::ApiRequestErased;
 
 impl FederationApi {
@@ -10,7 +10,7 @@ impl FederationApi {
         outpoint: OutPoint,
     ) -> FederationResult<Option<(ContractId, u64)>> {
         self.request_current_consensus(
-            OUTGOING_CONTRACT_EXPIRATION_ENDPOINT.to_string(),
+            METHOD_OUTGOING_CONTRACT_EXPIRATION.to_string(),
             ApiRequestErased::new(outpoint),
         )
         .await

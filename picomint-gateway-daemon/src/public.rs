@@ -6,10 +6,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use bitcoin::hashes::sha256;
 use picomint_core::config::FederationId;
-use picomint_core::ln::endpoint_constants::{
-    CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
-};
 use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, SendPaymentPayload};
+use picomint_core::ln::routes::{
+    ROUTE_CREATE_BOLT11_INVOICE, ROUTE_ROUTING_INFO, ROUTE_SEND_PAYMENT,
+};
 use picomint_core::task::TaskHandle;
 use picomint_lnurl::LnurlResponse;
 use picomint_logging::LOG_GATEWAY;
@@ -74,9 +74,9 @@ pub async fn run_public(state: AppState, handle: TaskHandle) {
 
 fn router() -> Router<AppState> {
     Router::new()
-        .route(ROUTING_INFO_ENDPOINT, post(routing_info))
-        .route(SEND_PAYMENT_ENDPOINT, post(pay_bolt11_invoice))
-        .route(CREATE_BOLT11_INVOICE_ENDPOINT, post(create_bolt11_invoice))
+        .route(ROUTE_ROUTING_INFO, post(routing_info))
+        .route(ROUTE_SEND_PAYMENT, post(pay_bolt11_invoice))
+        .route(ROUTE_CREATE_BOLT11_INVOICE, post(create_bolt11_invoice))
         .route("/verify/{payment_hash}", get(verify_bolt11_preimage_get))
 }
 

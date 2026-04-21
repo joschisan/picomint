@@ -1,0 +1,9 @@
+pub const METHOD_CONSENSUS_BLOCK_COUNT: &str = "consensus_block_count";
+pub const METHOD_CONSENSUS_FEERATE: &str = "consensus_feerate";
+pub const METHOD_FEDERATION_WALLET: &str = "federation_wallet";
+pub const METHOD_RECEIVE_FEE: &str = "receive_fee";
+pub const METHOD_SEND_FEE: &str = "send_fee";
+pub const METHOD_TRANSACTION_ID: &str = "transaction_id";
+pub const METHOD_OUTPUT_INFO_SLICE: &str = "output_info_slice";
+pub const METHOD_PENDING_TRANSACTION_CHAIN: &str = "pending_transaction_chain";
+pub const METHOD_TRANSACTION_CHAIN: &str = "transaction_chain";

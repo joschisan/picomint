@@ -5,9 +5,10 @@
 
 pub mod config;
 pub mod contracts;
-pub mod endpoint_constants;
 pub mod gateway_api;
 pub mod lnurl;
+pub mod methods;
+pub mod routes;
 
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::schnorr::Signature;

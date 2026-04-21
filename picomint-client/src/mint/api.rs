@@ -4,9 +4,9 @@ use std::time::Duration;
 use crate::api::{FederationApi, ServerError};
 use crate::query::FilterMapThreshold;
 use bitcoin_hashes::sha256;
-use picomint_core::mint::endpoint_constants::{
-    RECOVERY_COUNT_ENDPOINT, RECOVERY_SLICE_ENDPOINT, RECOVERY_SLICE_HASH_ENDPOINT,
-    SIGNATURE_SHARES_ENDPOINT, SIGNATURE_SHARES_RECOVERY_ENDPOINT,
+use picomint_core::mint::methods::{
+    METHOD_RECOVERY_COUNT, METHOD_RECOVERY_SLICE, METHOD_RECOVERY_SLICE_HASH,
+    METHOD_SIGNATURE_SHARES, METHOD_SIGNATURE_SHARES_RECOVERY,
 };
 use picomint_core::mint::{Denomination, RecoveryItem};
 use picomint_core::module::ApiRequestErased;
@@ -32,7 +32,7 @@ impl FederationApi {
                 },
                 self.all_peers().to_num_peers(),
             ),
-            SIGNATURE_SHARES_ENDPOINT.to_owned(),
+            METHOD_SIGNATURE_SHARES.to_owned(),
             ApiRequestErased::new(txid),
         )
         .await
@@ -57,7 +57,7 @@ impl FederationApi {
                 },
                 self.all_peers().to_num_peers(),
             ),
-            SIGNATURE_SHARES_RECOVERY_ENDPOINT.to_owned(),
+            METHOD_SIGNATURE_SHARES_RECOVERY.to_owned(),
             ApiRequestErased::new(blinded_messages),
         )
         .await
@@ -65,7 +65,7 @@ impl FederationApi {
 
     pub async fn recovery_count(&self) -> anyhow::Result<u64> {
         self.request_current_consensus::<u64>(
-            RECOVERY_COUNT_ENDPOINT.to_string(),
+            METHOD_RECOVERY_COUNT.to_string(),
             ApiRequestErased::default(),
         )
         .await
@@ -74,7 +74,7 @@ impl FederationApi {
 
     pub async fn recovery_slice_hash(&self, start: u64, end: u64) -> sha256::Hash {
         self.request_current_consensus_retry(
-            RECOVERY_SLICE_HASH_ENDPOINT.to_owned(),
+            METHOD_RECOVERY_SLICE_HASH.to_owned(),
             ApiRequestErased::new((start, end)),
         )
         .await
@@ -90,7 +90,7 @@ impl FederationApi {
         let result = tokio::time::timeout(
             timeout,
             self.request_single_peer::<Vec<RecoveryItem>>(
-                RECOVERY_SLICE_ENDPOINT.to_owned(),
+                METHOD_RECOVERY_SLICE.to_owned(),
                 ApiRequestErased::new((start, end)),
                 peer,
             ),

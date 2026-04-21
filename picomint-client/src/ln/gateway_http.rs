@@ -7,10 +7,10 @@ use bitcoin::secp256k1::schnorr::Signature;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::config::FederationId;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
-use picomint_core::ln::endpoint_constants::{
-    CREATE_BOLT11_INVOICE_ENDPOINT, ROUTING_INFO_ENDPOINT, SEND_PAYMENT_ENDPOINT,
-};
 use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, RoutingInfo, SendPaymentPayload};
+use picomint_core::ln::routes::{
+    ROUTE_CREATE_BOLT11_INVOICE, ROUTE_ROUTING_INFO, ROUTE_SEND_PAYMENT,
+};
 use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
 use picomint_core::{Amount, OutPoint};
 use reqwest::Method;
@@ -40,11 +40,7 @@ async fn request<P: Serialize, T: DeserializeOwned>(
     route: &str,
     payload: Option<P>,
 ) -> Result<T, GatewayError> {
-    let url = format!(
-        "{}/{}",
-        base_url.trim_end_matches('/'),
-        route.trim_start_matches('/')
-    );
+    let url = format!("{}{route}", base_url.trim_end_matches('/'));
     let mut builder = reqwest::Client::new().request(method, url);
     if let Some(payload) = payload {
         builder = builder.json(&payload);
@@ -70,7 +66,7 @@ pub async fn routing_info(
     request(
         gateway_api,
         Method::POST,
-        ROUTING_INFO_ENDPOINT,
+        ROUTE_ROUTING_INFO,
         Some(federation_id),
     )
     .await
@@ -87,7 +83,7 @@ pub async fn bolt11_invoice(
     request(
         gateway_api,
         Method::POST,
-        CREATE_BOLT11_INVOICE_ENDPOINT,
+        ROUTE_CREATE_BOLT11_INVOICE,
         Some(CreateBolt11InvoicePayload {
             federation_id,
             contract,
@@ -110,7 +106,7 @@ pub async fn send_payment(
     request(
         gateway_api,
         Method::POST,
-        SEND_PAYMENT_ENDPOINT,
+        ROUTE_SEND_PAYMENT,
         Some(SendPaymentPayload {
             federation_id,
             outpoint,
