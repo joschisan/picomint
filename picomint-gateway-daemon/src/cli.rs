@@ -623,27 +623,24 @@ async fn resolve_client(
     id: Option<FederationId>,
 ) -> Result<Arc<Client>, CliError> {
     let clients = state.clients.read().await;
-    let id = match id {
-        Some(id) => id,
+    match id {
+        Some(id) => clients
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| CliError::bad_request("Federation not connected")),
         None => {
-            let mut iter = clients.keys();
-            match (iter.next(), iter.next()) {
-                (Some(id), None) => *id,
-                (None, _) => {
-                    return Err(CliError::bad_request("No federations connected"));
-                }
-                (Some(_), Some(_)) => {
-                    return Err(CliError::bad_request(
-                        "Multiple federations connected — pass --id <FEDERATION_ID>",
-                    ));
-                }
+            if clients.len() > 1 {
+                return Err(CliError::bad_request(
+                    "Multiple federations connected — pass --id <FEDERATION_ID>",
+                ));
             }
+            clients
+                .values()
+                .next()
+                .cloned()
+                .ok_or_else(|| CliError::bad_request("No federations connected"))
         }
-    };
-    clients
-        .get(&id)
-        .cloned()
-        .ok_or_else(|| CliError::bad_request("Federation not connected"))
+    }
 }
 
 /// Count held ecash notes by denomination
