@@ -2,6 +2,6 @@
 //! are looked up on the receiving side via exact string match (see the
 //! `handler!` dispatchers in `picomint-server-daemon::consensus`).
 
-pub const METHOD_CLIENT_CONFIG: &str = "client_config";
-pub const METHOD_SUBMIT_TRANSACTION: &str = "submit_transaction";
+pub const METHOD_CLIENT_CONFIG: &str = "client-config";
+pub const METHOD_SUBMIT_TRANSACTION: &str = "submit-transaction";
 pub const METHOD_LIVENESS: &str = "liveness";
