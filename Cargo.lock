@@ -5332,6 +5332,7 @@ name = "picomint-gateway-cli-core"
 version = "0.1.0"
 dependencies = [
  "bitcoin",
+ "clap",
  "lightning-invoice",
  "picomint-core",
  "serde",

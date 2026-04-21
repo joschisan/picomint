@@ -607,7 +607,7 @@ async fn module_mint_send(
 
     let ecash = client
         .mint()
-        .send(payload.amount)
+        .send(picomint_core::Amount::from_sats(payload.amount.to_sat()))
         .await
         .map_err(CliError::internal)?;
 
