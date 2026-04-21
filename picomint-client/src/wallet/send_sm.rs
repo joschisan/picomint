@@ -61,7 +61,8 @@ impl StateMachine for SendStateMachine {
                 ctx.client_ctx
                     .log_event(dbtx, self.operation_id, SendConfirmEvent { txid });
             }
-            AwaitFundingResult::Aborted(_) | AwaitFundingResult::Failure => {
+            AwaitFundingResult::Aborted(_) => {}
+            AwaitFundingResult::Failure => {
                 ctx.client_ctx
                     .log_event(dbtx, self.operation_id, SendFailureEvent);
             }
