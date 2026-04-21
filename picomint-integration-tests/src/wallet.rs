@@ -5,10 +5,8 @@ use anyhow::Context;
 use async_stream::stream;
 use bitcoincore_rpc::RpcApi;
 use futures::StreamExt;
-use picomint_client::Client;
-use picomint_client::wallet::events::{
-    ReceiveEvent, SendConfirmEvent, SendEvent, SendFailureEvent,
-};
+use picomint_client::wallet::events::{ReceiveEvent, SendConfirmEvent, SendEvent};
+use picomint_client::{Client, TxRejectEvent};
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use tokio::task::block_in_place;
 use tracing::info;
@@ -20,8 +18,8 @@ use crate::env::{TestEnv, retry};
 enum WalletEvent {
     Send(SendEvent),
     SendConfirm(SendConfirmEvent),
-    SendFailure(SendFailureEvent),
     Receive(ReceiveEvent),
+    TxReject(TxRejectEvent),
 }
 
 fn wallet_event_stream(
@@ -60,10 +58,10 @@ fn try_parse_wallet_event(
         return Some((op, WalletEvent::SendConfirm(e)));
     }
     if let Some(e) = entry.to_event() {
-        return Some((op, WalletEvent::SendFailure(e)));
+        return Some((op, WalletEvent::Receive(e)));
     }
     if let Some(e) = entry.to_event() {
-        return Some((op, WalletEvent::Receive(e)));
+        return Some((op, WalletEvent::TxReject(e)));
     }
     None
 }
@@ -133,8 +131,8 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     };
     assert_eq!(op, abort_op);
 
-    let Some((op, WalletEvent::SendFailure(_))) = send_events.next().await else {
-        panic!("Expected SendFailure event");
+    let Some((op, WalletEvent::TxReject(_))) = send_events.next().await else {
+        panic!("Expected TxReject event");
     };
     assert_eq!(op, abort_op);
 
