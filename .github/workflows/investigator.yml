@@ -6,12 +6,12 @@ on:
     types: [completed]
 
 concurrency:
-  group: investigator
+  group: flaker
   cancel-in-progress: false
 
 jobs:
   investigate:
-    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    if: ${{ github.event.workflow_run.conclusion != 'success' && github.event.workflow_run.conclusion != 'skipped' }}
     name: Investigate Failure
     runs-on: ubuntu-latest
     timeout-minutes: 300
@@ -29,7 +29,7 @@ jobs:
     - uses: dtolnay/rust-toolchain@stable
     - uses: Swatinem/rust-cache@v2
       with:
-        shared-key: integration
+        shared-key: picomint
 
     - name: Download failed run logs
       env:
@@ -38,10 +38,13 @@ jobs:
         mkdir -p /tmp/failed-logs
         gh run view ${{ github.event.workflow_run.id }} \
           --repo ${{ github.repository }} \
-          --log-failed > /tmp/failed-logs/failed.log 2>/dev/null || \
-        gh run view ${{ github.event.workflow_run.id }} \
-          --repo ${{ github.repository }} \
-          --log > /tmp/failed-logs/full.log
+          --log-failed > /tmp/failed-logs/failed.log 2>/dev/null || true
+        if [ ! -s /tmp/failed-logs/failed.log ]; then
+          rm -f /tmp/failed-logs/failed.log
+          gh run view ${{ github.event.workflow_run.id }} \
+            --repo ${{ github.repository }} \
+            --log > /tmp/failed-logs/full.log
+        fi
 
     - name: Investigate with Claude Code
       uses: anthropics/claude-code-action@v1
