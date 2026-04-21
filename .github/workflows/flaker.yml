@@ -5,13 +5,8 @@ on:
     branches: [main]
   workflow_dispatch:
 
-concurrency:
-  group: flaker
-  cancel-in-progress: true
-
 permissions:
   contents: read
-  actions: read
 
 jobs:
   integration:
@@ -24,15 +19,6 @@ jobs:
     - uses: Swatinem/rust-cache@v2
       with:
         shared-key: picomint
-
-    - name: Wait for any running investigator
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        while [ "$(gh run list --workflow=investigator.yml --status=in_progress --json databaseId --jq 'length')" != "0" ]; do
-          echo "Investigator running; waiting 60s..."
-          sleep 60
-        done
 
     - name: Prebuild workspace
       run: cargo build --workspace
