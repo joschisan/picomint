@@ -197,6 +197,8 @@ For the gateway to actually route payments on behalf of a federation, its guardi
 
 ### Manage Federation Liquidity
 
+Every command below accepts `--id <federation-id>` to target a specific federation. When exactly one federation is joined (the common case) the flag can be omitted and that federation is used.
+
 The gateway holds its own ecash balance in every federation it has joined. Check it with:
 
 ```bash
@@ -236,8 +238,6 @@ picomint-gateway-cli federation module mint send <amount>
 ```bash
 picomint-gateway-cli federation module mint receive <ecash>
 ```
-
-Every command above accepts `--id <federation-id>` to target a specific federation. When exactly one federation is joined (the common case) the flag can be omitted and that federation is used.
 
 ### Recovery
 
