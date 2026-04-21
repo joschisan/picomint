@@ -9,6 +9,7 @@ repository = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+clap = { workspace = true }
 picomint-core = { workspace = true }
 serde = { workspace = true }
 

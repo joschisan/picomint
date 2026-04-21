@@ -61,21 +61,9 @@ enum SetupCommands {
     /// Check setup status
     Status,
     /// Set local guardian parameters
-    SetLocalParams {
-        /// Guardian name
-        name: String,
-        /// Federation name (leader only)
-        #[arg(long)]
-        federation_name: Option<String>,
-        /// Federation size (leader only)
-        #[arg(long)]
-        federation_size: Option<u32>,
-    },
+    SetLocalParams(SetupSetLocalParamsRequest),
     /// Add a peer's setup code
-    AddPeer {
-        /// Peer's setup code
-        setup_code: String,
-    },
+    AddPeer(SetupAddPeerRequest),
     /// Start distributed key generation
     StartDkg,
     /// Restore guardian config from a config file (skips DKG)
@@ -119,9 +107,9 @@ enum LnCommands {
 #[derive(Subcommand)]
 enum LnGatewayCommands {
     /// Add a vetted gateway
-    Add { url: url::Url },
+    Add(LnGatewayRequest),
     /// Remove a vetted gateway
-    Remove { url: url::Url },
+    Remove(LnGatewayRequest),
     /// List vetted gateways
     List,
 }
@@ -196,91 +184,51 @@ fn print_json(value: &Value) {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let data_dir = &cli.data_dir;
+    let d = &cli.data_dir;
 
     let result = match cli.command {
-        Commands::Invite => request(data_dir, ROUTE_INVITE, ()).await?,
-        Commands::Audit => request(data_dir, ROUTE_AUDIT, ()).await?,
-        Commands::Config => request(data_dir, ROUTE_CONFIG, ()).await?,
-        Commands::SessionCount => request(data_dir, ROUTE_SESSION_COUNT, ()).await?,
+        Commands::Invite => request(d, ROUTE_INVITE, ()).await?,
+        Commands::Audit => request(d, ROUTE_AUDIT, ()).await?,
+        Commands::Config => request(d, ROUTE_CONFIG, ()).await?,
+        Commands::SessionCount => request(d, ROUTE_SESSION_COUNT, ()).await?,
+
         Commands::Setup(cmd) => match cmd {
-            SetupCommands::Status => request(data_dir, ROUTE_SETUP_STATUS, ()).await?,
-            SetupCommands::SetLocalParams {
-                name,
-                federation_name,
-                federation_size,
-            } => {
-                request(
-                    data_dir,
-                    ROUTE_SETUP_SET_LOCAL_PARAMS,
-                    SetupSetLocalParamsRequest {
-                        name,
-                        federation_name,
-                        federation_size,
-                    },
-                )
-                .await?
+            SetupCommands::Status => request(d, ROUTE_SETUP_STATUS, ()).await?,
+            SetupCommands::SetLocalParams(req) => {
+                request(d, ROUTE_SETUP_SET_LOCAL_PARAMS, req).await?
             }
-            SetupCommands::AddPeer { setup_code } => {
-                request(
-                    data_dir,
-                    ROUTE_SETUP_ADD_PEER,
-                    SetupAddPeerRequest { setup_code },
-                )
-                .await?
-            }
-            SetupCommands::StartDkg => request(data_dir, ROUTE_SETUP_START_DKG, ()).await?,
+            SetupCommands::AddPeer(req) => request(d, ROUTE_SETUP_ADD_PEER, req).await?,
+            SetupCommands::StartDkg => request(d, ROUTE_SETUP_START_DKG, ()).await?,
             SetupCommands::Restore { path } => {
                 let bytes = std::fs::read(&path)?;
-
                 let cfg: Value = serde_json::from_slice(&bytes)?;
-
-                request(data_dir, ROUTE_SETUP_RESTORE, cfg).await?
+                request(d, ROUTE_SETUP_RESTORE, cfg).await?
             }
         },
+
         Commands::Module(cmd) => match cmd {
             ModuleCommands::Wallet(cmd) => match cmd {
                 WalletCommands::TotalValue => {
-                    request(data_dir, ROUTE_MODULE_WALLET_TOTAL_VALUE, ()).await?
+                    request(d, ROUTE_MODULE_WALLET_TOTAL_VALUE, ()).await?
                 }
                 WalletCommands::BlockCount => {
-                    request(data_dir, ROUTE_MODULE_WALLET_BLOCK_COUNT, ()).await?
+                    request(d, ROUTE_MODULE_WALLET_BLOCK_COUNT, ()).await?
                 }
-                WalletCommands::Feerate => {
-                    request(data_dir, ROUTE_MODULE_WALLET_FEERATE, ()).await?
-                }
+                WalletCommands::Feerate => request(d, ROUTE_MODULE_WALLET_FEERATE, ()).await?,
                 WalletCommands::PendingTxChain => {
-                    request(data_dir, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ()).await?
+                    request(d, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ()).await?
                 }
-                WalletCommands::TxChain => {
-                    request(data_dir, ROUTE_MODULE_WALLET_TX_CHAIN, ()).await?
-                }
+                WalletCommands::TxChain => request(d, ROUTE_MODULE_WALLET_TX_CHAIN, ()).await?,
             },
             ModuleCommands::Ln(cmd) => match cmd {
                 LnCommands::Gateway(cmd) => match cmd {
-                    LnGatewayCommands::Add { url } => {
-                        request(
-                            data_dir,
-                            ROUTE_MODULE_LN_GATEWAY_ADD,
-                            LnGatewayRequest {
-                                url: url.to_string(),
-                            },
-                        )
-                        .await?
+                    LnGatewayCommands::Add(req) => {
+                        request(d, ROUTE_MODULE_LN_GATEWAY_ADD, req).await?
                     }
-                    LnGatewayCommands::Remove { url } => {
-                        request(
-                            data_dir,
-                            ROUTE_MODULE_LN_GATEWAY_REMOVE,
-                            LnGatewayRequest {
-                                url: url.to_string(),
-                            },
-                        )
-                        .await?
+                    LnGatewayCommands::Remove(req) => {
+                        request(d, ROUTE_MODULE_LN_GATEWAY_REMOVE, req).await?
                     }
-                    LnGatewayCommands::List => {
-                        request(data_dir, ROUTE_MODULE_LN_GATEWAY_LIST, ()).await?
-                    }
+                    LnGatewayCommands::List => request(d, ROUTE_MODULE_LN_GATEWAY_LIST, ()).await?,
                 },
             },
         },

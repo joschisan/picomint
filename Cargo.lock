@@ -5483,6 +5483,7 @@ dependencies = [
 name = "picomint-server-cli-core"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "picomint-core",
  "serde",
 ]

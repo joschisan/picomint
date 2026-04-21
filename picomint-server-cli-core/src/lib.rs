@@ -1,3 +1,4 @@
+use clap::Args;
 use picomint_core::module::audit::AuditSummary;
 use serde::{Deserialize, Serialize};
 
@@ -42,10 +43,15 @@ pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/ln/gateway/list";
 
 // --- /setup/set-local-params ---
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct SetupSetLocalParamsRequest {
+    /// Guardian name
     pub name: String,
+    /// Federation name (leader only)
+    #[arg(long)]
     pub federation_name: Option<String>,
+    /// Federation size (leader only)
+    #[arg(long)]
     pub federation_size: Option<u32>,
 }
 
@@ -56,8 +62,9 @@ pub struct SetupSetLocalParamsResponse {
 
 // --- /setup/add-peer ---
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct SetupAddPeerRequest {
+    /// Peer's setup code
     pub setup_code: String,
 }
 
@@ -106,7 +113,8 @@ pub struct WalletFeerateResponse {
 
 // --- /module/ln/gateway/* ---
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct LnGatewayRequest {
+    /// Gateway URL
     pub url: String,
 }
