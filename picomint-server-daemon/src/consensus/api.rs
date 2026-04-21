@@ -22,7 +22,7 @@ use tokio::sync::watch::{Receiver, Sender};
 use tracing::warn;
 
 use crate::config::ServerConfig;
-use crate::consensus::db::ACCEPTED_TRANSACTION;
+use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TRANSACTION};
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::server::{Server, process_transaction_with_server};
 use crate::p2p::P2PStatusReceivers;
@@ -49,14 +49,7 @@ pub struct ConsensusApi {
 
 impl ConsensusApi {
     /// Submit a transaction and long-poll until it is either accepted by
-    /// consensus or becomes invalid. On each commit we re-check: if the
-    /// transaction is now in `ACCEPTED_TRANSACTION` return `Ok`; if it fails
-    /// revalidation return `Err`; otherwise wait for the next commit.
-    ///
-    /// Relies on the invariant that module state is monotonic in the
-    /// "time makes a tx valid" direction — a valid tx can only become invalid
-    /// as the result of another tx being accepted (which fires the commit
-    /// notify via [`Database::wait_commit`]).
+    /// consensus or becomes invalid.
     pub async fn submit_transaction(
         &self,
         transaction: Transaction,
@@ -83,8 +76,10 @@ impl ConsensusApi {
             warn!(target: LOG_NET_API, "Unable to submit the tx into consensus");
         }
 
+        let notify = self.db.notify_for_table(&ACCEPTED_ITEM);
+
         loop {
-            let commit = self.db.wait_commit();
+            let notified = notify.notified();
 
             let tx = self.db.begin_write();
 
@@ -99,7 +94,7 @@ impl ConsensusApi {
 
             drop(tx);
 
-            commit.await;
+            notified.await;
         }
     }
 
