@@ -21,6 +21,7 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 backon = { workspace = true }
 bitcoin = { workspace = true }
+derive_more = { workspace = true }
 bitcoin-units = { workspace = true }
 bitcoin_hashes = { workspace = true }
 bls12_381 = { workspace = true }

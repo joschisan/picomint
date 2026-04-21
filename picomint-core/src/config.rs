@@ -1,12 +1,10 @@
 use std::collections::BTreeMap;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::hash::Hash;
-use std::path::Path;
 use std::str::FromStr;
 
-use bitcoin::hashes::{Hash as BitcoinHash, hex, sha256};
-use hex::FromHex;
-use serde::de::DeserializeOwned;
+use bitcoin::hashes::{Hash as BitcoinHash, sha256};
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
 use crate::PeerId;
@@ -41,44 +39,30 @@ pub struct PeerEndpoint {
     PartialOrd,
     Encodable,
     Decodable,
+    Display,
 )]
 pub struct FederationId(pub sha256::Hash);
 
 picomint_redb::consensus_key!(FederationId);
-
-impl Display for FederationId {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(&::hex::encode(self.0.to_byte_array()))
-    }
-}
 
 impl FederationId {
     /// Random dummy id for testing
     pub fn dummy() -> Self {
         Self(sha256::Hash::from_byte_array([42; 32]))
     }
-
-    pub(crate) fn from_byte_array(bytes: [u8; 32]) -> Self {
-        Self(sha256::Hash::from_byte_array(bytes))
-    }
 }
 
 impl FromStr for FederationId {
-    type Err = anyhow::Error;
+    type Err = <sha256::Hash as FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::from_byte_array(<[u8; 32]>::from_hex(s)?))
+        Ok(Self(s.parse()?))
     }
 }
 
 /// Key under which the federation name can be sent to client in the `meta` part
 /// of the config
 pub const META_FEDERATION_NAME_KEY: &str = "federation_name";
-
-pub fn load_from_file<T: DeserializeOwned>(path: &Path) -> Result<T, anyhow::Error> {
-    let file = std::fs::File::open(path)?;
-    Ok(serde_json::from_reader(file)?)
-}
 
 /// Federation-wide config.
 ///

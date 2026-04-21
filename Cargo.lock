@@ -5229,6 +5229,7 @@ dependencies = [
  "bitcoin-units",
  "bitcoin_hashes",
  "bls12_381",
+ "derive_more 2.1.1",
  "futures",
  "futures-util",
  "getrandom 0.3.3",
