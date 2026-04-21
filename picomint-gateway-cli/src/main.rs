@@ -189,7 +189,7 @@ enum MintCommands {
     /// Count ecash notes by denomination
     Count,
     /// Send ecash
-    Send { amount: Amount },
+    Send { amount: bitcoin::Amount },
     /// Receive ecash
     Receive { ecash: String },
 }
@@ -442,7 +442,7 @@ async fn main() -> Result<()> {
                         ROUTE_MODULE_MINT_SEND,
                         MintSendRequest {
                             federation_id,
-                            amount,
+                            amount: Amount::from_sats(amount.to_sat()),
                         },
                     )
                     .await?

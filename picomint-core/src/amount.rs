@@ -1,9 +1,4 @@
-use std::num::ParseIntError;
-use std::str::FromStr;
-
-use bitcoin::Denomination;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use picomint_encoding::{Decodable, Encodable};
 
@@ -41,14 +36,6 @@ impl Amount {
     /// Create an amount from a number of satoshis.
     pub const fn from_sats(sats: u64) -> Self {
         Self::from_msats(sats * 1000)
-    }
-
-    fn from_str_in(s: &str, denom: Denomination) -> Result<Self, ParseAmountError> {
-        if denom == Denomination::MilliSatoshi {
-            return Ok(Self::from_msats(s.parse()?));
-        }
-        let btc_amt = bitcoin::amount::Amount::from_str_in(s, denom)?;
-        Ok(Self::from(btc_amt))
     }
 
     pub fn saturating_sub(self, other: Self) -> Self {
@@ -166,42 +153,9 @@ impl std::iter::Sum for Amount {
     }
 }
 
-impl FromStr for Amount {
-    type Err = ParseAmountError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some(i) = s.find(char::is_alphabetic) {
-            let (amt, denom) = s.split_at(i);
-            Self::from_str_in(amt.trim(), denom.trim().parse()?)
-        } else {
-            // default to millisatoshi
-            Self::from_str_in(s.trim(), Denomination::MilliSatoshi)
-        }
-    }
-}
-
-impl From<bitcoin::Amount> for Amount {
-    fn from(amt: bitcoin::Amount) -> Self {
-        assert!(amt.to_sat() <= 2_100_000_000_000_000);
-        Self {
-            msats: amt.to_sat() * 1000,
-        }
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum ParseAmountError {
-    #[error("Error parsing string as integer: {0}")]
-    NotANumber(#[from] ParseIntError),
-    #[error("Error parsing string as a bitcoin amount: {0}")]
-    WrongBitcoinAmount(#[from] bitcoin::amount::ParseAmountError),
-    #[error("Error parsing string as a bitcoin denomination: {0}")]
-    WrongBitcoinDenomination(#[from] bitcoin_units::amount::ParseDenominationError),
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Amount, FromStr};
+    use super::Amount;
 
     #[test]
     fn amount_multiplication_by_scalar() {
@@ -211,43 +165,5 @@ mod tests {
     #[test]
     fn scalar_multiplication_by_amount() {
         assert_eq!(123 * Amount::from_msats(1000), Amount::from_msats(123_000));
-    }
-
-    #[test]
-    fn test_amount_parsing() {
-        // msats
-        assert_eq!(Amount::from_msats(123), Amount::from_str("123").unwrap());
-        assert_eq!(
-            Amount::from_msats(123),
-            Amount::from_str("123msat").unwrap()
-        );
-        assert_eq!(
-            Amount::from_msats(123),
-            Amount::from_str("123 msat").unwrap()
-        );
-        assert_eq!(
-            Amount::from_msats(123),
-            Amount::from_str("123 msats").unwrap()
-        );
-        // sats
-        assert_eq!(Amount::from_sats(123), Amount::from_str("123sat").unwrap());
-        assert_eq!(Amount::from_sats(123), Amount::from_str("123 sat").unwrap());
-        assert_eq!(
-            Amount::from_sats(123),
-            Amount::from_str("123satoshi").unwrap()
-        );
-        assert_eq!(
-            Amount::from_sats(123),
-            Amount::from_str("123satoshis").unwrap()
-        );
-        // btc
-        assert_eq!(
-            Amount::from_sats(12_300_000_000),
-            Amount::from_str("123btc").unwrap()
-        );
-        assert_eq!(
-            Amount::from_sats(12_345_600_000),
-            Amount::from_str("123.456btc").unwrap()
-        );
     }
 }
