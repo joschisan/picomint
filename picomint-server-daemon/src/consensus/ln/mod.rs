@@ -80,7 +80,6 @@ pub fn validate_config(identity: &PeerId, cfg: &LightningConfig) -> anyhow::Resu
     Ok(())
 }
 
-#[derive(Debug)]
 pub struct Lightning {
     cfg: LightningConfig,
     db: Database,

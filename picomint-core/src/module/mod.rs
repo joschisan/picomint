@@ -1,8 +1,7 @@
 //! Core module system types shared between the server and client sides.
 pub mod audit;
 
-use std::error::Error;
-use std::fmt::{self, Debug, Formatter};
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
@@ -81,9 +80,10 @@ pub const PICOMINT_ALPN: &[u8] = b"picomint";
 /// Authentication secret used to verify guardian admin API requests.
 ///
 /// The inner value is private to prevent timing leaks via direct comparison.
-/// Use [`Self::verify`] for authentication checks. [`Self::as_str`] is a
-/// temporary escape hatch for I/O that still needs the plaintext value and
-/// should be removed once passwords are hashed at rest.
+/// Use [`Self::verify`] for authentication checks. No `Debug` impl — the
+/// plaintext must never end up in a log. [`Self::as_str`] is a temporary
+/// escape hatch for I/O that still needs the plaintext value and should be
+/// removed once passwords are hashed at rest.
 #[derive(Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ApiAuth(String);
 
@@ -102,24 +102,11 @@ impl ApiAuth {
     }
 }
 
-impl Debug for ApiAuth {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ApiAuth(****)")
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable, thiserror::Error)]
+#[error("{code} {message}")]
 pub struct ApiError {
     pub code: u32,
     pub message: String,
-}
-
-impl Error for ApiError {}
-
-impl fmt::Display for ApiError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{} {}", self.code, self.message))
-    }
 }
 
 impl ApiError {

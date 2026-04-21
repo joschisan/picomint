@@ -118,7 +118,8 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
             CLIENT_CONFIG_ENDPOINT.to_owned(),
             ApiRequestErased::default(),
         )
-        .await?;
+        .await
+        .map_err(|_| anyhow::anyhow!("Failed to download client config from invite peer"))?;
 
     let api_endpoints = api_endpoints
         .into_iter()
@@ -133,7 +134,8 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
             CLIENT_CONFIG_ENDPOINT.to_owned(),
             ApiRequestErased::default(),
         )
-        .await?;
+        .await
+        .map_err(|_| anyhow::anyhow!("Failed to download client config from all peers"))?;
 
     if client_config.calculate_federation_id() != federation_id {
         bail!("Obtained client config has different federation id");

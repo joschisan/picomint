@@ -80,7 +80,7 @@ pub struct ServerConfigPrivate {
 }
 
 /// All the info we configure prior to config gen starting
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ConfigGenSettings {
     /// Bind address for our P2P connection
     pub p2p_addr: SocketAddr,

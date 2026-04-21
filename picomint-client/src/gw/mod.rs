@@ -418,7 +418,7 @@ pub(crate) async fn await_receive_from_log(
 /// interface between the is expressed as a trait. The core gateway handles
 /// lightning operations that require access to the database or lightning node.
 #[async_trait]
-pub trait IGatewayClient: Debug + Send + Sync {
+pub trait IGatewayClient: Send + Sync {
     /// Use the gateway's lightning node to complete a payment
     async fn complete_htlc(&self, htlc_response: InterceptPaymentResponse);
 

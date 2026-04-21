@@ -163,7 +163,7 @@ impl LightningClientModule {
             .module_api()
             .ln_gateways()
             .await
-            .map_err(|e| SelectGatewayError::FailedToRequestGateways(e.to_string()))?;
+            .map_err(|_| SelectGatewayError::FailedToRequestGateways)?;
 
         if gateways.is_empty() {
             return Err(SelectGatewayError::NoGatewaysAvailable);
@@ -298,7 +298,7 @@ impl LightningClientModule {
             .module_api()
             .ln_consensus_block_count()
             .await
-            .map_err(|e| SendPaymentError::FailedToRequestBlockCount(e.to_string()))?;
+            .map_err(|_| SendPaymentError::FailedToRequestBlockCount)?;
 
         let contract = OutgoingContract {
             payment_image: PaymentImage::Hash(*invoice.payment_hash()),
@@ -577,7 +577,7 @@ impl LightningClientModule {
                 .module_api()
                 .ln_gateways()
                 .await
-                .map_err(|e| GenerateLnurlError::FailedToRequestGateways(e.to_string()))?;
+                .map_err(|_| GenerateLnurlError::FailedToRequestGateways)?;
 
             if gateways.is_empty() {
                 return Err(GenerateLnurlError::NoGatewaysAvailable);
@@ -648,7 +648,7 @@ impl LightningClientModule {
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
 pub enum SelectGatewayError {
     #[error("Failed to request gateways")]
-    FailedToRequestGateways(String),
+    FailedToRequestGateways,
     #[error("No gateways are available")]
     NoGatewaysAvailable,
     #[error("All gateways failed to respond")]
@@ -674,7 +674,7 @@ pub enum SendPaymentError {
     #[error("Gateway expiration time exceeds the allowed limit")]
     GatewayExpirationExceedsLimit,
     #[error("Failed to request block count")]
-    FailedToRequestBlockCount(String),
+    FailedToRequestBlockCount,
     #[error("Failed to fund the payment")]
     FailedToFundPayment(String),
     #[error("Invoice is for a different currency")]
@@ -707,7 +707,7 @@ pub enum GenerateLnurlError {
     #[error("No gateways are available")]
     NoGatewaysAvailable,
     #[error("Failed to request gateways")]
-    FailedToRequestGateways(String),
+    FailedToRequestGateways,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]

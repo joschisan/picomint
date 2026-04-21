@@ -12,7 +12,7 @@ use picomint_redb::Database;
 use crate::AppState;
 use crate::db::{CLIENT_CONFIG, ROOT_ENTROPY};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GatewayClientFactory {
     db: Database,
     mnemonic: Mnemonic,

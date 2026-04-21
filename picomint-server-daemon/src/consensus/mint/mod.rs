@@ -81,7 +81,6 @@ pub fn validate_config(identity: &PeerId, cfg: &MintConfig) -> anyhow::Result<()
     Ok(())
 }
 
-#[derive(Debug)]
 pub struct Mint {
     cfg: MintConfig,
     db: Database,

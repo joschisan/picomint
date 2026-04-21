@@ -188,14 +188,6 @@ impl DatabaseInner {
     }
 }
 
-impl Debug for Database {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Database")
-            .field("prefix", &self.prefix)
-            .finish_non_exhaustive()
-    }
-}
-
 impl Database {
     /// Open (or create) a redb database at `path`. The only fallible entry
     /// point; every other public method panics internally on redb errors.

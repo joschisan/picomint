@@ -501,7 +501,6 @@ impl Wallet {
     }
 }
 
-#[derive(Debug)]
 pub struct Wallet {
     cfg: WalletConfig,
     db: Database,
