@@ -22,7 +22,7 @@ use tokio::sync::watch::{Receiver, Sender};
 use tracing::warn;
 
 use crate::config::ServerConfig;
-use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TRANSACTION};
+use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TRANSACTION, SIGNED_SESSION_OUTCOME};
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::server::{Server, process_transaction_with_server};
 use crate::p2p::P2PStatusReceivers;
@@ -54,8 +54,11 @@ impl ConsensusApi {
         &self,
         transaction: Transaction,
     ) -> Result<(), TransactionError> {
-        let notify = self.db.notify_for_table(&ACCEPTED_ITEM);
-        let mut notified = Box::pin(notify.notified());
+        let notify_item = self.db.notify_for_table(&ACCEPTED_ITEM);
+        let notify_session = self.db.notify_for_table(&SIGNED_SESSION_OUTCOME);
+
+        let mut notified_item = Box::pin(notify_item.notified());
+        let mut notified_session = Box::pin(notify_session.notified());
 
         let tx = self.db.begin_write();
 
@@ -81,7 +84,7 @@ impl ConsensusApi {
 
         loop {
             tokio::select! {
-                _ = &mut notified => {
+                _ = &mut notified_item => {
                     let tx = self.db.begin_write();
 
                     if tx
@@ -95,7 +98,19 @@ impl ConsensusApi {
 
                     drop(tx);
 
-                    notified = Box::pin(notify.notified());
+                    notified_item = Box::pin(notify_item.notified());
+                }
+                _ = &mut notified_session => {
+                    if self
+                        .submission_sender
+                        .send(ConsensusItem::Transaction(transaction.clone()))
+                        .await
+                        .is_err()
+                    {
+                        warn!(target: LOG_NET_API, "Unable to submit the tx into consensus");
+                    }
+
+                    notified_session = Box::pin(notify_session.notified());
                 }
             }
         }
