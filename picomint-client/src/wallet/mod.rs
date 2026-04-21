@@ -44,7 +44,7 @@ enum RootSecretPath {
     Address,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WalletClientModule {
     root_secret: Secret,
     cfg: WalletConfigConsensus,
@@ -53,7 +53,7 @@ pub struct WalletClientModule {
     send_executor: ModuleExecutor<SendStateMachine>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WalletClientContext {
     pub client_ctx: ClientContext,
 }

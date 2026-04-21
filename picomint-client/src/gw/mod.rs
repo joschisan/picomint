@@ -96,7 +96,7 @@ impl GatewayClientModule {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GatewayClientModule {
     pub federation_id: FederationId,
     pub cfg: LightningConfigConsensus,
@@ -112,7 +112,7 @@ pub struct GatewayClientModule {
 /// Lean context handed to per-SM executors. Holds `Arc<MintClientModule>`
 /// (no cycle — gw owns its executor → ctx → mint, mint does not reach back
 /// into gw) but does NOT hold `Arc<GatewayClientModule>` itself.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GwSmContext {
     pub client_ctx: ClientContext,
     pub mint: Arc<crate::mint::MintClientModule>,

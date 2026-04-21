@@ -252,7 +252,6 @@ impl MintClientModule {
     }
 }
 
-#[derive(Debug)]
 pub struct MintClientModule {
     federation_id: FederationId,
     cfg: MintConfigConsensus,
@@ -265,7 +264,7 @@ pub struct MintClientModule {
 
 /// Context handed to per-SM executors. Keeps the `ClientContext` handle
 /// plus the immutable config data SMs need.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MintSmContext {
     pub client_ctx: ClientContext,
     pub tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,

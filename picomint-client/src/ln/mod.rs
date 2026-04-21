@@ -52,7 +52,7 @@ const CONTRACT_CONFIRMATION_BUFFER: u64 = 12;
 
 pub type SendResult = Result<OperationId, SendPaymentError>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LightningClientContext {
     pub(crate) federation_id: FederationId,
     pub(crate) client_ctx: ClientContext,
@@ -60,7 +60,7 @@ pub struct LightningClientContext {
     pub(crate) input_fee: Amount,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LightningClientModule {
     federation_id: FederationId,
     cfg: LightningConfigConsensus,
