@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use async_channel::Receiver;
+use picomint_core::envs::is_running_in_test_env;
 use picomint_core::secp256k1::schnorr;
 use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use picomint_core::task::{TaskGroup, TaskHandle};
@@ -230,8 +231,14 @@ impl ConsensusEngine {
         // items from the current session from index zero
         let mut item_index = 0;
 
-        // We request the signed session outcome every three seconds from a random peer
-        let mut index_broadcast_interval = tokio::time::interval(Duration::from_secs(3));
+        // We request the signed session outcome from a random peer at a fixed
+        // interval (3s prod / 300ms test).
+        let broadcast_interval = if is_running_in_test_env() {
+            Duration::from_millis(300)
+        } else {
+            Duration::from_secs(3)
+        };
+        let mut index_broadcast_interval = tokio::time::interval(broadcast_interval);
 
         // We build a session outcome out of the ordered batches until either we have
         // processed broadcast_rounds_per_session rounds or a threshold signed
