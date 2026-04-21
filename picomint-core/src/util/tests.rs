@@ -1,11 +1,4 @@
-use std::time::Duration;
-
-use assert_matches::assert_matches;
-use futures::FutureExt;
-use tokio::time::error::Elapsed;
-use tokio::time::timeout;
-
-use super::{NextOrPending, SafeUrl};
+use super::SafeUrl;
 
 #[test]
 fn test_safe_url() {
@@ -67,15 +60,4 @@ fn test_safe_url() {
 
     // Exercise `From`-trait via `Into`
     let _: SafeUrl = url::Url::parse("http://1.2.3.4:80/foo").unwrap().into();
-}
-
-#[tokio::test]
-async fn test_next_or_pending() {
-    let mut stream = futures::stream::iter(vec![1, 2]);
-    assert_eq!(stream.next_or_pending().now_or_never(), Some(1));
-    assert_eq!(stream.next_or_pending().now_or_never(), Some(2));
-    assert_matches!(
-        timeout(Duration::from_millis(100), stream.next_or_pending()).await,
-        Err(Elapsed { .. })
-    );
 }

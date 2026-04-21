@@ -26,10 +26,6 @@ pub struct PeerId(u8);
 consensus_key!(PeerId);
 
 impl PeerId {
-    pub fn new(id: u8) -> Self {
-        Self(id)
-    }
-
     pub fn to_usize(self) -> usize {
         self.0 as usize
     }
@@ -86,12 +82,6 @@ impl NumPeers {
     /// honest (assuming the federation is not compromised).
     pub fn one_honest(self) -> usize {
         self.max_evil() + 1
-    }
-
-    /// Returns the degree of an underlying polynomial to require threshold
-    /// signatures.
-    pub fn degree(self) -> usize {
-        self.threshold() - 1
     }
 
     /// Returns the number of guardians required to achieve consensus and

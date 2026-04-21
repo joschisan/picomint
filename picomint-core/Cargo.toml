@@ -19,7 +19,6 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 backon = { workspace = true }
 bitcoin = { workspace = true }
 bitcoin-units = { workspace = true }
@@ -70,7 +69,6 @@ tokio = { workspace = true, features = ["io-util"] }
 wasm-bindgen-futures = { workspace = true }
 
 [dev-dependencies]
-assert_matches = { workspace = true }
 test-log = { workspace = true }
 tokio-test = { workspace = true }
 

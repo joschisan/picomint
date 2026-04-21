@@ -1,8 +1,4 @@
-use jsonrpsee_core::Serialize;
-use picomint_core::util::SafeUrl;
-use picomint_derive::{Decodable, Encodable};
 use picomint_logging::LOG_CORE;
-use serde::Deserialize;
 use tracing::warn;
 
 /// Print sensitive secrets without redacting them. Use only for debugging.
@@ -37,11 +33,4 @@ pub fn is_env_var_set(var: &str) -> bool {
 /// `cargo nextest`, or the integration test harness.
 pub fn is_running_in_test_env() -> bool {
     cfg!(test) || is_env_var_set("NEXTEST") || is_env_var_set(IN_TEST_ENV)
-}
-
-/// Configuration for the bitcoin RPC
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub struct BitcoinRpcConfig {
-    pub kind: String,
-    pub url: SafeUrl,
 }

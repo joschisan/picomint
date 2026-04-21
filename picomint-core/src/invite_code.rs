@@ -75,29 +75,6 @@ impl InviteCode {
         Self(code_vec)
     }
 
-    /// Returns the iroh node id of one of the guardians.
-    pub fn node_id(&self) -> PublicKey {
-        self.0
-            .iter()
-            .find_map(|data| match data {
-                InviteCodePart::Api { node_id, .. } => Some(*node_id),
-                InviteCodePart::FederationId(_) => None,
-            })
-            .expect("Ensured by constructor")
-    }
-
-    /// Returns the id of the guardian whose node id we expose via
-    /// [`InviteCode::node_id`].
-    pub fn peer(&self) -> PeerId {
-        self.0
-            .iter()
-            .find_map(|data| match data {
-                InviteCodePart::Api { peer, .. } => Some(*peer),
-                InviteCodePart::FederationId(_) => None,
-            })
-            .expect("Ensured by constructor")
-    }
-
     /// Get all peer node ids in the [`InviteCode`].
     pub fn peers(&self) -> BTreeMap<PeerId, PublicKey> {
         self.0
@@ -176,7 +153,7 @@ mod tests {
         let parts = vec![
             InviteCodePart::Api {
                 node_id,
-                peer: PeerId::new(0),
+                peer: PeerId::from(0),
             },
             InviteCodePart::FederationId(FederationId(
                 bitcoin::hashes::sha256::Hash::from_str(

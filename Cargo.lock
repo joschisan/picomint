@@ -5223,9 +5223,7 @@ name = "picomint-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "assert_matches",
  "async-lock",
- "async-trait",
  "backon",
  "bitcoin",
  "bitcoin-units",

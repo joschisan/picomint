@@ -1,63 +1,18 @@
 use std::fmt::{Debug, Display, Formatter};
-use std::future::Future;
 use std::hash::Hash;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use anyhow::format_err;
-use futures::StreamExt;
 use picomint_logging::LOG_CORE;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::warn;
 use url::{Host, ParseError, Url};
 
 use crate::envs::{DEBUG_SHOW_SECRETS_ENV, is_env_var_set};
 
-/// Future that is `Send` unless targeting WASM
-pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a + Send>>;
-
 /// Stream that is `Send` unless targeting WASM
 pub type BoxStream<'a, T> = Pin<Box<dyn futures::Stream<Item = T> + 'a + Send>>;
-
-#[async_trait::async_trait]
-pub trait NextOrPending {
-    type Output;
-
-    async fn next_or_pending(&mut self) -> Self::Output;
-
-    async fn ok(&mut self) -> anyhow::Result<Self::Output>;
-}
-
-#[async_trait::async_trait]
-impl<S> NextOrPending for S
-where
-    S: futures::Stream + Unpin + Send,
-    S::Item: Send,
-{
-    type Output = S::Item;
-
-    /// Waits for the next item in a stream. If the stream is closed while
-    /// waiting, returns an error.  Useful when expecting a stream to progress.
-    async fn ok(&mut self) -> anyhow::Result<Self::Output> {
-        self.next()
-            .await
-            .map_or_else(|| Err(format_err!("Stream was unexpectedly closed")), Ok)
-    }
-
-    /// Waits for the next item in a stream. If the stream is closed while
-    /// waiting the future will be pending forever. This is useful in cases
-    /// where the future will be cancelled by shutdown logic anyway and handling
-    /// each place where a stream may terminate would be too much trouble.
-    async fn next_or_pending(&mut self) -> Self::Output {
-        if let Some(item) = self.next().await {
-            item
-        } else {
-            debug!(target: LOG_CORE, "Stream ended in next_or_pending, pending forever to avoid throwing an error on shutdown");
-            std::future::pending().await
-        }
-    }
-}
 
 // TODO: make fully RFC1738 conformant
 /// Wrapper for `Url` that only prints the scheme, domain, port and path portion
@@ -145,22 +100,8 @@ impl SafeUrl {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
-    pub fn username(&self) -> &str {
-        self.0.username()
-    }
-    pub fn password(&self) -> Option<&str> {
-        self.0.password()
-    }
     pub fn join(&self, input: &str) -> Result<Self, ParseError> {
         self.0.join(input).map(SafeUrl)
-    }
-
-    pub fn fragment(&self) -> Option<&str> {
-        self.0.fragment()
-    }
-
-    pub fn set_fragment(&mut self, arg: Option<&str>) {
-        self.0.set_fragment(arg);
     }
 }
 
@@ -237,31 +178,6 @@ impl FromStr for SafeUrl {
     fn from_str(input: &str) -> Result<Self, ParseError> {
         Self::parse(input)
     }
-}
-
-/// Computes the median from a slice of sorted `u64`s
-pub fn get_median(vals: &[u64]) -> Option<u64> {
-    if vals.is_empty() {
-        return None;
-    }
-    let len = vals.len();
-    let mid = len / 2;
-
-    if len.is_multiple_of(2) {
-        Some(u64::midpoint(vals[mid - 1], vals[mid]))
-    } else {
-        Some(vals[mid])
-    }
-}
-
-/// Computes the average of the given `u64` slice.
-pub fn get_average(vals: &[u64]) -> Option<u64> {
-    if vals.is_empty() {
-        return None;
-    }
-
-    let sum: u64 = vals.iter().sum();
-    Some(sum / vals.len() as u64)
 }
 
 #[cfg(test)]

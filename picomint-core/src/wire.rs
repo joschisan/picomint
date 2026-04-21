@@ -21,16 +21,6 @@ pub enum Input {
     Wallet(WalletInput),
 }
 
-impl Input {
-    pub fn module_kind(&self) -> ModuleKind {
-        match self {
-            Self::Mint(_) => ModuleKind::Mint,
-            Self::Ln(_) => ModuleKind::Ln,
-            Self::Wallet(_) => ModuleKind::Wallet,
-        }
-    }
-}
-
 impl fmt::Display for Input {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -64,16 +54,6 @@ pub enum Output {
     Mint(MintOutput),
     Ln(Box<LightningOutput>),
     Wallet(WalletOutput),
-}
-
-impl Output {
-    pub fn module_kind(&self) -> ModuleKind {
-        match self {
-            Self::Mint(_) => ModuleKind::Mint,
-            Self::Ln(_) => ModuleKind::Ln,
-            Self::Wallet(_) => ModuleKind::Wallet,
-        }
-    }
 }
 
 impl fmt::Display for Output {

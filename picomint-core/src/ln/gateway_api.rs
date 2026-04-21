@@ -3,11 +3,10 @@
 //! (`picomint_client::ln::gateway_http`).
 
 use std::ops::Add;
-use std::str::FromStr;
 
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::secp256k1::schnorr::Signature;
-use lightning_invoice::{Bolt11Invoice, RoutingFees};
+use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
@@ -146,56 +145,3 @@ impl Add for PaymentFee {
     }
 }
 
-impl From<RoutingFees> for PaymentFee {
-    fn from(value: RoutingFees) -> Self {
-        Self {
-            base: Amount::from_msats(u64::from(value.base_msat)),
-            parts_per_million: u64::from(value.proportional_millionths),
-        }
-    }
-}
-
-impl From<PaymentFee> for RoutingFees {
-    fn from(value: PaymentFee) -> Self {
-        Self {
-            base_msat: u32::try_from(value.base.msats).expect("base msat was truncated from u64"),
-            proportional_millionths: u32::try_from(value.parts_per_million)
-                .expect("ppm was truncated from u64"),
-        }
-    }
-}
-
-impl std::fmt::Display for PaymentFee {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{},{}", self.base, self.parts_per_million)
-    }
-}
-
-impl FromStr for PaymentFee {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = s.split(',');
-        let base_str = parts
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Failed to parse base fee"))?;
-        let ppm_str = parts
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Failed to parse ppm"))?;
-
-        // Ensure no extra parts
-        if parts.next().is_some() {
-            return Err(anyhow::anyhow!(
-                "Failed to parse fees. Expected format <base>,<ppm>"
-            ));
-        }
-
-        let base = Amount::from_str(base_str)?;
-        let parts_per_million = ppm_str.parse::<u64>()?;
-
-        Ok(Self {
-            base,
-            parts_per_million,
-        })
-    }
-}

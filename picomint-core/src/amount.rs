@@ -1,24 +1,11 @@
 use std::num::ParseIntError;
 use std::str::FromStr;
 
-use anyhow::bail;
 use bitcoin::Denomination;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use picomint_encoding::{Decodable, Encodable};
-
-pub const SATS_PER_BITCOIN: u64 = 100_000_000;
-
-/// Shorthand for [`Amount::from_msats`]
-pub fn msats(msats: u64) -> Amount {
-    Amount::from_msats(msats)
-}
-
-/// Shorthand for [`Amount::from_sats`]
-pub fn sats(amount: u64) -> Amount {
-    Amount::from_sats(amount)
-}
 
 /// Represents an amount of BTC. The base denomination is millisatoshis, which
 /// is why the `Amount` type from rust-bitcoin isn't used instead.
@@ -50,25 +37,12 @@ impl Amount {
         Self { msats }
     }
 
-    pub const fn from_units(units: u64) -> Self {
-        Self { msats: units }
-    }
-
     /// Create an amount from a number of satoshis.
     pub const fn from_sats(sats: u64) -> Self {
         Self::from_msats(sats * 1000)
     }
 
-    /// Create an amount from a number of whole bitcoins.
-    pub const fn from_bitcoins(bitcoins: u64) -> Self {
-        Self::from_sats(bitcoins * SATS_PER_BITCOIN)
-    }
-
-    /// Parse a decimal string as a value in the given denomination.
-    ///
-    /// Note: This only parses the value string.  If you want to parse a value
-    /// with denomination, use [`FromStr`].
-    pub fn from_str_in(s: &str, denom: Denomination) -> Result<Self, ParseAmountError> {
+    fn from_str_in(s: &str, denom: Denomination) -> Result<Self, ParseAmountError> {
         if denom == Denomination::MilliSatoshi {
             return Ok(Self::from_msats(s.parse()?));
         }
@@ -88,28 +62,6 @@ impl Amount {
         }
     }
 
-    /// Returns an error if the amount is more precise than satoshis (i.e. if it
-    /// has a milli-satoshi remainder). Otherwise, returns `Ok(())`.
-    pub fn ensure_sats_precision(&self) -> anyhow::Result<()> {
-        if !self.msats.is_multiple_of(1000) {
-            bail!("Amount is using a precision smaller than satoshi, cannot convert to satoshis");
-        }
-        Ok(())
-    }
-
-    pub fn try_into_sats(&self) -> anyhow::Result<u64> {
-        self.ensure_sats_precision()?;
-        Ok(self.msats / 1000)
-    }
-
-    pub const fn sats_round_down(&self) -> u64 {
-        self.msats / 1000
-    }
-
-    pub fn sats_f64(&self) -> f64 {
-        self.msats as f64 / 1000.0
-    }
-
     pub fn checked_sub(self, other: Self) -> Option<Self> {
         Some(Self {
             msats: self.msats.checked_sub(other.msats)?,
@@ -119,12 +71,6 @@ impl Amount {
     pub fn checked_add(self, other: Self) -> Option<Self> {
         Some(Self {
             msats: self.msats.checked_add(other.msats)?,
-        })
-    }
-
-    pub fn checked_mul(self, other: u64) -> Option<Self> {
-        Some(Self {
-            msats: self.msats.checked_mul(other)?,
         })
     }
 }
@@ -250,14 +196,6 @@ impl From<bitcoin::Amount> for Amount {
     }
 }
 
-impl TryFrom<Amount> for bitcoin::Amount {
-    type Error = anyhow::Error;
-
-    fn try_from(value: Amount) -> anyhow::Result<Self> {
-        value.try_into_sats().map(Self::from_sat)
-    }
-}
-
 #[derive(Error, Debug)]
 pub enum ParseAmountError {
     #[error("Error parsing string as integer: {0}")]
@@ -280,20 +218,6 @@ mod tests {
     #[test]
     fn scalar_multiplication_by_amount() {
         assert_eq!(123 * Amount::from_msats(1000), Amount::from_msats(123_000));
-    }
-
-    #[test]
-    fn checked_mul_success() {
-        assert_eq!(
-            Amount::from_msats(100).checked_mul(5),
-            Some(Amount::from_msats(500))
-        );
-    }
-
-    #[test]
-    fn checked_mul_overflow() {
-        assert_eq!(Amount::from_msats(u64::MAX).checked_mul(2), None);
-        assert_eq!(Amount::from_msats(u64::MAX / 2 + 1).checked_mul(2), None);
     }
 
     #[test]
@@ -325,7 +249,7 @@ mod tests {
         );
         // btc
         assert_eq!(
-            Amount::from_bitcoins(123),
+            Amount::from_sats(12_300_000_000),
             Amount::from_str("123btc").unwrap()
         );
         assert_eq!(

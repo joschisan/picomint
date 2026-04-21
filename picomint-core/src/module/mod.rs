@@ -26,13 +26,6 @@ pub struct TransactionItemAmounts {
     pub fee: Amount,
 }
 
-impl TransactionItemAmounts {
-    pub const ZERO: Self = Self {
-        amount: Amount::ZERO,
-        fee: Amount::ZERO,
-    };
-}
-
 /// Type-erased API request: `params` carries the consensus-encoded parameter
 /// bytes, which the endpoint decodes into its concrete `Param` type.
 #[derive(Debug, Clone, Encodable, Decodable)]
@@ -83,24 +76,6 @@ pub struct IrohApiRequest {
     pub request: ApiRequestErased,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IrohGatewayRequest {
-    /// REST API route for specifying which action to take
-    pub route: String,
-
-    /// Parameters for the request
-    pub params: Option<serde_json::Value>,
-
-    /// Password for authenticated requests to the gateway
-    pub password: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IrohGatewayResponse {
-    pub status: u16,
-    pub body: serde_json::Value,
-}
-
 pub const PICOMINT_ALPN: &[u8] = b"picomint";
 
 /// Authentication secret used to verify guardian admin API requests.
@@ -147,26 +122,18 @@ impl fmt::Display for ApiError {
     }
 }
 
-pub type ApiResult<T> = Result<T, ApiError>;
-
 impl ApiError {
-    pub fn new(code: u32, message: String) -> Self {
-        Self { code, message }
-    }
-
     pub fn not_found(message: String) -> Self {
-        Self::new(404, message)
+        Self {
+            code: 404,
+            message,
+        }
     }
 
     pub fn bad_request(message: String) -> Self {
-        Self::new(400, message)
-    }
-
-    pub fn unauthorized() -> Self {
-        Self::new(401, "Invalid authorization".to_string())
-    }
-
-    pub fn server_error(message: String) -> Self {
-        Self::new(500, message)
+        Self {
+            code: 400,
+            message,
+        }
     }
 }
