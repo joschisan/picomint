@@ -85,7 +85,7 @@ impl TestEnv {
         let invite_code_str = runtime.block_on(retry("fetch invite code", || async {
             Ok(cli::server_invite(&peer0_data_dir)?.invite_code)
         }))?;
-        let invite_code: InviteCode = invite_code_str.trim().parse()?;
+        let invite_code: InviteCode = picomint_base32::decode(invite_code_str.trim())?;
         info!("Federation ready");
 
         // Bind the iroh endpoint now so we can start building the first client

@@ -92,7 +92,7 @@ pub struct GetInviteCodeRequest {
 pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<ConsensusConfig> {
     debug!(
         target: LOG_CLIENT_NET,
-        %invite,
+        invite = %picomint_base32::encode(invite),
         peers = ?invite.peers(),
         "Downloading client config via invite code"
     );

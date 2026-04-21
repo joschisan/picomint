@@ -21,7 +21,6 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 backon = { workspace = true }
-bech32 = { workspace = true }
 bitcoin = { workspace = true }
 bitcoin-units = { workspace = true }
 bitcoin_hashes = { workspace = true }
