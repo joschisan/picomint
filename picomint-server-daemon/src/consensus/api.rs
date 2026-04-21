@@ -54,6 +54,9 @@ impl ConsensusApi {
         &self,
         transaction: Transaction,
     ) -> Result<(), TransactionError> {
+        let notify = self.db.notify_for_table(&ACCEPTED_ITEM);
+        let mut notified = Box::pin(notify.notified());
+
         let tx = self.db.begin_write();
 
         if tx
@@ -76,25 +79,25 @@ impl ConsensusApi {
             warn!(target: LOG_NET_API, "Unable to submit the tx into consensus");
         }
 
-        let notify = self.db.notify_for_table(&ACCEPTED_ITEM);
-
         loop {
-            let notified = notify.notified();
+            tokio::select! {
+                _ = &mut notified => {
+                    let tx = self.db.begin_write();
 
-            let tx = self.db.begin_write();
+                    if tx
+                        .get(&ACCEPTED_TRANSACTION, &transaction.tx_hash())
+                        .is_some()
+                    {
+                        return Ok(());
+                    }
 
-            if tx
-                .get(&ACCEPTED_TRANSACTION, &transaction.tx_hash())
-                .is_some()
-            {
-                return Ok(());
+                    process_transaction_with_server(&self.server, &tx, &transaction).await?;
+
+                    drop(tx);
+
+                    notified = Box::pin(notify.notified());
+                }
             }
-
-            process_transaction_with_server(&self.server, &tx, &transaction).await?;
-
-            drop(tx);
-
-            notified.await;
         }
     }
 
