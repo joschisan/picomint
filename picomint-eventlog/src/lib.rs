@@ -13,7 +13,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use futures::Stream;
-use picomint_core::core::{ModuleKind, OperationId};
+use picomint_core::core::OperationId;
 use picomint_core::time::duration_since_epoch;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::NativeTableDef;
@@ -23,8 +23,30 @@ use picomint_redb::{consensus_key, consensus_value};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    Encodable,
+    Decodable,
+)]
+pub enum EventSource {
+    Core,
+    Mint,
+    Ln,
+    Wallet,
+    Gw,
+}
+
 pub trait Event: serde::Serialize + serde::de::DeserializeOwned {
-    const MODULE: Option<ModuleKind>;
+    const SOURCE: EventSource;
     const KIND: EventKind;
 }
 
@@ -111,13 +133,12 @@ impl fmt::Display for EventKind {
 pub struct EventLogEntry {
     pub kind: EventKind,
 
-    /// Module that produced the event (if any).
-    pub module: Option<ModuleKind>,
+    /// Where the event came from. See [`EventSource`].
+    pub source: EventSource,
 
-    /// Operation this event belongs to, if any. Set by the caller of
-    /// [`log_event`]; used to index the event into
+    /// Operation this event belongs to. Used to index the event into
     /// [`EVENT_LOG_BY_OPERATION`] for op-scoped tailing.
-    pub operation_id: Option<OperationId>,
+    pub operation_id: OperationId,
 
     /// Timestamp in microseconds after unix epoch.
     pub ts_usecs: u64,
@@ -128,7 +149,7 @@ pub struct EventLogEntry {
 
 impl EventLogEntry {
     pub fn to_event<E: Event>(&self) -> Option<E> {
-        (self.module == E::MODULE && self.kind == E::KIND)
+        (self.source == E::SOURCE && self.kind == E::KIND)
             .then(|| serde_json::from_slice(&self.payload).ok())
             .flatten()
     }
@@ -151,7 +172,7 @@ impl Serialize for PersistedLogEntry {
         let mut state = serializer.serialize_struct("PersistedLogEntry", 6)?;
         state.serialize_field("id", &self.id)?;
         state.serialize_field("kind", &self.inner.kind)?;
-        state.serialize_field("module", &self.inner.module)?;
+        state.serialize_field("source", &self.inner.source)?;
         state.serialize_field("operation_id", &self.inner.operation_id)?;
         state.serialize_field("ts_usecs", &self.inner.ts_usecs)?;
 
@@ -192,22 +213,22 @@ pub const EVENT_LOG: NativeTableDef<EventLogId, EventLogEntry> = NativeTableDef:
 pub const EVENT_LOG_BY_OPERATION: NativeTableDef<(OperationId, EventLogId), EventLogEntry> =
     NativeTableDef::new("event-log-by-operation");
 
-/// Append an event to [`EVENT_LOG`] and — if `operation_id` is set — to
-/// [`EVENT_LOG_BY_OPERATION`]. IDs are allocated inline under redb's
-/// single-writer serialization. The per-table [`Notify`] for `EVENT_LOG` is
-/// woken automatically on commit by the redb layer.
+/// Append an event to [`EVENT_LOG`] and [`EVENT_LOG_BY_OPERATION`]. IDs are
+/// allocated inline under redb's single-writer serialization. The per-table
+/// [`Notify`] for `EVENT_LOG` is woken automatically on commit by the redb
+/// layer.
 pub fn log_event_raw(
     dbtx: &WriteTxRef<'_>,
     kind: EventKind,
-    module: Option<ModuleKind>,
-    operation_id: Option<OperationId>,
+    source: EventSource,
+    operation_id: OperationId,
     payload: Vec<u8>,
 ) {
     let id = next_event_log_id(dbtx);
     let ts_usecs = u64::try_from(duration_since_epoch().as_micros()).unwrap_or(u64::MAX);
     let entry = EventLogEntry {
         kind,
-        module,
+        source,
         operation_id,
         ts_usecs,
         payload,
@@ -220,24 +241,22 @@ pub fn log_event_raw(
         );
     });
 
-    if let Some(operation_id) = operation_id {
-        dbtx.with_native_table(&EVENT_LOG_BY_OPERATION, |t| {
-            assert!(
-                t.insert(&(operation_id, id), &entry)
-                    .expect("redb insert failed")
-                    .is_none(),
-                "Must never overwrite existing event"
-            );
-        });
-    }
+    dbtx.with_native_table(&EVENT_LOG_BY_OPERATION, |t| {
+        assert!(
+            t.insert(&(operation_id, id), &entry)
+                .expect("redb insert failed")
+                .is_none(),
+            "Must never overwrite existing event"
+        );
+    });
 }
 
 /// Typed convenience: encode an [`Event`] into the log.
-pub fn log_event<E: Event>(dbtx: &WriteTxRef<'_>, operation_id: Option<OperationId>, event: E) {
+pub fn log_event<E: Event>(dbtx: &WriteTxRef<'_>, operation_id: OperationId, event: E) {
     log_event_raw(
         dbtx,
         E::KIND,
-        E::MODULE,
+        E::SOURCE,
         operation_id,
         serde_json::to_vec(&event).expect("Serialization can't fail"),
     );

@@ -1,8 +1,7 @@
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, Txid};
 use picomint_core::TransactionId;
-use picomint_core::core::ModuleKind;
-use picomint_eventlog::{Event, EventKind};
+use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
 /// Emitted when a pegout (send to onchain) operation is initiated.
@@ -15,7 +14,7 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const MODULE: Option<ModuleKind> = Some(picomint_core::wallet::KIND);
+    const SOURCE: EventSource = EventSource::Wallet;
     const KIND: EventKind = EventKind::from_static("send");
 }
 
@@ -26,7 +25,7 @@ pub struct SendConfirmEvent {
 }
 
 impl Event for SendConfirmEvent {
-    const MODULE: Option<ModuleKind> = Some(picomint_core::wallet::KIND);
+    const SOURCE: EventSource = EventSource::Wallet;
     const KIND: EventKind = EventKind::from_static("send-confirm");
 }
 
@@ -35,7 +34,7 @@ impl Event for SendConfirmEvent {
 pub struct SendFailureEvent;
 
 impl Event for SendFailureEvent {
-    const MODULE: Option<ModuleKind> = Some(picomint_core::wallet::KIND);
+    const SOURCE: EventSource = EventSource::Wallet;
     const KIND: EventKind = EventKind::from_static("send-failure");
 }
 
@@ -49,6 +48,6 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const MODULE: Option<ModuleKind> = Some(picomint_core::wallet::KIND);
+    const SOURCE: EventSource = EventSource::Wallet;
     const KIND: EventKind = EventKind::from_static("receive");
 }

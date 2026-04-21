@@ -167,7 +167,11 @@ fn main() -> anyhow::Result<()> {
 
     info!("Successfully started LDK Node");
 
-    // 5. Construct AppState
+    // 5. Create task group for graceful shutdown (owned by AppState so
+    //    per-federation tail tasks spawned at join-time share its lifetime).
+    let task_group = picomint_core::task::TaskGroup::new();
+
+    // 6. Construct AppState
     let state = AppState {
         clients: Arc::new(RwLock::new(BTreeMap::new())),
         node: node.clone(),
@@ -185,15 +189,15 @@ fn main() -> anyhow::Result<()> {
             parts_per_million: opts.transaction_fee_ppm,
         },
         outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
+        query_state: picomint_gateway_daemon::query::QueryState::new(),
+        task_group: task_group.clone(),
     };
 
-    // 8. Load federation clients
+    // 7. Load federation clients + spawn their analytics tail tasks
     runtime.block_on(state.load_clients())?;
+    runtime.block_on(state.spawn_analytics_tails());
 
-    // 9. Create task group for graceful shutdown
-    let task_group = picomint_core::task::TaskGroup::new();
-
-    // 10. Spawn tasks
+    // 8. Spawn tasks
     let public_task = runtime.spawn(public::run_public(state.clone(), task_group.make_handle()));
     let cli_task = runtime.spawn(cli::run_cli(state.clone(), task_group.make_handle()));
     let events_task = runtime.spawn(process_ldk_events(state.clone(), task_group.make_handle()));

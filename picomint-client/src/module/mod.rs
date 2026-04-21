@@ -5,14 +5,12 @@ use futures::StreamExt as _;
 use picomint_core::TransactionId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
-use picomint_core::core::{ModuleKind, OperationId};
+use picomint_core::core::OperationId;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::util::BoxStream;
 use picomint_eventlog::{EVENT_LOG, Event, EventLogId, PersistedLogEntry};
-use picomint_logging::LOG_CLIENT;
 use picomint_redb::{Database, WriteTxRef};
 use tokio::sync::Notify;
-use tracing::warn;
 
 use crate::{TxAcceptEvent, TxRejectEvent};
 
@@ -20,7 +18,6 @@ use crate::{TxAcceptEvent, TxRejectEvent};
 /// config. Each module is constructed with one of these.
 #[derive(Debug, Clone)]
 pub struct ClientContext {
-    kind: ModuleKind,
     api: FederationApi,
     api_scope: ApiScope,
     db: Database,
@@ -30,7 +27,6 @@ pub struct ClientContext {
 
 impl ClientContext {
     pub fn new(
-        kind: ModuleKind,
         api: FederationApi,
         api_scope: ApiScope,
         db: Database,
@@ -38,7 +34,6 @@ impl ClientContext {
         federation_id: FederationId,
     ) -> Self {
         Self {
-            kind,
             api,
             api_scope,
             db,
@@ -162,14 +157,6 @@ impl ClientContext {
     where
         E: Event + Send,
     {
-        if <E as Event>::MODULE != Some(self.kind) {
-            warn!(
-                target: LOG_CLIENT,
-                module_kind = %self.kind,
-                event_module = ?<E as Event>::MODULE,
-                "Client module logging events of different module than its own. This might become an error in the future."
-            );
-        }
-        picomint_eventlog::log_event(dbtx, Some(operation_id), event);
+        picomint_eventlog::log_event(dbtx, operation_id, event);
     }
 }

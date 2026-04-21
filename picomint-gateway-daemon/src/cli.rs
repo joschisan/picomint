@@ -23,13 +23,13 @@ use picomint_gateway_cli_core::{
     LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
     LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MintReceiveRequest,
     MintReceiveResponse, MintSendRequest, MintSendResponse, MnemonicResponse, PeerInfo,
-    ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
+    QueryRequest, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
     ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES,
     ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_RECEIVE,
-    WalletReceiveRequest, WalletReceiveResponse,
+    ROUTE_QUERY, WalletReceiveRequest, WalletReceiveResponse,
 };
 use picomint_logging::LOG_GATEWAY;
 use reqwest::StatusCode;
@@ -132,6 +132,21 @@ fn router() -> Router<AppState> {
         .route(ROUTE_MODULE_MINT_SEND, post(module_mint_send))
         .route(ROUTE_MODULE_MINT_RECEIVE, post(module_mint_receive))
         .route(ROUTE_MODULE_WALLET_RECEIVE, post(module_wallet_receive))
+        // Analytics
+        .route(ROUTE_QUERY, post(query))
+}
+
+/// Run a SQL query against the in-memory gw-events analytics tables.
+/// Returns a JSON array of row objects keyed by column name.
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn query(
+    State(state): State<AppState>,
+    Json(payload): Json<QueryRequest>,
+) -> Result<Json<serde_json::Value>, CliError> {
+    let rows = crate::query::run_query(&state.query_state, &payload.sql)
+        .await
+        .map_err(CliError::bad_request)?;
+    Ok(Json(rows))
 }
 
 // ---------------------------------------------------------------------------
@@ -506,7 +521,18 @@ async fn federation_join(
 
     AppState::check_federation_network(&client, state.network).await?;
 
-    state.clients.write().await.insert(federation_id, client);
+    state
+        .clients
+        .write()
+        .await
+        .insert(federation_id, client.clone());
+
+    crate::query::spawn_tail(
+        &state.task_group,
+        client,
+        federation_id,
+        state.query_state.clone(),
+    );
 
     debug!(target: LOG_GATEWAY, %federation_id, "Federation connected");
 

@@ -7,7 +7,7 @@ use picomint_redb::Database;
 use tokio::try_join;
 use tracing::info;
 
-use super::{EVENT_LOG, EventKind, log_event_raw, subscribe_operation_events};
+use super::{EVENT_LOG, EventKind, EventSource, log_event_raw, subscribe_operation_events};
 
 #[test_log::test(tokio::test)]
 async fn sanity_subscribe_operation_events() {
@@ -48,8 +48,8 @@ async fn sanity_subscribe_operation_events() {
                 log_event_raw(
                     &dbtx.as_ref(),
                     EventKind::from(format!("{i}")),
-                    None,
-                    Some(operation_id),
+                    EventSource::Core,
+                    operation_id,
                     vec![],
                 );
 

@@ -52,7 +52,7 @@ fn wallet_event_stream(
 fn try_parse_wallet_event(
     entry: &EventLogEntry,
 ) -> Option<(picomint_core::core::OperationId, WalletEvent)> {
-    let op = entry.operation_id?;
+    let op = entry.operation_id;
     if let Some(e) = entry.to_event() {
         return Some((op, WalletEvent::Send(e)));
     }

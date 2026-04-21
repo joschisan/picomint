@@ -45,7 +45,7 @@ fn mint_event_stream(
 }
 
 fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, MintEvent)> {
-    let op = entry.operation_id?;
+    let op = entry.operation_id;
     if let Some(e) = entry.to_event() {
         return Some((op, MintEvent::Send(e)));
     }

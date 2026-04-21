@@ -130,6 +130,13 @@ pub fn gateway_ldk_invoice_pay(gw_data_dir: &Path, invoice: &str) -> Result<Valu
         .run_cli::<Value>()
 }
 
+pub fn gateway_query(gw_data_dir: &Path, sql: &str) -> Result<Value> {
+    gateway_cmd(gw_data_dir)
+        .arg("query")
+        .arg(sql)
+        .run_cli::<Value>()
+}
+
 // ── Guardian CLI wrappers ───────────────────────────────────────────────────
 
 pub fn server_invite(data_dir: &Path) -> Result<InviteResponse> {

@@ -3,6 +3,7 @@ pub mod client;
 pub mod db;
 pub mod kvstore;
 pub mod public;
+pub mod query;
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -66,6 +67,8 @@ pub struct AppState {
     pub routing_fees: PaymentFee,
     pub transaction_fees: PaymentFee,
     pub outbound_lightning_payment_lock_pool: Arc<lockable::LockPool<PaymentId>>,
+    pub query_state: query::QueryState,
+    pub task_group: picomint_core::task::TaskGroup,
 }
 
 impl std::fmt::Debug for AppState {
@@ -83,6 +86,20 @@ impl AppState {
     /// Retrieves a client for a given federation.
     pub async fn select_client(&self, federation_id: FederationId) -> Option<Arc<Client>> {
         self.clients.read().await.get(&federation_id).cloned()
+    }
+
+    /// After `load_clients`, spawn one analytics tail task per federation
+    /// client so the in-memory Arrow mirror starts backfilling immediately.
+    pub async fn spawn_analytics_tails(&self) {
+        let clients = self.clients.read().await;
+        for (federation_id, client) in clients.iter() {
+            query::spawn_tail(
+                &self.task_group,
+                client.clone(),
+                *federation_id,
+                self.query_state.clone(),
+            );
+        }
     }
 
     /// Load all persisted federation clients on startup.

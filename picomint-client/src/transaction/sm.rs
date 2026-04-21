@@ -51,12 +51,12 @@ impl StateMachine for TxSubmissionStateMachine {
 
         match outcome {
             Ok(()) => {
-                picomint_eventlog::log_event(dbtx, Some(self.operation_id), TxAcceptEvent { txid });
+                picomint_eventlog::log_event(dbtx, self.operation_id, TxAcceptEvent { txid });
             }
             Err(error) => {
                 picomint_eventlog::log_event(
                     dbtx,
-                    Some(self.operation_id),
+                    self.operation_id,
                     TxRejectEvent { txid, error },
                 );
             }
