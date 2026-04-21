@@ -34,18 +34,21 @@ jobs:
           sleep 60
         done
 
+    - name: Prebuild workspace
+      run: cargo build --workspace
+
     - name: Make test script executable
       run: chmod +x test-integration.sh
 
     - name: Loop integration tests until failure or deadline
       run: |
         set -u
-        DEADLINE=$(($(date +%s) + 12000))  # ~3h 20m
+        DEADLINE=$(($(date +%s) + 10800))  # 3h
         i=0
         while [ "$(date +%s)" -lt "$DEADLINE" ]; do
           i=$((i + 1))
           echo "=== iteration $i ==="
-          if ! timeout 1200 ./test-integration.sh; then
+          if ! timeout 600 ./test-integration.sh; then
             echo "FAILED on iteration $i"
             exit 1
           fi
