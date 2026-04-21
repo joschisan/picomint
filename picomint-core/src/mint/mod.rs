@@ -1,4 +1,3 @@
-use std::fmt;
 use std::hash::Hash;
 
 use bitcoin_hashes::hash160;
@@ -43,22 +42,9 @@ impl Denomination {
     }
 }
 
-impl fmt::Display for Denomination {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "2^{} msats", self.0)
-    }
-}
-
 /// The mint module does not define any consensus items.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub enum MintConsensusItem {}
-
-impl std::fmt::Display for MintConsensusItem {
-    #[allow(clippy::uninhabited_references)]
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {}
-    }
-}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct MintOutputBlindSignature(pub tbs::BlindedSignature);
@@ -90,12 +76,6 @@ pub struct MintInput {
     pub note: Note,
 }
 
-impl std::fmt::Display for MintInput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Mint Note {}", self.note.denomination)
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct MintOutput {
     pub denomination: Denomination,
@@ -106,12 +86,6 @@ pub struct MintOutput {
 impl MintOutput {
     pub fn amount(&self) -> Amount {
         self.denomination.amount()
-    }
-}
-
-impl std::fmt::Display for MintOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Mint Note {}", self.denomination)
     }
 }
 
