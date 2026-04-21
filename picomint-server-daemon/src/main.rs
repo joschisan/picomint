@@ -14,8 +14,8 @@ use clap::{ArgGroup, Parser};
 use futures::FutureExt as _;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoindClient, EsploraClient};
 use picomint_core::task::TaskGroup;
-use picomint_core::util::SafeUrl;
 use picomint_logging::{LOG_CORE, TracingSetup};
+use url::Url;
 use picomint_server_daemon::config::ConfigGenSettings;
 use picomint_server_daemon::{DB_FILE, run_server};
 use tracing::{debug, error, info};
@@ -49,11 +49,11 @@ struct ServerOpts {
 
     /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
     #[arg(long, env = "ESPLORA_URL")]
-    esplora_url: Option<SafeUrl>,
+    esplora_url: Option<Url>,
 
     /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
     #[arg(long, env = "BITCOIND_URL")]
-    bitcoind_url: Option<SafeUrl>,
+    bitcoind_url: Option<Url>,
 
     /// The username to use when connecting to bitcoind
     #[arg(long, env = "BITCOIND_USERNAME")]
@@ -125,11 +125,15 @@ async fn main() -> anyhow::Result<Infallible> {
                     .clone()
                     .expect("BITCOIND_URL is set but BITCOIND_PASSWORD is not");
                 BitcoinBackend::Bitcoind(
-                    BitcoindClient::new(bitcoind_username, bitcoind_password, bitcoind_url)
-                        .unwrap(),
+                    BitcoindClient::new(
+                        bitcoind_username,
+                        bitcoind_password,
+                        bitcoind_url.as_str(),
+                    )
+                    .unwrap(),
                 )
             }
-            (None, Some(url)) => BitcoinBackend::Esplora(EsploraClient::new(url).unwrap()),
+            (None, Some(url)) => BitcoinBackend::Esplora(EsploraClient::new(url.as_str()).unwrap()),
             _ => unreachable!("ArgGroup enforces exactly one of BITCOIND_URL or ESPLORA_URL"),
         },
     );

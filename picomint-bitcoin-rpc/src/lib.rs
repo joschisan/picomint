@@ -7,7 +7,6 @@ use std::time::Duration;
 use anyhow::{Result, ensure};
 use picomint_core::bitcoin::{Block, BlockHash, Network, Transaction};
 use picomint_core::task::TaskGroup;
-use picomint_core::util::SafeUrl;
 use picomint_logging::LOG_SERVER;
 use tokio::sync::watch;
 use tracing::{debug, warn};
@@ -48,7 +47,7 @@ pub enum BitcoinBackend {
 }
 
 impl BitcoinBackend {
-    pub fn url(&self) -> SafeUrl {
+    pub fn url(&self) -> String {
         match self {
             BitcoinBackend::Bitcoind(c) => c.url(),
             BitcoinBackend::Esplora(c) => c.url(),
@@ -171,7 +170,7 @@ impl BitcoinRpcMonitor {
         })
     }
 
-    pub fn url(&self) -> SafeUrl {
+    pub fn url(&self) -> String {
         self.rpc.url()
     }
 

@@ -1,5 +1,4 @@
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
-use picomint_core::util::SafeUrl;
 use picomint_core::{OutPoint, PeerId};
 use picomint_redb::table;
 use tpe::DecryptionKeyShare;
@@ -42,7 +41,7 @@ table!(
 
 table!(
     GATEWAY,
-    SafeUrl => (),
+    String => (),
     "gateway",
 );
 

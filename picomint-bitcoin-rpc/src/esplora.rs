@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use bitcoin::{BlockHash, Transaction};
-use picomint_core::util::SafeUrl;
 
 use crate::Feerate;
 use picomint_logging::{LOG_BITCOIND_ESPLORA, LOG_SERVER};
@@ -11,28 +10,28 @@ use tracing::info;
 #[derive(Debug)]
 pub struct EsploraClient {
     client: esplora_client::AsyncClient,
-    url: SafeUrl,
+    url: String,
 }
 
 impl EsploraClient {
-    pub fn new(url: &SafeUrl) -> anyhow::Result<Self> {
+    pub fn new(url: &str) -> anyhow::Result<Self> {
         info!(
             target: LOG_SERVER,
             %url,
             "Initializing bitcoin esplora backend"
         );
         // URL needs to have any trailing path including '/' removed
-        let without_trailing = url.as_str().trim_end_matches('/');
+        let without_trailing = url.trim_end_matches('/');
 
         let builder = esplora_client::Builder::new(without_trailing);
         let client = builder.build_async()?;
         Ok(Self {
             client,
-            url: url.clone(),
+            url: url.to_string(),
         })
     }
 
-    pub fn url(&self) -> SafeUrl {
+    pub fn url(&self) -> String {
         self.url.clone()
     }
 

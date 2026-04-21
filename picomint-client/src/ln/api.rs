@@ -8,7 +8,6 @@ use picomint_core::ln::endpoint_constants::{
     GATEWAYS_ENDPOINT,
 };
 use picomint_core::module::ApiRequestErased;
-use picomint_core::util::SafeUrl;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
 use rand::seq::SliceRandom;
 
@@ -41,8 +40,8 @@ impl FederationApi {
         .await
     }
 
-    pub async fn ln_gateways(&self) -> FederationResult<Vec<SafeUrl>> {
-        let gateways: BTreeMap<PeerId, Vec<SafeUrl>> = self
+    pub async fn ln_gateways(&self) -> FederationResult<Vec<String>> {
+        let gateways: BTreeMap<PeerId, Vec<String>> = self
             .request_with_strategy(
                 FilterMapThreshold::new(
                     |_, gateways| Ok(gateways),
@@ -57,9 +56,9 @@ impl FederationApi {
             .values()
             .flatten()
             .cloned()
-            .collect::<BTreeSet<SafeUrl>>()
+            .collect::<BTreeSet<String>>()
             .into_iter()
-            .collect::<Vec<SafeUrl>>();
+            .collect::<Vec<String>>();
 
         // Shuffling the gateways ensures that payments are distributed over the
         // gateways evenly.
@@ -75,9 +74,9 @@ impl FederationApi {
         Ok(union)
     }
 
-    pub async fn ln_gateways_from_peer(&self, peer: PeerId) -> ServerResult<Vec<SafeUrl>> {
+    pub async fn ln_gateways_from_peer(&self, peer: PeerId) -> ServerResult<Vec<String>> {
         let gateways = self
-            .request_single_peer::<Vec<SafeUrl>>(
+            .request_single_peer::<Vec<String>>(
                 GATEWAYS_ENDPOINT.to_string(),
                 ApiRequestErased::default(),
                 peer,

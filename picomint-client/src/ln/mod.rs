@@ -33,7 +33,6 @@ enum RootSecretPath {
 }
 use crate::secret::Secret;
 use picomint_core::time::duration_since_epoch;
-use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, OutPoint, PeerId};
 use picomint_encoding::Encodable;
 use picomint_redb::WriteTxRef;
@@ -133,7 +132,7 @@ impl LightningClientModule {
             let mut entries = Vec::new();
             for gateway in gateways {
                 if let Ok(Some(routing_info)) =
-                    gateway_http::routing_info(gateway.clone(), &self.federation_id).await
+                    gateway_http::routing_info(&gateway, &self.federation_id).await
                 {
                     entries.push((routing_info.lightning_public_key, gateway));
                 }
@@ -158,7 +157,7 @@ impl LightningClientModule {
     pub async fn select_gateway(
         &self,
         invoice: Option<Bolt11Invoice>,
-    ) -> Result<(SafeUrl, RoutingInfo), SelectGatewayError> {
+    ) -> Result<(String, RoutingInfo), SelectGatewayError> {
         let gateways = self
             .client_ctx
             .module_api()
@@ -192,11 +191,11 @@ impl LightningClientModule {
     }
 
     /// Sends a request to each peer for their registered gateway list and
-    /// returns a `Vec<SafeUrl` of all registered gateways to the client.
+    /// returns a `Vec<String` of all registered gateways to the client.
     pub async fn list_gateways(
         &self,
         peer: Option<PeerId>,
-    ) -> Result<Vec<SafeUrl>, ListGatewaysError> {
+    ) -> Result<Vec<String>, ListGatewaysError> {
         if let Some(peer) = peer {
             self.client_ctx
                 .module_api()
@@ -213,12 +212,12 @@ impl LightningClientModule {
     }
 
     /// Requests the `RoutingInfo`, including fee information, from the gateway
-    /// available at the `SafeUrl`.
+    /// available at the `String`.
     pub async fn routing_info(
         &self,
-        gateway: &SafeUrl,
+        gateway: &str,
     ) -> Result<Option<RoutingInfo>, RoutingInfoError> {
-        gateway_http::routing_info(gateway.clone(), &self.federation_id)
+        gateway_http::routing_info(gateway, &self.federation_id)
             .await
             .map_err(|_| RoutingInfoError::FailedToRequestRoutingInfo)
     }
@@ -243,7 +242,7 @@ impl LightningClientModule {
     pub async fn send(
         &self,
         invoice: Bolt11Invoice,
-        gateway: Option<SafeUrl>,
+        gateway: Option<String>,
     ) -> Result<OperationId, SendPaymentError> {
         let amount = invoice
             .amount_milli_satoshis()
@@ -376,7 +375,7 @@ impl LightningClientModule {
         amount: Amount,
         expiry_secs: u32,
         description: Bolt11InvoiceDescription,
-        gateway: Option<SafeUrl>,
+        gateway: Option<String>,
     ) -> Result<Bolt11Invoice, ReceiveError> {
         let receive_keypair = self
             .module_root_secret
@@ -402,7 +401,7 @@ impl LightningClientModule {
         amount: Amount,
         expiry_secs: u32,
         description: Bolt11InvoiceDescription,
-        gateway: Option<SafeUrl>,
+        gateway: Option<String>,
     ) -> Result<Bolt11Invoice, ReceiveError> {
         let ephemeral_kp = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
@@ -467,7 +466,7 @@ impl LightningClientModule {
         );
 
         let invoice = gateway_http::bolt11_invoice(
-            gateway.clone(),
+            &gateway,
             self.federation_id,
             contract.clone(),
             amount,
@@ -567,8 +566,8 @@ impl LightningClientModule {
     /// to use for testing purposes.
     pub async fn generate_lnurl(
         &self,
-        recurringd: SafeUrl,
-        gateway: Option<SafeUrl>,
+        recurringd: String,
+        gateway: Option<String>,
     ) -> Result<String, GenerateLnurlError> {
         let gateways = if let Some(gateway) = gateway {
             vec![gateway]

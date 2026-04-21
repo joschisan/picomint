@@ -24,7 +24,6 @@ use picomint_core::ln::gateway_api::{PaymentFee, RoutingInfo, SendPaymentPayload
 use picomint_core::ln::{
     Bolt11InvoiceDescription, LightningInput, LightningInvoice, OutgoingWitness,
 };
-use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, OutPoint, wire};
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_invoice};
@@ -280,7 +279,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
 
     let ln = client.ln();
 
-    let gw: SafeUrl = env.gw_public.parse()?;
+    let gw: String = env.gw_public.parse()?;
 
     let mut events = pin!(ln_event_stream(client));
 
@@ -449,7 +448,7 @@ async fn wait_tx_accepted(
     panic!("operation event stream ended");
 }
 
-async fn test_mock_send_exactly_once(client: &Arc<Client>, mock_gw: SafeUrl) -> anyhow::Result<()> {
+async fn test_mock_send_exactly_once(client: &Arc<Client>, mock_gw: String) -> anyhow::Result<()> {
     info!("ln: test_mock_send_exactly_once");
 
     let ln = client.ln();
@@ -478,7 +477,7 @@ async fn test_mock_send_exactly_once(client: &Arc<Client>, mock_gw: SafeUrl) -> 
 
 async fn test_mock_send_refund_forfeit(
     client: &Arc<Client>,
-    mock_gw: SafeUrl,
+    mock_gw: String,
 ) -> anyhow::Result<()> {
     info!("ln: test_mock_send_refund_forfeit");
 
@@ -497,7 +496,7 @@ async fn test_mock_send_refund_forfeit(
     Ok(())
 }
 
-async fn test_mock_wrong_network(client: &Arc<Client>, mock_gw: SafeUrl) -> anyhow::Result<()> {
+async fn test_mock_wrong_network(client: &Arc<Client>, mock_gw: String) -> anyhow::Result<()> {
     info!("ln: test_mock_wrong_network");
 
     match client.ln().send(signet_invoice(), Some(mock_gw)).await {
@@ -515,7 +514,7 @@ async fn test_mock_wrong_network(client: &Arc<Client>, mock_gw: SafeUrl) -> anyh
 
 async fn test_claim_outgoing_contract(
     client: &Arc<Client>,
-    mock_gw: SafeUrl,
+    mock_gw: String,
 ) -> anyhow::Result<()> {
     info!("ln: test_claim_outgoing_contract");
 
@@ -580,7 +579,7 @@ async fn test_claim_outgoing_contract(
 async fn test_unilateral_refund(
     env: &TestEnv,
     client: &Arc<Client>,
-    mock_gw: SafeUrl,
+    mock_gw: String,
 ) -> anyhow::Result<()> {
     info!("ln: test_unilateral_refund");
 
@@ -617,8 +616,8 @@ async fn test_lnurl_recurringd_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
     // Fresh client so the receive-event stream starts empty.
     let client = env.new_client().await?;
 
-    let gw: SafeUrl = env.gw_public.parse()?;
-    let recurringd: SafeUrl = env.recurring_url.parse()?;
+    let gw: String = env.gw_public.parse()?;
+    let recurringd: String = env.recurring_url.parse()?;
 
     let lnurl = client
         .ln()
@@ -767,7 +766,7 @@ fn mock_invoice(preimage: [u8; 32], payment_secret: [u8; 32], currency: Currency
         .expect("invoice build")
 }
 
-async fn spawn_mock_gateway() -> anyhow::Result<SafeUrl> {
+async fn spawn_mock_gateway() -> anyhow::Result<String> {
     let app = Router::new()
         .route(ROUTING_INFO_ENDPOINT, post(mock_routing_info))
         .route(SEND_PAYMENT_ENDPOINT, post(mock_send_payment));

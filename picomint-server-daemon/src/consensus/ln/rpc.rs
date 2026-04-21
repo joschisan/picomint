@@ -6,7 +6,6 @@ use picomint_core::OutPoint;
 use picomint_core::ln::ContractId;
 use picomint_core::ln::contracts::IncomingContract;
 use picomint_core::module::ApiError;
-use picomint_core::util::SafeUrl;
 use tokio::time::timeout;
 use tpe::DecryptionKeyShare;
 
@@ -105,7 +104,7 @@ pub async fn await_incoming_contracts(
     Ok((results, next_index))
 }
 
-pub fn gateways(ln: &Lightning, (): ()) -> Result<Vec<SafeUrl>, ApiError> {
+pub fn gateways(ln: &Lightning, (): ()) -> Result<Vec<String>, ApiError> {
     Ok(ln
         .db
         .begin_read()

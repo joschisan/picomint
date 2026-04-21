@@ -22,7 +22,6 @@ use picomint_core::ln::{
 };
 use picomint_core::secret::Secret;
 use picomint_core::time::duration_since_epoch;
-use picomint_core::util::SafeUrl;
 use picomint_encoding::Encodable;
 use picomint_lnurl::{InvoiceResponse, LnurlResponse, PayResponse, pay_request_tag};
 use picomint_logging::TracingSetup;
@@ -143,13 +142,15 @@ async fn invoice(
 
     info!(%params.amount, %gateway, "Created invoice");
 
-    let verify = gateway
-        .join(&format!("verify/{}", invoice.payment_hash()))
-        .expect("verify/{hash} is a valid relative path");
+    let verify = format!(
+        "{}/verify/{}",
+        gateway.trim_end_matches('/'),
+        invoice.payment_hash()
+    );
 
     Json(LnurlResponse::Ok(InvoiceResponse {
         pr: invoice.clone(),
-        verify: Some(verify.to_string()),
+        verify: Some(verify),
     }))
 }
 
@@ -157,10 +158,10 @@ async fn create_contract_and_fetch_invoice(
     federation_id: FederationId,
     recipient_pk: PublicKey,
     aggregate_pk: AggregatePublicKey,
-    gateways: Vec<SafeUrl>,
+    gateways: Vec<String>,
     amount: u64,
     expiry_secs: u32,
-) -> anyhow::Result<(SafeUrl, Bolt11Invoice)> {
+) -> anyhow::Result<(String, Bolt11Invoice)> {
     let ephemeral_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
     let shared_secret =
@@ -241,9 +242,9 @@ async fn create_contract_and_fetch_invoice(
 }
 
 async fn select_gateway(
-    gateways: Vec<SafeUrl>,
+    gateways: Vec<String>,
     federation_id: FederationId,
-) -> anyhow::Result<(RoutingInfo, SafeUrl)> {
+) -> anyhow::Result<(RoutingInfo, String)> {
     for gateway in gateways {
         if let Ok(routing_info) = gateway_request::<_, Option<RoutingInfo>>(
             &gateway,
@@ -263,14 +264,14 @@ async fn select_gateway(
 /// One-shot POST to a gateway endpoint with a JSON payload, returning the
 /// JSON-decoded response.
 async fn gateway_request<P: Serialize, T: DeserializeOwned>(
-    base_url: &SafeUrl,
+    base_url: &str,
     route: &str,
     payload: &P,
 ) -> anyhow::Result<T> {
-    let url = base_url.join(route).expect("Invalid base url");
+    let url = format!("{}/{route}", base_url.trim_end_matches('/'));
 
     let response = reqwest::Client::new()
-        .request(Method::POST, url.to_unsafe())
+        .request(Method::POST, url)
         .json(payload)
         .send()
         .await

@@ -19,7 +19,7 @@ use clap::{ArgGroup, Parser};
 use lightning::types::payment::PaymentHash;
 use picomint_core::Amount;
 use picomint_core::ln::gateway_api::PaymentFee;
-use picomint_core::util::SafeUrl;
+use url::Url;
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::kvstore::RedbKvStore;
 use picomint_gateway_daemon::{AppState, DB_FILE, cli, public};
@@ -61,11 +61,11 @@ pub struct GatewayOpts {
 
     /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
     #[arg(long, env = "ESPLORA_URL")]
-    pub esplora_url: Option<SafeUrl>,
+    pub esplora_url: Option<Url>,
 
     /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
     #[arg(long, env = "BITCOIND_URL")]
-    pub bitcoind_url: Option<SafeUrl>,
+    pub bitcoind_url: Option<Url>,
 
     /// The username to use when connecting to bitcoind
     #[arg(long, env = "BITCOIND_USERNAME")]

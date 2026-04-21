@@ -119,9 +119,9 @@ enum LnCommands {
 #[derive(Subcommand)]
 enum LnGatewayCommands {
     /// Add a vetted gateway
-    Add { url: String },
+    Add { url: url::Url },
     /// Remove a vetted gateway
-    Remove { url: String },
+    Remove { url: url::Url },
     /// List vetted gateways
     List,
 }
@@ -262,7 +262,9 @@ async fn main() -> Result<()> {
                         request(
                             data_dir,
                             ROUTE_MODULE_LN_GATEWAY_ADD,
-                            LnGatewayRequest { url },
+                            LnGatewayRequest {
+                                url: url.to_string(),
+                            },
                         )
                         .await?
                     }
@@ -270,7 +272,9 @@ async fn main() -> Result<()> {
                         request(
                             data_dir,
                             ROUTE_MODULE_LN_GATEWAY_REMOVE,
-                            LnGatewayRequest { url },
+                            LnGatewayRequest {
+                                url: url.to_string(),
+                            },
                         )
                         .await?
                     }

@@ -22,7 +22,6 @@ use picomint_core::ln::{
 use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::time::duration_since_epoch;
-use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_logging::LOG_MODULE_LN;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
@@ -374,14 +373,14 @@ impl Lightning {
         self.consensus_unix_time(&self.db.begin_read())
     }
 
-    pub async fn add_gateway_ui(&self, gateway: SafeUrl) -> bool {
+    pub async fn add_gateway_ui(&self, gateway: String) -> bool {
         let tx = self.db.begin_write();
         let is_new_entry = tx.insert(&GATEWAY, &gateway, &()).is_none();
         tx.commit();
         is_new_entry
     }
 
-    pub async fn remove_gateway_ui(&self, gateway: SafeUrl) -> bool {
+    pub async fn remove_gateway_ui(&self, gateway: String) -> bool {
         let tx = self.db.begin_write();
         let entry_existed = tx.remove(&GATEWAY, &gateway).is_some();
         tx.commit();
@@ -389,7 +388,7 @@ impl Lightning {
     }
 
     #[must_use]
-    pub fn gateways_ui(&self) -> Vec<SafeUrl> {
+    pub fn gateways_ui(&self) -> Vec<String> {
         self.db
             .begin_read()
             .iter(&GATEWAY, |r| r.map(|(url, ())| url).collect())

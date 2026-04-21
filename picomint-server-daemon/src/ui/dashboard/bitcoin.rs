@@ -1,14 +1,13 @@
 use maud::{Markup, html};
 use picomint_bitcoin_rpc::BitcoinRpcStatus;
-use picomint_core::util::SafeUrl;
 
-pub fn render(url: SafeUrl, status: &Option<BitcoinRpcStatus>) -> Markup {
+pub fn render(url: String, status: &Option<BitcoinRpcStatus>) -> Markup {
     html! {
         div class="card h-100" {
             div class="card-header dashboard-header" { "Bitcoin Rpc Connection" }
             div class="card-body" {
                 div class="alert alert-info mb-3" {
-                    (url.to_unsafe().to_string())
+                    (url)
                 }
 
                 @if let Some(status) = status {

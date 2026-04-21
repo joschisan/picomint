@@ -12,7 +12,6 @@ use picomint_core::ln::endpoint_constants::{
 };
 use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, RoutingInfo, SendPaymentPayload};
 use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
-use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, OutPoint};
 use reqwest::Method;
 use serde::Serialize;
@@ -36,13 +35,13 @@ pub enum GatewayError {
 /// operation, so a fresh `reqwest::Client` per call is fine — there is no
 /// long-lived stream of requests to amortize a shared client over.
 async fn request<P: Serialize, T: DeserializeOwned>(
-    base_url: &SafeUrl,
+    base_url: &str,
     method: Method,
     route: &str,
     payload: Option<P>,
 ) -> Result<T, GatewayError> {
-    let url = base_url.join(route).expect("Invalid base url");
-    let mut builder = reqwest::Client::new().request(method, url.to_unsafe());
+    let url = format!("{}/{route}", base_url.trim_end_matches('/'));
+    let mut builder = reqwest::Client::new().request(method, url);
     if let Some(payload) = payload {
         builder = builder.json(&payload);
     }
@@ -61,11 +60,11 @@ async fn request<P: Serialize, T: DeserializeOwned>(
 }
 
 pub async fn routing_info(
-    gateway_api: SafeUrl,
+    gateway_api: &str,
     federation_id: &FederationId,
 ) -> Result<Option<RoutingInfo>, GatewayError> {
     request(
-        &gateway_api,
+        gateway_api,
         Method::POST,
         ROUTING_INFO_ENDPOINT,
         Some(federation_id),
@@ -74,7 +73,7 @@ pub async fn routing_info(
 }
 
 pub async fn bolt11_invoice(
-    gateway_api: SafeUrl,
+    gateway_api: &str,
     federation_id: FederationId,
     contract: IncomingContract,
     amount: Amount,
@@ -82,7 +81,7 @@ pub async fn bolt11_invoice(
     expiry_secs: u32,
 ) -> Result<Bolt11Invoice, GatewayError> {
     request(
-        &gateway_api,
+        gateway_api,
         Method::POST,
         CREATE_BOLT11_INVOICE_ENDPOINT,
         Some(CreateBolt11InvoicePayload {
@@ -97,7 +96,7 @@ pub async fn bolt11_invoice(
 }
 
 pub async fn send_payment(
-    gateway_api: SafeUrl,
+    gateway_api: &str,
     federation_id: FederationId,
     outpoint: OutPoint,
     contract: OutgoingContract,
@@ -105,7 +104,7 @@ pub async fn send_payment(
     auth: Signature,
 ) -> Result<Result<[u8; 32], Signature>, GatewayError> {
     request(
-        &gateway_api,
+        gateway_api,
         Method::POST,
         SEND_PAYMENT_ENDPOINT,
         Some(SendPaymentPayload {

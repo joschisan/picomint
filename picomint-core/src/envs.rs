@@ -1,9 +1,6 @@
 use picomint_logging::LOG_CORE;
 use tracing::warn;
 
-/// Print sensitive secrets without redacting them. Use only for debugging.
-pub const DEBUG_SHOW_SECRETS_ENV: &str = "DEBUG_SHOW_SECRETS";
-
 /// Env var set by the integration test harness when daemons run as subprocesses
 /// of `picomint-integration-tests`.
 pub const IN_TEST_ENV: &str = "IN_TEST_ENV";

@@ -168,27 +168,19 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<LnGatewayRequest>,
     ) -> Result<Json<bool>, CliError> {
-        let url: picomint_core::util::SafeUrl = payload
-            .url
-            .parse()
-            .map_err(|e| CliError::internal(format!("Invalid URL: {e}")))?;
-        Ok(Json(api.server.ln.add_gateway_ui(url).await))
+        Ok(Json(api.server.ln.add_gateway_ui(payload.url).await))
     }
 
     async fn ln_gateway_remove(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<LnGatewayRequest>,
     ) -> Result<Json<bool>, CliError> {
-        let url: picomint_core::util::SafeUrl = payload
-            .url
-            .parse()
-            .map_err(|e| CliError::internal(format!("Invalid URL: {e}")))?;
-        Ok(Json(api.server.ln.remove_gateway_ui(url).await))
+        Ok(Json(api.server.ln.remove_gateway_ui(payload.url).await))
     }
 
     async fn ln_gateway_list(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<Vec<picomint_core::util::SafeUrl>>, CliError> {
+    ) -> Result<Json<Vec<String>>, CliError> {
         Ok(Json(api.server.ln.gateways_ui()))
     }
 
