@@ -21,11 +21,11 @@ use crate::ui::{
 };
 
 // Setup route constants
-pub const FEDERATION_SETUP_ROUTE: &str = "/federation_setup";
-pub const ADD_SETUP_CODE_ROUTE: &str = "/add_setup_code";
-pub const RESET_SETUP_CODES_ROUTE: &str = "/reset_setup_codes";
-pub const START_DKG_ROUTE: &str = "/start_dkg";
-pub const RESTORE_CONFIG_ROUTE: &str = "/restore_config";
+pub const FEDERATION_SETUP_ROUTE: &str = "/federation-setup";
+pub const ADD_SETUP_CODE_ROUTE: &str = "/add-setup-code";
+pub const RESET_SETUP_CODES_ROUTE: &str = "/reset-setup-codes";
+pub const START_DKG_ROUTE: &str = "/start-dkg";
+pub const RESTORE_CONFIG_ROUTE: &str = "/restore-config";
 pub const RECOVER_PAGE_ROUTE: &str = "/recover";
 
 #[derive(Debug, Deserialize)]
