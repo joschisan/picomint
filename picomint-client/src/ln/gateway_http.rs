@@ -40,7 +40,11 @@ async fn request<P: Serialize, T: DeserializeOwned>(
     route: &str,
     payload: Option<P>,
 ) -> Result<T, GatewayError> {
-    let url = format!("{}/{route}", base_url.trim_end_matches('/'));
+    let url = format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        route.trim_start_matches('/')
+    );
     let mut builder = reqwest::Client::new().request(method, url);
     if let Some(payload) = payload {
         builder = builder.json(&payload);

@@ -268,7 +268,11 @@ async fn gateway_request<P: Serialize, T: DeserializeOwned>(
     route: &str,
     payload: &P,
 ) -> anyhow::Result<T> {
-    let url = format!("{}/{route}", base_url.trim_end_matches('/'));
+    let url = format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        route.trim_start_matches('/')
+    );
 
     let response = reqwest::Client::new()
         .request(Method::POST, url)
