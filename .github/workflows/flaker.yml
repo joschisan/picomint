@@ -1,29 +1,53 @@
 name: Flaker
 
 on:
-  schedule:
-    - cron: '*/15 * * * *'
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
   group: flaker
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 240
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
     - uses: Swatinem/rust-cache@v2
       with:
         shared-key: picomint
+
+    - name: Wait for any running investigator
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        while [ "$(gh run list --workflow=investigator.yml --status=in_progress --json databaseId --jq 'length')" != "0" ]; do
+          echo "Investigator running; waiting 60s..."
+          sleep 60
+        done
+
     - name: Make test script executable
       run: chmod +x test-integration.sh
-    - name: Run integration tests
-      run: ./test-integration.sh
+
+    - name: Loop integration tests until failure or deadline
+      run: |
+        set -u
+        DEADLINE=$(($(date +%s) + 12000))  # ~3h 20m
+        i=0
+        while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+          i=$((i + 1))
+          echo "=== iteration $i ==="
+          if ! timeout 1200 ./test-integration.sh; then
+            echo "FAILED on iteration $i"
+            exit 1
+          fi
+        done
+        echo "Completed $i iterations within budget."
