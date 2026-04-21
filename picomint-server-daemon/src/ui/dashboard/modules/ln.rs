@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::extract::{Form, State};
 use axum::response::{IntoResponse, Redirect};
 use maud::{Markup, html};
-use picomint_core::util::SafeUrl;
+use url::Url;
 
 use crate::consensus::api::ConsensusApi;
 use crate::ui::auth::UserAuth;
@@ -16,7 +16,7 @@ pub const LN_REMOVE_ROUTE: &str = "/ln/remove";
 // Form for gateway management
 #[derive(serde::Deserialize)]
 pub struct GatewayForm {
-    pub gateway_url: SafeUrl,
+    pub gateway_url: Url,
 }
 
 // Function to render the Lightning module UI section
@@ -121,7 +121,12 @@ pub async fn post_add(
     _auth: UserAuth,
     Form(form): Form<GatewayForm>,
 ) -> impl IntoResponse {
-    state.api.server.ln.add_gateway_ui(form.gateway_url).await;
+    state
+        .api
+        .server
+        .ln
+        .add_gateway_ui(form.gateway_url.to_string())
+        .await;
 
     Redirect::to(ROOT_ROUTE).into_response()
 }
@@ -136,7 +141,7 @@ pub async fn post_remove(
         .api
         .server
         .ln
-        .remove_gateway_ui(form.gateway_url)
+        .remove_gateway_ui(form.gateway_url.to_string())
         .await;
 
     Redirect::to(ROOT_ROUTE).into_response()

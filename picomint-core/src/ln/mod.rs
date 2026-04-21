@@ -5,9 +5,10 @@
 
 pub mod config;
 pub mod contracts;
-pub mod endpoint_constants;
 pub mod gateway_api;
 pub mod lnurl;
+pub mod methods;
+pub mod routes;
 
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::schnorr::Signature;
@@ -66,23 +67,11 @@ pub enum OutgoingWitness {
     Cancel(Signature),
 }
 
-impl std::fmt::Display for LightningInput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LightningInput",)
-    }
-}
-
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub enum LightningOutput {
     Outgoing(OutgoingContract),
     Incoming(IncomingContract),
-}
-
-impl std::fmt::Display for LightningOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LightningOutput")
-    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
@@ -113,17 +102,4 @@ pub enum LightningOutputError {
 pub enum LightningConsensusItem {
     BlockCountVote(u64),
     UnixTimeVote(u64),
-}
-
-impl std::fmt::Display for LightningConsensusItem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BlockCountVote(c) => {
-                write!(f, "Block Count {c}")
-            }
-            Self::UnixTimeVote(t) => {
-                write!(f, "Unix Time {t}")
-            }
-        }
-    }
 }

@@ -122,13 +122,11 @@ where
         }
     }
 
-    pub fn resolved_name(&self, prefix: &[String]) -> String {
-        prefix
-            .iter()
-            .map(String::as_str)
-            .chain(std::iter::once(self.name))
-            .collect::<Vec<_>>()
-            .join("/")
+    pub fn resolved_name(&self, prefix: &Option<String>) -> String {
+        match prefix {
+            Some(p) => format!("{p}/{}", self.name),
+            None => self.name.to_string(),
+        }
     }
 }
 
@@ -165,7 +163,13 @@ macro_rules! table {
 #[derive(Clone)]
 pub struct Database {
     inner: Arc<DatabaseInner>,
-    prefix: Vec<String>,
+    /// Optional single-level namespace. `Some("federation-xyz")` causes every
+    /// table opened through this handle to resolve to `"federation-xyz/{label}"`
+    /// on disk. `None` means tables open at their bare label. Intentionally
+    /// flat — no stacking — since the only runtime isolation the codebase
+    /// needs is per-federation in the gateway; server-daemon modules disambiguate
+    /// at the label level (`"mint-note"`, etc.).
+    prefix: Option<String>,
 }
 
 struct DatabaseInner {
@@ -188,14 +192,6 @@ impl DatabaseInner {
     }
 }
 
-impl Debug for Database {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Database")
-            .field("prefix", &self.prefix)
-            .finish_non_exhaustive()
-    }
-}
-
 impl Database {
     /// Open (or create) a redb database at `path`. The only fallible entry
     /// point; every other public method panics internally on redb errors.
@@ -208,7 +204,7 @@ impl Database {
                 notify: Mutex::new(BTreeMap::new()),
                 global_notify: Arc::new(Notify::new()),
             }),
-            prefix: Vec::new(),
+            prefix: None,
         })
     }
 
@@ -224,21 +220,21 @@ impl Database {
                 notify: Mutex::new(BTreeMap::new()),
                 global_notify: Arc::new(Notify::new()),
             }),
-            prefix: Vec::new(),
+            prefix: None,
         }
     }
 
-    /// Carve out a sub-namespace. Composable:
-    /// `db.isolate("client_0").isolate("module_3")` produces tables named
-    /// `client_0/module_3/<table>` on disk.
-    pub fn isolate(&self, segment: impl Into<String>) -> Database {
-        let mut prefix = self.prefix.clone();
-
-        prefix.push(segment.into());
-
-        Self {
-            inner: self.inner.clone(),
-            prefix,
+    /// Carve out a single-level namespace. Resolves tables on disk as
+    /// `"{prefix}/{label}"`. Flat by design — panics if called on an
+    /// already-isolated handle. The only legitimate production use is the
+    /// gateway's per-federation client DB.
+    pub fn isolate(&self, prefix: impl std::fmt::Display) -> Database {
+        match self.prefix {
+            None => Self {
+                inner: self.inner.clone(),
+                prefix: Some(prefix.to_string()),
+            },
+            Some(_) => panic!("You tried to isolate a db twice"),
         }
     }
 
@@ -263,7 +259,6 @@ impl Database {
 
         ReadTransaction {
             tx,
-            db: self.inner.clone(),
             prefix: self.prefix.clone(),
         }
     }
@@ -327,8 +322,7 @@ impl Database {
 
 pub struct ReadTransaction {
     tx: redb::ReadTransaction,
-    db: Arc<DatabaseInner>,
-    prefix: Vec<String>,
+    prefix: Option<String>,
 }
 
 impl ReadTransaction {
@@ -336,46 +330,21 @@ impl ReadTransaction {
     pub fn as_ref(&self) -> ReadTxRef<'_> {
         ReadTxRef {
             tx: &self.tx,
-            db: &self.db,
             prefix: self.prefix.clone(),
         }
     }
-
-    /// Borrow a view with an additional prefix segment.
-    pub fn isolate(&self, segment: impl Into<String>) -> ReadTxRef<'_> {
-        let mut view = self.as_ref();
-
-        view.prefix.push(segment.into());
-
-        view
-    }
 }
 
-/// Borrowed view of a [`ReadTransaction`] with a possibly-extended prefix.
+/// Borrowed view of a [`ReadTransaction`] carrying its prefix.
 pub struct ReadTxRef<'tx> {
     tx: &'tx redb::ReadTransaction,
-    db: &'tx Arc<DatabaseInner>,
-    prefix: Vec<String>,
-}
-
-impl<'tx> ReadTxRef<'tx> {
-    pub fn isolate(&self, segment: impl Into<String>) -> ReadTxRef<'tx> {
-        let mut view = ReadTxRef {
-            tx: self.tx,
-            db: self.db,
-            prefix: self.prefix.clone(),
-        };
-
-        view.prefix.push(segment.into());
-
-        view
-    }
+    prefix: Option<String>,
 }
 
 pub struct WriteTransaction {
     tx: redb::WriteTransaction,
     db: Arc<DatabaseInner>,
-    prefix: Vec<String>,
+    prefix: Option<String>,
     /// Resolved names of tables opened for write during this tx. Populated any
     /// time a table is opened (including for read), used to notify waiters on
     /// commit. Over-notifies on pure reads — harmless but slightly noisy.
@@ -388,21 +357,10 @@ impl WriteTransaction {
     pub fn as_ref(&self) -> WriteTxRef<'_> {
         WriteTxRef {
             tx: &self.tx,
-            db: &self.db,
             prefix: self.prefix.clone(),
             touched: &self.touched,
             on_commit: &self.on_commit,
         }
-    }
-
-    /// Borrow a view with an additional prefix segment. Used by the engine to
-    /// hand a module-scoped view of a shared transaction to a server module.
-    pub fn isolate(&self, segment: impl Into<String>) -> WriteTxRef<'_> {
-        let mut view = self.as_ref();
-
-        view.prefix.push(segment.into());
-
-        view
     }
 
     /// Register a callback to run after a successful commit.
@@ -433,33 +391,18 @@ impl WriteTransaction {
     }
 }
 
-/// Borrowed view of a [`WriteTransaction`] with a possibly-extended prefix.
-/// This is what server modules receive from the consensus engine; they cannot
-/// commit, but they can read, write, isolate further, and register post-commit
-/// callbacks that the owning [`WriteTransaction::commit`] will fire.
+/// Borrowed view of a [`WriteTransaction`] carrying its prefix. This is what
+/// server modules receive from the consensus engine; they cannot commit, but
+/// they can read, write, and register post-commit callbacks that the owning
+/// [`WriteTransaction::commit`] will fire.
 pub struct WriteTxRef<'tx> {
     tx: &'tx redb::WriteTransaction,
-    db: &'tx Arc<DatabaseInner>,
-    prefix: Vec<String>,
+    prefix: Option<String>,
     touched: &'tx Mutex<BTreeSet<String>>,
     on_commit: &'tx Mutex<Vec<Box<dyn FnOnce() + Send + 'static>>>,
 }
 
 impl<'tx> WriteTxRef<'tx> {
-    pub fn isolate(&self, segment: impl Into<String>) -> WriteTxRef<'tx> {
-        let mut view = WriteTxRef {
-            tx: self.tx,
-            db: self.db,
-            prefix: self.prefix.clone(),
-            touched: self.touched,
-            on_commit: self.on_commit,
-        };
-
-        view.prefix.push(segment.into());
-
-        view
-    }
-
     /// Register a callback to run after a successful commit.
     pub fn on_commit(&self, f: impl FnOnce() + Send + 'static) {
         self.on_commit
@@ -1179,30 +1122,27 @@ mod tests {
     }
 
     #[test]
-    fn shared_tx_with_module_isolation() {
+    fn isolate_gives_separate_keyspaces() {
         let db = Database::open_in_memory();
 
-        let tx = db.begin_write();
+        let tx_a = db.isolate("a").begin_write();
+        tx_a.insert(&USERS, &1, &"alice".to_string());
+        tx_a.commit();
 
-        tx.insert(&USERS, &0, &"root".to_string());
+        let tx_b = db.isolate("b").begin_write();
+        tx_b.insert(&USERS, &1, &"bob".to_string());
+        tx_b.commit();
 
-        let m1 = tx.isolate("m1");
-        m1.insert(&USERS, &1, &"alice".to_string());
-
-        let m2 = tx.isolate("m2");
-        m2.insert(&USERS, &1, &"bob".to_string());
-
-        tx.commit();
-
-        assert_eq!(db.begin_read().get(&USERS, &0), Some("root".into()));
         assert_eq!(
-            db.begin_read().isolate("m1").get(&USERS, &1),
+            db.isolate("a").begin_read().get(&USERS, &1),
             Some("alice".into())
         );
         assert_eq!(
-            db.begin_read().isolate("m2").get(&USERS, &1),
+            db.isolate("b").begin_read().get(&USERS, &1),
             Some("bob".into())
         );
+        // Root (no prefix) sees neither.
+        assert_eq!(db.begin_read().get(&USERS, &1), None);
     }
 
     #[test]

@@ -16,7 +16,7 @@ use crate::{TxAcceptEvent, TxRejectEvent};
 
 /// Per-module bundle of API handles, the shared client db, and federation
 /// config. Each module is constructed with one of these.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ClientContext {
     api: FederationApi,
     api_scope: ApiScope,

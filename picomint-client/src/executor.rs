@@ -92,12 +92,6 @@ pub struct ModuleExecutor<S: StateMachine> {
     inner: Arc<Inner<S>>,
 }
 
-impl<S: StateMachine> Debug for ModuleExecutor<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ModuleExecutor<{}>", std::any::type_name::<S>())
-    }
-}
-
 struct Inner<S: StateMachine> {
     db: Database,
     context: S::Context,

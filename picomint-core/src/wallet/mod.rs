@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod config;
-pub mod endpoint_constants;
+pub mod methods;
 
 pub const KIND: ModuleKind = ModuleKind::Wallet;
 
@@ -102,22 +102,6 @@ pub enum WalletConsensusItem {
     Signatures(Txid, Vec<Signature>),
 }
 
-impl std::fmt::Display for WalletConsensusItem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BlockCount(count) => {
-                write!(f, "Wallet Block Count {count}")
-            }
-            Self::Feerate(feerate) => {
-                write!(f, "Wallet Feerate Vote {feerate:?}")
-            }
-            Self::Signatures(..) => {
-                write!(f, "Wallet Signatures")
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct WalletInput {
     pub output_index: u64,
@@ -125,23 +109,11 @@ pub struct WalletInput {
     pub fee: bitcoin::Amount,
 }
 
-impl std::fmt::Display for WalletInput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Wallet PegIn for output index {}", self.output_index)
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct WalletOutput {
     pub destination: StandardScript,
     pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
-}
-
-impl std::fmt::Display for WalletOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Wallet PegOut {}", self.value)
-    }
 }
 
 #[derive(Debug, Error, Encodable, Decodable, Hash, Clone, Eq, PartialEq)]

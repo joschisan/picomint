@@ -1,5 +1,4 @@
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
-use picomint_core::util::SafeUrl;
 use picomint_core::{OutPoint, PeerId};
 use picomint_redb::table;
 use tpe::DecryptionKeyShare;
@@ -7,43 +6,43 @@ use tpe::DecryptionKeyShare;
 table!(
     BLOCK_COUNT_VOTE,
     PeerId => u64,
-    "block-count-vote",
+    "ln-block-count-vote",
 );
 
 table!(
     UNIX_TIME_VOTE,
     PeerId => u64,
-    "unix-time-vote",
+    "ln-unix-time-vote",
 );
 
 table!(
     INCOMING_CONTRACT,
     OutPoint => IncomingContract,
-    "incoming-contract",
+    "ln-incoming-contract",
 );
 
 table!(
     OUTGOING_CONTRACT,
     OutPoint => OutgoingContract,
-    "outgoing-contract",
+    "ln-outgoing-contract",
 );
 
 table!(
     DECRYPTION_KEY_SHARE,
     OutPoint => DecryptionKeyShare,
-    "decryption-key-share",
+    "ln-decryption-key-share",
 );
 
 table!(
     PREIMAGE,
     OutPoint => [u8; 32],
-    "preimage",
+    "ln-preimage",
 );
 
 table!(
     GATEWAY,
-    SafeUrl => (),
-    "gateway",
+    String => (),
+    "ln-gateway",
 );
 
 // Incoming contracts are indexed in three ways:
@@ -59,17 +58,17 @@ table!(
 table!(
     INCOMING_CONTRACT_STREAM_INDEX,
     () => u64,
-    "incoming-contract-stream-index",
+    "ln-incoming-contract-stream-index",
 );
 
 table!(
     INCOMING_CONTRACT_STREAM,
     u64 => (OutPoint, IncomingContract),
-    "incoming-contract-stream",
+    "ln-incoming-contract-stream",
 );
 
 table!(
     INCOMING_CONTRACT_INDEX,
     OutPoint => u64,
-    "incoming-contract-index",
+    "ln-incoming-contract-index",
 );

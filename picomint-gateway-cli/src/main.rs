@@ -5,29 +5,27 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use anyhow::{Context as _, Result, ensure};
-use bitcoin::address::NetworkUnchecked;
-use bitcoin::secp256k1::PublicKey;
 use clap::{Parser, Subcommand};
 use http_body_util::{BodyExt, Full};
 use hyper::Request;
 use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use picomint_core::Amount;
-use picomint_core::config::FederationId;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, FederationBalanceRequest, FederationConfigRequest, FederationJoinRequest,
+    FederationMintCountRequest, FederationMintReceiveRequest, FederationMintSendRequest,
+    FederationWalletReceiveRequest, FederationWalletSendFeeRequest, FederationWalletSendRequest,
     LdkChannelCloseRequest, LdkChannelOpenRequest, LdkInvoiceCreateRequest, LdkInvoicePayRequest,
-    LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest, MintCountRequest,
-    MintReceiveRequest, MintSendRequest, QueryRequest, ROUTE_FEDERATION_BALANCE,
-    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
-    ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST,
-    ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY,
-    ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT,
-    ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC, ROUTE_MODULE_MINT_COUNT,
-    ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_INFO,
-    ROUTE_MODULE_WALLET_RECEIVE, ROUTE_MODULE_WALLET_SEND, ROUTE_MODULE_WALLET_SEND_FEE,
-    ROUTE_QUERY, WalletInfoRequest, WalletReceiveRequest, WalletSendFeeRequest, WalletSendRequest,
+    LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest, QueryRequest,
+    ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
+    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
+    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
+    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
+    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    ROUTE_MNEMONIC, ROUTE_QUERY,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -59,18 +57,8 @@ enum Commands {
     /// Federation management
     #[command(subcommand)]
     Federation(FederationCommands),
-    /// Per-federation module commands
-    Module {
-        /// Federation ID
-        federation_id: FederationId,
-        #[command(subcommand)]
-        module: ModuleCommands,
-    },
     /// Run a SQL query against the in-memory gw-event analytics tables
-    Query {
-        /// SQL query (e.g. `SELECT * FROM payments LIMIT 10`)
-        sql: String,
-    },
+    Query(QueryRequest),
 }
 
 #[derive(Subcommand)]
@@ -78,25 +66,17 @@ enum LdkCommands {
     /// Get node balances
     Balances,
     /// On-chain operations
-    Onchain {
-        #[command(subcommand)]
-        command: LdkOnchainCommands,
-    },
+    #[command(subcommand)]
+    Onchain(LdkOnchainCommands),
     /// Channel operations
-    Channel {
-        #[command(subcommand)]
-        command: LdkChannelCommands,
-    },
+    #[command(subcommand)]
+    Channel(LdkChannelCommands),
     /// Invoice operations
-    Invoice {
-        #[command(subcommand)]
-        command: LdkInvoiceCommands,
-    },
+    #[command(subcommand)]
+    Invoice(LdkInvoiceCommands),
     /// Peer management
-    Peer {
-        #[command(subcommand)]
-        command: LdkPeerCommands,
-    },
+    #[command(subcommand)]
+    Peer(LdkPeerCommands),
 }
 
 #[derive(Subcommand)]
@@ -104,34 +84,15 @@ enum LdkOnchainCommands {
     /// Get a receive address
     Receive,
     /// Send funds
-    Send {
-        #[arg(long)]
-        address: bitcoin::Address<NetworkUnchecked>,
-        #[arg(long)]
-        amount: bitcoin::Amount,
-        #[arg(long)]
-        sats_per_vbyte: u64,
-    },
+    Send(LdkOnchainSendRequest),
 }
 
 #[derive(Subcommand)]
 enum LdkChannelCommands {
     /// Open a channel
-    Open {
-        pubkey: PublicKey,
-        host: String,
-        channel_size_sats: u64,
-        #[arg(long)]
-        push_amount_sats: Option<u64>,
-    },
+    Open(LdkChannelOpenRequest),
     /// Close channels with a peer
-    Close {
-        pubkey: PublicKey,
-        #[arg(long)]
-        force: bool,
-        #[arg(long, required_unless_present = "force")]
-        sats_per_vbyte: Option<u64>,
-    },
+    Close(LdkChannelCloseRequest),
     /// List channels
     List,
 }
@@ -139,23 +100,17 @@ enum LdkChannelCommands {
 #[derive(Subcommand)]
 enum LdkInvoiceCommands {
     /// Create a bolt11 invoice
-    Create {
-        amount_msats: u64,
-        #[arg(long)]
-        expiry_secs: Option<u32>,
-        #[arg(long)]
-        description: Option<String>,
-    },
+    Create(LdkInvoiceCreateRequest),
     /// Pay a bolt11 invoice
-    Pay { invoice: String },
+    Pay(LdkInvoicePayRequest),
 }
 
 #[derive(Subcommand)]
 enum LdkPeerCommands {
     /// Connect to a peer
-    Connect { pubkey: PublicKey, host: String },
+    Connect(LdkPeerConnectRequest),
     /// Disconnect from a peer
-    Disconnect { pubkey: PublicKey },
+    Disconnect(LdkPeerDisconnectRequest),
     /// List peers
     List,
 }
@@ -163,15 +118,18 @@ enum LdkPeerCommands {
 #[derive(Subcommand)]
 enum FederationCommands {
     /// Join a federation
-    Join { invite: String },
+    Join(FederationJoinRequest),
     /// List connected federations
     List,
     /// Get a connected federation's JSON client config
-    Config { federation_id: FederationId },
-    /// Get invite code for a federation
-    Invite { federation_id: FederationId },
+    Config(FederationConfigRequest),
+    /// Export invite codes for every connected federation
+    Invite,
     /// Get a federation's ecash balance
-    Balance { federation_id: FederationId },
+    Balance(FederationBalanceRequest),
+    /// Per-federation module commands
+    #[command(subcommand)]
+    Module(ModuleCommands),
 }
 
 #[derive(Subcommand)]
@@ -187,28 +145,21 @@ enum ModuleCommands {
 #[derive(Subcommand)]
 enum MintCommands {
     /// Count ecash notes by denomination
-    Count,
+    Count(FederationMintCountRequest),
     /// Send ecash
-    Send { amount: Amount },
+    Send(FederationMintSendRequest),
     /// Receive ecash
-    Receive { ecash: String },
+    Receive(FederationMintReceiveRequest),
 }
 
 #[derive(Subcommand)]
 enum WalletCommands {
-    /// Query wallet info
-    Info { subcommand: String },
     /// Get send fee estimate
-    SendFee,
+    SendFee(FederationWalletSendFeeRequest),
     /// Send onchain from federation wallet
-    Send {
-        address: bitcoin::Address<NetworkUnchecked>,
-        amount: bitcoin::Amount,
-        #[arg(long)]
-        fee: Option<bitcoin::Amount>,
-    },
+    Send(FederationWalletSendRequest),
     /// Get receive address
-    Receive,
+    Receive(FederationWalletReceiveRequest),
 }
 
 /// Tiny connector that dials a fixed Unix socket path, ignoring the URI
@@ -279,228 +230,70 @@ fn print_json(value: &Value) {
 }
 
 #[tokio::main(flavor = "current_thread")]
-#[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let d = &cli.data_dir;
 
     let result = match cli.command {
-        Commands::Query { sql } => request(d, ROUTE_QUERY, QueryRequest { sql }).await?,
         Commands::Info => request(d, ROUTE_INFO, ()).await?,
         Commands::Mnemonic => request(d, ROUTE_MNEMONIC, ()).await?,
+        Commands::Query(req) => request(d, ROUTE_QUERY, req).await?,
+
         Commands::Ldk(cmd) => match cmd {
             LdkCommands::Balances => request(d, ROUTE_LDK_BALANCES, ()).await?,
-            LdkCommands::Onchain { command } => match command {
+            LdkCommands::Onchain(cmd) => match cmd {
                 LdkOnchainCommands::Receive => request(d, ROUTE_LDK_ONCHAIN_RECEIVE, ()).await?,
-                LdkOnchainCommands::Send {
-                    address,
-                    amount,
-                    sats_per_vbyte,
-                } => {
-                    request(
-                        d,
-                        ROUTE_LDK_ONCHAIN_SEND,
-                        LdkOnchainSendRequest {
-                            address,
-                            amount,
-                            sats_per_vbyte,
-                        },
-                    )
-                    .await?
-                }
+                LdkOnchainCommands::Send(req) => request(d, ROUTE_LDK_ONCHAIN_SEND, req).await?,
             },
-            LdkCommands::Channel { command } => match command {
-                LdkChannelCommands::Open {
-                    pubkey,
-                    host,
-                    channel_size_sats,
-                    push_amount_sats,
-                } => {
-                    request(
-                        d,
-                        ROUTE_LDK_CHANNEL_OPEN,
-                        LdkChannelOpenRequest {
-                            pubkey,
-                            host,
-                            channel_size_sats,
-                            push_amount_sats: push_amount_sats.unwrap_or(0),
-                        },
-                    )
-                    .await?
-                }
-                LdkChannelCommands::Close {
-                    pubkey,
-                    force,
-                    sats_per_vbyte,
-                } => {
-                    request(
-                        d,
-                        ROUTE_LDK_CHANNEL_CLOSE,
-                        LdkChannelCloseRequest {
-                            pubkey,
-                            force,
-                            sats_per_vbyte,
-                        },
-                    )
-                    .await?
-                }
+            LdkCommands::Channel(cmd) => match cmd {
+                LdkChannelCommands::Open(req) => request(d, ROUTE_LDK_CHANNEL_OPEN, req).await?,
+                LdkChannelCommands::Close(req) => request(d, ROUTE_LDK_CHANNEL_CLOSE, req).await?,
                 LdkChannelCommands::List => request(d, ROUTE_LDK_CHANNEL_LIST, ()).await?,
             },
-            LdkCommands::Invoice { command } => match command {
-                LdkInvoiceCommands::Create {
-                    amount_msats,
-                    expiry_secs,
-                    description,
-                } => {
-                    request(
-                        d,
-                        ROUTE_LDK_INVOICE_CREATE,
-                        LdkInvoiceCreateRequest {
-                            amount_msats,
-                            expiry_secs,
-                            description,
-                        },
-                    )
-                    .await?
+            LdkCommands::Invoice(cmd) => match cmd {
+                LdkInvoiceCommands::Create(req) => {
+                    request(d, ROUTE_LDK_INVOICE_CREATE, req).await?
                 }
-                LdkInvoiceCommands::Pay { invoice } => {
-                    let invoice: lightning_invoice::Bolt11Invoice =
-                        invoice.parse().context("Invalid bolt11 invoice")?;
-                    request(d, ROUTE_LDK_INVOICE_PAY, LdkInvoicePayRequest { invoice }).await?
-                }
+                LdkInvoiceCommands::Pay(req) => request(d, ROUTE_LDK_INVOICE_PAY, req).await?,
             },
-            LdkCommands::Peer { command } => match command {
-                LdkPeerCommands::Connect { pubkey, host } => {
-                    request(
-                        d,
-                        ROUTE_LDK_PEER_CONNECT,
-                        LdkPeerConnectRequest { pubkey, host },
-                    )
-                    .await?
-                }
-                LdkPeerCommands::Disconnect { pubkey } => {
-                    request(
-                        d,
-                        ROUTE_LDK_PEER_DISCONNECT,
-                        LdkPeerDisconnectRequest { pubkey },
-                    )
-                    .await?
+            LdkCommands::Peer(cmd) => match cmd {
+                LdkPeerCommands::Connect(req) => request(d, ROUTE_LDK_PEER_CONNECT, req).await?,
+                LdkPeerCommands::Disconnect(req) => {
+                    request(d, ROUTE_LDK_PEER_DISCONNECT, req).await?
                 }
                 LdkPeerCommands::List => request(d, ROUTE_LDK_PEER_LIST, ()).await?,
             },
         },
 
         Commands::Federation(cmd) => match cmd {
-            FederationCommands::Join { invite } => {
-                request(d, ROUTE_FEDERATION_JOIN, FederationJoinRequest { invite }).await?
-            }
+            FederationCommands::Join(req) => request(d, ROUTE_FEDERATION_JOIN, req).await?,
             FederationCommands::List => request(d, ROUTE_FEDERATION_LIST, ()).await?,
-            FederationCommands::Config { federation_id } => {
-                request(
-                    d,
-                    ROUTE_FEDERATION_CONFIG,
-                    FederationConfigRequest {
-                        federation_id: Some(federation_id),
-                    },
-                )
-                .await?
-            }
-            FederationCommands::Invite { federation_id } => {
-                request(
-                    d,
-                    ROUTE_FEDERATION_INVITE,
-                    serde_json::json!({ "federation_id": federation_id }),
-                )
-                .await?
-            }
-            FederationCommands::Balance { federation_id } => {
-                request(
-                    d,
-                    ROUTE_FEDERATION_BALANCE,
-                    FederationBalanceRequest { federation_id },
-                )
-                .await?
-            }
-        },
-
-        Commands::Module {
-            federation_id,
-            module,
-        } => match module {
-            ModuleCommands::Mint(cmd) => match cmd {
-                MintCommands::Count => {
-                    request(
-                        d,
-                        ROUTE_MODULE_MINT_COUNT,
-                        MintCountRequest { federation_id },
-                    )
-                    .await?
-                }
-                MintCommands::Send { amount } => {
-                    request(
-                        d,
-                        ROUTE_MODULE_MINT_SEND,
-                        MintSendRequest {
-                            federation_id,
-                            amount,
-                        },
-                    )
-                    .await?
-                }
-                MintCommands::Receive { ecash } => {
-                    request(
-                        d,
-                        ROUTE_MODULE_MINT_RECEIVE,
-                        MintReceiveRequest { notes: ecash },
-                    )
-                    .await?
-                }
-            },
-            ModuleCommands::Wallet(cmd) => match cmd {
-                WalletCommands::Info { subcommand } => {
-                    request(
-                        d,
-                        ROUTE_MODULE_WALLET_INFO,
-                        WalletInfoRequest {
-                            federation_id,
-                            subcommand,
-                        },
-                    )
-                    .await?
-                }
-                WalletCommands::SendFee => {
-                    request(
-                        d,
-                        ROUTE_MODULE_WALLET_SEND_FEE,
-                        WalletSendFeeRequest { federation_id },
-                    )
-                    .await?
-                }
-                WalletCommands::Send {
-                    address,
-                    amount,
-                    fee,
-                } => {
-                    request(
-                        d,
-                        ROUTE_MODULE_WALLET_SEND,
-                        WalletSendRequest {
-                            federation_id,
-                            address,
-                            amount,
-                            fee,
-                        },
-                    )
-                    .await?
-                }
-                WalletCommands::Receive => {
-                    request(
-                        d,
-                        ROUTE_MODULE_WALLET_RECEIVE,
-                        WalletReceiveRequest { federation_id },
-                    )
-                    .await?
-                }
+            FederationCommands::Config(req) => request(d, ROUTE_FEDERATION_CONFIG, req).await?,
+            FederationCommands::Invite => request(d, ROUTE_FEDERATION_INVITE, ()).await?,
+            FederationCommands::Balance(req) => request(d, ROUTE_FEDERATION_BALANCE, req).await?,
+            FederationCommands::Module(cmd) => match cmd {
+                ModuleCommands::Mint(cmd) => match cmd {
+                    MintCommands::Count(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_MINT_COUNT, req).await?
+                    }
+                    MintCommands::Send(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_MINT_SEND, req).await?
+                    }
+                    MintCommands::Receive(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_MINT_RECEIVE, req).await?
+                    }
+                },
+                ModuleCommands::Wallet(cmd) => match cmd {
+                    WalletCommands::SendFee(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, req).await?
+                    }
+                    WalletCommands::Send(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_WALLET_SEND, req).await?
+                    }
+                    WalletCommands::Receive(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, req).await?
+                    }
+                },
             },
         },
     };

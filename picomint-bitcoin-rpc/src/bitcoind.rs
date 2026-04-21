@@ -1,10 +1,8 @@
-use anyhow::anyhow;
 use bitcoin::{BlockHash, Transaction};
 use bitcoincore_rpc::Error::JsonRpc;
 use bitcoincore_rpc::bitcoincore_rpc_json::EstimateMode;
 use bitcoincore_rpc::jsonrpc::Error::Rpc;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
-use picomint_core::util::SafeUrl;
 use tokio::task::block_in_place;
 
 use crate::Feerate;
@@ -14,16 +12,12 @@ use tracing::info;
 #[derive(Debug)]
 pub struct BitcoindClient {
     client: Client,
-    url: SafeUrl,
+    url: String,
 }
 
 impl BitcoindClient {
-    pub fn new(username: String, password: String, url: &SafeUrl) -> anyhow::Result<Self> {
+    pub fn new(username: String, password: String, url: &str) -> anyhow::Result<Self> {
         let auth = Auth::UserPass(username, password);
-
-        let url = url
-            .without_auth()
-            .map_err(|()| anyhow!("Failed to strip auth from Bitcoin Rpc Url"))?;
 
         info!(
             target: LOG_SERVER,
@@ -31,12 +25,12 @@ impl BitcoindClient {
             "Initializing bitcoin bitcoind backend"
         );
         Ok(Self {
-            client: Client::new(url.as_str(), auth)?,
-            url,
+            client: Client::new(url, auth)?,
+            url: url.to_string(),
         })
     }
 
-    pub fn url(&self) -> SafeUrl {
+    pub fn url(&self) -> String {
         self.url.clone()
     }
 

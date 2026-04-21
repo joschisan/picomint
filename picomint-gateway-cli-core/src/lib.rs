@@ -1,9 +1,12 @@
 use std::collections::BTreeMap;
 
 use bitcoin::address::NetworkUnchecked;
+use clap::Args;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::config::FederationId;
+use picomint_core::core::OperationId;
 use picomint_core::invite_code::InviteCode;
+use picomint_core::mint::Denomination;
 use picomint_core::{Amount, PeerId, secp256k1};
 use serde::{Deserialize, Serialize};
 
@@ -39,18 +42,18 @@ pub const ROUTE_FEDERATION_BALANCE: &str = "/federation/balance";
 pub const ROUTE_QUERY: &str = "/query";
 
 // Per-federation module commands
-pub const ROUTE_MODULE_MINT_COUNT: &str = "/module/mint/count";
-pub const ROUTE_MODULE_MINT_SEND: &str = "/module/mint/send";
-pub const ROUTE_MODULE_MINT_RECEIVE: &str = "/module/mint/receive";
-pub const ROUTE_MODULE_WALLET_INFO: &str = "/module/wallet/info";
-pub const ROUTE_MODULE_WALLET_SEND_FEE: &str = "/module/wallet/send-fee";
-pub const ROUTE_MODULE_WALLET_SEND: &str = "/module/wallet/send";
-pub const ROUTE_MODULE_WALLET_RECEIVE: &str = "/module/wallet/receive";
+pub const ROUTE_FEDERATION_MODULE_MINT_COUNT: &str = "/federation/module/mint/count";
+pub const ROUTE_FEDERATION_MODULE_MINT_SEND: &str = "/federation/module/mint/send";
+pub const ROUTE_FEDERATION_MODULE_MINT_RECEIVE: &str = "/federation/module/mint/receive";
+pub const ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE: &str = "/federation/module/wallet/send-fee";
+pub const ROUTE_FEDERATION_MODULE_WALLET_SEND: &str = "/federation/module/wallet/send";
+pub const ROUTE_FEDERATION_MODULE_WALLET_RECEIVE: &str = "/federation/module/wallet/receive";
 
 // --- /query ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct QueryRequest {
+    /// SQL query (e.g. `SELECT * FROM payments LIMIT 10`)
     pub sql: String,
 }
 
@@ -86,21 +89,24 @@ pub struct LdkBalancesResponse {
 
 // --- /ldk/channel/open ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkChannelOpenRequest {
     pub pubkey: secp256k1::PublicKey,
     pub host: String,
     pub channel_size_sats: u64,
+    #[arg(long, default_value_t = 0)]
     pub push_amount_sats: u64,
 }
 
 // --- /ldk/channel/close ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkChannelCloseRequest {
     pub pubkey: secp256k1::PublicKey,
+    #[arg(long)]
     #[serde(default)]
     pub force: bool,
+    #[arg(long, required_unless_present = "force")]
     pub sats_per_vbyte: Option<u64>,
 }
 
@@ -138,10 +144,13 @@ pub struct LdkOnchainReceiveResponse {
 
 // --- /ldk/onchain/send ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkOnchainSendRequest {
+    #[arg(long)]
     pub address: bitcoin::Address<NetworkUnchecked>,
+    #[arg(long)]
     pub amount: bitcoin::Amount,
+    #[arg(long)]
     pub sats_per_vbyte: u64,
 }
 
@@ -152,10 +161,12 @@ pub struct LdkOnchainSendResponse {
 
 // --- /ldk/invoice/create ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkInvoiceCreateRequest {
     pub amount_msats: u64,
+    #[arg(long)]
     pub expiry_secs: Option<u32>,
+    #[arg(long)]
     pub description: Option<String>,
 }
 
@@ -166,7 +177,7 @@ pub struct LdkInvoiceCreateResponse {
 
 // --- /ldk/invoice/pay ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkInvoicePayRequest {
     pub invoice: Bolt11Invoice,
 }
@@ -178,7 +189,7 @@ pub struct LdkInvoicePayResponse {
 
 // --- /ldk/peer/connect ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkPeerConnectRequest {
     pub pubkey: secp256k1::PublicKey,
     pub host: String,
@@ -186,7 +197,7 @@ pub struct LdkPeerConnectRequest {
 
 // --- /ldk/peer/disconnect ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkPeerDisconnectRequest {
     pub pubkey: secp256k1::PublicKey,
 }
@@ -207,16 +218,17 @@ pub struct PeerInfo {
 
 // --- /federation/join ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationJoinRequest {
     pub invite: String,
 }
 
 // --- /federation/balance ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationBalanceRequest {
-    pub federation_id: FederationId,
+    #[arg(long = "id")]
+    pub federation_id: Option<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -239,8 +251,9 @@ pub struct FederationInfo {
 
 // --- /federation/config ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationConfigRequest {
+    #[arg(long = "id")]
     pub federation_id: Option<FederationId>,
 }
 
@@ -256,71 +269,85 @@ pub struct FederationInviteResponse {
     pub invite_codes: BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>,
 }
 
-// --- /module/mint/count ---
+// --- /federation/module/mint/count ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintCountRequest {
-    pub federation_id: FederationId,
-}
-
-// --- /module/mint/send ---
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintSendRequest {
-    pub federation_id: FederationId,
-    pub amount: Amount,
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct FederationMintCountRequest {
+    #[arg(long = "id")]
+    pub federation_id: Option<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintSendResponse {
+pub struct FederationMintCountResponse {
+    /// Count of held ecash notes keyed by denomination.
+    pub counts: BTreeMap<Denomination, u64>,
+}
+
+// --- /federation/module/mint/send ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct FederationMintSendRequest {
+    pub amount: bitcoin::Amount,
+    #[arg(long = "id")]
+    pub federation_id: Option<FederationId>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FederationMintSendResponse {
     pub notes: String,
 }
 
-// --- /module/mint/receive ---
+// --- /federation/module/mint/receive ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintReceiveRequest {
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct FederationMintReceiveRequest {
     pub notes: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintReceiveResponse {
+pub struct FederationMintReceiveResponse {
     pub amount: Amount,
 }
 
-// --- /module/wallet/info ---
+// --- /federation/module/wallet/send-fee ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct WalletInfoRequest {
-    pub federation_id: FederationId,
-    pub subcommand: String,
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct FederationWalletSendFeeRequest {
+    #[arg(long = "id")]
+    pub federation_id: Option<FederationId>,
 }
 
-// --- /module/wallet/send-fee ---
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct WalletSendFeeRequest {
-    pub federation_id: FederationId,
+pub struct FederationWalletSendFeeResponse {
+    pub fee: bitcoin::Amount,
 }
 
-// --- /module/wallet/send ---
+// --- /federation/module/wallet/send ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct WalletSendRequest {
-    pub federation_id: FederationId,
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct FederationWalletSendRequest {
     pub address: bitcoin::Address<NetworkUnchecked>,
     pub amount: bitcoin::Amount,
+    #[arg(long)]
     pub fee: Option<bitcoin::Amount>,
-}
-
-// --- /module/wallet/receive ---
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct WalletReceiveRequest {
-    pub federation_id: FederationId,
+    #[arg(long = "id")]
+    pub federation_id: Option<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct WalletReceiveResponse {
+pub struct FederationWalletSendResponse {
+    pub operation_id: OperationId,
+}
+
+// --- /federation/module/wallet/receive ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct FederationWalletReceiveRequest {
+    #[arg(long = "id")]
+    pub federation_id: Option<FederationId>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FederationWalletReceiveResponse {
     pub address: bitcoin::Address<bitcoin::address::NetworkUnchecked>,
 }

@@ -1,8 +1,5 @@
 //! Static wire enums for the fixed module set: mint + ln + wallet.
 
-use std::fmt;
-
-use crate::core::ModuleKind;
 use crate::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
     LightningOutputError,
@@ -19,26 +16,6 @@ pub enum Input {
     Mint(MintInput),
     Ln(LightningInput),
     Wallet(WalletInput),
-}
-
-impl Input {
-    pub fn module_kind(&self) -> ModuleKind {
-        match self {
-            Self::Mint(_) => ModuleKind::Mint,
-            Self::Ln(_) => ModuleKind::Ln,
-            Self::Wallet(_) => ModuleKind::Wallet,
-        }
-    }
-}
-
-impl fmt::Display for Input {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Mint(v) => v.fmt(f),
-            Self::Ln(v) => v.fmt(f),
-            Self::Wallet(v) => v.fmt(f),
-        }
-    }
 }
 
 impl From<MintInput> for Input {
@@ -66,26 +43,6 @@ pub enum Output {
     Wallet(WalletOutput),
 }
 
-impl Output {
-    pub fn module_kind(&self) -> ModuleKind {
-        match self {
-            Self::Mint(_) => ModuleKind::Mint,
-            Self::Ln(_) => ModuleKind::Ln,
-            Self::Wallet(_) => ModuleKind::Wallet,
-        }
-    }
-}
-
-impl fmt::Display for Output {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Mint(v) => v.fmt(f),
-            Self::Ln(v) => v.fmt(f),
-            Self::Wallet(v) => v.fmt(f),
-        }
-    }
-}
-
 impl From<MintOutput> for Output {
     fn from(v: MintOutput) -> Self {
         Self::Mint(v)
@@ -109,26 +66,6 @@ pub enum ModuleConsensusItem {
     Mint(MintConsensusItem),
     Ln(LightningConsensusItem),
     Wallet(WalletConsensusItem),
-}
-
-impl ModuleConsensusItem {
-    pub fn module_kind(&self) -> ModuleKind {
-        match self {
-            Self::Mint(_) => ModuleKind::Mint,
-            Self::Ln(_) => ModuleKind::Ln,
-            Self::Wallet(_) => ModuleKind::Wallet,
-        }
-    }
-}
-
-impl fmt::Display for ModuleConsensusItem {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Mint(v) => v.fmt(f),
-            Self::Ln(v) => v.fmt(f),
-            Self::Wallet(v) => v.fmt(f),
-        }
-    }
 }
 
 impl From<MintConsensusItem> for ModuleConsensusItem {

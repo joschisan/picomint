@@ -70,6 +70,7 @@ pub fn gateway_federation_balance(
     gateway_cmd(gw_data_dir)
         .arg("federation")
         .arg("balance")
+        .arg("--id")
         .arg(fed_id)
         .run_cli::<FederationBalanceResponse>()
 }

@@ -26,7 +26,7 @@ use crate::ui::{
     login_submit_response, single_card_layout,
 };
 
-pub const BACKUP_CONFIG_ROUTE: &str = "/backup_config";
+pub const BACKUP_CONFIG_ROUTE: &str = "/backup-config";
 
 async fn login_form_handler() -> impl IntoResponse {
     Html(single_card_layout("Enter Password", login_form(None)).into_string())

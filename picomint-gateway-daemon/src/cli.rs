@@ -12,24 +12,32 @@ use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
+use picomint_client::Client;
 use picomint_client::gw::Preimage;
+use picomint_core::config::FederationId;
 use picomint_core::task::TaskHandle;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, ChannelInfo, FederationBalanceRequest, FederationBalanceResponse,
     FederationConfigRequest, FederationConfigResponse, FederationInviteResponse,
-    FederationJoinRequest, FederationListResponse, InfoResponse, LdkBalancesResponse,
-    LdkChannelCloseRequest, LdkChannelCloseResponse, LdkChannelListResponse, LdkChannelOpenRequest,
-    LdkInvoiceCreateRequest, LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
+    FederationJoinRequest, FederationListResponse, FederationMintCountRequest,
+    FederationMintCountResponse, FederationMintReceiveRequest, FederationMintReceiveResponse,
+    FederationMintSendRequest, FederationMintSendResponse, FederationWalletReceiveRequest,
+    FederationWalletReceiveResponse, FederationWalletSendFeeRequest,
+    FederationWalletSendFeeResponse, FederationWalletSendRequest, FederationWalletSendResponse,
+    InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelCloseResponse,
+    LdkChannelListResponse, LdkChannelOpenRequest, LdkInvoiceCreateRequest,
+    LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
     LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
-    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MintReceiveRequest,
-    MintReceiveResponse, MintSendRequest, MintSendResponse, MnemonicResponse, PeerInfo,
-    QueryRequest, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
-    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_INFO, ROUTE_LDK_BALANCES,
-    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
+    PeerInfo, QueryRequest, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
+    ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
+    ROUTE_FEDERATION_MODULE_MINT_COUNT, ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
+    ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
-    ROUTE_MNEMONIC, ROUTE_MODULE_MINT_RECEIVE, ROUTE_MODULE_MINT_SEND, ROUTE_MODULE_WALLET_RECEIVE,
-    ROUTE_QUERY, WalletReceiveRequest, WalletReceiveResponse,
+    ROUTE_MNEMONIC, ROUTE_QUERY,
 };
 use picomint_logging::LOG_GATEWAY;
 use reqwest::StatusCode;
@@ -129,9 +137,30 @@ fn router() -> Router<AppState> {
         .route(ROUTE_FEDERATION_INVITE, post(federation_invite))
         .route(ROUTE_FEDERATION_BALANCE, post(federation_balance))
         // Per-federation module commands
-        .route(ROUTE_MODULE_MINT_SEND, post(module_mint_send))
-        .route(ROUTE_MODULE_MINT_RECEIVE, post(module_mint_receive))
-        .route(ROUTE_MODULE_WALLET_RECEIVE, post(module_wallet_receive))
+        .route(
+            ROUTE_FEDERATION_MODULE_MINT_COUNT,
+            post(federation_module_mint_count),
+        )
+        .route(
+            ROUTE_FEDERATION_MODULE_MINT_SEND,
+            post(federation_module_mint_send),
+        )
+        .route(
+            ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
+            post(federation_module_mint_receive),
+        )
+        .route(
+            ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE,
+            post(federation_module_wallet_send_fee),
+        )
+        .route(
+            ROUTE_FEDERATION_MODULE_WALLET_SEND,
+            post(federation_module_wallet_send),
+        )
+        .route(
+            ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
+            post(federation_module_wallet_receive),
+        )
         // Analytics
         .route(ROUTE_QUERY, post(query))
 }
@@ -508,9 +537,12 @@ async fn federation_join(
             CliError::bad_request(format!("Invalid federation member string {e:?}"))
         })?;
 
-    let federation_id = invite_code.federation_id();
-
-    if state.clients.read().await.contains_key(&federation_id) {
+    if state
+        .clients
+        .read()
+        .await
+        .contains_key(&invite_code.federation_id)
+    {
         return Err(CliError::bad_request(
             "Federation has already been registered",
         ));
@@ -527,16 +559,16 @@ async fn federation_join(
         .clients
         .write()
         .await
-        .insert(federation_id, client.clone());
+        .insert(invite_code.federation_id, client.clone());
 
     crate::query::spawn_tail(
         &state.task_group,
         client,
-        federation_id,
+        invite_code.federation_id,
         state.query_state.clone(),
     );
 
-    debug!(target: LOG_GATEWAY, %federation_id, "Federation connected");
+    debug!(target: LOG_GATEWAY, federation_id = %invite_code.federation_id, "Federation connected");
 
     Ok(Json(()))
 }
@@ -566,10 +598,7 @@ async fn federation_balance(
     State(state): State<AppState>,
     Json(payload): Json<FederationBalanceRequest>,
 ) -> Result<Json<FederationBalanceResponse>, CliError> {
-    let client = state
-        .select_client(payload.federation_id)
-        .await
-        .ok_or(CliError::bad_request("Federation not connected"))?;
+    let client = resolve_client(&state, payload.federation_id).await?;
 
     let balance_msat = client
         .get_balance()
@@ -592,44 +621,76 @@ async fn federation_invite(
 // Per-federation module handlers
 // ---------------------------------------------------------------------------
 
+/// Resolve the target federation client. When `id` is `None` and the gateway
+/// has exactly one federation joined, that one is used; otherwise the caller
+/// must supply `--id`.
+async fn resolve_client(
+    state: &AppState,
+    id: Option<FederationId>,
+) -> Result<Arc<Client>, CliError> {
+    let clients = state.clients.read().await;
+    match id {
+        Some(id) => clients
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| CliError::bad_request("Federation not connected")),
+        None => {
+            if clients.len() > 1 {
+                return Err(CliError::bad_request(
+                    "Multiple federations connected — pass --id <FEDERATION_ID>",
+                ));
+            }
+            clients
+                .values()
+                .next()
+                .cloned()
+                .ok_or_else(|| CliError::bad_request("No federations connected"))
+        }
+    }
+}
+
+/// Count held ecash notes by denomination
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn federation_module_mint_count(
+    State(state): State<AppState>,
+    Json(payload): Json<FederationMintCountRequest>,
+) -> Result<Json<FederationMintCountResponse>, CliError> {
+    let client = resolve_client(&state, payload.federation_id).await?;
+    let counts = client.mint().get_count_by_denomination();
+    Ok(Json(FederationMintCountResponse { counts }))
+}
+
 /// Spend ecash from a federation
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn module_mint_send(
+async fn federation_module_mint_send(
     State(state): State<AppState>,
-    Json(payload): Json<MintSendRequest>,
-) -> Result<Json<MintSendResponse>, CliError> {
-    let client = state
-        .select_client(payload.federation_id)
-        .await
-        .ok_or(CliError::bad_request("Federation not connected"))?;
+    Json(payload): Json<FederationMintSendRequest>,
+) -> Result<Json<FederationMintSendResponse>, CliError> {
+    let client = resolve_client(&state, payload.federation_id).await?;
 
     let ecash = client
         .mint()
-        .send(payload.amount)
+        .send(picomint_core::Amount::from_sats(payload.amount.to_sat()))
         .await
         .map_err(CliError::internal)?;
 
-    let response = MintSendResponse {
+    Ok(Json(FederationMintSendResponse {
         notes: picomint_base32::encode(&ecash),
-    };
-    Ok(Json(response))
+    }))
 }
 
-/// Receive ecash into the gateway
+/// Receive ecash into the gateway. The ecash string itself carries the target
+/// federation id, so no `--id` is needed.
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn module_mint_receive(
+async fn federation_module_mint_receive(
     State(state): State<AppState>,
-    Json(payload): Json<MintReceiveRequest>,
-) -> Result<Json<MintReceiveResponse>, CliError> {
+    Json(payload): Json<FederationMintReceiveRequest>,
+) -> Result<Json<FederationMintReceiveResponse>, CliError> {
     let ecash: picomint_client::mint::ECash = picomint_base32::decode(&payload.notes)
         .map_err(|e| CliError::bad_request(format!("Invalid ECash: {e}")))?;
 
-    let federation_id = ecash
-        .mint()
-        .ok_or_else(|| CliError::bad_request("ECash does not contain federation id"))?;
-
     let client = state
-        .select_client(federation_id)
+        .select_client(ecash.mint)
         .await
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
@@ -640,23 +701,48 @@ async fn module_mint_receive(
         .receive(&ecash)
         .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
 
-    let response = MintReceiveResponse { amount };
-    Ok(Json(response))
+    Ok(Json(FederationMintReceiveResponse { amount }))
+}
+
+/// Fetch the current onchain send-fee for a federation
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn federation_module_wallet_send_fee(
+    State(state): State<AppState>,
+    Json(payload): Json<FederationWalletSendFeeRequest>,
+) -> Result<Json<FederationWalletSendFeeResponse>, CliError> {
+    let client = resolve_client(&state, payload.federation_id).await?;
+    let fee = client
+        .wallet()
+        .send_fee()
+        .await
+        .map_err(|e| CliError::internal(format!("Failed to fetch send fee: {e}")))?;
+    Ok(Json(FederationWalletSendFeeResponse { fee }))
+}
+
+/// Withdraw onchain from a federation
+#[instrument(target = LOG_GATEWAY, skip_all, err)]
+async fn federation_module_wallet_send(
+    State(state): State<AppState>,
+    Json(payload): Json<FederationWalletSendRequest>,
+) -> Result<Json<FederationWalletSendResponse>, CliError> {
+    let client = resolve_client(&state, payload.federation_id).await?;
+    let operation_id = client
+        .wallet()
+        .send(payload.address, payload.amount, payload.fee)
+        .await
+        .map_err(|e| CliError::internal(format!("Failed to send onchain: {e}")))?;
+    Ok(Json(FederationWalletSendResponse { operation_id }))
 }
 
 /// Generate deposit address for a federation
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn module_wallet_receive(
+async fn federation_module_wallet_receive(
     State(state): State<AppState>,
-    Json(payload): Json<WalletReceiveRequest>,
-) -> Result<Json<WalletReceiveResponse>, CliError> {
-    let client = state
-        .select_client(payload.federation_id)
-        .await
-        .ok_or(CliError::bad_request("Federation not connected"))?;
-
+    Json(payload): Json<FederationWalletReceiveRequest>,
+) -> Result<Json<FederationWalletReceiveResponse>, CliError> {
+    let client = resolve_client(&state, payload.federation_id).await?;
     let address = client.wallet().receive().await;
-    Ok(Json(WalletReceiveResponse {
+    Ok(Json(FederationWalletReceiveResponse {
         address: address.as_unchecked().clone(),
     }))
 }

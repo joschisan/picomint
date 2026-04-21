@@ -54,6 +54,7 @@ tokio = { workspace = true }
 tokio-rustls = { workspace = true }
 tpe = { workspace = true }
 tracing = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 test-log = { workspace = true }

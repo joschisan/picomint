@@ -44,7 +44,7 @@ enum RootSecretPath {
     Address,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WalletClientModule {
     root_secret: Secret,
     cfg: WalletConfigConsensus,
@@ -53,7 +53,7 @@ pub struct WalletClientModule {
     send_executor: ModuleExecutor<SendStateMachine>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WalletClientContext {
     pub client_ctx: ClientContext,
 }
@@ -133,7 +133,7 @@ impl WalletClientModule {
             .module_api()
             .wallet_send_fee()
             .await
-            .map_err(|e| SendError::FederationError(e.to_string()))?
+            .map_err(|_| SendError::FederationError)?
             .ok_or(SendError::NoConsensusFeerateAvailable)
     }
 
@@ -159,7 +159,7 @@ impl WalletClientModule {
                 .module_api()
                 .wallet_send_fee()
                 .await
-                .map_err(|e| SendError::FederationError(e.to_string()))?
+                .map_err(|_| SendError::FederationError)?
                 .ok_or(SendError::NoConsensusFeerateAvailable)?,
         };
 
@@ -354,7 +354,8 @@ impl WalletClientModule {
             .client_ctx
             .module_api()
             .wallet_output_info_slice(next_output_index, next_output_index + SLICE_SIZE)
-            .await?;
+            .await
+            .map_err(|_| anyhow!("Failed to fetch wallet output info slice"))?;
 
         for output in &outputs {
             if let Some(&address_index) = address_map.get(&output.script) {
@@ -385,7 +386,8 @@ impl WalletClientModule {
                         .client_ctx
                         .module_api()
                         .wallet_pending_tx_chain()
-                        .await?
+                        .await
+                        .map_err(|_| anyhow!("Failed to request wallet pending tx chain"))?
                         .len()
                         >= 3
                     {
@@ -396,7 +398,8 @@ impl WalletClientModule {
                         .client_ctx
                         .module_api()
                         .wallet_receive_fee()
-                        .await?
+                        .await
+                        .map_err(|_| anyhow!("Failed to request wallet receive fee"))?
                         .ok_or(anyhow!("No consensus feerate is available"))?;
 
                     if output.value > receive_fee {
@@ -432,8 +435,8 @@ pub enum SendError {
     WrongNetwork,
     #[error("The value is too small")]
     DustValue,
-    #[error("Federation returned an error: {0}")]
-    FederationError(String),
+    #[error("Could not determine the send fee")]
+    FederationError,
     #[error("No consensus feerate is available at this time")]
     NoConsensusFeerateAvailable,
     #[error("The client does not have sufficient funds to send the payment")]

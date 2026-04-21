@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
-use std::str::FromStr;
 
+use derive_more::{Display, FromStr};
 use serde::{Deserialize, Serialize};
 
 use picomint_encoding::{Decodable, Encodable};
@@ -20,32 +20,16 @@ use picomint_redb::consensus_key;
     Deserialize,
     Encodable,
     Decodable,
+    Display,
+    FromStr,
 )]
 pub struct PeerId(u8);
 
 consensus_key!(PeerId);
 
 impl PeerId {
-    pub fn new(id: u8) -> Self {
-        Self(id)
-    }
-
     pub fn to_usize(self) -> usize {
         self.0 as usize
-    }
-}
-
-impl std::fmt::Display for PeerId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl FromStr for PeerId {
-    type Err = <u8 as FromStr>::Err;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse().map(PeerId)
     }
 }
 
@@ -86,12 +70,6 @@ impl NumPeers {
     /// honest (assuming the federation is not compromised).
     pub fn one_honest(self) -> usize {
         self.max_evil() + 1
-    }
-
-    /// Returns the degree of an underlying polynomial to require threshold
-    /// signatures.
-    pub fn degree(self) -> usize {
-        self.threshold() - 1
     }
 
     /// Returns the number of guardians required to achieve consensus and

@@ -8,7 +8,6 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::contracts::OutgoingContract;
 use picomint_core::ln::{LightningInput, OutgoingWitness};
-use picomint_core::util::SafeUrl;
 use picomint_core::wire;
 use picomint_core::{OutPoint, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
@@ -43,7 +42,7 @@ pub struct SendSMCommon {
     pub operation_id: OperationId,
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
-    pub gateway_api: Option<SafeUrl>,
+    pub gateway_api: Option<String>,
     pub invoice: Option<LightningInvoice>,
     pub refund_keypair: Keypair,
 }
@@ -125,7 +124,7 @@ impl StateMachine for SendStateMachine {
 
 #[instrument(target = LOG_CLIENT_MODULE_LN, skip(refund_keypair))]
 async fn gateway_send_payment_sm(
-    gateway_api: SafeUrl,
+    gateway_api: String,
     federation_id: FederationId,
     outpoint: OutPoint,
     contract: OutgoingContract,
@@ -134,7 +133,7 @@ async fn gateway_send_payment_sm(
 ) -> Result<[u8; 32], Signature> {
     (|| async {
         let payment_result = crate::ln::gateway_http::send_payment(
-            gateway_api.clone(),
+            &gateway_api,
             federation_id,
             outpoint,
             contract.clone(),

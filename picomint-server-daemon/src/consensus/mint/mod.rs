@@ -4,19 +4,17 @@ mod rpc;
 use std::collections::BTreeMap;
 
 use anyhow::ensure;
-use picomint_core::core::ModuleKind;
 use picomint_core::mint::config::{
     MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
 };
-use picomint_core::mint::endpoint_constants::{
-    RECOVERY_COUNT_ENDPOINT, RECOVERY_SLICE_ENDPOINT, RECOVERY_SLICE_HASH_ENDPOINT,
-    SIGNATURE_SHARES_ENDPOINT, SIGNATURE_SHARES_RECOVERY_ENDPOINT,
+use picomint_core::mint::methods::{
+    METHOD_RECOVERY_COUNT, METHOD_RECOVERY_SLICE, METHOD_RECOVERY_SLICE_HASH,
+    METHOD_SIGNATURE_SHARES, METHOD_SIGNATURE_SHARES_RECOVERY,
 };
 use picomint_core::mint::{
     Denomination, MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError,
     RecoveryItem, verify_note,
 };
-use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::{Amount, InPoint, OutPoint, PeerId};
 use picomint_encoding::Encodable;
@@ -81,7 +79,6 @@ pub fn validate_config(identity: &PeerId, cfg: &MintConfig) -> anyhow::Result<()
     Ok(())
 }
 
-#[derive(Debug)]
 pub struct Mint {
     cfg: MintConfig,
     db: Database,
@@ -212,18 +209,11 @@ impl Mint {
         })
     }
 
-    pub async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
-        let items = dbtx.iter(&ISSUANCE_COUNTER, |r| {
-            r.map(|(denomination, count)| {
-                (
-                    format!("IssuanceCounter({denomination:?})"),
-                    -((denomination.amount().msats * count) as i64),
-                )
-            })
-            .collect::<Vec<_>>()
-        });
-
-        audit.add_items(ModuleKind::Mint, items);
+    pub async fn audit(&self, dbtx: &WriteTxRef<'_>) -> i64 {
+        dbtx.iter(&ISSUANCE_COUNTER, |r| {
+            r.map(|(denomination, count)| -((denomination.amount().msats * count) as i64))
+                .sum()
+        })
     }
 
     pub async fn handle_api(
@@ -232,13 +222,13 @@ impl Mint {
         req: ApiRequestErased,
     ) -> Result<Vec<u8>, ApiError> {
         match method {
-            SIGNATURE_SHARES_ENDPOINT => handler_async!(signature_shares, self, req).await,
-            SIGNATURE_SHARES_RECOVERY_ENDPOINT => {
+            METHOD_SIGNATURE_SHARES => handler_async!(signature_shares, self, req).await,
+            METHOD_SIGNATURE_SHARES_RECOVERY => {
                 handler!(signature_shares_recovery, self, req).await
             }
-            RECOVERY_SLICE_ENDPOINT => handler!(recovery_slice, self, req).await,
-            RECOVERY_SLICE_HASH_ENDPOINT => handler!(recovery_slice_hash, self, req).await,
-            RECOVERY_COUNT_ENDPOINT => handler!(recovery_count, self, req).await,
+            METHOD_RECOVERY_SLICE => handler!(recovery_slice, self, req).await,
+            METHOD_RECOVERY_SLICE_HASH => handler!(recovery_slice_hash, self, req).await,
+            METHOD_RECOVERY_COUNT => handler!(recovery_count, self, req).await,
             other => Err(ApiError::not_found(other.to_string())),
         }
     }

@@ -71,17 +71,6 @@ pub struct AppState {
     pub task_group: picomint_core::task::TaskGroup,
 }
 
-impl std::fmt::Debug for AppState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AppState")
-            .field("gateway_db", &self.gateway_db)
-            .field("api_addr", &self.api_addr)
-            .field("data_dir", &self.data_dir)
-            .field("node_id", &self.node.node_id())
-            .finish_non_exhaustive()
-    }
-}
-
 impl AppState {
     /// Retrieves a client for a given federation.
     pub async fn select_client(&self, federation_id: FederationId) -> Option<Arc<Client>> {

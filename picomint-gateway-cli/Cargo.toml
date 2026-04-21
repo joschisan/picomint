@@ -18,13 +18,10 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-bitcoin = { workspace = true }
 clap = { workspace = true }
 http-body-util = "0.1"
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
-lightning-invoice = { workspace = true }
-picomint-core = { workspace = true }
 picomint-gateway-cli-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

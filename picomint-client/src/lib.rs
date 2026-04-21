@@ -47,8 +47,8 @@ use api::{FederationApi, ServerError};
 pub use iroh::Endpoint;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
-use picomint_core::endpoint_constants::CLIENT_CONFIG_ENDPOINT;
 use picomint_core::invite_code::InviteCode;
+use picomint_core::methods::METHOD_CLIENT_CONFIG;
 use picomint_core::module::ApiRequestErased;
 use picomint_logging::LOG_CLIENT_NET;
 use query::FilterMap;
@@ -93,12 +93,12 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
     debug!(
         target: LOG_CLIENT_NET,
         invite = %picomint_base32::encode(invite),
-        peers = ?invite.peers(),
+        peers = ?invite.peers,
         "Downloading client config via invite code"
     );
 
-    let federation_id = invite.federation_id();
-    let api_from_invite = FederationApi::new(endpoint.clone(), invite.peers());
+    let federation_id = invite.federation_id;
+    let api_from_invite = FederationApi::new(endpoint.clone(), invite.peers.clone());
 
     let query_strategy = FilterMap::new(move |cfg: ConsensusConfig| {
         if federation_id != cfg.calculate_federation_id() {
@@ -113,10 +113,11 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
     let api_endpoints: BTreeMap<PeerId, picomint_core::config::PeerEndpoint> = api_from_invite
         .request_with_strategy(
             query_strategy,
-            CLIENT_CONFIG_ENDPOINT.to_owned(),
+            METHOD_CLIENT_CONFIG.to_owned(),
             ApiRequestErased::default(),
         )
-        .await?;
+        .await
+        .map_err(|_| anyhow::anyhow!("Failed to download client config from invite peer"))?;
 
     let api_endpoints = api_endpoints
         .into_iter()
@@ -128,10 +129,11 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
     let api_full = FederationApi::new(endpoint.clone(), api_endpoints);
     let client_config = api_full
         .request_current_consensus::<ConsensusConfig>(
-            CLIENT_CONFIG_ENDPOINT.to_owned(),
+            METHOD_CLIENT_CONFIG.to_owned(),
             ApiRequestErased::default(),
         )
-        .await?;
+        .await
+        .map_err(|_| anyhow::anyhow!("Failed to download client config from all peers"))?;
 
     if client_config.calculate_federation_id() != federation_id {
         bail!("Obtained client config has different federation id");

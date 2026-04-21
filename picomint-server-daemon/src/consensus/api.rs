@@ -5,10 +5,8 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::config::ConsensusConfig;
-use picomint_core::endpoint_constants::{
-    CLIENT_CONFIG_ENDPOINT, LIVENESS_ENDPOINT, SUBMIT_TRANSACTION_ENDPOINT,
-};
-use picomint_core::module::audit::{Audit, AuditSummary};
+use picomint_core::methods::{METHOD_CLIENT_CONFIG, METHOD_LIVENESS, METHOD_SUBMIT_TRANSACTION};
+use picomint_core::module::audit::AuditSummary;
 use picomint_core::module::{ApiError, ApiRequestErased};
 use picomint_core::transaction::{ConsensusItem, Transaction, TransactionError};
 
@@ -124,12 +122,7 @@ impl ConsensusApi {
         // Modules read their own tables during `audit`; we open a write tx and
         // drop it without commit after building the audit view.
         let tx = self.db.begin_write();
-
-        let mut audit = Audit::default();
-
-        self.server.audit(&tx, &mut audit).await;
-
-        AuditSummary::from_audit(&audit)
+        self.server.audit(&tx).await
     }
 }
 
@@ -140,9 +133,9 @@ impl ConsensusApi {
         req: ApiRequestErased,
     ) -> Result<Vec<u8>, ApiError> {
         match method {
-            SUBMIT_TRANSACTION_ENDPOINT => handler_async!(submit_transaction, self, req).await,
-            CLIENT_CONFIG_ENDPOINT => handler!(client_config, self, req).await,
-            LIVENESS_ENDPOINT => handler!(liveness, self, req).await,
+            METHOD_SUBMIT_TRANSACTION => handler_async!(submit_transaction, self, req).await,
+            METHOD_CLIENT_CONFIG => handler!(client_config, self, req).await,
+            METHOD_LIVENESS => handler!(liveness, self, req).await,
             other => Err(ApiError::not_found(other.to_string())),
         }
     }

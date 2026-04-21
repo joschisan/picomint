@@ -5,10 +5,9 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use picomint_logging::{LOG_TASK, LOG_TEST};
+use picomint_logging::LOG_TASK;
 use thiserror::Error;
 use tokio::signal;
-use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::info;
@@ -213,25 +212,3 @@ impl Future for TaskShutdownToken {
         self.0.as_mut().poll(cx)
     }
 }
-
-// Used in tests when sleep functionality is desired so it can be logged.
-// Must include comment describing the reason for sleeping.
-pub async fn sleep_in_test(comment: impl AsRef<str>, duration: Duration) {
-    info!(
-        target: LOG_TEST,
-        "Sleeping for {}.{:03} seconds because: {}",
-        duration.as_secs(),
-        duration.subsec_millis(),
-        comment.as_ref()
-    );
-    sleep(duration).await;
-}
-
-/// An error used as a "cancelled" marker in [`Cancellable`].
-#[derive(Error, Debug)]
-#[error("Operation cancelled")]
-pub struct Cancelled;
-
-/// Operation that can potentially get cancelled returning no result (e.g.
-/// program shutdown).
-pub type Cancellable<T> = std::result::Result<T, Cancelled>;

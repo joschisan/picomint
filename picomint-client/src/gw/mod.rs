@@ -15,7 +15,6 @@ use crate::transaction::{Output, TransactionBuilder};
 use anyhow::{anyhow, ensure};
 use async_trait::async_trait;
 use bitcoin::hashes::sha256;
-use bitcoin::secp256k1::Message;
 use events::{
     CompleteEvent, ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent,
     SendCancelEvent, SendEvent, SendSuccessEvent,
@@ -97,7 +96,7 @@ impl GatewayClientModule {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GatewayClientModule {
     pub federation_id: FederationId,
     pub cfg: LightningConfigConsensus,
@@ -113,7 +112,7 @@ pub struct GatewayClientModule {
 /// Lean context handed to per-SM executors. Holds `Arc<MintClientModule>`
 /// (no cycle — gw owns its executor → ctx → mint, mint does not reach back
 /// into gw) but does NOT hold `Arc<GatewayClientModule>` itself.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GwSmContext {
     pub client_ctx: ClientContext,
     pub mint: Arc<crate::mint::MintClientModule>,
@@ -161,15 +160,10 @@ impl GatewayClientModule {
 
         // This prevents DOS attacks where an attacker submits a different invoice.
         ensure!(
-            secp256k1::SECP256K1
-                .verify_schnorr(
-                    &payload.auth,
-                    &Message::from_digest(
-                        *payload.invoice.consensus_hash::<sha256::Hash>().as_ref()
-                    ),
-                    &payload.contract.refund_pk.x_only_public_key().0,
-                )
-                .is_ok(),
+            payload.contract.verify_invoice_auth(
+                payload.invoice.consensus_hash::<sha256::Hash>(),
+                &payload.auth,
+            ),
             "Invalid auth signature for the invoice data"
         );
 
@@ -424,7 +418,7 @@ pub(crate) async fn await_receive_from_log(
 /// interface between the is expressed as a trait. The core gateway handles
 /// lightning operations that require access to the database or lightning node.
 #[async_trait]
-pub trait IGatewayClient: Debug + Send + Sync {
+pub trait IGatewayClient: Send + Sync {
     /// Use the gateway's lightning node to complete a payment
     async fn complete_htlc(&self, htlc_response: InterceptPaymentResponse);
 

@@ -29,59 +29,59 @@ picomint_redb::consensus_value!(Signatures);
 table!(
     OUTPUT,
     u64 => Output,
-    "output",
+    "wallet-output",
 );
 
 table!(
     SPENT_OUTPUT,
     u64 => (),
-    "spent-output",
+    "wallet-spent-output",
 );
 
 table!(
     FEDERATION_WALLET,
     () => FederationWallet,
-    "federation-wallet",
+    "wallet-federation-wallet",
 );
 
 table!(
     TX_INFO,
     u64 => TxInfo,
-    "tx-info",
+    "wallet-tx-info",
 );
 
 table!(
     TX_INFO_INDEX,
     picomint_core::OutPoint => u64,
-    "tx-info-index",
+    "wallet-tx-info-index",
 );
 
 table!(
     UNSIGNED_TX,
     TxidKey => FederationTx,
-    "unsigned-tx",
+    "wallet-unsigned-tx",
 );
 
 table!(
     SIGNATURES,
     (TxidKey, PeerId) => Signatures,
-    "signatures",
+    "wallet-signatures",
 );
 
 table!(
     UNCONFIRMED_TX,
     TxidKey => FederationTx,
-    "unconfirmed-tx",
+    "wallet-unconfirmed-tx",
 );
 
 table!(
     BLOCK_COUNT_VOTE,
     PeerId => u64,
-    "block-count-vote",
+    "wallet-block-count-vote",
 );
 
 table!(
     FEE_RATE_VOTE,
     PeerId => Option<u64>,
-    "fee-rate-vote",
+    "wallet-fee-rate-vote",
 );

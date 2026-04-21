@@ -293,7 +293,7 @@ fn common_columns(
 
     for row in rows {
         fed_b.append_value(&fed_str);
-        op_b.append_value(row.operation_id.to_string());
+        op_b.append_value(row.operation_id.0.to_string());
         ts_b.append_value(i64::try_from(row.ts_usecs).unwrap_or(i64::MAX));
     }
 

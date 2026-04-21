@@ -7,22 +7,19 @@ use anyhow::{Context, ensure};
 use group::Curve;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::bitcoin::Network;
-use picomint_core::core::ModuleKind;
 use picomint_core::ln::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
-use picomint_core::ln::endpoint_constants::{
-    AWAIT_INCOMING_CONTRACTS_ENDPOINT, AWAIT_PREIMAGE_ENDPOINT, CONSENSUS_BLOCK_COUNT_ENDPOINT,
-    DECRYPTION_KEY_SHARE_ENDPOINT, GATEWAYS_ENDPOINT, OUTGOING_CONTRACT_EXPIRATION_ENDPOINT,
+use picomint_core::ln::methods::{
+    METHOD_AWAIT_INCOMING_CONTRACTS, METHOD_AWAIT_PREIMAGE, METHOD_CONSENSUS_BLOCK_COUNT,
+    METHOD_DECRYPTION_KEY_SHARE, METHOD_GATEWAYS, METHOD_OUTGOING_CONTRACT_EXPIRATION,
 };
 use picomint_core::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
     LightningOutputError, OutgoingWitness,
 };
-use picomint_core::module::audit::Audit;
 use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
 use picomint_core::time::duration_since_epoch;
-use picomint_core::util::SafeUrl;
 use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_logging::LOG_MODULE_LN;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
@@ -81,7 +78,6 @@ pub fn validate_config(identity: &PeerId, cfg: &LightningConfig) -> anyhow::Resu
     Ok(())
 }
 
-#[derive(Debug)]
 pub struct Lightning {
     cfg: LightningConfig,
     db: Database,
@@ -273,32 +269,19 @@ impl Lightning {
         })
     }
 
-    pub async fn audit(&self, dbtx: &WriteTxRef<'_>, audit: &mut Audit) {
-        // Both incoming and outgoing contracts represent liabilities to the federation
-        // since they are obligations to issue notes.
-        let outgoing_items = dbtx.iter(&OUTGOING_CONTRACT, |r| {
-            r.map(|(outpoint, contract)| {
-                (
-                    format!("OutgoingContract({outpoint:?})"),
-                    -(contract.amount.msats as i64),
-                )
-            })
-            .collect::<Vec<_>>()
+    /// Both incoming and outgoing contracts represent liabilities to the
+    /// federation since they are obligations to issue notes.
+    pub async fn audit(&self, dbtx: &WriteTxRef<'_>) -> i64 {
+        let outgoing: i64 = dbtx.iter(&OUTGOING_CONTRACT, |r| {
+            r.map(|(_, contract)| -(contract.amount.msats as i64)).sum()
         });
 
-        audit.add_items(ModuleKind::Ln, outgoing_items);
-
-        let incoming_items = dbtx.iter(&INCOMING_CONTRACT, |r| {
-            r.map(|(outpoint, contract)| {
-                (
-                    format!("IncomingContract({outpoint:?})"),
-                    -(contract.commitment.amount.msats as i64),
-                )
-            })
-            .collect::<Vec<_>>()
+        let incoming: i64 = dbtx.iter(&INCOMING_CONTRACT, |r| {
+            r.map(|(_, contract)| -(contract.commitment.amount.msats as i64))
+                .sum()
         });
 
-        audit.add_items(ModuleKind::Ln, incoming_items);
+        outgoing + incoming
     }
 
     pub async fn handle_api(
@@ -307,16 +290,16 @@ impl Lightning {
         req: ApiRequestErased,
     ) -> Result<Vec<u8>, ApiError> {
         match method {
-            CONSENSUS_BLOCK_COUNT_ENDPOINT => handler!(consensus_block_count, self, req).await,
-            AWAIT_PREIMAGE_ENDPOINT => handler_async!(await_preimage, self, req).await,
-            DECRYPTION_KEY_SHARE_ENDPOINT => handler!(decryption_key_share, self, req).await,
-            OUTGOING_CONTRACT_EXPIRATION_ENDPOINT => {
+            METHOD_CONSENSUS_BLOCK_COUNT => handler!(consensus_block_count, self, req).await,
+            METHOD_AWAIT_PREIMAGE => handler_async!(await_preimage, self, req).await,
+            METHOD_DECRYPTION_KEY_SHARE => handler!(decryption_key_share, self, req).await,
+            METHOD_OUTGOING_CONTRACT_EXPIRATION => {
                 handler!(outgoing_contract_expiration, self, req).await
             }
-            AWAIT_INCOMING_CONTRACTS_ENDPOINT => {
+            METHOD_AWAIT_INCOMING_CONTRACTS => {
                 handler_async!(await_incoming_contracts, self, req).await
             }
-            GATEWAYS_ENDPOINT => handler!(gateways, self, req).await,
+            METHOD_GATEWAYS => handler!(gateways, self, req).await,
             other => Err(ApiError::not_found(other.to_string())),
         }
     }
@@ -374,14 +357,16 @@ impl Lightning {
         self.consensus_unix_time(&self.db.begin_read())
     }
 
-    pub async fn add_gateway_ui(&self, gateway: SafeUrl) -> bool {
+    pub async fn add_gateway_ui(&self, gateway: String) -> bool {
+        let gateway = gateway.trim_end_matches('/').to_string();
         let tx = self.db.begin_write();
         let is_new_entry = tx.insert(&GATEWAY, &gateway, &()).is_none();
         tx.commit();
         is_new_entry
     }
 
-    pub async fn remove_gateway_ui(&self, gateway: SafeUrl) -> bool {
+    pub async fn remove_gateway_ui(&self, gateway: String) -> bool {
+        let gateway = gateway.trim_end_matches('/').to_string();
         let tx = self.db.begin_write();
         let entry_existed = tx.remove(&GATEWAY, &gateway).is_some();
         tx.commit();
@@ -389,7 +374,7 @@ impl Lightning {
     }
 
     #[must_use]
-    pub fn gateways_ui(&self) -> Vec<SafeUrl> {
+    pub fn gateways_ui(&self) -> Vec<String> {
         self.db
             .begin_read()
             .iter(&GATEWAY, |r| r.map(|(url, ())| url).collect())

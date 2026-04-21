@@ -12,7 +12,7 @@ use picomint_redb::Database;
 use crate::AppState;
 use crate::db::{CLIENT_CONFIG, ROOT_ENTROPY};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GatewayClientFactory {
     db: Database,
     mnemonic: Mnemonic,
@@ -65,7 +65,7 @@ impl GatewayClientFactory {
     }
 
     fn client_database(&self, federation_id: FederationId) -> Database {
-        self.db.isolate(format!("client-{federation_id}"))
+        self.db.isolate(federation_id)
     }
 
     async fn read_config(&self, federation_id: &FederationId) -> Option<ConsensusConfig> {

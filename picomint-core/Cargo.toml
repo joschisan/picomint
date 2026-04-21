@@ -19,38 +19,31 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 backon = { workspace = true }
 bitcoin = { workspace = true }
-bitcoin-units = { workspace = true }
 bitcoin_hashes = { workspace = true }
 bls12_381 = { workspace = true }
+derive_more = { workspace = true }
 futures = { workspace = true }
 group = { workspace = true }
 hex = { workspace = true, features = ["serde"] }
 iroh-base = { workspace = true, default-features = false }
-itertools = { workspace = true }
-jsonrpsee-core = { workspace = true, features = ["client"] }
 lightning-invoice = { workspace = true }
 miniscript = { workspace = true, features = ["serde"] }
 picomint-base32 = { workspace = true }
-picomint-derive = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-logging = { workspace = true }
 picomint-redb = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
-redb = { workspace = true }
 secp256k1 = { workspace = true, features = ["global-context", "rand-std"] }
 serde = { workspace = true }
-serde_json = { workspace = true }
 subtle = { workspace = true }
 tbs = { workspace = true }
 thiserror = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
 tpe = { workspace = true }
 tracing = { workspace = true }
-url = { workspace = true, features = ["serde"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { workspace = true, features = ["full", "tracing"] }
@@ -70,7 +63,6 @@ tokio = { workspace = true, features = ["io-util"] }
 wasm-bindgen-futures = { workspace = true }
 
 [dev-dependencies]
-assert_matches = { workspace = true }
 test-log = { workspace = true }
 tokio-test = { workspace = true }
 

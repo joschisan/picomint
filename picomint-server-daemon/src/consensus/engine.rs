@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use async_channel::Receiver;
-use picomint_core::module::audit::Audit;
+use picomint_core::envs::is_running_in_test_env;
 use picomint_core::secp256k1::schnorr;
 use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use picomint_core::task::{TaskGroup, TaskHandle};
@@ -29,7 +29,6 @@ use crate::consensus::aleph_bft::spawner::Spawner;
 use crate::consensus::db::{
     ACCEPTED_ITEM, ACCEPTED_TRANSACTION, ALEPH_UNITS, SIGNED_SESSION_OUTCOME,
 };
-use crate::consensus::debug::DebugConsensusItem;
 use crate::consensus::server::process_transaction_with_server;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
@@ -232,8 +231,14 @@ impl ConsensusEngine {
         // items from the current session from index zero
         let mut item_index = 0;
 
-        // We request the signed session outcome every three seconds from a random peer
-        let mut index_broadcast_interval = tokio::time::interval(Duration::from_secs(3));
+        // We request the signed session outcome from a random peer at a fixed
+        // interval (3s prod / 300ms test).
+        let broadcast_interval = if is_running_in_test_env() {
+            Duration::from_millis(300)
+        } else {
+            Duration::from_secs(3)
+        };
+        let mut index_broadcast_interval = tokio::time::interval(broadcast_interval);
 
         // We build a session outcome out of the ordered batches until either we have
         // processed broadcast_rounds_per_session rounds or a threshold signed
@@ -522,7 +527,7 @@ impl ConsensusEngine {
         trace!(
             target: LOG_CONSENSUS,
             %peer,
-            item = ?DebugConsensusItem(&item),
+            item = ?item,
             "Processing consensus item"
         );
 
@@ -554,7 +559,7 @@ impl ConsensusEngine {
                 trace!(
                     target: LOG_CONSENSUS,
                     %peer,
-                    item = ?DebugConsensusItem(&item),
+                    item = ?item,
                     err = %format_args!("{err:#}"),
                     "Rejected consensus item"
                 );
@@ -572,7 +577,7 @@ impl ConsensusEngine {
         debug!(
             target: LOG_CONSENSUS,
             %peer,
-            item = ?DebugConsensusItem(&item),
+            item = ?item,
             "Processed consensus item"
         );
 
@@ -611,16 +616,11 @@ impl ConsensusEngine {
                 debug!(target: LOG_CONSENSUS, %txid,  "Transaction accepted");
                 tx.insert(&ACCEPTED_TRANSACTION, &txid, &());
 
-                let mut audit = Audit::default();
-                self.server.audit(tx, &mut audit).await;
+                let audit = self.server.audit(tx).await;
 
                 assert!(
-                    audit
-                        .net_assets()
-                        .expect("Overflow while checking balance sheet")
-                        .milli_sat
-                        >= 0,
-                    "Balance sheet of the fed has gone negative, this should never happen! {audit}"
+                    audit.total >= 0,
+                    "Balance sheet of the fed has gone negative, this should never happen! {audit:?}"
                 );
 
                 Ok(())

@@ -7,11 +7,9 @@
 //! secondary table keyed by `(operation_id, event_log_id)` so a subscriber
 //! can tail events for a specific operation cheaply via a stream API.
 use std::borrow::Cow;
-use std::fmt;
-use std::str::FromStr;
-
 use std::sync::Arc;
 
+use derive_more::{Display, FromStr};
 use futures::Stream;
 use picomint_core::core::OperationId;
 use picomint_core::time::duration_since_epoch;
@@ -64,6 +62,8 @@ pub trait Event: serde::Serialize + serde::de::DeserializeOwned {
     Deserialize,
     Encodable,
     Decodable,
+    Display,
+    FromStr,
 )]
 pub struct EventLogId(pub u64);
 
@@ -88,21 +88,7 @@ impl From<EventLogId> for u64 {
     }
 }
 
-impl FromStr for EventLogId {
-    type Err = <u64 as FromStr>::Err;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        u64::from_str(s).map(Self)
-    }
-}
-
-impl fmt::Display for EventLogId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encodable, Decodable)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encodable, Decodable, Display)]
 pub struct EventKind(Cow<'static, str>);
 
 impl EventKind {
@@ -120,12 +106,6 @@ impl<'s> From<&'s str> for EventKind {
 impl From<String> for EventKind {
     fn from(value: String) -> Self {
         Self(Cow::Owned(value))
-    }
-}
-
-impl fmt::Display for EventKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
     }
 }
 
@@ -160,28 +140,6 @@ impl EventLogEntry {
 pub struct PersistedLogEntry {
     id: EventLogId,
     inner: EventLogEntry,
-}
-
-impl Serialize for PersistedLogEntry {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-
-        let mut state = serializer.serialize_struct("PersistedLogEntry", 6)?;
-        state.serialize_field("id", &self.id)?;
-        state.serialize_field("kind", &self.inner.kind)?;
-        state.serialize_field("source", &self.inner.source)?;
-        state.serialize_field("operation_id", &self.inner.operation_id)?;
-        state.serialize_field("ts_usecs", &self.inner.ts_usecs)?;
-
-        let payload_value: serde_json::Value = serde_json::from_slice(&self.inner.payload)
-            .unwrap_or_else(|_| serde_json::Value::String(hex::encode(&self.inner.payload)));
-        state.serialize_field("payload", &payload_value)?;
-
-        state.end()
-    }
 }
 
 impl PersistedLogEntry {
