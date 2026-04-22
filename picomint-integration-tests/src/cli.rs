@@ -30,13 +30,13 @@ impl RunCli for Command {
 }
 
 fn gateway_cmd(gw_data_dir: &Path) -> Command {
-    let mut cmd = Command::new("target/debug/picomint-gateway-cli");
+    let mut cmd = Command::new("target/release/picomint-gateway-cli");
     cmd.arg("--data-dir").arg(gw_data_dir);
     cmd
 }
 
 fn server_cmd(data_dir: &Path) -> Command {
-    let mut cmd = Command::new("target/debug/picomint-server-cli");
+    let mut cmd = Command::new("target/release/picomint-server-cli");
     cmd.arg("--data-dir").arg(data_dir);
     cmd
 }
