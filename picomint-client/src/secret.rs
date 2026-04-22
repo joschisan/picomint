@@ -30,8 +30,8 @@ enum Path {
     #[allow(dead_code)]
     Core,
     Mint,
-    Ln,
     Wallet,
+    Ln,
     Gw,
 }
 

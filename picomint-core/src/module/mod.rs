@@ -34,8 +34,8 @@ pub struct TransactionItemAmounts {
 pub enum ApiMethod {
     Core(CoreMethod),
     Mint(MintMethod),
-    Ln(LnMethod),
     Wallet(WalletMethod),
+    Ln(LnMethod),
 }
 
 pub const PICOMINT_ALPN: &[u8] = b"picomint";
