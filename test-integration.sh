@@ -35,8 +35,15 @@ docker run -d \
     -fallbackfee=0.0004 \
     -txindex=0
 
-echo "Waiting for bitcoind to start..."
-sleep 3
+echo "Waiting for bitcoind RPC..."
+for _ in $(seq 1 60); do
+    if docker exec "$CONTAINER_NAME" bitcoin-cli \
+        -regtest -rpcuser=bitcoin -rpcpassword=bitcoin \
+        getblockchaininfo >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.2
+done
 
 echo "Creating wallet..."
 docker exec "$CONTAINER_NAME" bitcoin-cli \
