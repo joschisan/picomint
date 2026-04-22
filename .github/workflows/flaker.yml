@@ -38,9 +38,10 @@ jobs:
         }
         while [ "$(date +%s)" -lt "$DEADLINE" ]; do
           i=$((i + 1))
-          echo "=== iteration $i ==="
-          if ! timeout 600 ./test-integration.sh 2>&1 | tee "$LOG"; then
-            echo "FAILED on iteration $i"
+          START=$(date +%s)
+          if ! timeout 600 ./test-integration.sh >"$LOG" 2>&1; then
+            echo "=== iteration $i FAILED after $(($(date +%s) - START))s ==="
+            cat "$LOG"
             DIR=$(extract_dir)
             if [ -n "$DIR" ] && [ -d "$DIR" ]; then
               echo "Archiving failing temp dir: $DIR"
@@ -49,6 +50,7 @@ jobs:
             fi
             exit 1
           fi
+          echo "iteration $i passed in $(($(date +%s) - START))s"
           # Reclaim disk from the passing iteration's temp dir.
           DIR=$(extract_dir)
           [ -n "$DIR" ] && [ -d "$DIR" ] && rm -rf "$DIR"
