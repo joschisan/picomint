@@ -20,7 +20,7 @@ use iroh::endpoint::{RecvStream, SendStream};
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
 use picomint_core::envs::is_running_in_test_env;
-use picomint_core::module::{ApiAuth, ApiError, ApiMethod, IrohApiRequest};
+use picomint_core::module::{ApiAuth, ApiError, Method};
 use picomint_core::task::TaskGroup;
 use picomint_core::transaction::ConsensusItem;
 use picomint_core::wire;
@@ -73,19 +73,12 @@ pub async fn run(
 
     // Wait for the bitcoin backend to come up before instantiating modules that
     // read its status during startup (the wallet module broadcast loop).
-    let _num_peers = NumPeers::from(cfg.consensus.iroh_endpoints.len());
+    let _num_peers = NumPeers::from(cfg.consensus.peers.len());
 
     info!(target: LOG_CORE, "Initialise module mint...");
     let mint = Arc::new(crate::consensus::mint::Mint::new(
         cfg.mint_config(),
         db.clone(),
-    ));
-
-    info!(target: LOG_CORE, "Initialise module ln...");
-    let ln = Arc::new(crate::consensus::ln::Lightning::new(
-        cfg.ln_config(),
-        db.clone(),
-        bitcoin_rpc_connection.clone(),
     ));
 
     info!(target: LOG_CORE, "Initialise module wallet...");
@@ -96,9 +89,14 @@ pub async fn run(
         bitcoin_rpc_connection.clone(),
     ));
 
-    let server = Server { mint, ln, wallet };
+    info!(target: LOG_CORE, "Initialise module ln...");
+    let ln = Arc::new(crate::consensus::ln::Lightning::new(
+        cfg.ln_config(),
+        db.clone(),
+        bitcoin_rpc_connection.clone(),
+    ));
 
-    let client_cfg = cfg.consensus.clone();
+    let server = Server { mint, wallet, ln };
 
     let (submission_sender, submission_receiver) = async_channel::bounded(TRANSACTION_BUFFER);
     let (shutdown_sender, shutdown_receiver) = watch::channel(None);
@@ -106,7 +104,7 @@ pub async fn run(
     let mut ci_status_senders = BTreeMap::new();
     let mut ci_status_receivers = BTreeMap::new();
 
-    for peer in cfg.consensus.broadcast_public_keys.keys().copied() {
+    for peer in cfg.consensus.peers.keys().copied() {
         let (ci_sender, ci_receiver) = watch::channel(None);
 
         ci_status_senders.insert(peer, ci_sender);
@@ -117,7 +115,6 @@ pub async fn run(
         cfg: cfg.clone(),
         db: db.clone(),
         server: server.clone(),
-        client_cfg: client_cfg.clone(),
         submission_sender: submission_sender.clone(),
         shutdown_sender,
         shutdown_receiver: shutdown_receiver.clone(),
@@ -150,17 +147,17 @@ pub async fn run(
                         .await
                         .ok();
                 }
-                for item in server.ln.consensus_proposal(&tx.as_ref()).await {
-                    submission_sender
-                        .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
-                        .await
-                        .ok();
-                }
                 for item in server.wallet.consensus_proposal(&tx.as_ref()).await {
                     submission_sender
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
                             item,
                         )))
+                        .await
+                        .ok();
+                }
+                for item in server.ln.consensus_proposal(&tx.as_ref()).await {
+                    submission_sender
+                        .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
                         .await
                         .ok();
                 }
@@ -308,9 +305,9 @@ async fn handle_request(
     _request_permit: tokio::sync::OwnedSemaphorePermit,
 ) -> anyhow::Result<()> {
     let request = recv_stream.read_to_end(100_000).await?;
-    let request = IrohApiRequest::consensus_decode_exact(&request)?;
+    let method = Method::consensus_decode_exact(&request)?;
 
-    let response = dispatch(consensus_api, request).await;
+    let response = dispatch(consensus_api, method).await;
     let response = response.consensus_encode_to_vec();
 
     send_stream.write_all(&response).await?;
@@ -318,32 +315,11 @@ async fn handle_request(
     Ok(())
 }
 
-async fn dispatch(
-    consensus_api: Arc<ConsensusApi>,
-    request: IrohApiRequest,
-) -> Result<Vec<u8>, ApiError> {
-    match request.method {
-        ApiMethod::Core(method) => consensus_api.handle_api(&method, request.request).await,
-        ApiMethod::Mint(method) => {
-            consensus_api
-                .server
-                .mint
-                .handle_api(&method, request.request)
-                .await
-        }
-        ApiMethod::Ln(method) => {
-            consensus_api
-                .server
-                .ln
-                .handle_api(&method, request.request)
-                .await
-        }
-        ApiMethod::Wallet(method) => {
-            consensus_api
-                .server
-                .wallet
-                .handle_api(&method, request.request)
-                .await
-        }
+async fn dispatch(consensus_api: Arc<ConsensusApi>, method: Method) -> Result<Vec<u8>, ApiError> {
+    match method {
+        Method::Core(m) => consensus_api.handle_api(m).await,
+        Method::Mint(m) => consensus_api.server.mint.handle_api(m).await,
+        Method::Wallet(m) => consensus_api.server.wallet.handle_api(m).await,
+        Method::Ln(m) => consensus_api.server.ln.handle_api(m).await,
     }
 }

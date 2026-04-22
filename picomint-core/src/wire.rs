@@ -1,4 +1,4 @@
-//! Static wire enums for the fixed module set: mint + ln + wallet.
+//! Static wire enums for the fixed module set: mint + wallet + ln.
 
 use crate::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
@@ -14,8 +14,8 @@ use thiserror::Error;
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum Input {
     Mint(MintInput),
-    Ln(LightningInput),
     Wallet(WalletInput),
+    Ln(LightningInput),
 }
 
 impl From<MintInput> for Input {
@@ -39,8 +39,8 @@ impl From<WalletInput> for Input {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum Output {
     Mint(MintOutput),
-    Ln(Box<LightningOutput>),
     Wallet(WalletOutput),
+    Ln(Box<LightningOutput>),
 }
 
 impl From<MintOutput> for Output {
@@ -64,8 +64,8 @@ impl From<WalletOutput> for Output {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum ModuleConsensusItem {
     Mint(MintConsensusItem),
-    Ln(LightningConsensusItem),
     Wallet(WalletConsensusItem),
+    Ln(LightningConsensusItem),
 }
 
 impl From<MintConsensusItem> for ModuleConsensusItem {
@@ -90,10 +90,10 @@ impl From<WalletConsensusItem> for ModuleConsensusItem {
 pub enum InputError {
     #[error("Mint input error: {0}")]
     Mint(MintInputError),
-    #[error("Lightning input error: {0}")]
-    Ln(LightningInputError),
     #[error("Wallet input error: {0}")]
     Wallet(WalletInputError),
+    #[error("Lightning input error: {0}")]
+    Ln(LightningInputError),
 }
 
 impl From<MintInputError> for InputError {
@@ -118,10 +118,10 @@ impl From<WalletInputError> for InputError {
 pub enum OutputError {
     #[error("Mint output error: {0}")]
     Mint(MintOutputError),
-    #[error("Lightning output error: {0}")]
-    Ln(LightningOutputError),
     #[error("Wallet output error: {0}")]
     Wallet(WalletOutputError),
+    #[error("Lightning output error: {0}")]
+    Ln(LightningOutputError),
 }
 
 impl From<MintOutputError> for OutputError {

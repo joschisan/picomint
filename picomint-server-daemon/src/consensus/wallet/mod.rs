@@ -19,7 +19,7 @@ use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletOutput};
 use miniscript::descriptor::Wsh;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::backoff::{Retryable, networking_backoff};
-use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
+use picomint_core::module::{ApiError, InputMeta, TransactionItemAmounts};
 use picomint_core::task::TaskGroup;
 use picomint_core::wallet as common;
 use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId};
@@ -31,11 +31,7 @@ use tokio::time::sleep;
 use crate::config::dkg::DkgHandle;
 use crate::handler;
 use picomint_core::wallet::config::{WalletConfig, WalletConfigPrivate};
-use picomint_core::wallet::methods::{
-    METHOD_CONSENSUS_BLOCK_COUNT, METHOD_CONSENSUS_FEERATE, METHOD_FEDERATION_WALLET,
-    METHOD_OUTPUT_INFO_SLICE, METHOD_PENDING_TRANSACTION_CHAIN, METHOD_RECEIVE_FEE,
-    METHOD_SEND_FEE, METHOD_TRANSACTION_CHAIN, METHOD_TRANSACTION_ID,
-};
+use picomint_core::wallet::methods::WalletMethod;
 use picomint_core::wallet::{
     FederationWallet, TxInfo, WalletInputError, WalletOutputError, descriptor,
     is_potential_receive, tweak_public_key,
@@ -470,22 +466,21 @@ impl Wallet {
             .map_or(0, |wallet| 1000 * wallet.value.to_sat() as i64)
     }
 
-    pub async fn handle_api(
-        &self,
-        method: &str,
-        req: ApiRequestErased,
-    ) -> Result<Vec<u8>, ApiError> {
+    pub async fn handle_api(&self, method: WalletMethod) -> Result<Vec<u8>, ApiError> {
         match method {
-            METHOD_CONSENSUS_BLOCK_COUNT => handler!(consensus_block_count, self, req).await,
-            METHOD_CONSENSUS_FEERATE => handler!(consensus_feerate, self, req).await,
-            METHOD_FEDERATION_WALLET => handler!(federation_wallet, self, req).await,
-            METHOD_SEND_FEE => handler!(send_fee, self, req).await,
-            METHOD_RECEIVE_FEE => handler!(receive_fee, self, req).await,
-            METHOD_TRANSACTION_ID => handler!(tx_id, self, req).await,
-            METHOD_OUTPUT_INFO_SLICE => handler!(output_info_slice, self, req).await,
-            METHOD_PENDING_TRANSACTION_CHAIN => handler!(pending_tx_chain, self, req).await,
-            METHOD_TRANSACTION_CHAIN => handler!(tx_chain, self, req).await,
-            other => Err(ApiError::not_found(other.to_string())),
+            WalletMethod::ConsensusBlockCount(req) => {
+                handler!(consensus_block_count, self, req).await
+            }
+            WalletMethod::ConsensusFeerate(req) => handler!(consensus_feerate, self, req).await,
+            WalletMethod::FederationWallet(req) => handler!(federation_wallet, self, req).await,
+            WalletMethod::SendFee(req) => handler!(send_fee, self, req).await,
+            WalletMethod::ReceiveFee(req) => handler!(receive_fee, self, req).await,
+            WalletMethod::TransactionId(req) => handler!(tx_id, self, req).await,
+            WalletMethod::OutputInfoSlice(req) => handler!(output_info_slice, self, req).await,
+            WalletMethod::PendingTransactionChain(req) => {
+                handler!(pending_tx_chain, self, req).await
+            }
+            WalletMethod::TransactionChain(req) => handler!(tx_chain, self, req).await,
         }
     }
 }

@@ -1,11 +1,8 @@
-use std::collections::BTreeMap;
-
-use bitcoin::hashes::{Hash, sha256};
+use bitcoin::hashes::sha256;
 use picomint_encoding::{Decodable, Encodable};
-use secp256k1::{Message, PublicKey, SECP256K1};
 
 use crate::transaction::ConsensusItem;
-use crate::{NumPeersExt as _, PeerId, secp256k1};
+use crate::{PeerId, secp256k1};
 
 /// A consensus item accepted in the consensus
 ///
@@ -63,35 +60,3 @@ pub struct SignedSessionOutcome {
 }
 
 picomint_redb::consensus_value!(SignedSessionOutcome);
-
-impl SignedSessionOutcome {
-    pub fn verify(
-        &self,
-        broadcast_public_keys: &BTreeMap<PeerId, PublicKey>,
-        block_index: u64,
-    ) -> bool {
-        let message = Message::from_digest(
-            (
-                broadcast_public_keys.consensus_hash::<sha256::Hash>(),
-                self.session_outcome.header(block_index),
-            )
-                .consensus_hash::<sha256::Hash>()
-                .to_byte_array(),
-        );
-
-        let threshold = broadcast_public_keys.to_num_peers().threshold();
-        if self.signatures.len() < threshold {
-            return false;
-        }
-
-        self.signatures.iter().all(|(peer_id, signature)| {
-            let Some(pub_key) = broadcast_public_keys.get(peer_id) else {
-                return false;
-            };
-
-            SECP256K1
-                .verify_schnorr(signature, &message, &pub_key.x_only_public_key().0)
-                .is_ok()
-        })
-    }
-}

@@ -6,7 +6,7 @@
 //!   [`setup::router`] which takes an `Arc<SetupApi>` directly.
 //! - Dashboard UI (once the federation is running). Served by
 //!   [`dashboard::router`] which takes an `Arc<ConsensusApi>` and reaches
-//!   straight into the three typed module instances (`mint`, `ln`, `wallet`)
+//!   straight into the three typed module instances (`mint`, `wallet`, `ln`)
 //!   hanging off it.
 //!
 //! Previously this lived in two sibling crates (`picomint-server-ui` and

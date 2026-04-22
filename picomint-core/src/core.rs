@@ -2,7 +2,6 @@
 //!
 //! This module defines common interoperability types
 //! and functionality that is used on both client and sever side.
-use std::fmt;
 
 use bitcoin::hashes::sha256;
 use derive_more::Display;
@@ -39,43 +38,3 @@ impl OperationId {
 }
 
 picomint_redb::consensus_key!(OperationId);
-
-/// Type of a module in the fixed set.
-///
-/// Discriminants are also used as the `ChildId` input for per-module secret
-/// derivation and as the stable wire tag. Order matters — do not reorder.
-#[derive(
-    Debug,
-    Copy,
-    Clone,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    Encodable,
-    Decodable,
-)]
-pub enum ModuleKind {
-    Mint,
-    Ln,
-    Wallet,
-}
-
-impl ModuleKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Mint => "mint",
-            Self::Ln => "ln",
-            Self::Wallet => "wallet",
-        }
-    }
-}
-
-impl fmt::Display for ModuleKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}

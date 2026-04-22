@@ -7,7 +7,6 @@ use bitcoin::{Address, PubkeyHash, ScriptBuf, ScriptHash, Txid, WPubkeyHash, WSc
 use miniscript::descriptor::Wsh;
 use picomint_encoding::{Decodable, Encodable};
 
-use crate::core::ModuleKind;
 use crate::{NumPeersExt, PeerId};
 use secp256k1::ecdsa::Signature;
 use secp256k1::{PublicKey, Scalar, XOnlyPublicKey};
@@ -16,8 +15,6 @@ use thiserror::Error;
 
 pub mod config;
 pub mod methods;
-
-pub const KIND: ModuleKind = ModuleKind::Wallet;
 
 /// Returns a sleep duration of 1 second in test environments or 60 seconds in
 /// production. Used for polling intervals where faster feedback is needed

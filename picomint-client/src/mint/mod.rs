@@ -6,6 +6,7 @@ mod ecash;
 mod events;
 pub mod issuance;
 mod issuance_sm;
+mod secret;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
@@ -13,7 +14,6 @@ use std::time::Duration;
 
 use crate::api::FederationApi;
 use crate::module::ClientContext;
-use crate::secret::Secret;
 use crate::transaction::{Input, Output, TransactionBuilder};
 use crate::transaction::{Transaction, TxSubmissionSmContext, TxSubmissionStateMachine};
 use anyhow::{Context as _, bail};
@@ -39,6 +39,7 @@ use thiserror::Error;
 pub use self::ecash::ECash;
 use self::issuance::NoteIssuanceRequest;
 use self::issuance_sm::IssuanceStateMachine;
+pub use self::secret::MintSecret;
 
 const TARGET_PER_DENOMINATION: usize = 3;
 const SLICE_SIZE: u64 = 10000;
@@ -79,7 +80,7 @@ impl MintClientModule {
         db: &Database,
         api: &FederationApi,
         module_api: &FederationApi,
-        module_root_secret: &Secret,
+        mint_secret: &MintSecret,
     ) -> anyhow::Result<()> {
         let mut state = if let Some(state) = db.begin_read().get(&RECOVERY_STATE, &()) {
             state
@@ -113,7 +114,7 @@ impl MintClientModule {
         })
         .buffered(PARALLEL_SLICE_REQUESTS);
 
-        let tweak_filter = issuance::tweak_filter(module_root_secret);
+        let tweak_filter = mint_secret.tweak_filter();
 
         loop {
             let items = recovery_stream
@@ -132,7 +133,7 @@ impl MintClientModule {
                             continue;
                         }
                         let output_secret =
-                            issuance::output_secret(*denomination, *tweak, module_root_secret);
+                            issuance::output_secret(*denomination, *tweak, mint_secret);
 
                         if !issuance::check_nonce(&output_secret, *nonce_hash) {
                             continue;
@@ -147,7 +148,7 @@ impl MintClientModule {
 
                         state.requests.insert(
                             computed_nonce_hash,
-                            NoteIssuanceRequest::new(*denomination, *tweak, module_root_secret),
+                            NoteIssuanceRequest::new(*denomination, *tweak, mint_secret),
                         );
                     }
                     RecoveryItem::Input { nonce_hash } => {
@@ -197,12 +198,12 @@ impl MintClientModule {
         federation_id: FederationId,
         cfg: MintConfigConsensus,
         context: ClientContext,
-        module_root_secret: &Secret,
+        secret: MintSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<MintClientModule> {
         let (tweak_sender, tweak_receiver) = async_channel::bounded(50);
 
-        let filter = issuance::tweak_filter(module_root_secret);
+        let filter = secret.tweak_filter();
 
         tokio::task::spawn_blocking(move || {
             loop {
@@ -233,9 +234,7 @@ impl MintClientModule {
 
         let tx_submission_executor = crate::executor::ModuleExecutor::new(
             context.db().clone(),
-            TxSubmissionSmContext {
-                api: context.global_api(),
-            },
+            TxSubmissionSmContext { api: context.api() },
             task_group.clone(),
         )
         .await;
@@ -243,7 +242,7 @@ impl MintClientModule {
         Ok(MintClientModule {
             federation_id,
             cfg,
-            root_secret: *module_root_secret,
+            secret,
             client_ctx: context,
             tweak_receiver,
             tx_submission_executor,
@@ -255,7 +254,7 @@ impl MintClientModule {
 pub struct MintClientModule {
     federation_id: FederationId,
     cfg: MintConfigConsensus,
-    root_secret: Secret,
+    secret: MintSecret,
     client_ctx: ClientContext,
     tweak_receiver: async_channel::Receiver<[u8; 16]>,
     tx_submission_executor: crate::executor::ModuleExecutor<TxSubmissionStateMachine>,
@@ -351,7 +350,7 @@ impl MintClientModule {
                 .recv_blocking()
                 .expect("Tweak generator task dropped its sender");
 
-            issuance_requests.push(NoteIssuanceRequest::new(d, tweak, &self.root_secret));
+            issuance_requests.push(NoteIssuanceRequest::new(d, tweak, &self.secret));
         }
 
         for request in &issuance_requests {
@@ -550,7 +549,7 @@ impl MintClientModule {
         }
 
         self.client_ctx
-            .global_api()
+            .api()
             .liveness()
             .await
             .map_err(|_| SendECashError::Offline)?;
@@ -569,7 +568,7 @@ impl MintClientModule {
                 .tweak_receiver
                 .recv_blocking()
                 .expect("Tweak generator task dropped its sender");
-            issuance_requests.push(NoteIssuanceRequest::new(d, tweak, &self.root_secret));
+            issuance_requests.push(NoteIssuanceRequest::new(d, tweak, &self.secret));
         }
 
         let mut builder = TransactionBuilder::new();

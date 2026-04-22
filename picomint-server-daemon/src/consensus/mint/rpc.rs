@@ -1,46 +1,48 @@
 //! Freestanding API handlers for [`super::Mint`].
-//!
-//! Each function matches one endpoint constant in
-//! `picomint_core::mint::methods` and is dispatched from
-//! `Mint::handle_api` via the `handler!` macro.
 
-use bitcoin::hashes::sha256;
+use picomint_core::OutPoint;
+use picomint_core::TransactionId;
 use picomint_core::mint::RecoveryItem;
+use picomint_core::mint::methods::{
+    RecoveryCountRequest, RecoveryCountResponse, RecoverySliceHashRequest,
+    RecoverySliceHashResponse, RecoverySliceRequest, RecoverySliceResponse,
+    SignatureSharesRecoveryRequest, SignatureSharesRecoveryResponse, SignatureSharesRequest,
+    SignatureSharesResponse,
+};
 use picomint_core::module::ApiError;
-use picomint_core::{OutPoint, TransactionId};
 use picomint_encoding::Encodable as _;
 use picomint_redb::ReadTransaction;
-use tbs::{BlindedMessage, BlindedSignatureShare};
+use tbs::BlindedSignatureShare;
 
 use super::Mint;
 use super::db::{BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, RECOVERY_ITEM};
 
 pub async fn signature_shares(
     mint: &Mint,
-    txid: TransactionId,
-) -> Result<Vec<BlindedSignatureShare>, ApiError> {
+    req: SignatureSharesRequest,
+) -> Result<SignatureSharesResponse, ApiError> {
     // Wait until any BLINDED_SIGNATURE_SHARE for this txid exists. All mint
     // outputs of a given tx are signed atomically in the same consensus
     // commit, so observing one implies all are present.
-    let (signatures, _tx) = mint
+    let (shares, _tx) = mint
         .db
         .wait_table_check(&BLINDED_SIGNATURE_SHARE, |tx| {
-            Some(collect_signature_shares(tx, txid)).filter(|s| !s.is_empty())
+            Some(collect_signature_shares(tx, req.txid)).filter(|s| !s.is_empty())
         })
         .await;
 
-    Ok(signatures)
+    Ok(SignatureSharesResponse { shares })
 }
 
 pub fn signature_shares_recovery(
     mint: &Mint,
-    messages: Vec<BlindedMessage>,
-) -> Result<Vec<BlindedSignatureShare>, ApiError> {
+    req: SignatureSharesRecoveryRequest,
+) -> Result<SignatureSharesRecoveryResponse, ApiError> {
     let mut shares = Vec::new();
 
     let tx = mint.db.begin_read();
 
-    for message in messages {
+    for message in req.messages {
         let share = tx
             .get(&BLINDED_SIGNATURE_SHARE_RECOVERY, &message)
             .ok_or_else(|| ApiError::bad_request("No blinded signature share found".to_string()))?;
@@ -48,22 +50,37 @@ pub fn signature_shares_recovery(
         shares.push(share);
     }
 
-    Ok(shares)
+    Ok(SignatureSharesRecoveryResponse { shares })
 }
 
-pub fn recovery_slice(mint: &Mint, range: (u64, u64)) -> Result<Vec<RecoveryItem>, ApiError> {
+pub fn recovery_slice(
+    mint: &Mint,
+    req: RecoverySliceRequest,
+) -> Result<RecoverySliceResponse, ApiError> {
     let tx = mint.db.begin_read();
-    Ok(collect_recovery_slice(&tx, range))
+    Ok(RecoverySliceResponse {
+        items: collect_recovery_slice(&tx, req.start, req.end),
+    })
 }
 
-pub fn recovery_slice_hash(mint: &Mint, range: (u64, u64)) -> Result<sha256::Hash, ApiError> {
+pub fn recovery_slice_hash(
+    mint: &Mint,
+    req: RecoverySliceHashRequest,
+) -> Result<RecoverySliceHashResponse, ApiError> {
     let tx = mint.db.begin_read();
-    Ok(collect_recovery_slice(&tx, range).consensus_hash::<sha256::Hash>())
+    Ok(RecoverySliceHashResponse {
+        hash: collect_recovery_slice(&tx, req.start, req.end).consensus_hash(),
+    })
 }
 
-pub fn recovery_count(mint: &Mint, (): ()) -> Result<u64, ApiError> {
+pub fn recovery_count(
+    mint: &Mint,
+    _: RecoveryCountRequest,
+) -> Result<RecoveryCountResponse, ApiError> {
     let tx = mint.db.begin_read();
-    Ok(super::get_recovery_count(&tx))
+    Ok(RecoveryCountResponse {
+        count: super::get_recovery_count(&tx),
+    })
 }
 
 fn collect_signature_shares(
@@ -80,8 +97,6 @@ fn collect_signature_shares(
     })
 }
 
-fn collect_recovery_slice(tx: &ReadTransaction, range: (u64, u64)) -> Vec<RecoveryItem> {
-    tx.range(&RECOVERY_ITEM, range.0..range.1, |r| {
-        r.map(|(_, v)| v).collect()
-    })
+fn collect_recovery_slice(tx: &ReadTransaction, start: u64, end: u64) -> Vec<RecoveryItem> {
+    tx.range(&RECOVERY_ITEM, start..end, |r| r.map(|(_, v)| v).collect())
 }

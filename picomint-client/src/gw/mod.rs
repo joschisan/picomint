@@ -3,6 +3,7 @@ mod complete_sm;
 mod db;
 pub mod events;
 mod receive_sm;
+mod secret;
 mod send_sm;
 
 use std::collections::BTreeMap;
@@ -33,7 +34,7 @@ use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
 
-use crate::secret::Secret;
+pub use self::secret::GwSecret;
 use receive_sm::ReceiveStateMachine;
 use secp256k1::schnorr::Signature;
 use send_sm::SendStateMachine;
@@ -46,11 +47,6 @@ use self::complete_sm::{CompleteSMCommon, CompleteSMState, CompleteStateMachine}
 /// Lightning CLTV Delta in blocks
 pub const EXPIRATION_DELTA_MINIMUM: u64 = 144;
 
-#[derive(Encodable)]
-enum RootSecretPath {
-    Node,
-}
-
 impl GatewayClientModule {
     pub async fn new(
         federation_id: FederationId,
@@ -58,12 +54,10 @@ impl GatewayClientModule {
         context: ClientContext,
         mint: Arc<crate::mint::MintClientModule>,
         gateway: Arc<dyn IGatewayClient>,
-        module_root_secret: &Secret,
+        gw_secret: GwSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<GatewayClientModule> {
-        let keypair = module_root_secret
-            .child(&RootSecretPath::Node)
-            .to_secp_keypair();
+        let keypair = gw_secret.contract_keypair();
 
         let sm_context = GwSmContext {
             client_ctx: context.clone(),
@@ -171,7 +165,7 @@ impl GatewayClientModule {
         // before we start the state machine to prevent DOS attacks.
         let (contract_id, expiration) = self
             .client_ctx
-            .module_api()
+            .api()
             .gw_outgoing_contract_expiration(payload.outpoint)
             .await
             .map_err(|_| anyhow!("The gateway can not reach the federation"))?

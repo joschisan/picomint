@@ -203,7 +203,7 @@ async fn await_preimage_sm(
 ) -> Option<[u8; 32]> {
     let preimage = ctx
         .client_ctx
-        .module_api()
+        .api()
         .ln_await_preimage(outpoint, contract.expiration)
         .await?;
 

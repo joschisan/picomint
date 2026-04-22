@@ -181,9 +181,9 @@ impl AppState {
         for (federation_id, client) in clients.iter() {
             let config = client.config().await;
             let mut fed_codes = BTreeMap::new();
-            for (peer_id, endpoints) in &config.iroh_endpoints {
+            for (peer_id, endpoint) in &config.peers {
                 if let Some(code) = client.invite_code(*peer_id).await {
-                    fed_codes.insert(*peer_id, (endpoints.name.clone(), code));
+                    fed_codes.insert(*peer_id, (endpoint.name.clone(), code));
                 }
             }
             invite_codes.insert(*federation_id, fed_codes);

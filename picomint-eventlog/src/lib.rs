@@ -38,8 +38,8 @@ use tokio::sync::Notify;
 pub enum EventSource {
     Core,
     Mint,
-    Ln,
     Wallet,
+    Ln,
     Gw,
 }
 

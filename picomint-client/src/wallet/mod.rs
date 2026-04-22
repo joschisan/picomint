@@ -3,6 +3,7 @@ pub use picomint_core::wallet as common;
 mod api;
 mod db;
 pub mod events;
+mod secret;
 mod send_sm;
 
 use std::collections::BTreeMap;
@@ -27,7 +28,7 @@ use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_encoding::Encodable;
 
-use crate::secret::Secret;
+pub use self::secret::WalletSecret;
 use picomint_logging::LOG_CLIENT_MODULE_WALLET;
 use secp256k1::Keypair;
 use send_sm::SendStateMachine;
@@ -39,14 +40,9 @@ use tracing::warn;
 /// Number of output info entries to scan per batch.
 const SLICE_SIZE: u64 = 1000;
 
-#[derive(Encodable)]
-enum RootSecretPath {
-    Address,
-}
-
 #[derive(Clone)]
 pub struct WalletClientModule {
-    root_secret: Secret,
+    secret: WalletSecret,
     cfg: WalletConfigConsensus,
     client_ctx: ClientContext,
     mint: std::sync::Arc<crate::mint::MintClientModule>,
@@ -73,7 +69,7 @@ impl WalletClientModule {
         cfg: WalletConfigConsensus,
         context: ClientContext,
         mint: std::sync::Arc<crate::mint::MintClientModule>,
-        module_root_secret: &Secret,
+        secret: WalletSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<WalletClientModule> {
         let sm_context = WalletClientContext {
@@ -83,7 +79,7 @@ impl WalletClientModule {
             ModuleExecutor::new(context.db().clone(), sm_context, task_group.clone()).await;
 
         let module = WalletClientModule {
-            root_secret: *module_root_secret,
+            secret,
             cfg,
             client_ctx: context,
             mint,
@@ -105,7 +101,7 @@ impl WalletClientModule {
     /// Fetch the total value of bitcoin controlled by the federation.
     pub async fn total_value(&self) -> FederationResult<bitcoin::Amount> {
         self.client_ctx
-            .module_api()
+            .api()
             .wallet_federation_wallet()
             .await
             .map(|tx_out| tx_out.map_or(bitcoin::Amount::ZERO, |tx_out| tx_out.value))
@@ -113,24 +109,18 @@ impl WalletClientModule {
 
     /// Fetch the consensus block count of the federation.
     pub async fn block_count(&self) -> FederationResult<u64> {
-        self.client_ctx
-            .module_api()
-            .wallet_consensus_block_count()
-            .await
+        self.client_ctx.api().wallet_consensus_block_count().await
     }
 
     /// Fetch the current consensus feerate.
     pub async fn feerate(&self) -> FederationResult<Option<u64>> {
-        self.client_ctx
-            .module_api()
-            .wallet_consensus_feerate()
-            .await
+        self.client_ctx.api().wallet_consensus_feerate().await
     }
 
     /// Fetch the current fee required to send an onchain payment.
     pub async fn send_fee(&self) -> Result<bitcoin::Amount, SendError> {
         self.client_ctx
-            .module_api()
+            .api()
             .wallet_send_fee()
             .await
             .map_err(|_| SendError::FederationError)?
@@ -156,7 +146,7 @@ impl WalletClientModule {
             Some(value) => value,
             None => self
                 .client_ctx
-                .module_api()
+                .api()
                 .wallet_send_fee()
                 .await
                 .map_err(|_| SendError::FederationError)?
@@ -237,10 +227,7 @@ impl WalletClientModule {
     }
 
     fn derive_tweak(&self, index: u64) -> Keypair {
-        self.root_secret
-            .child(&RootSecretPath::Address)
-            .child(&index)
-            .to_secp_keypair()
+        self.secret.address_keypair(index)
     }
 
     /// Find the next valid index starting from (and including) `start_index`.
@@ -352,7 +339,7 @@ impl WalletClientModule {
 
         let outputs = self
             .client_ctx
-            .module_api()
+            .api()
             .wallet_output_info_slice(next_output_index, next_output_index + SLICE_SIZE)
             .await
             .map_err(|_| anyhow!("Failed to fetch wallet output info slice"))?;
@@ -384,7 +371,7 @@ impl WalletClientModule {
                     // the congestion will clear up within a few blocks.
                     if self
                         .client_ctx
-                        .module_api()
+                        .api()
                         .wallet_pending_tx_chain()
                         .await
                         .map_err(|_| anyhow!("Failed to request wallet pending tx chain"))?
@@ -396,7 +383,7 @@ impl WalletClientModule {
 
                     let receive_fee = self
                         .client_ctx
-                        .module_api()
+                        .api()
                         .wallet_receive_fee()
                         .await
                         .map_err(|_| anyhow!("Failed to request wallet receive fee"))?

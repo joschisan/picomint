@@ -73,10 +73,10 @@ pub struct ServerConfigPrivate {
     pub broadcast_secret_key: SecretKey,
     /// Private key material for the mint module
     pub mint: MintConfigPrivate,
-    /// Private key material for the lightning module
-    pub ln: LightningConfigPrivate,
     /// Private key material for the wallet module
     pub wallet: WalletConfigPrivate,
+    /// Private key material for the lightning module
+    pub ln: LightningConfigPrivate,
 }
 
 /// All the info we configure prior to config gen starting
@@ -132,14 +132,28 @@ impl ServerConfig {
         ln: picomint_core::ln::config::LightningConfig,
         wallet: WalletConfig,
     ) -> Self {
+        let peers = params
+            .peers
+            .iter()
+            .map(|(id, peer)| {
+                let endpoint = PeerEndpoint {
+                    iroh_pk: peer.pk,
+                    broadcast_pk: *broadcast_public_keys
+                        .get(id)
+                        .expect("broadcast pk for every peer"),
+                    name: peer.name.clone(),
+                };
+                (*id, endpoint)
+            })
+            .collect();
+
         let consensus = ConsensusConfig {
-            broadcast_public_keys,
-            broadcast_rounds_per_session: broadcast_rounds_per_session(),
-            iroh_endpoints: params.iroh_endpoints(),
+            peers,
             mint: mint.consensus,
-            ln: ln.consensus,
             wallet: wallet.consensus,
+            ln: ln.consensus,
             meta: params.meta.clone(),
+            broadcast_rounds_per_session: broadcast_rounds_per_session(),
         };
 
         let private = ServerConfigPrivate {
@@ -147,8 +161,8 @@ impl ServerConfig {
             iroh_sk: params.iroh_sk,
             broadcast_secret_key,
             mint: mint.private,
-            ln: ln.private,
             wallet: wallet.private,
+            ln: ln.private,
         };
 
         Self { consensus, private }
@@ -186,19 +200,19 @@ impl ServerConfig {
     }
 
     pub fn validate_config(&self, identity: &PeerId) -> anyhow::Result<()> {
-        let endpoints = &self.consensus.iroh_endpoints;
+        let peers = &self.consensus.peers;
         let my_public_key = self
             .private
             .broadcast_secret_key
             .public_key(&Secp256k1::new());
 
-        if Some(&my_public_key) != self.consensus.broadcast_public_keys.get(identity) {
+        if Some(my_public_key) != peers.get(identity).map(|p| p.broadcast_pk) {
             bail!("Broadcast secret key doesn't match corresponding public key");
         }
-        if endpoints.keys().max().copied().map(PeerId::to_usize) != Some(endpoints.len() - 1) {
+        if peers.keys().max().copied().map(PeerId::to_usize) != Some(peers.len() - 1) {
             bail!("Peer ids are not indexed from 0");
         }
-        if endpoints.keys().min().copied() != Some(PeerId::from(0)) {
+        if peers.keys().min().copied() != Some(PeerId::from(0)) {
             bail!("Peer ids are not indexed from 0");
         }
 
@@ -383,16 +397,7 @@ impl ConfigGenParams {
         self.peers.keys().copied().collect()
     }
 
-    pub fn iroh_endpoints(&self) -> BTreeMap<PeerId, PeerEndpoint> {
-        self.peers
-            .iter()
-            .map(|(id, peer)| {
-                let endpoint = PeerEndpoint {
-                    name: peer.name.clone(),
-                    node_id: peer.pk,
-                };
-                (*id, endpoint)
-            })
-            .collect()
+    pub fn iroh_pks(&self) -> BTreeMap<PeerId, iroh_base::PublicKey> {
+        self.peers.iter().map(|(id, peer)| (*id, peer.pk)).collect()
     }
 }

@@ -4,10 +4,9 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
-use picomint_core::config::ConsensusConfig;
-use picomint_core::methods::{METHOD_CLIENT_CONFIG, METHOD_LIVENESS, METHOD_SUBMIT_TRANSACTION};
+use picomint_core::methods::CoreMethod;
+use picomint_core::module::ApiError;
 use picomint_core::module::audit::AuditSummary;
-use picomint_core::module::{ApiError, ApiRequestErased};
 use picomint_core::transaction::{ConsensusItem, Transaction, TransactionError};
 
 use crate::consensus::rpc;
@@ -33,8 +32,6 @@ pub struct ConsensusApi {
     pub db: Database,
     /// Static wire-dispatch handle to the fixed module set
     pub server: Server,
-    /// Cached client config
-    pub client_cfg: ConsensusConfig,
     /// For sending API events to consensus such as transactions
     pub submission_sender: async_channel::Sender<ConsensusItem>,
     pub shutdown_receiver: Receiver<Option<u64>>,
@@ -127,16 +124,13 @@ impl ConsensusApi {
 }
 
 impl ConsensusApi {
-    pub async fn handle_api(
-        &self,
-        method: &str,
-        req: ApiRequestErased,
-    ) -> Result<Vec<u8>, ApiError> {
+    pub async fn handle_api(&self, method: CoreMethod) -> Result<Vec<u8>, ApiError> {
         match method {
-            METHOD_SUBMIT_TRANSACTION => handler_async!(submit_transaction, self, req).await,
-            METHOD_CLIENT_CONFIG => handler!(client_config, self, req).await,
-            METHOD_LIVENESS => handler!(liveness, self, req).await,
-            other => Err(ApiError::not_found(other.to_string())),
+            CoreMethod::SubmitTransaction(req) => {
+                handler_async!(submit_transaction, self, req).await
+            }
+            CoreMethod::Config(req) => handler!(config, self, req).await,
+            CoreMethod::Liveness(req) => handler!(liveness, self, req).await,
         }
     }
 }

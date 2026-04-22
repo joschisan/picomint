@@ -2,18 +2,18 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::Endpoint;
-use crate::api::{ApiScope, FederationApi};
+use crate::api::FederationApi;
 use crate::gw::{GatewayClientModule, IGatewayClient};
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
-use crate::secret::{Mnemonic, client_root, module_secret};
+use crate::secret::{ClientSecret, Mnemonic};
 use crate::wallet::WalletClientModule;
 use futures::Stream;
 use picomint_core::Amount;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
-use picomint_core::core::{ModuleKind, OperationId};
+use picomint_core::core::OperationId;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxStream;
@@ -98,12 +98,12 @@ impl Client {
             "Building picomint client",
         );
         let federation_id = config.calculate_federation_id();
-        let root_secret = client_root(mnemonic, federation_id);
+        let client_secret = ClientSecret::new(mnemonic, federation_id);
 
         let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
-            .iroh_endpoints
+            .peers
             .iter()
-            .map(|(peer, endpoints)| (*peer, endpoints.node_id))
+            .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
             .collect();
         let api: FederationApi = FederationApi::new(connectors.clone(), peer_node_ids);
 
@@ -111,7 +111,6 @@ impl Client {
 
         let mint_context = crate::module::ClientContext::new(
             api.clone(),
-            ApiScope::Mint,
             db.clone(),
             config.clone(),
             federation_id,
@@ -121,7 +120,7 @@ impl Client {
                 federation_id,
                 config.mint.clone(),
                 mint_context,
-                &module_secret(&root_secret, ModuleKind::Mint),
+                client_secret.mint_secret(),
                 &task_group,
             )
             .await?,
@@ -129,7 +128,6 @@ impl Client {
 
         let wallet_context = crate::module::ClientContext::new(
             api.clone(),
-            ApiScope::Wallet,
             db.clone(),
             config.clone(),
             federation_id,
@@ -139,18 +137,16 @@ impl Client {
                 config.wallet.clone(),
                 wallet_context,
                 mint.clone(),
-                &module_secret(&root_secret, ModuleKind::Wallet),
+                client_secret.wallet_secret(),
                 &task_group,
             )
             .await?,
         );
 
-        let ln_secret = module_secret(&root_secret, ModuleKind::Ln);
         let ln = match ln_choice {
             LnChoice::Regular => {
                 let ln_context = crate::module::ClientContext::new(
                     api.clone(),
-                    ApiScope::Ln,
                     db.clone(),
                     config.clone(),
                     federation_id,
@@ -161,7 +157,7 @@ impl Client {
                         config.ln.clone(),
                         ln_context,
                         mint.clone(),
-                        &ln_secret,
+                        client_secret.ln_secret(),
                         &task_group,
                     )
                     .await?,
@@ -170,7 +166,6 @@ impl Client {
             LnChoice::Gateway(gateway) => {
                 let gw_context = crate::module::ClientContext::new(
                     api.clone(),
-                    ApiScope::Ln,
                     db.clone(),
                     config.clone(),
                     federation_id,
@@ -182,7 +177,7 @@ impl Client {
                         gw_context,
                         mint.clone(),
                         gateway,
-                        &ln_secret,
+                        client_secret.gw_secret(),
                         &task_group,
                     )
                     .await?,
@@ -296,9 +291,9 @@ impl Client {
     pub async fn get_peer_node_ids(&self) -> BTreeMap<PeerId, iroh_base::PublicKey> {
         self.config()
             .await
-            .iroh_endpoints
+            .peers
             .iter()
-            .map(|(peer, endpoints)| (*peer, endpoints.node_id))
+            .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
             .collect()
     }
 
@@ -316,7 +311,12 @@ impl Client {
     pub async fn get_guardian_public_keys_blocking(
         &self,
     ) -> BTreeMap<PeerId, picomint_core::secp256k1::PublicKey> {
-        self.config().await.broadcast_public_keys
+        self.config()
+            .await
+            .peers
+            .iter()
+            .map(|(peer, endpoint)| (*peer, endpoint.broadcast_pk))
+            .collect()
     }
 
     pub async fn get_event_log(
