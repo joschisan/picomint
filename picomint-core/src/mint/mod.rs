@@ -7,13 +7,10 @@ use tbs::{BlindedMessage, Message};
 use thiserror::Error;
 
 use crate::Amount;
-use crate::core::ModuleKind;
 use crate::secp256k1::PublicKey;
 
 pub mod config;
 pub mod methods;
-
-pub const KIND: ModuleKind = ModuleKind::Mint;
 
 /// Compact representation of a power-of-2 amount denomination
 /// Represents 2^denomination msats

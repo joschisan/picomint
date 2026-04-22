@@ -6,14 +6,14 @@ use crate::api::FederationApi;
 use crate::gw::{GatewayClientModule, IGatewayClient};
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
-use crate::secret::{Mnemonic, client_root, module_secret};
+use crate::secret::{Mnemonic, Path, client_root, module_secret};
 use crate::wallet::WalletClientModule;
 use futures::Stream;
 use picomint_core::Amount;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
-use picomint_core::core::{ModuleKind, OperationId};
+use picomint_core::core::OperationId;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxStream;
@@ -120,7 +120,7 @@ impl Client {
                 federation_id,
                 config.mint.clone(),
                 mint_context,
-                &module_secret(&root_secret, ModuleKind::Mint),
+                &module_secret(&root_secret, Path::Mint),
                 &task_group,
             )
             .await?,
@@ -137,13 +137,13 @@ impl Client {
                 config.wallet.clone(),
                 wallet_context,
                 mint.clone(),
-                &module_secret(&root_secret, ModuleKind::Wallet),
+                &module_secret(&root_secret, Path::Wallet),
                 &task_group,
             )
             .await?,
         );
 
-        let ln_secret = module_secret(&root_secret, ModuleKind::Ln);
+        let ln_secret = module_secret(&root_secret, Path::Ln);
         let ln = match ln_choice {
             LnChoice::Regular => {
                 let ln_context = crate::module::ClientContext::new(

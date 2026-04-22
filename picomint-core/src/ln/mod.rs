@@ -18,7 +18,6 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tpe::AggregateDecryptionKey;
 
-use crate::core::ModuleKind;
 use crate::ln::contracts::{IncomingContract, OutgoingContract};
 use crate::{Amount, OutPoint};
 
@@ -32,8 +31,6 @@ pub enum Bolt11InvoiceDescription {
 pub enum LightningInvoice {
     Bolt11(Bolt11Invoice),
 }
-
-pub const KIND: ModuleKind = ModuleKind::Ln;
 
 /// Per-contract derivation path for the ECDH-rooted incoming-contract
 /// secret tree. Shared between the contract creator (client receive path,

@@ -55,7 +55,7 @@ use query::FilterMap;
 use tracing::debug;
 
 pub use client::Client;
-pub use picomint_core::core::{ModuleKind, OperationId};
+pub use picomint_core::core::OperationId;
 pub use secret::{Mnemonic, random as random_mnemonic};
 
 use picomint_core::TransactionId;
