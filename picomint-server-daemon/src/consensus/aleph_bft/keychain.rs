@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use aleph_bft::Keychain as KeychainTrait;
 use bitcoin::hashes::Hash;
+use picomint_core::config::FederationId;
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
 use picomint_encoding::Encodable;
 use secp256k1::hashes::sha256;
@@ -13,7 +14,7 @@ use crate::config::ServerConfig;
 pub struct Keychain {
     identity: PeerId,
     pks: BTreeMap<PeerId, PublicKey>,
-    message_tag: sha256::Hash,
+    message_tag: FederationId,
     keypair: Keypair,
 }
 
@@ -27,7 +28,7 @@ impl Keychain {
             .collect();
         Keychain {
             identity: cfg.private.identity,
-            message_tag: cfg.consensus.calculate_federation_id().0,
+            message_tag: cfg.consensus.calculate_federation_id(),
             pks,
             keypair: cfg
                 .private
