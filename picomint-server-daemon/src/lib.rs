@@ -29,19 +29,15 @@ use tracing::info;
 
 /// Dispatch helper for module `handle_api` match arms.
 ///
-/// `handler!(fn_name, self, req).await` decodes `req` into the parameter type
-/// of `rpc::fn_name`, calls `rpc::fn_name(self, param)`, and consensus-encodes
-/// the response. Each module has a `mod rpc` submodule with one
-/// `fn name(module: &Self, param: P) -> Result<R, ApiError>` per endpoint.
-/// Use [`handler_async!`] when the rpc handler is itself async.
+/// `handler!(fn_name, self, req).await` calls `rpc::fn_name(self, req)` and
+/// consensus-encodes the response. Each module has a `mod rpc` submodule with
+/// one `fn name(module: &Self, req: XRequest) -> Result<XResponse, ApiError>`
+/// per endpoint. Use [`handler_async!`] when the rpc handler is itself async.
 #[macro_export]
 macro_rules! handler {
     ($func:ident, $self:expr, $req:expr) => {
         async move {
-            let param = $req
-                .to_typed()
-                .map_err(|e| ::picomint_core::module::ApiError::bad_request(e.to_string()))?;
-            let resp = rpc::$func($self, param)?;
+            let resp = rpc::$func($self, $req)?;
             ::std::result::Result::Ok(::picomint_encoding::Encodable::consensus_encode_to_vec(
                 &resp,
             ))
@@ -54,10 +50,7 @@ macro_rules! handler {
 macro_rules! handler_async {
     ($func:ident, $self:expr, $req:expr) => {
         async move {
-            let param = $req
-                .to_typed()
-                .map_err(|e| ::picomint_core::module::ApiError::bad_request(e.to_string()))?;
-            let resp = rpc::$func($self, param).await?;
+            let resp = rpc::$func($self, $req).await?;
             ::std::result::Result::Ok(::picomint_encoding::Encodable::consensus_encode_to_vec(
                 &resp,
             ))

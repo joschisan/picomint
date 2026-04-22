@@ -5,11 +5,13 @@ use crate::api::{FederationApi, ServerError};
 use crate::query::FilterMapThreshold;
 use bitcoin_hashes::sha256;
 use picomint_core::mint::methods::{
-    METHOD_RECOVERY_COUNT, METHOD_RECOVERY_SLICE, METHOD_RECOVERY_SLICE_HASH,
-    METHOD_SIGNATURE_SHARES, METHOD_SIGNATURE_SHARES_RECOVERY,
+    MintMethod, RecoveryCountRequest, RecoveryCountResponse, RecoverySliceHashRequest,
+    RecoverySliceHashResponse, RecoverySliceRequest, RecoverySliceResponse,
+    SignatureSharesRecoveryRequest, SignatureSharesRecoveryResponse, SignatureSharesRequest,
+    SignatureSharesResponse,
 };
 use picomint_core::mint::{Denomination, RecoveryItem};
-use picomint_core::module::ApiRequestErased;
+use picomint_core::module::ApiMethod;
 use picomint_core::{NumPeersExt, PeerId, TransactionId};
 use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 
@@ -24,16 +26,14 @@ impl FederationApi {
         tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
     ) -> BTreeMap<PeerId, Vec<BlindedSignatureShare>> {
         self.request_with_strategy_retry(
-            // This query collects a threshold of 2f + 1 valid blind signature shares
             FilterMapThreshold::new(
-                move |peer, signature_shares| {
-                    verify_blind_shares(peer, signature_shares, &issuance_requests, &tbs_pks)
+                move |peer, resp: SignatureSharesResponse| {
+                    verify_blind_shares(peer, resp.shares, &issuance_requests, &tbs_pks)
                         .map_err(ServerError::InvalidResponse)
                 },
                 self.all_peers().to_num_peers(),
             ),
-            METHOD_SIGNATURE_SHARES.to_owned(),
-            ApiRequestErased::new(txid),
+            ApiMethod::Mint(MintMethod::SignatureShares(SignatureSharesRequest { txid })),
         )
         .await
     }
@@ -43,41 +43,41 @@ impl FederationApi {
         issuance_requests: Vec<NoteIssuanceRequest>,
         tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
     ) -> BTreeMap<PeerId, Vec<BlindedSignatureShare>> {
-        let blinded_messages: Vec<BlindedMessage> = issuance_requests
+        let messages: Vec<BlindedMessage> = issuance_requests
             .iter()
             .map(NoteIssuanceRequest::blinded_message)
             .collect();
 
         self.request_with_strategy_retry(
-            // This query collects a threshold of 2f + 1 valid blind signature shares
             FilterMapThreshold::new(
-                move |peer, signature_shares| {
-                    verify_blind_shares(peer, signature_shares, &issuance_requests, &tbs_pks)
+                move |peer, resp: SignatureSharesRecoveryResponse| {
+                    verify_blind_shares(peer, resp.shares, &issuance_requests, &tbs_pks)
                         .map_err(ServerError::InvalidResponse)
                 },
                 self.all_peers().to_num_peers(),
             ),
-            METHOD_SIGNATURE_SHARES_RECOVERY.to_owned(),
-            ApiRequestErased::new(blinded_messages),
+            ApiMethod::Mint(MintMethod::SignatureSharesRecovery(
+                SignatureSharesRecoveryRequest { messages },
+            )),
         )
         .await
     }
 
     pub async fn recovery_count(&self) -> anyhow::Result<u64> {
-        self.request_current_consensus::<u64>(
-            METHOD_RECOVERY_COUNT.to_string(),
-            ApiRequestErased::default(),
-        )
+        self.request_current_consensus::<RecoveryCountResponse>(ApiMethod::Mint(
+            MintMethod::RecoveryCount(RecoveryCountRequest),
+        ))
         .await
+        .map(|resp| resp.count)
         .map_err(|_| anyhow::anyhow!("Failed to request recovery count"))
     }
 
     pub async fn recovery_slice_hash(&self, start: u64, end: u64) -> sha256::Hash {
-        self.request_current_consensus_retry(
-            METHOD_RECOVERY_SLICE_HASH.to_owned(),
-            ApiRequestErased::new((start, end)),
-        )
+        self.request_current_consensus_retry::<RecoverySliceHashResponse>(ApiMethod::Mint(
+            MintMethod::RecoverySliceHash(RecoverySliceHashRequest { start, end }),
+        ))
         .await
+        .hash
     }
 
     pub async fn recovery_slice(
@@ -87,16 +87,18 @@ impl FederationApi {
         start: u64,
         end: u64,
     ) -> anyhow::Result<Vec<RecoveryItem>> {
-        let result = tokio::time::timeout(
+        let result: RecoverySliceResponse = tokio::time::timeout(
             timeout,
-            self.request_single_peer::<Vec<RecoveryItem>>(
-                METHOD_RECOVERY_SLICE.to_owned(),
-                ApiRequestErased::new((start, end)),
+            self.request_single_peer::<RecoverySliceResponse>(
+                ApiMethod::Mint(MintMethod::RecoverySlice(RecoverySliceRequest {
+                    start,
+                    end,
+                })),
                 peer,
             ),
         )
         .await??;
 
-        Ok(result)
+        Ok(result.items)
     }
 }

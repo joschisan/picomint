@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::api::{ApiScope, FederationApi};
+use crate::api::FederationApi;
 use futures::StreamExt as _;
 use picomint_core::TransactionId;
 use picomint_core::config::ConsensusConfig;
@@ -19,7 +19,6 @@ use crate::{TxAcceptEvent, TxRejectEvent};
 #[derive(Clone)]
 pub struct ClientContext {
     api: FederationApi,
-    api_scope: ApiScope,
     db: Database,
     config: ConsensusConfig,
     federation_id: FederationId,
@@ -28,28 +27,23 @@ pub struct ClientContext {
 impl ClientContext {
     pub fn new(
         api: FederationApi,
-        api_scope: ApiScope,
         db: Database,
         config: ConsensusConfig,
         federation_id: FederationId,
     ) -> Self {
         Self {
             api,
-            api_scope,
             db,
             config,
             federation_id,
         }
     }
 
-    /// Get a reference to a global Api handle
-    pub fn global_api(&self) -> FederationApi {
+    /// Federation API handle. Typed wire methods are built with
+    /// `ApiMethod::<Module>(<ModuleMethod>::...)` — there is no module-scope
+    /// plumbing to attach.
+    pub fn api(&self) -> FederationApi {
         self.api.clone()
-    }
-
-    /// Get a reference to a module Api handle
-    pub fn module_api(&self) -> FederationApi {
-        self.api.clone().with_scope(self.api_scope)
     }
 
     pub fn db(&self) -> &Database {

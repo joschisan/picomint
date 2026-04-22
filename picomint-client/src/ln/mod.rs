@@ -128,7 +128,7 @@ impl LightningClientModule {
         // if possible, such that the payment does not go over lightning, reducing
         // fees and latency.
 
-        if let Ok(gateways) = self.client_ctx.module_api().ln_gateways().await {
+        if let Ok(gateways) = self.client_ctx.api().ln_gateways().await {
             let mut entries = Vec::new();
             for gateway in gateways {
                 if let Ok(Some(routing_info)) =
@@ -160,7 +160,7 @@ impl LightningClientModule {
     ) -> Result<(String, RoutingInfo), SelectGatewayError> {
         let gateways = self
             .client_ctx
-            .module_api()
+            .api()
             .ln_gateways()
             .await
             .map_err(|_| SelectGatewayError::FailedToRequestGateways)?;
@@ -198,13 +198,13 @@ impl LightningClientModule {
     ) -> Result<Vec<String>, ListGatewaysError> {
         if let Some(peer) = peer {
             self.client_ctx
-                .module_api()
+                .api()
                 .ln_gateways_from_peer(peer)
                 .await
                 .map_err(|_| ListGatewaysError::FailedToListGateways)
         } else {
             self.client_ctx
-                .module_api()
+                .api()
                 .ln_gateways()
                 .await
                 .map_err(|_| ListGatewaysError::FailedToListGateways)
@@ -281,7 +281,7 @@ impl LightningClientModule {
 
         let consensus_block_count = self
             .client_ctx
-            .module_api()
+            .api()
             .ln_consensus_block_count()
             .await
             .map_err(|_| SendPaymentError::FailedToRequestBlockCount)?;
@@ -538,7 +538,7 @@ impl LightningClientModule {
     pub async fn generate_lnurl(&self, recurringd: String) -> Result<String, GenerateLnurlError> {
         let gateways = self
             .client_ctx
-            .module_api()
+            .api()
             .ln_gateways()
             .await
             .map_err(|_| GenerateLnurlError::FailedToRequestGateways)?;
@@ -584,7 +584,7 @@ impl LightningClientModule {
 
         let (entries, next_index) = self
             .client_ctx
-            .module_api()
+            .api()
             .ln_await_incoming_contracts(stream_index, 128)
             .await;
 

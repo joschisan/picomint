@@ -105,7 +105,7 @@ impl WalletClientModule {
     /// Fetch the total value of bitcoin controlled by the federation.
     pub async fn total_value(&self) -> FederationResult<bitcoin::Amount> {
         self.client_ctx
-            .module_api()
+            .api()
             .wallet_federation_wallet()
             .await
             .map(|tx_out| tx_out.map_or(bitcoin::Amount::ZERO, |tx_out| tx_out.value))
@@ -113,24 +113,18 @@ impl WalletClientModule {
 
     /// Fetch the consensus block count of the federation.
     pub async fn block_count(&self) -> FederationResult<u64> {
-        self.client_ctx
-            .module_api()
-            .wallet_consensus_block_count()
-            .await
+        self.client_ctx.api().wallet_consensus_block_count().await
     }
 
     /// Fetch the current consensus feerate.
     pub async fn feerate(&self) -> FederationResult<Option<u64>> {
-        self.client_ctx
-            .module_api()
-            .wallet_consensus_feerate()
-            .await
+        self.client_ctx.api().wallet_consensus_feerate().await
     }
 
     /// Fetch the current fee required to send an onchain payment.
     pub async fn send_fee(&self) -> Result<bitcoin::Amount, SendError> {
         self.client_ctx
-            .module_api()
+            .api()
             .wallet_send_fee()
             .await
             .map_err(|_| SendError::FederationError)?
@@ -156,7 +150,7 @@ impl WalletClientModule {
             Some(value) => value,
             None => self
                 .client_ctx
-                .module_api()
+                .api()
                 .wallet_send_fee()
                 .await
                 .map_err(|_| SendError::FederationError)?
@@ -352,7 +346,7 @@ impl WalletClientModule {
 
         let outputs = self
             .client_ctx
-            .module_api()
+            .api()
             .wallet_output_info_slice(next_output_index, next_output_index + SLICE_SIZE)
             .await
             .map_err(|_| anyhow!("Failed to fetch wallet output info slice"))?;
@@ -384,7 +378,7 @@ impl WalletClientModule {
                     // the congestion will clear up within a few blocks.
                     if self
                         .client_ctx
-                        .module_api()
+                        .api()
                         .wallet_pending_tx_chain()
                         .await
                         .map_err(|_| anyhow!("Failed to request wallet pending tx chain"))?
@@ -396,7 +390,7 @@ impl WalletClientModule {
 
                     let receive_fee = self
                         .client_ctx
-                        .module_api()
+                        .api()
                         .wallet_receive_fee()
                         .await
                         .map_err(|_| anyhow!("Failed to request wallet receive fee"))?

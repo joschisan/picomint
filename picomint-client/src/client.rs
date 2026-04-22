@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::Endpoint;
-use crate::api::{ApiScope, FederationApi};
+use crate::api::FederationApi;
 use crate::gw::{GatewayClientModule, IGatewayClient};
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
@@ -111,7 +111,6 @@ impl Client {
 
         let mint_context = crate::module::ClientContext::new(
             api.clone(),
-            ApiScope::Mint,
             db.clone(),
             config.clone(),
             federation_id,
@@ -129,7 +128,6 @@ impl Client {
 
         let wallet_context = crate::module::ClientContext::new(
             api.clone(),
-            ApiScope::Wallet,
             db.clone(),
             config.clone(),
             federation_id,
@@ -150,7 +148,6 @@ impl Client {
             LnChoice::Regular => {
                 let ln_context = crate::module::ClientContext::new(
                     api.clone(),
-                    ApiScope::Ln,
                     db.clone(),
                     config.clone(),
                     federation_id,
@@ -170,7 +167,6 @@ impl Client {
             LnChoice::Gateway(gateway) => {
                 let gw_context = crate::module::ClientContext::new(
                     api.clone(),
-                    ApiScope::Ln,
                     db.clone(),
                     config.clone(),
                     federation_id,

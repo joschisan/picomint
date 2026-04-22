@@ -7,15 +7,12 @@ use anyhow::ensure;
 use picomint_core::mint::config::{
     MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
 };
-use picomint_core::mint::methods::{
-    METHOD_RECOVERY_COUNT, METHOD_RECOVERY_SLICE, METHOD_RECOVERY_SLICE_HASH,
-    METHOD_SIGNATURE_SHARES, METHOD_SIGNATURE_SHARES_RECOVERY,
-};
+use picomint_core::mint::methods::MintMethod;
 use picomint_core::mint::{
     Denomination, MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError,
     RecoveryItem, verify_note,
 };
-use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
+use picomint_core::module::{ApiError, InputMeta, TransactionItemAmounts};
 use picomint_core::{Amount, InPoint, OutPoint, PeerId};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
@@ -216,20 +213,15 @@ impl Mint {
         })
     }
 
-    pub async fn handle_api(
-        &self,
-        method: &str,
-        req: ApiRequestErased,
-    ) -> Result<Vec<u8>, ApiError> {
+    pub async fn handle_api(&self, method: MintMethod) -> Result<Vec<u8>, ApiError> {
         match method {
-            METHOD_SIGNATURE_SHARES => handler_async!(signature_shares, self, req).await,
-            METHOD_SIGNATURE_SHARES_RECOVERY => {
+            MintMethod::SignatureShares(req) => handler_async!(signature_shares, self, req).await,
+            MintMethod::SignatureSharesRecovery(req) => {
                 handler!(signature_shares_recovery, self, req).await
             }
-            METHOD_RECOVERY_SLICE => handler!(recovery_slice, self, req).await,
-            METHOD_RECOVERY_SLICE_HASH => handler!(recovery_slice_hash, self, req).await,
-            METHOD_RECOVERY_COUNT => handler!(recovery_count, self, req).await,
-            other => Err(ApiError::not_found(other.to_string())),
+            MintMethod::RecoverySlice(req) => handler!(recovery_slice, self, req).await,
+            MintMethod::RecoverySliceHash(req) => handler!(recovery_slice_hash, self, req).await,
+            MintMethod::RecoveryCount(req) => handler!(recovery_count, self, req).await,
         }
     }
 }

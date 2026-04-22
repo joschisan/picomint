@@ -20,7 +20,7 @@ use iroh::endpoint::{RecvStream, SendStream};
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
 use picomint_core::envs::is_running_in_test_env;
-use picomint_core::module::{ApiAuth, ApiError, ApiMethod, IrohApiRequest};
+use picomint_core::module::{ApiAuth, ApiError, ApiMethod};
 use picomint_core::task::TaskGroup;
 use picomint_core::transaction::ConsensusItem;
 use picomint_core::wire;
@@ -98,7 +98,7 @@ pub async fn run(
 
     let server = Server { mint, ln, wallet };
 
-    let client_cfg = cfg.consensus.clone();
+    let config = cfg.consensus.clone();
 
     let (submission_sender, submission_receiver) = async_channel::bounded(TRANSACTION_BUFFER);
     let (shutdown_sender, shutdown_receiver) = watch::channel(None);
@@ -117,7 +117,7 @@ pub async fn run(
         cfg: cfg.clone(),
         db: db.clone(),
         server: server.clone(),
-        client_cfg: client_cfg.clone(),
+        config: config.clone(),
         submission_sender: submission_sender.clone(),
         shutdown_sender,
         shutdown_receiver: shutdown_receiver.clone(),
@@ -308,9 +308,9 @@ async fn handle_request(
     _request_permit: tokio::sync::OwnedSemaphorePermit,
 ) -> anyhow::Result<()> {
     let request = recv_stream.read_to_end(100_000).await?;
-    let request = IrohApiRequest::consensus_decode_exact(&request)?;
+    let method = ApiMethod::consensus_decode_exact(&request)?;
 
-    let response = dispatch(consensus_api, request).await;
+    let response = dispatch(consensus_api, method).await;
     let response = response.consensus_encode_to_vec();
 
     send_stream.write_all(&response).await?;
@@ -320,30 +320,12 @@ async fn handle_request(
 
 async fn dispatch(
     consensus_api: Arc<ConsensusApi>,
-    request: IrohApiRequest,
+    method: ApiMethod,
 ) -> Result<Vec<u8>, ApiError> {
-    match request.method {
-        ApiMethod::Core(method) => consensus_api.handle_api(&method, request.request).await,
-        ApiMethod::Mint(method) => {
-            consensus_api
-                .server
-                .mint
-                .handle_api(&method, request.request)
-                .await
-        }
-        ApiMethod::Ln(method) => {
-            consensus_api
-                .server
-                .ln
-                .handle_api(&method, request.request)
-                .await
-        }
-        ApiMethod::Wallet(method) => {
-            consensus_api
-                .server
-                .wallet
-                .handle_api(&method, request.request)
-                .await
-        }
+    match method {
+        ApiMethod::Core(m) => consensus_api.handle_api(m).await,
+        ApiMethod::Mint(m) => consensus_api.server.mint.handle_api(m).await,
+        ApiMethod::Ln(m) => consensus_api.server.ln.handle_api(m).await,
+        ApiMethod::Wallet(m) => consensus_api.server.wallet.handle_api(m).await,
     }
 }

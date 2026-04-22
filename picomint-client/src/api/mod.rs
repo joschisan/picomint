@@ -13,8 +13,10 @@ use iroh::endpoint::Connection;
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{BackoffBuilder, Retryable, networking_backoff};
 use picomint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
-use picomint_core::methods::{METHOD_LIVENESS, METHOD_SUBMIT_TRANSACTION};
-use picomint_core::module::{ApiError, ApiMethod, ApiRequestErased, IrohApiRequest, PICOMINT_ALPN};
+use picomint_core::methods::{
+    CoreMethod, LivenessRequest, SubmitTransactionRequest, SubmitTransactionResponse,
+};
+use picomint_core::module::{ApiError, ApiMethod, PICOMINT_ALPN};
 use picomint_core::{NumPeersExt, PeerId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_logging::LOG_CLIENT_NET_API;
@@ -108,20 +110,9 @@ pub type FederationResult<T> = Result<T, FederationError>;
 /// [`PeerState`] on a watch channel; requests wait for the first transition
 /// out of `None` and read the live connection (or fail) from the current
 /// value.
-/// Which of the three static modules this API handle is scoped to, if any.
-/// Determines which [`ApiMethod`] variant requests are wrapped in.
-#[derive(Clone, Copy, Debug)]
-pub enum ApiScope {
-    Core,
-    Mint,
-    Ln,
-    Wallet,
-}
-
 #[derive(Clone, Debug)]
 pub struct FederationApi {
     peers: BTreeSet<PeerId>,
-    scope: ApiScope,
     states: BTreeMap<PeerId, watch::Receiver<Option<PeerState>>>,
 }
 
@@ -141,7 +132,6 @@ impl FederationApi {
 
         Self {
             peers: peers.keys().copied().collect(),
-            scope: ApiScope::Core,
             states,
         }
     }
@@ -149,16 +139,6 @@ impl FederationApi {
     /// List of all federation peers.
     pub fn all_peers(&self) -> &BTreeSet<PeerId> {
         &self.peers
-    }
-
-    /// Return a clone of this API scoped to a specific module, so subsequent
-    /// calls wrap in the matching [`ApiMethod`] variant.
-    pub fn with_scope(&self, scope: ApiScope) -> FederationApi {
-        FederationApi {
-            peers: self.peers.clone(),
-            scope,
-            states: self.states.clone(),
-        }
     }
 
     /// Stream of live connection status for each peer.
@@ -180,22 +160,10 @@ impl FederationApi {
     #[instrument(
         target = LOG_CLIENT_NET_API,
         skip_all,
-        fields(peer_id = %peer_id, method = %method),
+        fields(peer_id = %peer_id, method = ?method),
     )]
-    pub async fn request_raw(
-        &self,
-        peer_id: PeerId,
-        method: &str,
-        params: &ApiRequestErased,
-    ) -> ServerResult<Vec<u8>> {
-        let method = match self.scope {
-            ApiScope::Core => ApiMethod::Core(method.to_string()),
-            ApiScope::Mint => ApiMethod::Mint(method.to_string()),
-            ApiScope::Ln => ApiMethod::Ln(method.to_string()),
-            ApiScope::Wallet => ApiMethod::Wallet(method.to_string()),
-        };
-
-        trace!(target: LOG_CLIENT_NET_API, %peer_id, %method, "Api request");
+    pub async fn request_raw(&self, peer_id: PeerId, method: ApiMethod) -> ServerResult<Vec<u8>> {
+        trace!(target: LOG_CLIENT_NET_API, %peer_id, ?method, "Api request");
 
         let mut rx = self
             .states
@@ -214,7 +182,7 @@ impl FederationApi {
             return Err(ServerError::Connection(anyhow!("peer not connected")));
         };
 
-        let res = request_over_connection(&conn, method.clone(), params.clone()).await;
+        let res = request_over_connection(&conn, method.clone()).await;
 
         trace!(target: LOG_CLIENT_NET_API, ?method, res_ok = res.is_ok(), "Api response");
 
@@ -223,47 +191,42 @@ impl FederationApi {
 
     pub async fn request_single_peer<Ret>(
         &self,
-        method: String,
-        params: ApiRequestErased,
+        method: ApiMethod,
         peer: PeerId,
     ) -> ServerResult<Ret>
     where
         Ret: Decodable,
     {
-        self.request_raw(peer, &method, &params)
-            .await
-            .and_then(|bytes| {
-                Ret::consensus_decode_exact(&bytes)
-                    .map_err(|e| ServerError::ResponseDeserialization(e.into()))
-            })
+        self.request_raw(peer, method).await.and_then(|bytes| {
+            Ret::consensus_decode_exact(&bytes)
+                .map_err(|e| ServerError::ResponseDeserialization(e.into()))
+        })
     }
 
     pub async fn request_single_peer_federation<FedRet>(
         &self,
-        method: String,
-        params: ApiRequestErased,
+        method: ApiMethod,
         peer_id: PeerId,
     ) -> FederationResult<FedRet>
     where
         FedRet: Decodable + Eq + Debug + Clone + Send,
     {
-        self.request_raw(peer_id, &method, &params)
+        self.request_raw(peer_id, method.clone())
             .await
             .and_then(|bytes| {
                 FedRet::consensus_decode_exact(&bytes)
                     .map_err(|e| ServerError::ResponseDeserialization(e.into()))
             })
-            .map_err(|e| error::FederationError::new_one_peer(peer_id, method, params, e))
+            .map_err(|e| error::FederationError::new_one_peer(peer_id, method, e))
     }
 
     /// Make an aggregate request to federation, using `strategy` to logically
     /// merge the responses.
-    #[instrument(target = LOG_CLIENT_NET_API, skip_all, fields(method = method))]
+    #[instrument(target = LOG_CLIENT_NET_API, skip_all, fields(method = ?method))]
     pub async fn request_with_strategy<PR: Decodable, FR: Debug>(
         &self,
         mut strategy: impl QueryStrategy<PR, FR> + Send,
-        method: String,
-        params: ApiRequestErased,
+        method: ApiMethod,
     ) -> FederationResult<FR> {
         // NOTE: `FuturesUnorderded` is a footgun, but all we do here is polling
         // completed results from it and we don't do any `await`s when
@@ -275,11 +238,8 @@ impl FederationApi {
         for peer in self.all_peers() {
             futures.push(Box::pin({
                 let method = &method;
-                let params = &params;
                 async move {
-                    let result = self
-                        .request_single_peer(method.clone(), params.clone(), *peer)
-                        .await;
+                    let result = self.request_single_peer(method.clone(), *peer).await;
 
                     (*peer, result)
                 }
@@ -301,11 +261,9 @@ impl FederationApi {
                         for peer in peers {
                             futures.push(Box::pin({
                                 let method = &method;
-                                let params = &params;
                                 async move {
-                                    let result = self
-                                        .request_single_peer(method.clone(), params.clone(), peer)
-                                        .await;
+                                    let result =
+                                        self.request_single_peer(method.clone(), peer).await;
 
                                     (peer, result)
                                 }
@@ -325,11 +283,7 @@ impl FederationApi {
             }
 
             if peer_errors.len() == peer_error_threshold {
-                return Err(FederationError::peer_errors(
-                    method.clone(),
-                    params.clone(),
-                    peer_errors,
-                ));
+                return Err(FederationError::peer_errors(method.clone(), peer_errors));
             }
         }
     }
@@ -338,8 +292,7 @@ impl FederationApi {
     pub async fn request_with_strategy_retry<PR: Decodable + Send, FR: Debug>(
         &self,
         mut strategy: impl QueryStrategy<PR, FR> + Send,
-        method: String,
-        params: ApiRequestErased,
+        method: ApiMethod,
     ) -> FR {
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
         #[cfg(target_family = "wasm")]
@@ -348,10 +301,9 @@ impl FederationApi {
         for peer in self.all_peers() {
             futures.push(Box::pin({
                 let method = &method;
-                let params = &params;
                 async move {
                     let response = (|| async {
-                        self.request_single_peer(method.clone(), params.clone(), *peer)
+                        self.request_single_peer(method.clone(), *peer)
                             .await
                             .inspect_err(|e| {
                                 e.report_if_unusual(*peer, "QueryWithStrategyRetry");
@@ -378,21 +330,16 @@ impl FederationApi {
                     for peer in peers {
                         futures.push(Box::pin({
                             let method = &method;
-                            let params = &params;
                             async move {
                                 let response = (|| async {
-                                    self.request_single_peer(
-                                        method.clone(),
-                                        params.clone(),
-                                        peer,
-                                    )
-                                    .await
-                                    .inspect_err(|err| {
-                                        if err.is_unusual() {
-                                            debug!(target: LOG_CLIENT_NET_API, err = %err, "Unusual peer error");
-                                        }
-                                    })
-                                    .map_err(|e| anyhow!(e.to_string()))
+                                    self.request_single_peer(method.clone(), peer)
+                                        .await
+                                        .inspect_err(|err| {
+                                            if err.is_unusual() {
+                                                debug!(target: LOG_CLIENT_NET_API, err = %err, "Unusual peer error");
+                                            }
+                                        })
+                                        .map_err(|e| anyhow!(e.to_string()))
                                 })
                                 .retry(networking_backoff())
                                 .await
@@ -412,34 +359,24 @@ impl FederationApi {
         }
     }
 
-    pub async fn request_current_consensus<Ret>(
-        &self,
-        method: String,
-        params: ApiRequestErased,
-    ) -> FederationResult<Ret>
+    pub async fn request_current_consensus<Ret>(&self, method: ApiMethod) -> FederationResult<Ret>
     where
         Ret: Decodable + Eq + Debug + Clone + Send,
     {
         self.request_with_strategy(
             ThresholdConsensus::new(self.all_peers().to_num_peers()),
             method,
-            params,
         )
         .await
     }
 
-    pub async fn request_current_consensus_retry<Ret>(
-        &self,
-        method: String,
-        params: ApiRequestErased,
-    ) -> Ret
+    pub async fn request_current_consensus_retry<Ret>(&self, method: ApiMethod) -> Ret
     where
         Ret: Decodable + Eq + Debug + Clone + Send,
     {
         self.request_with_strategy_retry(
             ThresholdConsensus::new(self.all_peers().to_num_peers()),
             method,
-            params,
         )
         .await
     }
@@ -447,18 +384,19 @@ impl FederationApi {
     /// Submit a transaction and await the final outcome. The server long-
     /// polls until the tx is either accepted or becomes invalid.
     pub async fn submit_transaction(&self, tx: Transaction) -> Result<(), TransactionError> {
-        self.request_current_consensus_retry(
-            METHOD_SUBMIT_TRANSACTION.to_owned(),
-            ApiRequestErased::new(tx),
-        )
+        self.request_current_consensus_retry::<SubmitTransactionResponse>(ApiMethod::Core(
+            CoreMethod::SubmitTransaction(SubmitTransactionRequest { transaction: tx }),
+        ))
         .await
+        .outcome
     }
 
     /// Lightweight liveness check — returns `Ok(())` if the federation is
     /// reachable.
     pub async fn liveness(&self) -> FederationResult<()> {
-        self.request_current_consensus(METHOD_LIVENESS.to_owned(), ApiRequestErased::default())
+        self.request_current_consensus(ApiMethod::Core(CoreMethod::Liveness(LivenessRequest)))
             .await
+            .map(|_: picomint_core::methods::LivenessResponse| ())
     }
 }
 
@@ -492,9 +430,8 @@ const IROH_MAX_RESPONSE_BYTES: usize = ALEPH_BFT_UNIT_BYTE_LIMIT * 3600 * 4 * 2;
 async fn request_over_connection(
     connection: &Connection,
     method: ApiMethod,
-    request: ApiRequestErased,
 ) -> ServerResult<Vec<u8>> {
-    let request_bytes = IrohApiRequest { method, request }.consensus_encode_to_vec();
+    let request_bytes = method.consensus_encode_to_vec();
 
     let (mut sink, mut stream) = connection
         .open_bi()

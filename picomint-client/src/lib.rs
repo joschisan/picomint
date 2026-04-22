@@ -48,8 +48,8 @@ pub use iroh::Endpoint;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::invite_code::InviteCode;
-use picomint_core::methods::METHOD_CLIENT_CONFIG;
-use picomint_core::module::ApiRequestErased;
+use picomint_core::methods::{ConfigRequest, ConfigResponse, CoreMethod};
+use picomint_core::module::ApiMethod;
 use picomint_logging::LOG_CLIENT_NET;
 use query::FilterMap;
 use tracing::debug;
@@ -100,21 +100,20 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
     let federation_id = invite.federation_id;
     let api_from_invite = FederationApi::new(endpoint.clone(), invite.peers.clone());
 
-    let query_strategy = FilterMap::new(move |cfg: ConsensusConfig| {
-        if federation_id != cfg.calculate_federation_id() {
+    let query_strategy = FilterMap::new(move |resp: ConfigResponse| {
+        if federation_id != resp.config.calculate_federation_id() {
             return Err(ServerError::ConditionFailed(anyhow::anyhow!(
                 "FederationId in invite code does not match client config"
             )));
         }
 
-        Ok(cfg.iroh_endpoints.clone())
+        Ok(resp.config.iroh_endpoints.clone())
     });
 
     let api_endpoints: BTreeMap<PeerId, picomint_core::config::PeerEndpoint> = api_from_invite
         .request_with_strategy(
             query_strategy,
-            METHOD_CLIENT_CONFIG.to_owned(),
-            ApiRequestErased::default(),
+            ApiMethod::Core(CoreMethod::Config(ConfigRequest)),
         )
         .await
         .map_err(|_| anyhow::anyhow!("Failed to download client config from invite peer"))?;
@@ -128,12 +127,12 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
 
     let api_full = FederationApi::new(endpoint.clone(), api_endpoints);
     let client_config = api_full
-        .request_current_consensus::<ConsensusConfig>(
-            METHOD_CLIENT_CONFIG.to_owned(),
-            ApiRequestErased::default(),
-        )
+        .request_current_consensus::<ConfigResponse>(ApiMethod::Core(CoreMethod::Config(
+            ConfigRequest,
+        )))
         .await
-        .map_err(|_| anyhow::anyhow!("Failed to download client config from all peers"))?;
+        .map_err(|_| anyhow::anyhow!("Failed to download client config from all peers"))?
+        .config;
 
     if client_config.calculate_federation_id() != federation_id {
         bail!("Obtained client config has different federation id");

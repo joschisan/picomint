@@ -8,8 +8,8 @@ use anyhow::anyhow;
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInput;
 use picomint_core::ln::contracts::IncomingContract;
-use picomint_core::ln::methods::METHOD_DECRYPTION_KEY_SHARE;
-use picomint_core::module::ApiRequestErased;
+use picomint_core::ln::methods::{DecryptionKeyShareRequest, DecryptionKeyShareResponse, LnMethod};
+use picomint_core::module::ApiMethod;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::wire;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
@@ -50,10 +50,11 @@ impl StateMachine for ReceiveStateMachine {
         let contract = self.contract.clone();
         let shares = ctx
             .client_ctx
-            .module_api()
+            .api()
             .request_with_strategy_retry(
                 FilterMapThreshold::new(
-                    move |peer_id, share: DecryptionKeyShare| {
+                    move |peer_id, resp: DecryptionKeyShareResponse| {
+                        let share = resp.share;
                         if !contract.verify_decryption_share(
                             tpe_pks
                                 .get(&peer_id)
@@ -69,10 +70,11 @@ impl StateMachine for ReceiveStateMachine {
 
                         Ok(share)
                     },
-                    ctx.client_ctx.global_api().all_peers().to_num_peers(),
+                    ctx.client_ctx.api().all_peers().to_num_peers(),
                 ),
-                METHOD_DECRYPTION_KEY_SHARE.to_owned(),
-                ApiRequestErased::new(self.outpoint),
+                ApiMethod::Ln(LnMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
+                    outpoint: self.outpoint,
+                })),
             )
             .await;
         Ok(shares)

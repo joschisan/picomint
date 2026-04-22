@@ -10,15 +10,12 @@ use picomint_core::bitcoin::Network;
 use picomint_core::ln::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
-use picomint_core::ln::methods::{
-    METHOD_AWAIT_INCOMING_CONTRACTS, METHOD_AWAIT_PREIMAGE, METHOD_CONSENSUS_BLOCK_COUNT,
-    METHOD_DECRYPTION_KEY_SHARE, METHOD_GATEWAYS, METHOD_OUTGOING_CONTRACT_EXPIRATION,
-};
+use picomint_core::ln::methods::LnMethod;
 use picomint_core::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
     LightningOutputError, OutgoingWitness,
 };
-use picomint_core::module::{ApiError, ApiRequestErased, InputMeta, TransactionItemAmounts};
+use picomint_core::module::{ApiError, InputMeta, TransactionItemAmounts};
 use picomint_core::time::duration_since_epoch;
 use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_logging::LOG_MODULE_LN;
@@ -284,23 +281,18 @@ impl Lightning {
         outgoing + incoming
     }
 
-    pub async fn handle_api(
-        &self,
-        method: &str,
-        req: ApiRequestErased,
-    ) -> Result<Vec<u8>, ApiError> {
+    pub async fn handle_api(&self, method: LnMethod) -> Result<Vec<u8>, ApiError> {
         match method {
-            METHOD_CONSENSUS_BLOCK_COUNT => handler!(consensus_block_count, self, req).await,
-            METHOD_AWAIT_PREIMAGE => handler_async!(await_preimage, self, req).await,
-            METHOD_DECRYPTION_KEY_SHARE => handler!(decryption_key_share, self, req).await,
-            METHOD_OUTGOING_CONTRACT_EXPIRATION => {
+            LnMethod::ConsensusBlockCount(req) => handler!(consensus_block_count, self, req).await,
+            LnMethod::AwaitPreimage(req) => handler_async!(await_preimage, self, req).await,
+            LnMethod::DecryptionKeyShare(req) => handler!(decryption_key_share, self, req).await,
+            LnMethod::OutgoingContractExpiration(req) => {
                 handler!(outgoing_contract_expiration, self, req).await
             }
-            METHOD_AWAIT_INCOMING_CONTRACTS => {
+            LnMethod::AwaitIncomingContracts(req) => {
                 handler_async!(await_incoming_contracts, self, req).await
             }
-            METHOD_GATEWAYS => handler!(gateways, self, req).await,
-            other => Err(ApiError::not_found(other.to_string())),
+            LnMethod::Gateways(req) => handler!(gateways, self, req).await,
         }
     }
 }

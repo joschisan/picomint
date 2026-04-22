@@ -44,7 +44,7 @@ impl StateMachine for IssuanceStateMachine {
 
             let shares = ctx
                 .client_ctx
-                .module_api()
+                .api()
                 .signature_shares(txid, self.issuance_requests.clone(), ctx.tbs_pks.clone())
                 .await;
 
@@ -52,7 +52,7 @@ impl StateMachine for IssuanceStateMachine {
         } else {
             let shares = ctx
                 .client_ctx
-                .module_api()
+                .api()
                 .signature_shares_recovery(self.issuance_requests.clone(), ctx.tbs_pks.clone())
                 .await;
 

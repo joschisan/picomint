@@ -4,51 +4,55 @@ use crate::api::{FederationApi, FederationResult, ServerResult};
 use crate::query::FilterMapThreshold;
 use picomint_core::ln::contracts::IncomingContract;
 use picomint_core::ln::methods::{
-    METHOD_AWAIT_INCOMING_CONTRACTS, METHOD_AWAIT_PREIMAGE, METHOD_CONSENSUS_BLOCK_COUNT,
-    METHOD_GATEWAYS,
+    AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitPreimageRequest,
+    AwaitPreimageResponse, ConsensusBlockCountRequest, ConsensusBlockCountResponse,
+    GatewaysRequest, GatewaysResponse, LnMethod,
 };
-use picomint_core::module::ApiRequestErased;
+use picomint_core::module::ApiMethod;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
 use rand::seq::SliceRandom;
 
 impl FederationApi {
     pub async fn ln_consensus_block_count(&self) -> FederationResult<u64> {
-        self.request_current_consensus(
-            METHOD_CONSENSUS_BLOCK_COUNT.to_string(),
-            ApiRequestErased::new(()),
-        )
+        self.request_current_consensus::<ConsensusBlockCountResponse>(ApiMethod::Ln(
+            LnMethod::ConsensusBlockCount(ConsensusBlockCountRequest),
+        ))
         .await
+        .map(|resp| resp.count)
     }
 
     pub async fn ln_await_preimage(&self, outpoint: OutPoint, expiration: u64) -> Option<[u8; 32]> {
-        self.request_current_consensus_retry(
-            METHOD_AWAIT_PREIMAGE.to_string(),
-            ApiRequestErased::new((outpoint, expiration)),
-        )
+        self.request_current_consensus_retry::<AwaitPreimageResponse>(ApiMethod::Ln(
+            LnMethod::AwaitPreimage(AwaitPreimageRequest {
+                outpoint,
+                expiration,
+            }),
+        ))
         .await
+        .preimage
     }
 
     pub async fn ln_await_incoming_contracts(
         &self,
         start: u64,
-        n: u64,
+        batch: u64,
     ) -> (Vec<(OutPoint, IncomingContract)>, u64) {
-        self.request_current_consensus_retry(
-            METHOD_AWAIT_INCOMING_CONTRACTS.to_string(),
-            ApiRequestErased::new((start, n)),
-        )
-        .await
+        let resp = self
+            .request_current_consensus_retry::<AwaitIncomingContractsResponse>(ApiMethod::Ln(
+                LnMethod::AwaitIncomingContracts(AwaitIncomingContractsRequest { start, batch }),
+            ))
+            .await;
+        (resp.contracts, resp.next_index)
     }
 
     pub async fn ln_gateways(&self) -> FederationResult<Vec<String>> {
         let gateways: BTreeMap<PeerId, Vec<String>> = self
             .request_with_strategy(
                 FilterMapThreshold::new(
-                    |_, gateways| Ok(gateways),
+                    |_, resp: GatewaysResponse| Ok(resp.gateways),
                     self.all_peers().to_num_peers(),
                 ),
-                METHOD_GATEWAYS.to_string(),
-                ApiRequestErased::default(),
+                ApiMethod::Ln(LnMethod::Gateways(GatewaysRequest)),
             )
             .await?;
 
@@ -75,14 +79,13 @@ impl FederationApi {
     }
 
     pub async fn ln_gateways_from_peer(&self, peer: PeerId) -> ServerResult<Vec<String>> {
-        let gateways = self
-            .request_single_peer::<Vec<String>>(
-                METHOD_GATEWAYS.to_string(),
-                ApiRequestErased::default(),
+        let resp = self
+            .request_single_peer::<GatewaysResponse>(
+                ApiMethod::Ln(LnMethod::Gateways(GatewaysRequest)),
                 peer,
             )
             .await?;
 
-        Ok(gateways)
+        Ok(resp.gateways)
     }
 }

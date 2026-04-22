@@ -1,22 +1,28 @@
 //! Freestanding API handlers for [`crate::consensus::api::ConsensusApi`].
 
-use picomint_core::config::ConsensusConfig;
+use picomint_core::methods::{
+    ConfigRequest, ConfigResponse, LivenessRequest, LivenessResponse, SubmitTransactionRequest,
+    SubmitTransactionResponse,
+};
 use picomint_core::module::ApiError;
-use picomint_core::transaction::{Transaction, TransactionError};
 
 use crate::consensus::api::ConsensusApi;
 
 pub async fn submit_transaction(
     api: &ConsensusApi,
-    tx: Transaction,
-) -> Result<Result<(), TransactionError>, ApiError> {
-    Ok(api.submit_transaction(tx).await)
+    req: SubmitTransactionRequest,
+) -> Result<SubmitTransactionResponse, ApiError> {
+    Ok(SubmitTransactionResponse {
+        outcome: api.submit_transaction(req.transaction).await,
+    })
 }
 
-pub fn client_config(api: &ConsensusApi, (): ()) -> Result<ConsensusConfig, ApiError> {
-    Ok(api.client_cfg.clone())
+pub fn config(api: &ConsensusApi, _: ConfigRequest) -> Result<ConfigResponse, ApiError> {
+    Ok(ConfigResponse {
+        config: api.config.clone(),
+    })
 }
 
-pub fn liveness(_: &ConsensusApi, (): ()) -> Result<(), ApiError> {
-    Ok(())
+pub fn liveness(_: &ConsensusApi, _: LivenessRequest) -> Result<LivenessResponse, ApiError> {
+    Ok(LivenessResponse)
 }

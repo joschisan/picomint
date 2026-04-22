@@ -233,9 +233,7 @@ impl MintClientModule {
 
         let tx_submission_executor = crate::executor::ModuleExecutor::new(
             context.db().clone(),
-            TxSubmissionSmContext {
-                api: context.global_api(),
-            },
+            TxSubmissionSmContext { api: context.api() },
             task_group.clone(),
         )
         .await;
@@ -550,7 +548,7 @@ impl MintClientModule {
         }
 
         self.client_ctx
-            .global_api()
+            .api()
             .liveness()
             .await
             .map_err(|_| SendECashError::Offline)?;

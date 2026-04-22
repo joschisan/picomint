@@ -171,7 +171,7 @@ impl GatewayClientModule {
         // before we start the state machine to prevent DOS attacks.
         let (contract_id, expiration) = self
             .client_ctx
-            .module_api()
+            .api()
             .gw_outgoing_contract_expiration(payload.outpoint)
             .await
             .map_err(|_| anyhow!("The gateway can not reach the federation"))?

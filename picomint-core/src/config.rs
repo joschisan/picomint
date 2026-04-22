@@ -58,11 +58,11 @@ pub const META_FEDERATION_NAME_KEY: &str = "federation_name";
 
 /// Federation-wide config.
 ///
-/// Produced by DKG on the server side, served to clients via the
-/// [`METHOD_CLIENT_CONFIG`], and stored in both the server and client
-/// databases. Byte-for-byte identical on every peer.
+/// Produced by DKG on the server side, served to clients via the core
+/// [`CoreMethod::Config`] wire method, and stored in both the server and
+/// client databases. Byte-for-byte identical on every peer.
 ///
-/// [`METHOD_CLIENT_CONFIG`]: crate::methods::METHOD_CLIENT_CONFIG
+/// [`CoreMethod::Config`]: crate::methods::CoreMethod::Config
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ConsensusConfig {
     /// Public keys for the atomic broadcast to authenticate messages
