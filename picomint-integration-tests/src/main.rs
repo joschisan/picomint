@@ -17,6 +17,8 @@ fn main() -> anyhow::Result<()> {
 
     let runtime = Arc::new(tokio::runtime::Runtime::new()?);
 
+    let t_total = std::time::Instant::now();
+
     info!("Setting up test environment...");
     let (env, client_send) = env::TestEnv::setup(runtime.clone())?;
 
@@ -42,7 +44,7 @@ fn main() -> anyhow::Result<()> {
     info!("Running guardian backup/restore test...");
     runtime.block_on(restore::run_test(&env))?;
 
-    info!("All integration tests passed!");
+    info!(total_ms = t_total.elapsed().as_millis() as u64, "All integration tests passed!");
 
     std::process::exit(0);
 }

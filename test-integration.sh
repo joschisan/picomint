@@ -15,7 +15,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Building workspace..."
-cargo build --workspace
+cargo build --workspace --release
 
 # Clean up any leftover container from previous run
 docker stop "$CONTAINER_NAME" 2>/dev/null || true
@@ -44,4 +44,4 @@ docker exec "$CONTAINER_NAME" bitcoin-cli \
     createwallet "" > /dev/null || true
 
 echo "Running integration tests..."
-RUST_LOG="${RUST_LOG:-info}" ./target/debug/picomint-integration-tests
+RUST_LOG="${RUST_LOG:-info}" ./target/release/picomint-integration-tests
