@@ -73,7 +73,7 @@ pub async fn run(
 
     // Wait for the bitcoin backend to come up before instantiating modules that
     // read its status during startup (the wallet module broadcast loop).
-    let _num_peers = NumPeers::from(cfg.consensus.iroh_endpoints.len());
+    let _num_peers = NumPeers::from(cfg.consensus.peers.len());
 
     info!(target: LOG_CORE, "Initialise module mint...");
     let mint = Arc::new(crate::consensus::mint::Mint::new(
@@ -106,7 +106,7 @@ pub async fn run(
     let mut ci_status_senders = BTreeMap::new();
     let mut ci_status_receivers = BTreeMap::new();
 
-    for peer in cfg.consensus.broadcast_public_keys.keys().copied() {
+    for peer in cfg.consensus.peers.keys().copied() {
         let (ci_sender, ci_receiver) = watch::channel(None);
 
         ci_status_senders.insert(peer, ci_sender);

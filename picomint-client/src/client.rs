@@ -101,9 +101,9 @@ impl Client {
         let root_secret = client_root(mnemonic, federation_id);
 
         let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
-            .iroh_endpoints
+            .peers
             .iter()
-            .map(|(peer, endpoints)| (*peer, endpoints.node_id))
+            .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
             .collect();
         let api: FederationApi = FederationApi::new(connectors.clone(), peer_node_ids);
 
@@ -292,9 +292,9 @@ impl Client {
     pub async fn get_peer_node_ids(&self) -> BTreeMap<PeerId, iroh_base::PublicKey> {
         self.config()
             .await
-            .iroh_endpoints
+            .peers
             .iter()
-            .map(|(peer, endpoints)| (*peer, endpoints.node_id))
+            .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
             .collect()
     }
 
@@ -312,7 +312,12 @@ impl Client {
     pub async fn get_guardian_public_keys_blocking(
         &self,
     ) -> BTreeMap<PeerId, picomint_core::secp256k1::PublicKey> {
-        self.config().await.broadcast_public_keys
+        self.config()
+            .await
+            .peers
+            .iter()
+            .map(|(peer, endpoint)| (*peer, endpoint.broadcast_pk))
+            .collect()
     }
 
     pub async fn get_event_log(

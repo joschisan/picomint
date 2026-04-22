@@ -107,7 +107,7 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
             )));
         }
 
-        Ok(resp.config.iroh_endpoints.clone())
+        Ok(resp.config.peers.clone())
     });
 
     let api_endpoints: BTreeMap<PeerId, picomint_core::config::PeerEndpoint> = api_from_invite
@@ -120,7 +120,7 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
 
     let api_endpoints = api_endpoints
         .into_iter()
-        .map(|(peer, endpoint)| (peer, endpoint.node_id))
+        .map(|(peer, endpoint)| (peer, endpoint.iroh_pk))
         .collect();
 
     debug!(target: LOG_CLIENT_NET, "Verifying client config with all peers");

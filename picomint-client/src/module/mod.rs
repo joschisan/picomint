@@ -82,13 +82,13 @@ impl ClientContext {
     /// Returns an invite code for the federation that points to an arbitrary
     /// guardian server for fetching the config
     pub fn get_invite_code(&self) -> InviteCode {
-        let (peer, endpoints) = self
+        let (peer, endpoint) = self
             .config
-            .iroh_endpoints
+            .peers
             .iter()
             .next()
             .expect("A federation always has at least one guardian");
-        InviteCode::new(endpoints.node_id, *peer, self.federation_id)
+        InviteCode::new(endpoint.iroh_pk, *peer, self.federation_id)
     }
 
     /// Shared [`Notify`] that fires on every commit touching the event log.

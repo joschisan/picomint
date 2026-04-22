@@ -85,9 +85,9 @@ pub async fn run_server(
                 cfg.private.iroh_sk.clone(),
                 settings.p2p_addr,
                 cfg.consensus
-                    .iroh_endpoints
+                    .peers
                     .iter()
-                    .map(|(peer, endpoints)| (*peer, endpoints.node_id))
+                    .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
                     .collect(),
             )
             .await?;
@@ -202,11 +202,7 @@ pub async fn run_config_gen(
             let connector = P2PConnector::new(
                 cg_params.iroh_sk.clone(),
                 settings.p2p_addr,
-                cg_params
-                    .iroh_endpoints()
-                    .iter()
-                    .map(|(peer, endpoints)| (*peer, endpoints.node_id))
-                    .collect(),
+                cg_params.iroh_pks(),
             )
             .await?;
 
@@ -238,9 +234,9 @@ pub async fn run_config_gen(
                 cfg.private.iroh_sk.clone(),
                 settings.p2p_addr,
                 cfg.consensus
-                    .iroh_endpoints
+                    .peers
                     .iter()
-                    .map(|(peer, endpoints)| (*peer, endpoints.node_id))
+                    .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
                     .collect(),
             )
             .await?;

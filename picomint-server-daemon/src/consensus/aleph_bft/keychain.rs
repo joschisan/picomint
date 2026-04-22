@@ -19,10 +19,16 @@ pub struct Keychain {
 
 impl Keychain {
     pub fn new(cfg: &ServerConfig) -> Self {
+        let pks: BTreeMap<PeerId, PublicKey> = cfg
+            .consensus
+            .peers
+            .iter()
+            .map(|(peer, endpoint)| (*peer, endpoint.broadcast_pk))
+            .collect();
         Keychain {
             identity: cfg.private.identity,
-            pks: cfg.consensus.broadcast_public_keys.clone(),
-            message_tag: cfg.consensus.broadcast_public_keys.consensus_hash(),
+            message_tag: pks.consensus_hash(),
+            pks,
             keypair: cfg
                 .private
                 .broadcast_secret_key
