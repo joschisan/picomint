@@ -8,13 +8,13 @@ use picomint_core::ln::methods::{
     AwaitPreimageResponse, ConsensusBlockCountRequest, ConsensusBlockCountResponse,
     GatewaysRequest, GatewaysResponse, LnMethod,
 };
-use picomint_core::module::ApiMethod;
+use picomint_core::module::Method;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
 use rand::seq::SliceRandom;
 
 impl FederationApi {
     pub async fn ln_consensus_block_count(&self) -> FederationResult<u64> {
-        self.request_current_consensus::<ConsensusBlockCountResponse>(ApiMethod::Ln(
+        self.request_current_consensus::<ConsensusBlockCountResponse>(Method::Ln(
             LnMethod::ConsensusBlockCount(ConsensusBlockCountRequest),
         ))
         .await
@@ -22,7 +22,7 @@ impl FederationApi {
     }
 
     pub async fn ln_await_preimage(&self, outpoint: OutPoint, expiration: u64) -> Option<[u8; 32]> {
-        self.request_current_consensus_retry::<AwaitPreimageResponse>(ApiMethod::Ln(
+        self.request_current_consensus_retry::<AwaitPreimageResponse>(Method::Ln(
             LnMethod::AwaitPreimage(AwaitPreimageRequest {
                 outpoint,
                 expiration,
@@ -38,7 +38,7 @@ impl FederationApi {
         batch: u64,
     ) -> (Vec<(OutPoint, IncomingContract)>, u64) {
         let resp = self
-            .request_current_consensus_retry::<AwaitIncomingContractsResponse>(ApiMethod::Ln(
+            .request_current_consensus_retry::<AwaitIncomingContractsResponse>(Method::Ln(
                 LnMethod::AwaitIncomingContracts(AwaitIncomingContractsRequest { start, batch }),
             ))
             .await;
@@ -52,7 +52,7 @@ impl FederationApi {
                     |_, resp: GatewaysResponse| Ok(resp.gateways),
                     self.all_peers().to_num_peers(),
                 ),
-                ApiMethod::Ln(LnMethod::Gateways(GatewaysRequest)),
+                Method::Ln(LnMethod::Gateways(GatewaysRequest)),
             )
             .await?;
 
@@ -81,7 +81,7 @@ impl FederationApi {
     pub async fn ln_gateways_from_peer(&self, peer: PeerId) -> ServerResult<Vec<String>> {
         let resp = self
             .request_single_peer::<GatewaysResponse>(
-                ApiMethod::Ln(LnMethod::Gateways(GatewaysRequest)),
+                Method::Ln(LnMethod::Gateways(GatewaysRequest)),
                 peer,
             )
             .await?;

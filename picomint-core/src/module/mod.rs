@@ -31,7 +31,7 @@ pub struct TransactionItemAmounts {
 /// the concrete request for its module; the response type is determined by
 /// the variant the client sent.
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub enum ApiMethod {
+pub enum Method {
     Core(CoreMethod),
     Mint(MintMethod),
     Wallet(WalletMethod),

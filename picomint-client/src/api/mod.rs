@@ -16,7 +16,7 @@ use picomint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
 use picomint_core::methods::{
     CoreMethod, LivenessRequest, SubmitTransactionRequest, SubmitTransactionResponse,
 };
-use picomint_core::module::{ApiError, ApiMethod, PICOMINT_ALPN};
+use picomint_core::module::{ApiError, Method, PICOMINT_ALPN};
 use picomint_core::{NumPeersExt, PeerId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_logging::LOG_CLIENT_NET_API;
@@ -162,7 +162,7 @@ impl FederationApi {
         skip_all,
         fields(peer_id = %peer_id, method = ?method),
     )]
-    pub async fn request_raw(&self, peer_id: PeerId, method: ApiMethod) -> ServerResult<Vec<u8>> {
+    pub async fn request_raw(&self, peer_id: PeerId, method: Method) -> ServerResult<Vec<u8>> {
         trace!(target: LOG_CLIENT_NET_API, %peer_id, ?method, "Api request");
 
         let mut rx = self
@@ -191,7 +191,7 @@ impl FederationApi {
 
     pub async fn request_single_peer<Ret>(
         &self,
-        method: ApiMethod,
+        method: Method,
         peer: PeerId,
     ) -> ServerResult<Ret>
     where
@@ -205,7 +205,7 @@ impl FederationApi {
 
     pub async fn request_single_peer_federation<FedRet>(
         &self,
-        method: ApiMethod,
+        method: Method,
         peer_id: PeerId,
     ) -> FederationResult<FedRet>
     where
@@ -226,7 +226,7 @@ impl FederationApi {
     pub async fn request_with_strategy<PR: Decodable, FR: Debug>(
         &self,
         mut strategy: impl QueryStrategy<PR, FR> + Send,
-        method: ApiMethod,
+        method: Method,
     ) -> FederationResult<FR> {
         // NOTE: `FuturesUnorderded` is a footgun, but all we do here is polling
         // completed results from it and we don't do any `await`s when
@@ -292,7 +292,7 @@ impl FederationApi {
     pub async fn request_with_strategy_retry<PR: Decodable + Send, FR: Debug>(
         &self,
         mut strategy: impl QueryStrategy<PR, FR> + Send,
-        method: ApiMethod,
+        method: Method,
     ) -> FR {
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
         #[cfg(target_family = "wasm")]
@@ -359,7 +359,7 @@ impl FederationApi {
         }
     }
 
-    pub async fn request_current_consensus<Ret>(&self, method: ApiMethod) -> FederationResult<Ret>
+    pub async fn request_current_consensus<Ret>(&self, method: Method) -> FederationResult<Ret>
     where
         Ret: Decodable + Eq + Debug + Clone + Send,
     {
@@ -370,7 +370,7 @@ impl FederationApi {
         .await
     }
 
-    pub async fn request_current_consensus_retry<Ret>(&self, method: ApiMethod) -> Ret
+    pub async fn request_current_consensus_retry<Ret>(&self, method: Method) -> Ret
     where
         Ret: Decodable + Eq + Debug + Clone + Send,
     {
@@ -384,7 +384,7 @@ impl FederationApi {
     /// Submit a transaction and await the final outcome. The server long-
     /// polls until the tx is either accepted or becomes invalid.
     pub async fn submit_transaction(&self, tx: Transaction) -> Result<(), TransactionError> {
-        self.request_current_consensus_retry::<SubmitTransactionResponse>(ApiMethod::Core(
+        self.request_current_consensus_retry::<SubmitTransactionResponse>(Method::Core(
             CoreMethod::SubmitTransaction(SubmitTransactionRequest { transaction: tx }),
         ))
         .await
@@ -394,7 +394,7 @@ impl FederationApi {
     /// Lightweight liveness check — returns `Ok(())` if the federation is
     /// reachable.
     pub async fn liveness(&self) -> FederationResult<()> {
-        self.request_current_consensus(ApiMethod::Core(CoreMethod::Liveness(LivenessRequest)))
+        self.request_current_consensus(Method::Core(CoreMethod::Liveness(LivenessRequest)))
             .await
             .map(|_: picomint_core::methods::LivenessResponse| ())
     }
@@ -429,7 +429,7 @@ const IROH_MAX_RESPONSE_BYTES: usize = ALEPH_BFT_UNIT_BYTE_LIMIT * 3600 * 4 * 2;
 
 async fn request_over_connection(
     connection: &Connection,
-    method: ApiMethod,
+    method: Method,
 ) -> ServerResult<Vec<u8>> {
     let request_bytes = method.consensus_encode_to_vec();
 

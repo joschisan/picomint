@@ -9,7 +9,7 @@ use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInput;
 use picomint_core::ln::contracts::IncomingContract;
 use picomint_core::ln::methods::{DecryptionKeyShareRequest, DecryptionKeyShareResponse, LnMethod};
-use picomint_core::module::ApiMethod;
+use picomint_core::module::Method;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::wire;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
@@ -72,7 +72,7 @@ impl StateMachine for ReceiveStateMachine {
                     },
                     ctx.client_ctx.api().all_peers().to_num_peers(),
                 ),
-                ApiMethod::Ln(LnMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
+                Method::Ln(LnMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
                     outpoint: self.outpoint,
                 })),
             )

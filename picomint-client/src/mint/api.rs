@@ -11,7 +11,7 @@ use picomint_core::mint::methods::{
     SignatureSharesResponse,
 };
 use picomint_core::mint::{Denomination, RecoveryItem};
-use picomint_core::module::ApiMethod;
+use picomint_core::module::Method;
 use picomint_core::{NumPeersExt, PeerId, TransactionId};
 use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 
@@ -33,7 +33,7 @@ impl FederationApi {
                 },
                 self.all_peers().to_num_peers(),
             ),
-            ApiMethod::Mint(MintMethod::SignatureShares(SignatureSharesRequest { txid })),
+            Method::Mint(MintMethod::SignatureShares(SignatureSharesRequest { txid })),
         )
         .await
     }
@@ -56,7 +56,7 @@ impl FederationApi {
                 },
                 self.all_peers().to_num_peers(),
             ),
-            ApiMethod::Mint(MintMethod::SignatureSharesRecovery(
+            Method::Mint(MintMethod::SignatureSharesRecovery(
                 SignatureSharesRecoveryRequest { messages },
             )),
         )
@@ -64,7 +64,7 @@ impl FederationApi {
     }
 
     pub async fn recovery_count(&self) -> anyhow::Result<u64> {
-        self.request_current_consensus::<RecoveryCountResponse>(ApiMethod::Mint(
+        self.request_current_consensus::<RecoveryCountResponse>(Method::Mint(
             MintMethod::RecoveryCount(RecoveryCountRequest),
         ))
         .await
@@ -73,7 +73,7 @@ impl FederationApi {
     }
 
     pub async fn recovery_slice_hash(&self, start: u64, end: u64) -> sha256::Hash {
-        self.request_current_consensus_retry::<RecoverySliceHashResponse>(ApiMethod::Mint(
+        self.request_current_consensus_retry::<RecoverySliceHashResponse>(Method::Mint(
             MintMethod::RecoverySliceHash(RecoverySliceHashRequest { start, end }),
         ))
         .await
@@ -90,7 +90,7 @@ impl FederationApi {
         let result: RecoverySliceResponse = tokio::time::timeout(
             timeout,
             self.request_single_peer::<RecoverySliceResponse>(
-                ApiMethod::Mint(MintMethod::RecoverySlice(RecoverySliceRequest {
+                Method::Mint(MintMethod::RecoverySlice(RecoverySliceRequest {
                     start,
                     end,
                 })),

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use picomint_core::PeerId;
-use picomint_core::module::ApiMethod;
+use picomint_core::module::Method;
 
 use super::ServerError;
 
@@ -10,13 +10,13 @@ use super::ServerError;
 /// Generally all Federation errors are retryable.
 #[derive(Debug)]
 pub struct FederationError {
-    pub method: ApiMethod,
+    pub method: Method,
     pub peer_errors: BTreeMap<PeerId, ServerError>,
 }
 
 impl FederationError {
     pub(crate) fn peer_errors(
-        method: ApiMethod,
+        method: Method,
         peer_errors: BTreeMap<PeerId, ServerError>,
     ) -> Self {
         Self {
@@ -25,7 +25,7 @@ impl FederationError {
         }
     }
 
-    pub fn new_one_peer(peer_id: PeerId, method: ApiMethod, error: ServerError) -> Self {
+    pub fn new_one_peer(peer_id: PeerId, method: Method, error: ServerError) -> Self {
         Self {
             method,
             peer_errors: [(peer_id, error)].into_iter().collect(),

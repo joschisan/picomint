@@ -49,7 +49,7 @@ use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::methods::{ConfigRequest, ConfigResponse, CoreMethod};
-use picomint_core::module::ApiMethod;
+use picomint_core::module::Method;
 use picomint_logging::LOG_CLIENT_NET;
 use query::FilterMap;
 use tracing::debug;
@@ -113,7 +113,7 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
     let api_endpoints: BTreeMap<PeerId, picomint_core::config::PeerEndpoint> = api_from_invite
         .request_with_strategy(
             query_strategy,
-            ApiMethod::Core(CoreMethod::Config(ConfigRequest)),
+            Method::Core(CoreMethod::Config(ConfigRequest)),
         )
         .await
         .map_err(|_| anyhow::anyhow!("Failed to download client config from invite peer"))?;
@@ -127,7 +127,7 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
 
     let api_full = FederationApi::new(endpoint.clone(), api_endpoints);
     let client_config = api_full
-        .request_current_consensus::<ConfigResponse>(ApiMethod::Core(CoreMethod::Config(
+        .request_current_consensus::<ConfigResponse>(Method::Core(CoreMethod::Config(
             ConfigRequest,
         )))
         .await

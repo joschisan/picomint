@@ -40,7 +40,7 @@ impl ClientContext {
     }
 
     /// Federation API handle. Typed wire methods are built with
-    /// `ApiMethod::<Module>(<ModuleMethod>::...)` — there is no module-scope
+    /// `Method::<Module>(<ModuleMethod>::...)` — there is no module-scope
     /// plumbing to attach.
     pub fn api(&self) -> FederationApi {
         self.api.clone()

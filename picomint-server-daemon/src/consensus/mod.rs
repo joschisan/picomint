@@ -20,7 +20,7 @@ use iroh::endpoint::{RecvStream, SendStream};
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
 use picomint_core::envs::is_running_in_test_env;
-use picomint_core::module::{ApiAuth, ApiError, ApiMethod};
+use picomint_core::module::{ApiAuth, ApiError, Method};
 use picomint_core::task::TaskGroup;
 use picomint_core::transaction::ConsensusItem;
 use picomint_core::wire;
@@ -305,7 +305,7 @@ async fn handle_request(
     _request_permit: tokio::sync::OwnedSemaphorePermit,
 ) -> anyhow::Result<()> {
     let request = recv_stream.read_to_end(100_000).await?;
-    let method = ApiMethod::consensus_decode_exact(&request)?;
+    let method = Method::consensus_decode_exact(&request)?;
 
     let response = dispatch(consensus_api, method).await;
     let response = response.consensus_encode_to_vec();
@@ -317,12 +317,12 @@ async fn handle_request(
 
 async fn dispatch(
     consensus_api: Arc<ConsensusApi>,
-    method: ApiMethod,
+    method: Method,
 ) -> Result<Vec<u8>, ApiError> {
     match method {
-        ApiMethod::Core(m) => consensus_api.handle_api(m).await,
-        ApiMethod::Mint(m) => consensus_api.server.mint.handle_api(m).await,
-        ApiMethod::Ln(m) => consensus_api.server.ln.handle_api(m).await,
-        ApiMethod::Wallet(m) => consensus_api.server.wallet.handle_api(m).await,
+        Method::Core(m) => consensus_api.handle_api(m).await,
+        Method::Mint(m) => consensus_api.server.mint.handle_api(m).await,
+        Method::Ln(m) => consensus_api.server.ln.handle_api(m).await,
+        Method::Wallet(m) => consensus_api.server.wallet.handle_api(m).await,
     }
 }
