@@ -98,8 +98,6 @@ pub async fn run(
 
     let server = Server { mint, ln, wallet };
 
-    let config = cfg.consensus.clone();
-
     let (submission_sender, submission_receiver) = async_channel::bounded(TRANSACTION_BUFFER);
     let (shutdown_sender, shutdown_receiver) = watch::channel(None);
 
@@ -117,7 +115,6 @@ pub async fn run(
         cfg: cfg.clone(),
         db: db.clone(),
         server: server.clone(),
-        config: config.clone(),
         submission_sender: submission_sender.clone(),
         shutdown_sender,
         shutdown_receiver: shutdown_receiver.clone(),

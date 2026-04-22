@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
-use picomint_core::config::ConsensusConfig;
 use picomint_core::methods::CoreMethod;
 use picomint_core::module::ApiError;
 use picomint_core::module::audit::AuditSummary;
@@ -33,8 +32,6 @@ pub struct ConsensusApi {
     pub db: Database,
     /// Static wire-dispatch handle to the fixed module set
     pub server: Server,
-    /// Cached client config
-    pub config: ConsensusConfig,
     /// For sending API events to consensus such as transactions
     pub submission_sender: async_channel::Sender<ConsensusItem>,
     pub shutdown_receiver: Receiver<Option<u64>>,

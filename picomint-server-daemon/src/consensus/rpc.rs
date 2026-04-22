@@ -19,7 +19,7 @@ pub async fn submit_transaction(
 
 pub fn config(api: &ConsensusApi, _: ConfigRequest) -> Result<ConfigResponse, ApiError> {
     Ok(ConfigResponse {
-        config: api.config.clone(),
+        config: api.cfg.consensus.clone(),
     })
 }
 
