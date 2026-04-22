@@ -4,6 +4,7 @@ mod api;
 mod db;
 pub mod events;
 mod gateway_http;
+mod secret;
 mod send_sm;
 
 use std::sync::Arc;
@@ -26,11 +27,7 @@ use picomint_core::ln::{
 use picomint_core::task::TaskGroup;
 use picomint_core::wire;
 
-#[derive(picomint_encoding::Encodable)]
-enum RootSecretPath {
-    Receive,
-    Refund,
-}
+pub use self::secret::LnSecret;
 use crate::secret::Secret;
 use picomint_core::time::duration_since_epoch;
 use picomint_core::{Amount, OutPoint, PeerId};
@@ -66,7 +63,7 @@ pub struct LightningClientModule {
     cfg: LightningConfigConsensus,
     client_ctx: ClientContext,
     mint: Arc<crate::mint::MintClientModule>,
-    module_root_secret: Secret,
+    secret: LnSecret,
     send_executor: ModuleExecutor<SendStateMachine>,
 }
 
@@ -85,7 +82,7 @@ impl LightningClientModule {
         cfg: LightningConfigConsensus,
         client_ctx: ClientContext,
         mint: Arc<crate::mint::MintClientModule>,
-        module_root_secret: &Secret,
+        secret: LnSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<Self> {
         let sm_context = LightningClientContext {
@@ -102,7 +99,7 @@ impl LightningClientModule {
             cfg,
             client_ctx,
             mint,
-            module_root_secret: *module_root_secret,
+            secret,
             send_executor,
         };
 
@@ -258,11 +255,7 @@ impl LightningClientModule {
 
         let tweak: [u8; 16] = rand::Rng::r#gen(&mut rand::thread_rng());
 
-        let refund_keypair = self
-            .module_root_secret
-            .child(&RootSecretPath::Refund)
-            .child(&tweak)
-            .to_secp_keypair();
+        let refund_keypair = self.secret.refund_keypair(&tweak);
 
         let (gateway_api, routing_info) = self
             .select_gateway(Some(invoice.clone()))
@@ -360,10 +353,7 @@ impl LightningClientModule {
         expiry_secs: u32,
         description: Bolt11InvoiceDescription,
     ) -> Result<Bolt11Invoice, ReceiveError> {
-        let receive_keypair = self
-            .module_root_secret
-            .child(&RootSecretPath::Receive)
-            .to_secp_keypair();
+        let receive_keypair = self.secret.receive_keypair();
 
         self.create_contract_and_fetch_invoice(
             receive_keypair.public_key(),
@@ -547,10 +537,7 @@ impl LightningClientModule {
             return Err(GenerateLnurlError::NoGatewaysAvailable);
         }
 
-        let receive_keypair = self
-            .module_root_secret
-            .child(&RootSecretPath::Receive)
-            .to_secp_keypair();
+        let receive_keypair = self.secret.receive_keypair();
 
         let payload = picomint_base32::encode(&lnurl::LnurlRequest {
             federation_id: self.federation_id,
@@ -588,11 +575,7 @@ impl LightningClientModule {
             .ln_await_incoming_contracts(stream_index, 128)
             .await;
 
-        let sk = self
-            .module_root_secret
-            .child(&RootSecretPath::Receive)
-            .to_secp_keypair()
-            .secret_key();
+        let sk = self.secret.receive_keypair().secret_key();
 
         let dbtx = self.client_ctx.db().begin_write();
 

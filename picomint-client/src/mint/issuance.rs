@@ -5,15 +5,8 @@ use picomint_core::secp256k1::{Keypair, PublicKey};
 use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedMessage, BlindedSignature, BlindingKey, blind_message, unblind_signature};
 
+use super::secret::MintSecret;
 use super::{SpendableNote, thread_rng};
-use crate::secret::Secret;
-
-#[derive(Encodable)]
-pub enum RootSecretPath {
-    TweakFilter,
-    NoteNonce,
-    NoteBlinding,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct NoteIssuanceRequest {
@@ -24,8 +17,8 @@ pub struct NoteIssuanceRequest {
 }
 
 impl NoteIssuanceRequest {
-    pub fn new(denomination: Denomination, tweak: [u8; 16], root_secret: &Secret) -> Self {
-        let secret = output_secret(denomination, tweak, root_secret);
+    pub fn new(denomination: Denomination, tweak: [u8; 16], mint_secret: &MintSecret) -> Self {
+        let secret = output_secret(denomination, tweak, mint_secret);
 
         Self {
             denomination,
@@ -58,12 +51,8 @@ impl NoteIssuanceRequest {
 
 // ============ Grinding Functions ============
 
-pub fn tweak_filter(root_secret: &Secret) -> [u8; 32] {
-    root_secret.child(&RootSecretPath::TweakFilter).to_bytes()
-}
-
-pub fn grind_tweak(root_secret: &Secret) -> [u8; 16] {
-    let filter = tweak_filter(root_secret);
+pub fn grind_tweak(mint_secret: &MintSecret) -> [u8; 16] {
+    let filter = mint_secret.tweak_filter();
 
     loop {
         let tweak = thread_rng().r#gen();
@@ -94,24 +83,25 @@ pub fn check_nonce(secret: &OutputSecret, nonce_hash: hash160::Hash) -> bool {
 pub struct OutputSecret {
     denomination: Denomination,
     tweak: [u8; 16],
-    root: Secret,
+    mint_secret: MintSecret,
 }
 
-pub fn output_secret(denomination: Denomination, tweak: [u8; 16], root: &Secret) -> OutputSecret {
+pub fn output_secret(
+    denomination: Denomination,
+    tweak: [u8; 16],
+    mint_secret: &MintSecret,
+) -> OutputSecret {
     OutputSecret {
         denomination,
         tweak,
-        root: *root,
+        mint_secret: *mint_secret,
     }
 }
 
 fn keypair(secret: &OutputSecret) -> Keypair {
     secret
-        .root
-        .child(&RootSecretPath::NoteNonce)
-        .child(&secret.denomination)
-        .child(&secret.tweak)
-        .to_secp_keypair()
+        .mint_secret
+        .note_nonce_keypair(secret.denomination, secret.tweak)
 }
 
 pub fn nonce(secret: &OutputSecret) -> PublicKey {
@@ -119,14 +109,9 @@ pub fn nonce(secret: &OutputSecret) -> PublicKey {
 }
 
 fn blinding_key(secret: &OutputSecret) -> BlindingKey {
-    BlindingKey(
-        secret
-            .root
-            .child(&RootSecretPath::NoteBlinding)
-            .child(&secret.denomination)
-            .child(&secret.tweak)
-            .to_bls_scalar(),
-    )
+    secret
+        .mint_secret
+        .note_blinding_key(secret.denomination, secret.tweak)
 }
 
 pub fn blinded_message(secret: &OutputSecret) -> BlindedMessage {

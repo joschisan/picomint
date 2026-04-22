@@ -6,7 +6,7 @@ use crate::api::FederationApi;
 use crate::gw::{GatewayClientModule, IGatewayClient};
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
-use crate::secret::{Mnemonic, client_root};
+use crate::secret::{ClientSecret, Mnemonic};
 use crate::wallet::WalletClientModule;
 use futures::Stream;
 use picomint_core::Amount;
@@ -98,7 +98,7 @@ impl Client {
             "Building picomint client",
         );
         let federation_id = config.calculate_federation_id();
-        let root_secret = client_root(mnemonic, federation_id);
+        let client_secret = ClientSecret::new(mnemonic, federation_id);
 
         let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
             .peers
@@ -120,7 +120,7 @@ impl Client {
                 federation_id,
                 config.mint.clone(),
                 mint_context,
-                &root_secret.mint_module_secret(),
+                client_secret.mint_secret(),
                 &task_group,
             )
             .await?,
@@ -137,7 +137,7 @@ impl Client {
                 config.wallet.clone(),
                 wallet_context,
                 mint.clone(),
-                &root_secret.wallet_module_secret(),
+                client_secret.wallet_secret(),
                 &task_group,
             )
             .await?,
@@ -157,7 +157,7 @@ impl Client {
                         config.ln.clone(),
                         ln_context,
                         mint.clone(),
-                        &root_secret.ln_module_secret(),
+                        client_secret.ln_secret(),
                         &task_group,
                     )
                     .await?,
@@ -177,7 +177,7 @@ impl Client {
                         gw_context,
                         mint.clone(),
                         gateway,
-                        &root_secret.gw_module_secret(),
+                        client_secret.gw_secret(),
                         &task_group,
                     )
                     .await?,

@@ -3,6 +3,7 @@ pub use picomint_core::wallet as common;
 mod api;
 mod db;
 pub mod events;
+mod secret;
 mod send_sm;
 
 use std::collections::BTreeMap;
@@ -27,7 +28,7 @@ use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_encoding::Encodable;
 
-use crate::secret::Secret;
+pub use self::secret::WalletSecret;
 use picomint_logging::LOG_CLIENT_MODULE_WALLET;
 use secp256k1::Keypair;
 use send_sm::SendStateMachine;
@@ -39,14 +40,9 @@ use tracing::warn;
 /// Number of output info entries to scan per batch.
 const SLICE_SIZE: u64 = 1000;
 
-#[derive(Encodable)]
-enum RootSecretPath {
-    Address,
-}
-
 #[derive(Clone)]
 pub struct WalletClientModule {
-    root_secret: Secret,
+    secret: WalletSecret,
     cfg: WalletConfigConsensus,
     client_ctx: ClientContext,
     mint: std::sync::Arc<crate::mint::MintClientModule>,
@@ -73,7 +69,7 @@ impl WalletClientModule {
         cfg: WalletConfigConsensus,
         context: ClientContext,
         mint: std::sync::Arc<crate::mint::MintClientModule>,
-        module_root_secret: &Secret,
+        secret: WalletSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<WalletClientModule> {
         let sm_context = WalletClientContext {
@@ -83,7 +79,7 @@ impl WalletClientModule {
             ModuleExecutor::new(context.db().clone(), sm_context, task_group.clone()).await;
 
         let module = WalletClientModule {
-            root_secret: *module_root_secret,
+            secret,
             cfg,
             client_ctx: context,
             mint,
@@ -231,10 +227,7 @@ impl WalletClientModule {
     }
 
     fn derive_tweak(&self, index: u64) -> Keypair {
-        self.root_secret
-            .child(&RootSecretPath::Address)
-            .child(&index)
-            .to_secp_keypair()
+        self.secret.address_keypair(index)
     }
 
     /// Find the next valid index starting from (and including) `start_index`.
