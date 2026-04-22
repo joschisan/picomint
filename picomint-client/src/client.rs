@@ -6,7 +6,7 @@ use crate::api::FederationApi;
 use crate::gw::{GatewayClientModule, IGatewayClient};
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
-use crate::secret::{Mnemonic, ModuleSecrets as _, client_root};
+use crate::secret::{Mnemonic, client_root};
 use crate::wallet::WalletClientModule;
 use futures::Stream;
 use picomint_core::Amount;
