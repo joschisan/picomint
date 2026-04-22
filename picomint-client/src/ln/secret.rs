@@ -1,7 +1,7 @@
 //! Lightning-module derivation tree. Only constructible via
-//! [`ClientSecret::ln_module_secret`]; the path enum is private.
+//! [`ClientSecret::ln_secret`]; the path enum is private.
 //!
-//! [`ClientSecret::ln_module_secret`]: crate::secret::ClientSecret::ln_module_secret
+//! [`ClientSecret::ln_secret`]: crate::secret::ClientSecret::ln_secret
 
 use picomint_core::secp256k1::Keypair;
 use picomint_core::secret::Secret;

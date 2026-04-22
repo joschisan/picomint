@@ -71,10 +71,10 @@ pub struct ConsensusConfig {
     pub peers: BTreeMap<PeerId, PeerEndpoint>,
     /// Mint module config
     pub mint: MintConfigConsensus,
-    /// Lightning module config
-    pub ln: LightningConfigConsensus,
     /// Wallet module config
     pub wallet: WalletConfigConsensus,
+    /// Lightning module config
+    pub ln: LightningConfigConsensus,
     /// Free-form federation metadata (federation name, etc.)
     pub meta: BTreeMap<String, String>,
     /// Number of AlephBFT rounds per session.

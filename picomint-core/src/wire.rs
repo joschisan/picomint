@@ -1,4 +1,4 @@
-//! Static wire enums for the fixed module set: mint + ln + wallet.
+//! Static wire enums for the fixed module set: mint + wallet + ln.
 
 use crate::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,

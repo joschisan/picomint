@@ -1,7 +1,7 @@
 //! Wallet-module derivation tree. Only constructible via
-//! [`ClientSecret::wallet_module_secret`]; the path enum is private.
+//! [`ClientSecret::wallet_secret`]; the path enum is private.
 //!
-//! [`ClientSecret::wallet_module_secret`]: crate::secret::ClientSecret::wallet_module_secret
+//! [`ClientSecret::wallet_secret`]: crate::secret::ClientSecret::wallet_secret
 
 use picomint_core::secp256k1::Keypair;
 use picomint_core::secret::Secret;

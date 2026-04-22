@@ -19,8 +19,8 @@ use crate::consensus::wallet::Wallet;
 #[derive(Clone)]
 pub struct Server {
     pub mint: Arc<Mint>,
-    pub ln: Arc<Lightning>,
     pub wallet: Arc<Wallet>,
+    pub ln: Arc<Lightning>,
 }
 
 impl Server {
@@ -32,13 +32,13 @@ impl Server {
     ) -> anyhow::Result<()> {
         match item {
             wire::ModuleConsensusItem::Mint(ci) => match *ci {},
-            wire::ModuleConsensusItem::Ln(ci) => {
-                self.ln
+            wire::ModuleConsensusItem::Wallet(ci) => {
+                self.wallet
                     .process_consensus_item(dbtx, ci.clone(), peer_id)
                     .await
             }
-            wire::ModuleConsensusItem::Wallet(ci) => {
-                self.wallet
+            wire::ModuleConsensusItem::Ln(ci) => {
+                self.ln
                     .process_consensus_item(dbtx, ci.clone(), peer_id)
                     .await
             }
@@ -57,16 +57,16 @@ impl Server {
                 .process_input(dbtx, i, in_point)
                 .await
                 .map_err(wire::InputError::Mint),
-            wire::Input::Ln(i) => self
-                .ln
-                .process_input(dbtx, i, in_point)
-                .await
-                .map_err(wire::InputError::Ln),
             wire::Input::Wallet(i) => self
                 .wallet
                 .process_input(dbtx, i, in_point)
                 .await
                 .map_err(wire::InputError::Wallet),
+            wire::Input::Ln(i) => self
+                .ln
+                .process_input(dbtx, i, in_point)
+                .await
+                .map_err(wire::InputError::Ln),
         }
     }
 
@@ -82,25 +82,25 @@ impl Server {
                 .process_output(dbtx, o, out_point)
                 .await
                 .map_err(wire::OutputError::Mint),
-            wire::Output::Ln(o) => self
-                .ln
-                .process_output(dbtx, o, out_point)
-                .await
-                .map_err(wire::OutputError::Ln),
             wire::Output::Wallet(o) => self
                 .wallet
                 .process_output(dbtx, o, out_point)
                 .await
                 .map_err(wire::OutputError::Wallet),
+            wire::Output::Ln(o) => self
+                .ln
+                .process_output(dbtx, o, out_point)
+                .await
+                .map_err(wire::OutputError::Ln),
         }
     }
 
     pub async fn audit(&self, dbtx: &WriteTransaction) -> AuditSummary {
         let dbtx = dbtx.as_ref();
         let mint = self.mint.audit(&dbtx).await;
-        let ln = self.ln.audit(&dbtx).await;
         let wallet = self.wallet.audit(&dbtx).await;
-        AuditSummary::new(mint, ln, wallet)
+        let ln = self.ln.audit(&dbtx).await;
+        AuditSummary::new(mint, wallet, ln)
     }
 }
 

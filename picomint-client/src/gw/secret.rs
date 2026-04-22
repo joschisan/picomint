@@ -1,7 +1,7 @@
 //! Gateway-module derivation tree. Only constructible via
-//! [`ClientSecret::gw_module_secret`]; the path enum is private.
+//! [`ClientSecret::gw_secret`]; the path enum is private.
 //!
-//! [`ClientSecret::gw_module_secret`]: crate::secret::ClientSecret::gw_module_secret
+//! [`ClientSecret::gw_secret`]: crate::secret::ClientSecret::gw_secret
 
 use picomint_core::secp256k1::Keypair;
 use picomint_core::secret::Secret;

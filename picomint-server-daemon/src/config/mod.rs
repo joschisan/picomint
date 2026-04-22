@@ -73,10 +73,10 @@ pub struct ServerConfigPrivate {
     pub broadcast_secret_key: SecretKey,
     /// Private key material for the mint module
     pub mint: MintConfigPrivate,
-    /// Private key material for the lightning module
-    pub ln: LightningConfigPrivate,
     /// Private key material for the wallet module
     pub wallet: WalletConfigPrivate,
+    /// Private key material for the lightning module
+    pub ln: LightningConfigPrivate,
 }
 
 /// All the info we configure prior to config gen starting
@@ -150,8 +150,8 @@ impl ServerConfig {
         let consensus = ConsensusConfig {
             peers,
             mint: mint.consensus,
-            ln: ln.consensus,
             wallet: wallet.consensus,
+            ln: ln.consensus,
             meta: params.meta.clone(),
             broadcast_rounds_per_session: broadcast_rounds_per_session(),
         };
@@ -161,8 +161,8 @@ impl ServerConfig {
             iroh_sk: params.iroh_sk,
             broadcast_secret_key,
             mint: mint.private,
-            ln: ln.private,
             wallet: wallet.private,
+            ln: ln.private,
         };
 
         Self { consensus, private }

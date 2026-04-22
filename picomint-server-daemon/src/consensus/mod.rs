@@ -81,13 +81,6 @@ pub async fn run(
         db.clone(),
     ));
 
-    info!(target: LOG_CORE, "Initialise module ln...");
-    let ln = Arc::new(crate::consensus::ln::Lightning::new(
-        cfg.ln_config(),
-        db.clone(),
-        bitcoin_rpc_connection.clone(),
-    ));
-
     info!(target: LOG_CORE, "Initialise module wallet...");
     let wallet = Arc::new(crate::consensus::wallet::Wallet::new(
         cfg.wallet_config(),
@@ -96,7 +89,14 @@ pub async fn run(
         bitcoin_rpc_connection.clone(),
     ));
 
-    let server = Server { mint, ln, wallet };
+    info!(target: LOG_CORE, "Initialise module ln...");
+    let ln = Arc::new(crate::consensus::ln::Lightning::new(
+        cfg.ln_config(),
+        db.clone(),
+        bitcoin_rpc_connection.clone(),
+    ));
+
+    let server = Server { mint, wallet, ln };
 
     let (submission_sender, submission_receiver) = async_channel::bounded(TRANSACTION_BUFFER);
     let (shutdown_sender, shutdown_receiver) = watch::channel(None);
@@ -147,17 +147,17 @@ pub async fn run(
                         .await
                         .ok();
                 }
-                for item in server.ln.consensus_proposal(&tx.as_ref()).await {
-                    submission_sender
-                        .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
-                        .await
-                        .ok();
-                }
                 for item in server.wallet.consensus_proposal(&tx.as_ref()).await {
                     submission_sender
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
                             item,
                         )))
+                        .await
+                        .ok();
+                }
+                for item in server.ln.consensus_proposal(&tx.as_ref()).await {
+                    submission_sender
+                        .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
                         .await
                         .ok();
                 }
@@ -319,7 +319,7 @@ async fn dispatch(consensus_api: Arc<ConsensusApi>, method: Method) -> Result<Ve
     match method {
         Method::Core(m) => consensus_api.handle_api(m).await,
         Method::Mint(m) => consensus_api.server.mint.handle_api(m).await,
-        Method::Ln(m) => consensus_api.server.ln.handle_api(m).await,
         Method::Wallet(m) => consensus_api.server.wallet.handle_api(m).await,
+        Method::Ln(m) => consensus_api.server.ln.handle_api(m).await,
     }
 }

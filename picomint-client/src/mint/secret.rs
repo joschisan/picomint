@@ -1,7 +1,7 @@
 //! Mint-module derivation tree. Only constructible via
-//! [`ClientSecret::mint_module_secret`]; the path enum is private.
+//! [`ClientSecret::mint_secret`]; the path enum is private.
 //!
-//! [`ClientSecret::mint_module_secret`]: crate::secret::ClientSecret::mint_module_secret
+//! [`ClientSecret::mint_secret`]: crate::secret::ClientSecret::mint_secret
 
 use picomint_core::mint::Denomination;
 use picomint_core::secp256k1::Keypair;

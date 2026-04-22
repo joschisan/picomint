@@ -4,8 +4,8 @@ use picomint_core::module::audit::AuditSummary;
 pub fn render(audit_summary: &AuditSummary) -> Markup {
     let rows = [
         ("Mint", audit_summary.mint),
-        ("Ln", audit_summary.ln),
         ("Wallet", audit_summary.wallet),
+        ("Ln", audit_summary.ln),
     ];
 
     html! {
