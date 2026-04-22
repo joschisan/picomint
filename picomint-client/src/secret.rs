@@ -42,7 +42,7 @@ pub struct ClientSecret(Secret);
 
 impl ClientSecret {
     pub fn new(mnemonic: &Mnemonic, federation_id: FederationId) -> Self {
-        Self(Secret::new_root(&mnemonic.to_seed_normalized("")).child(&federation_id))
+        Self(Secret::new_root(&mnemonic.to_entropy()).child(&federation_id))
     }
 
     pub fn mint_secret(&self) -> MintSecret {
