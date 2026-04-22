@@ -15,7 +15,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Building workspace..."
-cargo build --workspace
+cargo build --workspace --release
 
 # Clean up any leftover container from previous run
 docker stop "$CONTAINER_NAME" 2>/dev/null || true
@@ -35,8 +35,15 @@ docker run -d \
     -fallbackfee=0.0004 \
     -txindex=0
 
-echo "Waiting for bitcoind to start..."
-sleep 3
+echo "Waiting for bitcoind RPC..."
+for _ in $(seq 1 60); do
+    if docker exec "$CONTAINER_NAME" bitcoin-cli \
+        -regtest -rpcuser=bitcoin -rpcpassword=bitcoin \
+        getblockchaininfo >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.2
+done
 
 echo "Creating wallet..."
 docker exec "$CONTAINER_NAME" bitcoin-cli \
@@ -44,4 +51,4 @@ docker exec "$CONTAINER_NAME" bitcoin-cli \
     createwallet "" > /dev/null || true
 
 echo "Running integration tests..."
-RUST_LOG="${RUST_LOG:-info}" ./target/debug/picomint-integration-tests
+RUST_LOG="${RUST_LOG:-info}" ./target/release/picomint-integration-tests

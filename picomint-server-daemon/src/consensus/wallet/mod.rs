@@ -53,7 +53,7 @@ pub const CONFIRMATION_FINALITY_DELAY: u64 = 6;
 
 /// Maximum number of blocks the consensus block count can advance in a single
 /// consensus item to limit the work done in one `process_consensus_item` step.
-const MAX_BLOCK_COUNT_INCREMENT: u64 = 10;
+const MAX_BLOCK_COUNT_INCREMENT: u64 = 50;
 
 /// Minimum fee rate vote of 1 sat/vB to ensure we never propose a fee rate
 /// below what Bitcoin Core will relay.
@@ -548,6 +548,17 @@ impl Wallet {
         let new_consensus_block_count = self.consensus_block_count(dbtx);
 
         assert!(old_consensus_block_count <= new_consensus_block_count);
+
+        if new_consensus_block_count != old_consensus_block_count {
+            info!(
+                target: LOG_MODULE_WALLET,
+                %peer,
+                block_count_vote,
+                old_consensus_block_count,
+                new_consensus_block_count,
+                "consensus_block_count advanced"
+            );
+        }
 
         // We do not sync blocks that predate the federation itself.
         if old_consensus_block_count == 0 {

@@ -12,7 +12,7 @@ jobs:
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 300
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
@@ -21,26 +21,24 @@ jobs:
         shared-key: picomint
 
     - name: Prebuild workspace
-      run: cargo build --workspace
+      run: cargo build --workspace --release
 
     - name: Make test script executable
       run: chmod +x test-integration.sh
 
-    - name: Loop integration tests until failure or deadline
+    - name: Loop integration tests for 50 iterations
       run: |
         set -uo pipefail
         mkdir -p /tmp/flake-artifact
-        DEADLINE=$(($(date +%s) + 10800))  # 3h
         LOG=/tmp/flake-artifact/iter.log
-        i=0
         extract_dir() {
           grep -oE 'Test data directory: .+' "$LOG" | tail -1 | sed 's/^Test data directory: //'
         }
-        while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-          i=$((i + 1))
-          echo "=== iteration $i ==="
-          if ! timeout 600 ./test-integration.sh 2>&1 | tee "$LOG"; then
-            echo "FAILED on iteration $i"
+        for i in $(seq 1 50); do
+          START=$(date +%s)
+          if ! timeout 300 ./test-integration.sh >"$LOG" 2>&1; then
+            echo "=== iteration $i FAILED after $(($(date +%s) - START))s ==="
+            cat "$LOG"
             DIR=$(extract_dir)
             if [ -n "$DIR" ] && [ -d "$DIR" ]; then
               echo "Archiving failing temp dir: $DIR"
@@ -49,11 +47,12 @@ jobs:
             fi
             exit 1
           fi
+          echo "iteration $i passed in $(($(date +%s) - START))s"
           # Reclaim disk from the passing iteration's temp dir.
           DIR=$(extract_dir)
           [ -n "$DIR" ] && [ -d "$DIR" ] && rm -rf "$DIR"
         done
-        echo "Completed $i iterations within budget."
+        echo "All 50 iterations passed."
 
     - name: Upload flake artifact
       if: failure()
