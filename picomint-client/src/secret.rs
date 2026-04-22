@@ -49,12 +49,12 @@ impl ClientSecret {
         MintSecret::new(self.0.child(&Path::Mint))
     }
 
-    pub fn ln_secret(&self) -> LnSecret {
-        LnSecret::new(self.0.child(&Path::Ln))
-    }
-
     pub fn wallet_secret(&self) -> WalletSecret {
         WalletSecret::new(self.0.child(&Path::Wallet))
+    }
+
+    pub fn ln_secret(&self) -> LnSecret {
+        LnSecret::new(self.0.child(&Path::Ln))
     }
 
     pub fn gw_secret(&self) -> GwSecret {
