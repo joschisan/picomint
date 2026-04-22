@@ -38,7 +38,3 @@ pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Mnemonic {
 pub(crate) fn client_root(mnemonic: &Mnemonic, federation_id: FederationId) -> Secret {
     Secret::new_root(&mnemonic.to_seed_normalized("")).child(&federation_id)
 }
-
-pub(crate) fn module_secret(root: &Secret, path: Path) -> Secret {
-    root.child(&path)
-}

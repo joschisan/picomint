@@ -6,7 +6,7 @@ use crate::api::FederationApi;
 use crate::gw::{GatewayClientModule, IGatewayClient};
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
-use crate::secret::{Mnemonic, Path, client_root, module_secret};
+use crate::secret::{Mnemonic, Path, client_root};
 use crate::wallet::WalletClientModule;
 use futures::Stream;
 use picomint_core::Amount;
@@ -120,7 +120,7 @@ impl Client {
                 federation_id,
                 config.mint.clone(),
                 mint_context,
-                &module_secret(&root_secret, Path::Mint),
+                &root_secret.child(&Path::Mint),
                 &task_group,
             )
             .await?,
@@ -137,13 +137,13 @@ impl Client {
                 config.wallet.clone(),
                 wallet_context,
                 mint.clone(),
-                &module_secret(&root_secret, Path::Wallet),
+                &root_secret.child(&Path::Wallet),
                 &task_group,
             )
             .await?,
         );
 
-        let ln_secret = module_secret(&root_secret, Path::Ln);
+        let ln_secret = root_secret.child(&Path::Ln);
         let ln = match ln_choice {
             LnChoice::Regular => {
                 let ln_context = crate::module::ClientContext::new(
