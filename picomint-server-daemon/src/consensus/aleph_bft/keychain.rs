@@ -1,39 +1,26 @@
-use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use aleph_bft::Keychain as KeychainTrait;
 use bitcoin::hashes::Hash;
-use picomint_core::config::FederationId;
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
 use picomint_encoding::Encodable;
 use secp256k1::hashes::sha256;
-use secp256k1::{Keypair, Message, PublicKey, schnorr};
+use secp256k1::{Message, schnorr};
 
 use crate::config::ServerConfig;
 
+/// AlephBFT keychain backed by the server config. All fields are derived on
+/// access — the config is the single source of truth for the peer set,
+/// broadcast keys, and federation id.
 #[derive(Clone, Debug)]
 pub struct Keychain {
-    identity: PeerId,
-    pks: BTreeMap<PeerId, PublicKey>,
-    message_tag: FederationId,
-    keypair: Keypair,
+    cfg: Arc<ServerConfig>,
 }
 
 impl Keychain {
     pub fn new(cfg: &ServerConfig) -> Self {
-        let pks: BTreeMap<PeerId, PublicKey> = cfg
-            .consensus
-            .peers
-            .iter()
-            .map(|(peer, endpoint)| (*peer, endpoint.broadcast_pk))
-            .collect();
         Keychain {
-            identity: cfg.private.identity,
-            message_tag: cfg.consensus.calculate_federation_id(),
-            pks,
-            keypair: cfg
-                .private
-                .broadcast_secret_key
-                .keypair(secp256k1::SECP256K1),
+            cfg: Arc::new(cfg.clone()),
         }
     }
 
@@ -41,15 +28,20 @@ impl Keychain {
     // to the full consensus config, so a signature produced under one
     // federation cannot be replayed against another.
     fn tagged_message<T: Encodable + ?Sized>(&self, message: &T) -> Message {
+        let tag = self.cfg.consensus.calculate_federation_id();
         Message::from_digest(
-            (self.message_tag, message)
+            (tag, message)
                 .consensus_hash::<sha256::Hash>()
                 .to_byte_array(),
         )
     }
 
     pub fn sign_schnorr<T: Encodable + ?Sized>(&self, message: &T) -> schnorr::Signature {
-        self.keypair.sign_schnorr(self.tagged_message(message))
+        self.cfg
+            .private
+            .broadcast_secret_key
+            .keypair(secp256k1::SECP256K1)
+            .sign_schnorr(self.tagged_message(message))
     }
 
     pub fn verify_schnorr<T: Encodable + ?Sized>(
@@ -58,12 +50,12 @@ impl Keychain {
         signature: &schnorr::Signature,
         peer_id: PeerId,
     ) -> bool {
-        match self.pks.get(&peer_id) {
-            Some(public_key) => secp256k1::SECP256K1
+        match self.cfg.consensus.peers.get(&peer_id) {
+            Some(endpoint) => secp256k1::SECP256K1
                 .verify_schnorr(
                     signature,
                     &self.tagged_message(message),
-                    &public_key.x_only_public_key().0,
+                    &endpoint.broadcast_pk.x_only_public_key().0,
                 )
                 .is_ok(),
             None => false,
@@ -73,7 +65,7 @@ impl Keychain {
 
 impl aleph_bft::Index for Keychain {
     fn index(&self) -> aleph_bft::NodeIndex {
-        self.identity.to_usize().into()
+        self.cfg.private.identity.to_usize().into()
     }
 }
 
@@ -82,7 +74,7 @@ impl aleph_bft::Keychain for Keychain {
     type Signature = [u8; 64];
 
     fn node_count(&self) -> aleph_bft::NodeCount {
-        self.pks.len().into()
+        self.cfg.consensus.peers.len().into()
     }
 
     fn sign(&self, message: &[u8]) -> Self::Signature {
@@ -110,7 +102,7 @@ impl aleph_bft::MultiKeychain for Keychain {
         signature: &Self::Signature,
         index: aleph_bft::NodeIndex,
     ) -> Self::PartialMultisignature {
-        let mut partial = aleph_bft::NodeMap::with_size(self.pks.len().into());
+        let mut partial = aleph_bft::NodeMap::with_size(self.cfg.consensus.peers.len().into());
 
         partial.insert(index, *signature);
 
@@ -118,7 +110,7 @@ impl aleph_bft::MultiKeychain for Keychain {
     }
 
     fn is_complete(&self, msg: &[u8], partial: &Self::PartialMultisignature) -> bool {
-        if partial.iter().count() < self.pks.to_num_peers().threshold() {
+        if partial.iter().count() < self.cfg.consensus.peers.to_num_peers().threshold() {
             return false;
         }
 
