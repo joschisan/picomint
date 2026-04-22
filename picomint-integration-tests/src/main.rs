@@ -44,7 +44,10 @@ fn main() -> anyhow::Result<()> {
     info!("Running guardian backup/restore test...");
     runtime.block_on(restore::run_test(&env))?;
 
-    info!(total_ms = t_total.elapsed().as_millis() as u64, "All integration tests passed!");
+    info!(
+        total_ms = t_total.elapsed().as_millis() as u64,
+        "All integration tests passed!"
+    );
 
     std::process::exit(0);
 }
