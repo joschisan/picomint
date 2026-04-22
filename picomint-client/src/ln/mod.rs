@@ -222,11 +222,10 @@ impl LightningClientModule {
             .map_err(|_| RoutingInfoError::FailedToRequestRoutingInfo)
     }
 
-    /// Pay an invoice. For testing you can optionally specify a gateway to
-    /// route with, otherwise a gateway will be selected automatically. If the
-    /// invoice was created by a gateway connected to our federation, the same
-    /// gateway will be selected to allow for a direct ecash swap. Otherwise we
-    /// select a random online gateway.
+    /// Pay an invoice. A gateway is selected automatically: if the invoice was
+    /// created by a gateway connected to our federation, the same gateway is
+    /// selected to allow for a direct ecash swap. Otherwise we select a random
+    /// online gateway.
     ///
     /// The fee for this payment may depend on the selected gateway but
     /// will be limited to one and a half percent plus one hundred satoshis.
@@ -239,11 +238,7 @@ impl LightningClientModule {
     /// The absolute fee for a payment can be calculated from the operation meta
     /// to be shown to the user in the transaction history.
     #[allow(clippy::too_many_lines)]
-    pub async fn send(
-        &self,
-        invoice: Bolt11Invoice,
-        gateway: Option<String>,
-    ) -> Result<OperationId, SendPaymentError> {
+    pub async fn send(&self, invoice: Bolt11Invoice) -> Result<OperationId, SendPaymentError> {
         let amount = invoice
             .amount_milli_satoshis()
             .ok_or(SendPaymentError::InvoiceMissingAmount)?;
@@ -269,19 +264,10 @@ impl LightningClientModule {
             .child(&tweak)
             .to_secp_keypair();
 
-        let (gateway_api, routing_info) = match gateway {
-            Some(gateway_api) => (
-                gateway_api.clone(),
-                self.routing_info(&gateway_api)
-                    .await
-                    .map_err(|e| SendPaymentError::FailedToConnectToGateway(e.to_string()))?
-                    .ok_or(SendPaymentError::FederationNotSupported)?,
-            ),
-            None => self
-                .select_gateway(Some(invoice.clone()))
-                .await
-                .map_err(SendPaymentError::SelectGateway)?,
-        };
+        let (gateway_api, routing_info) = self
+            .select_gateway(Some(invoice.clone()))
+            .await
+            .map_err(SendPaymentError::SelectGateway)?;
 
         let (send_fee, expiration_delta) = routing_info.send_parameters(&invoice);
 
@@ -359,9 +345,7 @@ impl LightningClientModule {
         Ok(operation_id)
     }
 
-    /// Request an invoice. For testing you can optionally specify a gateway to
-    /// generate the invoice, otherwise a random online gateway will be selected
-    /// automatically.
+    /// Request an invoice. A random online gateway is selected automatically.
     ///
     /// The total fee for this payment may depend on the chosen gateway but
     /// will be limited to half of one percent plus fifty satoshis. Since the
@@ -375,7 +359,6 @@ impl LightningClientModule {
         amount: Amount,
         expiry_secs: u32,
         description: Bolt11InvoiceDescription,
-        gateway: Option<String>,
     ) -> Result<Bolt11Invoice, ReceiveError> {
         let receive_keypair = self
             .module_root_secret
@@ -387,7 +370,6 @@ impl LightningClientModule {
             amount,
             expiry_secs,
             description,
-            gateway,
         )
         .await
     }
@@ -401,7 +383,6 @@ impl LightningClientModule {
         amount: Amount,
         expiry_secs: u32,
         description: Bolt11InvoiceDescription,
-        gateway: Option<String>,
     ) -> Result<Bolt11Invoice, ReceiveError> {
         let ephemeral_kp = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
@@ -421,19 +402,10 @@ impl LightningClientModule {
             .child(&IncomingContractPath::ClaimKey)
             .to_secp_scalar();
 
-        let (gateway, routing_info) = match gateway {
-            Some(gateway) => (
-                gateway.clone(),
-                self.routing_info(&gateway)
-                    .await
-                    .map_err(|e| ReceiveError::FailedToConnectToGateway(e.to_string()))?
-                    .ok_or(ReceiveError::FederationNotSupported)?,
-            ),
-            None => self
-                .select_gateway(None)
-                .await
-                .map_err(ReceiveError::SelectGateway)?,
-        };
+        let (gateway, routing_info) = self
+            .select_gateway(None)
+            .await
+            .map_err(ReceiveError::SelectGateway)?;
 
         if !routing_info.receive_fee.le(&PaymentFee::RECEIVE_FEE_LIMIT) {
             return Err(ReceiveError::GatewayFeeExceedsLimit);
@@ -562,29 +534,18 @@ impl LightningClientModule {
         Some((claim_keypair, agg_decryption_key))
     }
 
-    /// Generate an lnurl for the client. You can optionally specify a gateway
-    /// to use for testing purposes.
-    pub async fn generate_lnurl(
-        &self,
-        recurringd: String,
-        gateway: Option<String>,
-    ) -> Result<String, GenerateLnurlError> {
-        let gateways = if let Some(gateway) = gateway {
-            vec![gateway]
-        } else {
-            let gateways = self
-                .client_ctx
-                .module_api()
-                .ln_gateways()
-                .await
-                .map_err(|_| GenerateLnurlError::FailedToRequestGateways)?;
+    /// Generate an lnurl for the client.
+    pub async fn generate_lnurl(&self, recurringd: String) -> Result<String, GenerateLnurlError> {
+        let gateways = self
+            .client_ctx
+            .module_api()
+            .ln_gateways()
+            .await
+            .map_err(|_| GenerateLnurlError::FailedToRequestGateways)?;
 
-            if gateways.is_empty() {
-                return Err(GenerateLnurlError::NoGatewaysAvailable);
-            }
-
-            gateways
-        };
+        if gateways.is_empty() {
+            return Err(GenerateLnurlError::NoGatewaysAvailable);
+        }
 
         let receive_keypair = self
             .module_root_secret
@@ -665,10 +626,6 @@ pub enum SendPaymentError {
     InvoiceAlreadyAttempted(OperationId),
     #[error(transparent)]
     SelectGateway(SelectGatewayError),
-    #[error("Failed to connect to gateway")]
-    FailedToConnectToGateway(String),
-    #[error("Gateway does not support this federation")]
-    FederationNotSupported,
     #[error("Gateway fee exceeds the allowed limit")]
     GatewayFeeExceedsLimit,
     #[error("Gateway expiration time exceeds the allowed limit")]
@@ -690,8 +647,6 @@ pub enum ReceiveError {
     SelectGateway(SelectGatewayError),
     #[error("Failed to connect to gateway")]
     FailedToConnectToGateway(String),
-    #[error("Gateway does not support this federation")]
-    FederationNotSupported,
     #[error("Gateway fee exceeds the allowed limit")]
     GatewayFeeExceedsLimit,
     #[error("Amount is too small to cover fees")]

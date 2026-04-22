@@ -9,9 +9,9 @@ use anyhow::{Context, ensure};
 use bitcoin::Network;
 use bitcoincore_rpc::RpcApi;
 use iroh::Endpoint;
+use iroh::address_lookup::MdnsAddressLookup;
 use iroh::endpoint::presets::N0;
 use picomint_client::{Client, Mnemonic};
-use picomint_core::Amount;
 use picomint_core::invite_code::InviteCode;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
@@ -92,7 +92,11 @@ impl TestEnv {
         // concurrently with the rest of setup — address grinding is the
         // slowest part of client construction and benefits from overlapping
         // with gateway/LDK bring-up.
-        let endpoint = runtime.block_on(async { Endpoint::builder(N0).bind().await })?;
+        let endpoint = runtime.block_on(
+            Endpoint::builder(N0)
+                .address_lookup(MdnsAddressLookup::builder())
+                .bind(),
+        )?;
 
         let client_counter = AtomicU64::new(0);
         let client_send = runtime.block_on(build_client(
@@ -212,33 +216,6 @@ impl TestEnv {
             self.bitcoind
                 .send_to_address(addr, amount, None, None, None, None, None, None)
         })?)
-    }
-
-    pub async fn pegin(&self, client: &Arc<Client>, amount: bitcoin::Amount) -> anyhow::Result<()> {
-        let wallet = client.wallet();
-        let addr = wallet.receive().await;
-        info!(%addr, "Pegin address ready");
-
-        let txid = self.send_to_address(&addr, amount)?;
-
-        retry("pegin tx in mempool", || async {
-            block_in_place(|| self.bitcoind.get_mempool_entry(&txid))
-                .map(|_| ())
-                .context("pegin tx not in mempool yet")
-        })
-        .await?;
-
-        self.mine_blocks(10);
-
-        retry("pegin balance", || async {
-            let balance = client.get_balance().await?;
-            ensure!(balance > Amount::ZERO, "balance is zero");
-            Ok(())
-        })
-        .await?;
-
-        info!("Pegged in to {addr}");
-        Ok(())
     }
 }
 
