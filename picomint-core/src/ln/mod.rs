@@ -9,6 +9,7 @@ pub mod gateway_api;
 pub mod lnurl;
 pub mod methods;
 pub mod routes;
+pub mod secret;
 
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::schnorr::Signature;
@@ -30,16 +31,6 @@ pub enum Bolt11InvoiceDescription {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Decodable, Encodable)]
 pub enum LightningInvoice {
     Bolt11(Bolt11Invoice),
-}
-
-/// Per-contract derivation path for the ECDH-rooted incoming-contract
-/// secret tree. Shared between the contract creator (client receive path,
-/// recurringd) and the claimant (client recover path).
-#[derive(Encodable)]
-pub enum IncomingContractPath {
-    EncryptionSeed,
-    Preimage,
-    ClaimKey,
 }
 
 /// Minimum contract amount to ensure the incoming contract can be claimed

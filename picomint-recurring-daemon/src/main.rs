@@ -15,10 +15,8 @@ use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
 use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, PaymentFee, RoutingInfo};
 use picomint_core::ln::lnurl::LnurlRequest;
 use picomint_core::ln::routes::{ROUTE_CREATE_BOLT11_INVOICE, ROUTE_ROUTING_INFO};
-use picomint_core::ln::{
-    Bolt11InvoiceDescription, IncomingContractPath, MINIMUM_INCOMING_CONTRACT_AMOUNT,
-};
-use picomint_core::secret::Secret;
+use picomint_core::ln::secret::IncomingContractSecret;
+use picomint_core::ln::{Bolt11InvoiceDescription, MINIMUM_INCOMING_CONTRACT_AMOUNT};
 use picomint_core::time::duration_since_epoch;
 use picomint_encoding::Encodable;
 use picomint_lnurl::{InvoiceResponse, LnurlResponse, PayResponse, pay_request_tag};
@@ -165,19 +163,11 @@ async fn create_contract_and_fetch_invoice(
     let shared_secret =
         ecdh::SharedSecret::new(&recipient_pk, &ephemeral_keypair.secret_key()).secret_bytes();
 
-    let contract_secret = Secret::new_root(&shared_secret);
+    let contract_secret = IncomingContractSecret::new(shared_secret);
 
-    let encryption_seed = contract_secret
-        .child(&IncomingContractPath::EncryptionSeed)
-        .to_bytes();
-
-    let preimage = contract_secret
-        .child(&IncomingContractPath::Preimage)
-        .to_bytes();
-
-    let claim_tweak = contract_secret
-        .child(&IncomingContractPath::ClaimKey)
-        .to_secp_scalar();
+    let encryption_seed = contract_secret.encryption_seed();
+    let preimage = contract_secret.preimage();
+    let claim_tweak = contract_secret.claim_tweak();
 
     let claim_pk = recipient_pk
         .mul_tweak(secp256k1::SECP256K1, &claim_tweak)

@@ -20,15 +20,15 @@ use picomint_core::core::OperationId;
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentImage};
 use picomint_core::ln::gateway_api::{PaymentFee, RoutingInfo};
+use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_core::ln::{
-    Bolt11InvoiceDescription, IncomingContractPath, LightningInput, LightningInvoice,
-    LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
+    Bolt11InvoiceDescription, LightningInput, LightningInvoice, LightningOutput,
+    MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
 };
 use picomint_core::task::TaskGroup;
 use picomint_core::wire;
 
 pub use self::secret::LnSecret;
-use crate::secret::Secret;
 use picomint_core::time::duration_since_epoch;
 use picomint_core::{Amount, OutPoint, PeerId};
 use picomint_encoding::Encodable;
@@ -378,19 +378,11 @@ impl LightningClientModule {
 
         let shared_secret = ecdh::SharedSecret::new(&recipient_pk, &ephemeral_kp.secret_key());
 
-        let contract_secret = Secret::new_root(&shared_secret.secret_bytes());
+        let contract_secret = IncomingContractSecret::new(shared_secret.secret_bytes());
 
-        let encryption_seed = contract_secret
-            .child(&IncomingContractPath::EncryptionSeed)
-            .to_bytes();
-
-        let preimage = contract_secret
-            .child(&IncomingContractPath::Preimage)
-            .to_bytes();
-
-        let claim_tweak = contract_secret
-            .child(&IncomingContractPath::ClaimKey)
-            .to_secp_scalar();
+        let encryption_seed = contract_secret.encryption_seed();
+        let preimage = contract_secret.preimage();
+        let claim_tweak = contract_secret.claim_tweak();
 
         let (gateway, routing_info) = self
             .select_gateway(None)
@@ -494,15 +486,10 @@ impl LightningClientModule {
         let shared_secret =
             ecdh::SharedSecret::new(&contract.commitment.ephemeral_pk, &sk).secret_bytes();
 
-        let contract_secret = Secret::new_root(&shared_secret);
+        let contract_secret = IncomingContractSecret::new(shared_secret);
 
-        let encryption_seed = contract_secret
-            .child(&IncomingContractPath::EncryptionSeed)
-            .to_bytes();
-
-        let claim_tweak = contract_secret
-            .child(&IncomingContractPath::ClaimKey)
-            .to_secp_scalar();
+        let encryption_seed = contract_secret.encryption_seed();
+        let claim_tweak = contract_secret.claim_tweak();
 
         let claim_keypair = sk
             .mul_tweak(&claim_tweak)
