@@ -9,7 +9,7 @@ use picomint_encoding::Encodable;
 
 #[derive(Encodable)]
 enum Path {
-    Node,
+    Contract,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -20,7 +20,10 @@ impl GwSecret {
         Self(module_root)
     }
 
-    pub fn node_keypair(&self) -> Keypair {
-        self.0.child(&Path::Node).to_secp_keypair()
+    /// The gateway's federation-facing identity keypair. Used as `claim_pk`
+    /// on outgoing contracts, as the refund key on incoming contracts, and
+    /// to sign forfeit messages on cancelled sends.
+    pub fn contract_keypair(&self) -> Keypair {
+        self.0.child(&Path::Contract).to_secp_keypair()
     }
 }

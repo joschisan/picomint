@@ -57,7 +57,7 @@ impl GatewayClientModule {
         gw_secret: GwSecret,
         task_group: &TaskGroup,
     ) -> anyhow::Result<GatewayClientModule> {
-        let keypair = gw_secret.node_keypair();
+        let keypair = gw_secret.contract_keypair();
 
         let sm_context = GwSmContext {
             client_ctx: context.clone(),
