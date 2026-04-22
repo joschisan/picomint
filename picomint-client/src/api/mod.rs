@@ -189,11 +189,7 @@ impl FederationApi {
         res
     }
 
-    pub async fn request_single_peer<Ret>(
-        &self,
-        method: Method,
-        peer: PeerId,
-    ) -> ServerResult<Ret>
+    pub async fn request_single_peer<Ret>(&self, method: Method, peer: PeerId) -> ServerResult<Ret>
     where
         Ret: Decodable,
     {
@@ -427,10 +423,7 @@ async fn connection_task(
 
 const IROH_MAX_RESPONSE_BYTES: usize = ALEPH_BFT_UNIT_BYTE_LIMIT * 3600 * 4 * 2;
 
-async fn request_over_connection(
-    connection: &Connection,
-    method: Method,
-) -> ServerResult<Vec<u8>> {
+async fn request_over_connection(connection: &Connection, method: Method) -> ServerResult<Vec<u8>> {
     let request_bytes = method.consensus_encode_to_vec();
 
     let (mut sink, mut stream) = connection

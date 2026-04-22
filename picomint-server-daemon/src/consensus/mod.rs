@@ -315,10 +315,7 @@ async fn handle_request(
     Ok(())
 }
 
-async fn dispatch(
-    consensus_api: Arc<ConsensusApi>,
-    method: Method,
-) -> Result<Vec<u8>, ApiError> {
+async fn dispatch(consensus_api: Arc<ConsensusApi>, method: Method) -> Result<Vec<u8>, ApiError> {
     match method {
         Method::Core(m) => consensus_api.handle_api(m).await,
         Method::Mint(m) => consensus_api.server.mint.handle_api(m).await,

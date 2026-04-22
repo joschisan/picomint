@@ -15,10 +15,7 @@ pub struct FederationError {
 }
 
 impl FederationError {
-    pub(crate) fn peer_errors(
-        method: Method,
-        peer_errors: BTreeMap<PeerId, ServerError>,
-    ) -> Self {
+    pub(crate) fn peer_errors(method: Method, peer_errors: BTreeMap<PeerId, ServerError>) -> Self {
         Self {
             method,
             peer_errors,
