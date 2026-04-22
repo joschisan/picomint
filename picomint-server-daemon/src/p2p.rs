@@ -11,6 +11,7 @@ use bitcoin::hashes::sha256;
 use bls12_381::{G1Projective, G2Projective, Scalar};
 use futures::FutureExt;
 use futures::future::select_all;
+use iroh::address_lookup::MdnsAddressLookup;
 use iroh::endpoint::presets::N0;
 use iroh::endpoint::{Connection, RecvStream};
 use iroh::{Endpoint, PublicKey, SecretKey, Watcher as _};
@@ -144,6 +145,7 @@ impl P2PConnector {
             .secret_key(secret_key)
             .alpns(vec![PICOMINT_ALPN.to_vec()])
             .bind_addr(p2p_addr)?
+            .address_lookup(MdnsAddressLookup::builder())
             .bind()
             .await?;
 

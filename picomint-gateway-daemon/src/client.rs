@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use iroh::Endpoint;
+use iroh::address_lookup::MdnsAddressLookup;
 use iroh::endpoint::presets::N0;
 use picomint_client::gw::IGatewayClient;
 use picomint_client::{Client, Mnemonic};
@@ -30,7 +31,10 @@ impl GatewayClientFactory {
         );
         dbtx.commit();
 
-        let endpoint = Endpoint::builder(N0).bind().await?;
+        let endpoint = Endpoint::builder(N0)
+            .address_lookup(MdnsAddressLookup::builder())
+            .bind()
+            .await?;
 
         Ok(Self {
             connectors: endpoint,
@@ -48,7 +52,10 @@ impl GatewayClientFactory {
                 let mnemonic = Mnemonic::from_entropy(&entropy)
                     .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {e}"))?;
 
-                let endpoint = Endpoint::builder(N0).bind().await?;
+                let endpoint = Endpoint::builder(N0)
+                    .address_lookup(MdnsAddressLookup::builder())
+                    .bind()
+                    .await?;
 
                 Ok(Some(Self {
                     connectors: endpoint,

@@ -9,6 +9,7 @@ use anyhow::{Context, ensure};
 use bitcoin::Network;
 use bitcoincore_rpc::RpcApi;
 use iroh::Endpoint;
+use iroh::address_lookup::MdnsAddressLookup;
 use iroh::endpoint::presets::N0;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::invite_code::InviteCode;
@@ -91,7 +92,11 @@ impl TestEnv {
         // concurrently with the rest of setup — address grinding is the
         // slowest part of client construction and benefits from overlapping
         // with gateway/LDK bring-up.
-        let endpoint = runtime.block_on(async { Endpoint::builder(N0).bind().await })?;
+        let endpoint = runtime.block_on(
+            Endpoint::builder(N0)
+                .address_lookup(MdnsAddressLookup::builder())
+                .bind(),
+        )?;
 
         let client_counter = AtomicU64::new(0);
         let client_send = runtime.block_on(build_client(
