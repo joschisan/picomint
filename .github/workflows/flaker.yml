@@ -21,7 +21,7 @@ jobs:
         shared-key: picomint
 
     - name: Prebuild workspace
-      run: cargo build --workspace
+      run: cargo build --workspace --release
 
     - name: Make test script executable
       run: chmod +x test-integration.sh
@@ -39,7 +39,7 @@ jobs:
         while [ "$(date +%s)" -lt "$DEADLINE" ]; do
           i=$((i + 1))
           START=$(date +%s)
-          if ! timeout 600 ./test-integration.sh >"$LOG" 2>&1; then
+          if ! timeout 300 ./test-integration.sh >"$LOG" 2>&1; then
             echo "=== iteration $i FAILED after $(($(date +%s) - START))s ==="
             cat "$LOG"
             DIR=$(extract_dir)

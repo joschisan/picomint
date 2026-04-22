@@ -62,14 +62,19 @@ jobs:
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
     - uses: Swatinem/rust-cache@v2
       with:
         shared-key: picomint
+
+    - name: Prebuild workspace
+      run: cargo build --workspace --release
+
     - name: Make test script executable
       run: chmod +x test-integration.sh
+
     - name: Run integration tests
-      run: ./test-integration.sh
+      run: timeout 300 ./test-integration.sh
