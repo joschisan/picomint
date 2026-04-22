@@ -27,7 +27,7 @@ impl Keychain {
             .collect();
         Keychain {
             identity: cfg.private.identity,
-            message_tag: pks.consensus_hash(),
+            message_tag: cfg.consensus.calculate_federation_id().0,
             pks,
             keypair: cfg
                 .private
@@ -36,9 +36,9 @@ impl Keychain {
         }
     }
 
-    // Tagging messages with the hash of the public key set ensures that peers with
-    // an incorrect public key set cannot create signatures that are accepted by
-    // their peers.
+    // Tagging messages with the federation id binds every broadcast signature
+    // to the full consensus config, so a signature produced under one
+    // federation cannot be replayed against another.
     fn tagged_message<T: Encodable + ?Sized>(&self, message: &T) -> Message {
         Message::from_digest(
             (self.message_tag, message)
