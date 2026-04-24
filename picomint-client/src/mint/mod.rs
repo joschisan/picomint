@@ -129,7 +129,7 @@ impl MintClientModule {
                         nonce_hash,
                         tweak,
                     } => {
-                        if !issuance::check_tweak(*tweak, tweak_filter) {
+                        if !issuance::check_tweak(tweak_filter, *tweak) {
                             continue;
                         }
                         let output_secret =
@@ -209,7 +209,7 @@ impl MintClientModule {
             loop {
                 let tweak: [u8; 16] = thread_rng().r#gen();
 
-                if !issuance::check_tweak(tweak, filter) {
+                if !issuance::check_tweak(filter, tweak) {
                     continue;
                 }
 

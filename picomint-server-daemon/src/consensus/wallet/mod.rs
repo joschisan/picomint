@@ -596,7 +596,7 @@ impl Wallet {
                 // claim them by index.
 
                 for (vout, tx_out) in tx.output.iter().enumerate() {
-                    if is_potential_receive(&tx_out.script_pubkey, &pks_hash) {
+                    if is_potential_receive(&pks_hash, &tx_out.script_pubkey) {
                         let outpoint = bitcoin::OutPoint {
                             txid: tx.compute_txid(),
                             vout: u32::try_from(vout)

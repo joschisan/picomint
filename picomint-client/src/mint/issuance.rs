@@ -48,7 +48,7 @@ impl NoteIssuanceRequest {
     }
 }
 
-pub fn check_tweak(tweak: [u8; 16], seed: [u8; 32]) -> bool {
+pub fn check_tweak(seed: [u8; 32], tweak: [u8; 16]) -> bool {
     (seed, tweak)
         .consensus_hash::<sha256::Hash>()
         .to_byte_array()
