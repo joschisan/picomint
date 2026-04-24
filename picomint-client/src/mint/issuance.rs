@@ -1,12 +1,11 @@
 use bitcoin_hashes::{Hash, hash160, sha256};
 use picomint_core::mint::{Denomination, MintOutput, nonce_message};
-use picomint_core::secp256k1::rand::Rng;
 use picomint_core::secp256k1::{Keypair, PublicKey};
 use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedMessage, BlindedSignature, BlindingKey, blind_message, unblind_signature};
 
+use super::SpendableNote;
 use super::secret::MintSecret;
-use super::{SpendableNote, thread_rng};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct NoteIssuanceRequest {
@@ -46,20 +45,6 @@ impl NoteIssuanceRequest {
 
     pub fn blinded_message(&self) -> BlindedMessage {
         blind_message(nonce_message(self.keypair.public_key()), self.blinding_key)
-    }
-}
-
-// ============ Grinding Functions ============
-
-pub fn grind_tweak(mint_secret: &MintSecret) -> [u8; 16] {
-    let filter = mint_secret.tweak_filter();
-
-    loop {
-        let tweak = thread_rng().r#gen();
-
-        if check_tweak(tweak, filter) {
-            return tweak;
-        }
     }
 }
 

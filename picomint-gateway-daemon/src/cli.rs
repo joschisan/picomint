@@ -7,12 +7,14 @@ use axum::extract::{Json, State};
 use axum::response::IntoResponse;
 use axum::routing::post;
 use bitcoin::FeeRate;
+use futures::StreamExt as _;
 use hex::ToHex;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
-use picomint_client::Client;
+use picomint_client::wallet::events::{SendConfirmEvent, SendFailureEvent};
+use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
 use picomint_core::task::TaskHandle;
 use picomint_gateway_cli_core::{
@@ -671,7 +673,8 @@ async fn federation_module_mint_send(
 }
 
 /// Receive ecash into the gateway. The ecash string itself carries the target
-/// federation id, so no `--id` is needed.
+/// federation id, so no `--id` is needed. Blocks until issuance either
+/// completes or fails federation-side.
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_module_mint_receive(
     State(state): State<AppState>,
@@ -686,12 +689,24 @@ async fn federation_module_mint_receive(
 
     let amount = ecash.amount();
 
-    client
+    let operation_id = client
         .mint()
         .receive(&ecash)
-        .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
+        .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
 
-    Ok(Json(FederationMintReceiveResponse { amount }))
+    let mut events = client.subscribe_operation_events(operation_id);
+    while let Some(entry) = events.next().await {
+        if entry.to_event::<TxAcceptEvent>().is_some() {
+            return Ok(Json(FederationMintReceiveResponse { amount }));
+        }
+        if let Some(e) = entry.to_event::<TxRejectEvent>() {
+            return Err(CliError::bad_request(format!(
+                "Transaction rejected: {}",
+                e.error
+            )));
+        }
+    }
+    Err(CliError::internal("Event stream ended unexpectedly"))
 }
 
 /// Fetch the current onchain send-fee for a federation
@@ -709,7 +724,9 @@ async fn federation_module_wallet_send_fee(
     Ok(Json(FederationWalletSendFeeResponse { fee }))
 }
 
-/// Withdraw onchain from a federation
+/// Withdraw onchain from a federation. Blocks until the send reaches a
+/// terminal state: confirmed broadcast, federation rejected the input tx, or
+/// the federation accepted but never produced a bitcoin txid.
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_module_wallet_send(
     State(state): State<AppState>,
@@ -720,8 +737,26 @@ async fn federation_module_wallet_send(
         .wallet()
         .send(payload.address, payload.amount, payload.fee)
         .await
-        .map_err(|e| CliError::internal(format!("Failed to send onchain: {e}")))?;
-    Ok(Json(FederationWalletSendResponse { operation_id }))
+        .map_err(|e| CliError::internal(format!("Failed to submit onchain send: {e}")))?;
+
+    let mut events = client.subscribe_operation_events(operation_id);
+    while let Some(entry) = events.next().await {
+        if let Some(e) = entry.to_event::<SendConfirmEvent>() {
+            return Ok(Json(FederationWalletSendResponse { txid: e.txid }));
+        }
+        if let Some(e) = entry.to_event::<TxRejectEvent>() {
+            return Err(CliError::bad_request(format!(
+                "Transaction rejected: {}",
+                e.error
+            )));
+        }
+        if entry.to_event::<SendFailureEvent>().is_some() {
+            return Err(CliError::internal(
+                "Failure to retrieve txid from federation",
+            ));
+        }
+    }
+    Err(CliError::internal("Event stream ended unexpectedly"))
 }
 
 /// Generate deposit address for a federation

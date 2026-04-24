@@ -4,7 +4,7 @@ mod api;
 mod client_db;
 mod ecash;
 mod events;
-pub mod issuance;
+mod issuance;
 mod issuance_sm;
 mod secret;
 

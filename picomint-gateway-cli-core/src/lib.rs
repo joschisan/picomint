@@ -4,7 +4,6 @@ use bitcoin::address::NetworkUnchecked;
 use clap::Args;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::config::FederationId;
-use picomint_core::core::OperationId;
 use picomint_core::mint::Denomination;
 use picomint_core::{Amount, PeerId, secp256k1};
 use serde::{Deserialize, Serialize};
@@ -331,7 +330,7 @@ pub struct FederationWalletSendRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FederationWalletSendResponse {
-    pub operation_id: OperationId,
+    pub txid: bitcoin::Txid,
 }
 
 // --- /federation/module/wallet/receive ---
