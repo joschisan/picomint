@@ -123,6 +123,13 @@ fn dispatch_ln_receive(
     op_id: OperationId,
     preimage: Option<[u8; 32]>,
 ) {
+    // Refund path: the federation-side refund tx already reclaims the
+    // contract amount for us. We intentionally do NOT fail the inbound LDK
+    // HTLC — let it expire on LDK's own schedule.
+    let Some(preimage) = preimage else {
+        return;
+    };
+
     let row = tx_ref
         .get(&INCOMING_CONTRACT, &op_id)
         .expect("incoming_contract row registered by create_bolt11_invoice");
@@ -134,16 +141,9 @@ fn dispatch_ln_receive(
         }
     };
 
-    match preimage {
-        Some(preimage) => state
-            .node
-            .bolt11_payment()
-            .claim_for_hash(ph, row.amount.msats, PaymentPreimage(preimage))
-            .expect("LDK has this payment_hash (registered via receive_for_hash)"),
-        None => state
-            .node
-            .bolt11_payment()
-            .fail_for_hash(ph)
-            .expect("LDK has this payment_hash (registered via receive_for_hash)"),
-    }
+    state
+        .node
+        .bolt11_payment()
+        .claim_for_hash(ph, row.amount.msats, PaymentPreimage(preimage))
+        .expect("LDK has this payment_hash (registered via receive_for_hash)");
 }
