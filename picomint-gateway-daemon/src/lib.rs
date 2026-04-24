@@ -26,6 +26,7 @@ use lightning_invoice::{
 use picomint_client::Client;
 use picomint_client::gw::EXPIRATION_DELTA_MINIMUM;
 use picomint_client::gw::events::ReceiveSuccessEvent;
+use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::contracts::PaymentImage;
@@ -36,7 +37,6 @@ use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
 use picomint_core::secp256k1::PublicKey;
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::time::duration_since_epoch;
-use picomint_core::Amount;
 use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_lnurl::VerifyResponse;
@@ -204,7 +204,6 @@ impl AppState {
         }
         configs
     }
-
 }
 
 // Lightning Gateway implementation
