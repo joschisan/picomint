@@ -1,439 +1,148 @@
-//! In-memory SQL query surface over the gateway's gw-module event log.
+//! On-disk SQLite mirror of the gateway's gw-module event log.
 //!
-//! Per-federation tail tasks mirror gw events into Arrow `RecordBatch`es, one
-//! `Vec<RecordBatch>` per event kind. The `/query` handler snapshots this
-//! state, builds a fresh `SessionContext` with a `payments` view on top, and
-//! runs the user's SQL.
+//! Per-federation tail tasks read from the client event log and `INSERT`
+//! rows into `{DATA_DIR}/analytics.sqlite`. One table per event kind plus a
+//! `payments` view that stitches sends/receives into a single row per op.
+//!
+//! The file is **wiped on every gateway startup** — analytics state is
+//! derived, not authoritative. The event log in each client's redb is the
+//! source of truth; the tail replays from position 0 on every boot.
+//!
+//! Users and agents inspect the db directly via `sqlite3 analytics.sqlite`.
+//! No query transport is layered on top.
 
-use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context as _, Result};
-use arrow_json::ArrayWriter;
-use datafusion::arrow::array::{
-    ArrayRef, RecordBatch, StringBuilder, TimestampMicrosecondBuilder, UInt64Builder,
-};
-use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
-use datafusion::datasource::MemTable;
-use datafusion::prelude::SessionContext;
+use anyhow::Context as _;
 use picomint_client::Client;
 use picomint_client::gw::events::{
     ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent, SendCancelEvent,
     SendEvent, SendSuccessEvent,
 };
 use picomint_core::config::FederationId;
-use picomint_core::core::OperationId;
-use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::task::TaskGroup;
-use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_eventlog::{EventLogEntry, EventLogId};
-use tokio::sync::RwLock;
+use rusqlite::Connection;
+use tokio::sync::Mutex;
 
 const CHUNK_SIZE: u64 = 10_000;
 
-/// All gw-module analytics tables — table name matches the event kind string.
-const TABLES: &[&str] = &[
-    "send",
-    "send_success",
-    "send_cancel",
-    "receive",
-    "receive_success",
-    "receive_failure",
-    "receive_refund",
-];
+/// Sub-directory inside `DATA_DIR` that holds the SQLite analytics DB and
+/// its WAL/SHM sidecar files. The whole directory is wiped on every
+/// startup so we don't have to special-case individual files.
+pub const ANALYTICS_DIR: &str = "analytics";
+/// Filename of the analytics DB inside `ANALYTICS_DIR`.
+pub const ANALYTICS_FILE: &str = "analytics.sqlite";
 
-fn common_fields() -> Vec<Field> {
-    vec![
-        Field::new("federation_id", DataType::Utf8, false),
-        Field::new("operation_id", DataType::Utf8, false),
-        Field::new(
-            "ts",
-            DataType::Timestamp(TimeUnit::Microsecond, None),
-            false,
-        ),
-    ]
-}
-
-fn schema_for(table: &str) -> SchemaRef {
-    let mut fields = common_fields();
-    match table {
-        "send" => {
-            fields.push(Field::new("outpoint", DataType::Utf8, false));
-            fields.push(Field::new("amount_msat", DataType::UInt64, false));
-            fields.push(Field::new("ln_fee_msat", DataType::UInt64, false));
-            fields.push(Field::new("fee_msat", DataType::UInt64, false));
-        }
-        "send_success" => {
-            fields.push(Field::new("preimage", DataType::Utf8, false));
-            fields.push(Field::new("txid", DataType::Utf8, false));
-            fields.push(Field::new("ln_fee_msat", DataType::UInt64, false));
-        }
-        "send_cancel" => {
-            fields.push(Field::new("signature", DataType::Utf8, false));
-        }
-        "receive" => {
-            fields.push(Field::new("txid", DataType::Utf8, false));
-            fields.push(Field::new("amount_msat", DataType::UInt64, false));
-            fields.push(Field::new("fee_msat", DataType::UInt64, false));
-        }
-        "receive_success" => {
-            fields.push(Field::new("preimage", DataType::Utf8, false));
-        }
-        "receive_failure" => {}
-        "receive_refund" => {
-            fields.push(Field::new("txid", DataType::Utf8, false));
-        }
-        _ => unreachable!("unknown gw table: {table}"),
-    }
-    Arc::new(Schema::new(fields))
-}
-
-#[derive(Clone, Default)]
+/// Shared handle to the analytics SQLite connection. All tail tasks and any
+/// future readers go through this single mutex-guarded connection — fine
+/// because SQLite serializes writes internally anyway and our write volume
+/// is bounded by event-log throughput.
+#[derive(Clone)]
 pub struct QueryState {
-    inner: Arc<RwLock<BTreeMap<&'static str, Vec<RecordBatch>>>>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl QueryState {
-    pub fn new() -> Self {
-        Self::default()
-    }
+    /// Wipe `{DATA_DIR}/analytics/`, recreate it, and open a fresh SQLite
+    /// DB with the schema + `payments` view installed. Analytics state is
+    /// always rebuilt from the redb event log on startup, so we don't
+    /// preserve anything across restarts.
+    pub fn wipe_and_init(data_dir: &Path) -> anyhow::Result<Self> {
+        let dir: PathBuf = data_dir.join(ANALYTICS_DIR);
+        // A full directory wipe handles the db file and its WAL/SHM sidecars
+        // in one shot.
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).context("failed to create analytics dir")?;
 
-    async fn append(&self, table: &'static str, batch: RecordBatch) {
-        self.inner
-            .write()
-            .await
-            .entry(table)
-            .or_default()
-            .push(batch);
-    }
+        let conn = Connection::open(dir.join(ANALYTICS_FILE))
+            .context("failed to open analytics.sqlite")?;
+        // WAL mode: readers don't block the writer, writer doesn't block
+        // readers. Critical for concurrent `sqlite3` CLI access while the
+        // gateway is running.
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
 
-    async fn snapshot(&self) -> BTreeMap<&'static str, Vec<RecordBatch>> {
-        self.inner.read().await.clone()
-    }
-}
+        conn.execute_batch(SCHEMA_SQL)
+            .context("failed to install analytics schema")?;
 
-/// Spawn the per-client tailer: drain the event log forward in 10k-row
-/// chunks, blocking on `event_notify` only when caught up with the head.
-pub fn spawn_tail(
-    task_group: &TaskGroup,
-    client: Arc<Client>,
-    federation_id: FederationId,
-    state: QueryState,
-) {
-    task_group.spawn_cancellable("gw-analytics-tail", tail(client, federation_id, state));
-}
-
-async fn tail(client: Arc<Client>, federation_id: FederationId, state: QueryState) {
-    let mut cursor = EventLogId::default();
-    let notify = client.event_notify();
-
-    loop {
-        // Register interest in the next commit BEFORE reading, so we don't
-        // miss a commit that lands between the read and `.await`.
-        let notified = notify.notified();
-
-        let chunk = client.get_event_log(Some(cursor), CHUNK_SIZE).await;
-        if let Some((last_id, _)) = chunk.last() {
-            cursor = last_id.saturating_add(1);
-            let entries: Vec<&EventLogEntry> = chunk.iter().map(|(_, e)| e).collect();
-            for (table, batch) in build_batches(federation_id, &entries) {
-                state.append(table, batch).await;
-            }
-        }
-
-        // Short chunk means we've caught up with the head; block until the
-        // next commit. Full chunk means there might be more to drain — loop
-        // without waiting.
-        if (chunk.len() as u64) < CHUNK_SIZE {
-            notified.await;
-        }
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
     }
 }
 
-/// Every gw-module event we care about, paired with its common fields
-/// (`operation_id`, `ts_usecs`). `parse_gw_row` below walks each entry and
-/// tries each typed `to_event::<E>()` in sequence — which already checks
-/// both `EventSource::Gw` and the kind string — so mint/wallet/ln events
-/// that share kind names ("send", "receive") drop through as `None`.
-enum GwRow {
-    Send(Common, SendEvent),
-    SendSuccess(Common, SendSuccessEvent),
-    SendCancel(Common, SendCancelEvent),
-    Receive(Common, ReceiveEvent),
-    ReceiveSuccess(Common, ReceiveSuccessEvent),
-    ReceiveFailure(Common),
-    ReceiveRefund(Common, ReceiveRefundEvent),
-}
+/// Schema + `payments` view. Column naming matches the previous DataFusion
+/// layout so operator-written queries and scripts keep working.
+const SCHEMA_SQL: &str = r#"
+CREATE TABLE send (
+    operation_id  TEXT NOT NULL,
+    ts            INTEGER NOT NULL,   -- usecs since unix epoch
+    federation_id TEXT NOT NULL,
+    outpoint      TEXT NOT NULL,
+    amount_msat   INTEGER NOT NULL,
+    ln_fee_msat   INTEGER NOT NULL,
+    fee_msat      INTEGER NOT NULL,
+    PRIMARY KEY (federation_id, operation_id)
+);
 
-#[derive(Copy, Clone)]
-struct Common {
-    operation_id: OperationId,
-    ts_usecs: u64,
-}
+CREATE TABLE send_success (
+    operation_id  TEXT NOT NULL,
+    ts            INTEGER NOT NULL,
+    federation_id TEXT NOT NULL,
+    preimage      TEXT NOT NULL,
+    txid          TEXT NOT NULL,
+    ln_fee_msat   INTEGER NOT NULL,
+    PRIMARY KEY (federation_id, operation_id)
+);
 
-fn parse_gw_row(entry: &EventLogEntry) -> Option<GwRow> {
-    let common = Common {
-        operation_id: entry.operation_id,
-        ts_usecs: entry.ts_usecs,
-    };
-    if let Some(e) = entry.to_event::<SendEvent>() {
-        return Some(GwRow::Send(common, e));
-    }
-    if let Some(e) = entry.to_event::<SendSuccessEvent>() {
-        return Some(GwRow::SendSuccess(common, e));
-    }
-    if let Some(e) = entry.to_event::<SendCancelEvent>() {
-        return Some(GwRow::SendCancel(common, e));
-    }
-    if let Some(e) = entry.to_event::<ReceiveEvent>() {
-        return Some(GwRow::Receive(common, e));
-    }
-    if let Some(e) = entry.to_event::<ReceiveSuccessEvent>() {
-        return Some(GwRow::ReceiveSuccess(common, e));
-    }
-    if entry.to_event::<ReceiveFailureEvent>().is_some() {
-        return Some(GwRow::ReceiveFailure(common));
-    }
-    if let Some(e) = entry.to_event::<ReceiveRefundEvent>() {
-        return Some(GwRow::ReceiveRefund(common, e));
-    }
-    None
-}
+CREATE TABLE send_cancel (
+    operation_id  TEXT NOT NULL,
+    ts            INTEGER NOT NULL,
+    federation_id TEXT NOT NULL,
+    signature     TEXT NOT NULL,
+    PRIMARY KEY (federation_id, operation_id)
+);
 
-/// Sort `entries` into per-kind buckets of typed events and emit one
-/// `RecordBatch` per non-empty bucket.
-fn build_batches(
-    federation_id: FederationId,
-    entries: &[&EventLogEntry],
-) -> Vec<(&'static str, RecordBatch)> {
-    let mut sends = Vec::new();
-    let mut send_successes = Vec::new();
-    let mut send_cancels = Vec::new();
-    let mut receives = Vec::new();
-    let mut receive_successes = Vec::new();
-    let mut receive_failures = Vec::new();
-    let mut receive_refunds = Vec::new();
+CREATE TABLE receive (
+    operation_id  TEXT NOT NULL,
+    ts            INTEGER NOT NULL,
+    federation_id TEXT NOT NULL,
+    txid          TEXT NOT NULL,
+    amount_msat   INTEGER NOT NULL,
+    fee_msat      INTEGER NOT NULL,
+    PRIMARY KEY (federation_id, operation_id)
+);
 
-    for entry in entries {
-        match parse_gw_row(entry) {
-            Some(GwRow::Send(c, e)) => sends.push((c, e)),
-            Some(GwRow::SendSuccess(c, e)) => send_successes.push((c, e)),
-            Some(GwRow::SendCancel(c, e)) => send_cancels.push((c, e)),
-            Some(GwRow::Receive(c, e)) => receives.push((c, e)),
-            Some(GwRow::ReceiveSuccess(c, e)) => receive_successes.push((c, e)),
-            Some(GwRow::ReceiveFailure(c)) => receive_failures.push(c),
-            Some(GwRow::ReceiveRefund(c, e)) => receive_refunds.push((c, e)),
-            None => {}
-        }
-    }
+CREATE TABLE receive_success (
+    operation_id  TEXT NOT NULL,
+    ts            INTEGER NOT NULL,
+    federation_id TEXT NOT NULL,
+    preimage      TEXT NOT NULL,
+    PRIMARY KEY (federation_id, operation_id)
+);
 
-    let mut out = Vec::new();
-    if !sends.is_empty() {
-        out.push(("send", build_gw_send(federation_id, &sends)));
-    }
-    if !send_successes.is_empty() {
-        out.push((
-            "send_success",
-            build_gw_send_success(federation_id, &send_successes),
-        ));
-    }
-    if !send_cancels.is_empty() {
-        out.push((
-            "send_cancel",
-            build_gw_send_cancel(federation_id, &send_cancels),
-        ));
-    }
-    if !receives.is_empty() {
-        out.push(("receive", build_gw_receive(federation_id, &receives)));
-    }
-    if !receive_successes.is_empty() {
-        out.push((
-            "receive_success",
-            build_gw_receive_success(federation_id, &receive_successes),
-        ));
-    }
-    if !receive_failures.is_empty() {
-        out.push((
-            "receive_failure",
-            build_common_only(federation_id, "receive_failure", &receive_failures),
-        ));
-    }
-    if !receive_refunds.is_empty() {
-        out.push((
-            "receive_refund",
-            build_gw_receive_refund(federation_id, &receive_refunds),
-        ));
-    }
-    out
-}
+CREATE TABLE receive_failure (
+    operation_id  TEXT NOT NULL,
+    ts            INTEGER NOT NULL,
+    federation_id TEXT NOT NULL,
+    PRIMARY KEY (federation_id, operation_id)
+);
 
-/// Build the three common columns (federation_id, operation_id, ts) shared
-/// by every gw table. Returns the builders finalized into arrays.
-fn common_columns(
-    federation_id: FederationId,
-    rows: impl ExactSizeIterator<Item = Common>,
-) -> Vec<ArrayRef> {
-    let fed_str = federation_id.to_string();
-    let n = rows.len();
+CREATE TABLE receive_refund (
+    operation_id  TEXT NOT NULL,
+    ts            INTEGER NOT NULL,
+    federation_id TEXT NOT NULL,
+    txid          TEXT NOT NULL,
+    PRIMARY KEY (federation_id, operation_id)
+);
 
-    let mut fed_b = StringBuilder::with_capacity(n, n * fed_str.len());
-    let mut op_b = StringBuilder::with_capacity(n, n * 64);
-    let mut ts_b = TimestampMicrosecondBuilder::with_capacity(n);
+CREATE INDEX idx_send_ts             ON send(ts);
+CREATE INDEX idx_send_success_ts     ON send_success(ts);
+CREATE INDEX idx_receive_ts          ON receive(ts);
+CREATE INDEX idx_receive_success_ts  ON receive_success(ts);
 
-    for row in rows {
-        fed_b.append_value(&fed_str);
-        op_b.append_value(row.operation_id.0.to_string());
-        ts_b.append_value(i64::try_from(row.ts_usecs).unwrap_or(i64::MAX));
-    }
-
-    vec![
-        Arc::new(fed_b.finish()),
-        Arc::new(op_b.finish()),
-        Arc::new(ts_b.finish()),
-    ]
-}
-
-/// For payload-less events (`gw_receive_failure`, `gw_complete`): the table
-/// is just the three common columns.
-fn build_common_only(
-    federation_id: FederationId,
-    table: &'static str,
-    rows: &[Common],
-) -> RecordBatch {
-    let cols = common_columns(federation_id, rows.iter().copied());
-    RecordBatch::try_new(schema_for(table), cols).expect("schema matches columns")
-}
-
-fn build_gw_send(federation_id: FederationId, rows: &[(Common, SendEvent)]) -> RecordBatch {
-    let n = rows.len();
-    let mut outpoint_b = StringBuilder::with_capacity(n, n * 72);
-    let mut amount_b = UInt64Builder::with_capacity(n);
-    let mut ln_fee_b = UInt64Builder::with_capacity(n);
-    let mut fee_b = UInt64Builder::with_capacity(n);
-
-    for (_, ev) in rows {
-        outpoint_b.append_value(format_outpoint(&ev.outpoint));
-        amount_b.append_value(format_amount(ev.amount));
-        ln_fee_b.append_value(format_amount(ev.ln_fee));
-        fee_b.append_value(format_amount(ev.fee));
-    }
-
-    let mut cols = common_columns(federation_id, rows.iter().map(|(c, _)| *c));
-    cols.push(Arc::new(outpoint_b.finish()));
-    cols.push(Arc::new(amount_b.finish()));
-    cols.push(Arc::new(ln_fee_b.finish()));
-    cols.push(Arc::new(fee_b.finish()));
-    RecordBatch::try_new(schema_for("send"), cols).expect("schema matches columns")
-}
-
-fn build_gw_send_success(
-    federation_id: FederationId,
-    rows: &[(Common, SendSuccessEvent)],
-) -> RecordBatch {
-    let n = rows.len();
-    let mut preimage_b = StringBuilder::with_capacity(n, n * 64);
-    let mut txid_b = StringBuilder::with_capacity(n, n * 64);
-    let mut ln_fee_b = UInt64Builder::with_capacity(n);
-
-    for (_, ev) in rows {
-        preimage_b.append_value(hex::encode(ev.preimage));
-        txid_b.append_value(format_txid(&ev.txid));
-        ln_fee_b.append_value(format_amount(ev.ln_fee));
-    }
-
-    let mut cols = common_columns(federation_id, rows.iter().map(|(c, _)| *c));
-    cols.push(Arc::new(preimage_b.finish()));
-    cols.push(Arc::new(txid_b.finish()));
-    cols.push(Arc::new(ln_fee_b.finish()));
-    RecordBatch::try_new(schema_for("send_success"), cols).expect("schema matches columns")
-}
-
-fn build_gw_send_cancel(
-    federation_id: FederationId,
-    rows: &[(Common, SendCancelEvent)],
-) -> RecordBatch {
-    let n = rows.len();
-    let mut sig_b = StringBuilder::with_capacity(n, n * 128);
-
-    for (_, ev) in rows {
-        sig_b.append_value(format_signature(&ev.signature));
-    }
-
-    let mut cols = common_columns(federation_id, rows.iter().map(|(c, _)| *c));
-    cols.push(Arc::new(sig_b.finish()));
-    RecordBatch::try_new(schema_for("send_cancel"), cols).expect("schema matches columns")
-}
-
-fn build_gw_receive(federation_id: FederationId, rows: &[(Common, ReceiveEvent)]) -> RecordBatch {
-    let n = rows.len();
-    let mut txid_b = StringBuilder::with_capacity(n, n * 64);
-    let mut amount_b = UInt64Builder::with_capacity(n);
-    let mut fee_b = UInt64Builder::with_capacity(n);
-
-    for (_, ev) in rows {
-        txid_b.append_value(format_txid(&ev.txid));
-        amount_b.append_value(format_amount(ev.amount));
-        fee_b.append_value(format_amount(ev.fee));
-    }
-
-    let mut cols = common_columns(federation_id, rows.iter().map(|(c, _)| *c));
-    cols.push(Arc::new(txid_b.finish()));
-    cols.push(Arc::new(amount_b.finish()));
-    cols.push(Arc::new(fee_b.finish()));
-    RecordBatch::try_new(schema_for("receive"), cols).expect("schema matches columns")
-}
-
-fn build_gw_receive_success(
-    federation_id: FederationId,
-    rows: &[(Common, ReceiveSuccessEvent)],
-) -> RecordBatch {
-    let n = rows.len();
-    let mut preimage_b = StringBuilder::with_capacity(n, n * 64);
-
-    for (_, ev) in rows {
-        preimage_b.append_value(hex::encode(ev.preimage));
-    }
-
-    let mut cols = common_columns(federation_id, rows.iter().map(|(c, _)| *c));
-    cols.push(Arc::new(preimage_b.finish()));
-    RecordBatch::try_new(schema_for("receive_success"), cols).expect("schema matches columns")
-}
-
-fn build_gw_receive_refund(
-    federation_id: FederationId,
-    rows: &[(Common, ReceiveRefundEvent)],
-) -> RecordBatch {
-    let n = rows.len();
-    let mut txid_b = StringBuilder::with_capacity(n, n * 64);
-
-    for (_, ev) in rows {
-        txid_b.append_value(format_txid(&ev.txid));
-    }
-
-    let mut cols = common_columns(federation_id, rows.iter().map(|(c, _)| *c));
-    cols.push(Arc::new(txid_b.finish()));
-    RecordBatch::try_new(schema_for("receive_refund"), cols).expect("schema matches columns")
-}
-
-fn format_outpoint(o: &OutPoint) -> String {
-    format!("{}:{}", o.txid, o.out_idx)
-}
-
-fn format_txid(t: &TransactionId) -> String {
-    t.to_string()
-}
-
-fn format_signature(s: &Signature) -> String {
-    s.to_string()
-}
-
-fn format_amount(a: Amount) -> u64 {
-    a.msats
-}
-
-/// SQL stitching the event tables into a single wide `payments` row per operation.
-/// Dashed table names need double-quoting per ANSI SQL.
-const PAYMENTS_VIEW_SQL: &str = r#"
 CREATE VIEW payments AS
 SELECT
     s.federation_id,
@@ -449,8 +158,10 @@ SELECT
     s.amount_msat,
     succ.preimage
 FROM send s
-LEFT JOIN send_success succ ON s.operation_id = succ.operation_id
-LEFT JOIN send_cancel  canc ON s.operation_id = canc.operation_id
+LEFT JOIN send_success succ
+       ON succ.federation_id = s.federation_id AND succ.operation_id = s.operation_id
+LEFT JOIN send_cancel  canc
+       ON canc.federation_id = s.federation_id AND canc.operation_id = s.operation_id
 UNION ALL
 SELECT
     r.federation_id,
@@ -464,58 +175,144 @@ SELECT
         WHEN fail.operation_id   IS NOT NULL THEN 'failure'
         ELSE 'pending'
     END AS status,
-    CAST(r.amount_msat AS BIGINT UNSIGNED) AS amount_msat,
+    r.amount_msat,
     succ.preimage
 FROM receive r
-LEFT JOIN receive_success succ   ON r.operation_id = succ.operation_id
-LEFT JOIN receive_failure fail   ON r.operation_id = fail.operation_id
-LEFT JOIN receive_refund  refund ON r.operation_id = refund.operation_id
+LEFT JOIN receive_success succ
+       ON succ.federation_id = r.federation_id AND succ.operation_id = r.operation_id
+LEFT JOIN receive_failure fail
+       ON fail.federation_id = r.federation_id AND fail.operation_id = r.operation_id
+LEFT JOIN receive_refund  refund
+       ON refund.federation_id = r.federation_id AND refund.operation_id = r.operation_id;
 "#;
 
-/// Build a fresh `SessionContext` from a snapshot of `state` and register the
-/// `payments` view. New context per query — the registered `MemTable`s wrap
-/// `Arc`'d batches so this is O(1) clone, not a data copy.
-pub async fn build_session(state: &QueryState) -> Result<SessionContext> {
-    let snapshot = state.snapshot().await;
-    let ctx = SessionContext::new();
-
-    for table in TABLES {
-        let schema = schema_for(table);
-        let batches = snapshot.get(table).cloned().unwrap_or_default();
-        let mem = MemTable::try_new(schema, vec![batches])?;
-        ctx.register_table(*table, Arc::new(mem))?;
-    }
-
-    ctx.sql(PAYMENTS_VIEW_SQL)
-        .await
-        .context("failed to prepare payments view")?
-        .collect()
-        .await
-        .context("failed to register payments view")?;
-
-    Ok(ctx)
+/// Spawn the per-client tailer: drain the event log forward in chunks and
+/// mirror each gw event into the SQLite analytics DB. Blocks on
+/// `event_notify` only when caught up with the head.
+pub fn spawn_tail(
+    task_group: &TaskGroup,
+    client: Arc<Client>,
+    federation_id: FederationId,
+    state: QueryState,
+) {
+    task_group.spawn_cancellable("gw-analytics-tail", tail(client, federation_id, state));
 }
 
-/// Run `sql` against the current analytics snapshot, return rows as a JSON array.
-///
-/// Each row is a JSON object keyed by column name. Column order is preserved
-/// by the `preserve_order` feature on `serde_json` in the workspace.
-pub async fn run_query(state: &QueryState, sql: &str) -> Result<serde_json::Value> {
-    let ctx = build_session(state).await?;
-    let df = ctx.sql(sql).await.context("SQL parse/plan failed")?;
-    let batches = df.collect().await.context("query execution failed")?;
+async fn tail(client: Arc<Client>, federation_id: FederationId, state: QueryState) {
+    let mut cursor = EventLogId::default();
+    let notify = client.event_notify();
+    let fed_id_hex = federation_id.to_string();
 
-    let mut buf = Vec::new();
-    let mut writer = ArrayWriter::new(&mut buf);
-    for batch in &batches {
-        writer.write(batch)?;
+    loop {
+        // Register interest in the next commit BEFORE reading, so we don't
+        // miss a commit that lands between the read and `.await`.
+        let notified = notify.notified();
+
+        let chunk = client.get_event_log(Some(cursor), CHUNK_SIZE).await;
+        if let Some((last_id, _)) = chunk.last() {
+            cursor = last_id.saturating_add(1);
+            let entries: Vec<EventLogEntry> = chunk.iter().map(|(_, e)| e.clone()).collect();
+            let fed = fed_id_hex.clone();
+            let state = state.clone();
+            // rusqlite is sync — hop off the tokio runtime's thread pool for
+            // the insert batch so we don't block other async work.
+            if let Err(e) =
+                tokio::task::spawn_blocking(move || insert_batch(&state, &fed, &entries))
+                    .await
+                    .expect("spawn_blocking join")
+            {
+                tracing::error!(
+                    target: picomint_logging::LOG_GATEWAY,
+                    %federation_id, error = %e,
+                    "analytics insert failed"
+                );
+            }
+        }
+
+        // Short chunk means we've caught up with the head; block until the
+        // next commit. Full chunk means there might be more to drain — loop
+        // without waiting.
+        if (chunk.len() as u64) < CHUNK_SIZE {
+            notified.await;
+        }
     }
-    writer.finish()?;
-    drop(writer);
+}
 
-    if buf.is_empty() {
-        return Ok(serde_json::Value::Array(Vec::new()));
+fn insert_batch(state: &QueryState, fed_id: &str, entries: &[EventLogEntry]) -> anyhow::Result<()> {
+    let mut guard = state.conn.blocking_lock();
+    let tx = guard.transaction()?;
+    for entry in entries {
+        let op_id = entry.operation_id.to_string();
+        let ts = entry.ts_usecs as i64;
+        if let Some(e) = entry.to_event::<SendEvent>() {
+            tx.execute(
+                "INSERT OR IGNORE INTO send \
+                 (federation_id, operation_id, ts, outpoint, amount_msat, ln_fee_msat, fee_msat) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                rusqlite::params![
+                    fed_id,
+                    op_id,
+                    ts,
+                    format!("{}:{}", e.outpoint.txid, e.outpoint.out_idx),
+                    e.amount.msats as i64,
+                    e.ln_fee.msats as i64,
+                    e.fee.msats as i64,
+                ],
+            )?;
+        } else if let Some(e) = entry.to_event::<SendSuccessEvent>() {
+            tx.execute(
+                "INSERT OR IGNORE INTO send_success \
+                 (federation_id, operation_id, ts, preimage, txid, ln_fee_msat) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                rusqlite::params![
+                    fed_id,
+                    op_id,
+                    ts,
+                    hex::encode(e.preimage),
+                    e.txid.to_string(),
+                    e.ln_fee.msats as i64,
+                ],
+            )?;
+        } else if let Some(e) = entry.to_event::<SendCancelEvent>() {
+            tx.execute(
+                "INSERT OR IGNORE INTO send_cancel \
+                 (federation_id, operation_id, ts, signature) VALUES (?, ?, ?, ?)",
+                rusqlite::params![fed_id, op_id, ts, e.signature.to_string()],
+            )?;
+        } else if let Some(e) = entry.to_event::<ReceiveEvent>() {
+            tx.execute(
+                "INSERT OR IGNORE INTO receive \
+                 (federation_id, operation_id, ts, txid, amount_msat, fee_msat) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                rusqlite::params![
+                    fed_id,
+                    op_id,
+                    ts,
+                    e.txid.to_string(),
+                    e.amount.msats as i64,
+                    e.fee.msats as i64,
+                ],
+            )?;
+        } else if let Some(e) = entry.to_event::<ReceiveSuccessEvent>() {
+            tx.execute(
+                "INSERT OR IGNORE INTO receive_success \
+                 (federation_id, operation_id, ts, preimage) VALUES (?, ?, ?, ?)",
+                rusqlite::params![fed_id, op_id, ts, hex::encode(e.preimage)],
+            )?;
+        } else if entry.to_event::<ReceiveFailureEvent>().is_some() {
+            tx.execute(
+                "INSERT OR IGNORE INTO receive_failure \
+                 (federation_id, operation_id, ts) VALUES (?, ?, ?)",
+                rusqlite::params![fed_id, op_id, ts],
+            )?;
+        } else if let Some(e) = entry.to_event::<ReceiveRefundEvent>() {
+            tx.execute(
+                "INSERT OR IGNORE INTO receive_refund \
+                 (federation_id, operation_id, ts, txid) VALUES (?, ?, ?, ?)",
+                rusqlite::params![fed_id, op_id, ts, e.txid.to_string()],
+            )?;
+        }
     }
-
-    serde_json::from_slice(&buf).context("failed to parse arrow-json output")
+    tx.commit()?;
+    Ok(())
 }

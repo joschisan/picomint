@@ -206,7 +206,7 @@ fn main() -> anyhow::Result<()> {
             base: Amount::from_msats(opts.ln_fee_base_msat),
             ppm: opts.ln_fee_ppm,
         },
-        query_state: picomint_gateway_daemon::query::QueryState::new(),
+        query_state: picomint_gateway_daemon::query::QueryState::wipe_and_init(&opts.data_dir)?,
         task_group: task_group.clone(),
     };
 

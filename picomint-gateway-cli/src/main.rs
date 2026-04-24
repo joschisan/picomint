@@ -16,7 +16,7 @@ use picomint_gateway_cli_core::{
     FederationMintCountRequest, FederationMintReceiveRequest, FederationMintSendRequest,
     FederationWalletReceiveRequest, FederationWalletSendFeeRequest, FederationWalletSendRequest,
     LdkChannelCloseRequest, LdkChannelOpenRequest, LdkInvoiceCreateRequest, LdkInvoicePayRequest,
-    LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest, QueryRequest,
+    LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
     ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
     ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
     ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
@@ -25,7 +25,7 @@ use picomint_gateway_cli_core::{
     ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
-    ROUTE_MNEMONIC, ROUTE_QUERY,
+    ROUTE_MNEMONIC,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -57,8 +57,6 @@ enum Commands {
     /// Federation management
     #[command(subcommand)]
     Federation(FederationCommands),
-    /// Run a SQL query against the in-memory gw-event analytics tables
-    Query(QueryRequest),
 }
 
 #[derive(Subcommand)]
@@ -237,7 +235,6 @@ async fn main() -> Result<()> {
     let result = match cli.command {
         Commands::Info => request(d, ROUTE_INFO, ()).await?,
         Commands::Mnemonic => request(d, ROUTE_MNEMONIC, ()).await?,
-        Commands::Query(req) => request(d, ROUTE_QUERY, req).await?,
 
         Commands::Ldk(cmd) => match cmd {
             LdkCommands::Balances => request(d, ROUTE_LDK_BALANCES, ()).await?,

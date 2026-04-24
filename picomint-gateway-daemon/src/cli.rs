@@ -28,15 +28,15 @@ use picomint_gateway_cli_core::{
     LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
     LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
     LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
-    PeerInfo, QueryRequest, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
-    ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
-    ROUTE_FEDERATION_MODULE_MINT_COUNT, ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
-    ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
-    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    PeerInfo, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
+    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
+    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
+    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
-    ROUTE_MNEMONIC, ROUTE_QUERY,
+    ROUTE_MNEMONIC,
 };
 use picomint_logging::LOG_GATEWAY;
 use reqwest::StatusCode;
@@ -154,21 +154,6 @@ fn router() -> Router<AppState> {
             ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
             post(federation_module_wallet_receive),
         )
-        // Analytics
-        .route(ROUTE_QUERY, post(query))
-}
-
-/// Run a SQL query against the in-memory gw-events analytics tables.
-/// Returns a JSON array of row objects keyed by column name.
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn query(
-    State(state): State<AppState>,
-    Json(payload): Json<QueryRequest>,
-) -> Result<Json<serde_json::Value>, CliError> {
-    let rows = crate::query::run_query(&state.query_state, &payload.sql)
-        .await
-        .map_err(CliError::bad_request)?;
-    Ok(Json(rows))
 }
 
 // ---------------------------------------------------------------------------

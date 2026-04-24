@@ -27,7 +27,6 @@ use picomint_core::ln::{
 use picomint_core::{Amount, OutPoint, wire};
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_invoice};
-use serde_json::Value;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -140,69 +139,55 @@ fn deregister_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
 async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     info!("ln: test_analytics_query");
 
+    let db_path = env.gw_data_dir.join("analytics").join("analytics.sqlite");
+    let conn = rusqlite::Connection::open(&db_path)?;
+
     let count = |sql: &str| -> anyhow::Result<u64> {
-        cli::gateway_query(&env.gw_data_dir, sql)?
-            .as_array()
-            .and_then(|a| a.first())
-            .and_then(|r| r.get("n"))
-            .and_then(Value::as_u64)
-            .ok_or_else(|| anyhow::anyhow!("unexpected query shape for: {sql}"))
+        let n: i64 = conn.query_row(sql, [], |r| r.get(0))?;
+        Ok(n as u64)
     };
 
     // Raw event tables
-    assert_eq!(count("SELECT COUNT(*) AS n FROM send")?, 2);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM send_success")?, 1);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM send_cancel")?, 1);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM receive")?, 2);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM receive_success")?, 2);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM receive_failure")?, 0);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM receive_refund")?, 0);
+    assert_eq!(count("SELECT COUNT(*) FROM send")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM send_success")?, 1);
+    assert_eq!(count("SELECT COUNT(*) FROM send_cancel")?, 1);
+    assert_eq!(count("SELECT COUNT(*) FROM receive")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM receive_success")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM receive_failure")?, 0);
+    assert_eq!(count("SELECT COUNT(*) FROM receive_refund")?, 0);
 
     // `payments` view stitches sends/receives into one row per operation
-    assert_eq!(count("SELECT COUNT(*) AS n FROM payments")?, 4);
+    assert_eq!(count("SELECT COUNT(*) FROM payments")?, 4);
     assert_eq!(
-        count(
-            "SELECT COUNT(*) AS n FROM payments WHERE direction='outgoing' AND status='success'"
-        )?,
+        count("SELECT COUNT(*) FROM payments WHERE direction='outgoing' AND status='success'")?,
         1
     );
     assert_eq!(
-        count(
-            "SELECT COUNT(*) AS n FROM payments WHERE direction='outgoing' AND status='cancelled'"
-        )?,
+        count("SELECT COUNT(*) FROM payments WHERE direction='outgoing' AND status='cancelled'")?,
         1
     );
     assert_eq!(
-        count(
-            "SELECT COUNT(*) AS n FROM payments WHERE direction='incoming' AND status='success'"
-        )?,
+        count("SELECT COUNT(*) FROM payments WHERE direction='incoming' AND status='success'")?,
         2
     );
 
     // Join key sanity — `operation_id` must match across event tables
     assert_eq!(
         count(
-            "SELECT COUNT(*) AS n FROM send s \
+            "SELECT COUNT(*) FROM send s \
              INNER JOIN send_success ss USING (operation_id)"
         )?,
         1
     );
 
-    // Amount extraction from the invoice payload
-    let sum = cli::gateway_query(
-        &env.gw_data_dir,
-        "SELECT SUM(amount_msat) AS n FROM payments \
+    // Amount extraction
+    let sum: i64 = conn.query_row(
+        "SELECT SUM(amount_msat) FROM payments \
          WHERE direction='outgoing' AND status='success'",
-    )?
-    .as_array()
-    .and_then(|a| a.first())
-    .and_then(|r| r.get("n"))
-    .and_then(Value::as_u64)
-    .ok_or_else(|| anyhow::anyhow!("unexpected sum query shape"))?;
-    assert_eq!(sum, 1_000_000);
-
-    // Bad SQL surfaces as CLI error
-    assert!(cli::gateway_query(&env.gw_data_dir, "SELECT * FROM does_not_exist").is_err());
+        [],
+        |r| r.get(0),
+    )?;
+    assert_eq!(sum as u64, 1_000_000);
 
     info!("ln: test_analytics_query passed");
 
