@@ -157,7 +157,6 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     assert_eq!(count("SELECT COUNT(*) AS n FROM receive_success")?, 2);
     assert_eq!(count("SELECT COUNT(*) AS n FROM receive_failure")?, 0);
     assert_eq!(count("SELECT COUNT(*) AS n FROM receive_refund")?, 0);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM complete")?, 2);
 
     // `payments` view stitches sends/receives into one row per operation
     assert_eq!(count("SELECT COUNT(*) AS n FROM payments")?, 4);

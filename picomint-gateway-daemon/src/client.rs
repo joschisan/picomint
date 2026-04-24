@@ -3,14 +3,12 @@ use std::sync::Arc;
 use iroh::Endpoint;
 use iroh::address_lookup::MdnsAddressLookup;
 use iroh::endpoint::presets::N0;
-use picomint_client::gw::IGatewayClient;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::invite_code::InviteCode;
 use picomint_redb::Database;
 
-use crate::AppState;
 use crate::db::{CLIENT_CONFIG, ROOT_ENTROPY};
 
 #[derive(Clone)]
@@ -84,11 +82,7 @@ impl GatewayClientFactory {
 
     /// Join a federation for the first time. Errors if a config for this
     /// federation is already persisted — use [`Self::load`] in that case.
-    pub async fn join(
-        &self,
-        invite: &InviteCode,
-        gateway: Arc<AppState>,
-    ) -> anyhow::Result<Arc<picomint_client::Client>> {
+    pub async fn join(&self, invite: &InviteCode) -> anyhow::Result<Arc<picomint_client::Client>> {
         let config = picomint_client::download(&self.connectors, invite).await?;
 
         let dbtx = self.db.begin_write();
@@ -103,7 +97,7 @@ impl GatewayClientFactory {
 
         dbtx.commit();
 
-        self.open(config, gateway).await
+        self.open(config).await
     }
 
     /// Open the client for a federation whose config is already persisted.
@@ -111,25 +105,19 @@ impl GatewayClientFactory {
     pub async fn load(
         &self,
         federation_id: &FederationId,
-        gateway: Arc<AppState>,
     ) -> anyhow::Result<Option<Arc<picomint_client::Client>>> {
         match self.read_config(federation_id).await {
-            Some(config) => self.open(config, gateway).await.map(Some),
+            Some(config) => self.open(config).await.map(Some),
             None => Ok(None),
         }
     }
 
-    async fn open(
-        &self,
-        config: ConsensusConfig,
-        gateway: Arc<AppState>,
-    ) -> anyhow::Result<Arc<picomint_client::Client>> {
+    async fn open(&self, config: ConsensusConfig) -> anyhow::Result<Arc<picomint_client::Client>> {
         Client::new_gateway(
             self.connectors.clone(),
             self.client_database(config.calculate_federation_id()),
             &self.mnemonic,
             config,
-            gateway as Arc<dyn IGatewayClient>,
         )
         .await
         .map_err(|e| anyhow::anyhow!("Client open error: {e}"))

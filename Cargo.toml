@@ -112,7 +112,6 @@ ldk-node = "0.7.0"
 lightning = "0.2.0"
 lightning-invoice = { version = "0.34.0", features = ["serde", "std"] }
 lightning-types = "0.3.0"
-lockable = "0.1.1"
 macro_rules_attribute = "0.2.2"
 maud = "0.27.0"
 miniscript = "12.3.4"

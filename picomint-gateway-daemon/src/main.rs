@@ -12,19 +12,20 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::RwLock;
 
 use bitcoin::Network;
-use bitcoin::hashes::{Hash as _, sha256};
 use clap::{ArgGroup, Parser};
 use lightning::types::payment::PaymentHash;
 use picomint_core::Amount;
+use picomint_core::core::OperationId;
 use picomint_core::ln::gateway_api::PaymentFee;
 use picomint_gateway_daemon::client::GatewayClientFactory;
-use picomint_gateway_daemon::kvstore::RedbKvStore;
-use picomint_gateway_daemon::{AppState, DB_FILE, cli, public};
+use picomint_gateway_daemon::db::{INCOMING_CONTRACT, OUTGOING_CONTRACT, PROCESSED_LDK_PAYMENT};
+use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
 use picomint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
+use picomint_redb::WriteTxRef;
 use rand::rngs::OsRng;
-use tokio::sync::RwLock;
 use tracing::{info, warn};
 use url::Url;
 
@@ -128,6 +129,13 @@ fn main() -> anyhow::Result<()> {
     let mnemonic = client_factory.mnemonic().clone();
 
     // 4. Build LDK node
+    let ldk_data_dir = opts
+        .data_dir
+        .join(LDK_NODE_DB_FOLDER)
+        .to_str()
+        .expect("Invalid data dir path")
+        .to_string();
+
     let mut node_builder = ldk_node::Builder::new();
 
     node_builder.set_runtime(runtime.handle().clone());
@@ -135,9 +143,7 @@ fn main() -> anyhow::Result<()> {
     node_builder.set_node_alias("picomint-gateway-daemon".to_string())?;
     node_builder.set_listening_addresses(vec![opts.ldk_addr.into()])?;
     node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
-    // Non-KV scratch path (log file lives here; KV state goes to the redb
-    // `ldk-node` table via `build_with_store`).
-    node_builder.set_storage_dir_path(opts.data_dir.display().to_string());
+    node_builder.set_storage_dir_path(ldk_data_dir);
 
     match (opts.bitcoind_url.clone(), opts.esplora_url.clone()) {
         (Some(url), _) => {
@@ -160,8 +166,7 @@ fn main() -> anyhow::Result<()> {
 
     info!(target: LOG_LIGHTNING, "Starting LDK Node...");
 
-    let kv_store = Arc::new(RedbKvStore::new(gateway_db.clone()));
-    let node = Arc::new(node_builder.build_with_store(kv_store)?);
+    let node = Arc::new(node_builder.build()?);
 
     node.start()?;
 
@@ -188,14 +193,14 @@ fn main() -> anyhow::Result<()> {
             base: Amount::from_msats(opts.transaction_fee_base_msat),
             parts_per_million: opts.transaction_fee_ppm,
         },
-        outbound_lightning_payment_lock_pool: Arc::new(lockable::LockPool::new()),
         query_state: picomint_gateway_daemon::query::QueryState::new(),
         task_group: task_group.clone(),
     };
 
-    // 7. Load federation clients + spawn their analytics tail tasks
+    // 7. Load federation clients + spawn their analytics tails and trailers
     runtime.block_on(state.load_clients())?;
     runtime.block_on(state.spawn_analytics_tails());
+    runtime.block_on(state.spawn_trailers());
 
     // 8. Spawn tasks
     let public_task = runtime.spawn(public::run_public(state.clone(), task_group.make_handle()));
@@ -244,86 +249,157 @@ async fn process_ldk_events(state: AppState, handle: picomint_core::task::TaskHa
             () = handle.make_shutdown_rx() => break,
         };
 
-        process_ldk_event(&state, event).await;
+        process_ldk_event(&state, event);
 
-        if let Err(e) = state.node.event_handled() {
-            warn!(
-                target: LOG_LIGHTNING,
-                err = %e,
-                "Failed to mark event handled",
-            );
-        }
+        state
+            .node
+            .event_handled()
+            .expect("LDK event_handled persistence failed");
     }
 }
 
-async fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
-    if let ldk_node::Event::PaymentClaimable {
-        payment_hash,
-        claimable_amount_msat,
-        ..
-    } = event
-    {
-        handle_lightning_payment(state, payment_hash.0, claimable_amount_msat).await;
+fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
+    let dbtx = state.gateway_db.begin_write();
+
+    match event {
+        ldk_node::Event::PaymentClaimable {
+            payment_hash,
+            claimable_amount_msat,
+            ..
+        } => handle_payment_claimable(state, &dbtx.as_ref(), payment_hash.0, claimable_amount_msat),
+        ldk_node::Event::PaymentSuccessful {
+            payment_hash,
+            payment_preimage: Some(preimage),
+            ..
+        } => handle_payment_successful(state, &dbtx.as_ref(), payment_hash.0, preimage.0),
+        ldk_node::Event::PaymentFailed {
+            payment_hash: Some(ph),
+            ..
+        } => handle_payment_failed(state, &dbtx.as_ref(), ph.0),
+        _ => return,
     }
+
+    dbtx.commit();
 }
 
-/// Handles an intercepted lightning payment. If the payment is part of an
-/// incoming payment to a federation, spawns a state machine and hands the
-/// payment off to it. Otherwise, fails the HTLC since forwarding is not
-/// supported.
-async fn handle_lightning_payment(state: &AppState, payment_hash: [u8; 32], amount_msat: u64) {
-    if try_handle_lightning_payment_ln(state, payment_hash, amount_msat)
-        .await
-        .is_ok()
+/// Inbound HTLC arrived. Submit the registered incoming contract via
+/// `start_receive`. On amount mismatch or `start_receive` failure (e.g.
+/// insufficient gateway liquidity to fund the incoming contract), log the
+/// reason and fail the HTLC so the LN sender gets a refund.
+fn handle_payment_claimable(
+    state: &AppState,
+    dbtx: &WriteTxRef<'_>,
+    payment_hash: [u8; 32],
+    amount_msat: u64,
+) {
+    let operation_id = OperationId::from_encodable(&payment_hash);
+
+    if dbtx
+        .insert(&PROCESSED_LDK_PAYMENT, &payment_hash, &())
+        .is_some()
     {
         return;
     }
 
-    if let Err(err) = state
-        .node
-        .bolt11_payment()
-        .fail_for_hash(PaymentHash(payment_hash))
-    {
+    // LDK only fires PaymentClaimable for hashes we registered via
+    // `receive_for_hash` in `create_bolt11_invoice`, which commits the
+    // INCOMING_CONTRACT row before returning the invoice.
+    let row = dbtx
+        .get(&INCOMING_CONTRACT, &operation_id)
+        .expect("PaymentClaimable for an unregistered payment_hash");
+
+    if row.amount.msats != amount_msat {
         warn!(
             target: LOG_GATEWAY,
-            err = %err,
-            "Error failing unmatched HTLC",
+            expected = row.amount.msats,
+            got = amount_msat,
+            "Incoming HTLC amount mismatch",
+        );
+
+        state
+            .node
+            .bolt11_payment()
+            .fail_for_hash(PaymentHash(payment_hash))
+            .expect("LDK has this payment_hash (registered via receive_for_hash)");
+    } else {
+        let client = state
+            .select_client(row.federation_id)
+            .expect("source federation for incoming contract is connected");
+
+        if client
+            .gw()
+            .start_receive(&dbtx.isolate(row.federation_id), operation_id, row.contract)
+            .is_err()
+        {
+            tracing::error!(
+                target: LOG_GATEWAY,
+                "start_receive failed; failing HTLC",
+            );
+
+            state
+                .node
+                .bolt11_payment()
+                .fail_for_hash(PaymentHash(payment_hash))
+                .expect("LDK has this payment_hash (registered via receive_for_hash)");
+        }
+    }
+}
+
+/// Outbound LN payment succeeded. Look up the outgoing contract row and
+/// tell the source federation's client to finalize the send with the
+/// preimage carried on the `PaymentSuccessful` event.
+fn handle_payment_successful(
+    state: &AppState,
+    dbtx: &WriteTxRef<'_>,
+    payment_hash: [u8; 32],
+    preimage: [u8; 32],
+) {
+    let operation_id = OperationId::from_encodable(&payment_hash);
+
+    if dbtx
+        .insert(&PROCESSED_LDK_PAYMENT, &payment_hash, &())
+        .is_some()
+    {
+        return;
+    }
+
+    if let Some(row) = dbtx.get(&OUTGOING_CONTRACT, &operation_id) {
+        let client = state
+            .select_client(row.federation_id)
+            .expect("source federation for outgoing contract is connected");
+
+        client.gw().finalize_send(
+            &dbtx.isolate(row.federation_id),
+            operation_id,
+            row.contract,
+            row.outpoint,
+            Some(preimage),
         );
     }
 }
 
-async fn try_handle_lightning_payment_ln(
-    state: &AppState,
-    payment_hash: [u8; 32],
-    amount_msat: u64,
-) -> anyhow::Result<()> {
-    use picomint_core::ln::contracts::PaymentImage;
+/// Outbound LN payment failed. Look up the outgoing contract row and tell
+/// the source federation's client to forfeit the contract.
+fn handle_payment_failed(state: &AppState, dbtx: &WriteTxRef<'_>, payment_hash: [u8; 32]) {
+    let operation_id = OperationId::from_encodable(&payment_hash);
 
-    let hash = sha256::Hash::from_byte_array(payment_hash);
-
-    let (contract, client) = state
-        .get_registered_incoming_contract_and_client(PaymentImage::Hash(hash), amount_msat)
-        .await?;
-
-    if let Err(err) = client
-        .gw()
-        .relay_incoming_htlc(hash, 0, 0, contract, amount_msat)
-        .await
+    if dbtx
+        .insert(&PROCESSED_LDK_PAYMENT, &payment_hash, &())
+        .is_some()
     {
-        warn!(target: LOG_GATEWAY, err = %format_args!("{err:#}"), "Error relaying incoming lightning payment");
-
-        if let Err(err) = state
-            .node
-            .bolt11_payment()
-            .fail_for_hash(PaymentHash(payment_hash))
-        {
-            warn!(
-                target: LOG_GATEWAY,
-                err = %err,
-                "Error failing HTLC after relay error",
-            );
-        }
+        return;
     }
 
-    Ok(())
+    if let Some(row) = dbtx.get(&OUTGOING_CONTRACT, &operation_id) {
+        let client = state
+            .select_client(row.federation_id)
+            .expect("source federation for outgoing contract is connected");
+        client.gw().finalize_send(
+            &dbtx.isolate(row.federation_id),
+            operation_id,
+            row.contract,
+            row.outpoint,
+            None,
+        );
+    }
 }

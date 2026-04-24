@@ -13,7 +13,6 @@ use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use picomint_client::Client;
-use picomint_client::gw::Preimage;
 use picomint_core::config::FederationId;
 use picomint_core::task::TaskHandle;
 use picomint_gateway_cli_core::{
@@ -81,12 +80,6 @@ impl CliError {
 impl IntoResponse for CliError {
     fn into_response(self) -> axum::response::Response {
         (self.code, self.error).into_response()
-    }
-}
-
-impl From<picomint_client::gw::LightningRpcError> for CliError {
-    fn from(e: picomint_client::gw::LightningRpcError) -> Self {
-        Self::internal(e)
     }
 }
 
@@ -442,7 +435,7 @@ async fn ldk_invoice_pay(
         .send(&payload.invoice, None)
         .map_err(|e| CliError::internal(format!("LDK payment failed to initialize: {e:?}")))?;
 
-    let preimage = loop {
+    let preimage: [u8; 32] = loop {
         if let Some(payment_details) = state.node.payment(&payment_id) {
             match payment_details.status {
                 PaymentStatus::Pending => {}
@@ -452,7 +445,7 @@ async fn ldk_invoice_pay(
                         ..
                     } = payment_details.kind
                     {
-                        break Preimage(preimage.0);
+                        break preimage.0;
                     }
                 }
                 PaymentStatus::Failed => {
@@ -464,7 +457,7 @@ async fn ldk_invoice_pay(
     };
 
     Ok(Json(LdkInvoicePayResponse {
-        preimage: preimage.0.encode_hex::<String>(),
+        preimage: preimage.encode_hex::<String>(),
     }))
 }
 
@@ -540,7 +533,7 @@ async fn federation_join(
     if state
         .clients
         .read()
-        .await
+        .expect("clients RwLock poisoned")
         .contains_key(&invite_code.federation_id)
     {
         return Err(CliError::bad_request(
@@ -548,24 +541,28 @@ async fn federation_join(
         ));
     }
 
-    let client = state
-        .client_factory
-        .join(&invite_code, Arc::new(state.clone()))
-        .await?;
+    let client = state.client_factory.join(&invite_code).await?;
 
     AppState::check_federation_network(&client, state.network).await?;
 
     state
         .clients
         .write()
-        .await
+        .expect("clients RwLock poisoned")
         .insert(invite_code.federation_id, client.clone());
 
     crate::query::spawn_tail(
         &state.task_group,
-        client,
+        client.clone(),
         invite_code.federation_id,
         state.query_state.clone(),
+    );
+
+    crate::trailer::spawn_trailer(
+        &state.task_group,
+        state.clone(),
+        invite_code.federation_id,
+        client,
     );
 
     debug!(target: LOG_GATEWAY, federation_id = %invite_code.federation_id, "Federation connected");
@@ -628,7 +625,7 @@ async fn resolve_client(
     state: &AppState,
     id: Option<FederationId>,
 ) -> Result<Arc<Client>, CliError> {
-    let clients = state.clients.read().await;
+    let clients = state.clients.read().expect("clients RwLock poisoned");
     match id {
         Some(id) => clients
             .get(&id)
@@ -691,7 +688,6 @@ async fn federation_module_mint_receive(
 
     let client = state
         .select_client(ecash.mint)
-        .await
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
     let amount = ecash.amount();

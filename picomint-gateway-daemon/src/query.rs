@@ -18,8 +18,8 @@ use datafusion::datasource::MemTable;
 use datafusion::prelude::SessionContext;
 use picomint_client::Client;
 use picomint_client::gw::events::{
-    CompleteEvent, ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent,
-    SendCancelEvent, SendEvent, SendSuccessEvent,
+    ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent, SendCancelEvent,
+    SendEvent, SendSuccessEvent,
 };
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -41,7 +41,6 @@ const TABLES: &[&str] = &[
     "receive_success",
     "receive_failure",
     "receive_refund",
-    "complete",
 ];
 
 fn common_fields() -> Vec<Field> {
@@ -82,7 +81,6 @@ fn schema_for(table: &str) -> SchemaRef {
         "receive_refund" => {
             fields.push(Field::new("txid", DataType::Utf8, false));
         }
-        "complete" => {}
         _ => unreachable!("unknown gw table: {table}"),
     }
     Arc::new(Schema::new(fields))
@@ -163,7 +161,6 @@ enum GwRow {
     ReceiveSuccess(Common, ReceiveSuccessEvent),
     ReceiveFailure(Common),
     ReceiveRefund(Common, ReceiveRefundEvent),
-    Complete(Common),
 }
 
 #[derive(Copy, Clone)]
@@ -198,9 +195,6 @@ fn parse_gw_row(entry: &EventLogEntry) -> Option<GwRow> {
     if let Some(e) = entry.to_event::<ReceiveRefundEvent>() {
         return Some(GwRow::ReceiveRefund(common, e));
     }
-    if entry.to_event::<CompleteEvent>().is_some() {
-        return Some(GwRow::Complete(common));
-    }
     None
 }
 
@@ -217,7 +211,6 @@ fn build_batches(
     let mut receive_successes = Vec::new();
     let mut receive_failures = Vec::new();
     let mut receive_refunds = Vec::new();
-    let mut completes = Vec::new();
 
     for entry in entries {
         match parse_gw_row(entry) {
@@ -228,7 +221,6 @@ fn build_batches(
             Some(GwRow::ReceiveSuccess(c, e)) => receive_successes.push((c, e)),
             Some(GwRow::ReceiveFailure(c)) => receive_failures.push(c),
             Some(GwRow::ReceiveRefund(c, e)) => receive_refunds.push((c, e)),
-            Some(GwRow::Complete(c)) => completes.push(c),
             None => {}
         }
     }
@@ -268,12 +260,6 @@ fn build_batches(
         out.push((
             "receive_refund",
             build_gw_receive_refund(federation_id, &receive_refunds),
-        ));
-    }
-    if !completes.is_empty() {
-        out.push((
-            "complete",
-            build_common_only(federation_id, "complete", &completes),
         ));
     }
     out

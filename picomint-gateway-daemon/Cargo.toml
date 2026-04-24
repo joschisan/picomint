@@ -15,7 +15,7 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 arrow-json = { workspace = true }
-async-trait = { workspace = true }
+futures = { workspace = true }
 axum = { workspace = true, features = ["json"] }
 bitcoin = { workspace = true }
 clap = { workspace = true }
@@ -26,7 +26,6 @@ iroh = { workspace = true, default-features = false }
 ldk-node = { workspace = true }
 lightning = { workspace = true }
 lightning-invoice = { workspace = true }
-lockable = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-client = { workspace = true }
 picomint-core = { workspace = true }

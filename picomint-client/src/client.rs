@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::Endpoint;
 use crate::api::FederationApi;
-use crate::gw::{GatewayClientModule, IGatewayClient};
+use crate::gw::GatewayClientModule;
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
 use crate::secret::{ClientSecret, Mnemonic};
@@ -25,7 +25,7 @@ use tracing::debug;
 /// LN-flavor selection used by the two constructors below.
 enum LnChoice {
     Regular,
-    Gateway(Arc<dyn IGatewayClient>),
+    Gateway,
 }
 
 /// Lightning-module flavor mounted on a client. Regular federation clients
@@ -73,16 +73,15 @@ impl Client {
     }
 
     /// Gateway-flavor counterpart of [`Client::new`]. Used by the gateway
-    /// daemon, which mounts its own [`IGatewayClient`] in place of the
-    /// regular lightning module.
+    /// daemon, which mounts [`GatewayClientModule`] in place of the regular
+    /// lightning module.
     pub async fn new_gateway(
         connectors: Endpoint,
         db: Database,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
-        gateway: Arc<dyn IGatewayClient>,
     ) -> anyhow::Result<Arc<Self>> {
-        Self::build(connectors, db, mnemonic, config, LnChoice::Gateway(gateway)).await
+        Self::build(connectors, db, mnemonic, config, LnChoice::Gateway).await
     }
 
     async fn build(
@@ -163,7 +162,7 @@ impl Client {
                     .await?,
                 ))
             }
-            LnChoice::Gateway(gateway) => {
+            LnChoice::Gateway => {
                 let gw_context = crate::module::ClientContext::new(
                     api.clone(),
                     db.clone(),
@@ -176,7 +175,6 @@ impl Client {
                         config.ln.clone(),
                         gw_context,
                         mint.clone(),
-                        gateway,
                         client_secret.gw_secret(),
                         &task_group,
                     )

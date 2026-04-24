@@ -3085,8 +3085,6 @@ version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5971ac85611da7067dbfcabef3c70ebb5606018acd9e2a3903a0da507521e0d5"
 dependencies = [
- "allocator-api2",
- "equivalent",
  "foldhash 0.1.5",
 ]
 
@@ -3766,7 +3764,7 @@ dependencies = [
  "iroh-base",
  "iroh-dns",
  "iroh-metrics",
- "lru 0.16.3",
+ "lru",
  "n0-error",
  "n0-future",
  "noq",
@@ -3823,15 +3821,6 @@ name = "itertools"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
 dependencies = [
  "either",
 ]
@@ -4290,19 +4279,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lockable"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e251a4db7189cc05077d5585541ec5a8c4fb47e561edff84c46c1e35671027b"
-dependencies = [
- "derive_more 1.0.0",
- "futures",
- "itertools 0.13.0",
- "lru 0.12.5",
- "tokio",
-]
-
-[[package]]
 name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4319,15 +4295,6 @@ dependencies = [
  "scoped-tls",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "lru"
-version = "0.12.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
-dependencies = [
- "hashbrown 0.15.4",
 ]
 
 [[package]]
@@ -5177,7 +5144,6 @@ dependencies = [
  "assert_matches",
  "async-channel",
  "async-stream",
- "async-trait",
  "bip39",
  "bitcoin",
  "bitcoin_hashes",
@@ -5325,18 +5291,17 @@ dependencies = [
  "anyhow",
  "arrow-json",
  "assert_matches",
- "async-trait",
  "axum",
  "bitcoin",
  "clap",
  "datafusion",
+ "futures",
  "hex",
  "iroh",
  "itertools 0.14.0",
  "ldk-node",
  "lightning",
  "lightning-invoice",
- "lockable",
  "picomint-base32",
  "picomint-client",
  "picomint-core",

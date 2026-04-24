@@ -87,15 +87,3 @@ impl Event for ReceiveRefundEvent {
     const SOURCE: EventSource = EventSource::Gw;
     const KIND: EventKind = EventKind::from_static("receive-refund");
 }
-
-// --- Complete (preimage revealed to LN network) ---
-
-/// Emitted when the completion state machine has settled or cancelled the
-/// HTLC towards the LN node. Only applies to externally-routed receives.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct CompleteEvent;
-
-impl Event for CompleteEvent {
-    const SOURCE: EventSource = EventSource::Gw;
-    const KIND: EventKind = EventKind::from_static("complete");
-}
