@@ -55,10 +55,10 @@ fn ln_event_stream(
             let notified = notify.notified();
             let events = client.get_event_log(Some(next_id), 100).await;
 
-            for entry in events {
-                next_id = entry.id().saturating_add(1);
+            for (id, entry) in events {
+                next_id = id.saturating_add(1);
 
-                if let Some((op, event)) = try_parse_ln_event(entry.as_raw()) {
+                if let Some((op, event)) = try_parse_ln_event(&entry) {
                     yield (op, event);
                 }
             }

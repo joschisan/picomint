@@ -1034,16 +1034,10 @@ mod tests {
     }
 
     #[test]
-    fn nested_isolation_composes() {
+    #[should_panic(expected = "You tried to isolate a db twice")]
+    fn nested_isolation_panics() {
         let db = Database::open_in_memory();
-        let nested = db.isolate("gateway").isolate("client_7").isolate("mint");
-
-        let tx = nested.begin_write();
-        tx.insert(&BALANCES, &42, &999);
-        tx.commit();
-
-        assert_eq!(nested.begin_read().get(&BALANCES, &42), Some(999));
-        assert_eq!(db.begin_read().get(&BALANCES, &42), None);
+        let _ = db.isolate("gateway").isolate("client_7");
     }
 
     #[test]

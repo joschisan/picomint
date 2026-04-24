@@ -59,6 +59,17 @@ jobs:
         tool: cargo-machete
     - run: cargo machete
 
+  test:
+    name: Cargo Test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: picomint
+    - run: cargo test --workspace
+
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest
