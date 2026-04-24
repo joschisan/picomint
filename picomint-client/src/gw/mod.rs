@@ -14,7 +14,7 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
-use picomint_core::ln::{LightningInput, LightningInvoice, LightningOutput, OutgoingWitness};
+use picomint_core::ln::{LightningInput, LightningOutput, OutgoingWitness};
 use picomint_core::secp256k1::Keypair;
 use picomint_core::task::TaskGroup;
 use picomint_core::wire;
@@ -106,10 +106,20 @@ impl GatewayClientModule {
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         outpoint: OutPoint,
-        invoice: LightningInvoice,
+        amount: Amount,
+        ln_fee: Amount,
+        fee: Amount,
     ) {
-        self.client_ctx
-            .log_event(dbtx, operation_id, SendEvent { outpoint, invoice });
+        self.client_ctx.log_event(
+            dbtx,
+            operation_id,
+            SendEvent {
+                outpoint,
+                amount,
+                ln_fee,
+                fee,
+            },
+        );
     }
 
     /// Bootstrap a receive: submit the IncomingContract tx to the federation,
@@ -128,6 +138,7 @@ impl GatewayClientModule {
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
         contract: IncomingContract,
+        fee: Amount,
     ) -> anyhow::Result<()> {
         let tx_builder = TransactionBuilder::from_output(Output {
             output: wire::Output::Ln(Box::new(LightningOutput::Incoming(contract.clone()))),
@@ -164,6 +175,7 @@ impl GatewayClientModule {
             ReceiveEvent {
                 txid: outpoint.txid,
                 amount: contract.commitment.amount,
+                fee,
             },
         );
         Ok(())
@@ -191,6 +203,7 @@ impl GatewayClientModule {
         contract: OutgoingContract,
         outpoint: OutPoint,
         preimage: Option<[u8; 32]>,
+        ln_fee: Amount,
     ) {
         match preimage {
             Some(preimage) => {
@@ -209,8 +222,15 @@ impl GatewayClientModule {
                     .finalize_and_submit_transaction(dbtx, operation_id, tx_builder)
                     .expect("Cannot claim outgoing contract — additional funding needed");
 
-                self.client_ctx
-                    .log_event(dbtx, operation_id, SendSuccessEvent { preimage, txid });
+                self.client_ctx.log_event(
+                    dbtx,
+                    operation_id,
+                    SendSuccessEvent {
+                        preimage,
+                        txid,
+                        ln_fee,
+                    },
+                );
             }
             None => {
                 let signature = self.keypair.sign_schnorr(contract.forfeit_message());

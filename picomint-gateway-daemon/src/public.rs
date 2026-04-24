@@ -8,7 +8,7 @@ use bitcoin::hashes::sha256;
 use picomint_core::config::FederationId;
 use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, SendPaymentPayload};
 use picomint_core::ln::routes::{
-    ROUTE_CREATE_BOLT11_INVOICE, ROUTE_ROUTING_INFO, ROUTE_SEND_PAYMENT,
+    ROUTE_CREATE_BOLT11_INVOICE, ROUTE_GATEWAY_INFO, ROUTE_SEND_PAYMENT,
 };
 use picomint_core::task::TaskHandle;
 use picomint_lnurl::LnurlResponse;
@@ -74,19 +74,19 @@ pub async fn run_public(state: AppState, handle: TaskHandle) {
 
 fn router() -> Router<AppState> {
     Router::new()
-        .route(ROUTE_ROUTING_INFO, post(routing_info))
+        .route(ROUTE_GATEWAY_INFO, post(gateway_info))
         .route(ROUTE_SEND_PAYMENT, post(pay_bolt11_invoice))
         .route(ROUTE_CREATE_BOLT11_INVOICE, post(create_bolt11_invoice))
         .route("/verify/{payment_hash}", get(verify_bolt11_preimage_get))
 }
 
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn routing_info(
+async fn gateway_info(
     State(state): State<AppState>,
     Json(federation_id): Json<FederationId>,
 ) -> Result<Json<serde_json::Value>, CliError> {
-    let routing_info = state.routing_info(&federation_id).await?;
-    Ok(Json(json!(routing_info)))
+    let gateway_info = state.gateway_info(&federation_id).await?;
+    Ok(Json(json!(gateway_info)))
 }
 
 #[instrument(target = LOG_GATEWAY, skip_all, err)]

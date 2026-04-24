@@ -31,7 +31,7 @@ use picomint_core::core::OperationId;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::ln::contracts::PaymentImage;
 use picomint_core::ln::gateway_api::{
-    CreateBolt11InvoicePayload, PaymentFee, RoutingInfo, SendPaymentPayload,
+    CreateBolt11InvoicePayload, GatewayInfo, PaymentFee, SendPaymentPayload,
 };
 use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
 use picomint_core::secp256k1::PublicKey;
@@ -66,8 +66,9 @@ pub struct AppState {
     pub api_addr: SocketAddr,
     pub data_dir: std::path::PathBuf,
     pub network: Network,
-    pub routing_fees: PaymentFee,
-    pub transaction_fees: PaymentFee,
+    pub send_fee: PaymentFee,
+    pub receive_fee: PaymentFee,
+    pub ln_fee: PaymentFee,
     pub query_state: query::QueryState,
     pub task_group: picomint_core::task::TaskGroup,
 }
@@ -234,23 +235,22 @@ impl AppState {
             .map(|client| client.gw().keypair.public_key())
     }
 
-    pub async fn routing_info(
+    pub async fn gateway_info(
         &self,
         federation_id: &FederationId,
-    ) -> anyhow::Result<Option<RoutingInfo>> {
+    ) -> anyhow::Result<Option<GatewayInfo>> {
         self.select_client(*federation_id)
             .context("Federation not connected")?;
 
         Ok(self
             .public_key(federation_id)
-            .map(|module_public_key| RoutingInfo {
+            .map(|module_public_key| GatewayInfo {
                 lightning_public_key: self.node.node_id(),
                 module_public_key,
-                send_fee_default: self.routing_fees + self.transaction_fees,
-                send_fee_minimum: self.transaction_fees,
-                expiration_delta_default: 1440,
-                expiration_delta_minimum: EXPIRATION_DELTA_MINIMUM,
-                receive_fee: self.transaction_fees,
+                send_fee: self.send_fee,
+                receive_fee: self.receive_fee,
+                ln_fee: self.ln_fee,
+                expiration_delta: 1440,
             }))
     }
 
@@ -307,6 +307,20 @@ impl AppState {
 
         let operation_id = OperationId::from_encodable(&payment_hash);
 
+        let is_direct_swap = self.node.node_id() == invoice.get_payee_pub_key();
+
+        let fee = self.send_fee.fee(amount);
+        let ln_fee = if is_direct_swap {
+            Amount::ZERO
+        } else {
+            self.ln_fee.fee(amount)
+        };
+
+        ensure!(
+            payload.contract.amount == Amount::from_msats(amount + fee.msats + ln_fee.msats),
+            "Contract amount does not match invoice amount + send fee + ln fee"
+        );
+
         // --- Idempotency: if outgoing_contract row already exists, subscribe
         //     and return. subscribe_send replays event history, so a
         //     completed op resolves immediately.
@@ -337,14 +351,15 @@ impl AppState {
                 &tx.as_ref().isolate(payload.federation_id),
                 operation_id,
                 payload.outpoint,
-                payload.invoice.clone(),
+                Amount::from_msats(amount),
+                ln_fee,
+                fee,
             );
             tx.commit();
         }
 
         // --- Direct-swap vs external LN -------------------------------------
-        if self.node.node_id() == invoice.get_payee_pub_key() {
-            // Direct swap: the receiver is registered on one of our federations.
+        if is_direct_swap {
             let incoming_row = self
                 .gateway_db
                 .begin_read()
@@ -363,6 +378,8 @@ impl AppState {
                 .select_client(incoming_row.federation_id)
                 .ok_or_else(|| anyhow!("Direct-swap target federation not connected"))?;
 
+            let incoming_fee = incoming_row.amount - incoming_row.contract.commitment.amount;
+
             let tx = self.gateway_db.begin_write();
             f2_client
                 .gw()
@@ -370,25 +387,12 @@ impl AppState {
                     &tx.as_ref().isolate(incoming_row.federation_id),
                     operation_id,
                     incoming_row.contract,
+                    incoming_fee,
                 )
                 .map_err(|e| anyhow!("Failed to start direct-swap receive: {e}"))?;
             tx.commit();
         } else {
-            // External LN send. Compute max fee from routing info + contract
-            // amount, then kick off LDK send. LDK events will later drive
-            // finalize_send on this gateway's outgoing contract.
-            let routing_info = self
-                .routing_info(&payload.federation_id)
-                .await?
-                .ok_or_else(|| anyhow!("Routing info not available"))?;
-
-            let min_contract_amount = routing_info.send_fee_minimum.add_to(amount);
-            let max_fee_msat = payload
-                .contract
-                .amount
-                .msats
-                .checked_sub(min_contract_amount.msats)
-                .ok_or_else(|| anyhow!("Contract underfunded for LN routing"))?;
+            // External LN send: `ln_fee` becomes LDK's hard cap on route cost.
             let max_delay = expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM);
 
             let payment_id = PaymentId(payment_hash.to_byte_array());
@@ -398,7 +402,7 @@ impl AppState {
                     .send(
                         invoice,
                         Some(RouteParametersConfig {
-                            max_total_routing_fee_msat: Some(max_fee_msat),
+                            max_total_routing_fee_msat: Some(ln_fee.msats),
                             max_total_cltv_expiry_delta: max_delay as u32,
                             ..RouteParametersConfig::default()
                         }),
@@ -423,8 +427,8 @@ impl AppState {
             bail!("Incoming payment error: The contract is invalid");
         }
 
-        let payment_info = self
-            .routing_info(&payload.federation_id)
+        let gateway_info = self
+            .gateway_info(&payload.federation_id)
             .await?
             .with_context(|| {
                 format!(
@@ -433,11 +437,11 @@ impl AppState {
                 )
             })?;
 
-        if payload.contract.commitment.refund_pk != payment_info.module_public_key {
+        if payload.contract.commitment.refund_pk != gateway_info.module_public_key {
             bail!("Incoming payment error: The incoming contract is keyed to another gateway");
         }
 
-        let contract_amount = payment_info.receive_fee.subtract_from(payload.amount.msats);
+        let contract_amount = gateway_info.receive_fee.subtract_from(payload.amount.msats);
 
         if contract_amount == Amount::ZERO {
             bail!("Incoming payment error: Zero amount incoming contracts are not supported");

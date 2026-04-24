@@ -19,8 +19,8 @@ use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, Send
 use picomint_client::transaction::{Input, TransactionBuilder};
 use picomint_client::{Client, OperationId};
 use picomint_core::config::FederationId;
-use picomint_core::ln::gateway_api::{PaymentFee, RoutingInfo, SendPaymentPayload};
-use picomint_core::ln::routes::{ROUTE_ROUTING_INFO, ROUTE_SEND_PAYMENT};
+use picomint_core::ln::gateway_api::{GatewayInfo, PaymentFee, SendPaymentPayload};
+use picomint_core::ln::routes::{ROUTE_GATEWAY_INFO, ROUTE_SEND_PAYMENT};
 use picomint_core::ln::{
     Bolt11InvoiceDescription, LightningInput, LightningInvoice, OutgoingWitness,
 };
@@ -724,7 +724,7 @@ fn mock_invoice(preimage: [u8; 32], payment_secret: [u8; 32], currency: Currency
 
 async fn spawn_mock_gateway() -> anyhow::Result<String> {
     let app = Router::new()
-        .route(ROUTE_ROUTING_INFO, post(mock_routing_info))
+        .route(ROUTE_GATEWAY_INFO, post(mock_gateway_info))
         .route(ROUTE_SEND_PAYMENT, post(mock_send_payment));
 
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).await?;
@@ -738,18 +738,21 @@ async fn spawn_mock_gateway() -> anyhow::Result<String> {
     Ok(format!("http://{addr}").parse().expect("valid url"))
 }
 
-async fn mock_routing_info(Json(_federation_id): Json<FederationId>) -> Json<Option<RoutingInfo>> {
+async fn mock_gateway_info(Json(_federation_id): Json<FederationId>) -> Json<Option<GatewayInfo>> {
     // Short expiration deltas keep the unilateral-refund test fast — the
     // federation's consensus block count must advance past the contract's
     // expiration for `await_preimage` to return `None`.
-    Json(Some(RoutingInfo {
+    let tx_fee = PaymentFee {
+        base: picomint_core::Amount::from_sats(2),
+        ppm: 3000,
+    };
+    Json(Some(GatewayInfo {
         lightning_public_key: gateway_keypair().public_key(),
         module_public_key: gateway_keypair().public_key(),
-        send_fee_minimum: PaymentFee::TRANSACTION_FEE_DEFAULT,
-        send_fee_default: PaymentFee::TRANSACTION_FEE_DEFAULT,
-        expiration_delta_minimum: 50,
-        expiration_delta_default: 50,
-        receive_fee: PaymentFee::TRANSACTION_FEE_DEFAULT,
+        send_fee: tx_fee,
+        receive_fee: tx_fee,
+        ln_fee: tx_fee,
+        expiration_delta: 50,
     }))
 }
 

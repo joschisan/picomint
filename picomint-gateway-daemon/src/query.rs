@@ -23,7 +23,6 @@ use picomint_client::gw::events::{
 };
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::ln::LightningInvoice;
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::task::TaskGroup;
 use picomint_core::{Amount, OutPoint, TransactionId};
@@ -60,12 +59,14 @@ fn schema_for(table: &str) -> SchemaRef {
     match table {
         "send" => {
             fields.push(Field::new("outpoint", DataType::Utf8, false));
-            fields.push(Field::new("invoice", DataType::Utf8, false));
-            fields.push(Field::new("amount_msat", DataType::UInt64, true));
+            fields.push(Field::new("amount_msat", DataType::UInt64, false));
+            fields.push(Field::new("ln_fee_msat", DataType::UInt64, false));
+            fields.push(Field::new("fee_msat", DataType::UInt64, false));
         }
         "send_success" => {
             fields.push(Field::new("preimage", DataType::Utf8, false));
             fields.push(Field::new("txid", DataType::Utf8, false));
+            fields.push(Field::new("ln_fee_msat", DataType::UInt64, false));
         }
         "send_cancel" => {
             fields.push(Field::new("signature", DataType::Utf8, false));
@@ -73,6 +74,7 @@ fn schema_for(table: &str) -> SchemaRef {
         "receive" => {
             fields.push(Field::new("txid", DataType::Utf8, false));
             fields.push(Field::new("amount_msat", DataType::UInt64, false));
+            fields.push(Field::new("fee_msat", DataType::UInt64, false));
         }
         "receive_success" => {
             fields.push(Field::new("preimage", DataType::Utf8, false));
@@ -305,23 +307,22 @@ fn build_common_only(
 fn build_gw_send(federation_id: FederationId, rows: &[(Common, SendEvent)]) -> RecordBatch {
     let n = rows.len();
     let mut outpoint_b = StringBuilder::with_capacity(n, n * 72);
-    let mut invoice_b = StringBuilder::with_capacity(n, n * 256);
     let mut amount_b = UInt64Builder::with_capacity(n);
+    let mut ln_fee_b = UInt64Builder::with_capacity(n);
+    let mut fee_b = UInt64Builder::with_capacity(n);
 
     for (_, ev) in rows {
         outpoint_b.append_value(format_outpoint(&ev.outpoint));
-        let LightningInvoice::Bolt11(invoice) = &ev.invoice;
-        invoice_b.append_value(invoice.to_string());
-        match invoice.amount_milli_satoshis() {
-            Some(msat) => amount_b.append_value(msat),
-            None => amount_b.append_null(),
-        }
+        amount_b.append_value(format_amount(ev.amount));
+        ln_fee_b.append_value(format_amount(ev.ln_fee));
+        fee_b.append_value(format_amount(ev.fee));
     }
 
     let mut cols = common_columns(federation_id, rows.iter().map(|(c, _)| *c));
     cols.push(Arc::new(outpoint_b.finish()));
-    cols.push(Arc::new(invoice_b.finish()));
     cols.push(Arc::new(amount_b.finish()));
+    cols.push(Arc::new(ln_fee_b.finish()));
+    cols.push(Arc::new(fee_b.finish()));
     RecordBatch::try_new(schema_for("send"), cols).expect("schema matches columns")
 }
 
@@ -332,15 +333,18 @@ fn build_gw_send_success(
     let n = rows.len();
     let mut preimage_b = StringBuilder::with_capacity(n, n * 64);
     let mut txid_b = StringBuilder::with_capacity(n, n * 64);
+    let mut ln_fee_b = UInt64Builder::with_capacity(n);
 
     for (_, ev) in rows {
         preimage_b.append_value(hex::encode(ev.preimage));
         txid_b.append_value(format_txid(&ev.txid));
+        ln_fee_b.append_value(format_amount(ev.ln_fee));
     }
 
     let mut cols = common_columns(federation_id, rows.iter().map(|(c, _)| *c));
     cols.push(Arc::new(preimage_b.finish()));
     cols.push(Arc::new(txid_b.finish()));
+    cols.push(Arc::new(ln_fee_b.finish()));
     RecordBatch::try_new(schema_for("send_success"), cols).expect("schema matches columns")
 }
 
@@ -364,15 +368,18 @@ fn build_gw_receive(federation_id: FederationId, rows: &[(Common, ReceiveEvent)]
     let n = rows.len();
     let mut txid_b = StringBuilder::with_capacity(n, n * 64);
     let mut amount_b = UInt64Builder::with_capacity(n);
+    let mut fee_b = UInt64Builder::with_capacity(n);
 
     for (_, ev) in rows {
         txid_b.append_value(format_txid(&ev.txid));
         amount_b.append_value(format_amount(ev.amount));
+        fee_b.append_value(format_amount(ev.fee));
     }
 
     let mut cols = common_columns(federation_id, rows.iter().map(|(c, _)| *c));
     cols.push(Arc::new(txid_b.finish()));
     cols.push(Arc::new(amount_b.finish()));
+    cols.push(Arc::new(fee_b.finish()));
     RecordBatch::try_new(schema_for("receive"), cols).expect("schema matches columns")
 }
 

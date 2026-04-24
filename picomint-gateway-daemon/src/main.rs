@@ -84,21 +84,30 @@ pub struct GatewayOpts {
     #[arg(long = "ldk-addr", env = "LDK_ADDR", default_value = "0.0.0.0:9735")]
     pub ldk_addr: SocketAddr,
 
-    /// Base routing fee in millisatoshis for Lightning payments
-    #[arg(long, env = "ROUTING_FEE_BASE_MSAT", default_value_t = 2000)]
-    pub routing_fee_base_msat: u64,
+    /// Base send fee in millisatoshis: the gateway's tx cut on outgoing payments.
+    #[arg(long, env = "SEND_FEE_BASE_MSAT", default_value_t = 2000)]
+    pub send_fee_base_msat: u64,
 
-    /// Routing fee rate in parts per million for Lightning payments
-    #[arg(long, env = "ROUTING_FEE_PPM", default_value_t = 3000)]
-    pub routing_fee_ppm: u64,
+    /// Send fee rate in parts per million: the gateway's tx cut on outgoing payments.
+    #[arg(long, env = "SEND_FEE_PPM", default_value_t = 3000)]
+    pub send_fee_ppm: u64,
 
-    /// Base transaction fee in millisatoshis for federation transactions
-    #[arg(long, env = "TRANSACTION_FEE_BASE_MSAT", default_value_t = 2000)]
-    pub transaction_fee_base_msat: u64,
+    /// Base receive fee in millisatoshis: the gateway's tx cut on incoming payments.
+    #[arg(long, env = "RECEIVE_FEE_BASE_MSAT", default_value_t = 2000)]
+    pub receive_fee_base_msat: u64,
 
-    /// Transaction fee rate in parts per million for federation transactions
-    #[arg(long, env = "TRANSACTION_FEE_PPM", default_value_t = 3000)]
-    pub transaction_fee_ppm: u64,
+    /// Receive fee rate in parts per million: the gateway's tx cut on incoming payments.
+    #[arg(long, env = "RECEIVE_FEE_PPM", default_value_t = 3000)]
+    pub receive_fee_ppm: u64,
+
+    /// Base Lightning routing fee in millisatoshis. Enforced exactly as
+    /// LDK's `max_total_routing_fee_msat` cap on external outgoing payments.
+    #[arg(long, env = "LN_FEE_BASE_MSAT", default_value_t = 2000)]
+    pub ln_fee_base_msat: u64,
+
+    /// Lightning routing fee rate in parts per million.
+    #[arg(long, env = "LN_FEE_PPM", default_value_t = 3000)]
+    pub ln_fee_ppm: u64,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -185,13 +194,17 @@ fn main() -> anyhow::Result<()> {
         api_addr: opts.api_addr,
         data_dir: opts.data_dir.clone(),
         network: opts.network,
-        routing_fees: PaymentFee {
-            base: Amount::from_msats(opts.routing_fee_base_msat),
-            parts_per_million: opts.routing_fee_ppm,
+        send_fee: PaymentFee {
+            base: Amount::from_msats(opts.send_fee_base_msat),
+            ppm: opts.send_fee_ppm,
         },
-        transaction_fees: PaymentFee {
-            base: Amount::from_msats(opts.transaction_fee_base_msat),
-            parts_per_million: opts.transaction_fee_ppm,
+        receive_fee: PaymentFee {
+            base: Amount::from_msats(opts.receive_fee_base_msat),
+            ppm: opts.receive_fee_ppm,
+        },
+        ln_fee: PaymentFee {
+            base: Amount::from_msats(opts.ln_fee_base_msat),
+            ppm: opts.ln_fee_ppm,
         },
         query_state: picomint_gateway_daemon::query::QueryState::new(),
         task_group: task_group.clone(),
@@ -270,8 +283,15 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
         ldk_node::Event::PaymentSuccessful {
             payment_hash,
             payment_preimage: Some(preimage),
+            fee_paid_msat,
             ..
-        } => handle_payment_successful(state, &dbtx.as_ref(), payment_hash.0, preimage.0),
+        } => handle_payment_successful(
+            state,
+            &dbtx.as_ref(),
+            payment_hash.0,
+            preimage.0,
+            Amount::from_msats(fee_paid_msat.unwrap_or(0)),
+        ),
         ldk_node::Event::PaymentFailed {
             payment_hash: Some(ph),
             ..
@@ -326,9 +346,16 @@ fn handle_payment_claimable(
             .select_client(row.federation_id)
             .expect("source federation for incoming contract is connected");
 
+        let fee = row.amount - row.contract.commitment.amount;
+
         if client
             .gw()
-            .start_receive(&dbtx.isolate(row.federation_id), operation_id, row.contract)
+            .start_receive(
+                &dbtx.isolate(row.federation_id),
+                operation_id,
+                row.contract,
+                fee,
+            )
             .is_err()
         {
             tracing::error!(
@@ -353,6 +380,7 @@ fn handle_payment_successful(
     dbtx: &WriteTxRef<'_>,
     payment_hash: [u8; 32],
     preimage: [u8; 32],
+    ln_fee: Amount,
 ) {
     let operation_id = OperationId::from_encodable(&payment_hash);
 
@@ -374,6 +402,7 @@ fn handle_payment_successful(
             row.contract,
             row.outpoint,
             Some(preimage),
+            ln_fee,
         );
     }
 }
@@ -400,6 +429,7 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTxRef<'_>, payment_hash: 
             row.contract,
             row.outpoint,
             None,
+            Amount::ZERO,
         );
     }
 }

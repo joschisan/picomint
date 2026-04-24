@@ -27,7 +27,7 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::contracts::PaymentImage;
 use picomint_core::task::TaskGroup;
-use picomint_eventlog::PersistedLogEntry;
+use picomint_eventlog::EventLogEntry;
 use picomint_redb::WriteTxRef;
 
 use crate::AppState;
@@ -59,12 +59,12 @@ async fn run(state: AppState, federation_id: FederationId, client: Arc<Client>) 
 
         let chunk = client.get_event_log(Some(cursor), CHUNK_SIZE).await;
 
-        for entry in &chunk {
+        for (id, entry) in &chunk {
             let dbtx = state.gateway_db.begin_write();
 
             dispatch(&state, &dbtx.as_ref(), entry);
 
-            cursor = entry.id().saturating_add(1);
+            cursor = id.saturating_add(1);
 
             dbtx.insert(&TRAILER_CURSOR, &federation_id, &cursor);
 
@@ -77,7 +77,7 @@ async fn run(state: AppState, federation_id: FederationId, client: Arc<Client>) 
     }
 }
 
-fn dispatch(state: &AppState, tx_ref: &WriteTxRef<'_>, entry: &PersistedLogEntry) {
+fn dispatch(state: &AppState, tx_ref: &WriteTxRef<'_>, entry: &EventLogEntry) {
     let preimage = if let Some(ev) = entry.to_event::<ReceiveSuccessEvent>() {
         Some(ev.preimage)
     } else if entry.to_event::<ReceiveRefundEvent>().is_some() {
@@ -86,7 +86,7 @@ fn dispatch(state: &AppState, tx_ref: &WriteTxRef<'_>, entry: &PersistedLogEntry
         return;
     };
 
-    let op_id = entry.as_raw().operation_id;
+    let op_id = entry.operation_id;
 
     if let Some(row) = tx_ref.get(&OUTGOING_CONTRACT, &op_id) {
         dispatch_direct_swap(state, tx_ref, op_id, row, preimage);
@@ -112,6 +112,8 @@ fn dispatch_direct_swap(
         row.contract,
         row.outpoint,
         preimage,
+        // Direct swap — no LN hop, no routing cost to record.
+        picomint_core::Amount::ZERO,
     );
 }
 

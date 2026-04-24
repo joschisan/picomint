@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct SendEvent {
     pub txid: TransactionId,
     pub amount: Amount,
+    pub ln_fee: Amount,
     pub fee: Amount,
 }
 
