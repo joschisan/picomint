@@ -251,36 +251,52 @@ The mnemonic can be used with any Bip 39 compatible wallet to recover the onchai
 
 ### Analytics
 
-Run SQL against the gateway's payment history to answer operational questions. See the ten most recent payments:
+The gateway mirrors every gw-module event into a SQLite database at
+`{DATA_DIR}/analytics/analytics.sqlite`. The directory is **wiped on every
+startup** and rebuilt by replaying the event log — analytics are derived,
+not authoritative, so it's safe to delete and let it rebuild.
+
+Inspect the DB with `sqlite3` directly (the gateway container already has
+it installed). See the ten most recent payments:
 
 ```bash
-picomint-gateway-cli query "SELECT * FROM payments ORDER BY started_at DESC LIMIT 10"
+docker exec -it picomint-gateway \
+    sqlite3 /data/analytics/analytics.sqlite \
+    "SELECT * FROM payments ORDER BY started_at DESC LIMIT 10;"
 ```
 
-Get a breakdown by status:
+Breakdown by status:
 
 ```bash
-picomint-gateway-cli query "SELECT status, COUNT(*) FROM payments GROUP BY status"
+docker exec -it picomint-gateway \
+    sqlite3 /data/analytics/analytics.sqlite \
+    "SELECT status, COUNT(*) FROM payments GROUP BY status;"
 ```
 
 Total processed volume per federation, in sats:
 
 ```bash
-picomint-gateway-cli query "SELECT federation_id, SUM(amount_msat)/1000 AS sats FROM payments WHERE status='success' GROUP BY federation_id"
+docker exec -it picomint-gateway \
+    sqlite3 /data/analytics/analytics.sqlite \
+    "SELECT federation_id, SUM(amount_msat)/1000 AS sats FROM payments WHERE status='success' GROUP BY federation_id;"
 ```
 
-Each row in `payments` is one incoming or outgoing operation. The SQL dialect is DataFusion.
+Each row in `payments` is one incoming or outgoing operation.
 
 | Column          | Type           | Notes                                                                                                    |
 |-----------------|----------------|----------------------------------------------------------------------------------------------------------|
-| `federation_id` | string         | Hex-encoded federation id                                                                                |
-| `operation_id`  | string         | Hex-encoded operation id; unique within direction                                                        |
-| `direction`     | string         | `incoming` or `outgoing`                                                                                 |
-| `status`        | string         | `pending`, `success`, `cancelled` (outgoing only), `failure` (incoming only), `refunded` (incoming only) |
-| `started_at`    | timestamp (µs) | When the operation was initiated                                                                         |
-| `completed_at`  | timestamp (µs) | NULL while `status = 'pending'`                                                                          |
-| `amount_msat`   | uint64         | Millisatoshis; NULL on outgoing rows that pay an amountless bolt11 invoice                               |
-| `preimage`      | string         | Hex-encoded; NULL unless `status = 'success'`                                                            |
+| `federation_id` | TEXT           | Hex-encoded federation id                                                                                |
+| `operation_id`  | TEXT           | Hex-encoded operation id; unique within `(federation_id, direction)`                                     |
+| `direction`     | TEXT           | `incoming` or `outgoing`                                                                                 |
+| `status`        | TEXT           | `pending`, `success`, `cancelled` (outgoing only), `failure` (incoming only), `refunded` (incoming only) |
+| `started_at`    | INTEGER        | When the operation was initiated (µs since epoch)                                                        |
+| `completed_at`  | INTEGER        | NULL while `status = 'pending'`                                                                          |
+| `amount_msat`   | INTEGER        | Millisatoshis; NULL on outgoing rows that pay an amountless bolt11 invoice                               |
+| `preimage`      | TEXT           | Hex-encoded; NULL unless `status = 'success'`                                                            |
+
+The raw event tables (`send`, `send_success`, `send_cancel`, `receive`,
+`receive_success`, `receive_failure`, `receive_refund`) are also queryable
+if you need a view more granular than `payments`.
 
 ### Interfaces
 
