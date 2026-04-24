@@ -12,11 +12,12 @@ use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_gateway_cli_core::{
-    CLI_SOCKET_FILENAME, FederationBalanceRequest, FederationConfigRequest, FederationJoinRequest,
-    FederationMintCountRequest, FederationMintReceiveRequest, FederationMintSendRequest,
-    FederationWalletReceiveRequest, FederationWalletSendFeeRequest, FederationWalletSendRequest,
-    LdkChannelCloseRequest, LdkChannelOpenRequest, LdkInvoiceCreateRequest, LdkInvoicePayRequest,
-    LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
+    CLI_SOCKET_FILENAME, FederationBalanceRequest, FederationConfigRequest,
+    FederationInviteRequest, FederationJoinRequest, FederationMintCountRequest,
+    FederationMintReceiveRequest, FederationMintSendRequest, FederationWalletReceiveRequest,
+    FederationWalletSendFeeRequest, FederationWalletSendRequest, LdkChannelCloseRequest,
+    LdkChannelOpenRequest, LdkInvoiceCreateRequest, LdkInvoicePayRequest, LdkOnchainSendRequest,
+    LdkPeerConnectRequest, LdkPeerDisconnectRequest,
     ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
     ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
     ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
@@ -121,8 +122,8 @@ enum FederationCommands {
     List,
     /// Get a connected federation's JSON client config
     Config(FederationConfigRequest),
-    /// Export invite codes for every connected federation
-    Invite,
+    /// Generate an invite code pointing at one guardian of one federation
+    Invite(FederationInviteRequest),
     /// Get a federation's ecash balance
     Balance(FederationBalanceRequest),
     /// Per-federation module commands
@@ -266,7 +267,7 @@ async fn main() -> Result<()> {
             FederationCommands::Join(req) => request(d, ROUTE_FEDERATION_JOIN, req).await?,
             FederationCommands::List => request(d, ROUTE_FEDERATION_LIST, ()).await?,
             FederationCommands::Config(req) => request(d, ROUTE_FEDERATION_CONFIG, req).await?,
-            FederationCommands::Invite => request(d, ROUTE_FEDERATION_INVITE, ()).await?,
+            FederationCommands::Invite(req) => request(d, ROUTE_FEDERATION_INVITE, req).await?,
             FederationCommands::Balance(req) => request(d, ROUTE_FEDERATION_BALANCE, req).await?,
             FederationCommands::Module(cmd) => match cmd {
                 ModuleCommands::Mint(cmd) => match cmd {

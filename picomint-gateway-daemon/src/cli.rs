@@ -17,8 +17,9 @@ use picomint_core::config::FederationId;
 use picomint_core::task::TaskHandle;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, ChannelInfo, FederationBalanceRequest, FederationBalanceResponse,
-    FederationConfigRequest, FederationConfigResponse, FederationInviteResponse,
-    FederationJoinRequest, FederationListResponse, FederationMintCountRequest,
+    FederationConfigRequest, FederationConfigResponse, FederationInviteRequest,
+    FederationInviteResponse, FederationJoinRequest, FederationListResponse,
+    FederationMintCountRequest,
     FederationMintCountResponse, FederationMintReceiveRequest, FederationMintReceiveResponse,
     FederationMintSendRequest, FederationMintSendResponse, FederationWalletReceiveRequest,
     FederationWalletReceiveResponse, FederationWalletSendFeeRequest,
@@ -590,13 +591,21 @@ async fn federation_balance(
     Ok(Json(FederationBalanceResponse { balance_msat }))
 }
 
-/// Export invite codes for all connected federations
+/// Generate an invite code that points new clients at one specific guardian
+/// of one specific connected federation.
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_invite(
     State(state): State<AppState>,
+    Json(payload): Json<FederationInviteRequest>,
 ) -> Result<Json<FederationInviteResponse>, CliError> {
-    let invite_codes = state.all_invite_codes().await;
-    Ok(Json(FederationInviteResponse { invite_codes }))
+    let client = resolve_client(&state, payload.federation_id).await?;
+    let invite_code = client
+        .invite_code(payload.peer_id)
+        .await
+        .ok_or_else(|| CliError::bad_request("Unknown peer id for this federation"))?;
+    Ok(Json(FederationInviteResponse {
+        invite: picomint_base32::encode(&invite_code),
+    }))
 }
 
 // ---------------------------------------------------------------------------

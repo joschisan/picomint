@@ -28,7 +28,6 @@ use picomint_client::gw::EXPIRATION_DELTA_MINIMUM;
 use picomint_client::gw::events::ReceiveSuccessEvent;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::invite_code::InviteCode;
 use picomint_core::ln::contracts::PaymentImage;
 use picomint_core::ln::gateway_api::{
     CreateBolt11InvoicePayload, GatewayInfo, PaymentFee, SendPaymentPayload,
@@ -37,7 +36,7 @@ use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
 use picomint_core::secp256k1::PublicKey;
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::time::duration_since_epoch;
-use picomint_core::{Amount, PeerId};
+use picomint_core::Amount;
 use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_lnurl::VerifyResponse;
@@ -206,23 +205,6 @@ impl AppState {
         configs
     }
 
-    /// Get invite codes for all connected federations.
-    pub async fn all_invite_codes(
-        &self,
-    ) -> BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>> {
-        let mut invite_codes = BTreeMap::new();
-        for (federation_id, client) in self.clients_snapshot() {
-            let config = client.config().await;
-            let mut fed_codes = BTreeMap::new();
-            for (peer_id, endpoint) in &config.peers {
-                if let Some(code) = client.invite_code(*peer_id).await {
-                    fed_codes.insert(*peer_id, (endpoint.name.clone(), code));
-                }
-            }
-            invite_codes.insert(federation_id, fed_codes);
-        }
-        invite_codes
-    }
 }
 
 // Lightning Gateway implementation

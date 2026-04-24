@@ -5,7 +5,6 @@ use clap::Args;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::invite_code::InviteCode;
 use picomint_core::mint::Denomination;
 use picomint_core::{Amount, PeerId, secp256k1};
 use serde::{Deserialize, Serialize};
@@ -135,9 +134,7 @@ pub struct LdkOnchainReceiveResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkOnchainSendRequest {
-    #[arg(long)]
     pub address: bitcoin::Address<NetworkUnchecked>,
-    #[arg(long)]
     pub amount: bitcoin::Amount,
     #[arg(long)]
     pub sats_per_vbyte: u64,
@@ -253,9 +250,18 @@ pub struct FederationConfigResponse {
 
 // --- /federation/invite ---
 
+/// Generate an invite code that points new clients at the given guardian
+/// `peer_id` of the chosen federation.
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct FederationInviteRequest {
+    pub peer_id: PeerId,
+    #[arg(long = "id")]
+    pub federation_id: Option<FederationId>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FederationInviteResponse {
-    pub invite_codes: BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>,
+    pub invite: String,
 }
 
 // --- /federation/module/mint/count ---
