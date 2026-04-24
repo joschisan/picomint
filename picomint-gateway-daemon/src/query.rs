@@ -27,7 +27,7 @@ use picomint_core::ln::LightningInvoice;
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::task::TaskGroup;
 use picomint_core::{Amount, OutPoint, TransactionId};
-use picomint_eventlog::{EventLogEntry, EventLogId, PersistedLogEntry};
+use picomint_eventlog::{EventLogEntry, EventLogId};
 use tokio::sync::RwLock;
 
 const CHUNK_SIZE: u64 = 10_000;
@@ -133,9 +133,10 @@ async fn tail(client: Arc<Client>, federation_id: FederationId, state: QueryStat
         let notified = notify.notified();
 
         let chunk = client.get_event_log(Some(cursor), CHUNK_SIZE).await;
-        if let Some(last) = chunk.last() {
-            cursor = last.id().saturating_add(1);
-            for (table, batch) in build_batches(federation_id, &chunk) {
+        if let Some((last_id, _)) = chunk.last() {
+            cursor = last_id.saturating_add(1);
+            let entries: Vec<&EventLogEntry> = chunk.iter().map(|(_, e)| e).collect();
+            for (table, batch) in build_batches(federation_id, &entries) {
                 state.append(table, batch).await;
             }
         }
@@ -207,7 +208,7 @@ fn parse_gw_row(entry: &EventLogEntry) -> Option<GwRow> {
 /// `RecordBatch` per non-empty bucket.
 fn build_batches(
     federation_id: FederationId,
-    entries: &[PersistedLogEntry],
+    entries: &[&EventLogEntry],
 ) -> Vec<(&'static str, RecordBatch)> {
     let mut sends = Vec::new();
     let mut send_successes = Vec::new();
@@ -219,7 +220,7 @@ fn build_batches(
     let mut completes = Vec::new();
 
     for entry in entries {
-        match parse_gw_row(entry.as_raw()) {
+        match parse_gw_row(entry) {
             Some(GwRow::Send(c, e)) => sends.push((c, e)),
             Some(GwRow::SendSuccess(c, e)) => send_successes.push((c, e)),
             Some(GwRow::SendCancel(c, e)) => send_cancels.push((c, e)),

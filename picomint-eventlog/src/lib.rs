@@ -135,35 +135,6 @@ impl EventLogEntry {
     }
 }
 
-/// An `EventLogEntry` that was already persisted (so has an id).
-#[derive(Debug, Clone)]
-pub struct PersistedLogEntry {
-    id: EventLogId,
-    inner: EventLogEntry,
-}
-
-impl PersistedLogEntry {
-    pub fn new(id: EventLogId, inner: EventLogEntry) -> Self {
-        Self { id, inner }
-    }
-
-    pub fn id(&self) -> EventLogId {
-        self.id
-    }
-
-    pub fn as_raw(&self) -> &EventLogEntry {
-        &self.inner
-    }
-}
-
-impl std::ops::Deref for PersistedLogEntry {
-    type Target = EventLogEntry;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
 consensus_value!(EventLogEntry);
 
 pub const EVENT_LOG: NativeTableDef<EventLogId, EventLogEntry> = NativeTableDef::new("event-log");
@@ -247,7 +218,7 @@ pub fn subscribe_operation_events(
     db: Database,
     event_notify: Arc<Notify>,
     operation_id: OperationId,
-) -> impl Stream<Item = PersistedLogEntry> {
+) -> impl Stream<Item = EventLogEntry> {
     async_stream::stream! {
         let mut next_id = EventLogId::LOG_START;
         loop {
@@ -261,13 +232,13 @@ pub fn subscribe_operation_events(
                         .map(|r| {
                             let (k, v) = r.expect("redb range item failed");
                             let (_, id) = k.value();
-                            PersistedLogEntry { id, inner: v.value() }
+                            (id, v.value())
                         })
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            for entry in batch {
-                next_id = entry.id().next();
+            for (id, entry) in batch {
+                next_id = id.next();
                 yield entry;
             }
             notified.await;

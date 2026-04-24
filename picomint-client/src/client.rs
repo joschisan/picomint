@@ -17,7 +17,7 @@ use picomint_core::core::OperationId;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxStream;
-use picomint_eventlog::{EventLogId, PersistedLogEntry};
+use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_logging::LOG_CLIENT;
 use picomint_redb::Database;
 use tracing::debug;
@@ -323,7 +323,7 @@ impl Client {
         &self,
         pos: Option<EventLogId>,
         limit: u64,
-    ) -> Vec<PersistedLogEntry> {
+    ) -> Vec<(EventLogId, EventLogEntry)> {
         let pos = pos.unwrap_or(EventLogId::LOG_START);
         let end = pos.saturating_add(limit);
         self.db
@@ -334,7 +334,7 @@ impl Client {
                     .expect("redb range failed")
                     .map(|r| {
                         let (k, v) = r.expect("redb range item failed");
-                        picomint_eventlog::PersistedLogEntry::new(k.value(), v.value())
+                        (k.value(), v.value())
                     })
                     .collect::<Vec<_>>()
             })
@@ -351,7 +351,7 @@ impl Client {
     pub fn subscribe_operation_events(
         &self,
         operation_id: OperationId,
-    ) -> BoxStream<'static, PersistedLogEntry> {
+    ) -> BoxStream<'static, EventLogEntry> {
         Box::pin(picomint_eventlog::subscribe_operation_events(
             self.db.clone(),
             self.event_notify(),
