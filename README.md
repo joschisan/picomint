@@ -257,11 +257,13 @@ startup** and rebuilt by replaying the event log — analytics are derived,
 not authoritative, so it's safe to delete and let it rebuild.
 
 Inspect the DB with `sqlite3` directly (the gateway container already has
-it installed). See the ten most recent payments:
+it installed). Pass `-header -column` for human-readable, column-aligned
+output — without it `sqlite3` prints unlabeled pipe-delimited rows. See
+the ten most recent payments:
 
 ```bash
 docker exec -it picomint-gateway \
-    sqlite3 /data/analytics/analytics.sqlite \
+    sqlite3 -header -column /data/analytics/analytics.sqlite \
     "SELECT * FROM payments ORDER BY started_at DESC LIMIT 10;"
 ```
 
@@ -269,7 +271,7 @@ Breakdown by status:
 
 ```bash
 docker exec -it picomint-gateway \
-    sqlite3 /data/analytics/analytics.sqlite \
+    sqlite3 -header -column /data/analytics/analytics.sqlite \
     "SELECT status, COUNT(*) FROM payments GROUP BY status;"
 ```
 
@@ -277,7 +279,7 @@ Total processed volume per federation, in sats:
 
 ```bash
 docker exec -it picomint-gateway \
-    sqlite3 /data/analytics/analytics.sqlite \
+    sqlite3 -header -column /data/analytics/analytics.sqlite \
     "SELECT federation_id, SUM(amount_msat)/1000 AS sats FROM payments WHERE status='success' GROUP BY federation_id;"
 ```
 
