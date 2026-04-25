@@ -6,7 +6,6 @@ use std::ops::Add;
 
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::secp256k1::schnorr::Signature;
-use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
@@ -35,42 +34,30 @@ pub struct SendPaymentPayload {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct RoutingInfo {
-    /// The public key of the gateways lightning node. Since this key signs the
-    /// gateways invoices the senders client uses it to differentiate between a
-    /// direct swap between picomints and a lightning swap.
+pub struct GatewayInfo {
+    /// The public key of the gateway's lightning node. Signs the gateway's
+    /// invoices so the sender can detect direct swaps by comparing against
+    /// the invoice's recovered payee pubkey.
     pub lightning_public_key: PublicKey,
-    /// The public key of the gateways client module. This key is used to claim
-    /// or cancel outgoing contracts and refund incoming contracts.
+    /// The public key of the gateway's client module. Used to claim or
+    /// cancel outgoing contracts and refund incoming contracts.
     pub module_public_key: PublicKey,
-    /// This is the fee the gateway charges for an outgoing payment. The senders
-    /// client will use this fee in case of a direct swap.
-    pub send_fee_minimum: PaymentFee,
-    /// This is the default total fee the gateway recommends for an outgoing
-    /// payment in case of a lightning swap. It accounts for the additional fee
-    /// required to reliably route this payment over lightning.
-    pub send_fee_default: PaymentFee,
-    /// This is the minimum expiration delta in block the gateway requires for
-    /// an outgoing payment. The senders client will use this expiration delta
-    /// in case of a direct swap.
-    pub expiration_delta_minimum: u64,
-    /// This is the default total expiration the gateway recommends for an
-    /// outgoing payment in case of a lightning swap. It accounts for the
-    /// additional expiration delta required to successfully route this payment
-    /// over lightning.
-    pub expiration_delta_default: u64,
-    /// This is the fee the gateway charges for an incoming payment.
+    /// Fee the gateway charges on outgoing payments. Enforced exactly —
+    /// the sender's contract must pay `send_fee` on top of the invoice
+    /// amount for direct swaps, and `send_fee + ln_fee` for external LN.
+    pub send_fee: PaymentFee,
+    /// Fee the gateway charges on incoming payments. Enforced exactly —
+    /// the incoming contract amount must equal `amount - receive_fee`.
     pub receive_fee: PaymentFee,
-}
-
-impl RoutingInfo {
-    pub fn send_parameters(&self, invoice: &Bolt11Invoice) -> (PaymentFee, u64) {
-        if invoice.recover_payee_pub_key() == self.lightning_public_key {
-            (self.send_fee_minimum, self.expiration_delta_minimum)
-        } else {
-            (self.send_fee_default, self.expiration_delta_default)
-        }
-    }
+    /// Maximum Lightning routing cost the gateway is willing to absorb on
+    /// external outgoing payments. Used by the gateway as LDK's
+    /// `max_total_routing_fee_msat` cap and charged to the sender on top of
+    /// `send_fee`.
+    pub ln_fee: PaymentFee,
+    /// Expiration delta in blocks for outgoing contracts. Sized for
+    /// external LN sends (accounts for intermediate LN hops) and used for
+    /// direct swaps as well.
+    pub expiration_delta: u64,
 }
 
 #[derive(
@@ -88,30 +75,29 @@ impl RoutingInfo {
 )]
 pub struct PaymentFee {
     pub base: Amount,
-    pub parts_per_million: u64,
+    pub ppm: u64,
 }
 
 impl PaymentFee {
-    /// This is the maximum send fee of one and a half percent plus one hundred
-    /// satoshis a correct gateway may recommend as a default. It accounts for
-    /// the fee required to reliably route this payment over lightning.
+    /// Upper bound a client accepts on `GatewayInfo::send_fee`. Protects the
+    /// sender against an abusive gateway's configured tx cut on outgoing
+    /// payments.
     pub const SEND_FEE_LIMIT: Self = Self {
-        base: Amount::from_sats(100),
-        parts_per_million: 15_000,
+        base: Amount::from_sats(50),
+        ppm: 5_000,
     };
 
-    /// This is the fee the gateway uses to cover transaction fees with the
-    /// federation.
-    pub const TRANSACTION_FEE_DEFAULT: Self = Self {
-        base: Amount::from_sats(2),
-        parts_per_million: 3000,
-    };
-
-    /// This is the maximum receive fee of half of one percent plus fifty
-    /// satoshis a correct gateway may recommend as a default.
+    /// Upper bound a client accepts on `GatewayInfo::receive_fee`.
     pub const RECEIVE_FEE_LIMIT: Self = Self {
         base: Amount::from_sats(50),
-        parts_per_million: 5_000,
+        ppm: 5_000,
+    };
+
+    /// Upper bound a client accepts on `GatewayInfo::ln_fee` — the LN
+    /// routing headroom the gateway is allowed to charge.
+    pub const LN_FEE_LIMIT: Self = Self {
+        base: Amount::from_sats(100),
+        ppm: 15_000,
     };
 
     pub fn add_to(&self, msats: u64) -> Amount {
@@ -128,7 +114,7 @@ impl PaymentFee {
 
     fn absolute_fee(&self, msats: u64) -> u64 {
         msats
-            .saturating_mul(self.parts_per_million)
+            .saturating_mul(self.ppm)
             .saturating_div(1_000_000)
             .checked_add(self.base.msats)
             .expect("The division creates sufficient headroom to add the base fee")
@@ -140,7 +126,7 @@ impl Add for PaymentFee {
     fn add(self, rhs: Self) -> Self::Output {
         Self {
             base: self.base + rhs.base,
-            parts_per_million: self.parts_per_million + rhs.parts_per_million,
+            ppm: self.ppm + rhs.ppm,
         }
     }
 }

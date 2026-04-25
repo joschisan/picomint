@@ -4,8 +4,6 @@ use bitcoin::address::NetworkUnchecked;
 use clap::Args;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::config::FederationId;
-use picomint_core::core::OperationId;
-use picomint_core::invite_code::InviteCode;
 use picomint_core::mint::Denomination;
 use picomint_core::{Amount, PeerId, secp256k1};
 use serde::{Deserialize, Serialize};
@@ -38,9 +36,6 @@ pub const ROUTE_FEDERATION_CONFIG: &str = "/federation/config";
 pub const ROUTE_FEDERATION_INVITE: &str = "/federation/invite";
 pub const ROUTE_FEDERATION_BALANCE: &str = "/federation/balance";
 
-// Analytics
-pub const ROUTE_QUERY: &str = "/query";
-
 // Per-federation module commands
 pub const ROUTE_FEDERATION_MODULE_MINT_COUNT: &str = "/federation/module/mint/count";
 pub const ROUTE_FEDERATION_MODULE_MINT_SEND: &str = "/federation/module/mint/send";
@@ -48,14 +43,6 @@ pub const ROUTE_FEDERATION_MODULE_MINT_RECEIVE: &str = "/federation/module/mint/
 pub const ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE: &str = "/federation/module/wallet/send-fee";
 pub const ROUTE_FEDERATION_MODULE_WALLET_SEND: &str = "/federation/module/wallet/send";
 pub const ROUTE_FEDERATION_MODULE_WALLET_RECEIVE: &str = "/federation/module/wallet/receive";
-
-// --- /query ---
-
-#[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct QueryRequest {
-    /// SQL query (e.g. `SELECT * FROM payments LIMIT 10`)
-    pub sql: String,
-}
 
 // --- /info ---
 
@@ -146,9 +133,7 @@ pub struct LdkOnchainReceiveResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkOnchainSendRequest {
-    #[arg(long)]
     pub address: bitcoin::Address<NetworkUnchecked>,
-    #[arg(long)]
     pub amount: bitcoin::Amount,
     #[arg(long)]
     pub sats_per_vbyte: u64,
@@ -264,9 +249,18 @@ pub struct FederationConfigResponse {
 
 // --- /federation/invite ---
 
+/// Generate an invite code that points new clients at the given guardian
+/// `peer_id` of the chosen federation.
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct FederationInviteRequest {
+    pub peer_id: PeerId,
+    #[arg(long = "id")]
+    pub federation_id: Option<FederationId>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FederationInviteResponse {
-    pub invite_codes: BTreeMap<FederationId, BTreeMap<PeerId, (String, InviteCode)>>,
+    pub invite: String,
 }
 
 // --- /federation/module/mint/count ---
@@ -336,7 +330,7 @@ pub struct FederationWalletSendRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FederationWalletSendResponse {
-    pub operation_id: OperationId,
+    pub txid: bitcoin::Txid,
 }
 
 // --- /federation/module/wallet/receive ---

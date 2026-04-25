@@ -1,9 +1,5 @@
 use std::collections::BTreeMap;
 
-use crate::api::ServerError;
-use crate::executor::StateMachine;
-use crate::query::FilterMapThreshold;
-use crate::transaction::{Input, TransactionBuilder};
 use anyhow::anyhow;
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInput;
@@ -21,10 +17,17 @@ use tracing::warn;
 
 use super::GwSmContext;
 use super::events::{ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent};
+use crate::api::ServerError;
+use crate::executor::StateMachine;
+use crate::query::FilterMapThreshold;
+use crate::transaction::{Input, TransactionBuilder};
 
-/// State machine that handles the relay of an incoming Lightning payment.
-/// Terminates once decryption shares are either invalid, produce a valid
-/// preimage (success), or fail to decode one (refunded).
+/// Single-state state machine covering the federation side of the receive
+/// flow. `trigger` waits for tx acceptance and gathers TPE decryption shares;
+/// `transition` logs the terminal receive event and submits the refund tx
+/// if the preimage decode failed. All external (LN / cross-fed) side effects
+/// are handled out-of-band by the per-federation trailer task watching this
+/// federation's event log.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveStateMachine {
     pub operation_id: OperationId,
@@ -44,7 +47,8 @@ impl StateMachine for ReceiveStateMachine {
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
         ctx.client_ctx
             .await_tx_accepted(self.operation_id, self.outpoint.txid)
-            .await?;
+            .await
+            .map_err(|e| e.to_string())?;
 
         let tpe_pks = ctx.tpe_pks.clone();
         let contract = self.contract.clone();
@@ -63,11 +67,10 @@ impl StateMachine for ReceiveStateMachine {
                                 )))?,
                             &share,
                         ) {
-                            return Err(crate::api::ServerError::InvalidResponse(anyhow!(
+                            return Err(ServerError::InvalidResponse(anyhow!(
                                 "Invalid decryption share"
                             )));
                         }
-
                         Ok(share)
                     },
                     ctx.client_ctx.api().all_peers().to_num_peers(),
@@ -77,6 +80,7 @@ impl StateMachine for ReceiveStateMachine {
                 })),
             )
             .await;
+
         Ok(shares)
     }
 
@@ -86,37 +90,37 @@ impl StateMachine for ReceiveStateMachine {
         dbtx: &WriteTxRef<'_>,
         outcome: Self::Outcome,
     ) -> Option<Self> {
-        let decryption_shares = match outcome {
-            Ok(shares) => shares
-                .into_iter()
-                .map(|(peer, share)| (peer.to_usize() as u64, share))
-                .collect(),
+        let shares = match outcome {
             Err(_) => {
                 ctx.client_ctx
                     .log_event(dbtx, self.operation_id, ReceiveFailureEvent);
-
                 return None;
             }
+            Ok(shares) => shares,
         };
 
+        let decryption_shares: BTreeMap<u64, DecryptionKeyShare> = shares
+            .into_iter()
+            .map(|(peer, share)| (peer.to_usize() as u64, share))
+            .collect();
         let agg_decryption_key = aggregate_dk_shares(&decryption_shares);
 
         if !self
             .contract
             .verify_agg_decryption_key(&ctx.tpe_agg_pk, &agg_decryption_key)
         {
-            warn!(target: LOG_CLIENT_MODULE_GW, "Failed to obtain decryption key. Client config's public keys are inconsistent");
-
+            warn!(
+                target: LOG_CLIENT_MODULE_GW,
+                "Aggregate decryption key invalid — TPE config inconsistent"
+            );
             ctx.client_ctx
                 .log_event(dbtx, self.operation_id, ReceiveFailureEvent);
-
             return None;
         }
 
         if let Some(preimage) = self.contract.decrypt_preimage(&agg_decryption_key) {
             ctx.client_ctx
                 .log_event(dbtx, self.operation_id, ReceiveSuccessEvent { preimage });
-
             return None;
         }
 
@@ -134,7 +138,6 @@ impl StateMachine for ReceiveStateMachine {
 
         ctx.client_ctx
             .log_event(dbtx, self.operation_id, ReceiveRefundEvent { txid });
-
         None
     }
 }

@@ -411,6 +411,28 @@ impl<'tx> WriteTxRef<'tx> {
             .push(Box::new(f));
     }
 
+    /// Carve out a single-level namespace on top of this tx. Resolves tables
+    /// on disk as `"{prefix}/{label}"`. Flat by design — panics if called on
+    /// an already-isolated ref. Shares `touched` and `on_commit` with the
+    /// parent, so writes made via the returned ref land in the parent's
+    /// single physical commit.
+    ///
+    /// Used by the gateway daemon to open one daemon-global write tx and
+    /// atomically write to a per-federation (isolated) client DB in the same
+    /// commit — avoiding the nested-begin_write deadlock redb's single-writer
+    /// lock would otherwise produce.
+    pub fn isolate(&self, prefix: impl std::fmt::Display) -> WriteTxRef<'_> {
+        match self.prefix {
+            None => WriteTxRef {
+                tx: self.tx,
+                prefix: Some(prefix.to_string()),
+                touched: self.touched,
+                on_commit: self.on_commit,
+            },
+            Some(_) => panic!("You tried to isolate a tx twice"),
+        }
+    }
+
     // ─── Native-typed ops (spike; will replace the bytes layer) ──────────
     //
     // Closure-based to sidestep GAT-related trait-resolution pain around

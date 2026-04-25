@@ -12,9 +12,9 @@ use lightning_invoice::Bolt11Invoice;
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
-use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, PaymentFee, RoutingInfo};
+use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, GatewayInfo, PaymentFee};
 use picomint_core::ln::lnurl::LnurlRequest;
-use picomint_core::ln::routes::{ROUTE_CREATE_BOLT11_INVOICE, ROUTE_ROUTING_INFO};
+use picomint_core::ln::routes::{ROUTE_CREATE_BOLT11_INVOICE, ROUTE_GATEWAY_INFO};
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_core::ln::{Bolt11InvoiceDescription, MINIMUM_INCOMING_CONTRACT_AMOUNT};
 use picomint_core::time::duration_since_epoch;
@@ -173,14 +173,14 @@ async fn create_contract_and_fetch_invoice(
         .mul_tweak(secp256k1::SECP256K1, &claim_tweak)
         .expect("Tweak is valid");
 
-    let (routing_info, gateway) = select_gateway(gateways, federation_id).await?;
+    let (gateway_info, gateway) = select_gateway(gateways, federation_id).await?;
 
     ensure!(
-        routing_info.receive_fee.le(&PaymentFee::RECEIVE_FEE_LIMIT),
+        gateway_info.receive_fee.le(&PaymentFee::RECEIVE_FEE_LIMIT),
         "Payment fee exceeds limit"
     );
 
-    let contract_amount = routing_info.receive_fee.subtract_from(amount);
+    let contract_amount = gateway_info.receive_fee.subtract_from(amount);
 
     ensure!(
         contract_amount >= MINIMUM_INCOMING_CONTRACT_AMOUNT,
@@ -199,7 +199,7 @@ async fn create_contract_and_fetch_invoice(
         contract_amount,
         expiration,
         claim_pk,
-        routing_info.module_public_key,
+        gateway_info.module_public_key,
         ephemeral_keypair.public_key(),
     );
 
@@ -232,14 +232,14 @@ async fn create_contract_and_fetch_invoice(
 async fn select_gateway(
     gateways: Vec<String>,
     federation_id: FederationId,
-) -> anyhow::Result<(RoutingInfo, String)> {
+) -> anyhow::Result<(GatewayInfo, String)> {
     for gateway in gateways {
-        if let Ok(routing_info) =
-            gateway_request::<_, Option<RoutingInfo>>(&gateway, ROUTE_ROUTING_INFO, &federation_id)
+        if let Ok(gateway_info) =
+            gateway_request::<_, Option<GatewayInfo>>(&gateway, ROUTE_GATEWAY_INFO, &federation_id)
                 .await
-            && let Some(routing_info) = routing_info
+            && let Some(gateway_info) = gateway_info
         {
-            return Ok((routing_info, gateway));
+            return Ok((gateway_info, gateway));
         }
     }
 

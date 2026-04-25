@@ -7,37 +7,38 @@ use axum::extract::{Json, State};
 use axum::response::IntoResponse;
 use axum::routing::post;
 use bitcoin::FeeRate;
+use futures::StreamExt as _;
 use hex::ToHex;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
-use picomint_client::Client;
-use picomint_client::gw::Preimage;
+use picomint_client::wallet::events::{SendConfirmEvent, SendFailureEvent};
+use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
 use picomint_core::task::TaskHandle;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, ChannelInfo, FederationBalanceRequest, FederationBalanceResponse,
-    FederationConfigRequest, FederationConfigResponse, FederationInviteResponse,
-    FederationJoinRequest, FederationListResponse, FederationMintCountRequest,
-    FederationMintCountResponse, FederationMintReceiveRequest, FederationMintReceiveResponse,
-    FederationMintSendRequest, FederationMintSendResponse, FederationWalletReceiveRequest,
-    FederationWalletReceiveResponse, FederationWalletSendFeeRequest,
-    FederationWalletSendFeeResponse, FederationWalletSendRequest, FederationWalletSendResponse,
-    InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelCloseResponse,
-    LdkChannelListResponse, LdkChannelOpenRequest, LdkInvoiceCreateRequest,
-    LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
+    FederationConfigRequest, FederationConfigResponse, FederationInviteRequest,
+    FederationInviteResponse, FederationJoinRequest, FederationListResponse,
+    FederationMintCountRequest, FederationMintCountResponse, FederationMintReceiveRequest,
+    FederationMintReceiveResponse, FederationMintSendRequest, FederationMintSendResponse,
+    FederationWalletReceiveRequest, FederationWalletReceiveResponse,
+    FederationWalletSendFeeRequest, FederationWalletSendFeeResponse, FederationWalletSendRequest,
+    FederationWalletSendResponse, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
+    LdkChannelCloseResponse, LdkChannelListResponse, LdkChannelOpenRequest,
+    LdkInvoiceCreateRequest, LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
     LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
     LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
-    PeerInfo, QueryRequest, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
-    ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
-    ROUTE_FEDERATION_MODULE_MINT_COUNT, ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
-    ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
-    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    PeerInfo, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
+    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
+    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
+    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
-    ROUTE_MNEMONIC, ROUTE_QUERY,
+    ROUTE_MNEMONIC,
 };
 use picomint_logging::LOG_GATEWAY;
 use reqwest::StatusCode;
@@ -81,12 +82,6 @@ impl CliError {
 impl IntoResponse for CliError {
     fn into_response(self) -> axum::response::Response {
         (self.code, self.error).into_response()
-    }
-}
-
-impl From<picomint_client::gw::LightningRpcError> for CliError {
-    fn from(e: picomint_client::gw::LightningRpcError) -> Self {
-        Self::internal(e)
     }
 }
 
@@ -161,21 +156,6 @@ fn router() -> Router<AppState> {
             ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
             post(federation_module_wallet_receive),
         )
-        // Analytics
-        .route(ROUTE_QUERY, post(query))
-}
-
-/// Run a SQL query against the in-memory gw-events analytics tables.
-/// Returns a JSON array of row objects keyed by column name.
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
-async fn query(
-    State(state): State<AppState>,
-    Json(payload): Json<QueryRequest>,
-) -> Result<Json<serde_json::Value>, CliError> {
-    let rows = crate::query::run_query(&state.query_state, &payload.sql)
-        .await
-        .map_err(CliError::bad_request)?;
-    Ok(Json(rows))
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +422,7 @@ async fn ldk_invoice_pay(
         .send(&payload.invoice, None)
         .map_err(|e| CliError::internal(format!("LDK payment failed to initialize: {e:?}")))?;
 
-    let preimage = loop {
+    let preimage: [u8; 32] = loop {
         if let Some(payment_details) = state.node.payment(&payment_id) {
             match payment_details.status {
                 PaymentStatus::Pending => {}
@@ -452,7 +432,7 @@ async fn ldk_invoice_pay(
                         ..
                     } = payment_details.kind
                     {
-                        break Preimage(preimage.0);
+                        break preimage.0;
                     }
                 }
                 PaymentStatus::Failed => {
@@ -464,7 +444,7 @@ async fn ldk_invoice_pay(
     };
 
     Ok(Json(LdkInvoicePayResponse {
-        preimage: preimage.0.encode_hex::<String>(),
+        preimage: preimage.encode_hex::<String>(),
     }))
 }
 
@@ -540,7 +520,7 @@ async fn federation_join(
     if state
         .clients
         .read()
-        .await
+        .expect("clients RwLock poisoned")
         .contains_key(&invite_code.federation_id)
     {
         return Err(CliError::bad_request(
@@ -548,24 +528,28 @@ async fn federation_join(
         ));
     }
 
-    let client = state
-        .client_factory
-        .join(&invite_code, Arc::new(state.clone()))
-        .await?;
+    let client = state.client_factory.join(&invite_code).await?;
 
     AppState::check_federation_network(&client, state.network).await?;
 
     state
         .clients
         .write()
-        .await
+        .expect("clients RwLock poisoned")
         .insert(invite_code.federation_id, client.clone());
 
     crate::query::spawn_tail(
         &state.task_group,
-        client,
+        client.clone(),
         invite_code.federation_id,
         state.query_state.clone(),
+    );
+
+    crate::trailer::spawn_trailer(
+        &state.task_group,
+        state.clone(),
+        invite_code.federation_id,
+        client,
     );
 
     debug!(target: LOG_GATEWAY, federation_id = %invite_code.federation_id, "Federation connected");
@@ -608,13 +592,21 @@ async fn federation_balance(
     Ok(Json(FederationBalanceResponse { balance_msat }))
 }
 
-/// Export invite codes for all connected federations
+/// Generate an invite code that points new clients at one specific guardian
+/// of one specific connected federation.
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_invite(
     State(state): State<AppState>,
+    Json(payload): Json<FederationInviteRequest>,
 ) -> Result<Json<FederationInviteResponse>, CliError> {
-    let invite_codes = state.all_invite_codes().await;
-    Ok(Json(FederationInviteResponse { invite_codes }))
+    let client = resolve_client(&state, payload.federation_id).await?;
+    let invite_code = client
+        .invite_code(payload.peer_id)
+        .await
+        .ok_or_else(|| CliError::bad_request("Unknown peer id for this federation"))?;
+    Ok(Json(FederationInviteResponse {
+        invite: picomint_base32::encode(&invite_code),
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -628,7 +620,7 @@ async fn resolve_client(
     state: &AppState,
     id: Option<FederationId>,
 ) -> Result<Arc<Client>, CliError> {
-    let clients = state.clients.read().await;
+    let clients = state.clients.read().expect("clients RwLock poisoned");
     match id {
         Some(id) => clients
             .get(&id)
@@ -680,7 +672,8 @@ async fn federation_module_mint_send(
 }
 
 /// Receive ecash into the gateway. The ecash string itself carries the target
-/// federation id, so no `--id` is needed.
+/// federation id, so no `--id` is needed. Blocks until issuance either
+/// completes or fails federation-side.
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_module_mint_receive(
     State(state): State<AppState>,
@@ -691,17 +684,28 @@ async fn federation_module_mint_receive(
 
     let client = state
         .select_client(ecash.mint)
-        .await
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
     let amount = ecash.amount();
 
-    client
+    let operation_id = client
         .mint()
         .receive(&ecash)
-        .map_err(|e| CliError::internal(format!("Failed to receive ecash: {e}")))?;
+        .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
 
-    Ok(Json(FederationMintReceiveResponse { amount }))
+    let mut events = client.subscribe_operation_events(operation_id);
+    while let Some(entry) = events.next().await {
+        if entry.to_event::<TxAcceptEvent>().is_some() {
+            return Ok(Json(FederationMintReceiveResponse { amount }));
+        }
+        if let Some(e) = entry.to_event::<TxRejectEvent>() {
+            return Err(CliError::bad_request(format!(
+                "Transaction rejected: {}",
+                e.error
+            )));
+        }
+    }
+    Err(CliError::internal("Event stream ended unexpectedly"))
 }
 
 /// Fetch the current onchain send-fee for a federation
@@ -719,7 +723,9 @@ async fn federation_module_wallet_send_fee(
     Ok(Json(FederationWalletSendFeeResponse { fee }))
 }
 
-/// Withdraw onchain from a federation
+/// Withdraw onchain from a federation. Blocks until the send reaches a
+/// terminal state: confirmed broadcast, federation rejected the input tx, or
+/// the federation accepted but never produced a bitcoin txid.
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_module_wallet_send(
     State(state): State<AppState>,
@@ -730,8 +736,26 @@ async fn federation_module_wallet_send(
         .wallet()
         .send(payload.address, payload.amount, payload.fee)
         .await
-        .map_err(|e| CliError::internal(format!("Failed to send onchain: {e}")))?;
-    Ok(Json(FederationWalletSendResponse { operation_id }))
+        .map_err(|e| CliError::internal(format!("Failed to submit onchain send: {e}")))?;
+
+    let mut events = client.subscribe_operation_events(operation_id);
+    while let Some(entry) = events.next().await {
+        if let Some(e) = entry.to_event::<SendConfirmEvent>() {
+            return Ok(Json(FederationWalletSendResponse { txid: e.txid }));
+        }
+        if let Some(e) = entry.to_event::<TxRejectEvent>() {
+            return Err(CliError::bad_request(format!(
+                "Transaction rejected: {}",
+                e.error
+            )));
+        }
+        if entry.to_event::<SendFailureEvent>().is_some() {
+            return Err(CliError::internal(
+                "Failure to retrieve txid from federation",
+            ));
+        }
+    }
+    Err(CliError::internal("Event stream ended unexpectedly"))
 }
 
 /// Generate deposit address for a federation

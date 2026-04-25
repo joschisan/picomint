@@ -237,7 +237,7 @@ impl WalletClientModule {
 
         block_in_place(|| {
             (start_index..)
-                .find(|i| is_potential_receive(&self.derive_address(*i).script_pubkey(), &pks_hash))
+                .find(|i| is_potential_receive(&pks_hash, &self.derive_address(*i).script_pubkey()))
                 .expect("Will always find a valid index")
         })
     }

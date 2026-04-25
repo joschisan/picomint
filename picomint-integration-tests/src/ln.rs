@@ -19,15 +19,14 @@ use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, Send
 use picomint_client::transaction::{Input, TransactionBuilder};
 use picomint_client::{Client, OperationId};
 use picomint_core::config::FederationId;
-use picomint_core::ln::gateway_api::{PaymentFee, RoutingInfo, SendPaymentPayload};
-use picomint_core::ln::routes::{ROUTE_ROUTING_INFO, ROUTE_SEND_PAYMENT};
+use picomint_core::ln::gateway_api::{GatewayInfo, PaymentFee, SendPaymentPayload};
+use picomint_core::ln::routes::{ROUTE_GATEWAY_INFO, ROUTE_SEND_PAYMENT};
 use picomint_core::ln::{
     Bolt11InvoiceDescription, LightningInput, LightningInvoice, OutgoingWitness,
 };
 use picomint_core::{Amount, OutPoint, wire};
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_invoice};
-use serde_json::Value;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -140,70 +139,55 @@ fn deregister_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
 async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     info!("ln: test_analytics_query");
 
+    let db_path = env.gw_data_dir.join("analytics").join("analytics.sqlite");
+    let conn = rusqlite::Connection::open(&db_path)?;
+
     let count = |sql: &str| -> anyhow::Result<u64> {
-        cli::gateway_query(&env.gw_data_dir, sql)?
-            .as_array()
-            .and_then(|a| a.first())
-            .and_then(|r| r.get("n"))
-            .and_then(Value::as_u64)
-            .ok_or_else(|| anyhow::anyhow!("unexpected query shape for: {sql}"))
+        let n: i64 = conn.query_row(sql, [], |r| r.get(0))?;
+        Ok(n as u64)
     };
 
     // Raw event tables
-    assert_eq!(count("SELECT COUNT(*) AS n FROM send")?, 2);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM send_success")?, 1);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM send_cancel")?, 1);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM receive")?, 2);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM receive_success")?, 2);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM receive_failure")?, 0);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM receive_refund")?, 0);
-    assert_eq!(count("SELECT COUNT(*) AS n FROM complete")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM send")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM send_success")?, 1);
+    assert_eq!(count("SELECT COUNT(*) FROM send_cancel")?, 1);
+    assert_eq!(count("SELECT COUNT(*) FROM receive")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM receive_success")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM receive_failure")?, 0);
+    assert_eq!(count("SELECT COUNT(*) FROM receive_refund")?, 0);
 
     // `payments` view stitches sends/receives into one row per operation
-    assert_eq!(count("SELECT COUNT(*) AS n FROM payments")?, 4);
+    assert_eq!(count("SELECT COUNT(*) FROM payments")?, 4);
     assert_eq!(
-        count(
-            "SELECT COUNT(*) AS n FROM payments WHERE direction='outgoing' AND status='success'"
-        )?,
+        count("SELECT COUNT(*) FROM payments WHERE direction='outgoing' AND status='success'")?,
         1
     );
     assert_eq!(
-        count(
-            "SELECT COUNT(*) AS n FROM payments WHERE direction='outgoing' AND status='cancelled'"
-        )?,
+        count("SELECT COUNT(*) FROM payments WHERE direction='outgoing' AND status='cancelled'")?,
         1
     );
     assert_eq!(
-        count(
-            "SELECT COUNT(*) AS n FROM payments WHERE direction='incoming' AND status='success'"
-        )?,
+        count("SELECT COUNT(*) FROM payments WHERE direction='incoming' AND status='success'")?,
         2
     );
 
     // Join key sanity — `operation_id` must match across event tables
     assert_eq!(
         count(
-            "SELECT COUNT(*) AS n FROM send s \
+            "SELECT COUNT(*) FROM send s \
              INNER JOIN send_success ss USING (operation_id)"
         )?,
         1
     );
 
-    // Amount extraction from the invoice payload
-    let sum = cli::gateway_query(
-        &env.gw_data_dir,
-        "SELECT SUM(amount_msat) AS n FROM payments \
+    // Amount extraction
+    let sum: i64 = conn.query_row(
+        "SELECT SUM(amount_msat) FROM payments \
          WHERE direction='outgoing' AND status='success'",
-    )?
-    .as_array()
-    .and_then(|a| a.first())
-    .and_then(|r| r.get("n"))
-    .and_then(Value::as_u64)
-    .ok_or_else(|| anyhow::anyhow!("unexpected sum query shape"))?;
-    assert_eq!(sum, 1_000_000);
-
-    // Bad SQL surfaces as CLI error
-    assert!(cli::gateway_query(&env.gw_data_dir, "SELECT * FROM does_not_exist").is_err());
+        [],
+        |r| r.get(0),
+    )?;
+    assert_eq!(sum as u64, 1_000_000);
 
     info!("ln: test_analytics_query passed");
 
@@ -725,7 +709,7 @@ fn mock_invoice(preimage: [u8; 32], payment_secret: [u8; 32], currency: Currency
 
 async fn spawn_mock_gateway() -> anyhow::Result<String> {
     let app = Router::new()
-        .route(ROUTE_ROUTING_INFO, post(mock_routing_info))
+        .route(ROUTE_GATEWAY_INFO, post(mock_gateway_info))
         .route(ROUTE_SEND_PAYMENT, post(mock_send_payment));
 
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).await?;
@@ -739,18 +723,21 @@ async fn spawn_mock_gateway() -> anyhow::Result<String> {
     Ok(format!("http://{addr}").parse().expect("valid url"))
 }
 
-async fn mock_routing_info(Json(_federation_id): Json<FederationId>) -> Json<Option<RoutingInfo>> {
+async fn mock_gateway_info(Json(_federation_id): Json<FederationId>) -> Json<Option<GatewayInfo>> {
     // Short expiration deltas keep the unilateral-refund test fast — the
     // federation's consensus block count must advance past the contract's
     // expiration for `await_preimage` to return `None`.
-    Json(Some(RoutingInfo {
+    let tx_fee = PaymentFee {
+        base: picomint_core::Amount::from_sats(2),
+        ppm: 3000,
+    };
+    Json(Some(GatewayInfo {
         lightning_public_key: gateway_keypair().public_key(),
         module_public_key: gateway_keypair().public_key(),
-        send_fee_minimum: PaymentFee::TRANSACTION_FEE_DEFAULT,
-        send_fee_default: PaymentFee::TRANSACTION_FEE_DEFAULT,
-        expiration_delta_minimum: 50,
-        expiration_delta_default: 50,
-        receive_fee: PaymentFee::TRANSACTION_FEE_DEFAULT,
+        send_fee: tx_fee,
+        receive_fee: tx_fee,
+        ln_fee: tx_fee,
+        expiration_delta: 50,
     }))
 }
 

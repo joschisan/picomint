@@ -7,9 +7,9 @@ use bitcoin::secp256k1::schnorr::Signature;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::config::FederationId;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
-use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, RoutingInfo, SendPaymentPayload};
+use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, GatewayInfo, SendPaymentPayload};
 use picomint_core::ln::routes::{
-    ROUTE_CREATE_BOLT11_INVOICE, ROUTE_ROUTING_INFO, ROUTE_SEND_PAYMENT,
+    ROUTE_CREATE_BOLT11_INVOICE, ROUTE_GATEWAY_INFO, ROUTE_SEND_PAYMENT,
 };
 use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
 use picomint_core::{Amount, OutPoint};
@@ -59,14 +59,14 @@ async fn request<P: Serialize, T: DeserializeOwned>(
     serde_json::from_value(value).map_err(|_| GatewayError::InvalidResponse)
 }
 
-pub async fn routing_info(
+pub async fn gateway_info(
     gateway_api: &str,
     federation_id: &FederationId,
-) -> Result<Option<RoutingInfo>, GatewayError> {
+) -> Result<Option<GatewayInfo>, GatewayError> {
     request(
         gateway_api,
         Method::POST,
-        ROUTE_ROUTING_INFO,
+        ROUTE_GATEWAY_INFO,
         Some(federation_id),
     )
     .await

@@ -19,7 +19,7 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentImage};
-use picomint_core::ln::gateway_api::{PaymentFee, RoutingInfo};
+use picomint_core::ln::gateway_api::{GatewayInfo, PaymentFee};
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_core::ln::{
     Bolt11InvoiceDescription, LightningInput, LightningInvoice, LightningOutput,
@@ -128,10 +128,10 @@ impl LightningClientModule {
         if let Ok(gateways) = self.client_ctx.api().ln_gateways().await {
             let mut entries = Vec::new();
             for gateway in gateways {
-                if let Ok(Some(routing_info)) =
-                    gateway_http::routing_info(&gateway, &self.federation_id).await
+                if let Ok(Some(gateway_info)) =
+                    gateway_http::gateway_info(&gateway, &self.federation_id).await
                 {
-                    entries.push((routing_info.lightning_public_key, gateway));
+                    entries.push((gateway_info.lightning_public_key, gateway));
                 }
             }
 
@@ -154,7 +154,7 @@ impl LightningClientModule {
     pub async fn select_gateway(
         &self,
         invoice: Option<Bolt11Invoice>,
-    ) -> Result<(String, RoutingInfo), SelectGatewayError> {
+    ) -> Result<(String, GatewayInfo), SelectGatewayError> {
         let gateways = self
             .client_ctx
             .api()
@@ -173,14 +173,14 @@ impl LightningClientModule {
                 .begin_read()
                 .get(&GATEWAY, &GatewayKey(invoice.recover_payee_pub_key()))
                 .filter(|gateway| gateways.contains(gateway))
-            && let Ok(Some(routing_info)) = self.routing_info(&gateway).await
+            && let Ok(Some(gateway_info)) = self.gateway_info(&gateway).await
         {
-            return Ok((gateway, routing_info));
+            return Ok((gateway, gateway_info));
         }
 
         for gateway in gateways {
-            if let Ok(Some(routing_info)) = self.routing_info(&gateway).await {
-                return Ok((gateway, routing_info));
+            if let Ok(Some(gateway_info)) = self.gateway_info(&gateway).await {
+                return Ok((gateway, gateway_info));
             }
         }
 
@@ -208,15 +208,15 @@ impl LightningClientModule {
         }
     }
 
-    /// Requests the `RoutingInfo`, including fee information, from the gateway
+    /// Requests the `GatewayInfo`, including fee information, from the gateway
     /// available at the `String`.
-    pub async fn routing_info(
+    pub async fn gateway_info(
         &self,
         gateway: &str,
-    ) -> Result<Option<RoutingInfo>, RoutingInfoError> {
-        gateway_http::routing_info(gateway, &self.federation_id)
+    ) -> Result<Option<GatewayInfo>, GatewayInfoError> {
+        gateway_http::gateway_info(gateway, &self.federation_id)
             .await
-            .map_err(|_| RoutingInfoError::FailedToRequestRoutingInfo)
+            .map_err(|_| GatewayInfoError::FailedToRequestGatewayInfo)
     }
 
     /// Pay an invoice. A gateway is selected automatically: if the invoice was
@@ -257,20 +257,34 @@ impl LightningClientModule {
 
         let refund_keypair = self.secret.refund_keypair(&tweak);
 
-        let (gateway_api, routing_info) = self
+        let (gateway_api, gateway_info) = self
             .select_gateway(Some(invoice.clone()))
             .await
             .map_err(SendPaymentError::SelectGateway)?;
 
-        let (send_fee, expiration_delta) = routing_info.send_parameters(&invoice);
+        let is_direct_swap = invoice.recover_payee_pub_key() == gateway_info.lightning_public_key;
 
-        if !send_fee.le(&PaymentFee::SEND_FEE_LIMIT) {
+        if !gateway_info.send_fee.le(&PaymentFee::SEND_FEE_LIMIT) {
             return Err(SendPaymentError::GatewayFeeExceedsLimit);
         }
 
-        if EXPIRATION_DELTA_LIMIT < expiration_delta {
+        if !is_direct_swap && !gateway_info.ln_fee.le(&PaymentFee::LN_FEE_LIMIT) {
+            return Err(SendPaymentError::GatewayFeeExceedsLimit);
+        }
+
+        if EXPIRATION_DELTA_LIMIT < gateway_info.expiration_delta {
             return Err(SendPaymentError::GatewayExpirationExceedsLimit);
         }
+
+        let ln_fee = if is_direct_swap {
+            Amount::ZERO
+        } else {
+            gateway_info.ln_fee.fee(amount)
+        };
+
+        let fee = gateway_info.send_fee.fee(amount);
+
+        let amount = Amount::from_msats(amount + ln_fee.msats + fee.msats);
 
         let consensus_block_count = self
             .client_ctx
@@ -281,16 +295,18 @@ impl LightningClientModule {
 
         let contract = OutgoingContract {
             payment_image: PaymentImage::Hash(*invoice.payment_hash()),
-            amount: send_fee.add_to(amount),
-            expiration: consensus_block_count + expiration_delta + CONTRACT_CONFIRMATION_BUFFER,
-            claim_pk: routing_info.module_public_key,
+            amount,
+            expiration: consensus_block_count
+                + gateway_info.expiration_delta
+                + CONTRACT_CONFIRMATION_BUFFER,
+            claim_pk: gateway_info.module_public_key,
             refund_pk: refund_keypair.public_key(),
             tweak,
         };
 
         let tx_builder = TransactionBuilder::from_output(Output {
             output: wire::Output::Ln(Box::new(LightningOutput::Outgoing(contract.clone()))),
-            amount: contract.amount,
+            amount,
             fee: self.cfg.output_fee,
         });
 
@@ -326,8 +342,9 @@ impl LightningClientModule {
 
         let event = SendEvent {
             txid,
-            amount: send_fee.add_to(amount),
-            fee: send_fee.fee(amount),
+            amount,
+            ln_fee,
+            fee,
         };
 
         self.client_ctx
@@ -642,7 +659,7 @@ pub enum ListGatewaysError {
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
-pub enum RoutingInfoError {
-    #[error("Failed to request routing info")]
-    FailedToRequestRoutingInfo,
+pub enum GatewayInfoError {
+    #[error("Failed to request gateway info")]
+    FailedToRequestGatewayInfo,
 }

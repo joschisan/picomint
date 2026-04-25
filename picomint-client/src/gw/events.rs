@@ -1,4 +1,3 @@
-use picomint_core::ln::LightningInvoice;
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_eventlog::{Event, EventKind, EventSource};
@@ -11,7 +10,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendEvent {
     pub outpoint: OutPoint,
-    pub invoice: LightningInvoice,
+    pub amount: Amount,
+    pub ln_fee: Amount,
+    pub fee: Amount,
 }
 
 impl Event for SendEvent {
@@ -20,10 +21,15 @@ impl Event for SendEvent {
 }
 
 /// Emitted when the outgoing HTLC is claimed with a preimage.
+///
+/// `ln_fee` is the routing cost reported by LDK's `PaymentSuccessful` event
+/// — `0` for direct swaps between picomint federations (no LN hop) and for
+/// LDK builds that omit fee tracking.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendSuccessEvent {
     pub preimage: [u8; 32],
     pub txid: TransactionId,
+    pub ln_fee: Amount,
 }
 
 impl Event for SendSuccessEvent {
@@ -49,6 +55,7 @@ impl Event for SendCancelEvent {
 pub struct ReceiveEvent {
     pub txid: TransactionId,
     pub amount: Amount,
+    pub fee: Amount,
 }
 
 impl Event for ReceiveEvent {
@@ -86,16 +93,4 @@ pub struct ReceiveRefundEvent {
 impl Event for ReceiveRefundEvent {
     const SOURCE: EventSource = EventSource::Gw;
     const KIND: EventKind = EventKind::from_static("receive-refund");
-}
-
-// --- Complete (preimage revealed to LN network) ---
-
-/// Emitted when the completion state machine has settled or cancelled the
-/// HTLC towards the LN node. Only applies to externally-routed receives.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct CompleteEvent;
-
-impl Event for CompleteEvent {
-    const SOURCE: EventSource = EventSource::Gw;
-    const KIND: EventKind = EventKind::from_static("complete");
 }
