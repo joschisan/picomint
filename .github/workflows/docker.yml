@@ -17,6 +17,8 @@ jobs:
             dockerfile: docker-server/Dockerfile
           - image: picomint-gateway
             dockerfile: docker-gateway/Dockerfile
+          - image: picomint-recurring
+            dockerfile: docker-recurring/Dockerfile
 
     steps:
     - uses: actions/checkout@v4
