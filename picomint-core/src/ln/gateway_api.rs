@@ -1,11 +1,18 @@
 //! Wire types shared between picomint clients and the gateway daemon.
-//! The HTTP request helpers themselves live client-side
-//! (`picomint_client::ln::gateway_http`).
+//! Requests and responses are length-framed, consensus-encoded, and sent
+//! over iroh bi-streams (see `picomint_client::ln::gateway_api` for the
+//! client-side dispatcher).
+//!
+//! Mirrors the federation's [`crate::module::Method`] shape: one typed
+//! enum whose variants carry concrete `XRequest` structs; responses are
+//! `XResponse` newtypes. The gateway has no modules so the enum is flat
+//! rather than per-module nested.
 
 use std::ops::Add;
 
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::secp256k1::schnorr::Signature;
+use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
@@ -15,17 +22,27 @@ use crate::config::FederationId;
 use crate::ln::contracts::{IncomingContract, OutgoingContract};
 use crate::ln::{Bolt11InvoiceDescription, LightningInvoice};
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct CreateBolt11InvoicePayload {
+/// Conservative cap for both requests and responses on the gateway wire.
+/// All four methods have small, bounded payloads (invoices, contracts,
+/// payment hashes) — 100 KiB leaves headroom without allowing abuse.
+pub const GATEWAY_MAX_MESSAGE_BYTES: usize = 100_000;
+
+// ── routing-info ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct GatewayInfoRequest {
     pub federation_id: FederationId,
-    pub contract: IncomingContract,
-    pub amount: Amount,
-    pub description: Bolt11InvoiceDescription,
-    pub expiry_secs: u32,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct SendPaymentPayload {
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct GatewayInfoResponse {
+    pub gateway_info: GatewayInfo,
+}
+
+// ── send-payment ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
+pub struct SendPaymentRequest {
     pub federation_id: FederationId,
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
@@ -33,7 +50,63 @@ pub struct SendPaymentPayload {
     pub auth: Signature,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct SendPaymentResponse {
+    /// `Ok(preimage)` on successful payment, `Err(forfeit_sig)` when the
+    /// gateway abandons the payment and signs over its claim.
+    pub outcome: Result<[u8; 32], Signature>,
+}
+
+// ── create-bolt11-invoice ───────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
+pub struct CreateBolt11InvoiceRequest {
+    pub federation_id: FederationId,
+    pub contract: IncomingContract,
+    pub amount: Amount,
+    pub description: Bolt11InvoiceDescription,
+    pub expiry_secs: u32,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct CreateBolt11InvoiceResponse {
+    pub invoice: Bolt11Invoice,
+}
+
+// ── verify-bolt11-preimage ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
+pub struct VerifyBolt11PreimageRequest {
+    pub payment_hash: bitcoin::hashes::sha256::Hash,
+    /// When true, the handler long-polls until the payment settles (or
+    /// the underlying await resolves with a terminal state). When false,
+    /// the handler returns the current state with a short internal
+    /// timeout so callers can poll cheaply.
+    pub wait: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
+pub struct VerifyBolt11PreimageResponse {
+    pub settled: bool,
+    pub preimage: Option<[u8; 32]>,
+}
+
+// ── dispatch enum ───────────────────────────────────────────────────────────
+
+/// The wire method dispatched to a gateway over iroh. Each variant
+/// carries the concrete request for the method; the response type for
+/// variant `X` is `XResponse`.
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub enum GatewayMethod {
+    GatewayInfo(GatewayInfoRequest),
+    SendPayment(SendPaymentRequest),
+    CreateBolt11Invoice(CreateBolt11InvoiceRequest),
+    VerifyBolt11Preimage(VerifyBolt11PreimageRequest),
+}
+
+// ── routing-info payload (public API, not wire-internal) ────────────────────
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct GatewayInfo {
     /// The public key of the gateway's lightning node. Signs the gateway's
     /// invoices so the sender can detect direct swaps by comparing against

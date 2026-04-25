@@ -14,6 +14,12 @@ table!(
 );
 
 table!(
+    IROH_SK,
+    () => [u8; 32],
+    "iroh-sk",
+);
+
+table!(
     CLIENT_CONFIG,
     FederationId => ConsensusConfig,
     "client-config",

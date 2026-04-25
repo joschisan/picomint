@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
 use iroh::Endpoint;
-use iroh::address_lookup::MdnsAddressLookup;
-use iroh::endpoint::presets::N0;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
@@ -20,7 +18,13 @@ pub struct GatewayClientFactory {
 
 impl GatewayClientFactory {
     /// Initialize a new factory, storing the mnemonic entropy in the database.
-    pub async fn init(db: Database, mnemonic: Mnemonic) -> anyhow::Result<Self> {
+    /// The endpoint is owned by the caller (main.rs) so the same node-id is
+    /// used for outbound federation dialing and inbound public API accepts.
+    pub async fn init(
+        db: Database,
+        mnemonic: Mnemonic,
+        endpoint: Endpoint,
+    ) -> anyhow::Result<Self> {
         let dbtx = db.begin_write();
         assert!(
             dbtx.as_ref()
@@ -28,11 +32,6 @@ impl GatewayClientFactory {
                 .is_none()
         );
         dbtx.commit();
-
-        let endpoint = Endpoint::builder(N0)
-            .address_lookup(MdnsAddressLookup::builder())
-            .bind()
-            .await?;
 
         Ok(Self {
             connectors: endpoint,
@@ -42,18 +41,13 @@ impl GatewayClientFactory {
     }
 
     /// Try to load an existing factory from the database.
-    pub async fn try_load(db: Database) -> anyhow::Result<Option<Self>> {
+    pub async fn try_load(db: Database, endpoint: Endpoint) -> anyhow::Result<Option<Self>> {
         let entropy = db.begin_read().as_ref().get(&ROOT_ENTROPY, &());
 
         match entropy {
             Some(entropy) => {
                 let mnemonic = Mnemonic::from_entropy(&entropy)
                     .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {e}"))?;
-
-                let endpoint = Endpoint::builder(N0)
-                    .address_lookup(MdnsAddressLookup::builder())
-                    .bind()
-                    .await?;
 
                 Ok(Some(Self {
                     connectors: endpoint,

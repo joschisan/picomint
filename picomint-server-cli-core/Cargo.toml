@@ -10,6 +10,7 @@ version = { workspace = true }
 
 [dependencies]
 clap = { workspace = true }
+iroh = { workspace = true, default-features = false }
 picomint-core = { workspace = true }
 serde = { workspace = true }
 

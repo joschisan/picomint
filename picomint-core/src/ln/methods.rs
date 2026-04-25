@@ -78,7 +78,7 @@ pub struct GatewaysRequest;
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct GatewaysResponse {
-    pub gateways: Vec<String>,
+    pub gateways: Vec<iroh_base::PublicKey>,
 }
 
 // ── dispatch enum ───────────────────────────────────────────────────────────

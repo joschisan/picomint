@@ -123,9 +123,9 @@ pub async fn await_incoming_contracts(
 
 pub fn gateways(ln: &Lightning, _: GatewaysRequest) -> Result<GatewaysResponse, ApiError> {
     Ok(GatewaysResponse {
-        gateways: ln
-            .db
-            .begin_read()
-            .iter(&GATEWAY, |r| r.map(|(url, ())| url).collect()),
+        gateways: ln.db.begin_read().iter(&GATEWAY, |r| {
+            r.filter_map(|(bytes, ())| iroh::PublicKey::from_bytes(&bytes).ok())
+                .collect()
+        }),
     })
 }

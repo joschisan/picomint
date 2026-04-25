@@ -46,10 +46,19 @@ pub struct TestEnv {
     pub bitcoind: bitcoincore_rpc::Client,
     pub invite_code: InviteCode,
     pub gw_data_dir: std::path::PathBuf,
-    pub gw_public: String,
+    /// Gateway's iroh node-id — the stable identity clients dial and
+    /// federations register as a gateway.
+    pub gw_public: iroh::PublicKey,
+    #[allow(dead_code)]
     pub recurring_url: String,
     pub endpoint: Endpoint,
     pub client_counter: AtomicU64,
+    /// Mnemonic per client index, kept so a test can `restart_client` and
+    /// rebuild a previously-built client against its existing redb file.
+    /// `build_client` derives keys from the mnemonic, so re-using the
+    /// same one is the only way the rebuilt client matches its prior
+    /// notes/contracts/event log.
+    pub client_mnemonics: Mutex<BTreeMap<u64, Mnemonic>>,
     /// One per guardian, indexed by peer id. `None` once we've killed it.
     pub guardian_processes: Mutex<Vec<Option<Child>>>,
 }
@@ -99,24 +108,30 @@ impl TestEnv {
         )?;
 
         let client_counter = AtomicU64::new(0);
+        let client_mnemonics = Mutex::new(BTreeMap::new());
+        let client_send_n = client_counter.fetch_add(1, Ordering::Relaxed);
+        let client_send_mnemonic = Mnemonic::generate(12)?;
+        runtime
+            .block_on(client_mnemonics.lock())
+            .insert(client_send_n, client_send_mnemonic.clone());
         let client_send = runtime.block_on(build_client(
             endpoint.clone(),
             invite_code.clone(),
             data_dir.clone(),
-            client_counter.fetch_add(1, Ordering::Relaxed),
+            client_send_n,
+            &client_send_mnemonic,
         ))?;
 
         runtime.block_on(start_gateway(base, "gw", GW_PORT, GW_LN_PORT))?;
 
         let gw_data_dir = base.join("gw");
-        // Public API is on the base port
-        let gw_public = format!("http://127.0.0.1:{GW_PORT}");
 
         info!("Waiting for gateway...");
-        runtime.block_on(retry("gw ready", || async {
-            cli::gateway_info(&gw_data_dir).map(|_| ())
+        let gw_info = runtime.block_on(retry("gw ready", || async {
+            cli::gateway_info(&gw_data_dir)
         }))?;
-        info!("Gateway ready");
+        let gw_public = gw_info.iroh_pk;
+        info!(%gw_public, "Gateway ready");
 
         runtime.block_on(start_recurring_daemon(base, RECURRING_PORT))?;
         let recurring_url = format!("http://127.0.0.1:{RECURRING_PORT}/");
@@ -145,6 +160,7 @@ impl TestEnv {
                 recurring_url,
                 endpoint,
                 client_counter,
+                client_mnemonics,
                 guardian_processes: Mutex::new(guardian_processes),
             },
             client_send,
@@ -194,11 +210,51 @@ impl TestEnv {
 
     pub async fn new_client(&self) -> anyhow::Result<Arc<Client>> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
+        let mnemonic = Mnemonic::generate(12)?;
+        self.client_mnemonics
+            .lock()
+            .await
+            .insert(n, mnemonic.clone());
         build_client(
             self.endpoint.clone(),
             self.invite_code.clone(),
             self.data_dir.clone(),
             n,
+            &mnemonic,
+        )
+        .await
+    }
+
+    /// Index of the persistent `client_send` returned from `setup`.
+    /// Constant since `client_send` is always built first.
+    pub const CLIENT_SEND_INDEX: u64 = 0;
+
+    /// Drop the previous instance, cancel its background tasks, and
+    /// rebuild the client at index `n` against its existing redb file
+    /// using the same mnemonic. Use after a federation-side change
+    /// (e.g. registering a gateway) so the rebuilt client's
+    /// `LnGatewayManager` re-fetches the gateway list — the manager
+    /// is single-fetch + frozen by design.
+    ///
+    /// `old` is consumed and shut down before the new client is built
+    /// to ensure the old endpoint/state-machine tasks have stopped.
+    pub async fn restart_client(&self, old: Arc<Client>, n: u64) -> anyhow::Result<Arc<Client>> {
+        old.shutdown().await;
+        drop(old);
+
+        let mnemonics = self.client_mnemonics.lock().await;
+        let mnemonic = mnemonics
+            .get(&n)
+            .ok_or_else(|| anyhow::anyhow!("no mnemonic registered for client {n}"))?
+            .clone();
+        drop(mnemonics);
+
+        build_client(
+            self.endpoint.clone(),
+            self.invite_code.clone(),
+            self.data_dir.clone(),
+            n,
+            &mnemonic,
         )
         .await
     }
@@ -224,17 +280,16 @@ async fn build_client(
     invite_code: InviteCode,
     data_dir: std::path::PathBuf,
     n: u64,
+    mnemonic: &Mnemonic,
 ) -> anyhow::Result<Arc<Client>> {
     let db_dir = data_dir.join(format!("client-{n}"));
     tokio::fs::create_dir_all(&db_dir).await?;
 
     let db = picomint_redb::Database::open(db_dir.join("database.redb"))?;
 
-    let mnemonic = Mnemonic::generate(12)?;
-
     let config = picomint_client::download(&endpoint, &invite_code).await?;
 
-    let client = Client::new(endpoint, db, &mnemonic, config).await?;
+    let client = Client::new(endpoint, db, mnemonic, config).await?;
 
     info!("Created client-{n}");
     Ok(client)

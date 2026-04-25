@@ -39,9 +39,13 @@ table!(
     "ln-preimage",
 );
 
+// Registered gateways: key is the raw 32-byte iroh node-id of the
+// gateway's persistent endpoint. `iroh::PublicKey` can't impl
+// `redb::Value`/`Key` here (orphan rules), so we store the bytes and
+// convert at the API boundary.
 table!(
     GATEWAY,
-    String => (),
+    [u8; 32] => (),
     "ln-gateway",
 );
 

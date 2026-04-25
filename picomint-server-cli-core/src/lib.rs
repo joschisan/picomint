@@ -115,6 +115,6 @@ pub struct WalletFeerateResponse {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct LnGatewayRequest {
-    /// Gateway URL
-    pub url: String,
+    /// Gateway iroh node-id (base32-encoded public key)
+    pub node_id: iroh::PublicKey,
 }

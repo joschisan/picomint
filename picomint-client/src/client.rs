@@ -158,6 +158,7 @@ impl Client {
                         mint.clone(),
                         client_secret.ln_secret(),
                         &task_group,
+                        connectors.clone(),
                     )
                     .await?,
                 ))

@@ -29,13 +29,15 @@ fn main() -> anyhow::Result<()> {
     info!("Running wallet tests...");
     runtime.block_on(wallet::run_tests(&env, &client_send))?;
 
-    info!("Running ln + mint tests in parallel...");
-    runtime.block_on(async {
-        tokio::try_join!(
-            ln::run_tests(&env, &client_send),
-            mint::run_tests(&env, &client_send),
-        )
-    })?;
+    info!("Running ln tests...");
+    // Sequential: ln restarts `client_send` mid-run after registering the
+    // gateway with the federation (manager is single-fetch + frozen by
+    // design). The returned handle is the post-restart client; mint runs
+    // against it next.
+    let client_send = runtime.block_on(ln::run_tests(&env, client_send))?;
+
+    info!("Running mint tests...");
+    runtime.block_on(mint::run_tests(&env, &client_send))?;
 
     info!("Shutting down the primary test client!");
 

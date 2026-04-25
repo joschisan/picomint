@@ -25,6 +25,7 @@ lightning-types = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-client = { workspace = true }
 picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
 picomint-eventlog = { workspace = true }
 picomint-gateway-cli-core = { workspace = true }
 picomint-lnurl = { workspace = true }

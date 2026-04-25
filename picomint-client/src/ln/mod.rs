@@ -3,7 +3,8 @@ pub use picomint_core::ln as common;
 mod api;
 mod db;
 pub mod events;
-mod gateway_http;
+mod gateway_api;
+mod gateway_manager;
 mod secret;
 mod send_sm;
 
@@ -13,7 +14,8 @@ use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::transaction::{Input, Output, TransactionBuilder};
 use bitcoin::secp256k1;
-use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
+use db::{INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
+use gateway_manager::{GatewayState, LnGatewayManager};
 use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -55,6 +57,7 @@ pub struct LightningClientContext {
     pub(crate) client_ctx: ClientContext,
     pub(crate) mint: Arc<crate::mint::MintClientModule>,
     pub(crate) input_fee: Amount,
+    pub(crate) gateway_manager: LnGatewayManager,
 }
 
 #[derive(Clone)]
@@ -65,6 +68,7 @@ pub struct LightningClientModule {
     mint: Arc<crate::mint::MintClientModule>,
     secret: LnSecret,
     send_executor: ModuleExecutor<SendStateMachine>,
+    gateway_manager: LnGatewayManager,
 }
 
 impl LightningClientModule {
@@ -84,12 +88,29 @@ impl LightningClientModule {
         mint: Arc<crate::mint::MintClientModule>,
         secret: LnSecret,
         task_group: &TaskGroup,
+        endpoint: iroh::Endpoint,
     ) -> anyhow::Result<Self> {
+        // Non-blocking: the manager spawns its own init task that retries
+        // the federation gateway-list fetch with backoff until success
+        // (an empty list is treated as success). Send/receive entry
+        // points await `wait_any_first_attempt` on the manager so they
+        // block on a freshly-constructed client only until the fetch
+        // completes and each per-gateway task has resolved its first
+        // dial attempt — then return `NoGatewaysAvailable` if the list
+        // came back empty.
+        let gateway_manager = LnGatewayManager::spawn(
+            endpoint,
+            federation_id,
+            client_ctx.api().clone(),
+            task_group,
+        );
+
         let sm_context = LightningClientContext {
             federation_id,
             client_ctx: client_ctx.clone(),
             mint: mint.clone(),
             input_fee: cfg.input_fee,
+            gateway_manager: gateway_manager.clone(),
         };
         let send_executor =
             ModuleExecutor::new(client_ctx.db().clone(), sm_context, task_group.clone()).await;
@@ -101,98 +122,66 @@ impl LightningClientModule {
             mint,
             secret,
             send_executor,
+            gateway_manager,
         };
 
         module.spawn_receive_scan_task(task_group);
 
-        module.spawn_gateway_map_update_task(task_group);
-
         Ok(module)
     }
 
-    fn spawn_gateway_map_update_task(&self, task_group: &TaskGroup) {
-        let module = self.clone();
-
-        task_group.spawn_cancellable("gateway_map_update_task", async move {
-            module.update_gateway_map().await;
-        });
-    }
-
-    async fn update_gateway_map(&self) {
-        // Update the mapping from lightning node public keys to gateway api
-        // endpoints maintained in the module database. When paying an invoice this
-        // enables the client to select the gateway that has created the invoice,
-        // if possible, such that the payment does not go over lightning, reducing
-        // fees and latency.
-
-        if let Ok(gateways) = self.client_ctx.api().ln_gateways().await {
-            let mut entries = Vec::new();
-            for gateway in gateways {
-                if let Ok(Some(gateway_info)) =
-                    gateway_http::gateway_info(&gateway, &self.federation_id).await
-                {
-                    entries.push((gateway_info.lightning_public_key, gateway));
-                }
-            }
-
-            let dbtx = self.client_ctx.db().begin_write();
-            {
-                let tx = dbtx.as_ref();
-                for (key, gateway) in entries {
-                    tx.insert(&GATEWAY, &GatewayKey(key), &gateway);
-                }
-            }
-
-            dbtx.commit();
-        }
-    }
-
-    /// Selects an available gateway by querying the federation's registered
-    /// gateways, checking if one of them match the invoice's payee public
-    /// key, then queries the gateway for `RoutingInfo` to determine if it is
-    /// online.
+    /// Selects a gateway from those known to the manager. When an
+    /// invoice is provided and its payee pubkey matches a known
+    /// gateway, that gateway is pinned — the payment has to land at
+    /// its lightning node, so we can't substitute another one.
+    /// Otherwise any currently-online gateway works.
+    ///
+    /// Blocks until the manager's init task has fetched the gateway
+    /// list from the federation and each per-gateway task has
+    /// resolved its first dial attempt. If the list is empty after
+    /// init, returns `NoGatewaysAvailable` immediately.
     pub async fn select_gateway(
         &self,
         invoice: Option<Bolt11Invoice>,
-    ) -> Result<(String, GatewayInfo), SelectGatewayError> {
-        let gateways = self
-            .client_ctx
-            .api()
-            .ln_gateways()
-            .await
-            .map_err(|_| SelectGatewayError::FailedToRequestGateways)?;
+    ) -> Result<(iroh::PublicKey, GatewayInfo), SelectGatewayError> {
+        self.gateway_manager.wait_any_first_attempt().await;
 
-        if gateways.is_empty() {
+        if self.gateway_manager.known_gateways().is_empty() {
             return Err(SelectGatewayError::NoGatewaysAvailable);
         }
 
-        if let Some(invoice) = invoice
-            && let Some(gateway) = self
-                .client_ctx
-                .db()
-                .begin_read()
-                .get(&GATEWAY, &GatewayKey(invoice.recover_payee_pub_key()))
-                .filter(|gateway| gateways.contains(gateway))
-            && let Ok(Some(gateway_info)) = self.gateway_info(&gateway).await
-        {
-            return Ok((gateway, gateway_info));
-        }
-
-        for gateway in gateways {
-            if let Ok(Some(gateway_info)) = self.gateway_info(&gateway).await {
-                return Ok((gateway, gateway_info));
+        if let Some(invoice) = invoice {
+            let payee = invoice.recover_payee_pub_key();
+            for node_id in self.gateway_manager.known_gateways() {
+                let Some(state) = self.gateway_manager.wait_first_attempt(&node_id).await else {
+                    continue;
+                };
+                if let GatewayState::Online {
+                    ref gateway_info, ..
+                } = state
+                    && gateway_info.lightning_public_key == payee
+                {
+                    return Ok((node_id, gateway_info.clone()));
+                }
             }
         }
 
-        Err(SelectGatewayError::GatewaysUnresponsive)
+        match self.gateway_manager.any_online() {
+            Some((node_id, GatewayState::Online { gateway_info, .. })) => {
+                Ok((node_id, gateway_info))
+            }
+            _ => Err(SelectGatewayError::GatewaysUnresponsive),
+        }
     }
 
-    /// Sends a request to each peer for their registered gateway list and
-    /// returns a `Vec<String` of all registered gateways to the client.
+    /// Return all gateways the manager is tracking. The per-peer
+    /// flavor still hits the federation directly — retained for
+    /// callers that want one peer's view of the registry rather than
+    /// the startup-frozen snapshot.
     pub async fn list_gateways(
         &self,
         peer: Option<PeerId>,
-    ) -> Result<Vec<String>, ListGatewaysError> {
+    ) -> Result<Vec<iroh::PublicKey>, ListGatewaysError> {
         if let Some(peer) = peer {
             self.client_ctx
                 .api()
@@ -200,23 +189,21 @@ impl LightningClientModule {
                 .await
                 .map_err(|_| ListGatewaysError::FailedToListGateways)
         } else {
-            self.client_ctx
-                .api()
-                .ln_gateways()
-                .await
-                .map_err(|_| ListGatewaysError::FailedToListGateways)
+            Ok(self.gateway_manager.known_gateways())
         }
     }
 
-    /// Requests the `GatewayInfo`, including fee information, from the gateway
-    /// available at the `String`.
+    /// Return the cached `GatewayInfo` for `gateway`, if the manager
+    /// currently holds a live connection to it. No on-demand probe —
+    /// gateway info was fetched at connection time.
     pub async fn gateway_info(
         &self,
-        gateway: &str,
+        gateway: &iroh::PublicKey,
     ) -> Result<Option<GatewayInfo>, GatewayInfoError> {
-        gateway_http::gateway_info(gateway, &self.federation_id)
-            .await
-            .map_err(|_| GatewayInfoError::FailedToRequestGatewayInfo)
+        match self.gateway_manager.snapshot(gateway) {
+            Some(Some(GatewayState::Online { gateway_info, .. })) => Ok(Some(gateway_info)),
+            _ => Ok(None),
+        }
     }
 
     /// Pay an invoice. A gateway is selected automatically: if the invoice was
@@ -257,7 +244,7 @@ impl LightningClientModule {
 
         let refund_keypair = self.secret.refund_keypair(&tweak);
 
-        let (gateway_api, gateway_info) = self
+        let (gateway_node_id, gateway_info) = self
             .select_gateway(Some(invoice.clone()))
             .await
             .map_err(SendPaymentError::SelectGateway)?;
@@ -330,7 +317,7 @@ impl LightningClientModule {
                 operation_id,
                 outpoint: OutPoint { txid, out_idx: 0 },
                 contract,
-                gateway_api: Some(gateway_api),
+                gateway_node_id: Some(gateway_node_id),
                 invoice: Some(LightningInvoice::Bolt11(invoice.clone())),
                 refund_keypair,
             },
@@ -401,16 +388,25 @@ impl LightningClientModule {
         let preimage = contract_secret.preimage();
         let claim_tweak = contract_secret.claim_tweak();
 
-        let (gateway, routing_info) = self
+        let (gateway_node_id, gateway_info) = self
             .select_gateway(None)
             .await
             .map_err(ReceiveError::SelectGateway)?;
 
-        if !routing_info.receive_fee.le(&PaymentFee::RECEIVE_FEE_LIMIT) {
+        let connection = match self.gateway_manager.snapshot(&gateway_node_id) {
+            Some(Some(GatewayState::Online { connection, .. })) => connection,
+            _ => {
+                return Err(ReceiveError::FailedToConnectToGateway(
+                    "Gateway not currently online".to_string(),
+                ));
+            }
+        };
+
+        if !gateway_info.receive_fee.le(&PaymentFee::RECEIVE_FEE_LIMIT) {
             return Err(ReceiveError::GatewayFeeExceedsLimit);
         }
 
-        let contract_amount = routing_info.receive_fee.subtract_from(amount.msats);
+        let contract_amount = gateway_info.receive_fee.subtract_from(amount.msats);
 
         if contract_amount < MINIMUM_INCOMING_CONTRACT_AMOUNT {
             return Err(ReceiveError::AmountTooSmall);
@@ -432,12 +428,12 @@ impl LightningClientModule {
             contract_amount,
             expiration,
             claim_pk,
-            routing_info.module_public_key,
+            gateway_info.module_public_key,
             ephemeral_kp.public_key(),
         );
 
-        let invoice = gateway_http::bolt11_invoice(
-            &gateway,
+        let invoice = gateway_api::bolt11_invoice(
+            &connection,
             self.federation_id,
             contract.clone(),
             amount,
@@ -528,14 +524,13 @@ impl LightningClientModule {
         Some((claim_keypair, agg_decryption_key))
     }
 
-    /// Generate an lnurl for the client.
+    /// Generate an lnurl for the client. Blocks until the manager has
+    /// fetched the federation's gateway list, since the lnurl payload
+    /// must encode the recipient's reachable gateways.
     pub async fn generate_lnurl(&self, recurringd: String) -> Result<String, GenerateLnurlError> {
-        let gateways = self
-            .client_ctx
-            .api()
-            .ln_gateways()
-            .await
-            .map_err(|_| GenerateLnurlError::FailedToRequestGateways)?;
+        self.gateway_manager.wait_any_first_attempt().await;
+
+        let gateways = self.gateway_manager.known_gateways();
 
         if gateways.is_empty() {
             return Err(GenerateLnurlError::NoGatewaysAvailable);
@@ -595,8 +590,6 @@ impl LightningClientModule {
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
 pub enum SelectGatewayError {
-    #[error("Failed to request gateways")]
-    FailedToRequestGateways,
     #[error("No gateways are available")]
     NoGatewaysAvailable,
     #[error("All gateways failed to respond")]
@@ -648,8 +641,6 @@ pub enum ReceiveError {
 pub enum GenerateLnurlError {
     #[error("No gateways are available")]
     NoGatewaysAvailable,
-    #[error("Failed to request gateways")]
-    FailedToRequestGateways,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]

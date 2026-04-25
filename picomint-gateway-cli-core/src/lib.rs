@@ -48,6 +48,11 @@ pub const ROUTE_FEDERATION_MODULE_WALLET_RECEIVE: &str = "/federation/module/wal
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct InfoResponse {
+    /// Iroh node-id of the gateway's public API endpoint — clients dial this
+    /// to reach the gateway over iroh.
+    pub iroh_pk: iroh_base::PublicKey,
+    /// Secp256k1 public key of the gateway's LDK node — used by clients to
+    /// recognise gateway-signed Lightning invoices.
     pub public_key: secp256k1::PublicKey,
     pub alias: String,
     pub network: String,

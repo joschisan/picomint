@@ -169,6 +169,7 @@ async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, CliEr
 
     Ok(Json(InfoResponse {
         public_key: state.node.node_id(),
+        iroh_pk: state.iroh_pk,
         alias: state
             .node
             .node_alias()

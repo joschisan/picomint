@@ -3,7 +3,6 @@ use std::sync::Arc;
 use axum::extract::{Form, State};
 use axum::response::{IntoResponse, Redirect};
 use maud::{Markup, html};
-use url::Url;
 
 use crate::consensus::api::ConsensusApi;
 use crate::ui::auth::UserAuth;
@@ -16,7 +15,7 @@ pub const LN_REMOVE_ROUTE: &str = "/ln/remove";
 // Form for gateway management
 #[derive(serde::Deserialize)]
 pub struct GatewayForm {
-    pub gateway_url: Url,
+    pub gateway_node_id: iroh::PublicKey,
 }
 
 // Function to render the Lightning module UI section
@@ -56,7 +55,7 @@ pub async fn render(lightning: &crate::consensus::ln::Lightning) -> Markup {
                             div class="h-100" {
                                 @if gateways.is_empty() {
                                     div class="text-center p-4" {
-                                        p { "You need a Lightning gateway to connect to your federation and then add its URL here in the dashboard to enable Lightning payments for your users. You can either run your own gateway or reach out to the Picomint team on " a href="https://chat.picomint.org/" { "Discord" } " - we are running our own gateway and are happy to get you started." }
+                                        p { "You need a Lightning gateway to connect to your federation and then add its iroh node-id here in the dashboard to enable Lightning payments for your users. You can either run your own gateway or reach out to the Picomint team on " a href="https://chat.picomint.org/" { "Discord" } " - we are running our own gateway and are happy to get you started." }
                                     }
                                 } @else {
                                     div class="table-responsive" {
@@ -67,7 +66,7 @@ pub async fn render(lightning: &crate::consensus::ln::Lightning) -> Markup {
                                                         td { (gateway.to_string()) }
                                                         td class="text-end" {
                                                             form action=(LN_REMOVE_ROUTE) method="post" style="display: inline;" {
-                                                                input type="hidden" name="gateway_url" value=(gateway.to_string());
+                                                                input type="hidden" name="gateway_node_id" value=(gateway.to_string());
                                                                 button type="submit" class="btn btn-sm btn-danger" {
                                                                     "Remove"
                                                                 }
@@ -90,15 +89,15 @@ pub async fn render(lightning: &crate::consensus::ln::Lightning) -> Markup {
                                 form action=(LN_ADD_ROUTE) method="post" class="w-100" style="max-width: 400px;" {
                                     div class="mb-3" {
                                         input
-                                            type="url"
+                                            type="text"
                                             class="form-control"
-                                            id="gateway-url"
-                                            name="gateway_url"
-                                            placeholder="Enter gateway URL"
+                                            id="gateway-node-id"
+                                            name="gateway_node_id"
+                                            placeholder="Enter gateway iroh node-id"
                                             required;
                                     }
                                     div class="text-muted mb-3 text-center" style="font-size: 0.875em;" {
-                                        "Please enter a valid URL starting with http:// or https://"
+                                        "Base32-encoded iroh public key printed by the gateway at startup."
                                     }
                                     div class="text-center" {
                                         button type="submit" class="btn btn-primary" style="min-width: 150px;" {
@@ -125,7 +124,7 @@ pub async fn post_add(
         .api
         .server
         .ln
-        .add_gateway_ui(form.gateway_url.to_string())
+        .add_gateway_ui(form.gateway_node_id)
         .await;
 
     Redirect::to(ROOT_ROUTE).into_response()
@@ -141,7 +140,7 @@ pub async fn post_remove(
         .api
         .server
         .ln
-        .remove_gateway_ui(form.gateway_url.to_string())
+        .remove_gateway_ui(form.gateway_node_id)
         .await;
 
     Redirect::to(ROOT_ROUTE).into_response()

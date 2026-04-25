@@ -349,26 +349,25 @@ impl Lightning {
         self.consensus_unix_time(&self.db.begin_read())
     }
 
-    pub async fn add_gateway_ui(&self, gateway: String) -> bool {
-        let gateway = gateway.trim_end_matches('/').to_string();
+    pub async fn add_gateway_ui(&self, gateway: iroh::PublicKey) -> bool {
         let tx = self.db.begin_write();
-        let is_new_entry = tx.insert(&GATEWAY, &gateway, &()).is_none();
+        let is_new_entry = tx.insert(&GATEWAY, gateway.as_bytes(), &()).is_none();
         tx.commit();
         is_new_entry
     }
 
-    pub async fn remove_gateway_ui(&self, gateway: String) -> bool {
-        let gateway = gateway.trim_end_matches('/').to_string();
+    pub async fn remove_gateway_ui(&self, gateway: iroh::PublicKey) -> bool {
         let tx = self.db.begin_write();
-        let entry_existed = tx.remove(&GATEWAY, &gateway).is_some();
+        let entry_existed = tx.remove(&GATEWAY, gateway.as_bytes()).is_some();
         tx.commit();
         entry_existed
     }
 
     #[must_use]
-    pub fn gateways_ui(&self) -> Vec<String> {
-        self.db
-            .begin_read()
-            .iter(&GATEWAY, |r| r.map(|(url, ())| url).collect())
+    pub fn gateways_ui(&self) -> Vec<iroh::PublicKey> {
+        self.db.begin_read().iter(&GATEWAY, |r| {
+            r.filter_map(|(bytes, ())| iroh::PublicKey::from_bytes(&bytes).ok())
+                .collect()
+        })
     }
 }

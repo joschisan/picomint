@@ -10,5 +10,5 @@ pub struct LnurlRequest {
     pub federation_id: FederationId,
     pub recipient_pk: PublicKey,
     pub aggregate_pk: AggregatePublicKey,
-    pub gateways: Vec<String>,
+    pub gateways: Vec<iroh_base::PublicKey>,
 }

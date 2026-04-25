@@ -11,6 +11,7 @@ version = { workspace = true }
 [dependencies]
 bitcoin = { workspace = true }
 clap = { workspace = true }
+iroh-base = { workspace = true, default-features = false }
 lightning-invoice = { workspace = true }
 picomint-core = { workspace = true }
 serde = { workspace = true }

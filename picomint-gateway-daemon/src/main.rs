@@ -16,12 +16,18 @@ use std::sync::RwLock;
 
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
+use iroh::Endpoint;
+use iroh::address_lookup::MdnsAddressLookup;
+use iroh::endpoint::presets::N0;
 use lightning::types::payment::PaymentHash;
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::ln::gateway_api::PaymentFee;
+use picomint_core::module::PICOMINT_ALPN;
 use picomint_gateway_daemon::client::GatewayClientFactory;
-use picomint_gateway_daemon::db::{INCOMING_CONTRACT, OUTGOING_CONTRACT, PROCESSED_LDK_PAYMENT};
+use picomint_gateway_daemon::db::{
+    INCOMING_CONTRACT, IROH_SK, OUTGOING_CONTRACT, PROCESSED_LDK_PAYMENT,
+};
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
 use picomint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use picomint_redb::WriteTxRef;
@@ -76,7 +82,9 @@ pub struct GatewayOpts {
     #[arg(long, env = "BITCOIND_PASSWORD")]
     pub bitcoind_password: Option<String>,
 
-    /// Public API listen address
+    /// Public iroh API UDP bind address. The gateway accepts bi-directional
+    /// QUIC connections from clients and recurringd here, under the
+    /// `PICOMINT_ALPN` protocol.
     #[arg(long = "api-addr", env = "API_ADDR", default_value = "0.0.0.0:8080")]
     pub api_addr: SocketAddr,
 
@@ -125,15 +133,35 @@ fn main() -> anyhow::Result<()> {
 
     let gateway_db = picomint_redb::Database::open(opts.data_dir.join(DB_FILE))?;
 
-    // 3. Load or init client factory (mnemonic)
-    let client_factory =
-        match runtime.block_on(GatewayClientFactory::try_load(gateway_db.clone()))? {
-            Some(factory) => factory,
-            None => runtime.block_on(GatewayClientFactory::init(
-                gateway_db.clone(),
-                picomint_client::random_mnemonic(&mut OsRng),
-            ))?,
-        };
+    // 3. Load or generate a stable iroh secret key so the gateway's node-id
+    //    survives restarts. Federations that registered this gateway by
+    //    node-id would otherwise silently point at a dead endpoint.
+    let iroh_sk = load_or_init_iroh_sk(&gateway_db);
+
+    let endpoint = runtime.block_on(
+        Endpoint::builder(N0)
+            .secret_key(iroh_sk)
+            .address_lookup(MdnsAddressLookup::builder())
+            .alpns(vec![PICOMINT_ALPN.to_vec()])
+            .bind_addr(opts.api_addr)
+            .expect("Failed to prepare iroh endpoint bind")
+            .bind(),
+    )?;
+
+    info!(target: LOG_GATEWAY, node_id = %endpoint.id(), api_addr = %opts.api_addr, "Gateway iroh endpoint bound");
+
+    // 4. Load or init client factory (mnemonic)
+    let client_factory = match runtime.block_on(GatewayClientFactory::try_load(
+        gateway_db.clone(),
+        endpoint.clone(),
+    ))? {
+        Some(factory) => factory,
+        None => runtime.block_on(GatewayClientFactory::init(
+            gateway_db.clone(),
+            picomint_client::random_mnemonic(&mut OsRng),
+            endpoint.clone(),
+        ))?,
+    };
 
     let mnemonic = client_factory.mnemonic().clone();
 
@@ -190,8 +218,8 @@ fn main() -> anyhow::Result<()> {
         clients: Arc::new(RwLock::new(BTreeMap::new())),
         node: node.clone(),
         client_factory,
+        iroh_pk: endpoint.id(),
         gateway_db,
-        api_addr: opts.api_addr,
         data_dir: opts.data_dir.clone(),
         network: opts.network,
         send_fee: PaymentFee {
@@ -216,7 +244,11 @@ fn main() -> anyhow::Result<()> {
     runtime.block_on(state.spawn_trailers());
 
     // 8. Spawn tasks
-    let public_task = runtime.spawn(public::run_public(state.clone(), task_group.make_handle()));
+    let public_task = runtime.spawn(public::run_public(
+        state.clone(),
+        endpoint.clone(),
+        task_group.make_handle(),
+    ));
     let cli_task = runtime.spawn(cli::run_cli(state.clone(), task_group.make_handle()));
     let events_task = runtime.spawn(process_ldk_events(state.clone(), task_group.make_handle()));
 
@@ -242,6 +274,28 @@ fn main() -> anyhow::Result<()> {
     info!(target: LOG_GATEWAY, "Gatewayd exiting...");
 
     Ok(())
+}
+
+/// Load a previously generated iroh secret key, or generate and persist a
+/// fresh one on first start. Kept as `[u8; 32]` in redb (iroh's SecretKey
+/// type can't impl `redb::Value` directly due to orphan rules).
+///
+/// One write tx: insert the fresh bytes and inspect the returned prior
+/// value. If a prior value existed, return it and drop the tx (aborting
+/// the overwrite); otherwise commit the fresh bytes.
+fn load_or_init_iroh_sk(db: &picomint_redb::Database) -> iroh::SecretKey {
+    let fresh = iroh::SecretKey::from_bytes(&rand::random()).to_bytes();
+
+    let dbtx = db.begin_write();
+
+    if let Some(existing) = dbtx.as_ref().insert(&IROH_SK, &(), &fresh) {
+        // Prior value present — the tx is dropped below without commit,
+        // reverting the overwrite attempt.
+        return iroh::SecretKey::from_bytes(&existing);
+    }
+
+    dbtx.commit();
+    iroh::SecretKey::from_bytes(&fresh)
 }
 
 async fn shutdown_signal() {

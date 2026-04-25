@@ -18,7 +18,8 @@ use secp256k1::schnorr::Signature;
 use tracing::{error, instrument};
 
 use super::events::{SendRefundEvent, SendSuccessEvent};
-use super::{LightningClientContext, LightningInvoice};
+use super::gateway_manager::{GatewayState, LnGatewayManager};
+use super::{LightningClientContext, LightningInvoice, gateway_api};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
@@ -42,7 +43,7 @@ pub struct SendSMCommon {
     pub operation_id: OperationId,
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
-    pub gateway_api: Option<String>,
+    pub gateway_node_id: Option<iroh::PublicKey>,
     pub invoice: Option<LightningInvoice>,
     pub refund_keypair: Keypair,
 }
@@ -80,11 +81,12 @@ impl StateMachine for SendStateMachine {
                     .await,
             ),
             SendSMState::Funded => {
-                let gateway_api = self.common.gateway_api.clone().unwrap();
+                let gateway_node_id = self.common.gateway_node_id.unwrap();
                 let invoice = self.common.invoice.clone().unwrap();
                 tokio::select! {
                     response = gateway_send_payment_sm(
-                        gateway_api,
+                        ctx.gateway_manager.clone(),
+                        gateway_node_id,
                         ctx.federation_id,
                         self.common.outpoint,
                         self.common.contract.clone(),
@@ -122,9 +124,10 @@ impl StateMachine for SendStateMachine {
     }
 }
 
-#[instrument(target = LOG_CLIENT_MODULE_LN, skip(refund_keypair))]
+#[instrument(target = LOG_CLIENT_MODULE_LN, skip(manager, refund_keypair))]
 async fn gateway_send_payment_sm(
-    gateway_api: String,
+    manager: LnGatewayManager,
+    gateway_node_id: iroh::PublicKey,
     federation_id: FederationId,
     outpoint: OutPoint,
     contract: OutgoingContract,
@@ -132,8 +135,13 @@ async fn gateway_send_payment_sm(
     refund_keypair: Keypair,
 ) -> Result<[u8; 32], Signature> {
     (|| async {
-        let payment_result = crate::ln::gateway_http::send_payment(
-            &gateway_api,
+        let connection = match manager.snapshot(&gateway_node_id) {
+            Some(Some(GatewayState::Online { connection, .. })) => connection,
+            _ => anyhow::bail!("Gateway not currently online"),
+        };
+
+        let payment_result = gateway_api::send_payment(
+            &connection,
             federation_id,
             outpoint,
             contract.clone(),
@@ -142,7 +150,8 @@ async fn gateway_send_payment_sm(
                 *invoice.consensus_hash::<sha256::Hash>().as_ref(),
             )),
         )
-        .await?;
+        .await
+        .map_err(|e| anyhow::anyhow!("gateway send: {e}"))?;
 
         ensure!(
             contract.verify_gateway_response(&payment_result),

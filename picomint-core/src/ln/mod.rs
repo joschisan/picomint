@@ -22,7 +22,7 @@ use tpe::AggregateDecryptionKey;
 use crate::ln::contracts::{IncomingContract, OutgoingContract};
 use crate::{Amount, OutPoint};
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
 pub enum Bolt11InvoiceDescription {
     Direct(String),
     Hash(sha256::Hash),

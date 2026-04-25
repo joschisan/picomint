@@ -45,8 +45,8 @@ impl FederationApi {
         (resp.contracts, resp.next_index)
     }
 
-    pub async fn ln_gateways(&self) -> FederationResult<Vec<String>> {
-        let gateways: BTreeMap<PeerId, Vec<String>> = self
+    pub async fn ln_gateways(&self) -> FederationResult<Vec<iroh::PublicKey>> {
+        let gateways: BTreeMap<PeerId, Vec<iroh::PublicKey>> = self
             .request_with_strategy(
                 FilterMapThreshold::new(
                     |_, resp: GatewaysResponse| Ok(resp.gateways),
@@ -59,10 +59,10 @@ impl FederationApi {
         let mut union = gateways
             .values()
             .flatten()
-            .cloned()
-            .collect::<BTreeSet<String>>()
+            .copied()
+            .collect::<BTreeSet<iroh::PublicKey>>()
             .into_iter()
-            .collect::<Vec<String>>();
+            .collect::<Vec<iroh::PublicKey>>();
 
         // Shuffling the gateways ensures that payments are distributed over the
         // gateways evenly.
@@ -78,7 +78,7 @@ impl FederationApi {
         Ok(union)
     }
 
-    pub async fn ln_gateways_from_peer(&self, peer: PeerId) -> ServerResult<Vec<String>> {
+    pub async fn ln_gateways_from_peer(&self, peer: PeerId) -> ServerResult<Vec<iroh::PublicKey>> {
         let resp = self
             .request_single_peer::<GatewaysResponse>(
                 Method::Ln(LnMethod::Gateways(GatewaysRequest)),

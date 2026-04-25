@@ -1,18 +1,5 @@
 use picomint_core::core::OperationId;
-use picomint_core::secp256k1::PublicKey;
-use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::table;
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
-pub struct GatewayKey(pub PublicKey);
-
-picomint_redb::consensus_key!(GatewayKey);
-
-table!(
-    GATEWAY,
-    GatewayKey => String,
-    "ln-gateway",
-);
 
 table!(
     INCOMING_CONTRACT_STREAM_INDEX,

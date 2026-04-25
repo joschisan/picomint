@@ -3870,6 +3870,7 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "clap",
+ "iroh-base",
  "lightning-invoice",
  "picomint-core",
  "serde",
@@ -3930,6 +3931,7 @@ dependencies = [
  "picomint-base32",
  "picomint-client",
  "picomint-core",
+ "picomint-encoding",
  "picomint-eventlog",
  "picomint-gateway-cli-core",
  "picomint-lnurl",
@@ -3972,6 +3974,7 @@ dependencies = [
  "axum",
  "bitcoin",
  "clap",
+ "iroh",
  "lightning-invoice",
  "picomint-base32",
  "picomint-core",
@@ -3980,7 +3983,6 @@ dependencies = [
  "picomint-logging",
  "picomint-tpe",
  "rand 0.8.5",
- "reqwest 0.12.22",
  "serde",
  "tokio",
  "tower-http",
@@ -4019,6 +4021,7 @@ name = "picomint-server-cli-core"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "iroh",
  "picomint-core",
  "serde",
 ]
