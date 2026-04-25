@@ -21,7 +21,7 @@ use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::ln::gateway_api::PaymentFee;
 use picomint_gateway_daemon::client::GatewayClientFactory;
-use picomint_gateway_daemon::db::{INCOMING_CONTRACT, OUTGOING_CONTRACT, PROCESSED_LDK_PAYMENT};
+use picomint_gateway_daemon::db::{INCOMING_CONTRACT, OUTGOING_CONTRACT, PROCESSED_LDK_EVENT};
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
 use picomint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use picomint_redb::WriteTxRef;
@@ -206,13 +206,13 @@ fn main() -> anyhow::Result<()> {
             base: Amount::from_msats(opts.ln_fee_base_msat),
             ppm: opts.ln_fee_ppm,
         },
-        query_state: picomint_gateway_daemon::query::QueryState::wipe_and_init(&opts.data_dir)?,
+        analytics: picomint_gateway_daemon::analytics::Analytics::wipe_and_init(&opts.data_dir)?,
         task_group: task_group.clone(),
     };
 
     // 7. Load federation clients + spawn their analytics tails and trailers
     runtime.block_on(state.load_clients())?;
-    runtime.block_on(state.spawn_analytics_tails());
+    runtime.block_on(state.spawn_analytics_trailers());
     runtime.block_on(state.spawn_trailers());
 
     // 8. Spawn tasks
@@ -315,7 +315,7 @@ fn handle_payment_claimable(
     let operation_id = OperationId::from_encodable(&payment_hash);
 
     if dbtx
-        .insert(&PROCESSED_LDK_PAYMENT, &payment_hash, &())
+        .insert(&PROCESSED_LDK_EVENT, &payment_hash, &())
         .is_some()
     {
         return;
@@ -385,7 +385,7 @@ fn handle_payment_successful(
     let operation_id = OperationId::from_encodable(&payment_hash);
 
     if dbtx
-        .insert(&PROCESSED_LDK_PAYMENT, &payment_hash, &())
+        .insert(&PROCESSED_LDK_EVENT, &payment_hash, &())
         .is_some()
     {
         return;
@@ -413,7 +413,7 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTxRef<'_>, payment_hash: 
     let operation_id = OperationId::from_encodable(&payment_hash);
 
     if dbtx
-        .insert(&PROCESSED_LDK_PAYMENT, &payment_hash, &())
+        .insert(&PROCESSED_LDK_EVENT, &payment_hash, &())
         .is_some()
     {
         return;

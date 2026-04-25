@@ -191,8 +191,8 @@ impl GatewayClientModule {
     /// `SendCancelEvent`.
     ///
     /// Called at most once per op id: both callers short-circuit re-entry
-    /// via upstream markers (`PROCESSED_LDK_PAYMENT` on the LDK path,
-    /// `TRAILER_CURSOR` on the trailer path) in the same unified dbtx.
+    /// via upstream markers (`PROCESSED_LDK_EVENT` on the LDK path,
+    /// `EVENT_CURSOR` on the trailer path) in the same unified dbtx.
     ///
     /// `dbtx` must be scoped to this federation's client DB namespace (see
     /// [`WriteTxRef::isolate`]).

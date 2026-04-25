@@ -538,11 +538,11 @@ async fn federation_join(
         .expect("clients RwLock poisoned")
         .insert(invite_code.federation_id, client.clone());
 
-    crate::query::spawn_tail(
+    crate::analytics::spawn_trailer(
         &state.task_group,
         client.clone(),
         invite_code.federation_id,
-        state.query_state.clone(),
+        state.analytics.clone(),
     );
 
     crate::trailer::spawn_trailer(
@@ -570,10 +570,16 @@ async fn federation_list(
 #[instrument(target = LOG_GATEWAY, skip_all, err)]
 async fn federation_config(
     State(state): State<AppState>,
-    Json(_payload): Json<FederationConfigRequest>,
+    Json(payload): Json<FederationConfigRequest>,
 ) -> Result<Json<FederationConfigResponse>, CliError> {
-    let federations = state.all_federation_configs().await;
-    Ok(Json(FederationConfigResponse { federations }))
+    let config = resolve_client(&state, payload.federation_id)
+        .await?
+        .config()
+        .await;
+
+    Ok(Json(FederationConfigResponse {
+        config: serde_json::to_value(&config).expect("ConsensusConfig is serializable"),
+    }))
 }
 
 /// Get a federation's ecash balance

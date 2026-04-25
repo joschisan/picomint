@@ -106,17 +106,7 @@ impl ClientContext {
         let end = pos.saturating_add(limit);
         self.db
             .begin_read()
-            .as_ref()
-            .with_native_table(&picomint_eventlog::EVENT_LOG, |t| {
-                t.range(pos..end)
-                    .expect("redb range failed")
-                    .map(|r| {
-                        let (k, v) = r.expect("redb range item failed");
-                        (k.value(), v.value())
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
+            .range(&picomint_eventlog::EVENT_LOG, pos..end, |it| it.collect())
     }
 
     /// Stream every event belonging to `operation_id`, starting from the

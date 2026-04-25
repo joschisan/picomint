@@ -14,7 +14,7 @@
 //!   `fail_for_hash` on the LDK node so the upstream LN sender's HTLC
 //!   settles or times out.
 //!
-//! Cursor is persisted per federation in the daemon DB (`TRAILER_CURSOR`)
+//! Cursor is persisted per federation in the daemon DB (`EVENT_CURSOR`)
 //! and advanced after each dispatched event. Dispatches are idempotent, so
 //! on a crash the trailer just re-runs the last event on restart.
 use std::sync::Arc;
@@ -31,7 +31,7 @@ use picomint_eventlog::EventLogEntry;
 use picomint_redb::WriteTxRef;
 
 use crate::AppState;
-use crate::db::{INCOMING_CONTRACT, OUTGOING_CONTRACT, TRAILER_CURSOR};
+use crate::db::{EVENT_CURSOR, INCOMING_CONTRACT, OUTGOING_CONTRACT};
 
 const CHUNK_SIZE: u64 = 1_000;
 
@@ -49,7 +49,7 @@ async fn run(state: AppState, federation_id: FederationId, client: Arc<Client>) 
         .gateway_db
         .begin_read()
         .as_ref()
-        .get(&TRAILER_CURSOR, &federation_id)
+        .get(&EVENT_CURSOR, &federation_id)
         .unwrap_or_default();
 
     let notify = client.event_notify();
@@ -66,7 +66,7 @@ async fn run(state: AppState, federation_id: FederationId, client: Arc<Client>) 
 
             cursor = id.saturating_add(1);
 
-            dbtx.insert(&TRAILER_CURSOR, &federation_id, &cursor);
+            dbtx.insert(&EVENT_CURSOR, &federation_id, &cursor);
 
             dbtx.commit();
         }

@@ -326,22 +326,18 @@ impl Client {
         let end = pos.saturating_add(limit);
         self.db
             .begin_read()
-            .as_ref()
-            .with_native_table(&picomint_eventlog::EVENT_LOG, |t| {
-                t.range(pos..end)
-                    .expect("redb range failed")
-                    .map(|r| {
-                        let (k, v) = r.expect("redb range item failed");
-                        (k.value(), v.value())
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
+            .range(&picomint_eventlog::EVENT_LOG, pos..end, |it| it.collect())
     }
 
     /// Shared [`Notify`] that fires on every commit touching the event log.
     pub fn event_notify(&self) -> Arc<tokio::sync::Notify> {
         self.db.notify_for_table(&picomint_eventlog::EVENT_LOG)
+    }
+
+    /// One-shot snapshot of every event currently logged for `operation_id`,
+    /// in insertion order.
+    pub fn read_operation_events(&self, operation_id: OperationId) -> Vec<EventLogEntry> {
+        picomint_eventlog::read_operation_events(&self.db, operation_id)
     }
 
     /// Stream every event belonging to `operation_id`, starting from the

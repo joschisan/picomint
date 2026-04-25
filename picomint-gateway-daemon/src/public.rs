@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Json, Path, Query, State};
@@ -115,7 +114,7 @@ async fn verify_bolt11_preimage_get(
     let response = state
         .verify_bolt11_preimage(payment_hash, query.contains_key("wait"))
         .await
-        .map_err(|e| LnurlError::internal(anyhow!(e)))?;
+        .map_err(LnurlError::internal)?;
 
     Ok(Json(json!(LnurlResponse::Ok(response))))
 }

@@ -37,9 +37,9 @@ table!(
 // presence implies the handler ran to completion, absence on an incoming
 // event means it's safe to (re-)process.
 table!(
-    PROCESSED_LDK_PAYMENT,
+    PROCESSED_LDK_EVENT,
     [u8; 32] => (),
-    "processed-ldk-payment",
+    "processed-ldk-event",
 );
 
 // Per-federation cursor for the trailer task. Value is the next
@@ -47,9 +47,9 @@ table!(
 // in the same dbtx that dispatches the external side effect — so a crashed
 // trailer simply re-dispatches idempotently on restart.
 table!(
-    TRAILER_CURSOR,
+    EVENT_CURSOR,
     FederationId => EventLogId,
-    "trailer-cursor",
+    "event-cursor",
 );
 
 #[derive(Debug, Clone, Encodable, Decodable)]
