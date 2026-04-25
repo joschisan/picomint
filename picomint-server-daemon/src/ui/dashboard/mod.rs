@@ -14,7 +14,6 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum_extra::extract::cookie::CookieJar;
 use maud::html;
-use picomint_core::config::META_FEDERATION_NAME_KEY;
 use picomint_core::module::ApiAuth;
 
 use crate::consensus::api::ConsensusApi;
@@ -77,13 +76,7 @@ async fn dashboard_view(
         .iter()
         .map(|(peer_id, endpoint)| (*peer_id, endpoint.name.clone()))
         .collect();
-    let federation_name = api
-        .cfg
-        .consensus
-        .meta
-        .get(META_FEDERATION_NAME_KEY)
-        .cloned()
-        .expect("Federation name must be set");
+    let federation_name = api.cfg.consensus.name.clone();
     let session_count = api.session_count().await;
     let p2p_connection_status: std::collections::BTreeMap<_, _> = api
         .p2p_status_receivers

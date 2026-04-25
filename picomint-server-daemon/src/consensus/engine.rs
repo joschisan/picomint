@@ -117,14 +117,14 @@ impl ConsensusEngine {
         // broadcast instance is therefore bound by:
         //
         // self.keychain.peer_count()
-        //      * (broadcast_rounds_per_session + EXP_SLOWDOWN_ROUNDS)
+        //      * (aleph_rounds_per_session + EXP_SLOWDOWN_ROUNDS)
         //      * ALEPH_BFT_UNIT_BYTE_LIMIT
 
         const EXP_SLOWDOWN_ROUNDS: u16 = 1000;
         const BASE: f64 = 1.02;
 
-        let rounds_per_session = self.cfg.consensus.broadcast_rounds_per_session;
-        let round_delay = f64::from(crate::config::BROADCAST_ROUND_DELAY_MS);
+        let rounds_per_session = self.cfg.consensus.aleph_rounds_per_session;
+        let round_delay = f64::from(crate::config::ALEPH_ROUND_DELAY_MS);
 
         let mut delay_config = aleph_bft::default_delay_config();
 
@@ -146,7 +146,7 @@ impl ConsensusEngine {
             session_index,
             self.cfg
                 .consensus
-                .broadcast_rounds_per_session
+                .aleph_rounds_per_session
                 .checked_add(EXP_SLOWDOWN_ROUNDS)
                 .expect("Rounds per session exceed maximum of u16::Max - EXP_SLOWDOWN_ROUNDS"),
             delay_config,
@@ -241,14 +241,14 @@ impl ConsensusEngine {
         let mut index_broadcast_interval = tokio::time::interval(broadcast_interval);
 
         // We build a session outcome out of the ordered batches until either we have
-        // processed broadcast_rounds_per_session rounds or a threshold signed
+        // processed aleph_rounds_per_session rounds or a threshold signed
         // session outcome is obtained from our peers
         loop {
             tokio::select! {
                 result = ordered_unit_receiver.recv() => {
                     let ordered_unit = result.ok()?;
 
-                    if ordered_unit.round >= self.cfg.consensus.broadcast_rounds_per_session {
+                    if ordered_unit.round >= self.cfg.consensus.aleph_rounds_per_session {
                         info!(
                             target: LOG_CONSENSUS,
                             session_index,

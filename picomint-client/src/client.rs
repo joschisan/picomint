@@ -51,7 +51,6 @@ pub struct Client {
     config: tokio::sync::RwLock<ConsensusConfig>,
     db: Database,
     federation_id: FederationId,
-    federation_config_meta: BTreeMap<String, String>,
     pub(crate) mint: Arc<MintClientModule>,
     pub(crate) wallet: Arc<WalletClientModule>,
     pub(crate) ln: LnFlavor,
@@ -184,10 +183,9 @@ impl Client {
         };
 
         Ok(Arc::new(Client {
-            config: tokio::sync::RwLock::new(config.clone()),
+            config: tokio::sync::RwLock::new(config),
             db,
             federation_id,
-            federation_config_meta: config.meta,
             mint,
             wallet,
             ln,
@@ -219,11 +217,6 @@ impl Client {
 
     pub async fn config(&self) -> ConsensusConfig {
         self.config.read().await.clone()
-    }
-
-    /// Get metadata value from the federation config itself
-    pub fn get_config_meta(&self, key: &str) -> Option<String> {
-        self.federation_config_meta.get(key).cloned()
     }
 
     pub fn mint(&self) -> &MintClientModule {

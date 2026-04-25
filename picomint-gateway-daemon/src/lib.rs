@@ -165,8 +165,8 @@ impl AppState {
     }
 
     /// Get the name of a federation from its client config.
-    pub async fn federation_name(client: &Arc<Client>) -> Option<String> {
-        client.config().await.federation_name()
+    pub async fn federation_name(client: &Arc<Client>) -> String {
+        client.config().await.name
     }
 
     /// Snapshot the current clients map into an owned Vec so we can release

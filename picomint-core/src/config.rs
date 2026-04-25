@@ -54,10 +54,6 @@ impl FederationId {
     }
 }
 
-/// Key under which the federation name can be sent to client in the `meta` part
-/// of the config
-pub const META_FEDERATION_NAME_KEY: &str = "federation_name";
-
 /// Federation-wide config.
 ///
 /// Produced by DKG on the server side, served to clients via the core
@@ -69,16 +65,16 @@ pub const META_FEDERATION_NAME_KEY: &str = "federation_name";
 pub struct ConsensusConfig {
     /// Per-peer endpoint info (iroh pk, broadcast pk, name).
     pub peers: BTreeMap<PeerId, PeerEndpoint>,
+    /// Federation name, chosen by the lead guardian during setup.
+    pub name: String,
     /// Mint module config
     pub mint: MintConfigConsensus,
     /// Wallet module config
     pub wallet: WalletConfigConsensus,
     /// Lightning module config
     pub ln: LightningConfigConsensus,
-    /// Free-form federation metadata (federation name, etc.)
-    pub meta: BTreeMap<String, String>,
     /// Number of AlephBFT rounds per session.
-    pub broadcast_rounds_per_session: u16,
+    pub aleph_rounds_per_session: u16,
 }
 
 picomint_redb::consensus_value!(ConsensusConfig);
@@ -86,9 +82,5 @@ picomint_redb::consensus_value!(ConsensusConfig);
 impl ConsensusConfig {
     pub fn calculate_federation_id(&self) -> FederationId {
         FederationId(self.consensus_hash())
-    }
-
-    pub fn federation_name(&self) -> Option<String> {
-        self.meta.get(META_FEDERATION_NAME_KEY).cloned()
     }
 }

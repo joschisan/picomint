@@ -38,18 +38,18 @@ pub const MAX_CLIENT_CONNECTIONS: u32 = 1000;
 
 /// AlephBFT round delay (ms). Byzantine-fault-only; the ordering floor is
 /// dominated by network latency in practice.
-pub const BROADCAST_ROUND_DELAY_MS: u16 = 50;
+pub const ALEPH_ROUND_DELAY_MS: u16 = 50;
 
 /// AlephBFT rounds per session. Controls session duration (3 min prod / 10 s
 /// test).
-const DEFAULT_BROADCAST_ROUNDS_PER_SESSION: u16 = 3600;
-const TEST_BROADCAST_ROUNDS_PER_SESSION: u16 = 200;
+const DEFAULT_ALEPH_ROUNDS_PER_SESSION: u16 = 3600;
+const TEST_ALEPH_ROUNDS_PER_SESSION: u16 = 200;
 
-fn broadcast_rounds_per_session() -> u16 {
+fn aleph_rounds_per_session() -> u16 {
     if is_running_in_test_env() {
-        TEST_BROADCAST_ROUNDS_PER_SESSION
+        TEST_ALEPH_ROUNDS_PER_SESSION
     } else {
-        DEFAULT_BROADCAST_ROUNDS_PER_SESSION
+        DEFAULT_ALEPH_ROUNDS_PER_SESSION
     }
 }
 
@@ -113,8 +113,8 @@ pub struct ConfigGenParams {
     pub iroh_sk: iroh::SecretKey,
     /// Endpoints of all servers
     pub peers: BTreeMap<PeerId, PeerSetupCode>,
-    /// Guardian-defined key-value pairs that will be passed to the client
-    pub meta: BTreeMap<String, String>,
+    /// Federation name, chosen by the lead guardian during setup.
+    pub name: String,
     /// Bitcoin network for this federation
     pub network: bitcoin::Network,
 }
@@ -152,8 +152,8 @@ impl ServerConfig {
             mint: mint.consensus,
             wallet: wallet.consensus,
             ln: ln.consensus,
-            meta: params.meta.clone(),
-            broadcast_rounds_per_session: broadcast_rounds_per_session(),
+            name: params.name.clone(),
+            aleph_rounds_per_session: aleph_rounds_per_session(),
         };
 
         let private = ServerConfigPrivate {
