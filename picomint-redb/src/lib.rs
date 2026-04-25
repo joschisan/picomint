@@ -441,7 +441,7 @@ impl<'tx> WriteTxRef<'tx> {
 
     /// Open the native redb table at this view's prefix+name and hand it to
     /// `f`. Registers the table in `touched` for post-commit notification.
-    pub fn with_native_table<K, V, R>(
+    pub(crate) fn with_native_table<K, V, R>(
         &self,
         def: &NativeTableDef<K, V>,
         f: impl FnOnce(&mut redb::Table<'_, K, V>) -> R,
@@ -469,7 +469,7 @@ impl<'tx> WriteTxRef<'tx> {
 impl ReadTxRef<'_> {
     /// Open the native redb table and hand it to `f`. Returns `None` if the
     /// table has never been written — treat that as "empty" at the call site.
-    pub fn with_native_table<K, V, R>(
+    pub(crate) fn with_native_table<K, V, R>(
         &self,
         def: &NativeTableDef<K, V>,
         f: impl FnOnce(&redb::ReadOnlyTable<K, V>) -> R,

@@ -15,7 +15,6 @@ use picomint_core::core::OperationId;
 use picomint_core::time::duration_since_epoch;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::NativeTableDef;
-use picomint_redb::redb::ReadableTable as _;
 use picomint_redb::{Database, WriteTxRef};
 use picomint_redb::{consensus_key, consensus_value};
 use serde::{Deserialize, Serialize};
@@ -171,21 +170,16 @@ pub fn log_event_raw(
         payload,
     };
 
-    dbtx.with_native_table(&EVENT_LOG, |t| {
-        assert!(
-            t.insert(&id, &entry).expect("redb insert failed").is_none(),
-            "Must never overwrite existing event"
-        );
-    });
+    assert!(
+        dbtx.insert(&EVENT_LOG, &id, &entry).is_none(),
+        "Must never overwrite existing event"
+    );
 
-    dbtx.with_native_table(&EVENT_LOG_BY_OPERATION, |t| {
-        assert!(
-            t.insert(&(operation_id, id), &entry)
-                .expect("redb insert failed")
-                .is_none(),
-            "Must never overwrite existing event"
-        );
-    });
+    assert!(
+        dbtx.insert(&EVENT_LOG_BY_OPERATION, &(operation_id, id), &entry)
+            .is_none(),
+        "Must never overwrite existing event"
+    );
 }
 
 /// Typed convenience: encode an [`Event`] into the log.
@@ -201,11 +195,8 @@ pub fn log_event<E: Event>(dbtx: &WriteTxRef<'_>, operation_id: OperationId, eve
 
 /// Next unused log id — one past the max existing id, or 0 if empty.
 fn next_event_log_id(dbtx: &WriteTxRef<'_>) -> EventLogId {
-    dbtx.with_native_table(&EVENT_LOG, |t| {
-        t.last()
-            .expect("redb last failed")
-            .map(|(k, _)| k.value().next())
-            .unwrap_or_default()
+    dbtx.iter(&EVENT_LOG, |it| {
+        it.next_back().map(|(k, _)| k.next()).unwrap_or_default()
     })
 }
 
@@ -213,18 +204,11 @@ fn next_event_log_id(dbtx: &WriteTxRef<'_>) -> EventLogId {
 /// insertion order. See [`subscribe_operation_events`] for the streaming
 /// variant that also yields events arriving after the call.
 pub fn read_operation_events(db: &Database, operation_id: OperationId) -> Vec<EventLogEntry> {
-    db.begin_read()
-        .as_ref()
-        .with_native_table(&EVENT_LOG_BY_OPERATION, |t| {
-            t.range((operation_id, EventLogId::LOG_START)..(operation_id, EventLogId::LOG_END))
-                .expect("redb range failed")
-                .map(|r| {
-                    let (_, v) = r.expect("redb range item failed");
-                    v.value()
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
+    db.begin_read().range(
+        &EVENT_LOG_BY_OPERATION,
+        (operation_id, EventLogId::LOG_START)..(operation_id, EventLogId::LOG_END),
+        |it| it.map(|(_, v)| v).collect(),
+    )
 }
 
 /// Stream every event belonging to `operation_id`, in insertion order.
@@ -241,20 +225,11 @@ pub fn subscribe_operation_events(
         let mut next_id = EventLogId::LOG_START;
         loop {
             let notified = event_notify.notified();
-            let batch = db
-                .begin_read()
-                .as_ref()
-                .with_native_table(&EVENT_LOG_BY_OPERATION, |t| {
-                    t.range((operation_id, next_id)..(operation_id, EventLogId::LOG_END))
-                        .expect("redb range failed")
-                        .map(|r| {
-                            let (k, v) = r.expect("redb range item failed");
-                            let (_, id) = k.value();
-                            (id, v.value())
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+            let batch: Vec<(EventLogId, EventLogEntry)> = db.begin_read().range(
+                &EVENT_LOG_BY_OPERATION,
+                (operation_id, next_id)..(operation_id, EventLogId::LOG_END),
+                |it| it.map(|((_, id), entry)| (id, entry)).collect(),
+            );
             for (id, entry) in batch {
                 next_id = id.next();
                 yield entry;
