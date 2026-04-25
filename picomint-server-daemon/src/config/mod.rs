@@ -3,11 +3,11 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
+use bitcoin::Network;
 use dkg::DkgHandle;
 use futures::future::select_all;
 use picomint_core::config::ConsensusConfig;
 pub use picomint_core::config::{FederationId, PeerEndpoint};
-use picomint_core::envs::is_running_in_test_env;
 use picomint_core::invite_code::InviteCode;
 use picomint_core::ln::config::LightningConfigPrivate;
 use picomint_core::mint::config::{MintConfig, MintConfigPrivate};
@@ -41,13 +41,13 @@ pub const MAX_CLIENT_CONNECTIONS: u32 = 1000;
 pub const ALEPH_ROUND_DELAY_MS: u16 = 50;
 
 /// AlephBFT rounds per session. Controls session duration (3 min prod / 10 s
-/// test).
+/// regtest).
 const DEFAULT_ALEPH_ROUNDS_PER_SESSION: u16 = 3600;
-const TEST_ALEPH_ROUNDS_PER_SESSION: u16 = 200;
+const REGTEST_ALEPH_ROUNDS_PER_SESSION: u16 = 200;
 
-fn aleph_rounds_per_session() -> u16 {
-    if is_running_in_test_env() {
-        TEST_ALEPH_ROUNDS_PER_SESSION
+fn aleph_rounds_per_session(network: Network) -> u16 {
+    if network == Network::Regtest {
+        REGTEST_ALEPH_ROUNDS_PER_SESSION
     } else {
         DEFAULT_ALEPH_ROUNDS_PER_SESSION
     }
@@ -149,7 +149,7 @@ impl ServerConfig {
 
         let consensus = ConsensusConfig {
             peers,
-            aleph_rounds_per_session: aleph_rounds_per_session(),
+            aleph_rounds_per_session: aleph_rounds_per_session(params.network),
             network: params.network,
             name: params.name.clone(),
             mint: mint.consensus,

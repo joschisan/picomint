@@ -495,7 +495,12 @@ impl Wallet {
         btc_rpc: BitcoinRpcMonitor,
         network: Network,
     ) -> Wallet {
-        Self::spawn_broadcast_unconfirmed_txs_task(btc_rpc.clone(), db.clone(), task_group);
+        Self::spawn_broadcast_unconfirmed_txs_task(
+            btc_rpc.clone(),
+            db.clone(),
+            task_group,
+            network,
+        );
 
         Wallet {
             cfg,
@@ -509,6 +514,7 @@ impl Wallet {
         btc_rpc: BitcoinRpcMonitor,
         db: Database,
         task_group: &TaskGroup,
+        network: Network,
     ) {
         task_group.spawn_cancellable("broadcast_unconfirmed_transactions", async move {
             loop {
@@ -520,7 +526,7 @@ impl Wallet {
                     btc_rpc.submit_transaction(unconfirmed_tx.tx).await;
                 }
 
-                sleep(common::sleep_duration()).await;
+                sleep(common::sleep_duration(network)).await;
             }
         });
     }
@@ -678,7 +684,7 @@ impl Wallet {
 
             info!(target: LOG_MODULE_WALLET, "Waiting for local bitcoin backend to sync to block count {block_count}");
 
-            sleep(common::sleep_duration()).await;
+            sleep(common::sleep_duration(self.network)).await;
         }
     }
 

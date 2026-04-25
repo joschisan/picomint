@@ -3,7 +3,9 @@ use std::time::Duration;
 
 use bitcoin::hashes::{Hash, hash160, sha256};
 use bitcoin::key::TapTweak;
-use bitcoin::{Address, PubkeyHash, ScriptBuf, ScriptHash, Txid, WPubkeyHash, WScriptHash};
+use bitcoin::{
+    Address, Network, PubkeyHash, ScriptBuf, ScriptHash, Txid, WPubkeyHash, WScriptHash,
+};
 use miniscript::descriptor::Wsh;
 use picomint_encoding::{Decodable, Encodable};
 
@@ -16,11 +18,9 @@ use thiserror::Error;
 pub mod config;
 pub mod methods;
 
-/// Returns a sleep duration of 1 second in test environments or 60 seconds in
-/// production. Used for polling intervals where faster feedback is needed
-/// during testing.
-pub fn sleep_duration() -> Duration {
-    if crate::envs::is_running_in_test_env() {
+/// Polling interval: 1 second on regtest (dev/CI), 60 seconds otherwise.
+pub fn sleep_duration(network: Network) -> Duration {
+    if network == Network::Regtest {
         Duration::from_secs(1)
     } else {
         Duration::from_mins(1)

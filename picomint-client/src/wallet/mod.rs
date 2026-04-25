@@ -317,7 +317,10 @@ impl WalletClientModule {
                     }
                 }
 
-                sleep(picomint_core::wallet::sleep_duration()).await;
+                sleep(picomint_core::wallet::sleep_duration(
+                    module.client_ctx.network(),
+                ))
+                .await;
             }
         });
     }
