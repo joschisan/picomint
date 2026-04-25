@@ -11,7 +11,8 @@ Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitco
 - `cargo check --workspace` — full workspace type check
 - `cargo build --workspace` — build everything
 - `cargo test --workspace` — run all tests
-- `just clippy` / `just format` / `just final-check`
+- `cargo clippy --workspace --all-targets` — lints
+- `cargo fmt --all` — format
 - `./test-integration.sh` — end-to-end integration test (requires Docker + bitcoind)
 
 ## Architecture
@@ -52,3 +53,15 @@ Env var names are unprefixed (puncture-style): `DATA_DIR`, `BITCOIN_NETWORK`, `B
 - Prefer concrete types over dyn/trait-objects. Keep module dispatch static with typed module sets.
 - No comments that explain WHAT code does — names and types already say it. Only comment non-obvious WHY.
 - Prefer deleting code over preserving it — picomint is explicitly a simplification project.
+
+## Style
+
+- All `use` statements at the top of the file. Never inside a function body.
+- Import functions/structs directly. Qualify with the containing module only when the bare name is too generic — e.g. `ln::render()` reads better than `render()`, but `Wallet::new` doesn't need `wallet::` in front of it.
+- On import-name collisions, qualify inline at the use-site (e.g. `bitcoin::Network::Regtest`) rather than aliasing with `as`.
+- Blank line between most statements. Exception: tight, repetitive groupings (e.g. several `let result_n = fn_n();` in a row).
+- Match arms: no blank lines between branches. Mix one-liner and block-bodied arms freely.
+- `///` doc comments on every `pub` item.
+- Use `?` plain. Add `.context("...")` only when the underlying error is too cryptic to be useful at the boundary.
+- Chain successive transformations on the same value rather than re-binding through multiple `let`s. Prefer `let x = data.iter().filter(...).map(...).collect();` over `let x = data.iter(); let x = x.filter(...); ...`.
+- `thiserror` types are reserved for errors returned to the client and errors serialized via `Encodable`/`Decodable`. Use `anyhow::Result` everywhere else (orchestration, internal helpers).
