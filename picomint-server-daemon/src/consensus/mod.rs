@@ -120,14 +120,11 @@ pub async fn run(
     task_group.spawn_cancellable("iroh-api", {
         let consensus_api = consensus_api.clone();
         let task_group = task_group.clone();
-        async move {
-            picomint_iroh_api::run_iroh_api(
-                foreign_conn_rx,
-                move |method: Method| dispatch(consensus_api.clone(), method),
-                task_group,
-            )
-            .await;
-        }
+        picomint_iroh_api::run_iroh_api(
+            foreign_conn_rx,
+            move |method: Method| dispatch(consensus_api.clone(), method),
+            task_group,
+        )
     });
 
     info!(target: LOG_CONSENSUS, "Starting Submission of Module CI proposals...");
