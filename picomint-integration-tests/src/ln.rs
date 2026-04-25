@@ -749,12 +749,7 @@ async fn spawn_mock_gateway() -> anyhow::Result<iroh::PublicKey> {
     tokio::spawn({
         let task_group = task_group.clone();
         async move {
-            picomint_iroh_api::run_iroh_api(
-                foreign_conn_rx,
-                |method: GatewayMethod| async move { mock_dispatch(method).await },
-                task_group,
-            )
-            .await;
+            picomint_iroh_api::run_iroh_api(foreign_conn_rx, mock_dispatch, task_group).await;
         }
     });
 

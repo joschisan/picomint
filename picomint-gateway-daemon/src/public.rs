@@ -96,10 +96,7 @@ pub async fn run_public(
 
     picomint_iroh_api::run_iroh_api(
         foreign_conn_rx,
-        move |method: GatewayMethod| {
-            let state = state.clone();
-            async move { dispatch(state, method).await }
-        },
+        move |method: GatewayMethod| dispatch(state.clone(), method),
         task_group,
     )
     .await;
