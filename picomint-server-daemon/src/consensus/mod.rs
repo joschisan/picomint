@@ -87,6 +87,7 @@ pub async fn run(
         db.clone(),
         task_group,
         bitcoin_rpc_connection.clone(),
+        cfg.consensus.network,
     ));
 
     info!(target: LOG_CORE, "Initialise module ln...");
@@ -194,6 +195,13 @@ pub async fn run(
     loop {
         match bitcoin_rpc_connection.status() {
             Some(status) => {
+                anyhow::ensure!(
+                    status.network == cfg.consensus.network,
+                    "Bitcoin backend network {} does not match federation network {}",
+                    status.network,
+                    cfg.consensus.network,
+                );
+
                 if let Some(progress) = status.sync_progress {
                     if progress >= 0.999 {
                         break;

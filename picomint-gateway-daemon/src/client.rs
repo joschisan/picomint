@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use bitcoin::Network;
 use iroh::Endpoint;
 use iroh::address_lookup::MdnsAddressLookup;
 use iroh::endpoint::presets::N0;
@@ -15,12 +16,13 @@ use crate::db::{CLIENT_CONFIG, ROOT_ENTROPY};
 pub struct GatewayClientFactory {
     db: Database,
     mnemonic: Mnemonic,
-    connectors: Endpoint,
+    endpoint: Endpoint,
+    network: Network,
 }
 
 impl GatewayClientFactory {
     /// Initialize a new factory, storing the mnemonic entropy in the database.
-    pub async fn init(db: Database, mnemonic: Mnemonic) -> anyhow::Result<Self> {
+    pub async fn init(db: Database, mnemonic: Mnemonic, network: Network) -> anyhow::Result<Self> {
         let dbtx = db.begin_write();
         assert!(
             dbtx.as_ref()
@@ -35,14 +37,15 @@ impl GatewayClientFactory {
             .await?;
 
         Ok(Self {
-            connectors: endpoint,
+            endpoint,
             db,
             mnemonic,
+            network,
         })
     }
 
     /// Try to load an existing factory from the database.
-    pub async fn try_load(db: Database) -> anyhow::Result<Option<Self>> {
+    pub async fn try_load(db: Database, network: Network) -> anyhow::Result<Option<Self>> {
         let entropy = db.begin_read().as_ref().get(&ROOT_ENTROPY, &());
 
         match entropy {
@@ -56,9 +59,10 @@ impl GatewayClientFactory {
                     .await?;
 
                 Ok(Some(Self {
-                    connectors: endpoint,
+                    endpoint,
                     db,
                     mnemonic,
+                    network,
                 }))
             }
             None => Ok(None),
@@ -83,7 +87,11 @@ impl GatewayClientFactory {
     /// Join a federation for the first time. Errors if a config for this
     /// federation is already persisted — use [`Self::load`] in that case.
     pub async fn join(&self, invite: &InviteCode) -> anyhow::Result<Arc<picomint_client::Client>> {
-        let config = picomint_client::download(&self.connectors, invite).await?;
+        let config = picomint_client::download(&self.endpoint, invite).await?;
+
+        if config.network != self.network {
+            anyhow::bail!("Unsupported network {}", config.network);
+        }
 
         let dbtx = self.db.begin_write();
 
@@ -114,7 +122,7 @@ impl GatewayClientFactory {
 
     async fn open(&self, config: ConsensusConfig) -> anyhow::Result<Arc<picomint_client::Client>> {
         Client::new_gateway(
-            self.connectors.clone(),
+            self.endpoint.clone(),
             self.client_database(config.calculate_federation_id()),
             &self.mnemonic,
             config,

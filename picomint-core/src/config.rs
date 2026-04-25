@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
+use bitcoin::Network;
 use bitcoin::hashes::{Hash as BitcoinHash, sha256};
 use derive_more::{Display, FromStr};
 use serde::{Deserialize, Serialize};
@@ -65,6 +66,10 @@ impl FederationId {
 pub struct ConsensusConfig {
     /// Per-peer endpoint info (iroh pk, broadcast pk, name).
     pub peers: BTreeMap<PeerId, PeerEndpoint>,
+    /// Number of AlephBFT rounds per session.
+    pub aleph_rounds_per_session: u16,
+    /// Bitcoin network this federation operates on.
+    pub network: Network,
     /// Federation name, chosen by the lead guardian during setup.
     pub name: String,
     /// Mint module config
@@ -73,8 +78,6 @@ pub struct ConsensusConfig {
     pub wallet: WalletConfigConsensus,
     /// Lightning module config
     pub ln: LightningConfigConsensus,
-    /// Number of AlephBFT rounds per session.
-    pub aleph_rounds_per_session: u16,
 }
 
 picomint_redb::consensus_value!(ConsensusConfig);

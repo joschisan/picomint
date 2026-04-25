@@ -63,28 +63,28 @@ impl Client {
     /// flavor. Downloads the federation config via the invite, persists it,
     /// and brings up the client.
     pub async fn new(
-        connectors: Endpoint,
+        endpoint: Endpoint,
         db: Database,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
     ) -> anyhow::Result<Arc<Self>> {
-        Self::build(connectors, db, mnemonic, config, LnChoice::Regular).await
+        Self::build(endpoint, db, mnemonic, config, LnChoice::Regular).await
     }
 
     /// Gateway-flavor counterpart of [`Client::new`]. Used by the gateway
     /// daemon, which mounts [`GatewayClientModule`] in place of the regular
     /// lightning module.
     pub async fn new_gateway(
-        connectors: Endpoint,
+        endpoint: Endpoint,
         db: Database,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
     ) -> anyhow::Result<Arc<Self>> {
-        Self::build(connectors, db, mnemonic, config, LnChoice::Gateway).await
+        Self::build(endpoint, db, mnemonic, config, LnChoice::Gateway).await
     }
 
     async fn build(
-        connectors: Endpoint,
+        endpoint: Endpoint,
         db: Database,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
@@ -103,16 +103,12 @@ impl Client {
             .iter()
             .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
             .collect();
-        let api: FederationApi = FederationApi::new(connectors.clone(), peer_node_ids);
+        let api: FederationApi = FederationApi::new(endpoint.clone(), peer_node_ids);
 
         let task_group = TaskGroup::new();
 
-        let mint_context = crate::module::ClientContext::new(
-            api.clone(),
-            db.clone(),
-            config.clone(),
-            federation_id,
-        );
+        let mint_context =
+            crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
         let mint = Arc::new(
             MintClientModule::new(
                 federation_id,
@@ -124,12 +120,8 @@ impl Client {
             .await?,
         );
 
-        let wallet_context = crate::module::ClientContext::new(
-            api.clone(),
-            db.clone(),
-            config.clone(),
-            federation_id,
-        );
+        let wallet_context =
+            crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
         let wallet = Arc::new(
             WalletClientModule::new(
                 config.wallet.clone(),
@@ -143,12 +135,8 @@ impl Client {
 
         let ln = match ln_choice {
             LnChoice::Regular => {
-                let ln_context = crate::module::ClientContext::new(
-                    api.clone(),
-                    db.clone(),
-                    config.clone(),
-                    federation_id,
-                );
+                let ln_context =
+                    crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
                 LnFlavor::Regular(Arc::new(
                     LightningClientModule::new(
                         federation_id,
@@ -162,12 +150,8 @@ impl Client {
                 ))
             }
             LnChoice::Gateway => {
-                let gw_context = crate::module::ClientContext::new(
-                    api.clone(),
-                    db.clone(),
-                    config.clone(),
-                    federation_id,
-                );
+                let gw_context =
+                    crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
                 LnFlavor::Gateway(Arc::new(
                     GatewayClientModule::new(
                         federation_id,

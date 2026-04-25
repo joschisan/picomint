@@ -6,7 +6,6 @@ mod rpc;
 use anyhow::{Context, ensure};
 use group::Curve;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
-use picomint_core::bitcoin::Network;
 use picomint_core::ln::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
@@ -35,10 +34,7 @@ use self::db::{
 
 /// Run DKG for the lightning module, producing a fresh `LightningConfig` for
 /// this peer.
-pub async fn distributed_gen(
-    peers: &DkgHandle<'_>,
-    network: Network,
-) -> anyhow::Result<LightningConfig> {
+pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<LightningConfig> {
     let (polynomial, sks) = peers.run_dkg_g1().await?;
 
     Ok(LightningConfig {
@@ -51,7 +47,6 @@ pub async fn distributed_gen(
                 .collect(),
             input_fee: Amount::from_sats(1),
             output_fee: Amount::from_sats(1),
-            network,
         },
         private: LightningConfigPrivate {
             sk: SecretKeyShare(sks),

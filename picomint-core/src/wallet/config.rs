@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use crate::{Amount, PeerId};
-use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
 use picomint_encoding::{Decodable, Encodable};
 use secp256k1::{PublicKey, SecretKey};
@@ -37,8 +36,6 @@ pub struct WalletConfigConsensus {
     pub input_fee: Amount,
     /// Fee charged per wallet output
     pub output_fee: Amount,
-    /// Bitcoin network (e.g. testnet, bitcoin)
-    pub network: Network,
 }
 
 /// Converts weight to virtual bytes, defined in [BIP-141] as weight / 4
@@ -73,7 +70,7 @@ impl WalletConfigConsensus {
     /// | 18        | 530  | 920     |
     /// | 19        | 539  | 937     |
     /// | 20        | 565  | 991     |
-    pub fn new(bitcoin_pks: BTreeMap<PeerId, PublicKey>, network: Network) -> Self {
+    pub fn new(bitcoin_pks: BTreeMap<PeerId, PublicKey>) -> Self {
         let tx_overhead_weight = 4 * 4 // nVersion
             + 1 // SegWit marker
             + 1 // SegWit flag
@@ -122,7 +119,6 @@ impl WalletConfigConsensus {
             dust_limit: bitcoin::Amount::from_sat(10_000),
             input_fee: crate::Amount::from_sats(10),
             output_fee: crate::Amount::from_sats(10),
-            network,
         }
     }
 }

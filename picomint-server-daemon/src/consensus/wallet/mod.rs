@@ -82,10 +82,7 @@ fn pending_txs_unordered(dbtx: &impl picomint_redb::DbRead) -> Vec<FederationTx>
 
 /// Run DKG for the wallet module, producing a fresh `WalletConfig` for this
 /// peer.
-pub async fn distributed_gen(
-    peers: &DkgHandle<'_>,
-    network: Network,
-) -> anyhow::Result<WalletConfig> {
+pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<WalletConfig> {
     let (bitcoin_sk, bitcoin_pk) = secp256k1::generate_keypair(&mut OsRng);
 
     let bitcoin_pks: BTreeMap<PeerId, PublicKey> = peers
@@ -96,7 +93,7 @@ pub async fn distributed_gen(
 
     Ok(WalletConfig {
         private: WalletConfigPrivate { bitcoin_sk },
-        consensus: WalletConfigConsensus::new(bitcoin_pks, network),
+        consensus: WalletConfigConsensus::new(bitcoin_pks),
     })
 }
 
@@ -136,8 +133,6 @@ impl Wallet {
             .collect();
 
         if let Some(status) = self.btc_rpc.status() {
-            assert_eq!(status.network, self.cfg.consensus.network);
-
             let block_count_vote = status
                 .block_count
                 .saturating_sub(CONFIRMATION_FINALITY_DELAY);
@@ -489,6 +484,7 @@ pub struct Wallet {
     cfg: WalletConfig,
     db: Database,
     btc_rpc: BitcoinRpcMonitor,
+    network: Network,
 }
 
 impl Wallet {
@@ -497,10 +493,16 @@ impl Wallet {
         db: Database,
         task_group: &TaskGroup,
         btc_rpc: BitcoinRpcMonitor,
+        network: Network,
     ) -> Wallet {
         Self::spawn_broadcast_unconfirmed_txs_task(btc_rpc.clone(), db.clone(), task_group);
 
-        Wallet { cfg, db, btc_rpc }
+        Wallet {
+            cfg,
+            db,
+            btc_rpc,
+            network,
+        }
     }
 
     fn spawn_broadcast_unconfirmed_txs_task(
@@ -568,11 +570,6 @@ impl Wallet {
         .await;
 
         for height in old_consensus_block_count..new_consensus_block_count {
-            // Verify network matches (status should be available after sync)
-            if let Some(status) = self.btc_rpc.status() {
-                assert_eq!(status.network, self.cfg.consensus.network);
-            }
-
             let block_hash = (|| self.btc_rpc.get_block_hash(height))
                 .retry(networking_backoff())
                 .await
@@ -911,7 +908,7 @@ impl Wallet {
 
     /// Get the network for UI display
     pub fn network_ui(&self) -> Network {
-        self.cfg.consensus.network
+        self.network
     }
 
     /// Get the current federation wallet info for UI display
@@ -973,7 +970,7 @@ impl Wallet {
             .add_tweak(tweak)
             .expect("Failed to tweak bitcoin secret key");
 
-        let sk = bitcoin::PrivateKey::new(sk, self.cfg.consensus.network).to_wif();
+        let sk = bitcoin::PrivateKey::new(sk, self.network).to_wif();
 
         Some((pks, sk))
     }

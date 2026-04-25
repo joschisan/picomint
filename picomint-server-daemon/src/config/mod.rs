@@ -149,11 +149,12 @@ impl ServerConfig {
 
         let consensus = ConsensusConfig {
             peers,
+            aleph_rounds_per_session: aleph_rounds_per_session(),
+            network: params.network,
+            name: params.name.clone(),
             mint: mint.consensus,
             wallet: wallet.consensus,
             ln: ln.consensus,
-            name: params.name.clone(),
-            aleph_rounds_per_session: aleph_rounds_per_session(),
         };
 
         let private = ServerConfigPrivate {
@@ -327,14 +328,14 @@ impl ServerConfig {
             "Running config generation for module of kind ln..."
         );
 
-        let ln = crate::consensus::ln::distributed_gen(&handle, params.network).await?;
+        let ln = crate::consensus::ln::distributed_gen(&handle).await?;
 
         info!(
             target: LOG_NET_PEER_DKG,
             "Running config generation for module of kind wallet..."
         );
 
-        let wallet = crate::consensus::wallet::distributed_gen(&handle, params.network).await?;
+        let wallet = crate::consensus::wallet::distributed_gen(&handle).await?;
 
         let cfg = ServerConfig::from(
             params.clone(),
