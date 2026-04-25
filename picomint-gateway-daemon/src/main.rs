@@ -247,6 +247,7 @@ fn main() -> anyhow::Result<()> {
     let public_task = runtime.spawn(public::run_public(
         state.clone(),
         endpoint.clone(),
+        task_group.clone(),
         task_group.make_handle(),
     ));
     let cli_task = runtime.spawn(cli::run_cli(state.clone(), task_group.make_handle()));

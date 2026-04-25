@@ -25,7 +25,7 @@ use tracing::trace;
 
 use crate::config::dkg::DkgHandle;
 use crate::config::poly::eval_poly_g1;
-use crate::{handler, handler_async};
+use picomint_iroh_api::{handler, handler_async};
 
 use self::db::{
     BLOCK_COUNT_VOTE, DECRYPTION_KEY_SHARE, GATEWAY, INCOMING_CONTRACT, INCOMING_CONTRACT_INDEX,

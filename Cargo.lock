@@ -3883,6 +3883,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "async-channel",
  "axum",
  "bitcoin",
  "clap",
@@ -3899,6 +3900,7 @@ dependencies = [
  "picomint-encoding",
  "picomint-eventlog",
  "picomint-gateway-cli-core",
+ "picomint-iroh-api",
  "picomint-lnurl",
  "picomint-logging",
  "picomint-redb",
@@ -3919,6 +3921,7 @@ name = "picomint-integration-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "async-stream",
  "axum",
  "bitcoin",
@@ -3934,6 +3937,7 @@ dependencies = [
  "picomint-encoding",
  "picomint-eventlog",
  "picomint-gateway-cli-core",
+ "picomint-iroh-api",
  "picomint-lnurl",
  "picomint-logging",
  "picomint-redb",
@@ -3942,6 +3946,21 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "picomint-iroh-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "futures",
+ "iroh",
+ "picomint-core",
+ "picomint-encoding",
+ "picomint-logging",
  "tokio",
  "tracing",
 ]
@@ -4052,6 +4071,7 @@ dependencies = [
  "picomint-bitcoin-rpc",
  "picomint-core",
  "picomint-encoding",
+ "picomint-iroh-api",
  "picomint-logging",
  "picomint-redb",
  "picomint-server-cli-core",

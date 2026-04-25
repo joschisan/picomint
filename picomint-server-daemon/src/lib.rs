@@ -27,37 +27,6 @@ use picomint_redb::Database;
 use tokio::net::TcpListener;
 use tracing::info;
 
-/// Dispatch helper for module `handle_api` match arms.
-///
-/// `handler!(fn_name, self, req).await` calls `rpc::fn_name(self, req)` and
-/// consensus-encodes the response. Each module has a `mod rpc` submodule with
-/// one `fn name(module: &Self, req: XRequest) -> Result<XResponse, ApiError>`
-/// per endpoint. Use [`handler_async!`] when the rpc handler is itself async.
-#[macro_export]
-macro_rules! handler {
-    ($func:ident, $self:expr, $req:expr) => {
-        async move {
-            let resp = rpc::$func($self, $req)?;
-            ::std::result::Result::Ok(::picomint_encoding::Encodable::consensus_encode_to_vec(
-                &resp,
-            ))
-        }
-    };
-}
-
-/// Like [`handler!`] but for `async fn` rpc handlers.
-#[macro_export]
-macro_rules! handler_async {
-    ($func:ident, $self:expr, $req:expr) => {
-        async move {
-            let resp = rpc::$func($self, $req).await?;
-            ::std::result::Result::Ok(::picomint_encoding::Encodable::consensus_encode_to_vec(
-                &resp,
-            ))
-        }
-    };
-}
-
 use crate::config::db::{load_server_config, store_server_config};
 use crate::config::setup::SetupApi;
 use crate::config::{ConfigGenSettings, SetupResult};

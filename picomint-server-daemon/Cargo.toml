@@ -40,6 +40,7 @@ picomint-base32 = { workspace = true }
 picomint-bitcoin-rpc = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
+picomint-iroh-api = { workspace = true }
 picomint-logging = { workspace = true }
 picomint-redb = { workspace = true }
 picomint-server-cli-core = { workspace = true }

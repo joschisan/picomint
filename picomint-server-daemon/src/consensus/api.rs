@@ -10,9 +10,9 @@ use picomint_core::module::audit::AuditSummary;
 use picomint_core::transaction::{ConsensusItem, Transaction, TransactionError};
 
 use crate::consensus::rpc;
-use crate::{handler, handler_async};
 use picomint_core::PeerId;
 use picomint_core::task::TaskGroup;
+use picomint_iroh_api::{handler, handler_async};
 use picomint_logging::LOG_NET_API;
 use picomint_redb::Database;
 use tokio::sync::watch::{Receiver, Sender};

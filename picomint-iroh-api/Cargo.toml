@@ -1,0 +1,27 @@
+[package]
+authors = { workspace = true }
+description = "Generic iroh request/response API loop shared by the federation server, gateway daemon, and integration-test mock gateway."
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-iroh-api"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[lib]
+name = "picomint_iroh_api"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-channel = { workspace = true }
+futures = { workspace = true }
+iroh = { workspace = true, default-features = false }
+picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
+picomint-logging = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

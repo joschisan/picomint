@@ -14,6 +14,7 @@ members = [
     "picomint-gateway-cli-core",
     "picomint-gateway-daemon",
     "picomint-integration-tests",
+    "picomint-iroh-api",
     "picomint-lnurl",
     "picomint-logging",
     "picomint-recurring-daemon",
@@ -125,6 +126,7 @@ picomint-encoding = { path = "./picomint-encoding", version = "=0.1.0" }
 picomint-eventlog = { path = "./picomint-eventlog", version = "=0.1.0" }
 picomint-gateway-cli-core = { path = "./picomint-gateway-cli-core", version = "=0.1.0" }
 picomint-gateway-daemon = { path = "./picomint-gateway-daemon", version = "=0.1.0" }
+picomint-iroh-api = { path = "./picomint-iroh-api", version = "=0.1.0" }
 picomint-lnurl = { path = "./picomint-lnurl", version = "=0.1.0" }
 picomint-logging = { path = "./picomint-logging", version = "=0.1.0" }
 picomint-redb = { path = "./picomint-redb", version = "=0.1.0" }

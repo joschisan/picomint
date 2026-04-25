@@ -21,7 +21,7 @@ use threshold_crypto::group::Curve;
 
 use crate::config::dkg::DkgHandle;
 use crate::config::poly::eval_poly_g2;
-use crate::{handler, handler_async};
+use picomint_iroh_api::{handler, handler_async};
 
 use self::db::{
     BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER, NOTE_NONCE,

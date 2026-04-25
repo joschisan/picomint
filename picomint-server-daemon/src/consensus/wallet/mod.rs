@@ -29,13 +29,13 @@ use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use tokio::time::sleep;
 
 use crate::config::dkg::DkgHandle;
-use crate::handler;
 use picomint_core::wallet::config::{WalletConfig, WalletConfigPrivate};
 use picomint_core::wallet::methods::WalletMethod;
 use picomint_core::wallet::{
     FederationWallet, TxInfo, WalletInputError, WalletOutputError, descriptor,
     is_potential_receive, tweak_public_key,
 };
+use picomint_iroh_api::handler;
 use rand::rngs::OsRng;
 use secp256k1::ecdsa::Signature;
 use secp256k1::{PublicKey, Scalar};

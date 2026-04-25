@@ -29,7 +29,9 @@ picomint-client = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-gateway-cli-core = { workspace = true }
+picomint-iroh-api = { workspace = true }
 picomint-lnurl = { workspace = true }
+async-channel = { workspace = true }
 picomint-logging = { workspace = true }
 picomint-redb = { workspace = true }
 rand = { workspace = true }

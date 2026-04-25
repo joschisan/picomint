@@ -15,16 +15,16 @@ use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, Send
 use picomint_client::transaction::{Input, TransactionBuilder};
 use picomint_client::{Client, OperationId};
 use picomint_core::ln::gateway_api::{
-    GATEWAY_MAX_MESSAGE_BYTES, GatewayInfo, GatewayInfoResponse, GatewayMethod, PaymentFee,
-    SendPaymentResponse,
+    GatewayInfo, GatewayInfoResponse, GatewayMethod, PaymentFee, SendPaymentResponse,
 };
 use picomint_core::ln::{
     Bolt11InvoiceDescription, LightningInput, LightningInvoice, OutgoingWitness,
 };
 use picomint_core::module::ApiError;
 use picomint_core::module::PICOMINT_ALPN;
+use picomint_core::task::TaskGroup;
 use picomint_core::{Amount, OutPoint, wire};
-use picomint_encoding::{Decodable, Encodable};
+use picomint_encoding::Encodable;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_invoice};
 use tracing::info;
@@ -739,27 +739,22 @@ async fn spawn_mock_gateway() -> anyhow::Result<iroh::PublicKey> {
 
     let node_id = endpoint.id();
 
-    tokio::spawn(async move {
-        while let Some(incoming) = endpoint.accept().await {
-            tokio::spawn(async move {
-                let Ok(connecting) = incoming.accept() else {
-                    return;
-                };
-                let Ok(connection) = connecting.await else {
-                    return;
-                };
-                while let Ok((mut send, mut recv)) = connection.accept_bi().await {
-                    let Ok(req_bytes) = recv.read_to_end(GATEWAY_MAX_MESSAGE_BYTES).await else {
-                        break;
-                    };
-                    let Ok(method) = GatewayMethod::consensus_decode_exact(&req_bytes) else {
-                        break;
-                    };
-                    let response = mock_dispatch(method).await;
-                    let _ = send.write_all(&response.consensus_encode_to_vec()).await;
-                    let _ = send.finish();
-                }
-            });
+    let task_group = TaskGroup::new();
+    let (foreign_conn_tx, foreign_conn_rx) = async_channel::bounded(128);
+
+    task_group.spawn_cancellable("mock-gw-accept", async move {
+        picomint_iroh_api::accept_into_channel(endpoint, foreign_conn_tx).await;
+    });
+
+    tokio::spawn({
+        let task_group = task_group.clone();
+        async move {
+            picomint_iroh_api::run_iroh_api(
+                foreign_conn_rx,
+                |method: GatewayMethod| async move { mock_dispatch(method).await },
+                task_group,
+            )
+            .await;
         }
     });
 
