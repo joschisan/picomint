@@ -253,7 +253,6 @@ async fn start_server(base: &Path, peer_idx: usize) -> anyhow::Result<Child> {
         .open(base.join(format!("server-{peer_idx}.log")))?;
 
     let child = Command::new("target/release/picomint-server-daemon")
-        .env("IN_TEST_ENV", "1")
         .env("DATA_DIR", data_dir.to_str().unwrap())
         .env("BITCOIN_NETWORK", "regtest")
         .env("BITCOIND_URL", format!("http://127.0.0.1:{BTC_RPC_PORT}"))
@@ -275,7 +274,6 @@ async fn start_recurring_daemon(base: &Path, port: u16) -> anyhow::Result<()> {
     let log_file = std::fs::File::create(base.join("recurring-daemon.log"))?;
 
     Command::new("target/release/picomint-recurring-daemon")
-        .env("IN_TEST_ENV", "1")
         .env("API_ADDR", format!("127.0.0.1:{port}"))
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
@@ -293,7 +291,6 @@ async fn start_gateway(base: &Path, name: &str, gw_port: u16, ln_port: u16) -> a
     let log_file = std::fs::File::create(base.join(format!("{name}.log")))?;
 
     Command::new("target/release/picomint-gateway-daemon")
-        .env("IN_TEST_ENV", "1")
         .env("DATA_DIR", data_dir.to_str().unwrap())
         .env("API_ADDR", format!("0.0.0.0:{gw_port}"))
         .env("LDK_ADDR", format!("0.0.0.0:{ln_port}"))

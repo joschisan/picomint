@@ -10,9 +10,6 @@ use std::sync::Arc;
 use tracing::info;
 
 fn main() -> anyhow::Result<()> {
-    // SAFETY: Called before any threads are spawned
-    unsafe { std::env::set_var("IN_TEST_ENV", "1") };
-
     picomint_logging::TracingSetup::default().init()?;
 
     let runtime = Arc::new(tokio::runtime::Runtime::new()?);

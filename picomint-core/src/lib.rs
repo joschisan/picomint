@@ -37,8 +37,6 @@ pub mod backoff;
 pub mod config;
 /// Fundamental types
 pub mod core;
-/// Common environment variables
-pub mod envs;
 /// Federation invite code
 pub mod invite_code;
 /// Lightning module wire types / helpers (shared between client and server).

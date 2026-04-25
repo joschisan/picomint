@@ -15,11 +15,11 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use bitcoin::Network;
 use futures::FutureExt;
 use iroh::endpoint::{RecvStream, SendStream};
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
-use picomint_core::envs::is_running_in_test_env;
 use picomint_core::module::{ApiAuth, ApiError, Method};
 use picomint_core::task::TaskGroup;
 use picomint_core::transaction::ConsensusItem;
@@ -63,7 +63,7 @@ pub async fn run(
 
     let bitcoin_rpc_connection = BitcoinRpcMonitor::new(
         bitcoin_backend,
-        if is_running_in_test_env() {
+        if cfg.consensus.network == Network::Regtest {
             Duration::from_millis(100)
         } else {
             Duration::from_mins(1)
