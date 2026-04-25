@@ -1,12 +1,12 @@
 //! On-disk SQLite mirror of the gateway's gw-module event log.
 //!
-//! Per-federation tail tasks read from the client event log and `INSERT`
+//! Per-federation trailer tasks read from the client event log and `INSERT`
 //! rows into `{DATA_DIR}/analytics.sqlite`. One table per event kind plus a
 //! `payments` view that stitches sends/receives into a single row per op.
 //!
 //! The file is **wiped on every gateway startup** — analytics state is
 //! derived, not authoritative. The event log in each client's redb is the
-//! source of truth; the tail replays from position 0 on every boot.
+//! source of truth; the trailer replays from position 0 on every boot.
 //!
 //! Users and agents inspect the db directly via `sqlite3 analytics.sqlite`.
 //! No query transport is layered on top.
@@ -35,16 +35,16 @@ pub const ANALYTICS_DIR: &str = "analytics";
 /// Filename of the analytics DB inside `ANALYTICS_DIR`.
 pub const ANALYTICS_FILE: &str = "analytics.sqlite";
 
-/// Shared handle to the analytics SQLite connection. All tail tasks and any
-/// future readers go through this single mutex-guarded connection — fine
+/// Shared handle to the analytics SQLite connection. All trailer tasks and
+/// any future readers go through this single mutex-guarded connection — fine
 /// because SQLite serializes writes internally anyway and our write volume
 /// is bounded by event-log throughput.
 #[derive(Clone)]
-pub struct QueryState {
+pub struct Analytics {
     conn: Arc<Mutex<Connection>>,
 }
 
-impl QueryState {
+impl Analytics {
     /// Wipe `{DATA_DIR}/analytics/`, recreate it, and open a fresh SQLite
     /// DB with the schema + `payments` view installed. Analytics state is
     /// always rebuilt from the redb event log on startup, so we don't
@@ -186,19 +186,22 @@ LEFT JOIN receive_refund  refund
        ON refund.federation_id = r.federation_id AND refund.operation_id = r.operation_id;
 "#;
 
-/// Spawn the per-client tailer: drain the event log forward in chunks and
+/// Spawn the per-client trailer: drain the event log forward in chunks and
 /// mirror each gw event into the SQLite analytics DB. Blocks on
 /// `event_notify` only when caught up with the head.
-pub fn spawn_tail(
+pub fn spawn_trailer(
     task_group: &TaskGroup,
     client: Arc<Client>,
     federation_id: FederationId,
-    state: QueryState,
+    state: Analytics,
 ) {
-    task_group.spawn_cancellable("gw-analytics-tail", tail(client, federation_id, state));
+    task_group.spawn_cancellable(
+        "gw-analytics-trailer",
+        trailer(client, federation_id, state),
+    );
 }
 
-async fn tail(client: Arc<Client>, federation_id: FederationId, state: QueryState) {
+async fn trailer(client: Arc<Client>, federation_id: FederationId, state: Analytics) {
     let mut cursor = EventLogId::default();
     let notify = client.event_notify();
     let fed_id_hex = federation_id.to_string();
@@ -238,7 +241,7 @@ async fn tail(client: Arc<Client>, federation_id: FederationId, state: QueryStat
     }
 }
 
-fn insert_batch(state: &QueryState, fed_id: &str, entries: &[EventLogEntry]) -> anyhow::Result<()> {
+fn insert_batch(state: &Analytics, fed_id: &str, entries: &[EventLogEntry]) -> anyhow::Result<()> {
     let mut guard = state.conn.blocking_lock();
     let tx = guard.transaction()?;
     for entry in entries {

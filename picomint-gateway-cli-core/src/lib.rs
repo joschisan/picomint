@@ -244,7 +244,7 @@ pub struct FederationConfigRequest {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct FederationConfigResponse {
-    pub federations: BTreeMap<FederationId, serde_json::Value>,
+    pub config: serde_json::Value,
 }
 
 // --- /federation/invite ---

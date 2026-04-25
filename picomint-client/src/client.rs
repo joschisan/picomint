@@ -344,6 +344,12 @@ impl Client {
         self.db.notify_for_table(&picomint_eventlog::EVENT_LOG)
     }
 
+    /// One-shot snapshot of every event currently logged for `operation_id`,
+    /// in insertion order.
+    pub fn read_operation_events(&self, operation_id: OperationId) -> Vec<EventLogEntry> {
+        picomint_eventlog::read_operation_events(&self.db, operation_id)
+    }
+
     /// Stream every event belonging to `operation_id`, starting from the
     /// beginning of the log (existing events first, then live ones).
     pub fn subscribe_operation_events(

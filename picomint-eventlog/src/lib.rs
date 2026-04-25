@@ -209,6 +209,24 @@ fn next_event_log_id(dbtx: &WriteTxRef<'_>) -> EventLogId {
     })
 }
 
+/// One-shot snapshot of every event currently logged for `operation_id`, in
+/// insertion order. See [`subscribe_operation_events`] for the streaming
+/// variant that also yields events arriving after the call.
+pub fn read_operation_events(db: &Database, operation_id: OperationId) -> Vec<EventLogEntry> {
+    db.begin_read()
+        .as_ref()
+        .with_native_table(&EVENT_LOG_BY_OPERATION, |t| {
+            t.range((operation_id, EventLogId::LOG_START)..(operation_id, EventLogId::LOG_END))
+                .expect("redb range failed")
+                .map(|r| {
+                    let (_, v) = r.expect("redb range item failed");
+                    v.value()
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
 /// Stream every event belonging to `operation_id`, in insertion order.
 ///
 /// Yields existing events first, then live ones. The cursor is kept internally

@@ -1,16 +1,13 @@
+pub mod analytics;
 pub mod cli;
 pub mod client;
 pub mod db;
 pub mod public;
-pub mod query;
 pub mod trailer;
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
-
-use tokio::time::timeout;
 
 use anyhow::{Context as _, anyhow, bail, ensure};
 use bitcoin::Network;
@@ -34,7 +31,6 @@ use picomint_core::ln::gateway_api::{
     CreateBolt11InvoicePayload, GatewayInfo, PaymentFee, SendPaymentPayload,
 };
 use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
-use picomint_core::secp256k1::PublicKey;
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::time::duration_since_epoch;
 use picomint_encoding::Encodable as _;
@@ -68,7 +64,7 @@ pub struct AppState {
     pub send_fee: PaymentFee,
     pub receive_fee: PaymentFee,
     pub ln_fee: PaymentFee,
-    pub query_state: query::QueryState,
+    pub analytics: analytics::Analytics,
     pub task_group: picomint_core::task::TaskGroup,
 }
 
@@ -83,16 +79,17 @@ impl AppState {
             .cloned()
     }
 
-    /// After `load_clients`, spawn one analytics tail task per federation
-    /// client so the in-memory Arrow mirror starts backfilling immediately.
-    pub async fn spawn_analytics_tails(&self) {
+    /// After `load_clients`, spawn one analytics trailer per federation
+    /// client so the SQLite mirror starts backfilling immediately.
+    pub async fn spawn_analytics_trailers(&self) {
         let clients = self.clients.read().expect("clients RwLock poisoned");
+
         for (federation_id, client) in clients.iter() {
-            query::spawn_tail(
+            analytics::spawn_trailer(
                 &self.task_group,
                 client.clone(),
                 *federation_id,
-                self.query_state.clone(),
+                self.analytics.clone(),
             );
         }
     }
@@ -102,6 +99,7 @@ impl AppState {
         let federations = self.client_factory.list_federations().await;
 
         let mut loaded = Vec::new();
+
         for federation_id in federations {
             match self.client_factory.load(&federation_id).await {
                 Ok(Some(client)) => {
@@ -117,6 +115,7 @@ impl AppState {
         }
 
         let mut clients = self.clients.write().expect("clients RwLock poisoned");
+
         for (id, client) in loaded {
             clients.insert(id, client);
         }
@@ -191,48 +190,23 @@ impl AppState {
         }
         infos
     }
-
-    /// Get JSON client configs for all connected federations.
-    pub async fn all_federation_configs(&self) -> BTreeMap<FederationId, serde_json::Value> {
-        let mut configs = BTreeMap::new();
-        for (federation_id, client) in self.clients_snapshot() {
-            let config = client.config().await;
-            configs.insert(
-                federation_id,
-                serde_json::to_value(&config).expect("ConsensusConfig is serializable"),
-            );
-        }
-        configs
-    }
 }
 
 // Lightning Gateway implementation
 impl AppState {
-    fn public_key(&self, federation_id: &FederationId) -> Option<PublicKey> {
-        self.clients
-            .read()
-            .expect("clients RwLock poisoned")
-            .get(federation_id)
-            .map(|client| client.gw().keypair.public_key())
-    }
-
-    pub async fn gateway_info(
-        &self,
-        federation_id: &FederationId,
-    ) -> anyhow::Result<Option<GatewayInfo>> {
-        self.select_client(*federation_id)
+    pub async fn gateway_info(&self, federation_id: &FederationId) -> anyhow::Result<GatewayInfo> {
+        let client = self
+            .select_client(*federation_id)
             .context("Federation not connected")?;
 
-        Ok(self
-            .public_key(federation_id)
-            .map(|module_public_key| GatewayInfo {
-                lightning_public_key: self.node.node_id(),
-                module_public_key,
-                send_fee: self.send_fee,
-                receive_fee: self.receive_fee,
-                ln_fee: self.ln_fee,
-                expiration_delta: 1440,
-            }))
+        Ok(GatewayInfo {
+            lightning_public_key: self.node.node_id(),
+            module_public_key: client.gw().keypair.public_key(),
+            send_fee: self.send_fee,
+            receive_fee: self.receive_fee,
+            ln_fee: self.ln_fee,
+            expiration_delta: 1440,
+        })
     }
 
     /// Orchestrates an outgoing payment. Verifies the request, registers the
@@ -276,21 +250,21 @@ impl AppState {
         );
 
         let LightningInvoice::Bolt11(invoice) = &payload.invoice;
-        let payment_hash = *invoice.payment_hash();
         let amount = invoice
             .amount_milli_satoshis()
             .ok_or(anyhow!("Invoice is missing amount"))?;
 
         ensure!(
-            PaymentImage::Hash(payment_hash) == payload.contract.payment_image,
+            PaymentImage::Hash(*invoice.payment_hash()) == payload.contract.payment_image,
             "The invoice's payment hash does not match the contract's payment hash"
         );
 
-        let operation_id = OperationId::from_encodable(&payment_hash);
+        let operation_id = OperationId::from_encodable(invoice.payment_hash());
 
         let is_direct_swap = self.node.node_id() == invoice.get_payee_pub_key();
 
         let fee = self.send_fee.fee(amount);
+
         let ln_fee = if is_direct_swap {
             Amount::ZERO
         } else {
@@ -316,28 +290,30 @@ impl AppState {
         }
 
         // --- Insert outgoing_contract row + log SendEvent on F1 (one tx) ---
-        {
-            let tx = self.gateway_db.begin_write();
-            tx.as_ref().insert(
-                &OUTGOING_CONTRACT,
-                &operation_id,
-                &OutgoingContractRow {
-                    federation_id: payload.federation_id,
-                    contract: payload.contract.clone(),
-                    outpoint: payload.outpoint,
-                    invoice: payload.invoice.clone(),
-                },
-            );
-            f1_client.gw().log_send_started(
-                &tx.as_ref().isolate(payload.federation_id),
-                operation_id,
-                payload.outpoint,
-                Amount::from_msats(amount),
-                ln_fee,
-                fee,
-            );
-            tx.commit();
-        }
+
+        let tx = self.gateway_db.begin_write();
+
+        tx.as_ref().insert(
+            &OUTGOING_CONTRACT,
+            &operation_id,
+            &OutgoingContractRow {
+                federation_id: payload.federation_id,
+                contract: payload.contract.clone(),
+                outpoint: payload.outpoint,
+                invoice: payload.invoice.clone(),
+            },
+        );
+
+        f1_client.gw().log_send_started(
+            &tx.as_ref().isolate(payload.federation_id),
+            operation_id,
+            payload.outpoint,
+            Amount::from_msats(amount),
+            ln_fee,
+            fee,
+        );
+
+        tx.commit();
 
         // --- Direct-swap vs external LN -------------------------------------
         if is_direct_swap {
@@ -376,7 +352,7 @@ impl AppState {
             // External LN send: `ln_fee` becomes LDK's hard cap on route cost.
             let max_delay = expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM);
 
-            let payment_id = PaymentId(payment_hash.to_byte_array());
+            let payment_id = PaymentId(invoice.payment_hash().to_byte_array());
             if self.node.payment(&payment_id).is_none() {
                 self.node
                     .bolt11_payment()
@@ -405,43 +381,36 @@ impl AppState {
         payload: CreateBolt11InvoicePayload,
     ) -> anyhow::Result<Bolt11Invoice> {
         if !payload.contract.verify() {
-            bail!("Incoming payment error: The contract is invalid");
+            bail!("The contract is invalid");
         }
 
         let gateway_info = self
             .gateway_info(&payload.federation_id)
-            .await?
-            .with_context(|| {
-                format!(
-                    "Incoming payment error: Federation {} does not exist",
-                    payload.federation_id
-                )
-            })?;
+            .await
+            .map_err(|_| anyhow!("Federation {} does not exist", payload.federation_id))?;
 
         if payload.contract.commitment.refund_pk != gateway_info.module_public_key {
-            bail!("Incoming payment error: The incoming contract is keyed to another gateway");
+            bail!("The incoming contract is keyed to another gateway");
         }
 
         let contract_amount = gateway_info.receive_fee.subtract_from(payload.amount.msats);
 
         if contract_amount == Amount::ZERO {
-            bail!("Incoming payment error: Zero amount incoming contracts are not supported");
+            bail!("Zero amount incoming contracts are not supported");
         }
 
         if contract_amount != payload.contract.commitment.amount {
-            bail!(
-                "Incoming payment error: The contract amount does not pay the correct amount of fees"
-            );
+            bail!("The contract amount does not pay the correct amount of fees");
         }
 
         if payload.contract.commitment.expiration <= duration_since_epoch().as_secs() {
-            bail!("Incoming payment error: The contract has already expired");
+            bail!("The contract has already expired");
         }
 
         let payment_hash = match payload.contract.commitment.payment_image {
             PaymentImage::Hash(h) => h,
             PaymentImage::Point(..) => {
-                bail!("Incoming payment error: PaymentImage is not a payment hash")
+                bail!("PaymentImage is not a payment hash")
             }
         };
 
@@ -455,56 +424,13 @@ impl AppState {
             .get(&INCOMING_CONTRACT, &operation_id)
         {
             if existing.federation_id != payload.federation_id {
-                bail!(
-                    "Incoming payment error: PaymentHash is already registered on a different federation"
-                );
+                bail!("PaymentHash is already registered on a different federation");
             }
             let LightningInvoice::Bolt11(existing_invoice) = existing.invoice;
             return Ok(existing_invoice);
         }
 
-        let invoice = self
-            .create_invoice_via_lnrpc(
-                payment_hash,
-                payload.amount,
-                payload.description.clone(),
-                payload.expiry_secs,
-            )
-            .await?;
-
-        let tx = self.gateway_db.begin_write();
-        if tx
-            .as_ref()
-            .insert(
-                &INCOMING_CONTRACT,
-                &operation_id,
-                &IncomingContractRow {
-                    federation_id: payload.federation_id,
-                    contract: payload.contract,
-                    invoice: LightningInvoice::Bolt11(invoice.clone()),
-                    amount: payload.amount,
-                },
-            )
-            .is_some()
-        {
-            // Racy duplicate — the other writer committed first. Since both
-            // operations are idempotent on op_id, this is fine.
-        }
-        tx.commit();
-
-        Ok(invoice)
-    }
-
-    pub async fn create_invoice_via_lnrpc(
-        &self,
-        payment_hash: sha256::Hash,
-        amount: Amount,
-        description: Bolt11InvoiceDescription,
-        expiry_time: u32,
-    ) -> anyhow::Result<Bolt11Invoice> {
-        let ph = PaymentHash(*payment_hash.as_byte_array());
-
-        let ldk_description = match description {
+        let ldk_description = match payload.description.clone() {
             Bolt11InvoiceDescription::Direct(desc) => LdkBolt11InvoiceDescription::Direct(
                 Description::new(desc).map_err(|_| anyhow!("Invalid invoice description"))?,
             ),
@@ -513,17 +439,40 @@ impl AppState {
             }
         };
 
-        self.node
+        let invoice = self
+            .node
             .bolt11_payment()
-            .receive_for_hash(amount.msats, &ldk_description, expiry_time, ph)
-            .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))
+            .receive_for_hash(
+                payload.amount.msats,
+                &ldk_description,
+                payload.expiry_secs,
+                PaymentHash(*payment_hash.as_byte_array()),
+            )
+            .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))?;
+
+        let tx = self.gateway_db.begin_write();
+
+        tx.as_ref().insert(
+            &INCOMING_CONTRACT,
+            &operation_id,
+            &IncomingContractRow {
+                federation_id: payload.federation_id,
+                contract: payload.contract,
+                invoice: LightningInvoice::Bolt11(invoice.clone()),
+                amount: payload.amount,
+            },
+        );
+
+        tx.commit();
+
+        Ok(invoice)
     }
 
     pub async fn verify_bolt11_preimage(
         &self,
         payment_hash: sha256::Hash,
         wait: bool,
-    ) -> std::result::Result<VerifyResponse, String> {
+    ) -> anyhow::Result<VerifyResponse> {
         let operation_id = OperationId::from_encodable(&payment_hash);
 
         let row = self
@@ -531,44 +480,44 @@ impl AppState {
             .begin_read()
             .as_ref()
             .get(&INCOMING_CONTRACT, &operation_id)
-            .ok_or("Unknown payment hash".to_string())?;
+            .ok_or_else(|| anyhow!("Unknown payment hash"))?;
 
         let client = self
             .select_client(row.federation_id)
             .expect("source federation for incoming contract is connected");
 
-        let await_preimage = async {
-            let mut stream = client.subscribe_operation_events(operation_id);
-
-            loop {
-                let entry = stream
-                    .next()
-                    .await
-                    .expect("subscribe_operation_events only ends at client shutdown");
-
-                if let Some(ev) = entry.to_event::<ReceiveSuccessEvent>() {
-                    return ev.preimage;
-                }
+        if !wait {
+            if let Some(preimage) = client
+                .read_operation_events(operation_id)
+                .into_iter()
+                .find_map(|entry| entry.to_event::<ReceiveSuccessEvent>().map(|e| e.preimage))
+            {
+                return Ok(VerifyResponse {
+                    settled: true,
+                    preimage: Some(preimage),
+                });
             }
-        };
 
-        let preimage = if wait {
-            await_preimage.await
-        } else {
-            match timeout(Duration::from_millis(100), await_preimage).await {
-                Ok(preimage) => preimage,
-                Err(_) => {
-                    return Ok(VerifyResponse {
-                        settled: false,
-                        preimage: None,
-                    });
-                }
+            return Ok(VerifyResponse {
+                settled: false,
+                preimage: None,
+            });
+        }
+
+        let mut stream = client.subscribe_operation_events(operation_id);
+
+        loop {
+            let entry = stream
+                .next()
+                .await
+                .expect("subscribe_operation_events only ends at client shutdown");
+
+            if let Some(ev) = entry.to_event::<ReceiveSuccessEvent>() {
+                return Ok(VerifyResponse {
+                    settled: true,
+                    preimage: Some(ev.preimage),
+                });
             }
-        };
-
-        Ok(VerifyResponse {
-            settled: true,
-            preimage: Some(preimage),
-        })
+        }
     }
 }
