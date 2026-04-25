@@ -126,14 +126,17 @@ fn main() -> anyhow::Result<()> {
     let gateway_db = picomint_redb::Database::open(opts.data_dir.join(DB_FILE))?;
 
     // 3. Load or init client factory (mnemonic)
-    let client_factory =
-        match runtime.block_on(GatewayClientFactory::try_load(gateway_db.clone()))? {
-            Some(factory) => factory,
-            None => runtime.block_on(GatewayClientFactory::init(
-                gateway_db.clone(),
-                picomint_client::random_mnemonic(&mut OsRng),
-            ))?,
-        };
+    let client_factory = match runtime.block_on(GatewayClientFactory::try_load(
+        gateway_db.clone(),
+        opts.network,
+    ))? {
+        Some(factory) => factory,
+        None => runtime.block_on(GatewayClientFactory::init(
+            gateway_db.clone(),
+            picomint_client::random_mnemonic(&mut OsRng),
+            opts.network,
+        ))?,
+    };
 
     let mnemonic = client_factory.mnemonic().clone();
 

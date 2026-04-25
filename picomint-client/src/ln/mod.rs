@@ -76,7 +76,6 @@ impl LightningClientModule {
         self.cfg.output_fee
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         federation_id: FederationId,
         cfg: LightningConfigConsensus,
@@ -244,10 +243,10 @@ impl LightningClientModule {
             return Err(SendPaymentError::InvoiceExpired);
         }
 
-        if self.cfg.network != invoice.currency().into() {
+        if self.client_ctx.network() != invoice.currency().into() {
             return Err(SendPaymentError::WrongCurrency {
                 invoice_currency: invoice.currency(),
-                federation_currency: self.cfg.network.into(),
+                federation_currency: self.client_ctx.network().into(),
             });
         }
 

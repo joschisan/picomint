@@ -8,8 +8,8 @@ use bitcoin::hashes::Hash as _;
 use picomint_encoding::{Decodable, Encodable};
 use thiserror::Error;
 
+use crate::TransactionId;
 use crate::wire;
-use crate::{Amount, TransactionId};
 
 /// An atomic value transfer operation within the Picomint system and consensus.
 ///
@@ -53,12 +53,7 @@ impl Transaction {
                 .verify_schnorr(signature, &msg, &pk.x_only_public_key().0)
                 .is_err()
             {
-                return Err(TransactionError::InvalidSignature {
-                    tx: self.consensus_encode_to_hex(),
-                    hash: self.tx_hash().consensus_encode_to_hex(),
-                    sig: signature.consensus_encode_to_hex(),
-                    key: pk.consensus_encode_to_hex(),
-                });
+                return Err(TransactionError::InvalidSignature);
             }
         }
 
@@ -68,32 +63,23 @@ impl Transaction {
 
 #[derive(Debug, Error, Encodable, Decodable, Clone, Eq, PartialEq)]
 pub enum TransactionError {
-    #[error("The transaction is unbalanced (in={inputs}, out={outputs}, fee={fee})")]
-    UnbalancedTransaction {
-        inputs: Amount,
-        outputs: Amount,
-        fee: Amount,
-    },
-    #[error("The transaction's signature is invalid: tx={tx}, hash={hash}, sig={sig}, key={key}")]
-    InvalidSignature {
-        tx: String,
-        hash: String,
-        sig: String,
-        key: String,
-    },
+    #[error("The transaction has no inputs")]
+    EmptyInputs,
+    #[error("The transaction has no outputs")]
+    EmptyOutputs,
+    #[error("The transaction is underfunded")]
+    Underfunded,
+    #[error("Amount arithmetic overflowed u64 msats")]
+    Overflow,
     #[error("The transaction did not have the correct number of signatures")]
     InvalidWitnessLength,
+    #[error("The transaction's signature is invalid")]
+    InvalidSignature,
     #[error("The transaction had an invalid input: {}", .0)]
     Input(wire::InputError),
     #[error("The transaction had an invalid output: {}", .0)]
     Output(wire::OutputError),
 }
-
-pub const TRANSACTION_OVERFLOW_ERROR: TransactionError = TransactionError::UnbalancedTransaction {
-    inputs: Amount::ZERO,
-    outputs: Amount::ZERO,
-    fee: Amount::ZERO,
-};
 
 /// All the items that may be produced during a consensus epoch.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]

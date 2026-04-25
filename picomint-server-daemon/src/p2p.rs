@@ -276,7 +276,7 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
                     Ok(Accepted::Peer(peer, connection)) => {
                         if connection_senders
                             .get_mut(&peer)
-                            .expect("Authenticating connectors dont return unknown peers")
+                            .expect("Authenticating endpoint doesn't return unknown peers")
                             .send(connection)
                             .await
                             .is_err()

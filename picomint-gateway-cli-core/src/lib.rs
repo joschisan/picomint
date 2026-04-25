@@ -231,7 +231,7 @@ pub struct FederationListResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FederationInfo {
     pub federation_id: FederationId,
-    pub federation_name: Option<String>,
+    pub federation_name: String,
 }
 
 // --- /federation/config ---

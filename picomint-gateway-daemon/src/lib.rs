@@ -39,7 +39,7 @@ use picomint_lnurl::VerifyResponse;
 use picomint_logging::LOG_GATEWAY;
 use picomint_redb::Database;
 use std::sync::RwLock;
-use tracing::{error, warn};
+use tracing::warn;
 
 use crate::db::{INCOMING_CONTRACT, IncomingContractRow, OUTGOING_CONTRACT, OutgoingContractRow};
 
@@ -138,34 +138,9 @@ impl AppState {
         }
     }
 
-    /// Verifies that the federation's lightning module network matches the
-    /// gateway's network.
-    pub async fn check_federation_network(
-        client: &Arc<Client>,
-        network: Network,
-    ) -> anyhow::Result<()> {
-        let federation_id = client.federation_id();
-        let config = client.config().await;
-
-        if config.ln.network != network {
-            error!(
-                target: LOG_GATEWAY,
-                %federation_id,
-                %network,
-                "Incorrect network for federation",
-            );
-            return Err(anyhow::anyhow!(format!(
-                "Unsupported network {}",
-                config.ln.network
-            )));
-        }
-
-        Ok(())
-    }
-
     /// Get the name of a federation from its client config.
-    pub async fn federation_name(client: &Arc<Client>) -> Option<String> {
-        client.config().await.federation_name()
+    pub async fn federation_name(client: &Arc<Client>) -> String {
+        client.config().await.name
     }
 
     /// Snapshot the current clients map into an owned Vec so we can release

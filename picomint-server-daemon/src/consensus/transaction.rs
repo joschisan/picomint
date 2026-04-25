@@ -1,6 +1,6 @@
 use picomint_core::Amount;
 use picomint_core::module::TransactionItemAmounts;
-use picomint_core::transaction::{TRANSACTION_OVERFLOW_ERROR, TransactionError};
+use picomint_core::transaction::TransactionError;
 
 #[derive(Clone, Debug, Default)]
 pub struct FundingVerifier {
@@ -17,12 +17,12 @@ impl FundingVerifier {
         self.inputs = self
             .inputs
             .checked_add(input.amount)
-            .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
+            .ok_or(TransactionError::Overflow)?;
 
         self.fees = self
             .fees
             .checked_add(input.fee)
-            .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
+            .ok_or(TransactionError::Overflow)?;
 
         Ok(self)
     }
@@ -34,12 +34,12 @@ impl FundingVerifier {
         self.outputs = self
             .outputs
             .checked_add(output_amounts.amount)
-            .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
+            .ok_or(TransactionError::Overflow)?;
 
         self.fees = self
             .fees
             .checked_add(output_amounts.fee)
-            .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
+            .ok_or(TransactionError::Overflow)?;
 
         Ok(self)
     }
@@ -48,17 +48,13 @@ impl FundingVerifier {
         let outputs_and_fees = self
             .outputs
             .checked_add(self.fees)
-            .ok_or(TRANSACTION_OVERFLOW_ERROR)?;
+            .ok_or(TransactionError::Overflow)?;
 
         if self.inputs >= outputs_and_fees {
             return Ok(());
         }
 
-        Err(TransactionError::UnbalancedTransaction {
-            inputs: self.inputs,
-            outputs: self.outputs,
-            fee: self.fees,
-        })
+        Err(TransactionError::Underfunded)
     }
 }
 

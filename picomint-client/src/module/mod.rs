@@ -21,22 +21,15 @@ pub struct ClientContext {
     api: FederationApi,
     db: Database,
     config: ConsensusConfig,
-    federation_id: FederationId,
 }
 
 impl ClientContext {
-    pub fn new(
-        api: FederationApi,
-        db: Database,
-        config: ConsensusConfig,
-        federation_id: FederationId,
-    ) -> Self {
-        Self {
-            api,
-            db,
-            config,
-            federation_id,
-        }
+    pub fn new(api: FederationApi, db: Database, config: ConsensusConfig) -> Self {
+        Self { api, db, config }
+    }
+
+    pub fn network(&self) -> bitcoin::Network {
+        self.config.network
     }
 
     /// Federation API handle. Typed wire methods are built with
@@ -76,7 +69,7 @@ impl ClientContext {
     }
 
     pub fn federation_id(&self) -> FederationId {
-        self.federation_id
+        self.config.calculate_federation_id()
     }
 
     /// Returns an invite code for the federation that points to an arbitrary
@@ -88,7 +81,7 @@ impl ClientContext {
             .iter()
             .next()
             .expect("A federation always has at least one guardian");
-        InviteCode::new(endpoint.iroh_pk, *peer, self.federation_id)
+        InviteCode::new(endpoint.iroh_pk, *peer, self.federation_id())
     }
 
     /// Shared [`Notify`] that fires on every commit touching the event log.

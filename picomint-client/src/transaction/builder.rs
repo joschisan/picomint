@@ -81,8 +81,17 @@ impl TransactionBuilder {
     }
 
     pub fn build(self) -> Transaction {
+        assert!(
+            !self.inputs.is_empty(),
+            "Transaction must have at least one input"
+        );
+        assert!(
+            !self.outputs.is_empty(),
+            "Transaction must have at least one output"
+        );
+
         let inputs: Vec<wire::Input> = self.inputs.iter().map(|i| i.input.clone()).collect();
-        let outputs: Vec<wire::Output> = self.outputs.into_iter().map(|o| o.output).collect();
+        let outputs: Vec<wire::Output> = self.outputs.iter().map(|o| o.output.clone()).collect();
 
         let txid = Transaction::tx_hash_from_parts(&inputs, &outputs);
 

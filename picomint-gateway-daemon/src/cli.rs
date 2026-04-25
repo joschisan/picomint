@@ -530,8 +530,6 @@ async fn federation_join(
 
     let client = state.client_factory.join(&invite_code).await?;
 
-    AppState::check_federation_network(&client, state.network).await?;
-
     state
         .clients
         .write()

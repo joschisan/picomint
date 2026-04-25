@@ -95,7 +95,7 @@ impl WalletClientModule {
 impl WalletClientModule {
     /// Returns the Bitcoin network for this federation.
     pub fn get_network(&self) -> bitcoin::Network {
-        self.cfg.network
+        self.client_ctx.network()
     }
 
     /// Fetch the total value of bitcoin controlled by the federation.
@@ -134,7 +134,7 @@ impl WalletClientModule {
         value: bitcoin::Amount,
         fee: Option<bitcoin::Amount>,
     ) -> Result<OperationId, SendError> {
-        if !address.is_valid_for_network(self.cfg.network) {
+        if !address.is_valid_for_network(self.client_ctx.network()) {
             return Err(SendError::WrongNetwork);
         }
 
@@ -223,7 +223,7 @@ impl WalletClientModule {
             &self.cfg.bitcoin_pks,
             &self.derive_tweak(index).public_key().consensus_hash(),
         )
-        .address(self.cfg.network)
+        .address(self.client_ctx.network())
     }
 
     fn derive_tweak(&self, index: u64) -> Keypair {

@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use crate::{Amount, PeerId};
-pub use bitcoin::Network;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use tpe::{AggregatePublicKey, PublicKeyShare, SecretKeyShare};
@@ -18,7 +17,6 @@ pub struct LightningConfigConsensus {
     pub tpe_pks: BTreeMap<PeerId, PublicKeyShare>,
     pub input_fee: Amount,
     pub output_fee: Amount,
-    pub network: Network,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]

@@ -1,11 +1,9 @@
-use std::collections::BTreeMap;
 use std::iter::once;
 use std::sync::Arc;
 
 use anyhow::{Context, ensure};
 use iroh::SecretKey;
 use picomint_core::PeerId;
-use picomint_core::config::META_FEDERATION_NAME_KEY;
 use picomint_encoding::{Decodable, Encodable};
 use serde::Serialize;
 use tokio::sync::Mutex;
@@ -283,10 +281,7 @@ impl SetupApi {
                 .map(|i| PeerId::from(i as u8))
                 .zip(state.setup_codes.clone())
                 .collect(),
-            meta: BTreeMap::from_iter(vec![(
-                META_FEDERATION_NAME_KEY.to_string(),
-                federation_name,
-            )]),
+            name: federation_name,
             network: self.settings.network,
         };
 

@@ -7,13 +7,14 @@ use std::sync::Arc;
 
 use picomint_core::module::InputMeta;
 use picomint_core::module::audit::AuditSummary;
-use picomint_core::transaction::Transaction;
+use picomint_core::transaction::{Transaction, TransactionError};
 use picomint_core::wire;
 use picomint_core::{InPoint, OutPoint, PeerId};
 use picomint_redb::{WriteTransaction, WriteTxRef};
 
 use crate::consensus::ln::Lightning;
 use crate::consensus::mint::Mint;
+use crate::consensus::transaction::FundingVerifier;
 use crate::consensus::wallet::Wallet;
 
 #[derive(Clone)]
@@ -109,10 +110,14 @@ pub async fn process_transaction_with_server(
     server: &Server,
     tx: &WriteTransaction,
     transaction: &Transaction,
-) -> Result<(), picomint_core::transaction::TransactionError> {
-    use picomint_core::transaction::TransactionError;
+) -> Result<(), TransactionError> {
+    if transaction.inputs.is_empty() {
+        return Err(TransactionError::EmptyInputs);
+    }
 
-    use crate::consensus::transaction::FundingVerifier;
+    if transaction.outputs.is_empty() {
+        return Err(TransactionError::EmptyOutputs);
+    }
 
     let mut funding_verifier = FundingVerifier::default();
     let mut public_keys = Vec::new();
