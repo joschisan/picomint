@@ -358,7 +358,7 @@ async fn asks_about_unknown_alert() {
         ))
         .outgoing_message(
             AlertMessage::AlertRequest(own_index, alert_hash),
-            Recipient::Node(alerter_index),
+            Recipient::Peer(alerter_index),
         );
     test_case.run(own_index).await;
 }
@@ -385,7 +385,7 @@ async fn ignores_wrong_alert() {
                 own_index,
                 RmcMessage::SignedHash(signed_wrong_alert_hash.clone()),
             ),
-            Recipient::Node(PeerId::new(i as u8)),
+            Recipient::Peer(PeerId::new(i as u8)),
         );
     }
     // We also make a proper alert to actually have something to wait for.
@@ -423,7 +423,7 @@ async fn responds_to_alert_queries() {
         .incoming_message(AlertMessage::AlertRequest(querier, alert_hash))
         .outgoing_message(
             AlertMessage::ForkAlert(signed_alert.clone()),
-            Recipient::Node(querier),
+            Recipient::Peer(querier),
         );
     for i in 1..n_members.total() {
         let node_id = PeerId::new(i as u8);
@@ -431,7 +431,7 @@ async fn responds_to_alert_queries() {
             .incoming_message(AlertMessage::AlertRequest(node_id, alert_hash))
             .outgoing_message(
                 AlertMessage::ForkAlert(signed_alert.clone()),
-                Recipient::Node(node_id),
+                Recipient::Peer(node_id),
             );
     }
     test_case.run(own_index).await;

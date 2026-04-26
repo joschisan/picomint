@@ -236,7 +236,7 @@ impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
         } else {
             // A request for a fork alert from another node.
             // It should be handled by sending the request via the network to the contained recipient.
-            RmcResponse::AlertRequest(*hash, Recipient::Node(sender))
+            RmcResponse::AlertRequest(*hash, Recipient::Peer(sender))
         }
     }
 
@@ -249,7 +249,7 @@ impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
             Some(alert) => {
                 // A copy of a fork alert.
                 // It should be handled by sending the contained `Alert` via the network to the contained recipient.
-                Ok((alert.clone().into_unchecked(), Recipient::Node(node)))
+                Ok((alert.clone().into_unchecked(), Recipient::Peer(node)))
             }
             None => Err(Error::UnknownAlertRequest),
         }
@@ -377,7 +377,7 @@ mod tests {
         let response = this.on_rmc_message(alerter_index, Message::SignedHash(signed_alert_hash));
         assert_eq!(
             response,
-            RmcResponse::AlertRequest(alert_hash, Recipient::Node(alerter_index),),
+            RmcResponse::AlertRequest(alert_hash, Recipient::Peer(alerter_index),),
         );
     }
 
@@ -423,7 +423,7 @@ mod tests {
             let node_id = PeerId::new(i as u8);
             assert_eq!(
                 this.on_alert_request(node_id, alert_hash),
-                Ok((signed_alert.clone(), Recipient::Node(node_id),)),
+                Ok((signed_alert.clone(), Recipient::Peer(node_id),)),
             );
         }
     }

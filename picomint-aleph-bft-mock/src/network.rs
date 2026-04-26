@@ -55,14 +55,14 @@ impl<D: Clone + Send + Debug + 'static> NetworkT<D> for Network<D> {
     fn send(&self, data: D, recipient: Recipient) {
         use Recipient::*;
         match recipient {
-            Node(node) => self
+            Peer(node) => self
                 .tx
                 .unbounded_send((data, node))
                 .expect("send on channel should work"),
             Everyone => {
                 for peer in self.peers.iter() {
                     if *peer != self.index {
-                        self.send(data.clone(), Node(*peer));
+                        self.send(data.clone(), Peer(*peer));
                     }
                 }
             }

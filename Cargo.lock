@@ -3679,6 +3679,7 @@ dependencies = [
  "bitcoin_hashes",
  "futures",
  "picomint-aleph-bft-crypto",
+ "picomint-core",
  "picomint-encoding",
 ]
 

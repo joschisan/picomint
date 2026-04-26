@@ -32,7 +32,7 @@ impl<T> Addressed<T> {
 
     /// Message with the single specified recipient.
     pub fn addressed_to(message: T, node_id: PeerId) -> Self {
-        Addressed::new(message, vec![Recipient::Node(node_id)])
+        Addressed::new(message, vec![Recipient::Peer(node_id)])
     }
 
     /// Message that should be broadcast.

@@ -168,7 +168,7 @@ impl Manager {
         let peers = n_members
             .peer_ids()
             .filter(|x| *x != own_id)
-            .map(Recipient::Node)
+            .map(Recipient::Peer)
             .collect();
         Manager {
             own_id,

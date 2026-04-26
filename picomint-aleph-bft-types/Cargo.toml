@@ -12,4 +12,5 @@ aleph-bft-crypto = { workspace = true }
 async-trait = { workspace = true }
 bitcoin_hashes = { workspace = true }
 futures = { workspace = true }
+picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }

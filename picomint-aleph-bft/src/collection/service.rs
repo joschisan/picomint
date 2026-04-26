@@ -139,7 +139,7 @@ impl<'a, MK: Keychain> Collection<'a, MK> {
             .size()
             .peer_ids()
             .filter(|idx| self.collected_starting_rounds.get(*idx).is_none())
-            .map(Recipient::Node)
+            .map(Recipient::Peer)
             .collect()
     }
 

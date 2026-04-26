@@ -1,13 +1,4 @@
-use crate::PeerId;
-
-use picomint_encoding::{Decodable, Encodable};
-
-/// A recipient of a message, either a specific node or everyone.
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
-pub enum Recipient {
-    Everyone,
-    Node(PeerId),
-}
+pub use picomint_core::p2p::Recipient;
 
 /// Network represents an interface for sending and receiving NetworkData.
 ///
