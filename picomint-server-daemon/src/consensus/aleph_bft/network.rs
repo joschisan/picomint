@@ -1,19 +1,20 @@
 use async_channel::Sender;
 use picomint_core::PeerId;
-use picomint_encoding::{Decodable, Encodable};
 use picomint_core::secp256k1::schnorr;
 use picomint_core::session_outcome::SignedSessionOutcome;
+use picomint_core::transaction::ConsensusItem;
+use picomint_encoding::{Decodable, Encodable};
 use picomint_logging::LOG_CONSENSUS;
 use picomint_redb::Database;
 use tracing::error;
 
 use super::super::db::SIGNED_SESSION_OUTCOME;
-use super::data_provider::UnitData;
+use super::data_provider::is_valid;
 use super::keychain::Keychain;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
 pub type NetworkData = aleph_bft::NetworkData<
-    UnitData,
+    Vec<ConsensusItem>,
     <Keychain as aleph_bft::Keychain>::Signature,
     <Keychain as aleph_bft::MultiKeychain>::PartialMultisignature,
 >;
@@ -52,8 +53,10 @@ impl aleph_bft::Network<NetworkData> for Network {
             aleph_bft::Recipient::Everyone => Recipient::Everyone,
         };
 
-        self.connections
-            .send(recipient, P2PMessage::Aleph(network_data.consensus_encode_to_vec()));
+        self.connections.send(
+            recipient,
+            P2PMessage::Aleph(network_data.consensus_encode_to_vec()),
+        );
     }
 
     async fn next_event(&mut self) -> Option<NetworkData> {
@@ -66,7 +69,11 @@ impl aleph_bft::Network<NetworkData> for Network {
                         Ok(network_data) => {
                             // in order to bound the RAM consumption of a session we have to bound
                             // the size of an individual unit in memory
-                            if network_data.included_data().iter().all(UnitData::is_valid) {
+                            if network_data
+                                .included_data()
+                                .iter()
+                                .all(|items| is_valid(items.as_slice()))
+                            {
                                 return Some(network_data);
                             }
 

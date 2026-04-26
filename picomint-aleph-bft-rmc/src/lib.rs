@@ -2,8 +2,8 @@ pub use aleph_bft_crypto::{
     Indexed, MultiKeychain, Multisigned, NodeCount, PartialMultisignature, PartiallyMultisigned,
     Signable, Signature, Signed, UncheckedSigned,
 };
-use picomint_encoding::{Decodable, Encodable};
 use core::fmt::Debug;
+use picomint_encoding::{Decodable, Encodable};
 use std::hash::Hash;
 
 mod handler;

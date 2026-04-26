@@ -1,9 +1,9 @@
 use aleph_bft_types::{DataProvider as DataProviderT, FinalizationHandler as FinalizationHandlerT};
 use async_trait::async_trait;
-use picomint_encoding::{Decodable, Encodable};
 use futures::{channel::mpsc::unbounded, future::pending, AsyncWrite};
 use log::error;
 use parking_lot::Mutex;
+use picomint_encoding::{Decodable, Encodable};
 use std::{
     io::{self},
     pin::Pin,
@@ -60,7 +60,9 @@ impl DataProviderT for DataProvider {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Decodable, Encodable)]
+#[derive(
+    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Decodable, Encodable,
+)]
 pub struct StalledDataProvider {}
 
 impl StalledDataProvider {

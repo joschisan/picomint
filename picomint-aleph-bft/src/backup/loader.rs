@@ -78,7 +78,9 @@ impl<D: Data, S: Signature, R: AsyncRead> BackupLoader<D, S, R> {
         let input = &mut &buf[..];
         let mut result = Vec::new();
         while !input.is_empty() {
-            result.push(<UncheckedSignedUnit<D, S>>::consensus_decode_partial(input)?);
+            result.push(<UncheckedSignedUnit<D, S>>::consensus_decode_partial(
+                input,
+            )?);
         }
         Ok(result)
     }

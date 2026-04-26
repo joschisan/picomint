@@ -1,6 +1,6 @@
 use aleph_bft_types::{SpawnHandle, TaskHandle};
-use picomint_encoding::{Decodable, Encodable};
 use futures::{channel::oneshot, Future};
+use picomint_encoding::{Decodable, Encodable};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default, Decodable, Encodable)]
 pub struct Spawner;

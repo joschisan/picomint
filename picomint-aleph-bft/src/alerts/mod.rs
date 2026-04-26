@@ -4,8 +4,8 @@ use crate::{
     UncheckedSigned, UnitHash,
 };
 use aleph_bft_rmc::Message as RmcMessage;
-use picomint_encoding::{Decodable, Encodable};
 use derivative::Derivative;
+use picomint_encoding::{Decodable, Encodable};
 
 mod handler;
 mod service;

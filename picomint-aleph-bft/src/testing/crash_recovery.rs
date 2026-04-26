@@ -4,12 +4,12 @@ use crate::{
     NodeCount, NodeIndex, SpawnHandle, TaskHandle,
 };
 use aleph_bft_mock::{Data, DataProvider, Router, Signature, Spawner};
-use picomint_encoding::Decodable;
 use futures::{
     channel::{mpsc, oneshot},
     StreamExt,
 };
 use parking_lot::Mutex;
+use picomint_encoding::Decodable;
 use serial_test::serial;
 use std::{
     collections::{HashMap, HashSet},

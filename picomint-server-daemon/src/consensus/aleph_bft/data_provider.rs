@@ -3,17 +3,14 @@ use std::collections::BTreeSet;
 use picomint_core::TransactionId;
 use picomint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
 use picomint_core::transaction::ConsensusItem;
-use picomint_encoding::{Decodable, Encodable};
+use picomint_encoding::Encodable;
 
 use crate::LOG_CONSENSUS;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Encodable, Decodable)]
-pub struct UnitData(pub Vec<u8>);
-
-impl UnitData {
-    pub fn is_valid(&self) -> bool {
-        self.0.len() <= ALEPH_BFT_UNIT_BYTE_LIMIT
-    }
+/// Returns true iff `items` encode to at most `ALEPH_BFT_UNIT_BYTE_LIMIT` bytes.
+/// Used by the network receive path to drop oversize units sent by malicious peers.
+pub fn is_valid(items: &[ConsensusItem]) -> bool {
+    items.consensus_encode_to_vec().len() <= ALEPH_BFT_UNIT_BYTE_LIMIT
 }
 
 pub struct DataProvider {
@@ -34,11 +31,11 @@ impl DataProvider {
 
 #[async_trait::async_trait]
 impl aleph_bft::DataProvider for DataProvider {
-    type Output = UnitData;
+    type Output = Vec<ConsensusItem>;
 
-    async fn get_data(&mut self) -> Option<UnitData> {
-        // the length of a vector is encoded in at most 9 bytes
-        let mut n_bytes = 9;
+    async fn get_data(&mut self) -> Option<Vec<ConsensusItem>> {
+        // 4-byte u32 BE length prefix from picomint-encoding's Vec encoding
+        let mut n_bytes = 4;
         let mut items = Vec::new();
 
         if let Some(item) = self.leftover_item.take() {
@@ -76,10 +73,8 @@ impl aleph_bft::DataProvider for DataProvider {
             return None;
         }
 
-        let bytes = items.consensus_encode_to_vec();
+        assert!(is_valid(&items));
 
-        assert!(bytes.len() <= ALEPH_BFT_UNIT_BYTE_LIMIT);
-
-        Some(UnitData(bytes))
+        Some(items)
     }
 }

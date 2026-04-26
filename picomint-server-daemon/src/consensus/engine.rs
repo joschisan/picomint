@@ -9,18 +9,17 @@ use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSession
 use picomint_core::task::{TaskGroup, TaskHandle};
 use picomint_core::transaction::ConsensusItem;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
-use picomint_encoding::Decodable;
 use picomint_redb::{Database, ReadTransaction, WriteTransaction};
 use rand::Rng;
 use rand::seq::IteratorRandom;
 use tokio::sync::watch;
 use tokio::time::sleep;
-use tracing::{debug, error, info, instrument, trace};
+use tracing::{debug, info, instrument, trace};
 
 use crate::LOG_CONSENSUS;
 use crate::config::ServerConfig;
 use crate::consensus::aleph_bft::backup::{UnitLoader, UnitSaver};
-use crate::consensus::aleph_bft::data_provider::{DataProvider, UnitData};
+use crate::consensus::aleph_bft::data_provider::DataProvider;
 use crate::consensus::aleph_bft::finalization_handler::{FinalizationHandler, OrderedUnit};
 use crate::consensus::aleph_bft::keychain::Keychain;
 use crate::consensus::aleph_bft::network::Network;
@@ -256,28 +255,15 @@ impl ConsensusEngine {
                         break;
                     }
 
-                    if let Some(UnitData(bytes)) = ordered_unit.data {
-                        match Vec::<ConsensusItem>::consensus_decode(&bytes) {
-                            Ok(items) => {
-                                for item in items {
-                                    if let Ok(()) = self.process_consensus_item(
-                                        session_index,
-                                        item_index,
-                                        item.clone(),
-                                        ordered_unit.creator
-                                    ).await {
-                                        item_index += 1;
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                error!(
-                                    target: LOG_CONSENSUS,
-                                    session_index,
-                                    peer = %ordered_unit.creator,
-                                    err = %err,
-                                    "Failed to decode consensus items from peer"
-                                );
+                    if let Some(items) = ordered_unit.data {
+                        for item in items {
+                            if let Ok(()) = self.process_consensus_item(
+                                session_index,
+                                item_index,
+                                item.clone(),
+                                ordered_unit.creator
+                            ).await {
+                                item_index += 1;
                             }
                         }
                     }

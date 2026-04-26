@@ -327,8 +327,7 @@ mod tests {
                     }
                 }
                 let encoded = bnm.consensus_encode_to_vec();
-                let decoded =
-                    NodeSubset::consensus_decode(&encoded).expect("decode should work");
+                let decoded = NodeSubset::consensus_decode(&encoded).expect("decode should work");
                 assert_eq!(decoded, bnm);
             }
         }

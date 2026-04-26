@@ -1,12 +1,11 @@
 use aleph_bft::Round;
 use picomint_core::PeerId;
-
-use super::data_provider::UnitData;
+use picomint_core::transaction::ConsensusItem;
 
 pub struct OrderedUnit {
     pub creator: PeerId,
     pub round: Round,
-    pub data: Option<UnitData>,
+    pub data: Option<Vec<ConsensusItem>>,
 }
 
 pub struct FinalizationHandler {
@@ -20,7 +19,7 @@ impl FinalizationHandler {
 }
 
 impl aleph_bft::UnitFinalizationHandler for FinalizationHandler {
-    type Data = UnitData;
+    type Data = Vec<ConsensusItem>;
 
     fn batch_finalized(&mut self, batch: Vec<aleph_bft::OrderedUnit<Self::Data>>) {
         for unit in batch {

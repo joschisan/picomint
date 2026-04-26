@@ -1,6 +1,6 @@
 use crate::{Index, NodeCount, NodeIndex, NodeMap};
-use picomint_encoding::{Decodable, Encodable};
 use log::warn;
+use picomint_encoding::{Decodable, Encodable};
 use std::{fmt::Debug, hash::Hash};
 
 /// The type used as a signature.

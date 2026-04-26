@@ -175,8 +175,8 @@ pub mod tests {
     fn given_control_hash_is_encoded_when_same_control_hash_is_decoded_then_results_are_the_same() {
         let ch = ControlHash::new(&vec![Some(([0; 32], 2)), None, Some(([1; 32], 2))].into());
         let encoded = ch.consensus_encode_to_vec();
-        let decoded =
-            ControlHash::consensus_decode_partial(&mut encoded.as_slice()).expect("should decode correctly");
+        let decoded = ControlHash::consensus_decode_partial(&mut encoded.as_slice())
+            .expect("should decode correctly");
         assert_eq!(decoded, ch);
     }
 
@@ -253,8 +253,9 @@ pub mod tests {
             129, 100, 217, 65, 183, 158, 24, 201, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0,
         ]);
-        let borked_ch = ControlHash::consensus_decode_partial(&mut borked_control_hash_bytes.as_slice())
-            .expect("should decode correctly");
+        let borked_ch =
+            ControlHash::consensus_decode_partial(&mut borked_control_hash_bytes.as_slice())
+                .expect("should decode correctly");
 
         assert_eq!(
             borked_ch

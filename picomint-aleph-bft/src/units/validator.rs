@@ -153,8 +153,9 @@ mod tests {
         let prefix_len = encoded.len() - 32;
         let mut borked_control_hash_bytes = encoded[..prefix_len].to_vec();
         borked_control_hash_bytes.extend([0u8; 32]);
-        control_hash = ControlHash::consensus_decode_partial(&mut borked_control_hash_bytes.as_slice())
-            .expect("should decode correctly");
+        control_hash =
+            ControlHash::consensus_decode_partial(&mut borked_control_hash_bytes.as_slice())
+                .expect("should decode correctly");
         let preunit = PreUnit::new(preunit.creator(), preunit.round(), control_hash);
         let unchecked_unit =
             preunit_to_unchecked_signed_unit(preunit.clone(), session_id, &keychain);

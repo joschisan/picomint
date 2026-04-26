@@ -4,8 +4,8 @@ use crate::{
     Data, Index, MultiKeychain, NodeCount, NodeIndex, Round, SessionId, Signable, Signed,
     UncheckedSigned, UnitHash,
 };
-use picomint_encoding::{Decodable, Encodable};
 use derivative::Derivative;
+use picomint_encoding::{Decodable, Encodable};
 
 mod control_hash;
 mod store;
@@ -234,8 +234,8 @@ pub mod tests {
             .flatten()
         {
             let encoded = full_unit.consensus_encode_to_vec();
-            let decoded =
-                TestFullUnit::consensus_decode_partial(&mut encoded.as_slice()).expect("should decode correctly");
+            let decoded = TestFullUnit::consensus_decode_partial(&mut encoded.as_slice())
+                .expect("should decode correctly");
             assert_eq!(decoded, full_unit);
         }
     }
