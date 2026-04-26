@@ -13,6 +13,7 @@ pub use dataio::{DataProvider, FinalizationHandler, OrderedUnit, UnitFinalizatio
 pub use network::{Network, Recipient};
 pub use tasks::{SpawnHandle, TaskHandle};
 
+use bitcoin_hashes::{sha256, Hash as BitcoinHash};
 use codec::Codec;
 use std::{fmt::Debug, hash::Hash as StdHash};
 
@@ -21,12 +22,12 @@ pub trait Data: Eq + Clone + Send + Sync + Debug + StdHash + Codec + 'static {}
 
 impl<T> Data for T where T: Eq + Clone + Send + Sync + Debug + StdHash + Codec + 'static {}
 
-/// A hasher, used for creating identifiers for blocks or units.
-pub trait Hasher: Eq + Clone + Send + Sync + Debug + 'static {
-    /// A hash, as an identifier for a block or unit.
-    type Hash: AsRef<[u8]> + Eq + Ord + Copy + Clone + Send + Sync + Debug + StdHash + Codec;
+/// Hash of a unit or other consensus message — sha256 of the consensus encoding.
+pub type UnitHash = [u8; 32];
 
-    fn hash(s: &[u8]) -> Self::Hash;
+/// Hash arbitrary bytes with sha256.
+pub fn hash(s: &[u8]) -> UnitHash {
+    <sha256::Hash as BitcoinHash>::hash(s).to_byte_array()
 }
 
 /// The number of a session for which the consensus is run.

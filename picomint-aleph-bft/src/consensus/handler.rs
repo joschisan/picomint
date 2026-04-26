@@ -6,7 +6,7 @@ use crate::{
     dissemination::{Addressed, DisseminationMessage, Responder, TaskManager, TaskManagerStatus},
     extension::Ordering,
     units::{UncheckedSignedUnit, Unit, UnitStore, UnitStoreStatus, Validator},
-    Data, DelayConfig, Hasher, MultiKeychain, NodeIndex, UnitFinalizationHandler,
+    Data, DelayConfig, MultiKeychain, NodeIndex, UnitFinalizationHandler, UnitHash,
 };
 use log::{debug, trace};
 use std::{
@@ -21,21 +21,21 @@ where
     UFH: UnitFinalizationHandler,
     MK: MultiKeychain,
 {
-    store: UnitStore<DagUnit<UFH::Hasher, UFH::Data, MK>>,
-    dag: Dag<UFH::Hasher, UFH::Data, MK>,
-    responder: Responder<UFH::Hasher, UFH::Data, MK>,
+    store: UnitStore<DagUnit<UFH::Data, MK>>,
+    dag: Dag<UFH::Data, MK>,
+    responder: Responder<UFH::Data, MK>,
     ordering: Ordering<MK, UFH>,
-    task_manager: TaskManager<UFH::Hasher>,
+    task_manager: TaskManager,
 }
 
 /// The status of the consensus, for logging purposes.
-pub struct Status<H: Hasher> {
-    task_manager_status: TaskManagerStatus<H>,
+pub struct Status {
+    task_manager_status: TaskManagerStatus,
     dag_status: DagStatus,
     store_status: UnitStoreStatus,
 }
 
-impl<H: Hasher> Status<H> {
+impl Status {
     fn short_report(&self) -> String {
         let rounds_behind = max(self.dag_status.top_round(), self.store_status.top_round())
             - self.store_status.top_round();
@@ -46,7 +46,7 @@ impl<H: Hasher> Status<H> {
     }
 }
 
-impl<H: Hasher> Display for Status<H> {
+impl Display for Status {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         write!(f, "{}", self.short_report())?;
         write!(f, ";reconstructed DAG: {}", self.store_status)?;
@@ -56,20 +56,20 @@ impl<H: Hasher> Display for Status<H> {
     }
 }
 
-type AddressedDisseminationMessage<H, D, MK> = Addressed<DisseminationMessage<H, D, MK>>;
+type AddressedDisseminationMessage<D, MK> = Addressed<DisseminationMessage<D, MK>>;
 
 /// The result of some operation within the consensus, requiring either other components should get
 /// informed about it, or messages should be sent to the network.
-pub struct ConsensusResult<H: Hasher, D: Data, MK: MultiKeychain> {
+pub struct ConsensusResult<D: Data, MK: MultiKeychain> {
     /// Units that should be sent for backup saving.
-    pub units: Vec<DagUnit<H, D, MK>>,
+    pub units: Vec<DagUnit<D, MK>>,
     /// Alerts that should be sent to the alerting component.
-    pub alerts: Vec<Alert<H, D, MK::Signature>>,
+    pub alerts: Vec<Alert<D, MK::Signature>>,
     /// Messages that should be sent to other committee members.
-    pub messages: Vec<AddressedDisseminationMessage<H, D, MK::Signature>>,
+    pub messages: Vec<AddressedDisseminationMessage<D, MK::Signature>>,
 }
 
-impl<H: Hasher, D: Data, MK: MultiKeychain> ConsensusResult<H, D, MK> {
+impl<D: Data, MK: MultiKeychain> ConsensusResult<D, MK> {
     fn noop() -> Self {
         ConsensusResult {
             units: Vec::new(),
@@ -104,8 +104,8 @@ where
 
     fn handle_dag_result(
         &mut self,
-        result: DagResult<UFH::Hasher, UFH::Data, MK>,
-    ) -> ConsensusResult<UFH::Hasher, UFH::Data, MK> {
+        result: DagResult<UFH::Data, MK>,
+    ) -> ConsensusResult<UFH::Data, MK> {
         let DagResult {
             units,
             alerts,
@@ -125,8 +125,8 @@ where
     /// Process a unit received (usually) from the network.
     pub fn process_incoming_unit(
         &mut self,
-        unit: UncheckedSignedUnit<UFH::Hasher, UFH::Data, MK::Signature>,
-    ) -> ConsensusResult<UFH::Hasher, UFH::Data, MK> {
+        unit: UncheckedSignedUnit<UFH::Data, MK::Signature>,
+    ) -> ConsensusResult<UFH::Data, MK> {
         let result = self.dag.add_unit(unit, &self.store);
         self.handle_dag_result(result)
     }
@@ -134,9 +134,9 @@ where
     /// Process a request received from the network.
     pub fn process_request(
         &mut self,
-        request: ReconstructionRequest<UFH::Hasher>,
+        request: ReconstructionRequest,
         node_id: NodeIndex,
-    ) -> Option<AddressedDisseminationMessage<UFH::Hasher, UFH::Data, MK::Signature>> {
+    ) -> Option<AddressedDisseminationMessage<UFH::Data, MK::Signature>> {
         match self.responder.handle_request(request, &self.store) {
             Ok(response) => Some(Addressed::addressed_to(response.into(), node_id)),
             Err(err) => {
@@ -149,9 +149,9 @@ where
     /// Process a parents response.
     pub fn process_parents(
         &mut self,
-        u_hash: <UFH::Hasher as Hasher>::Hash,
-        parents: Vec<UncheckedSignedUnit<UFH::Hasher, UFH::Data, MK::Signature>>,
-    ) -> ConsensusResult<UFH::Hasher, UFH::Data, MK> {
+        u_hash: UnitHash,
+        parents: Vec<UncheckedSignedUnit<UFH::Data, MK::Signature>>,
+    ) -> ConsensusResult<UFH::Data, MK> {
         if self.store.unit(&u_hash).is_some() {
             trace!(target: LOG_TARGET, "We got parents response but already imported the unit.");
             return ConsensusResult::noop();
@@ -165,7 +165,7 @@ where
         &mut self,
         salt: Salt,
         node_id: NodeIndex,
-    ) -> AddressedDisseminationMessage<UFH::Hasher, UFH::Data, MK::Signature> {
+    ) -> AddressedDisseminationMessage<UFH::Data, MK::Signature> {
         Addressed::addressed_to(
             self.responder
                 .handle_newest_unit_request(node_id, salt, &self.store)
@@ -177,8 +177,8 @@ where
     /// Process a forking notification.
     pub fn process_forking_notification(
         &mut self,
-        notification: ForkingNotification<UFH::Hasher, UFH::Data, MK::Signature>,
-    ) -> ConsensusResult<UFH::Hasher, UFH::Data, MK> {
+        notification: ForkingNotification<UFH::Data, MK::Signature>,
+    ) -> ConsensusResult<UFH::Data, MK> {
         let result = self
             .dag
             .process_forking_notification(notification, &self.store);
@@ -188,8 +188,8 @@ where
     /// What to do once a unit has been securely backed up on disk.
     pub fn on_unit_backup_saved(
         &mut self,
-        unit: DagUnit<UFH::Hasher, UFH::Data, MK>,
-    ) -> Option<AddressedDisseminationMessage<UFH::Hasher, UFH::Data, MK::Signature>> {
+        unit: DagUnit<UFH::Data, MK>,
+    ) -> Option<AddressedDisseminationMessage<UFH::Data, MK::Signature>> {
         let unit_hash = unit.hash();
         self.store.insert(unit.clone());
         self.dag.finished_processing(&unit_hash);
@@ -205,13 +205,13 @@ where
     /// Trigger all the ready tasks and get all the messages that should be sent now.
     pub fn trigger_tasks(
         &mut self,
-    ) -> Vec<AddressedDisseminationMessage<UFH::Hasher, UFH::Data, MK::Signature>> {
+    ) -> Vec<AddressedDisseminationMessage<UFH::Data, MK::Signature>> {
         self.task_manager
             .trigger_tasks(&self.store, self.dag.processing_units())
     }
 
     /// The status of the consensus handler, for logging purposes.
-    pub fn status(&self) -> Status<UFH::Hasher> {
+    pub fn status(&self) -> Status {
         Status {
             dag_status: self.dag.status(),
             store_status: self.store.status(),

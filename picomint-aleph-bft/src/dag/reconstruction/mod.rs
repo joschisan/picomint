@@ -1,6 +1,6 @@
 use crate::{
-    units::{ControlHash, FullUnit, HashFor, Unit, UnitCoord, UnitWithParents, WrappedUnit},
-    Hasher, NodeMap, SessionId,
+    units::{ControlHash, FullUnit, Unit, UnitCoord, UnitWithParents, WrappedUnit},
+    NodeMap, SessionId, UnitHash,
 };
 use aleph_bft_rmc::NodeCount;
 use std::collections::HashMap;
@@ -16,15 +16,13 @@ use parents::Reconstruction as ParentReconstruction;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ReconstructedUnit<U: Unit> {
     unit: U,
-    parents: NodeMap<(HashFor<U>, Round)>,
+    parents: NodeMap<(UnitHash, Round)>,
 }
 
 impl<U: Unit> ReconstructedUnit<U> {
     /// Returns a reconstructed unit if the parents agree with the hash, errors out otherwise.
-    pub fn with_parents(unit: U, parents: NodeMap<(HashFor<U>, Round)>) -> Result<Self, U> {
-        match unit.control_hash().combined_hash()
-            == ControlHash::<U::Hasher>::create_control_hash(&parents)
-        {
+    pub fn with_parents(unit: U, parents: NodeMap<(UnitHash, Round)>) -> Result<Self, U> {
+        match unit.control_hash().combined_hash() == ControlHash::create_control_hash(&parents) {
             true => Ok(ReconstructedUnit { unit, parents }),
             false => Err(unit),
         }
@@ -44,9 +42,7 @@ impl<U: Unit> ReconstructedUnit<U> {
 }
 
 impl<U: Unit> Unit for ReconstructedUnit<U> {
-    type Hasher = U::Hasher;
-
-    fn hash(&self) -> HashFor<U> {
+    fn hash(&self) -> UnitHash {
         self.unit.hash()
     }
 
@@ -54,7 +50,7 @@ impl<U: Unit> Unit for ReconstructedUnit<U> {
         self.unit.coord()
     }
 
-    fn control_hash(&self) -> &ControlHash<Self::Hasher> {
+    fn control_hash(&self) -> &ControlHash {
         self.unit.control_hash()
     }
 
@@ -63,7 +59,7 @@ impl<U: Unit> Unit for ReconstructedUnit<U> {
     }
 }
 
-impl<U: Unit> WrappedUnit<U::Hasher> for ReconstructedUnit<U> {
+impl<U: Unit> WrappedUnit for ReconstructedUnit<U> {
     type Wrapped = U;
 
     fn unpack(self) -> U {
@@ -72,11 +68,11 @@ impl<U: Unit> WrappedUnit<U::Hasher> for ReconstructedUnit<U> {
 }
 
 impl<U: Unit> UnitWithParents for ReconstructedUnit<U> {
-    fn parents(&self) -> impl Iterator<Item = &HashFor<U>> {
+    fn parents(&self) -> impl Iterator<Item = &UnitHash> {
         self.parents.values().map(|(hash, _)| hash)
     }
 
-    fn direct_parents(&self) -> impl Iterator<Item = &HashFor<Self>> {
+    fn direct_parents(&self) -> impl Iterator<Item = &UnitHash> {
         self.parents
             .values()
             .filter_map(|(hash, parent_round)| match self.unit.coord().round() {
@@ -93,7 +89,7 @@ impl<U: Unit> UnitWithParents for ReconstructedUnit<U> {
             })
     }
 
-    fn parent_for(&self, index: NodeIndex) -> Option<&HashFor<Self>> {
+    fn parent_for(&self, index: NodeIndex) -> Option<&UnitHash> {
         self.parents.get(index).map(|(hash, _)| hash)
     }
 
@@ -102,18 +98,14 @@ impl<U: Unit> UnitWithParents for ReconstructedUnit<U> {
     }
 }
 
-impl<D: Data, H: Hasher, K: MultiKeychain> From<ReconstructedUnit<Signed<FullUnit<H, D>, K>>>
-    for Option<D>
-{
-    fn from(value: ReconstructedUnit<Signed<FullUnit<H, D>, K>>) -> Self {
+impl<D: Data, K: MultiKeychain> From<ReconstructedUnit<Signed<FullUnit<D>, K>>> for Option<D> {
+    fn from(value: ReconstructedUnit<Signed<FullUnit<D>, K>>) -> Self {
         value.unpack().into_signable().into()
     }
 }
 
-impl<D: Data, H: Hasher, K: MultiKeychain> From<ReconstructedUnit<Signed<FullUnit<H, D>, K>>>
-    for OrderedUnit<D, H>
-{
-    fn from(unit: ReconstructedUnit<Signed<FullUnit<H, D>, K>>) -> Self {
+impl<D: Data, K: MultiKeychain> From<ReconstructedUnit<Signed<FullUnit<D>, K>>> for OrderedUnit<D> {
+    fn from(unit: ReconstructedUnit<Signed<FullUnit<D>, K>>) -> Self {
         let parents = unit.parents().cloned().collect();
         let unit = unit.unpack();
         let creator = unit.creator();
@@ -132,12 +124,12 @@ impl<D: Data, H: Hasher, K: MultiKeychain> From<ReconstructedUnit<Signed<FullUni
 
 /// What we need to request to reconstruct units.
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub enum Request<H: Hasher> {
+pub enum Request {
     /// We need a unit at this coordinate.
     Coord(UnitCoord),
     /// We need the explicit list of parents for the unit identified by the hash.
     /// This should only happen in the presence of forks, when optimistic reconstruction failed.
-    ParentsOf(H::Hash),
+    ParentsOf(UnitHash),
 }
 
 /// The result of a reconstruction attempt. Might contain multiple reconstructed units,
@@ -147,11 +139,11 @@ pub struct ReconstructionResult<U: Unit> {
     /// All the units that got reconstructed.
     pub units: Vec<ReconstructedUnit<U>>,
     /// Any requests that now should be made.
-    pub requests: Vec<Request<U::Hasher>>,
+    pub requests: Vec<Request>,
 }
 
 impl<U: Unit> ReconstructionResult<U> {
-    fn new(units: Vec<ReconstructedUnit<U>>, requests: Vec<Request<U::Hasher>>) -> Self {
+    fn new(units: Vec<ReconstructedUnit<U>>, requests: Vec<Request>) -> Self {
         ReconstructionResult { units, requests }
     }
 
@@ -166,7 +158,7 @@ impl<U: Unit> ReconstructionResult<U> {
         }
     }
 
-    fn request(request: Request<U::Hasher>) -> Self {
+    fn request(request: Request) -> Self {
         ReconstructionResult {
             units: Vec::new(),
             requests: vec![request],
@@ -177,7 +169,7 @@ impl<U: Unit> ReconstructionResult<U> {
         self.units.push(unit);
     }
 
-    fn add_request(&mut self, request: Request<U::Hasher>) {
+    fn add_request(&mut self, request: Request) {
         self.requests.push(request);
     }
 
@@ -228,8 +220,8 @@ impl<U: Unit> Reconstruction<U> {
     /// Add an explicit list of parents to the reconstruction.
     pub fn add_parents(
         &mut self,
-        unit: HashFor<U>,
-        parents: HashMap<UnitCoord, HashFor<U>>,
+        unit: UnitHash,
+        parents: HashMap<UnitCoord, UnitHash>,
     ) -> ReconstructionResult<U> {
         let parent_reconstruction_result = self.parents.add_parents(unit, parents);
         self.handle_parents_reconstruction_result(parent_reconstruction_result)

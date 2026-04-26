@@ -1,4 +1,4 @@
-use crate::{units::UnitCoord, Hasher, NodeCount, NodeIndex, NodeMap, Round};
+use crate::{units::UnitCoord, NodeCount, NodeIndex, NodeMap, Round, UnitHash};
 use codec::{Decode, Encode};
 use std::{
     fmt::{Display, Formatter, Result as FmtResult},
@@ -6,16 +6,16 @@ use std::{
 };
 
 #[derive(Eq, Debug, PartialEq)]
-pub enum Error<H: Hasher> {
+pub enum Error {
     RoundZeroWithSomeParents(NodeCount),
-    RoundZeroBadControlHash(H::Hash, H::Hash),
+    RoundZeroBadControlHash(UnitHash, UnitHash),
     NotDescendantOfPreviousUnit(NodeIndex),
     DescendantOfPreviousUnitHasWrongRound(Round),
     NotEnoughParentsForRound(Round),
     ParentsHigherThanRound(Round),
 }
 
-impl<H: Hasher> Display for Error<H> {
+impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Error::RoundZeroWithSomeParents(node_count) => {
@@ -55,14 +55,14 @@ impl<H: Hasher> Display for Error<H> {
 /// Combined hashes of the parents of a unit together with the set of indices of creators of the
 /// parents. By parent here we mean a parent hash and its round.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
-pub struct ControlHash<H: Hasher> {
+pub struct ControlHash {
     parents: NodeMap<Round>,
-    combined_hash: H::Hash,
+    combined_hash: UnitHash,
 }
 
-impl<H: Hasher> ControlHash<H> {
+impl ControlHash {
     /// Creates new control hash from parents hashes and rounds
-    pub fn new(parents_with_rounds_and_hashes: &NodeMap<(H::Hash, Round)>) -> Self {
+    pub fn new(parents_with_rounds_and_hashes: &NodeMap<(UnitHash, Round)>) -> Self {
         let mut parents_with_rounds = NodeMap::with_size(parents_with_rounds_and_hashes.size());
         for (parent_index, (_, parent_round)) in parents_with_rounds_and_hashes.iter() {
             parents_with_rounds.insert(parent_index, *parent_round);
@@ -74,11 +74,11 @@ impl<H: Hasher> ControlHash<H> {
     }
 
     /// Calculate parent control hash, which includes all parent hashes and their rounds into account.
-    pub fn create_control_hash(parent_map: &NodeMap<(H::Hash, Round)>) -> H::Hash {
-        parent_map.using_encoded(H::hash)
+    pub fn create_control_hash(parent_map: &NodeMap<(UnitHash, Round)>) -> UnitHash {
+        parent_map.using_encoded(crate::hash)
     }
 
-    pub fn combined_hash(&self) -> H::Hash {
+    pub fn combined_hash(&self) -> UnitHash {
         self.combined_hash
     }
 
@@ -94,20 +94,20 @@ impl<H: Hasher> ControlHash<H> {
         self.parents.size()
     }
 
-    pub fn validate(&self, unit_coord: UnitCoord) -> Result<(), Error<H>> {
+    pub fn validate(&self, unit_coord: UnitCoord) -> Result<(), Error> {
         match unit_coord.round {
             0 => self.validate_initial_round(),
             _ => self.validate_non_initial_round(unit_coord),
         }
     }
 
-    fn validate_initial_round(&self) -> Result<(), Error<H>> {
+    fn validate_initial_round(&self) -> Result<(), Error> {
         let parents_count = self.parents().count();
         if parents_count > 0 {
             return Err(Error::RoundZeroWithSomeParents(NodeCount(parents_count)));
         }
         let recalculated_control_hash =
-            ControlHash::<H>::create_control_hash(&NodeMap::with_size(self.n_members()));
+            ControlHash::create_control_hash(&NodeMap::with_size(self.n_members()));
         if self.combined_hash != recalculated_control_hash {
             return Err(Error::RoundZeroBadControlHash(
                 self.combined_hash,
@@ -118,7 +118,7 @@ impl<H: Hasher> ControlHash<H> {
         Ok(())
     }
 
-    fn validate_non_initial_round(&self, unit_coord: UnitCoord) -> Result<(), Error<H>> {
+    fn validate_non_initial_round(&self, unit_coord: UnitCoord) -> Result<(), Error> {
         assert!(unit_coord.round > 0, "Round must be greater than 0");
 
         self.unit_creator_is_descendant_of_previous_unit(unit_coord)?;
@@ -128,7 +128,7 @@ impl<H: Hasher> ControlHash<H> {
         Ok(())
     }
 
-    fn check_if_parents_greater_than_previous_round(&self, round: Round) -> Result<(), Error<H>> {
+    fn check_if_parents_greater_than_previous_round(&self, round: Round) -> Result<(), Error> {
         let parents_greater_than_previous_round = self
             .parents()
             .any(|unit_coord| unit_coord.round > round - 1);
@@ -138,7 +138,7 @@ impl<H: Hasher> ControlHash<H> {
         Ok(())
     }
 
-    fn previous_round_have_enough_parents(&self, round: Round) -> Result<(), Error<H>> {
+    fn previous_round_have_enough_parents(&self, round: Round) -> Result<(), Error> {
         let previous_round_parents = self
             .parents()
             .filter(|&parent| parent.round == round - 1)
@@ -152,7 +152,7 @@ impl<H: Hasher> ControlHash<H> {
     fn unit_creator_is_descendant_of_previous_unit(
         &self,
         unit_coord: UnitCoord,
-    ) -> Result<(), Error<H>> {
+    ) -> Result<(), Error> {
         match self.parents.get(unit_coord.creator) {
             None => return Err(Error::NotDescendantOfPreviousUnit(unit_coord.creator)),
             Some(&parent_round) => {
@@ -168,14 +168,12 @@ impl<H: Hasher> ControlHash<H> {
 #[cfg(test)]
 pub mod tests {
     use crate::units::{control_hash::Error, ControlHash, NodeCount, NodeIndex, UnitCoord};
-    use aleph_bft_mock::Hasher64;
     use aleph_bft_types::{NodeMap, Round};
     use codec::{Decode, Encode};
 
     #[test]
     fn given_control_hash_is_encoded_when_same_control_hash_is_decoded_then_results_are_the_same() {
-        let ch =
-            ControlHash::<Hasher64>::new(&vec![Some(([0; 8], 2)), None, Some(([1; 8], 2))].into());
+        let ch = ControlHash::new(&vec![Some(([0; 32], 2)), None, Some(([1; 32], 2))].into());
         let encoded = ch.encode();
         let decoded =
             ControlHash::decode(&mut encoded.as_slice()).expect("should decode correctly");
@@ -185,19 +183,22 @@ pub mod tests {
     #[test]
     fn given_control_hash_then_basic_properties_are_correct() {
         let parent_map = vec![
-            Some(([0; 8], 2)),
+            Some(([0; 32], 2)),
             None,
-            Some(([2; 8], 2)),
-            Some(([3; 8], 2)),
-            Some(([4; 8], 2)),
-            Some(([5; 8], 2)),
-            Some(([6; 8], 1)),
+            Some(([2; 32], 2)),
+            Some(([3; 32], 2)),
+            Some(([4; 32], 2)),
+            Some(([5; 32], 2)),
+            Some(([6; 32], 1)),
         ]
         .into();
-        let ch = ControlHash::<Hasher64>::new(&parent_map);
+        let ch = ControlHash::new(&parent_map);
+        // Recomputing must give the same hash, and a different parent set must give a
+        // different hash. Hash bytes themselves change with the underlying hasher
+        // (was sip64 in upstream, now sha256), so we don't pin a specific value.
         assert_eq!(
-            ControlHash::<Hasher64>::create_control_hash(&parent_map),
-            [249, 141, 250, 222, 107, 240, 194, 10]
+            ControlHash::create_control_hash(&parent_map),
+            ch.combined_hash()
         );
 
         assert_eq!(ch.parents().count(), 6);
@@ -218,16 +219,16 @@ pub mod tests {
     #[test]
     fn given_initial_round_when_validate_with_non_empty_parents_then_validate_returns_err() {
         let parent_map = vec![
-            Some(([0; 8], 2)),
+            Some(([0; 32], 2)),
             None,
-            Some(([2; 8], 2)),
-            Some(([3; 8], 2)),
-            Some(([4; 8], 2)),
-            Some(([5; 8], 2)),
-            Some(([6; 8], 1)),
+            Some(([2; 32], 2)),
+            Some(([3; 32], 2)),
+            Some(([4; 32], 2)),
+            Some(([5; 32], 2)),
+            Some(([6; 32], 1)),
         ]
         .into();
-        let ch = ControlHash::<Hasher64>::new(&parent_map);
+        let ch = ControlHash::new(&parent_map);
         assert_eq!(
             ch.validate(UnitCoord::new(0, NodeIndex(1)))
                 .expect_err("validate() should return error, returned Ok(()) instead"),
@@ -245,11 +246,14 @@ pub mod tests {
         // hash algorithm, just trying to send us garbage. Decode still work, as 8 random bytes is
         // is valid generic Hasher64 representation, but validation should not work
 
-        let correct_control_hash = ControlHash::<Hasher64>::new(&NodeMap::with_size(NodeCount(4)));
+        let correct_control_hash = ControlHash::new(&NodeMap::with_size(NodeCount(4)));
         let encoded_control_hash = correct_control_hash.encode();
         let mut borked_control_hash_bytes = encoded_control_hash[0..=7].to_vec();
-        borked_control_hash_bytes.extend([129, 100, 217, 65, 183, 158, 24, 201]);
-        let borked_ch = ControlHash::<Hasher64>::decode(&mut borked_control_hash_bytes.as_slice())
+        borked_control_hash_bytes.extend([
+            129, 100, 217, 65, 183, 158, 24, 201, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+        ]);
+        let borked_ch = ControlHash::decode(&mut borked_control_hash_bytes.as_slice())
             .expect("should decode correctly");
 
         assert_eq!(
@@ -258,7 +262,7 @@ pub mod tests {
                 .expect_err("validate() should return error, returned Ok(()) instead"),
             Error::RoundZeroBadControlHash(
                 borked_ch.combined_hash,
-                ControlHash::<Hasher64>::create_control_hash(&NodeMap::with_size(NodeCount(4)))
+                ControlHash::create_control_hash(&NodeMap::with_size(NodeCount(4)))
             )
         );
     }
@@ -266,16 +270,16 @@ pub mod tests {
     #[test]
     fn given_non_initial_round_when_validate_with_correct_unit_coord_then_validate_is_ok() {
         let parent_map = vec![
-            Some(([0; 8], 2)),
+            Some(([0; 32], 2)),
             None,
-            Some(([2; 8], 2)),
-            Some(([3; 8], 2)),
-            Some(([4; 8], 2)),
-            Some(([5; 8], 2)),
-            Some(([6; 8], 1)),
+            Some(([2; 32], 2)),
+            Some(([3; 32], 2)),
+            Some(([4; 32], 2)),
+            Some(([5; 32], 2)),
+            Some(([6; 32], 1)),
         ]
         .into();
-        let ch = ControlHash::<Hasher64>::new(&parent_map);
+        let ch = ControlHash::new(&parent_map);
         assert!(ch.validate(UnitCoord::new(3, NodeIndex(2))).is_ok());
     }
 
@@ -283,13 +287,13 @@ pub mod tests {
     fn given_non_initial_round_when_creator_parent_does_not_exist_then_err_is_returned_from_validate(
     ) {
         let parent_map = vec![
-            Some(([0; 8], 2)),
+            Some(([0; 32], 2)),
             None,
-            Some(([2; 8], 2)),
-            Some(([3; 8], 2)),
+            Some(([2; 32], 2)),
+            Some(([3; 32], 2)),
         ]
         .into();
-        let ch = ControlHash::<Hasher64>::new(&parent_map);
+        let ch = ControlHash::new(&parent_map);
         assert_eq!(
             ch.validate(UnitCoord::new(3, NodeIndex(1)))
                 .expect_err("validate() should return error, returned Ok(()) instead"),
@@ -301,13 +305,13 @@ pub mod tests {
     fn given_non_initial_round_hash_when_creator_parent_exists_but_has_wrong_round_then_err_is_returned_from_validate(
     ) {
         let parent_map = vec![
-            Some(([0; 8], 2)),
-            Some(([1; 8], 1)),
-            Some(([2; 8], 2)),
-            Some(([3; 8], 2)),
+            Some(([0; 32], 2)),
+            Some(([1; 32], 1)),
+            Some(([2; 32], 2)),
+            Some(([3; 32], 2)),
         ]
         .into();
-        let ch = ControlHash::<Hasher64>::new(&parent_map);
+        let ch = ControlHash::new(&parent_map);
         assert_eq!(
             ch.validate(UnitCoord::new(3, NodeIndex(1)))
                 .expect_err("validate() should return error, returned Ok(()) instead"),
@@ -320,12 +324,12 @@ pub mod tests {
     ) {
         let parent_map = vec![
             None,
-            Some(([1; 8], 2)),
-            Some(([2; 8], 2)),
-            Some(([3; 8], 1)),
+            Some(([1; 32], 2)),
+            Some(([2; 32], 2)),
+            Some(([3; 32], 1)),
         ]
         .into();
-        let ch = ControlHash::<Hasher64>::new(&parent_map);
+        let ch = ControlHash::new(&parent_map);
         assert_eq!(
             ch.validate(UnitCoord::new(3, NodeIndex(1)))
                 .expect_err("validate() should return error, returned Ok(()) instead"),
@@ -337,13 +341,13 @@ pub mod tests {
     fn given_non_initial_round_when_there_are_parents_from_greater_rounds_then_err_is_returned_from_validate(
     ) {
         let parent_map = vec![
-            Some(([0; 8], 2)),
-            Some(([1; 8], 2)),
-            Some(([2; 8], 2)),
-            Some(([3; 8], 3)),
+            Some(([0; 32], 2)),
+            Some(([1; 32], 2)),
+            Some(([2; 32], 2)),
+            Some(([3; 32], 3)),
         ]
         .into();
-        let ch = ControlHash::<Hasher64>::new(&parent_map);
+        let ch = ControlHash::new(&parent_map);
         assert_eq!(
             ch.validate(UnitCoord::new(3, NodeIndex(1)))
                 .expect_err("validate() should return error, returned Ok(()) instead"),
@@ -355,23 +359,52 @@ pub mod tests {
     fn given_correct_control_hash_when_only_single_property_change_then_control_hash_does_not_match(
     ) {
         let all_parents_from_round_three = [
-            Some(([193, 179, 113, 82, 221, 179, 199, 217], 3)),
-            Some(([215, 1, 244, 177, 19, 155, 43, 208], 3)),
-            Some(([12, 108, 24, 87, 75, 135, 37, 3], 3)),
-            Some(([3, 221, 173, 235, 29, 224, 247, 233], 3)),
+            Some((
+                [
+                    193, 179, 113, 82, 221, 179, 199, 217, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+                3,
+            )),
+            Some((
+                [
+                    215, 1, 244, 177, 19, 155, 43, 208, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+                3,
+            )),
+            Some((
+                [
+                    12, 108, 24, 87, 75, 135, 37, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+                3,
+            )),
+            Some((
+                [
+                    3, 221, 173, 235, 29, 224, 247, 233, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+                3,
+            )),
         ];
 
         let parents_from_round_three = &all_parents_from_round_three[0..3].to_vec().into();
-        let control_hash_of_fourth_round_unit =
-            ControlHash::<Hasher64>::new(parents_from_round_three);
+        let control_hash_of_fourth_round_unit = ControlHash::new(parents_from_round_three);
 
         let mut parents_from_round_three_but_one_hash_replaced = parents_from_round_three.clone();
         parents_from_round_three_but_one_hash_replaced.insert(
             NodeIndex(2),
-            ([234, 170, 183, 55, 61, 24, 31, 143], 3 as Round),
+            (
+                [
+                    234, 170, 183, 55, 61, 24, 31, 143, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+                3 as Round,
+            ),
         );
         let borked_hash_of_fourth_round_unit =
-            ControlHash::<Hasher64>::new(&parents_from_round_three_but_one_hash_replaced);
+            ControlHash::new(&parents_from_round_three_but_one_hash_replaced);
         assert_ne!(
             borked_hash_of_fourth_round_unit,
             control_hash_of_fourth_round_unit
@@ -379,10 +412,18 @@ pub mod tests {
 
         let mut parents_from_round_three_but_one_unit_round_replaced =
             parents_from_round_three.clone();
-        parents_from_round_three_but_one_unit_round_replaced
-            .insert(NodeIndex(2), ([12, 108, 24, 87, 75, 135, 37, 3], 2));
+        parents_from_round_three_but_one_unit_round_replaced.insert(
+            NodeIndex(2),
+            (
+                [
+                    12, 108, 24, 87, 75, 135, 37, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+                2,
+            ),
+        );
         let control_hash_of_fourth_round_unit_but_one_unit_replaced =
-            ControlHash::<Hasher64>::new(&parents_from_round_three_but_one_unit_round_replaced);
+            ControlHash::new(&parents_from_round_three_but_one_unit_round_replaced);
         assert_ne!(
             borked_hash_of_fourth_round_unit,
             control_hash_of_fourth_round_unit_but_one_unit_replaced

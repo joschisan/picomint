@@ -1,40 +1,29 @@
 use crate::{
     alerts::AlertMessage,
     network::{NetworkData, NetworkDataInner, UnitMessage},
-    Data, Hasher, Network, PartialMultisignature, Receiver, Recipient, Sender, Signature,
-    Terminator,
+    Data, Network, PartialMultisignature, Receiver, Recipient, Sender, Signature, Terminator,
 };
 use futures::{FutureExt, StreamExt};
 use log::{debug, error, warn};
 
-pub struct Hub<
-    H: Hasher,
-    D: Data,
-    S: Signature,
-    MS: PartialMultisignature,
-    N: Network<NetworkData<H, D, S, MS>>,
-> {
+pub struct Hub<D: Data, S: Signature, MS: PartialMultisignature, N: Network<NetworkData<D, S, MS>>>
+{
     network: N,
-    units_to_send: Receiver<(UnitMessage<H, D, S>, Recipient)>,
-    units_received: Sender<UnitMessage<H, D, S>>,
-    alerts_to_send: Receiver<(AlertMessage<H, D, S, MS>, Recipient)>,
-    alerts_received: Sender<AlertMessage<H, D, S, MS>>,
+    units_to_send: Receiver<(UnitMessage<D, S>, Recipient)>,
+    units_received: Sender<UnitMessage<D, S>>,
+    alerts_to_send: Receiver<(AlertMessage<D, S, MS>, Recipient)>,
+    alerts_received: Sender<AlertMessage<D, S, MS>>,
 }
 
-impl<
-        H: Hasher,
-        D: Data,
-        S: Signature,
-        MS: PartialMultisignature,
-        N: Network<NetworkData<H, D, S, MS>>,
-    > Hub<H, D, S, MS, N>
+impl<D: Data, S: Signature, MS: PartialMultisignature, N: Network<NetworkData<D, S, MS>>>
+    Hub<D, S, MS, N>
 {
     pub fn new(
         network: N,
-        units_to_send: Receiver<(UnitMessage<H, D, S>, Recipient)>,
-        units_received: Sender<UnitMessage<H, D, S>>,
-        alerts_to_send: Receiver<(AlertMessage<H, D, S, MS>, Recipient)>,
-        alerts_received: Sender<AlertMessage<H, D, S, MS>>,
+        units_to_send: Receiver<(UnitMessage<D, S>, Recipient)>,
+        units_received: Sender<UnitMessage<D, S>>,
+        alerts_to_send: Receiver<(AlertMessage<D, S, MS>, Recipient)>,
+        alerts_received: Sender<AlertMessage<D, S, MS>>,
     ) -> Self {
         Hub {
             network,
@@ -45,11 +34,11 @@ impl<
         }
     }
 
-    fn send(&self, data: NetworkData<H, D, S, MS>, recipient: Recipient) {
+    fn send(&self, data: NetworkData<D, S, MS>, recipient: Recipient) {
         self.network.send(data, recipient);
     }
 
-    fn handle_incoming(&self, network_data: NetworkData<H, D, S, MS>) {
+    fn handle_incoming(&self, network_data: NetworkData<D, S, MS>) {
         let NetworkData(network_data) = network_data;
         use NetworkDataInner::*;
         match network_data {

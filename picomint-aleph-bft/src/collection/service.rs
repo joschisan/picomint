@@ -4,8 +4,8 @@ use crate::{
     dissemination::{Addressed, DisseminationMessage},
     network::UnitMessageTo,
     units::{Unit, ValidationError, Validator},
-    Data, Hasher, Keychain, NodeCount, NodeIndex, NodeMap, Receiver, Recipient, Round, Sender,
-    Signature, SignatureError, UncheckedSigned,
+    Data, Keychain, NodeCount, NodeIndex, NodeMap, Receiver, Recipient, Round, Sender, Signature,
+    SignatureError, UncheckedSigned,
 };
 use futures::{channel::oneshot, FutureExt, StreamExt};
 use futures_timer::Delay;
@@ -19,14 +19,14 @@ use std::{
 
 /// Ways in which a newest unit response might be wrong.
 #[derive(Eq, PartialEq, Debug)]
-pub enum Error<H: Hasher, D: Data, S: Signature> {
+pub enum Error<D: Data, S: Signature> {
     WrongSignature,
     SaltMismatch(Salt, Salt),
-    InvalidUnit(ValidationError<H, D, S>),
+    InvalidUnit(ValidationError<D, S>),
     ForeignUnit(NodeIndex),
 }
 
-impl<H: Hasher, D: Data, S: Signature> Display for Error<H, D, S> {
+impl<D: Data, S: Signature> Display for Error<D, S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         use Error::*;
         match self {
@@ -40,16 +40,14 @@ impl<H: Hasher, D: Data, S: Signature> Display for Error<H, D, S> {
     }
 }
 
-impl<H: Hasher, D: Data, S: Signature> From<ValidationError<H, D, S>> for Error<H, D, S> {
-    fn from(ve: ValidationError<H, D, S>) -> Self {
+impl<D: Data, S: Signature> From<ValidationError<D, S>> for Error<D, S> {
+    fn from(ve: ValidationError<D, S>) -> Self {
         Error::InvalidUnit(ve)
     }
 }
 
-impl<H: Hasher, D: Data, S: Signature> From<SignatureError<NewestUnitResponse<H, D, S>, S>>
-    for Error<H, D, S>
-{
-    fn from(_: SignatureError<NewestUnitResponse<H, D, S>, S>) -> Self {
+impl<D: Data, S: Signature> From<SignatureError<NewestUnitResponse<D, S>, S>> for Error<D, S> {
+    fn from(_: SignatureError<NewestUnitResponse<D, S>, S>) -> Self {
         Error::WrongSignature
     }
 }
@@ -95,10 +93,11 @@ impl<'a, MK: Keychain> Collection<'a, MK> {
     }
 
     /// Process a response to a newest unit request.
-    pub fn on_newest_response<H: Hasher, D: Data>(
+    #[allow(clippy::result_large_err)]
+    pub fn on_newest_response<D: Data>(
         &mut self,
-        unchecked_response: UncheckedSigned<NewestUnitResponse<H, D, MK::Signature>, MK::Signature>,
-    ) -> Result<Status, Error<H, D, MK::Signature>> {
+        unchecked_response: UncheckedSigned<NewestUnitResponse<D, MK::Signature>, MK::Signature>,
+    ) -> Result<Status, Error<D, MK::Signature>> {
         let response = unchecked_response.check(self.keychain)?.into_signable();
         if response.salt != self.salt {
             return Err(Error::SaltMismatch(self.salt, response.salt));
@@ -145,9 +144,7 @@ impl<'a, MK: Keychain> Collection<'a, MK> {
     }
 
     /// Returns a request addressed to the appropriate nodes.
-    pub fn prepare_request<H: Hasher, D: Data>(
-        &self,
-    ) -> Addressed<DisseminationMessage<H, D, MK::Signature>> {
+    pub fn prepare_request<D: Data>(&self) -> Addressed<DisseminationMessage<D, MK::Signature>> {
         Addressed::new(
             DisseminationMessage::NewestUnitRequest(self.index(), self.salt()),
             self.missing_responders(),
@@ -170,22 +167,22 @@ impl<'a, MK: Keychain> Collection<'a, MK> {
 }
 
 /// A runnable wrapper around initial unit collection.
-pub struct IO<'a, H: Hasher, D: Data, MK: Keychain> {
+pub struct IO<'a, D: Data, MK: Keychain> {
     round_for_creator: oneshot::Sender<Option<Round>>,
     round_from_backup: Round,
-    responses_from_network: Receiver<CollectionResponse<H, D, MK>>,
-    requests_for_network: Sender<UnitMessageTo<H, D, MK::Signature>>,
+    responses_from_network: Receiver<CollectionResponse<D, MK>>,
+    requests_for_network: Sender<UnitMessageTo<D, MK::Signature>>,
     collection: Collection<'a, MK>,
     request_delay: DelaySchedule,
 }
 
-impl<'a, H: Hasher, D: Data, MK: Keychain> IO<'a, H, D, MK> {
+impl<'a, D: Data, MK: Keychain> IO<'a, D, MK> {
     /// Create the IO instance for the specified collection and channels associated with it.
     pub fn new(
         round_for_creator: oneshot::Sender<Option<Round>>,
         round_from_backup: Round,
-        responses_from_network: Receiver<CollectionResponse<H, D, MK>>,
-        requests_for_network: Sender<UnitMessageTo<H, D, MK::Signature>>,
+        responses_from_network: Receiver<CollectionResponse<D, MK>>,
+        requests_for_network: Sender<UnitMessageTo<D, MK::Signature>>,
         collection: Collection<'a, MK>,
         request_delay: DelaySchedule,
     ) -> Self {
@@ -325,16 +322,16 @@ mod tests {
         },
         Index, NodeCount, NodeIndex, SessionId, Signed, UncheckedSigned,
     };
-    use aleph_bft_mock::{Data, Hasher64, Keychain, Signature};
+    use aleph_bft_mock::{Data, Keychain, Signature};
     use std::iter::{once, repeat, repeat_n};
 
     type Collection<'a> = GenericCollection<'a, Keychain>;
     type Validator = GenericValidator<Keychain>;
-    type Creator = GenericCreator<Hasher64>;
-    type PreUnit = GenericPreUnit<Hasher64>;
-    type FullUnit = GenericFullUnit<Hasher64, Data>;
-    type UncheckedSignedUnit = GenericUncheckedSignedUnit<Hasher64, Data, Signature>;
-    type NewestUnitResponse = GenericNewestUnitResponse<Hasher64, Data, Signature>;
+    type Creator = GenericCreator;
+    type PreUnit = GenericPreUnit;
+    type FullUnit = GenericFullUnit<Data>;
+    type UncheckedSignedUnit = GenericUncheckedSignedUnit<Data, Signature>;
+    type NewestUnitResponse = GenericNewestUnitResponse<Data, Signature>;
     type UncheckedSignedNewestUnitResponse = UncheckedSigned<NewestUnitResponse, Signature>;
 
     fn keychain_set(n_members: NodeCount) -> Vec<Keychain> {
@@ -347,7 +344,7 @@ mod tests {
 
     fn create_responses<'a, R: Iterator<Item = (&'a Keychain, Option<UncheckedSignedUnit>)>>(
         presponses: R,
-        request: DisseminationMessage<Hasher64, Data, Signature>,
+        request: DisseminationMessage<Data, Signature>,
     ) -> Vec<UncheckedSignedNewestUnitResponse> {
         let (requester, salt) = match request {
             DisseminationMessage::NewestUnitRequest(requester, salt) => (requester, salt),
@@ -382,10 +379,7 @@ mod tests {
         let collection = Collection::new(&keychain, &validator);
         assert_eq!(collection.status(), Pending);
         assert_eq!(
-            collection
-                .prepare_request::<Hasher64, Data>()
-                .recipients()
-                .len(),
+            collection.prepare_request::<Data>().recipients().len(),
             n_members.0 - 1
         );
     }
@@ -406,13 +400,7 @@ mod tests {
             assert_eq!(collection.on_newest_response(response), Ok(Pending));
         }
         assert_eq!(collection.status(), Pending);
-        assert_eq!(
-            collection
-                .prepare_request::<Hasher64, Data>()
-                .recipients()
-                .len(),
-            3
-        );
+        assert_eq!(collection.prepare_request::<Data>().recipients().len(), 3);
     }
 
     #[test]
@@ -430,13 +418,7 @@ mod tests {
             assert_eq!(collection.on_newest_response(response), Ok(Pending));
         }
         assert_eq!(collection.status(), Pending);
-        assert_eq!(
-            collection
-                .prepare_request::<Hasher64, Data>()
-                .recipients()
-                .len(),
-            5
-        );
+        assert_eq!(collection.prepare_request::<Data>().recipients().len(), 5);
     }
 
     #[test]
@@ -459,13 +441,7 @@ mod tests {
             Ok(Ready(0))
         );
         assert_eq!(collection.status(), Ready(0));
-        assert_eq!(
-            collection
-                .prepare_request::<Hasher64, Data>()
-                .recipients()
-                .len(),
-            2
-        );
+        assert_eq!(collection.prepare_request::<Data>().recipients().len(), 2);
     }
 
     #[test]
@@ -514,10 +490,7 @@ mod tests {
         let keychain = &keychains[0];
         let validator = Validator::new(session_id, *keychain, max_round);
         let mut collection = Collection::new(keychain, &validator);
-        let request = collection
-            .prepare_request::<Hasher64, Data>()
-            .message()
-            .clone();
+        let request = collection.prepare_request::<Data>().message().clone();
         let wrong_salt_request = match request {
             DisseminationMessage::NewestUnitRequest(requester, salt) => {
                 DisseminationMessage::NewestUnitRequest(requester, salt + 1)

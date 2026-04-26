@@ -1,8 +1,8 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use crate::{
-    Data, Hasher, Index, MultiKeychain, NodeCount, NodeIndex, Round, SessionId, Signable, Signed,
-    UncheckedSigned,
+    Data, Index, MultiKeychain, NodeCount, NodeIndex, Round, SessionId, Signable, Signed,
+    UncheckedSigned, UnitHash,
 };
 use codec::{Decode, Encode};
 use derivative::Derivative;
@@ -57,13 +57,13 @@ impl Display for UnitCoord {
 
 /// The simplest type representing a unit, consisting of coordinates and a control hash
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
-pub struct PreUnit<H: Hasher> {
+pub struct PreUnit {
     coord: UnitCoord,
-    control_hash: ControlHash<H>,
+    control_hash: ControlHash,
 }
 
-impl<H: Hasher> PreUnit<H> {
-    pub(crate) fn new(creator: NodeIndex, round: Round, control_hash: ControlHash<H>) -> Self {
+impl PreUnit {
+    pub(crate) fn new(creator: NodeIndex, round: Round, control_hash: ControlHash) -> Self {
         PreUnit {
             coord: UnitCoord::new(round, creator),
             control_hash,
@@ -82,29 +82,29 @@ impl<H: Hasher> PreUnit<H> {
         self.coord.round()
     }
 
-    pub(crate) fn control_hash(&self) -> &ControlHash<H> {
+    pub(crate) fn control_hash(&self) -> &ControlHash {
         &self.control_hash
     }
 }
 
 #[derive(Debug, Decode, Derivative, Encode)]
 #[derivative(Eq, PartialEq, Hash)]
-pub struct FullUnit<H: Hasher, D: Data> {
-    pre_unit: PreUnit<H>,
+pub struct FullUnit<D: Data> {
+    pre_unit: PreUnit,
     data: Option<D>,
     session_id: SessionId,
     #[codec(skip)]
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    hash: RwLock<Option<H::Hash>>,
+    hash: RwLock<Option<UnitHash>>,
 }
 
-impl<H: Hasher, D: Data> From<FullUnit<H, D>> for Option<D> {
-    fn from(value: FullUnit<H, D>) -> Self {
+impl<D: Data> From<FullUnit<D>> for Option<D> {
+    fn from(value: FullUnit<D>) -> Self {
         value.data
     }
 }
 
-impl<H: Hasher, D: Data> Clone for FullUnit<H, D> {
+impl<D: Data> Clone for FullUnit<D> {
     fn clone(&self) -> Self {
         let hash = self.hash.try_read().and_then(|guard| *guard);
         FullUnit {
@@ -116,8 +116,8 @@ impl<H: Hasher, D: Data> Clone for FullUnit<H, D> {
     }
 }
 
-impl<H: Hasher, D: Data> FullUnit<H, D> {
-    pub(crate) fn new(pre_unit: PreUnit<H>, data: Option<D>, session_id: SessionId) -> Self {
+impl<D: Data> FullUnit<D> {
+    pub(crate) fn new(pre_unit: PreUnit, data: Option<D>, session_id: SessionId) -> Self {
         FullUnit {
             pre_unit,
             data,
@@ -125,7 +125,7 @@ impl<H: Hasher, D: Data> FullUnit<H, D> {
             hash: RwLock::new(None),
         }
     }
-    pub(crate) fn as_pre_unit(&self) -> &PreUnit<H> {
+    pub(crate) fn as_pre_unit(&self) -> &PreUnit {
         &self.pre_unit
     }
     pub(crate) fn data(&self) -> &Option<D> {
@@ -136,32 +136,30 @@ impl<H: Hasher, D: Data> FullUnit<H, D> {
     }
 }
 
-impl<H: Hasher, D: Data> Signable for FullUnit<H, D> {
-    type Hash = H::Hash;
-    fn hash(&self) -> H::Hash {
+impl<D: Data> Signable for FullUnit<D> {
+    type Hash = UnitHash;
+    fn hash(&self) -> UnitHash {
         Unit::hash(self)
     }
 }
 
-impl<H: Hasher, D: Data> Index for FullUnit<H, D> {
+impl<D: Data> Index for FullUnit<D> {
     fn index(&self) -> NodeIndex {
         self.creator()
     }
 }
 
-pub(crate) type UncheckedSignedUnit<H, D, S> = UncheckedSigned<FullUnit<H, D>, S>;
+pub(crate) type UncheckedSignedUnit<D, S> = UncheckedSigned<FullUnit<D>, S>;
 
-pub(crate) type SignedUnit<H, D, K> = Signed<FullUnit<H, D>, K>;
+pub(crate) type SignedUnit<D, K> = Signed<FullUnit<D>, K>;
 
 /// Abstract representation of a unit from the Dag point of view.
 pub trait Unit: 'static + Send + Clone {
-    type Hasher: Hasher;
-
-    fn hash(&self) -> <Self::Hasher as Hasher>::Hash;
+    fn hash(&self) -> UnitHash;
 
     fn coord(&self) -> UnitCoord;
 
-    fn control_hash(&self) -> &ControlHash<Self::Hasher>;
+    fn control_hash(&self) -> &ControlHash;
 
     fn session_id(&self) -> SessionId;
 
@@ -174,29 +172,27 @@ pub trait Unit: 'static + Send + Clone {
     }
 }
 
-pub trait WrappedUnit<H: Hasher>: Unit<Hasher = H> {
-    type Wrapped: Unit<Hasher = H>;
+pub trait WrappedUnit: Unit {
+    type Wrapped: Unit;
 
     fn unpack(self) -> Self::Wrapped;
 }
 
 pub trait UnitWithParents: Unit {
-    fn parents(&self) -> impl Iterator<Item = &HashFor<Self>>;
-    fn direct_parents(&self) -> impl Iterator<Item = &HashFor<Self>>;
-    fn parent_for(&self, index: NodeIndex) -> Option<&HashFor<Self>>;
+    fn parents(&self) -> impl Iterator<Item = &UnitHash>;
+    fn direct_parents(&self) -> impl Iterator<Item = &UnitHash>;
+    fn parent_for(&self, index: NodeIndex) -> Option<&UnitHash>;
 
     fn node_count(&self) -> NodeCount;
 }
 
-impl<H: Hasher, D: Data> Unit for FullUnit<H, D> {
-    type Hasher = H;
-
-    fn hash(&self) -> H::Hash {
+impl<D: Data> Unit for FullUnit<D> {
+    fn hash(&self) -> UnitHash {
         let hash = *self.hash.read();
         match hash {
             Some(hash) => hash,
             None => {
-                let hash = self.using_encoded(H::hash);
+                let hash = self.using_encoded(crate::hash);
                 *self.hash.write() = Some(hash);
                 hash
             }
@@ -207,7 +203,7 @@ impl<H: Hasher, D: Data> Unit for FullUnit<H, D> {
         self.pre_unit.coord
     }
 
-    fn control_hash(&self) -> &ControlHash<Self::Hasher> {
+    fn control_hash(&self) -> &ControlHash {
         self.pre_unit.control_hash()
     }
 
@@ -216,10 +212,8 @@ impl<H: Hasher, D: Data> Unit for FullUnit<H, D> {
     }
 }
 
-impl<H: Hasher, D: Data, MK: MultiKeychain> Unit for SignedUnit<H, D, MK> {
-    type Hasher = H;
-
-    fn hash(&self) -> H::Hash {
+impl<D: Data, MK: MultiKeychain> Unit for SignedUnit<D, MK> {
+    fn hash(&self) -> UnitHash {
         Unit::hash(self.as_signable())
     }
 
@@ -227,7 +221,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Unit for SignedUnit<H, D, MK> {
         self.as_signable().coord()
     }
 
-    fn control_hash(&self) -> &ControlHash<Self::Hasher> {
+    fn control_hash(&self) -> &ControlHash {
         self.as_signable().control_hash()
     }
 
@@ -236,18 +230,16 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Unit for SignedUnit<H, D, MK> {
     }
 }
 
-pub type HashFor<U> = <<U as Unit>::Hasher as Hasher>::Hash;
-
 #[cfg(test)]
 pub mod tests {
     use crate::{
         units::{random_full_parent_units_up_to, FullUnit, Unit},
-        Hasher, NodeCount,
+        NodeCount,
     };
-    use aleph_bft_mock::{Data, Hasher64};
+    use aleph_bft_mock::Data;
     use codec::{Decode, Encode};
 
-    pub type TestFullUnit = FullUnit<Hasher64, Data>;
+    pub type TestFullUnit = FullUnit<Data>;
 
     #[test]
     fn test_full_unit_hash_is_correct() {
@@ -255,7 +247,7 @@ pub mod tests {
             .into_iter()
             .flatten()
         {
-            let hash = full_unit.using_encoded(Hasher64::hash);
+            let hash = full_unit.using_encoded(crate::hash);
             assert_eq!(full_unit.hash(), hash);
         }
     }

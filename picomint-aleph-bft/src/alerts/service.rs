@@ -3,7 +3,7 @@ use crate::{
         handler::{Handler, RmcResponse},
         Alert, AlertMessage, ForkingNotification, NetworkMessage,
     },
-    Data, Hasher, MultiKeychain, Multisigned, NodeIndex, Receiver, Recipient, Sender, Terminator,
+    Data, MultiKeychain, Multisigned, NodeIndex, Receiver, Recipient, Sender, Terminator, UnitHash,
 };
 use aleph_bft_rmc::{DoublingDelayScheduler, Message as RmcMessage};
 use futures::{FutureExt, StreamExt};
@@ -11,29 +11,29 @@ use log::{debug, error, trace, warn};
 use std::time::Duration;
 
 const LOG_TARGET: &str = "AlephBFT-alerter";
-type RmcService<H, MK, S, M> =
-    aleph_bft_rmc::Service<H, MK, DoublingDelayScheduler<RmcMessage<H, S, M>>>;
+type RmcService<MK, S, M> =
+    aleph_bft_rmc::Service<UnitHash, MK, DoublingDelayScheduler<RmcMessage<UnitHash, S, M>>>;
 
-pub struct Service<H: Hasher, D: Data, MK: MultiKeychain> {
-    messages_for_network: Sender<(NetworkMessage<H, D, MK>, Recipient)>,
-    messages_from_network: Receiver<NetworkMessage<H, D, MK>>,
-    notifications_for_units: Sender<ForkingNotification<H, D, MK::Signature>>,
-    alerts_from_units: Receiver<Alert<H, D, MK::Signature>>,
+pub struct Service<D: Data, MK: MultiKeychain> {
+    messages_for_network: Sender<(NetworkMessage<D, MK>, Recipient)>,
+    messages_from_network: Receiver<NetworkMessage<D, MK>>,
+    notifications_for_units: Sender<ForkingNotification<D, MK::Signature>>,
+    alerts_from_units: Receiver<Alert<D, MK::Signature>>,
     node_index: NodeIndex,
     exiting: bool,
-    handler: Handler<H, D, MK>,
-    rmc_service: RmcService<H::Hash, MK, MK::Signature, MK::PartialMultisignature>,
+    handler: Handler<D, MK>,
+    rmc_service: RmcService<MK, MK::Signature, MK::PartialMultisignature>,
 }
 
-pub struct IO<H: Hasher, D: Data, MK: MultiKeychain> {
-    pub messages_for_network: Sender<(NetworkMessage<H, D, MK>, Recipient)>,
-    pub messages_from_network: Receiver<NetworkMessage<H, D, MK>>,
-    pub notifications_for_units: Sender<ForkingNotification<H, D, MK::Signature>>,
-    pub alerts_from_units: Receiver<Alert<H, D, MK::Signature>>,
+pub struct IO<D: Data, MK: MultiKeychain> {
+    pub messages_for_network: Sender<(NetworkMessage<D, MK>, Recipient)>,
+    pub messages_from_network: Receiver<NetworkMessage<D, MK>>,
+    pub notifications_for_units: Sender<ForkingNotification<D, MK::Signature>>,
+    pub alerts_from_units: Receiver<Alert<D, MK::Signature>>,
 }
 
-impl<H: Hasher, D: Data, MK: MultiKeychain> Service<H, D, MK> {
-    pub fn new(keychain: MK, io: IO<H, D, MK>, handler: Handler<H, D, MK>) -> Service<H, D, MK> {
+impl<D: Data, MK: MultiKeychain> Service<D, MK> {
+    pub fn new(keychain: MK, io: IO<D, MK>, handler: Handler<D, MK>) -> Service<D, MK> {
         let IO {
             messages_for_network,
             messages_from_network,
@@ -62,7 +62,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Service<H, D, MK> {
 
     fn rmc_message_to_network(
         &mut self,
-        message: RmcMessage<H::Hash, MK::Signature, MK::PartialMultisignature>,
+        message: RmcMessage<UnitHash, MK::Signature, MK::PartialMultisignature>,
     ) {
         self.send_message_for_network(
             AlertMessage::RmcMessage(self.node_index, message),
@@ -70,10 +70,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Service<H, D, MK> {
         );
     }
 
-    fn send_notification_for_units(
-        &mut self,
-        notification: ForkingNotification<H, D, MK::Signature>,
-    ) {
+    fn send_notification_for_units(&mut self, notification: ForkingNotification<D, MK::Signature>) {
         if self
             .notifications_for_units
             .unbounded_send(notification)
@@ -89,7 +86,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Service<H, D, MK> {
 
     fn send_message_for_network(
         &mut self,
-        message: AlertMessage<H, D, MK::Signature, MK::PartialMultisignature>,
+        message: AlertMessage<D, MK::Signature, MK::PartialMultisignature>,
         recipient: Recipient,
     ) {
         if self
@@ -107,7 +104,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Service<H, D, MK> {
 
     fn handle_message_from_network(
         &mut self,
-        message: AlertMessage<H, D, MK::Signature, MK::PartialMultisignature>,
+        message: AlertMessage<D, MK::Signature, MK::PartialMultisignature>,
     ) {
         match message {
             AlertMessage::ForkAlert(alert) => match self.handler.on_network_alert(alert.clone()) {
@@ -146,7 +143,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Service<H, D, MK> {
         }
     }
 
-    fn handle_alert_from_consensus(&mut self, alert: Alert<H, D, MK::Signature>) {
+    fn handle_alert_from_consensus(&mut self, alert: Alert<D, MK::Signature>) {
         trace!(target: LOG_TARGET, "Handling alert {:?}.", alert);
         let (message, recipient, hash) = self.handler.on_own_alert(alert.clone());
         self.send_message_for_network(message, recipient);
@@ -155,7 +152,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Service<H, D, MK> {
         }
     }
 
-    fn handle_multisigned(&mut self, multisigned: Multisigned<H::Hash, MK>) {
+    fn handle_multisigned(&mut self, multisigned: Multisigned<UnitHash, MK>) {
         match self.handler.alert_confirmed(multisigned.clone()) {
             Ok(notification) => {
                 self.send_notification_for_units(notification);

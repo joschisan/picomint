@@ -12,14 +12,14 @@ use crate::{
     NodeIndex, SpawnHandle, TaskHandle, Terminator,
 };
 use aleph_bft_mock::{
-    Data, DataProvider, FinalizationHandler, Hasher64, Keychain, Loader, Network as MockNetwork,
+    Data, DataProvider, FinalizationHandler, Keychain, Loader, Network as MockNetwork,
     PartialMultisignature, ReconnectSender as ReconnectSenderGeneric, Saver, Signature, Spawner,
 };
 use futures::channel::{mpsc::UnboundedReceiver, oneshot};
 use parking_lot::Mutex;
 use std::{sync::Arc, time::Duration};
 
-pub type NetworkData = crate::NetworkData<Hasher64, Data, Signature, PartialMultisignature>;
+pub type NetworkData = crate::NetworkData<Data, Signature, PartialMultisignature>;
 
 pub type Network = MockNetwork<NetworkData>;
 pub type ReconnectSender = ReconnectSenderGeneric<NetworkData>;

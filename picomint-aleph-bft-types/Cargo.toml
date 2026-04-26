@@ -10,5 +10,6 @@ repository = { workspace = true }
 [dependencies]
 aleph-bft-crypto = { workspace = true }
 async-trait = { workspace = true }
+bitcoin_hashes = { workspace = true }
 codec = { package = "parity-scale-codec", version = "3.0", default-features = false, features = ["derive"] }
 futures = { workspace = true }

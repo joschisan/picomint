@@ -4,8 +4,8 @@ use crate::{
     dissemination::{Addressed, DisseminationMessage, ReconstructionRequest, LOG_TARGET},
     task_queue::TaskQueue,
     units::{SignedUnit, Unit, UnitCoord, UnitStore, WrappedUnit},
-    Data, DelayConfig, Hasher, MultiKeychain, NodeCount, NodeIndex, NodeMap, Recipient, Round,
-    Signature,
+    Data, DelayConfig, MultiKeychain, NodeCount, NodeIndex, NodeMap, Recipient, Round, Signature,
+    UnitHash,
 };
 use itertools::Itertools;
 use log::trace;
@@ -18,39 +18,39 @@ use std::{
 
 /// Task that needs to be performed to ensure successful unit dissemination, either requesting or broadcasting a unit.
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub enum DisseminationTask<H: Hasher> {
+pub enum DisseminationTask {
     /// Perform a request.
-    Request(Request<H>),
+    Request(Request),
     /// Broadcast a unit.
-    Broadcast(H::Hash),
+    Broadcast(UnitHash),
 }
 
-enum TaskDetails<H: Hasher, D: Data, S: Signature> {
+enum TaskDetails<D: Data, S: Signature> {
     Cancel,
     Delay(Duration),
     BetterInstead {
-        better_request: Request<H>,
+        better_request: Request,
         delay: Duration,
     },
     Perform {
-        message: Addressed<DisseminationMessage<H, D, S>>,
+        message: Addressed<DisseminationMessage<D, S>>,
         delay: Duration,
     },
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
-struct RepeatableTask<H: Hasher> {
-    task: DisseminationTask<H>,
+struct RepeatableTask {
+    task: DisseminationTask,
     counter: usize,
 }
 
-impl<H: Hasher> RepeatableTask<H> {
-    fn new(task: DisseminationTask<H>) -> Self {
+impl RepeatableTask {
+    fn new(task: DisseminationTask) -> Self {
         Self { task, counter: 0 }
     }
 }
 
-impl<H: Hasher> Display for RepeatableTask<H> {
+impl Display for RepeatableTask {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         write!(
             f,
@@ -61,7 +61,7 @@ impl<H: Hasher> Display for RepeatableTask<H> {
 }
 
 /// Manager for tasks. Controls which tasks are performed and when.
-pub struct Manager<H: Hasher> {
+pub struct Manager {
     own_id: NodeIndex,
     peers: Vec<Recipient>,
     tick_interval: Duration,
@@ -71,20 +71,20 @@ pub struct Manager<H: Hasher> {
     coord_request_recipients: RecipientCountSchedule,
     parent_request_delay: DelaySchedule,
     parent_request_recipients: RecipientCountSchedule,
-    task_queue: TaskQueue<RepeatableTask<H>>,
+    task_queue: TaskQueue<RepeatableTask>,
     missing_coords: HashSet<UnitCoord>,
     top_rounds: NodeMap<Round>,
 }
 
-pub struct ManagerStatus<H: Hasher> {
+pub struct ManagerStatus {
     coord_request_count: usize,
     parent_request_count: usize,
     rebroadcast_count: usize,
-    long_time_pending_tasks: Vec<RepeatableTask<H>>,
+    long_time_pending_tasks: Vec<RepeatableTask>,
 }
 
-impl<H: Hasher> ManagerStatus<H> {
-    fn new(task_queue: &TaskQueue<RepeatableTask<H>>) -> Self {
+impl ManagerStatus {
+    fn new(task_queue: &TaskQueue<RepeatableTask>) -> Self {
         use DisseminationTask::*;
         let mut coord_request_count: usize = 0;
         let mut parent_request_count: usize = 0;
@@ -109,7 +109,7 @@ impl<H: Hasher> ManagerStatus<H> {
         }
     }
 
-    fn longest_pending_tasks(&self) -> Vec<&RepeatableTask<H>> {
+    fn longest_pending_tasks(&self) -> Vec<&RepeatableTask> {
         const ITEMS_PRINT_LIMIT: usize = 10;
         self.long_time_pending_tasks
             .iter()
@@ -130,7 +130,7 @@ impl<H: Hasher> ManagerStatus<H> {
     }
 }
 
-impl<H: Hasher> Display for ManagerStatus<H> {
+impl Display for ManagerStatus {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         write!(f, "task queue content: ")?;
         write!(
@@ -152,7 +152,7 @@ impl<H: Hasher> Display for ManagerStatus<H> {
     }
 }
 
-impl<H: Hasher> Manager<H> {
+impl Manager {
     /// Create a new Manager.
     pub fn new(own_id: NodeIndex, n_members: NodeCount, delay_config: DelayConfig) -> Self {
         let DelayConfig {
@@ -213,9 +213,9 @@ impl<H: Hasher> Manager<H> {
         &mut self,
         coord: UnitCoord,
         counter: usize,
-        stored_units: &UnitStore<DagUnit<H, D, MK>>,
-        processing_units: &UnitStore<SignedUnit<H, D, MK>>,
-    ) -> TaskDetails<H, D, MK::Signature> {
+        stored_units: &UnitStore<DagUnit<D, MK>>,
+        processing_units: &UnitStore<SignedUnit<D, MK>>,
+    ) -> TaskDetails<D, MK::Signature> {
         use Request::*;
         use TaskDetails::*;
         if stored_units.canonical_unit(coord).is_some() {
@@ -248,11 +248,11 @@ impl<H: Hasher> Manager<H> {
 
     fn request_details<D: Data, MK: MultiKeychain>(
         &mut self,
-        request: &Request<H>,
+        request: &Request,
         counter: usize,
-        stored_units: &UnitStore<DagUnit<H, D, MK>>,
-        processing_units: &UnitStore<SignedUnit<H, D, MK>>,
-    ) -> TaskDetails<H, D, MK::Signature> {
+        stored_units: &UnitStore<DagUnit<D, MK>>,
+        processing_units: &UnitStore<SignedUnit<D, MK>>,
+    ) -> TaskDetails<D, MK::Signature> {
         use Request::*;
         use TaskDetails::*;
         match request {
@@ -274,10 +274,10 @@ impl<H: Hasher> Manager<H> {
 
     fn task_details<D: Data, MK: MultiKeychain>(
         &mut self,
-        task: &RepeatableTask<H>,
-        stored_units: &UnitStore<DagUnit<H, D, MK>>,
-        processing_units: &UnitStore<SignedUnit<H, D, MK>>,
-    ) -> TaskDetails<H, D, MK::Signature> {
+        task: &RepeatableTask,
+        stored_units: &UnitStore<DagUnit<D, MK>>,
+        processing_units: &UnitStore<SignedUnit<D, MK>>,
+    ) -> TaskDetails<D, MK::Signature> {
         use DisseminationTask::*;
         use TaskDetails::*;
         match &task.task {
@@ -303,9 +303,9 @@ impl<H: Hasher> Manager<H> {
     /// Trigger all the ready tasks and get all the messages that should be sent now.
     pub fn trigger_tasks<D: Data, MK: MultiKeychain>(
         &mut self,
-        stored_units: &UnitStore<DagUnit<H, D, MK>>,
-        processing_units: &UnitStore<SignedUnit<H, D, MK>>,
-    ) -> Vec<Addressed<DisseminationMessage<H, D, MK::Signature>>> {
+        stored_units: &UnitStore<DagUnit<D, MK>>,
+        processing_units: &UnitStore<SignedUnit<D, MK>>,
+    ) -> Vec<Addressed<DisseminationMessage<D, MK::Signature>>> {
         trace!(target: LOG_TARGET, "Checking for due tasks.");
         use TaskDetails::*;
         let mut result = Vec::new();
@@ -340,7 +340,7 @@ impl<H: Hasher> Manager<H> {
     }
 
     /// Add a request to be performed according to the appropriate schedule.
-    pub fn add_request(&mut self, request: Request<H>) {
+    pub fn add_request(&mut self, request: Request) {
         trace!(target: LOG_TARGET, "Handling newly created request: {:?}", request);
         if let Request::Coord(coord) = request {
             if !self.missing_coords.insert(coord) {
@@ -356,8 +356,8 @@ impl<H: Hasher> Manager<H> {
     /// of own units.
     pub fn add_unit<D: Data, MK: MultiKeychain>(
         &mut self,
-        unit: &DagUnit<H, D, MK>,
-    ) -> Option<Addressed<DisseminationMessage<H, D, MK::Signature>>> {
+        unit: &DagUnit<D, MK>,
+    ) -> Option<Addressed<DisseminationMessage<D, MK::Signature>>> {
         trace!(target: LOG_TARGET, "New unit with hash {:?} at {}.", unit.hash(), unit.coord());
         let hash = unit.hash();
         let round = unit.round();
@@ -384,7 +384,7 @@ impl<H: Hasher> Manager<H> {
         }
     }
 
-    pub fn status(&self) -> ManagerStatus<H> {
+    pub fn status(&self) -> ManagerStatus {
         ManagerStatus::new(&self.task_queue)
     }
 }
@@ -400,7 +400,7 @@ mod tests {
         },
         NodeCount, NodeIndex, Recipient,
     };
-    use aleph_bft_mock::{Hasher64, Keychain};
+    use aleph_bft_mock::Keychain;
     use std::thread::sleep;
 
     #[test]
@@ -408,7 +408,7 @@ mod tests {
         let node_ix = NodeIndex(7);
         let node_count = NodeCount(20);
         let delay_config = gen_delay_config();
-        let manager: Manager<Hasher64> = Manager::new(node_ix, node_count, delay_config.clone());
+        let manager: Manager = Manager::new(node_ix, node_count, delay_config.clone());
 
         assert_eq!(manager.next_tick(), delay_config.tick_interval);
     }

@@ -1,6 +1,6 @@
 use crate::{
     units::{FullUnit, PreUnit, SignedUnit},
-    Data, Hasher, MultiKeychain, SessionId, Signed,
+    Data, MultiKeychain, SessionId, Signed,
 };
 
 /// The component responsible for packing Data into PreUnits,
@@ -18,11 +18,7 @@ impl<MK: MultiKeychain> Packer<MK> {
         }
     }
 
-    pub fn pack<H: Hasher, D: Data>(
-        &self,
-        preunit: PreUnit<H>,
-        data: Option<D>,
-    ) -> SignedUnit<H, D, MK> {
+    pub fn pack<D: Data>(&self, preunit: PreUnit, data: Option<D>) -> SignedUnit<D, MK> {
         Signed::sign(
             FullUnit::new(preunit, data, self.session_id),
             &self.keychain,

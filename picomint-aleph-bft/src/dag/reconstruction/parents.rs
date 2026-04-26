@@ -1,7 +1,7 @@
 use crate::{
     dag::reconstruction::{ReconstructedUnit, ReconstructionResult, Request},
-    units::{ControlHash, HashFor, Unit, UnitCoord},
-    NodeIndex, NodeMap,
+    units::{ControlHash, Unit, UnitCoord},
+    NodeIndex, NodeMap, UnitHash,
 };
 use aleph_bft_types::Round;
 use std::collections::{hash_map::Entry, HashMap};
@@ -10,7 +10,7 @@ use std::collections::{hash_map::Entry, HashMap};
 #[derive(Debug, PartialEq, Eq, Clone)]
 enum ReconstructingUnit<U: Unit> {
     /// We are trying to optimistically reconstruct the unit from potential parents we get.
-    Reconstructing(U, NodeMap<(HashFor<U>, Round)>),
+    Reconstructing(U, NodeMap<(UnitHash, Round)>),
     /// We are waiting for receiving an explicit list of unit parents.
     WaitingForParents(U),
 }
@@ -40,7 +40,7 @@ impl<U: Unit> ReconstructingUnit<U> {
     fn reconstruct_parent(
         self,
         parent_id: NodeIndex,
-        parent_hash: HashFor<U>,
+        parent_hash: UnitHash,
         parent_round: Round,
     ) -> SingleParentReconstructionResult<U> {
         use ReconstructingUnit::*;
@@ -63,7 +63,7 @@ impl<U: Unit> ReconstructingUnit<U> {
         }
     }
 
-    fn control_hash(&self) -> &ControlHash<U::Hasher> {
+    fn control_hash(&self) -> &ControlHash {
         self.as_unit().control_hash()
     }
 
@@ -76,7 +76,7 @@ impl<U: Unit> ReconstructingUnit<U> {
 
     fn with_parents(
         self,
-        parents: HashMap<UnitCoord, HashFor<U>>,
+        parents: HashMap<UnitCoord, UnitHash>,
     ) -> Result<ReconstructedUnit<U>, Self> {
         let control_hash = self.control_hash().clone();
         if parents.len() != control_hash.parents().count() {
@@ -98,9 +98,9 @@ impl<U: Unit> ReconstructingUnit<U> {
 
 /// Receives units with control hashes and reconstructs their parents.
 pub struct Reconstruction<U: Unit> {
-    reconstructing_units: HashMap<HashFor<U>, ReconstructingUnit<U>>,
-    units_by_coord: HashMap<UnitCoord, HashFor<U>>,
-    waiting_for_coord: HashMap<UnitCoord, Vec<HashFor<U>>>,
+    reconstructing_units: HashMap<UnitHash, ReconstructingUnit<U>>,
+    units_by_coord: HashMap<UnitCoord, UnitHash>,
+    waiting_for_coord: HashMap<UnitCoord, Vec<UnitHash>>,
 }
 
 impl<U: Unit> Reconstruction<U> {
@@ -115,9 +115,9 @@ impl<U: Unit> Reconstruction<U> {
 
     fn reconstruct_parent(
         &mut self,
-        child_hash: HashFor<U>,
+        child_hash: UnitHash,
         parent_id: NodeIndex,
-        parent_hash: HashFor<U>,
+        parent_hash: UnitHash,
         parent_round: Round,
     ) -> ReconstructionResult<U> {
         use SingleParentReconstructionResult::*;
@@ -199,8 +199,8 @@ impl<U: Unit> Reconstruction<U> {
     /// Add an explicit list of a units' parents, perhaps reconstructing it.
     pub fn add_parents(
         &mut self,
-        unit_hash: HashFor<U>,
-        parents: HashMap<UnitCoord, HashFor<U>>,
+        unit_hash: UnitHash,
+        parents: HashMap<UnitCoord, UnitHash>,
     ) -> ReconstructionResult<U> {
         // If we don't have the unit, just ignore this response.
         match self.reconstructing_units.remove(&unit_hash) {

@@ -2,7 +2,6 @@ use aleph_bft::Round;
 use picomint_core::PeerId;
 
 use super::data_provider::UnitData;
-use super::network::Hasher;
 
 pub struct OrderedUnit {
     pub creator: PeerId,
@@ -22,9 +21,8 @@ impl FinalizationHandler {
 
 impl aleph_bft::UnitFinalizationHandler for FinalizationHandler {
     type Data = UnitData;
-    type Hasher = Hasher;
 
-    fn batch_finalized(&mut self, batch: Vec<aleph_bft::OrderedUnit<Self::Data, Self::Hasher>>) {
+    fn batch_finalized(&mut self, batch: Vec<aleph_bft::OrderedUnit<Self::Data>>) {
         for unit in batch {
             // the channel is unbounded
             self.sender

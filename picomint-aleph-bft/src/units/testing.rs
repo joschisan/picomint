@@ -7,26 +7,24 @@ use crate::{
         SignedUnit as GenericSignedUnit, UncheckedSignedUnit as GenericUncheckedSignedUnit, Unit,
         UnitCoord, WrappedUnit,
     },
-    NodeCount, NodeIndex, NodeMap, Round, SessionId, Signed,
+    NodeCount, NodeIndex, NodeMap, Round, SessionId, Signed, UnitHash,
 };
-use aleph_bft_mock::{Data, Hash64, Hasher64, Keychain, Signature};
+use aleph_bft_mock::{Data, Keychain, Signature};
 use rand::prelude::IteratorRandom;
 
-type ControlHash = GenericControlHash<Hasher64>;
-type Creator = GenericCreator<Hasher64>;
-type PreUnit = GenericPreUnit<Hasher64>;
-pub type FullUnit = GenericFullUnit<Hasher64, Data>;
-type UncheckedSignedUnit = GenericUncheckedSignedUnit<Hasher64, Data, Signature>;
-pub type SignedUnit = GenericSignedUnit<Hasher64, Data, Keychain>;
+type ControlHash = GenericControlHash;
+type Creator = GenericCreator;
+type PreUnit = GenericPreUnit;
+pub type FullUnit = GenericFullUnit<Data>;
+type UncheckedSignedUnit = GenericUncheckedSignedUnit<Data, Signature>;
+pub type SignedUnit = GenericSignedUnit<Data, Keychain>;
 pub type DagUnit = ReconstructedUnit<SignedUnit>;
 
 #[derive(Clone)]
 pub struct WrappedSignedUnit(pub SignedUnit);
 
 impl Unit for WrappedSignedUnit {
-    type Hasher = Hasher64;
-
-    fn hash(&self) -> Hash64 {
+    fn hash(&self) -> UnitHash {
         self.0.hash()
     }
 
@@ -43,7 +41,7 @@ impl Unit for WrappedSignedUnit {
     }
 }
 
-impl WrappedUnit<Hasher64> for WrappedSignedUnit {
+impl WrappedUnit for WrappedSignedUnit {
     type Wrapped = SignedUnit;
 
     fn unpack(self) -> Self::Wrapped {
@@ -71,7 +69,7 @@ pub fn preunit_to_full_unit(preunit: PreUnit, session_id: SessionId) -> FullUnit
 }
 
 impl Creator {
-    pub fn add_units<U: Unit<Hasher = Hasher64>>(&mut self, units: &[U]) {
+    pub fn add_units<U: Unit>(&mut self, units: &[U]) {
         for unit in units {
             self.add_unit(unit);
         }
@@ -135,7 +133,7 @@ fn random_initial_reconstructed_units(
         .collect()
 }
 
-fn parent_map<U: Unit<Hasher = Hasher64>>(parents: &Vec<U>) -> NodeMap<(Hash64, Round)> {
+fn parent_map<U: Unit>(parents: &Vec<U>) -> NodeMap<(UnitHash, Round)> {
     let n_members = parents
         .last()
         .expect("there are parents")
@@ -148,7 +146,7 @@ fn parent_map<U: Unit<Hasher = Hasher64>>(parents: &Vec<U>) -> NodeMap<(Hash64, 
     result
 }
 
-pub fn random_unit_with_parents<U: Unit<Hasher = Hasher64>>(
+pub fn random_unit_with_parents<U: Unit>(
     creator: NodeIndex,
     parents: &Vec<U>,
     round: Round,
@@ -160,7 +158,7 @@ pub fn random_unit_with_parents<U: Unit<Hasher = Hasher64>>(
     preunit_to_full_unit(PreUnit::new(creator, round, control_hash), session_id)
 }
 
-pub fn random_reconstructed_unit_with_parents<U: Unit<Hasher = Hasher64>>(
+pub fn random_reconstructed_unit_with_parents<U: Unit>(
     creator: NodeIndex,
     parents: &Vec<U>,
     keychain: &Keychain,

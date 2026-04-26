@@ -1,8 +1,8 @@
 use crate::{
     alerts::{Alert, AlertMessage, ForkProof, ForkingNotification},
     units::Unit,
-    Data, Hasher, Keychain, MultiKeychain, Multisigned, NodeIndex, PartialMultisignature,
-    Recipient, SessionId, Signature, Signed, UncheckedSigned,
+    Data, Keychain, MultiKeychain, Multisigned, NodeIndex, PartialMultisignature, Recipient,
+    SessionId, Signature, Signed, UncheckedSigned, UnitHash,
 };
 use aleph_bft_rmc::Message as RmcMessage;
 use aleph_bft_types::Round;
@@ -46,29 +46,28 @@ impl Display for Error {
     }
 }
 
-type KnownAlerts<H, D, MK> =
-    HashMap<<H as Hasher>::Hash, Signed<Alert<H, D, <MK as Keychain>::Signature>, MK>>;
+type KnownAlerts<D, MK> = HashMap<UnitHash, Signed<Alert<D, <MK as Keychain>::Signature>, MK>>;
 
-pub type OnOwnAlertResponse<H, D, MK> = (
-    AlertMessage<H, D, <MK as Keychain>::Signature, <MK as MultiKeychain>::PartialMultisignature>,
+pub type OnOwnAlertResponse<D, MK> = (
+    AlertMessage<D, <MK as Keychain>::Signature, <MK as MultiKeychain>::PartialMultisignature>,
     Recipient,
-    <H as Hasher>::Hash,
+    UnitHash,
 );
 
-pub type OnNetworkAlertResponse<H, D, MK> = (
-    Option<ForkingNotification<H, D, <MK as Keychain>::Signature>>,
-    <H as Hasher>::Hash,
+pub type OnNetworkAlertResponse<D, MK> = (
+    Option<ForkingNotification<D, <MK as Keychain>::Signature>>,
+    UnitHash,
 );
 
-type OnAlertRequestResponse<H, D, MK> = (
-    UncheckedSigned<Alert<H, D, <MK as Keychain>::Signature>, <MK as Keychain>::Signature>,
+type OnAlertRequestResponse<D, MK> = (
+    UncheckedSigned<Alert<D, <MK as Keychain>::Signature>, <MK as Keychain>::Signature>,
     Recipient,
 );
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
-pub enum RmcResponse<H: Hasher, S: Signature, MS: PartialMultisignature> {
-    RmcMessage(RmcMessage<H::Hash, S, MS>),
-    AlertRequest(H::Hash, Recipient),
+pub enum RmcResponse<S: Signature, MS: PartialMultisignature> {
+    RmcMessage(RmcMessage<UnitHash, S, MS>),
+    AlertRequest(UnitHash, Recipient),
     Noop,
 }
 
@@ -76,15 +75,15 @@ pub enum RmcResponse<H: Hasher, S: Signature, MS: PartialMultisignature> {
 /// https://cardinal-cryptography.github.io/AlephBFT/how_alephbft_does_it.html Section 2.5 and
 /// https://cardinal-cryptography.github.io/AlephBFT/reliable_broadcast.html and to the Aleph
 /// paper https://arxiv.org/abs/1908.05156 Appendix A1 for a discussion.
-pub struct Handler<H: Hasher, D: Data, MK: MultiKeychain> {
+pub struct Handler<D: Data, MK: MultiKeychain> {
     session_id: SessionId,
     keychain: MK,
-    known_forkers: HashMap<NodeIndex, ForkProof<H, D, MK::Signature>>,
-    known_alerts: KnownAlerts<H, D, MK>,
-    known_rmcs: HashMap<(NodeIndex, NodeIndex), H::Hash>,
+    known_forkers: HashMap<NodeIndex, ForkProof<D, MK::Signature>>,
+    known_alerts: KnownAlerts<D, MK>,
+    known_rmcs: HashMap<(NodeIndex, NodeIndex), UnitHash>,
 }
 
-impl<H: Hasher, D: Data, MK: MultiKeychain> Handler<H, D, MK> {
+impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
     pub fn new(keychain: MK, session_id: SessionId) -> Self {
         Self {
             session_id,
@@ -99,7 +98,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Handler<H, D, MK> {
         self.known_forkers.contains_key(&forker)
     }
 
-    fn on_new_forker_detected(&mut self, forker: NodeIndex, proof: ForkProof<H, D, MK::Signature>) {
+    fn on_new_forker_detected(&mut self, forker: NodeIndex, proof: ForkProof<D, MK::Signature>) {
         self.known_forkers.insert(forker, proof);
     }
 
@@ -110,7 +109,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Handler<H, D, MK> {
     // Note that these units will have to be validated before being used in the consensus.
     // This is alright, if someone uses their alert to commit to incorrect units it's their own
     // problem.
-    fn verify_commitment(&self, alert: &Alert<H, D, MK::Signature>) -> Result<(), Error> {
+    fn verify_commitment(&self, alert: &Alert<D, MK::Signature>) -> Result<(), Error> {
         let mut rounds = HashSet::new();
         for u in &alert.legit_units {
             let u = match u.clone().check(&self.keychain) {
@@ -129,7 +128,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Handler<H, D, MK> {
         Ok(())
     }
 
-    fn verify_fork(&self, alert: &Alert<H, D, MK::Signature>) -> Result<(), Error> {
+    fn verify_fork(&self, alert: &Alert<D, MK::Signature>) -> Result<(), Error> {
         let (u1, u2) = &alert.proof;
         let (u1, u2) = {
             let u1 = u1.clone().check(&self.keychain);
@@ -161,8 +160,8 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Handler<H, D, MK> {
     fn rmc_alert(
         &mut self,
         forker: NodeIndex,
-        alert: Signed<Alert<H, D, MK::Signature>, MK>,
-    ) -> H::Hash {
+        alert: Signed<Alert<D, MK::Signature>, MK>,
+    ) -> UnitHash {
         let hash = alert.as_signable().hash();
         self.known_rmcs
             .insert((alert.as_signable().sender, forker), hash);
@@ -171,10 +170,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Handler<H, D, MK> {
     }
 
     /// Registers RMCs and messages but does not actually send them; make sure the returned values are forwarded to IO
-    pub fn on_own_alert(
-        &mut self,
-        alert: Alert<H, D, MK::Signature>,
-    ) -> OnOwnAlertResponse<H, D, MK> {
+    pub fn on_own_alert(&mut self, alert: Alert<D, MK::Signature>) -> OnOwnAlertResponse<D, MK> {
         let forker = alert.forker();
         self.known_forkers.insert(forker, alert.proof.clone());
         let alert = Signed::sign(alert, &self.keychain);
@@ -189,8 +185,8 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Handler<H, D, MK> {
     /// May return a `ForkingNotification`, which should be propagated
     pub fn on_network_alert(
         &mut self,
-        alert: UncheckedSigned<Alert<H, D, MK::Signature>, MK::Signature>,
-    ) -> Result<OnNetworkAlertResponse<H, D, MK>, Error> {
+        alert: UncheckedSigned<Alert<D, MK::Signature>, MK::Signature>,
+    ) -> Result<OnNetworkAlertResponse<D, MK>, Error> {
         let alert = match alert.check(&self.keychain) {
             Ok(alert) => alert,
             Err(_) => {
@@ -224,8 +220,8 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Handler<H, D, MK> {
     pub fn on_rmc_message(
         &self,
         sender: NodeIndex,
-        message: RmcMessage<H::Hash, MK::Signature, MK::PartialMultisignature>,
-    ) -> RmcResponse<H, MK::Signature, MK::PartialMultisignature> {
+        message: RmcMessage<UnitHash, MK::Signature, MK::PartialMultisignature>,
+    ) -> RmcResponse<MK::Signature, MK::PartialMultisignature> {
         let hash = message.hash();
         if let Some(alert) = self.known_alerts.get(hash) {
             let alert_id = (alert.as_signable().sender, alert.as_signable().forker());
@@ -247,8 +243,8 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Handler<H, D, MK> {
     pub fn on_alert_request(
         &self,
         node: NodeIndex,
-        hash: H::Hash,
-    ) -> Result<OnAlertRequestResponse<H, D, MK>, Error> {
+        hash: UnitHash,
+    ) -> Result<OnAlertRequestResponse<D, MK>, Error> {
         match self.known_alerts.get(&hash) {
             Some(alert) => {
                 // A copy of a fork alert.
@@ -262,8 +258,8 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Handler<H, D, MK> {
     /// May return a `ForkingNotification`, which should be propagated
     pub fn alert_confirmed(
         &mut self,
-        multisigned: Multisigned<H::Hash, MK>,
-    ) -> Result<ForkingNotification<H, D, MK::Signature>, Error> {
+        multisigned: Multisigned<UnitHash, MK>,
+    ) -> Result<ForkingNotification<D, MK::Signature>, Error> {
         let alert = match self.known_alerts.get(multisigned.as_signable()) {
             Some(alert) => alert.as_signable(),
             None => return Err(Error::UnknownAlertRMC),
@@ -286,18 +282,18 @@ mod tests {
         units::{FullUnit, PreUnit},
         PartiallyMultisigned, Recipient, Round,
     };
-    use aleph_bft_mock::{Data, Hasher64, Keychain, Signature};
+    use aleph_bft_mock::{Data, Keychain, Signature};
     use aleph_bft_rmc::Message;
     use aleph_bft_types::{NodeCount, NodeIndex, NodeMap, Signable, Signed};
 
-    type TestForkProof = ForkProof<Hasher64, Data, Signature>;
+    type TestForkProof = ForkProof<Data, Signature>;
 
     fn full_unit(
         n_members: NodeCount,
         node_id: NodeIndex,
         round: Round,
         variant: Option<u32>,
-    ) -> FullUnit<Hasher64, Data> {
+    ) -> FullUnit<Data> {
         FullUnit::new(
             PreUnit::new(
                 node_id,
@@ -372,7 +368,7 @@ mod tests {
         let own_keychain = Keychain::new(n_members, own_index);
         let alerter_keychain = Keychain::new(n_members, alerter_index);
         let forker_keychain = Keychain::new(n_members, forker_index);
-        let this: Handler<Hasher64, Data, _> = Handler::new(own_keychain, 0);
+        let this: Handler<Data, _> = Handler::new(own_keychain, 0);
         let fork_proof = make_fork_proof(forker_index, &forker_keychain, 0, n_members);
         let alert = Alert::new(alerter_index, fork_proof, vec![]);
         let alert_hash = Signable::hash(&alert);

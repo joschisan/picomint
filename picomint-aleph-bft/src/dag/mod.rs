@@ -6,7 +6,7 @@ use crate::{
     units::{
         SignedUnit, UncheckedSignedUnit, Unit, UnitStore, Validator as UnitValidator, WrappedUnit,
     },
-    Data, Hasher, MultiKeychain,
+    Data, MultiKeychain, UnitHash,
 };
 use log::{debug, trace, warn};
 
@@ -20,19 +20,19 @@ use validation::{Error as ValidationError, Validator};
 
 const LOG_TARGET: &str = "AlephBFT-dag";
 
-pub type DagUnit<H, D, MK> = ReconstructedUnit<SignedUnit<H, D, MK>>;
+pub type DagUnit<D, MK> = ReconstructedUnit<SignedUnit<D, MK>>;
 
 /// The result of sending some information to the Dag.
-pub struct DagResult<H: Hasher, D: Data, MK: MultiKeychain> {
+pub struct DagResult<D: Data, MK: MultiKeychain> {
     /// Units added to the dag.
-    pub units: Vec<DagUnit<H, D, MK>>,
+    pub units: Vec<DagUnit<D, MK>>,
     /// Requests for more information.
-    pub requests: Vec<Request<H>>,
+    pub requests: Vec<Request>,
     /// Alerts raised due to encountered forks.
-    pub alerts: Vec<Alert<H, D, MK::Signature>>,
+    pub alerts: Vec<Alert<D, MK::Signature>>,
 }
 
-impl<H: Hasher, D: Data, MK: MultiKeychain> DagResult<H, D, MK> {
+impl<D: Data, MK: MultiKeychain> DagResult<D, MK> {
     fn empty() -> Self {
         DagResult {
             units: Vec::new(),
@@ -41,7 +41,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> DagResult<H, D, MK> {
         }
     }
 
-    fn alert(alert: Alert<H, D, MK::Signature>) -> Self {
+    fn alert(alert: Alert<D, MK::Signature>) -> Self {
         DagResult {
             units: Vec::new(),
             requests: Vec::new(),
@@ -49,11 +49,11 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> DagResult<H, D, MK> {
         }
     }
 
-    fn add_alert(&mut self, alert: Alert<H, D, MK::Signature>) {
+    fn add_alert(&mut self, alert: Alert<D, MK::Signature>) {
         self.alerts.push(alert);
     }
 
-    fn accumulate(&mut self, other: DagResult<H, D, MK>) {
+    fn accumulate(&mut self, other: DagResult<D, MK>) {
         let DagResult {
             mut units,
             mut requests,
@@ -65,10 +65,10 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> DagResult<H, D, MK> {
     }
 }
 
-impl<H: Hasher, D: Data, MK: MultiKeychain> From<ReconstructionResult<SignedUnit<H, D, MK>>>
-    for DagResult<H, D, MK>
+impl<D: Data, MK: MultiKeychain> From<ReconstructionResult<SignedUnit<D, MK>>>
+    for DagResult<D, MK>
 {
-    fn from(other: ReconstructionResult<SignedUnit<H, D, MK>>) -> Self {
+    fn from(other: ReconstructionResult<SignedUnit<D, MK>>) -> Self {
         let ReconstructionResult { units, requests } = other;
         DagResult {
             units,
@@ -79,12 +79,12 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> From<ReconstructionResult<SignedUnit
 }
 
 /// The Dag ensuring that all units from the network get returned reconstructed in the correct order.
-pub struct Dag<H: Hasher, D: Data, MK: MultiKeychain> {
-    validator: Validator<H, D, MK>,
-    reconstruction: Reconstruction<SignedUnit<H, D, MK>>,
+pub struct Dag<D: Data, MK: MultiKeychain> {
+    validator: Validator<D, MK>,
+    reconstruction: Reconstruction<SignedUnit<D, MK>>,
 }
 
-impl<H: Hasher, D: Data, MK: MultiKeychain> Dag<H, D, MK> {
+impl<D: Data, MK: MultiKeychain> Dag<D, MK> {
     /// A new dag using the provided unit validator under the hood.
     pub fn new(unit_validator: UnitValidator<MK>) -> Self {
         Dag {
@@ -93,7 +93,7 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Dag<H, D, MK> {
         }
     }
 
-    fn handle_validation_error(error: ValidationError<H, D, MK>) -> DagResult<H, D, MK> {
+    fn handle_validation_error(error: ValidationError<D, MK>) -> DagResult<D, MK> {
         use ValidationError::*;
         match error {
             Invalid(e) => {
@@ -117,11 +117,11 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Dag<H, D, MK> {
     }
 
     /// Add a unit to the Dag.
-    pub fn add_unit<U: WrappedUnit<H, Wrapped = SignedUnit<H, D, MK>>>(
+    pub fn add_unit<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
         &mut self,
-        unit: UncheckedSignedUnit<H, D, MK::Signature>,
+        unit: UncheckedSignedUnit<D, MK::Signature>,
         store: &UnitStore<U>,
-    ) -> DagResult<H, D, MK> {
+    ) -> DagResult<D, MK> {
         match self.validator.validate(unit, store) {
             Ok(unit) => self.reconstruction.add_unit(unit).into(),
             Err(e) => Self::handle_validation_error(e),
@@ -129,12 +129,12 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Dag<H, D, MK> {
     }
 
     /// Add parents of a unit to the Dag.
-    pub fn add_parents<U: WrappedUnit<H, Wrapped = SignedUnit<H, D, MK>>>(
+    pub fn add_parents<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
         &mut self,
-        unit_hash: H::Hash,
-        parents: Vec<UncheckedSignedUnit<H, D, MK::Signature>>,
+        unit_hash: UnitHash,
+        parents: Vec<UncheckedSignedUnit<D, MK::Signature>>,
         store: &UnitStore<U>,
-    ) -> DagResult<H, D, MK> {
+    ) -> DagResult<D, MK> {
         use ValidationError::*;
         let mut result = DagResult::empty();
         let mut parent_hashes = HashMap::new();
@@ -177,11 +177,11 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Dag<H, D, MK> {
     }
 
     /// Process a forking notification, potentially returning a lot of unit processing results.
-    pub fn process_forking_notification<U: WrappedUnit<H, Wrapped = SignedUnit<H, D, MK>>>(
+    pub fn process_forking_notification<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
         &mut self,
-        notification: ForkingNotification<H, D, MK::Signature>,
+        notification: ForkingNotification<D, MK::Signature>,
         store: &UnitStore<U>,
-    ) -> DagResult<H, D, MK> {
+    ) -> DagResult<D, MK> {
         use ForkingNotification::*;
         let mut result = DagResult::empty();
         match notification {
@@ -204,12 +204,12 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Dag<H, D, MK> {
     }
 
     /// The store of units currently being processed by this dag.
-    pub fn processing_units(&self) -> &UnitStore<SignedUnit<H, D, MK>> {
+    pub fn processing_units(&self) -> &UnitStore<SignedUnit<D, MK>> {
         self.validator.processing_units()
     }
 
     /// Notify the dag that a unit has finished processing and can be cleared from the cache.
-    pub fn finished_processing(&mut self, hash: &H::Hash) {
+    pub fn finished_processing(&mut self, hash: &UnitHash) {
         self.validator.finished_processing(hash);
     }
 

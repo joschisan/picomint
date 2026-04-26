@@ -1,14 +1,15 @@
-use crate::units::{HashFor, UnitWithParents};
+use crate::units::UnitWithParents;
+use crate::UnitHash;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 struct OrphanedUnit<U: UnitWithParents> {
     unit: U,
-    missing_parents: HashSet<HashFor<U>>,
+    missing_parents: HashSet<UnitHash>,
 }
 
 impl<U: UnitWithParents> OrphanedUnit<U> {
     /// If there are no missing parents then returns just the internal unit.
-    pub fn new(unit: U, missing_parents: HashSet<HashFor<U>>) -> Result<Self, U> {
+    pub fn new(unit: U, missing_parents: HashSet<UnitHash>) -> Result<Self, U> {
         match missing_parents.is_empty() {
             true => Err(unit),
             false => Ok(OrphanedUnit {
@@ -19,7 +20,7 @@ impl<U: UnitWithParents> OrphanedUnit<U> {
     }
 
     /// If this was the last missing parent return the unit.
-    pub fn resolve_parent(self, parent: HashFor<U>) -> Result<U, Self> {
+    pub fn resolve_parent(self, parent: UnitHash) -> Result<U, Self> {
         let OrphanedUnit {
             unit,
             mut missing_parents,
@@ -35,12 +36,12 @@ impl<U: UnitWithParents> OrphanedUnit<U> {
     }
 
     /// The hash of the unit.
-    pub fn hash(&self) -> HashFor<U> {
+    pub fn hash(&self) -> UnitHash {
         self.unit.hash()
     }
 
     /// The set of still missing parents.
-    pub fn missing_parents(&self) -> &HashSet<HashFor<U>> {
+    pub fn missing_parents(&self) -> &HashSet<UnitHash> {
         &self.missing_parents
     }
 }
@@ -48,9 +49,9 @@ impl<U: UnitWithParents> OrphanedUnit<U> {
 /// A structure ensuring that units added to it are output in an order
 /// in agreement with the DAG order.
 pub struct Dag<U: UnitWithParents> {
-    orphaned_units: HashMap<HashFor<U>, OrphanedUnit<U>>,
-    waiting_for: HashMap<HashFor<U>, Vec<HashFor<U>>>,
-    dag_units: HashSet<HashFor<U>>,
+    orphaned_units: HashMap<UnitHash, OrphanedUnit<U>>,
+    waiting_for: HashMap<UnitHash, Vec<UnitHash>>,
+    dag_units: HashSet<UnitHash>,
 }
 
 impl<U: UnitWithParents> Dag<U> {
@@ -96,7 +97,7 @@ impl<U: UnitWithParents> Dag<U> {
         }
         let missing_parents = unit
             .parents()
-            .filter(|parent| !self.dag_units.contains(parent))
+            .filter(|parent| !self.dag_units.contains(*parent))
             .cloned()
             .collect();
         match OrphanedUnit::new(unit, missing_parents) {
@@ -118,16 +119,15 @@ mod test {
     use crate::{
         dag::reconstruction::{dag::Dag, ReconstructedUnit},
         units::{random_full_parent_units_up_to, TestingFullUnit, Unit},
-        Hasher, NodeCount, NodeIndex, NodeMap,
+        NodeCount, NodeIndex, NodeMap, UnitHash,
     };
-    use aleph_bft_mock::Hasher64;
     use aleph_bft_types::Round;
     use std::collections::HashSet;
 
     fn full_parents_to_map(
-        parents: Vec<<Hasher64 as Hasher>::Hash>,
+        parents: Vec<UnitHash>,
         parent_round: Round,
-    ) -> NodeMap<(<Hasher64 as Hasher>::Hash, Round)> {
+    ) -> NodeMap<(UnitHash, Round)> {
         let mut result = NodeMap::with_size(NodeCount(parents.len()));
         for (id, parent) in parents.into_iter().enumerate() {
             result.insert(NodeIndex(id), (parent, parent_round));
@@ -137,7 +137,7 @@ mod test {
 
     // silly clippy, the map below doesn't work with &[..]
     #[allow(clippy::ptr_arg)]
-    fn unit_hashes(units: &Vec<TestingFullUnit>) -> Vec<<Hasher64 as Hasher>::Hash> {
+    fn unit_hashes(units: &Vec<TestingFullUnit>) -> Vec<UnitHash> {
         units.iter().map(|unit| unit.hash()).collect()
     }
 

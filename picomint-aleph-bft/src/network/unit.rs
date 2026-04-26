@@ -1,28 +1,28 @@
 use crate::{
     collection::NewestUnitResponse,
     units::{UncheckedSignedUnit, UnitCoord},
-    Data, Hasher, NodeIndex, Signature, UncheckedSigned,
+    Data, NodeIndex, Signature, UncheckedSigned, UnitHash,
 };
 use codec::{Decode, Encode};
 
 /// A message concerning units, either about new units or some requests for them.
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
-pub enum UnitMessage<H: Hasher, D: Data, S: Signature> {
+pub enum UnitMessage<D: Data, S: Signature> {
     /// For disseminating newly created units.
-    Unit(UncheckedSignedUnit<H, D, S>),
+    Unit(UncheckedSignedUnit<D, S>),
     /// Request for a unit by its coord.
     CoordRequest(NodeIndex, UnitCoord),
     /// Request for the full list of parents of a unit.
-    ParentsRequest(NodeIndex, H::Hash),
+    ParentsRequest(NodeIndex, UnitHash),
     /// Response to a request for a full list of parents.
-    ParentsResponse(H::Hash, Vec<UncheckedSignedUnit<H, D, S>>),
+    ParentsResponse(UnitHash, Vec<UncheckedSignedUnit<D, S>>),
     /// Request by a node for the newest unit created by them, together with a u64 salt
     NewestRequest(NodeIndex, u64),
     /// Response to RequestNewest: (our index, maybe unit, salt) signed by us
-    NewestResponse(UncheckedSigned<NewestUnitResponse<H, D, S>, S>),
+    NewestResponse(UncheckedSigned<NewestUnitResponse<D, S>, S>),
 }
 
-impl<H: Hasher, D: Data, S: Signature> UnitMessage<H, D, S> {
+impl<D: Data, S: Signature> UnitMessage<D, S> {
     pub fn included_data(&self) -> Vec<D> {
         use UnitMessage::*;
         match self {

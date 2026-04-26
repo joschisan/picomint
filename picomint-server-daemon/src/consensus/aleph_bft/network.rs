@@ -1,10 +1,8 @@
 use async_channel::Sender;
-use bitcoin::hashes::{Hash, sha256};
 use parity_scale_codec::{Decode, Encode, IoReader};
 use picomint_core::PeerId;
 use picomint_core::secp256k1::schnorr;
 use picomint_core::session_outcome::SignedSessionOutcome;
-use picomint_encoding::Encodable;
 use picomint_logging::LOG_CONSENSUS;
 use picomint_redb::Database;
 use tracing::error;
@@ -14,19 +12,7 @@ use super::data_provider::UnitData;
 use super::keychain::Keychain;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Hasher;
-
-impl aleph_bft::Hasher for Hasher {
-    type Hash = [u8; 32];
-
-    fn hash(input: &[u8]) -> Self::Hash {
-        input.consensus_hash::<sha256::Hash>().to_byte_array()
-    }
-}
-
 pub type NetworkData = aleph_bft::NetworkData<
-    Hasher,
     UnitData,
     <Keychain as aleph_bft::Keychain>::Signature,
     <Keychain as aleph_bft::MultiKeychain>::PartialMultisignature,

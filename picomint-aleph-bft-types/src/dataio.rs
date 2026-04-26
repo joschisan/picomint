@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::{Data, Hasher, NodeIndex, Round};
+use crate::{Data, NodeIndex, Round, UnitHash};
 
 /// The source of data items that consensus should order.
 ///
@@ -34,10 +34,10 @@ pub trait FinalizationHandler<D: Data>: Sync + Send + 'static {
 /// Instances of this type are returned indirectly by [`member::run_session`] method using the
 /// [`UnitFinalizationHandler`] trait. This way it allows to reconstruct the DAG's structure used by AlephBFT,
 /// which can be then used for example for the purpose of node's performance evaluation.
-pub struct OrderedUnit<D: Data, H: Hasher> {
+pub struct OrderedUnit<D: Data> {
     pub data: Option<D>,
-    pub parents: Vec<H::Hash>,
-    pub hash: H::Hash,
+    pub parents: Vec<UnitHash>,
+    pub hash: UnitHash,
     pub creator: NodeIndex,
     pub round: Round,
 }
@@ -48,9 +48,8 @@ pub struct OrderedUnit<D: Data, H: Hasher> {
 /// has been finalized, in order of finalization.
 pub trait UnitFinalizationHandler: Sync + Send + 'static {
     type Data: Data;
-    type Hasher: Hasher;
 
     /// A batch of units, that contains data provided by [DataProvider::get_data], has been finalized.
     /// The calls to this function follow the order of finalization.
-    fn batch_finalized(&mut self, batch: Vec<OrderedUnit<Self::Data, Self::Hasher>>);
+    fn batch_finalized(&mut self, batch: Vec<OrderedUnit<Self::Data>>);
 }

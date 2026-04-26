@@ -4,7 +4,7 @@ use crate::{
     Index, Indexed, Keychain as _, NodeCount, NodeIndex, NodeMap, Recipient, Round, Signable,
     Signed, Terminator, UncheckedSigned,
 };
-use aleph_bft_mock::{Data, Hasher64, Keychain, PartialMultisignature, Signature};
+use aleph_bft_mock::{Data, Keychain, PartialMultisignature, Signature};
 use aleph_bft_rmc::Message as RmcMessage;
 use futures::{
     channel::{mpsc, oneshot},
@@ -18,11 +18,11 @@ use std::{
     time::Duration,
 };
 
-type TestMessage = AlertMessage<Hasher64, Data, Signature, PartialMultisignature>;
-type TestAlert = Alert<Hasher64, Data, Signature>;
-type TestNotification = ForkingNotification<Hasher64, Data, Signature>;
-type TestForkProof = ForkProof<Hasher64, Data, Signature>;
-type TestFullUnit = FullUnit<Hasher64, Data>;
+type TestMessage = AlertMessage<Data, Signature, PartialMultisignature>;
+type TestAlert = Alert<Data, Signature>;
+type TestNotification = ForkingNotification<Data, Signature>;
+type TestForkProof = ForkProof<Data, Signature>;
+type TestFullUnit = FullUnit<Data>;
 
 enum Input {
     Incoming(TestMessage),

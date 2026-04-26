@@ -3,7 +3,7 @@ use crate::{
     dag::Request as ReconstructionRequest,
     network::UnitMessage,
     units::UncheckedSignedUnit,
-    Data, Hasher, NodeIndex, Recipient, Signature, UncheckedSigned,
+    Data, NodeIndex, Recipient, Signature, UncheckedSigned, UnitHash,
 };
 
 mod responder;
@@ -66,34 +66,32 @@ impl<T> Addressed<T> {
 
 /// Responses to requests.
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub enum DisseminationResponse<H: Hasher, D: Data, S: Signature> {
+pub enum DisseminationResponse<D: Data, S: Signature> {
     /// Response to a coord request, just a single unit.
-    Coord(UncheckedSignedUnit<H, D, S>),
+    Coord(UncheckedSignedUnit<D, S>),
     /// All the parents of the specified unit.
-    Parents(H::Hash, Vec<UncheckedSignedUnit<H, D, S>>),
+    Parents(UnitHash, Vec<UncheckedSignedUnit<D, S>>),
     /// The newest unit response for initial unit collection.
-    NewestUnit(UncheckedSigned<NewestUnitResponse<H, D, S>, S>),
+    NewestUnit(UncheckedSigned<NewestUnitResponse<D, S>, S>),
 }
 
 /// A message that has to be passed between committee members for consensus to work.
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub enum DisseminationMessage<H: Hasher, D: Data, S: Signature> {
+pub enum DisseminationMessage<D: Data, S: Signature> {
     /// Unit, either broadcast or in response to a coord request.
-    Unit(UncheckedSignedUnit<H, D, S>),
+    Unit(UncheckedSignedUnit<D, S>),
     /// Request coming from the specified node for something.
-    Request(NodeIndex, ReconstructionRequest<H>),
+    Request(NodeIndex, ReconstructionRequest),
     /// Response to a parent request.
-    ParentsResponse(H::Hash, Vec<UncheckedSignedUnit<H, D, S>>),
+    ParentsResponse(UnitHash, Vec<UncheckedSignedUnit<D, S>>),
     /// Initial unit collection request.
     NewestUnitRequest(NodeIndex, Salt),
     /// Response to initial unit collection.
-    NewestUnitResponse(UncheckedSigned<NewestUnitResponse<H, D, S>, S>),
+    NewestUnitResponse(UncheckedSigned<NewestUnitResponse<D, S>, S>),
 }
 
-impl<H: Hasher, D: Data, S: Signature> From<UnitMessage<H, D, S>>
-    for DisseminationMessage<H, D, S>
-{
-    fn from(message: UnitMessage<H, D, S>) -> Self {
+impl<D: Data, S: Signature> From<UnitMessage<D, S>> for DisseminationMessage<D, S> {
+    fn from(message: UnitMessage<D, S>) -> Self {
         use DisseminationMessage::*;
         match message {
             UnitMessage::Unit(u) => Unit(u),
@@ -110,10 +108,8 @@ impl<H: Hasher, D: Data, S: Signature> From<UnitMessage<H, D, S>>
     }
 }
 
-impl<H: Hasher, D: Data, S: Signature> From<DisseminationMessage<H, D, S>>
-    for UnitMessage<H, D, S>
-{
-    fn from(message: DisseminationMessage<H, D, S>) -> Self {
+impl<D: Data, S: Signature> From<DisseminationMessage<D, S>> for UnitMessage<D, S> {
+    fn from(message: DisseminationMessage<D, S>) -> Self {
         use DisseminationMessage::*;
         match message {
             Unit(u) => UnitMessage::Unit(u),
@@ -130,10 +126,8 @@ impl<H: Hasher, D: Data, S: Signature> From<DisseminationMessage<H, D, S>>
     }
 }
 
-impl<H: Hasher, D: Data, S: Signature> From<DisseminationResponse<H, D, S>>
-    for DisseminationMessage<H, D, S>
-{
-    fn from(message: DisseminationResponse<H, D, S>) -> Self {
+impl<D: Data, S: Signature> From<DisseminationResponse<D, S>> for DisseminationMessage<D, S> {
+    fn from(message: DisseminationResponse<D, S>) -> Self {
         use DisseminationMessage::*;
         use DisseminationResponse::*;
         match message {

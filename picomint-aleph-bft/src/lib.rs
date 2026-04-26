@@ -21,11 +21,11 @@ mod task_queue;
 mod testing;
 
 pub use aleph_bft_types::{
-    Data, DataProvider, FinalizationHandler, Hasher, IncompleteMultisignatureError, Index, Indexed,
+    hash, Data, DataProvider, FinalizationHandler, IncompleteMultisignatureError, Index, Indexed,
     Keychain, MultiKeychain, Multisigned, Network, NodeCount, NodeIndex, NodeMap, NodeSubset,
     OrderedUnit, PartialMultisignature, PartiallyMultisigned, Recipient, Round, SessionId,
     Signable, Signature, SignatureError, SignatureSet, Signed, SpawnHandle, TaskHandle,
-    UncheckedSigned, UnitFinalizationHandler,
+    UncheckedSigned, UnitFinalizationHandler, UnitHash,
 };
 pub use config::{
     create_config, default_config, default_delay_config, exponential_slowdown, Config, DelayConfig,

@@ -10,7 +10,7 @@ use futures::{AsyncRead, AsyncReadExt};
 
 use crate::{
     units::{UncheckedSignedUnit, Unit, UnitCoord},
-    Data, Hasher, NodeIndex, Round, SessionId, Signature,
+    Data, NodeIndex, Round, SessionId, Signature,
 };
 
 /// Backup read error. Could be either caused by io error from `BackupReader`, or by decoding.
@@ -65,15 +65,15 @@ impl From<CodecError> for LoaderError {
     }
 }
 
-pub struct BackupLoader<H: Hasher, D: Data, S: Signature, R: AsyncRead> {
+pub struct BackupLoader<D: Data, S: Signature, R: AsyncRead> {
     backup: Pin<Box<R>>,
     index: NodeIndex,
     session_id: SessionId,
-    _phantom: PhantomData<(H, D, S)>,
+    _phantom: PhantomData<(D, S)>,
 }
 
-impl<H: Hasher, D: Data, S: Signature, R: AsyncRead> BackupLoader<H, D, S, R> {
-    pub fn new(backup: R, index: NodeIndex, session_id: SessionId) -> BackupLoader<H, D, S, R> {
+impl<D: Data, S: Signature, R: AsyncRead> BackupLoader<D, S, R> {
+    pub fn new(backup: R, index: NodeIndex, session_id: SessionId) -> BackupLoader<D, S, R> {
         BackupLoader {
             backup: Box::pin(backup),
             index,
@@ -82,18 +82,18 @@ impl<H: Hasher, D: Data, S: Signature, R: AsyncRead> BackupLoader<H, D, S, R> {
         }
     }
 
-    async fn load(&mut self) -> Result<Vec<UncheckedSignedUnit<H, D, S>>, LoaderError> {
+    async fn load(&mut self) -> Result<Vec<UncheckedSignedUnit<D, S>>, LoaderError> {
         let mut buf = Vec::new();
         self.backup.read_to_end(&mut buf).await?;
         let input = &mut &buf[..];
         let mut result = Vec::new();
         while !input.is_empty() {
-            result.push(<UncheckedSignedUnit<H, D, S>>::decode(input)?);
+            result.push(<UncheckedSignedUnit<D, S>>::decode(input)?);
         }
         Ok(result)
     }
 
-    fn verify_units(&self, units: &Vec<UncheckedSignedUnit<H, D, S>>) -> Result<(), LoaderError> {
+    fn verify_units(&self, units: &Vec<UncheckedSignedUnit<D, S>>) -> Result<(), LoaderError> {
         let mut already_loaded_coords = HashSet::new();
 
         for unit in units {
@@ -123,7 +123,7 @@ impl<H: Hasher, D: Data, S: Signature, R: AsyncRead> BackupLoader<H, D, S, R> {
 
     pub async fn load_backup(
         &mut self,
-    ) -> Result<(Vec<UncheckedSignedUnit<H, D, S>>, Round), LoaderError> {
+    ) -> Result<(Vec<UncheckedSignedUnit<D, S>>, Round), LoaderError> {
         let units = self.load().await?;
         self.verify_units(&units)?;
         let next_round: Round = units
@@ -142,7 +142,7 @@ impl<H: Hasher, D: Data, S: Signature, R: AsyncRead> BackupLoader<H, D, S, R> {
 mod tests {
     use codec::Encode;
 
-    use aleph_bft_mock::{Data, Hasher64, Keychain, Loader, Signature};
+    use aleph_bft_mock::{Data, Keychain, Loader, Signature};
 
     use crate::{
         backup::{loader::LoaderError, BackupLoader as GenericLoader},
@@ -153,8 +153,8 @@ mod tests {
         NodeCount, NodeIndex, Round, SessionId,
     };
 
-    type UncheckedSignedUnit = GenericUncheckedSignedUnit<Hasher64, Data, Signature>;
-    type BackupLoader<R> = GenericLoader<Hasher64, Data, Signature, R>;
+    type UncheckedSignedUnit = GenericUncheckedSignedUnit<Data, Signature>;
+    type BackupLoader<R> = GenericLoader<Data, Signature, R>;
 
     const SESSION_ID: SessionId = 43;
     const NODE_ID: NodeIndex = NodeIndex(0);

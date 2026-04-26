@@ -1,16 +1,14 @@
-use crate::{
-    Data, DataProvider, FinalizationHandler, Hasher, OrderedUnit, UnitFinalizationHandler,
-};
+use crate::{Data, DataProvider, FinalizationHandler, OrderedUnit, UnitFinalizationHandler};
 use futures::{AsyncRead, AsyncWrite};
 use std::marker::PhantomData;
 
 /// This adapter allows to map an implementation of [`FinalizationHandler`] onto implementation of [`UnitFinalizationHandler`].
-pub struct FinalizationHandlerAdapter<FH, D, H> {
+pub struct FinalizationHandlerAdapter<FH, D> {
     finalization_handler: FH,
-    _phantom: PhantomData<(D, H)>,
+    _phantom: PhantomData<D>,
 }
 
-impl<FH, D, H> From<FH> for FinalizationHandlerAdapter<FH, D, H> {
+impl<FH, D> From<FH> for FinalizationHandlerAdapter<FH, D> {
     fn from(value: FH) -> Self {
         Self {
             finalization_handler: value,
@@ -19,13 +17,12 @@ impl<FH, D, H> From<FH> for FinalizationHandlerAdapter<FH, D, H> {
     }
 }
 
-impl<D: Data, H: Hasher, FH: FinalizationHandler<D>> UnitFinalizationHandler
-    for FinalizationHandlerAdapter<FH, D, H>
+impl<D: Data, FH: FinalizationHandler<D>> UnitFinalizationHandler
+    for FinalizationHandlerAdapter<FH, D>
 {
     type Data = D;
-    type Hasher = H;
 
-    fn batch_finalized(&mut self, batch: Vec<OrderedUnit<Self::Data, Self::Hasher>>) {
+    fn batch_finalized(&mut self, batch: Vec<OrderedUnit<Self::Data>>) {
         for unit in batch {
             if let Some(data) = unit.data {
                 self.finalization_handler.data_finalized(data)
@@ -46,13 +43,8 @@ pub struct LocalIO<DP: DataProvider, UFH: UnitFinalizationHandler, US: AsyncWrit
     unit_loader: UL,
 }
 
-impl<
-        H: Hasher,
-        DP: DataProvider,
-        FH: FinalizationHandler<DP::Output>,
-        US: AsyncWrite,
-        UL: AsyncRead,
-    > LocalIO<DP, FinalizationHandlerAdapter<FH, DP::Output, H>, US, UL>
+impl<DP: DataProvider, FH: FinalizationHandler<DP::Output>, US: AsyncWrite, UL: AsyncRead>
+    LocalIO<DP, FinalizationHandlerAdapter<FH, DP::Output>, US, UL>
 {
     /// Create a new local interface. Note that this uses the simplified, and recommended,
     /// finalization handler that only deals with ordered data.

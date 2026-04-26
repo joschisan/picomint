@@ -6,19 +6,19 @@ use crate::{
         SignedUnit, UncheckedSignedUnit, Unit, UnitStore, UnitStoreStatus, ValidationError,
         Validator as UnitValidator, WrappedUnit,
     },
-    Data, Hasher, MultiKeychain, NodeIndex, NodeSubset, Round,
+    Data, MultiKeychain, NodeIndex, NodeSubset, Round, UnitHash,
 };
 
 /// What can go wrong when validating a unit.
 #[derive(Eq, PartialEq)]
-pub enum Error<H: Hasher, D: Data, MK: MultiKeychain> {
-    Invalid(ValidationError<H, D, MK::Signature>),
-    Duplicate(SignedUnit<H, D, MK>),
-    Uncommitted(SignedUnit<H, D, MK>),
-    NewForker(Box<Alert<H, D, MK::Signature>>),
+pub enum Error<D: Data, MK: MultiKeychain> {
+    Invalid(ValidationError<D, MK::Signature>),
+    Duplicate(SignedUnit<D, MK>),
+    Uncommitted(SignedUnit<D, MK>),
+    NewForker(Box<Alert<D, MK::Signature>>),
 }
 
-impl<H: Hasher, D: Data, MK: MultiKeychain> Debug for Error<H, D, MK> {
+impl<D: Data, MK: MultiKeychain> Debug for Error<D, MK> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         use Error::*;
         match self {
@@ -30,10 +30,8 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Debug for Error<H, D, MK> {
     }
 }
 
-impl<H: Hasher, D: Data, MK: MultiKeychain> From<ValidationError<H, D, MK::Signature>>
-    for Error<H, D, MK>
-{
-    fn from(e: ValidationError<H, D, MK::Signature>) -> Self {
+impl<D: Data, MK: MultiKeychain> From<ValidationError<D, MK::Signature>> for Error<D, MK> {
+    fn from(e: ValidationError<D, MK::Signature>) -> Self {
         Error::Invalid(e)
     }
 }
@@ -61,16 +59,16 @@ impl Display for ValidatorStatus {
     }
 }
 
-type ValidatorResult<H, D, MK> = Result<SignedUnit<H, D, MK>, Error<H, D, MK>>;
+type ValidatorResult<D, MK> = Result<SignedUnit<D, MK>, Error<D, MK>>;
 
 /// A validator that checks basic properties of units and catches forks.
-pub struct Validator<H: Hasher, D: Data, MK: MultiKeychain> {
+pub struct Validator<D: Data, MK: MultiKeychain> {
     unit_validator: UnitValidator<MK>,
-    processing_units: UnitStore<SignedUnit<H, D, MK>>,
+    processing_units: UnitStore<SignedUnit<D, MK>>,
     known_forkers: NodeSubset,
 }
 
-impl<H: Hasher, D: Data, MK: MultiKeychain> Validator<H, D, MK> {
+impl<D: Data, MK: MultiKeychain> Validator<D, MK> {
     /// A new validator using the provided unit validator under the hood.
     pub fn new(unit_validator: UnitValidator<MK>) -> Self {
         let node_count = unit_validator.node_count();
@@ -85,11 +83,11 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Validator<H, D, MK> {
         self.known_forkers[node_id]
     }
 
-    fn mark_forker<U: WrappedUnit<H, Wrapped = SignedUnit<H, D, MK>>>(
+    fn mark_forker<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
         &mut self,
         forker: NodeIndex,
         store: &UnitStore<U>,
-    ) -> Vec<UncheckedSignedUnit<H, D, MK::Signature>> {
+    ) -> Vec<UncheckedSignedUnit<D, MK::Signature>> {
         assert!(!self.is_forker(forker), "we shouldn't mark a forker twice");
         self.known_forkers.insert(forker);
         store
@@ -105,11 +103,12 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Validator<H, D, MK> {
             .collect()
     }
 
-    fn pre_validate<U: WrappedUnit<H, Wrapped = SignedUnit<H, D, MK>>>(
+    #[allow(clippy::result_large_err)]
+    fn pre_validate<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
         &mut self,
-        unit: UncheckedSignedUnit<H, D, MK::Signature>,
+        unit: UncheckedSignedUnit<D, MK::Signature>,
         store: &UnitStore<U>,
-    ) -> ValidatorResult<H, D, MK> {
+    ) -> ValidatorResult<D, MK> {
         let unit = self.unit_validator.validate_unit(unit)?;
         let unit_hash = unit.as_signable().hash();
         if store.unit(&unit_hash).is_some() || self.processing_units.unit(&unit_hash).is_some() {
@@ -119,11 +118,12 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Validator<H, D, MK> {
     }
 
     /// Validate an incoming unit.
-    pub fn validate<U: WrappedUnit<H, Wrapped = SignedUnit<H, D, MK>>>(
+    #[allow(clippy::result_large_err)]
+    pub fn validate<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
         &mut self,
-        unit: UncheckedSignedUnit<H, D, MK::Signature>,
+        unit: UncheckedSignedUnit<D, MK::Signature>,
         store: &UnitStore<U>,
-    ) -> ValidatorResult<H, D, MK> {
+    ) -> ValidatorResult<D, MK> {
         use Error::*;
         let unit = self.pre_validate(unit, store)?;
         let unit_coord = unit.as_signable().coord();
@@ -148,11 +148,12 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Validator<H, D, MK> {
     }
 
     /// Validate a committed unit, it has to be from a forker.
-    pub fn validate_committed<U: WrappedUnit<H, Wrapped = SignedUnit<H, D, MK>>>(
+    #[allow(clippy::result_large_err)]
+    pub fn validate_committed<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
         &mut self,
-        unit: UncheckedSignedUnit<H, D, MK::Signature>,
+        unit: UncheckedSignedUnit<D, MK::Signature>,
         store: &UnitStore<U>,
-    ) -> ValidatorResult<H, D, MK> {
+    ) -> ValidatorResult<D, MK> {
         let unit = self.pre_validate(unit, store)?;
         assert!(
             self.is_forker(unit.creator()),
@@ -163,13 +164,13 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Validator<H, D, MK> {
     }
 
     /// The store of units currently being processed.
-    pub fn processing_units(&self) -> &UnitStore<SignedUnit<H, D, MK>> {
+    pub fn processing_units(&self) -> &UnitStore<SignedUnit<D, MK>> {
         &self.processing_units
     }
 
     /// Signal that a unit finished processing and thus it's copy no longer has to be kept for fork detection.
     /// NOTE: This is only a memory optimization, if the units stay there forever everything still works.
-    pub fn finished_processing(&mut self, unit: &H::Hash) {
+    pub fn finished_processing(&mut self, unit: &UnitHash) {
         self.processing_units.remove(unit)
     }
 

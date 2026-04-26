@@ -8,7 +8,7 @@ mod spawner;
 
 pub use crypto::{BadSigning, Keychain, PartialMultisignature, Signable, Signature};
 pub use dataio::{Data, DataProvider, FinalizationHandler, Loader, Saver, StalledDataProvider};
-pub use hasher::{Hash64, Hasher64};
+pub use hasher::Hasher64;
 pub use network::{
     Network, NetworkHook, NetworkReceiver, NetworkSender, Peer, ReconnectSender, Router,
     UnreliableHook,

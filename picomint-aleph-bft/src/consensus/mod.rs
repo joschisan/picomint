@@ -34,7 +34,7 @@ pub async fn run_session<
     UFH: UnitFinalizationHandler<Data = DP::Output>,
     US: AsyncWrite + Send + Sync + 'static,
     UL: AsyncRead + Send + Sync + 'static,
-    N: Network<NetworkData<UFH::Hasher, DP::Output, MK::Signature, MK::PartialMultisignature>>,
+    N: Network<NetworkData<DP::Output, MK::Signature, MK::PartialMultisignature>>,
     SH: SpawnHandle,
     MK: MultiKeychain,
 >(

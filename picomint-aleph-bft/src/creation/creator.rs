@@ -1,18 +1,18 @@
 use crate::{
     creation::collector::{ConstraintError, UnitsCollector},
     units::{ControlHash, PreUnit, Unit},
-    Hasher, NodeCount, NodeIndex, NodeMap, Round,
+    NodeCount, NodeIndex, NodeMap, Round,
 };
 use anyhow::Result;
 use std::cmp;
 
-pub struct Creator<H: Hasher> {
-    round_collectors: Vec<UnitsCollector<H>>,
+pub struct Creator {
+    round_collectors: Vec<UnitsCollector>,
     node_id: NodeIndex,
     n_members: NodeCount,
 }
 
-impl<H: Hasher> Creator<H> {
+impl Creator {
     pub fn new(node_id: NodeIndex, n_members: NodeCount) -> Self {
         Creator {
             node_id,
@@ -26,7 +26,7 @@ impl<H: Hasher> Creator<H> {
     }
 
     // gets or initializes a unit collector for a given round (and all between if not there)
-    fn get_or_initialize_collector_for_round(&mut self, round: Round) -> &mut UnitsCollector<H> {
+    fn get_or_initialize_collector_for_round(&mut self, round: Round) -> &mut UnitsCollector {
         while round > self.current_round() {
             let next_collector = UnitsCollector::from_previous(
                 self.round_collectors
@@ -40,7 +40,7 @@ impl<H: Hasher> Creator<H> {
 
     /// To create a new unit, we need to have at least the consensus threshold of parents available in previous round.
     /// Additionally, our unit from previous round must be available.
-    pub fn create_unit(&self, round: Round) -> Result<PreUnit<H>> {
+    pub fn create_unit(&self, round: Round) -> Result<PreUnit> {
         let control_hash = match round.checked_sub(1) {
             None => ControlHash::new(&NodeMap::with_size(self.n_members)),
             Some(prev_round) => ControlHash::new(
@@ -54,7 +54,7 @@ impl<H: Hasher> Creator<H> {
         Ok(PreUnit::new(self.node_id, round, control_hash))
     }
 
-    pub fn add_unit<U: Unit<Hasher = H>>(&mut self, unit: &U) {
+    pub fn add_unit<U: Unit>(&mut self, unit: &U) {
         let start_round = unit.round();
         let end_round = cmp::max(start_round, self.current_round());
         for round in start_round..=end_round {
@@ -73,9 +73,8 @@ mod tests {
         },
         NodeCount, NodeIndex,
     };
-    use aleph_bft_mock::Hasher64;
 
-    type Creator = GenericCreator<Hasher64>;
+    type Creator = GenericCreator;
 
     #[test]
     fn creates_initial_unit() {

@@ -1,4 +1,4 @@
-use crate::{alerts::AlertMessage, Data, Hasher, PartialMultisignature, Recipient, Signature};
+use crate::{alerts::AlertMessage, Data, PartialMultisignature, Recipient, Signature};
 use codec::{Decode, Encode};
 use std::fmt::Debug;
 
@@ -8,15 +8,15 @@ mod unit;
 pub use hub::Hub;
 pub use unit::UnitMessage;
 
-pub type UnitMessageTo<H, D, S> = (UnitMessage<H, D, S>, Recipient);
+pub type UnitMessageTo<D, S> = (UnitMessage<D, S>, Recipient);
 
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
-pub(crate) enum NetworkDataInner<H: Hasher, D: Data, S: Signature, MS: PartialMultisignature> {
-    Units(UnitMessage<H, D, S>),
-    Alert(AlertMessage<H, D, S, MS>),
+pub(crate) enum NetworkDataInner<D: Data, S: Signature, MS: PartialMultisignature> {
+    Units(UnitMessage<D, S>),
+    Alert(AlertMessage<D, S, MS>),
 }
 
-impl<H: Hasher, D: Data, S: Signature, MS: PartialMultisignature> NetworkDataInner<H, D, S, MS> {
+impl<D: Data, S: Signature, MS: PartialMultisignature> NetworkDataInner<D, S, MS> {
     pub(crate) fn included_data(&self) -> Vec<D> {
         match self {
             Self::Units(message) => message.included_data(),
@@ -27,11 +27,11 @@ impl<H: Hasher, D: Data, S: Signature, MS: PartialMultisignature> NetworkDataInn
 
 /// NetworkData is the opaque format for all data that a committee member needs to send to other nodes.
 #[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
-pub struct NetworkData<H: Hasher, D: Data, S: Signature, MS: PartialMultisignature>(
-    pub(crate) NetworkDataInner<H, D, S, MS>,
+pub struct NetworkData<D: Data, S: Signature, MS: PartialMultisignature>(
+    pub(crate) NetworkDataInner<D, S, MS>,
 );
 
-impl<H: Hasher, D: Data, S: Signature, MS: PartialMultisignature> NetworkData<H, D, S, MS> {
+impl<D: Data, S: Signature, MS: PartialMultisignature> NetworkData<D, S, MS> {
     /// Returns all the Data in the network message that might end up in the ordering as a result
     /// of accepting this message. Useful for ensuring data availability, if Data only represents
     /// the objects the user wants to order, and facilitates access to the Data before it is
@@ -50,9 +50,9 @@ mod tests {
             UnitMessage,
         },
         units::{ControlHash, FullUnit, PreUnit, UncheckedSignedUnit, UnitCoord},
-        Hasher, NodeIndex, Round, Signed,
+        NodeIndex, Round, Signed,
     };
-    use aleph_bft_mock::{Data, Hasher64, Keychain, PartialMultisignature, Signature};
+    use aleph_bft_mock::{Data, Keychain, PartialMultisignature, Signature};
     use aleph_bft_types::NodeMap;
     use codec::{Decode, Encode};
 
@@ -60,19 +60,17 @@ mod tests {
         creator: NodeIndex,
         round: Round,
         data: Data,
-    ) -> UncheckedSignedUnit<Hasher64, Data, Signature> {
+    ) -> UncheckedSignedUnit<Data, Signature> {
         let control_hash = ControlHash::new(&NodeMap::with_size(7.into()));
         let pu = PreUnit::new(creator, round, control_hash);
         let signable = FullUnit::new(pu, Some(data), 0);
         Signed::sign(signable, &Keychain::new(0.into(), creator)).into_unchecked()
     }
 
-    type TestNetworkData = super::NetworkData<Hasher64, Data, Signature, PartialMultisignature>;
+    type TestNetworkData = super::NetworkData<Data, Signature, PartialMultisignature>;
     impl TestNetworkData {
-        fn new(
-            inner: super::NetworkDataInner<Hasher64, Data, Signature, PartialMultisignature>,
-        ) -> Self {
-            super::NetworkData::<Hasher64, Data, Signature, PartialMultisignature>(inner)
+        fn new(inner: super::NetworkDataInner<Data, Signature, PartialMultisignature>) -> Self {
+            super::NetworkData::<Data, Signature, PartialMultisignature>(inner)
         }
     }
 
@@ -128,7 +126,7 @@ mod tests {
         use UnitMessage::ParentsRequest;
 
         let ni = 7.into();
-        let h = 43.using_encoded(Hasher64::hash);
+        let h = 43.using_encoded(crate::hash);
         let nd = TestNetworkData::new(Units(ParentsRequest(ni, h)));
         let decoded = TestNetworkData::decode(&mut &nd.encode()[..]);
         assert!(decoded.is_ok(), "Bug in encode/decode for ParentsRequest");
@@ -148,7 +146,7 @@ mod tests {
     fn decoding_network_data_units_response_parents() {
         use UnitMessage::ParentsResponse;
 
-        let h = 43.using_encoded(Hasher64::hash);
+        let h = 43.using_encoded(crate::hash);
         let p1 = test_unchecked_unit(5.into(), 43, 1729);
         let p2 = test_unchecked_unit(13.into(), 43, 1729);
         let p3 = test_unchecked_unit(17.into(), 43, 1729);

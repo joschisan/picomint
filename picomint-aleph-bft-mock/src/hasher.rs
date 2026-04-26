@@ -1,19 +1,5 @@
-use aleph_bft_types::Hasher;
-use std::{collections::hash_map::DefaultHasher, hash::Hasher as StdHasher};
-
-// A hasher from the standard library that hashes to u64, should be enough to
-// avoid collisions in testing.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
+// After concretization, Hasher64 is a no-op marker; the actual hash function
+// is the free `aleph_bft_types::hash` (sha256). Kept as a type so upstream tests
+// that reference `Hasher64` as a marker still compile.
+#[derive(Copy, Clone, Eq, PartialEq, std::hash::Hash, Debug, Default)]
 pub struct Hasher64;
-
-impl Hasher for Hasher64 {
-    type Hash = [u8; 8];
-
-    fn hash(x: &[u8]) -> Self::Hash {
-        let mut hasher = DefaultHasher::new();
-        hasher.write(x);
-        hasher.finish().to_ne_bytes()
-    }
-}
-
-pub type Hash64 = <Hasher64 as Hasher>::Hash;

@@ -35,15 +35,15 @@ impl<T> From<TrySendError<T>> for CreatorError {
 
 pub struct IO<U: Unit, MK: MultiKeychain, DP: DataProvider> {
     pub incoming_parents: Receiver<U>,
-    pub outgoing_units: Sender<SignedUnit<U::Hasher, DP::Output, MK>>,
+    pub outgoing_units: Sender<SignedUnit<DP::Output, MK>>,
     pub data_provider: DP,
 }
 
 async fn create_unit<U: Unit>(
     round: Round,
-    creator: &mut Creator<U::Hasher>,
+    creator: &mut Creator,
     incoming_parents: &mut Receiver<U>,
-) -> Result<PreUnit<U::Hasher>, CreatorError> {
+) -> Result<PreUnit, CreatorError> {
     loop {
         match creator.create_unit(round) {
             Ok(unit) => return Ok(unit),
@@ -58,7 +58,7 @@ async fn create_unit<U: Unit>(
 /// Tries to process a single parent from given `incoming_parents` receiver.
 /// Returns error when `incoming_parents` channel is closed.
 async fn process_unit<U: Unit>(
-    creator: &mut Creator<U::Hasher>,
+    creator: &mut Creator,
     incoming_parents: &mut Receiver<U>,
 ) -> anyhow::Result<(), CreatorError> {
     let unit = incoming_parents
@@ -70,7 +70,7 @@ async fn process_unit<U: Unit>(
 }
 
 async fn keep_processing_units<U: Unit>(
-    creator: &mut Creator<U::Hasher>,
+    creator: &mut Creator,
     incoming_parents: &mut Receiver<U>,
 ) -> anyhow::Result<(), CreatorError> {
     loop {
@@ -79,7 +79,7 @@ async fn keep_processing_units<U: Unit>(
 }
 
 async fn keep_processing_units_until<U: Unit>(
-    creator: &mut Creator<U::Hasher>,
+    creator: &mut Creator,
     incoming_parents: &mut Receiver<U>,
     until: Delay,
 ) -> anyhow::Result<(), CreatorError> {

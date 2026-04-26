@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    extension::units::Units,
-    units::{HashFor, UnitWithParents},
-    Hasher, NodeCount, NodeIndex, Round,
+    extension::units::Units, units::UnitWithParents, NodeCount, NodeIndex, Round, UnitHash,
 };
 
 fn common_vote(relative_round: Round) -> bool {
@@ -18,39 +16,38 @@ fn common_vote(relative_round: Round) -> bool {
     relative_round % 2 == 1
 }
 
-enum CandidateOutcome<H: Hasher> {
+enum CandidateOutcome {
     Eliminate,
-    ElectionDone(H::Hash),
+    ElectionDone(UnitHash),
 }
 
 struct CandidateElection<U: UnitWithParents> {
     round: Round,
     candidate_creator: NodeIndex,
-    candidate_hash: HashFor<U>,
-    votes: HashMap<HashFor<U>, bool>,
+    candidate_hash: UnitHash,
+    votes: HashMap<UnitHash, bool>,
+    _phantom: std::marker::PhantomData<U>,
 }
 
 impl<U: UnitWithParents> CandidateElection<U> {
     /// Creates an election for the given candidate.
     /// The candidate will eventually either get elected or eliminated.
     /// Might immediately return an outcome.
-    pub fn for_candidate(
-        candidate: &U,
-        units: &Units<U>,
-    ) -> Result<Self, CandidateOutcome<U::Hasher>> {
+    pub fn for_candidate(candidate: &U, units: &Units<U>) -> Result<Self, CandidateOutcome> {
         CandidateElection {
             round: candidate.round(),
             candidate_creator: candidate.creator(),
             candidate_hash: candidate.hash(),
             votes: HashMap::new(),
+            _phantom: std::marker::PhantomData,
         }
         .compute_votes(units)
     }
 
     fn parent_votes(
         &mut self,
-        parents: Vec<HashFor<U>>,
-    ) -> Result<(NodeCount, NodeCount), CandidateOutcome<U::Hasher>> {
+        parents: Vec<UnitHash>,
+    ) -> Result<(NodeCount, NodeCount), CandidateOutcome> {
         let (mut votes_for, mut votes_against) = (NodeCount(0), NodeCount(0));
         for parent in parents {
             match self.votes.get(&parent).expect("units are added in order") {
@@ -63,10 +60,10 @@ impl<U: UnitWithParents> CandidateElection<U> {
 
     fn vote_from_parents(
         &mut self,
-        parents: Vec<HashFor<U>>,
+        parents: Vec<UnitHash>,
         threshold: NodeCount,
         relative_round: Round,
-    ) -> Result<bool, CandidateOutcome<U::Hasher>> {
+    ) -> Result<bool, CandidateOutcome> {
         use CandidateOutcome::*;
         // Gather parents' votes.
         let (votes_for, votes_against) = self.parent_votes(parents)?;
@@ -92,7 +89,7 @@ impl<U: UnitWithParents> CandidateElection<U> {
         })
     }
 
-    fn vote(&mut self, voter: &U) -> Result<(), CandidateOutcome<U::Hasher>> {
+    fn vote(&mut self, voter: &U) -> Result<(), CandidateOutcome> {
         // If the vote is already computed we are done.
         if self.votes.contains_key(&voter.hash()) {
             return Ok(());
@@ -117,7 +114,7 @@ impl<U: UnitWithParents> CandidateElection<U> {
         Ok(())
     }
 
-    fn compute_votes(mut self, units: &Units<U>) -> Result<Self, CandidateOutcome<U::Hasher>> {
+    fn compute_votes(mut self, units: &Units<U>) -> Result<Self, CandidateOutcome> {
         for round in self.round + 1..=units.highest_round() {
             for voter in units.in_round(round).expect("units are added in order") {
                 self.vote(voter)?;
@@ -128,7 +125,7 @@ impl<U: UnitWithParents> CandidateElection<U> {
 
     /// Add a single voter and compute their vote. This might end up electing or eliminating the candidate.
     /// Might panic if called for a unit before its parents.
-    pub fn add_voter(mut self, voter: &U) -> Result<Self, CandidateOutcome<U::Hasher>> {
+    pub fn add_voter(mut self, voter: &U) -> Result<Self, CandidateOutcome> {
         self.vote(voter).map(|()| self)
     }
 }
@@ -136,7 +133,7 @@ impl<U: UnitWithParents> CandidateElection<U> {
 /// Election for a single round.
 pub struct RoundElection<U: UnitWithParents> {
     // Remaining candidates for this round's head, in reverse order.
-    candidates: Vec<HashFor<U>>,
+    candidates: Vec<UnitHash>,
     voting: CandidateElection<U>,
 }
 
@@ -145,7 +142,7 @@ pub enum ElectionResult<U: UnitWithParents> {
     /// The election is not done yet.
     Pending(RoundElection<U>),
     /// The head has been elected.
-    Elected(HashFor<U>),
+    Elected(UnitHash),
 }
 
 impl<U: UnitWithParents> RoundElection<U> {
@@ -180,8 +177,8 @@ impl<U: UnitWithParents> RoundElection<U> {
     }
 
     fn handle_candidate_election_result(
-        result: Result<CandidateElection<U>, CandidateOutcome<U::Hasher>>,
-        mut candidates: Vec<HashFor<U>>,
+        result: Result<CandidateElection<U>, CandidateOutcome>,
+        mut candidates: Vec<UnitHash>,
         units: &Units<U>,
     ) -> ElectionResult<U> {
         use CandidateOutcome::*;

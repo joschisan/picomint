@@ -3,7 +3,7 @@ use crate::{
     units::{UncheckedSignedUnit, Unit, UnitCoord},
     NodeCount, NodeIndex, SpawnHandle, TaskHandle,
 };
-use aleph_bft_mock::{Data, DataProvider, Hasher64, Router, Signature, Spawner};
+use aleph_bft_mock::{Data, DataProvider, Router, Signature, Spawner};
 use codec::Decode;
 use futures::{
     channel::{mpsc, oneshot},
@@ -143,7 +143,7 @@ fn verify_backup(buf: &mut &[u8]) -> HashSet<UnitCoord> {
     let mut already_saved = HashSet::new();
 
     while !buf.is_empty() {
-        let unit = <UncheckedSignedUnit<Hasher64, Data, Signature>>::decode(buf).unwrap();
+        let unit = <UncheckedSignedUnit<Data, Signature>>::decode(buf).unwrap();
         let full_unit = unit.as_signable();
         let coord = full_unit.coord();
         let control_hash = &full_unit.as_pre_unit().control_hash();

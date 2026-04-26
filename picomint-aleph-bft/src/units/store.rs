@@ -1,10 +1,11 @@
+use crate::UnitHash;
 use std::{
     collections::HashMap,
     fmt::{Display, Formatter, Result as FmtResult},
 };
 
 use crate::{
-    units::{HashFor, Unit, UnitCoord},
+    units::{Unit, UnitCoord},
     NodeCount, NodeIndex, NodeMap, Round,
 };
 
@@ -30,8 +31,8 @@ impl Display for UnitStoreStatus {
 /// Stores units, and keeps track of which are canonical, i.e. the first ones inserted with a given coordinate.
 /// See `remove` for limitation on trusting canonical units, although they don't impact our usecases.
 pub struct UnitStore<U: Unit> {
-    by_hash: HashMap<HashFor<U>, U>,
-    canonical_units: NodeMap<HashMap<Round, HashFor<U>>>,
+    by_hash: HashMap<UnitHash, U>,
+    canonical_units: NodeMap<HashMap<Round, UnitHash>>,
     top_row: NodeMap<Round>,
 }
 
@@ -50,20 +51,20 @@ impl<U: Unit> UnitStore<U> {
         }
     }
 
-    fn mut_hashes_by(&mut self, creator: NodeIndex) -> &mut HashMap<Round, HashFor<U>> {
+    fn mut_hashes_by(&mut self, creator: NodeIndex) -> &mut HashMap<Round, UnitHash> {
         self.canonical_units
             .get_mut(creator)
             .expect("all hashmaps initialized")
     }
 
-    fn hashes_by(&self, creator: NodeIndex) -> &HashMap<Round, HashFor<U>> {
+    fn hashes_by(&self, creator: NodeIndex) -> &HashMap<Round, UnitHash> {
         self.canonical_units
             .get(creator)
             .expect("all hashmaps initialized")
     }
 
     // only call this for canonical units
-    fn canonical_by_hash(&self, hash: &HashFor<U>) -> &U {
+    fn canonical_by_hash(&self, hash: &UnitHash) -> &U {
         self.by_hash.get(hash).expect("we have all canonical units")
     }
 
@@ -106,7 +107,7 @@ impl<U: Unit> UnitStore<U> {
     }
 
     /// Remove a unit with a given hash. Notably if you remove a unit another might become canonical in its place in the future.
-    pub fn remove(&mut self, hash: &HashFor<U>) {
+    pub fn remove(&mut self, hash: &UnitHash) {
         if let Some(unit) = self.by_hash.remove(hash) {
             self.maybe_unset_canonical(&unit);
         }
@@ -129,7 +130,7 @@ impl<U: Unit> UnitStore<U> {
     }
 
     /// The unit for the given hash, if present.
-    pub fn unit(&self, hash: &HashFor<U>) -> Option<&U> {
+    pub fn unit(&self, hash: &UnitHash) -> Option<&U> {
         self.by_hash.get(hash)
     }
 

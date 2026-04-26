@@ -1,7 +1,7 @@
 use crate::units::{ControlHashError, UnitCoord};
 use crate::{
     units::{FullUnit, PreUnit, SignedUnit, UncheckedSignedUnit, Unit},
-    Data, Hasher, Keychain, NodeCount, NodeIndex, Round, SessionId, Signature, SignatureError,
+    Data, Keychain, NodeCount, NodeIndex, Round, SessionId, Signature, SignatureError,
 };
 use std::{
     fmt::{Display, Formatter, Result as FmtResult},
@@ -10,15 +10,15 @@ use std::{
 
 /// All that can be wrong with a unit except control hash issues.
 #[derive(Eq, PartialEq, Debug)]
-pub enum ValidationError<H: Hasher, D: Data, S: Signature> {
-    WrongSignature(UncheckedSignedUnit<H, D, S>),
-    WrongSession(FullUnit<H, D>),
-    RoundTooHigh(FullUnit<H, D>),
-    WrongNumberOfMembers(PreUnit<H>),
-    ParentValidationFailed(PreUnit<H>, ControlHashError<H>),
+pub enum ValidationError<D: Data, S: Signature> {
+    WrongSignature(UncheckedSignedUnit<D, S>),
+    WrongSession(FullUnit<D>),
+    RoundTooHigh(FullUnit<D>),
+    WrongNumberOfMembers(PreUnit),
+    ParentValidationFailed(PreUnit, ControlHashError),
 }
 
-impl<H: Hasher, D: Data, S: Signature> Display for ValidationError<H, D, S> {
+impl<D: Data, S: Signature> Display for ValidationError<D, S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         use ValidationError::*;
         match self {
@@ -40,10 +40,8 @@ impl<H: Hasher, D: Data, S: Signature> Display for ValidationError<H, D, S> {
     }
 }
 
-impl<H: Hasher, D: Data, S: Signature> From<SignatureError<FullUnit<H, D>, S>>
-    for ValidationError<H, D, S>
-{
-    fn from(se: SignatureError<FullUnit<H, D>, S>) -> Self {
+impl<D: Data, S: Signature> From<SignatureError<FullUnit<D>, S>> for ValidationError<D, S> {
+    fn from(se: SignatureError<FullUnit<D>, S>) -> Self {
         ValidationError::WrongSignature(se.unchecked)
     }
 }
@@ -55,8 +53,7 @@ pub struct Validator<K: Keychain> {
     max_round: Round,
 }
 
-type Result<H, D, K> =
-    StdResult<SignedUnit<H, D, K>, ValidationError<H, D, <K as Keychain>::Signature>>;
+type Result<D, K> = StdResult<SignedUnit<D, K>, ValidationError<D, <K as Keychain>::Signature>>;
 
 impl<K: Keychain> Validator<K> {
     pub fn new(session_id: SessionId, keychain: K, max_round: Round) -> Self {
@@ -75,10 +72,8 @@ impl<K: Keychain> Validator<K> {
         self.keychain.index()
     }
 
-    pub fn validate_unit<H: Hasher, D: Data>(
-        &self,
-        uu: UncheckedSignedUnit<H, D, K::Signature>,
-    ) -> Result<H, D, K> {
+    #[allow(clippy::result_large_err)]
+    pub fn validate_unit<D: Data>(&self, uu: UncheckedSignedUnit<D, K::Signature>) -> Result<D, K> {
         let su = uu.check(&self.keychain)?;
         let full_unit = su.as_signable();
         if full_unit.session_id() != self.session_id {
@@ -92,10 +87,8 @@ impl<K: Keychain> Validator<K> {
         self.validate_unit_parents(su)
     }
 
-    fn validate_unit_parents<H: Hasher, D: Data>(
-        &self,
-        su: SignedUnit<H, D, K>,
-    ) -> Result<H, D, K> {
+    #[allow(clippy::result_large_err)]
+    fn validate_unit_parents<D: Data>(&self, su: SignedUnit<D, K>) -> Result<D, K> {
         let pre_unit = su.as_signable().as_pre_unit();
         let n_members = pre_unit.n_members();
         if n_members != self.keychain.node_count() {
@@ -155,9 +148,11 @@ mod tests {
             .clone();
         let mut control_hash = preunit.control_hash().clone();
         let encoded = control_hash.encode();
-        // first 8 bytes is encoded NodeMap of size 7
+        // first 8 bytes is encoded NodeMap of size 7; remaining bytes are the 32-byte
+        // sha256 combined hash. Replace the hash with garbage that decodes but won't
+        // match a recomputation.
         let mut borked_control_hash_bytes = encoded[0..=7].to_vec();
-        borked_control_hash_bytes.extend([0u8, 1u8, 0u8, 1u8, 0u8, 1u8, 0u8, 1u8]);
+        borked_control_hash_bytes.extend([0u8; 32]);
         control_hash = ControlHash::decode(&mut borked_control_hash_bytes.as_slice())
             .expect("should decode correctly");
         let preunit = PreUnit::new(preunit.creator(), preunit.round(), control_hash);

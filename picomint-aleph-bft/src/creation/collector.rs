@@ -1,4 +1,4 @@
-use crate::{units::Unit, Hasher, NodeCount, NodeIndex, NodeMap, Round};
+use crate::{units::Unit, NodeCount, NodeIndex, NodeMap, Round, UnitHash};
 use anyhow::Result;
 use thiserror::Error;
 
@@ -11,13 +11,13 @@ pub enum ConstraintError {
 }
 
 #[derive(Clone)]
-pub struct UnitsCollector<H: Hasher> {
-    candidates: NodeMap<(H::Hash, Round)>,
+pub struct UnitsCollector {
+    candidates: NodeMap<(UnitHash, Round)>,
     for_round: Round,
     direct_parents: NodeCount,
 }
 
-impl<H: Hasher> UnitsCollector<H> {
+impl UnitsCollector {
     pub fn new_initial(n_members: NodeCount) -> Self {
         UnitsCollector {
             candidates: NodeMap::with_size(n_members),
@@ -26,7 +26,7 @@ impl<H: Hasher> UnitsCollector<H> {
         }
     }
 
-    pub fn from_previous(previous: &UnitsCollector<H>) -> Self {
+    pub fn from_previous(previous: &UnitsCollector) -> Self {
         UnitsCollector {
             candidates: previous.candidates.clone(),
             for_round: previous.for_round + 1,
@@ -34,7 +34,7 @@ impl<H: Hasher> UnitsCollector<H> {
         }
     }
 
-    pub fn add_unit<U: Unit<Hasher = H>>(&mut self, unit: &U) {
+    pub fn add_unit<U: Unit>(&mut self, unit: &U) {
         let node_id = unit.creator();
         let hash = unit.hash();
         let round = unit.round();
@@ -60,7 +60,7 @@ impl<H: Hasher> UnitsCollector<H> {
     pub fn prospective_parents(
         &self,
         node_id: NodeIndex,
-    ) -> Result<&NodeMap<(H::Hash, Round)>, ConstraintError> {
+    ) -> Result<&NodeMap<(UnitHash, Round)>, ConstraintError> {
         if self.direct_parents < self.candidates.size().consensus_threshold() {
             return Err(ConstraintError::NotEnoughParents);
         }
@@ -78,12 +78,11 @@ mod tests {
         units::{random_full_parent_units_up_to, Unit},
         NodeCount, NodeIndex,
     };
-    use aleph_bft_mock::Hasher64;
 
     #[test]
     fn initial_fails_without_parents() {
         let n_members = NodeCount(4);
-        let units_collector = UnitsCollector::<Hasher64>::new_initial(n_members);
+        let units_collector = UnitsCollector::new_initial(n_members);
 
         let err = units_collector
             .prospective_parents(NodeIndex(0))
@@ -191,7 +190,7 @@ mod tests {
     #[test]
     fn following_fails_without_parents() {
         let n_members = NodeCount(4);
-        let initial_units_collector = UnitsCollector::<Hasher64>::new_initial(n_members);
+        let initial_units_collector = UnitsCollector::new_initial(n_members);
         let units_collector = UnitsCollector::from_previous(&initial_units_collector);
 
         let err = units_collector
@@ -203,7 +202,7 @@ mod tests {
     #[test]
     fn following_fails_with_too_few_parents() {
         let n_members = NodeCount(4);
-        let initial_units_collector = UnitsCollector::<Hasher64>::new_initial(n_members);
+        let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(1, n_members, 43);
         units_collector.add_unit(&units[1][0]);
@@ -217,7 +216,7 @@ mod tests {
     #[test]
     fn following_fails_with_too_old_parents() {
         let n_members = NodeCount(4);
-        let initial_units_collector = UnitsCollector::<Hasher64>::new_initial(n_members);
+        let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(0, n_members, 43);
         for unit in &units[0] {
@@ -233,7 +232,7 @@ mod tests {
     #[test]
     fn following_fails_without_own_parent() {
         let n_members = NodeCount(4);
-        let initial_units_collector = UnitsCollector::<Hasher64>::new_initial(n_members);
+        let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(1, n_members, 43);
         for unit in units[1].iter().skip(1) {
@@ -249,7 +248,7 @@ mod tests {
     #[test]
     fn following_fails_with_too_old_own_parent() {
         let n_members = NodeCount(4);
-        let initial_units_collector = UnitsCollector::<Hasher64>::new_initial(n_members);
+        let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(1, n_members, 43);
         for unit in units[1].iter().skip(1) {
@@ -266,7 +265,7 @@ mod tests {
     #[test]
     fn following_successfully_computes_minimal_parents() {
         let n_members = NodeCount(4);
-        let initial_units_collector = UnitsCollector::<Hasher64>::new_initial(n_members);
+        let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(1, n_members, 43);
         for unit in units[1].iter().take(3) {
@@ -290,7 +289,7 @@ mod tests {
     #[test]
     fn following_successfully_computes_minimal_parents_with_ancient() {
         let n_members = NodeCount(4);
-        let initial_units_collector = UnitsCollector::<Hasher64>::new_initial(n_members);
+        let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(1, n_members, 43);
         for unit in units[1].iter().take(3) {
@@ -316,7 +315,7 @@ mod tests {
     #[test]
     fn following_successfully_computes_full_parents() {
         let n_members = NodeCount(4);
-        let initial_units_collector = UnitsCollector::<Hasher64>::new_initial(n_members);
+        let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(1, n_members, 43);
         for unit in &units[1] {
@@ -339,7 +338,7 @@ mod tests {
     #[test]
     fn following_inherits_units() {
         let n_members = NodeCount(4);
-        let mut initial_units_collector = UnitsCollector::<Hasher64>::new_initial(n_members);
+        let mut initial_units_collector = UnitsCollector::new_initial(n_members);
         let units = random_full_parent_units_up_to(1, n_members, 43);
         for unit in &units[0] {
             initial_units_collector.add_unit(unit);

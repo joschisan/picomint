@@ -3,27 +3,27 @@ use crate::{
     dag::{DagUnit, Request},
     dissemination::DisseminationResponse,
     units::{UnitCoord, UnitStore, UnitWithParents, WrappedUnit},
-    Data, Hasher, MultiKeychain, NodeIndex, Signed,
+    Data, MultiKeychain, NodeIndex, Signed, UnitHash,
 };
 use std::marker::PhantomData;
 use thiserror::Error;
 
 /// A responder that is able to answer requests for data about units.
-pub struct Responder<H: Hasher, D: Data, MK: MultiKeychain> {
+pub struct Responder<D: Data, MK: MultiKeychain> {
     keychain: MK,
-    _phantom: PhantomData<(H, D)>,
+    _phantom: PhantomData<D>,
 }
 
 /// Ways in which it can be impossible for us to respond to a request.
 #[derive(Eq, Error, Debug, PartialEq)]
-pub enum Error<H: Hasher> {
+pub enum Error {
     #[error("no canonical unit at {0}")]
     NoCanonicalAt(UnitCoord),
     #[error("unit with hash {0:?} not known")]
-    UnknownUnit(H::Hash),
+    UnknownUnit(UnitHash),
 }
 
-impl<H: Hasher, D: Data, MK: MultiKeychain> Responder<H, D, MK> {
+impl<D: Data, MK: MultiKeychain> Responder<D, MK> {
     /// Create a new responder.
     pub fn new(keychain: MK) -> Self {
         Responder {
@@ -39,8 +39,8 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Responder<H, D, MK> {
     fn on_request_coord(
         &self,
         coord: UnitCoord,
-        units: &UnitStore<DagUnit<H, D, MK>>,
-    ) -> Result<DisseminationResponse<H, D, MK::Signature>, Error<H>> {
+        units: &UnitStore<DagUnit<D, MK>>,
+    ) -> Result<DisseminationResponse<D, MK::Signature>, Error> {
         units
             .canonical_unit(coord)
             .map(|unit| DisseminationResponse::Coord(unit.clone().unpack().into()))
@@ -49,9 +49,9 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Responder<H, D, MK> {
 
     fn on_request_parents(
         &self,
-        hash: H::Hash,
-        units: &UnitStore<DagUnit<H, D, MK>>,
-    ) -> Result<DisseminationResponse<H, D, MK::Signature>, Error<H>> {
+        hash: UnitHash,
+        units: &UnitStore<DagUnit<D, MK>>,
+    ) -> Result<DisseminationResponse<D, MK::Signature>, Error> {
         units
             .unit(&hash)
             .map(|unit| {
@@ -75,8 +75,8 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Responder<H, D, MK> {
         &self,
         requester: NodeIndex,
         salt: Salt,
-        units: &UnitStore<DagUnit<H, D, MK>>,
-    ) -> DisseminationResponse<H, D, MK::Signature> {
+        units: &UnitStore<DagUnit<D, MK>>,
+    ) -> DisseminationResponse<D, MK::Signature> {
         let unit = units
             .canonical_units(requester)
             .last()
@@ -91,9 +91,9 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Responder<H, D, MK> {
     /// aren't able to help.
     pub fn handle_request(
         &self,
-        request: Request<H>,
-        units: &UnitStore<DagUnit<H, D, MK>>,
-    ) -> Result<DisseminationResponse<H, D, MK::Signature>, Error<H>> {
+        request: Request,
+        units: &UnitStore<DagUnit<D, MK>>,
+    ) -> Result<DisseminationResponse<D, MK::Signature>, Error> {
         use Request::*;
         match request {
             Coord(coord) => self.on_request_coord(coord, units),
@@ -106,8 +106,8 @@ impl<H: Hasher, D: Data, MK: MultiKeychain> Responder<H, D, MK> {
         &self,
         requester: NodeIndex,
         salt: Salt,
-        units: &UnitStore<DagUnit<H, D, MK>>,
-    ) -> DisseminationResponse<H, D, MK::Signature> {
+        units: &UnitStore<DagUnit<D, MK>>,
+    ) -> DisseminationResponse<D, MK::Signature> {
         self.on_request_newest(requester, salt, units)
     }
 }
@@ -126,14 +126,14 @@ mod test {
         },
         NodeCount, NodeIndex,
     };
-    use aleph_bft_mock::{Data, Hasher64, Keychain};
+    use aleph_bft_mock::{Data, Keychain};
     use std::iter::zip;
 
     const NODE_ID: NodeIndex = NodeIndex(0);
     const NODE_COUNT: NodeCount = NodeCount(7);
 
     fn setup() -> (
-        Responder<Hasher64, Data, Keychain>,
+        Responder<Data, Keychain>,
         UnitStore<TestingDagUnit>,
         Vec<Keychain>,
     ) {

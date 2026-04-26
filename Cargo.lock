@@ -3747,6 +3747,7 @@ name = "picomint-aleph-bft-types"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bitcoin_hashes",
  "futures",
  "parity-scale-codec",
  "picomint-aleph-bft-crypto",

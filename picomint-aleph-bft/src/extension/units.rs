@@ -1,14 +1,12 @@
+use crate::UnitHash;
 use std::collections::{HashMap, VecDeque};
 
-use crate::{
-    units::{HashFor, UnitWithParents},
-    Round,
-};
+use crate::{units::UnitWithParents, Round};
 
 /// Units kept in a way optimized for easy batch extraction.
 pub struct Units<U: UnitWithParents> {
-    units: HashMap<HashFor<U>, U>,
-    by_round: HashMap<Round, Vec<HashFor<U>>>,
+    units: HashMap<UnitHash, U>,
+    by_round: HashMap<Round, Vec<UnitHash>>,
     highest_round: Round,
 }
 
@@ -33,7 +31,7 @@ impl<U: UnitWithParents> Units<U> {
         self.units.insert(u.hash(), u);
     }
 
-    pub fn get(&self, hash: &HashFor<U>) -> Option<&U> {
+    pub fn get(&self, hash: &UnitHash) -> Option<&U> {
         self.units.get(hash)
     }
 
@@ -55,7 +53,7 @@ impl<U: UnitWithParents> Units<U> {
     }
 
     /// Remove a batch of units, deterministically ordered based on the given head.
-    pub fn remove_batch(&mut self, head: &HashFor<U>) -> Vec<U> {
+    pub fn remove_batch(&mut self, head: &UnitHash) -> Vec<U> {
         let mut batch = Vec::new();
         let mut queue = VecDeque::new();
         queue.push_back(
