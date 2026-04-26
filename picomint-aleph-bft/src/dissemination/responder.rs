@@ -3,14 +3,14 @@ use crate::{
     dag::{DagUnit, Request},
     dissemination::DisseminationResponse,
     units::{UnitCoord, UnitStore, UnitWithParents, WrappedUnit},
-    Data, MultiKeychain, PeerId, Signed, UnitHash,
+    Data, Keychain, PeerId, Signed, UnitHash,
 };
 use std::marker::PhantomData;
 use thiserror::Error;
 
 /// A responder that is able to answer requests for data about units.
-pub struct Responder<D: Data, MK: MultiKeychain> {
-    keychain: MK,
+pub struct Responder<D: Data> {
+    keychain: Keychain,
     _phantom: PhantomData<D>,
 }
 
@@ -23,9 +23,9 @@ pub enum Error {
     UnknownUnit(UnitHash),
 }
 
-impl<D: Data, MK: MultiKeychain> Responder<D, MK> {
+impl<D: Data> Responder<D> {
     /// Create a new responder.
-    pub fn new(keychain: MK) -> Self {
+    pub fn new(keychain: Keychain) -> Self {
         Responder {
             keychain,
             _phantom: PhantomData,
@@ -33,14 +33,14 @@ impl<D: Data, MK: MultiKeychain> Responder<D, MK> {
     }
 
     fn index(&self) -> PeerId {
-        self.keychain.index()
+        self.keychain.identity()
     }
 
     fn on_request_coord(
         &self,
         coord: UnitCoord,
-        units: &UnitStore<DagUnit<D, MK>>,
-    ) -> Result<DisseminationResponse<D, MK::Signature>, Error> {
+        units: &UnitStore<DagUnit<D>>,
+    ) -> Result<DisseminationResponse<D>, Error> {
         units
             .canonical_unit(coord)
             .map(|unit| DisseminationResponse::Coord(unit.clone().unpack().into()))
@@ -50,8 +50,8 @@ impl<D: Data, MK: MultiKeychain> Responder<D, MK> {
     fn on_request_parents(
         &self,
         hash: UnitHash,
-        units: &UnitStore<DagUnit<D, MK>>,
-    ) -> Result<DisseminationResponse<D, MK::Signature>, Error> {
+        units: &UnitStore<DagUnit<D>>,
+    ) -> Result<DisseminationResponse<D>, Error> {
         units
             .unit(&hash)
             .map(|unit| {
@@ -75,8 +75,8 @@ impl<D: Data, MK: MultiKeychain> Responder<D, MK> {
         &self,
         requester: PeerId,
         salt: Salt,
-        units: &UnitStore<DagUnit<D, MK>>,
-    ) -> DisseminationResponse<D, MK::Signature> {
+        units: &UnitStore<DagUnit<D>>,
+    ) -> DisseminationResponse<D> {
         let unit = units
             .canonical_units(requester)
             .last()
@@ -92,8 +92,8 @@ impl<D: Data, MK: MultiKeychain> Responder<D, MK> {
     pub fn handle_request(
         &self,
         request: Request,
-        units: &UnitStore<DagUnit<D, MK>>,
-    ) -> Result<DisseminationResponse<D, MK::Signature>, Error> {
+        units: &UnitStore<DagUnit<D>>,
+    ) -> Result<DisseminationResponse<D>, Error> {
         use Request::*;
         match request {
             Coord(coord) => self.on_request_coord(coord, units),
@@ -106,8 +106,8 @@ impl<D: Data, MK: MultiKeychain> Responder<D, MK> {
         &self,
         requester: PeerId,
         salt: Salt,
-        units: &UnitStore<DagUnit<D, MK>>,
-    ) -> DisseminationResponse<D, MK::Signature> {
+        units: &UnitStore<DagUnit<D>>,
+    ) -> DisseminationResponse<D> {
         self.on_request_newest(requester, salt, units)
     }
 }
@@ -126,20 +126,23 @@ mod test {
         },
         NumPeers, PeerId,
     };
-    use aleph_bft_mock::{Data, Keychain};
+    use aleph_bft_mock::{keychain, Data};
+    use aleph_bft_types::Keychain;
     use std::iter::zip;
 
     const NODE_ID: PeerId = PeerId::new(0 as u8);
     const NODE_COUNT: NumPeers = NumPeers::new(7 as usize);
 
-    fn setup() -> (
-        Responder<Data, Keychain>,
-        UnitStore<TestingDagUnit>,
-        Vec<Keychain>,
-    ) {
-        let keychains = Keychain::new_vec(NODE_COUNT);
+    fn keychain_set() -> Vec<Keychain> {
+        (0..NODE_COUNT.total())
+            .map(|i| keychain(NODE_COUNT, PeerId::new(i as u8)))
+            .collect()
+    }
+
+    fn setup() -> (Responder<Data>, UnitStore<TestingDagUnit>, Vec<Keychain>) {
+        let keychains = keychain_set();
         (
-            Responder::new(keychains[NODE_ID.to_usize()]),
+            Responder::new(keychains[NODE_ID.to_usize()].clone()),
             UnitStore::new(NODE_COUNT),
             keychains,
         )

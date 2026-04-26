@@ -9,49 +9,47 @@ use crate::{
     dissemination::{Addressed, DisseminationMessage},
     network::{UnitMessage, UnitMessageTo},
     units::{SignedUnit, UncheckedSignedUnit, Unit},
-    Data, Index, MultiKeychain, Receiver, Sender, Terminator, UnitFinalizationHandler,
+    Data, Index, Receiver, Sender, Terminator, UnitFinalizationHandler,
 };
 use futures::{FutureExt, StreamExt};
 use futures_timer::Delay;
 use log::{debug, error, info, trace, warn};
 use std::time::Duration;
 
-pub struct Service<UFH, MK>
+pub struct Service<UFH>
 where
     UFH: UnitFinalizationHandler,
-    MK: MultiKeychain,
 {
-    handler: Consensus<UFH, MK>,
-    alerts_for_alerter: Sender<Alert<UFH::Data, MK::Signature>>,
-    notifications_from_alerter: Receiver<ForkingNotification<UFH::Data, MK::Signature>>,
-    unit_messages_for_network: Sender<UnitMessageTo<UFH::Data, MK::Signature>>,
-    unit_messages_from_network: Receiver<UnitMessage<UFH::Data, MK::Signature>>,
-    responses_for_collection: Sender<CollectionResponse<UFH::Data, MK>>,
-    parents_for_creator: Sender<DagUnit<UFH::Data, MK>>,
-    backup_units_for_saver: Sender<DagUnit<UFH::Data, MK>>,
-    backup_units_from_saver: Receiver<DagUnit<UFH::Data, MK>>,
-    new_units_from_creator: Receiver<SignedUnit<UFH::Data, MK>>,
+    handler: Consensus<UFH>,
+    alerts_for_alerter: Sender<Alert<UFH::Data>>,
+    notifications_from_alerter: Receiver<ForkingNotification<UFH::Data>>,
+    unit_messages_for_network: Sender<UnitMessageTo<UFH::Data>>,
+    unit_messages_from_network: Receiver<UnitMessage<UFH::Data>>,
+    responses_for_collection: Sender<CollectionResponse<UFH::Data>>,
+    parents_for_creator: Sender<DagUnit<UFH::Data>>,
+    backup_units_for_saver: Sender<DagUnit<UFH::Data>>,
+    backup_units_from_saver: Receiver<DagUnit<UFH::Data>>,
+    new_units_from_creator: Receiver<SignedUnit<UFH::Data>>,
     exiting: bool,
 }
 
-pub struct IO<D: Data, MK: MultiKeychain> {
-    pub backup_units_for_saver: Sender<DagUnit<D, MK>>,
-    pub backup_units_from_saver: Receiver<DagUnit<D, MK>>,
-    pub alerts_for_alerter: Sender<Alert<D, MK::Signature>>,
-    pub notifications_from_alerter: Receiver<ForkingNotification<D, MK::Signature>>,
-    pub unit_messages_for_network: Sender<UnitMessageTo<D, MK::Signature>>,
-    pub unit_messages_from_network: Receiver<UnitMessage<D, MK::Signature>>,
-    pub responses_for_collection: Sender<CollectionResponse<D, MK>>,
-    pub parents_for_creator: Sender<DagUnit<D, MK>>,
-    pub new_units_from_creator: Receiver<SignedUnit<D, MK>>,
+pub struct IO<D: Data> {
+    pub backup_units_for_saver: Sender<DagUnit<D>>,
+    pub backup_units_from_saver: Receiver<DagUnit<D>>,
+    pub alerts_for_alerter: Sender<Alert<D>>,
+    pub notifications_from_alerter: Receiver<ForkingNotification<D>>,
+    pub unit_messages_for_network: Sender<UnitMessageTo<D>>,
+    pub unit_messages_from_network: Receiver<UnitMessage<D>>,
+    pub responses_for_collection: Sender<CollectionResponse<D>>,
+    pub parents_for_creator: Sender<DagUnit<D>>,
+    pub new_units_from_creator: Receiver<SignedUnit<D>>,
 }
 
-impl<UFH, MK> Service<UFH, MK>
+impl<UFH> Service<UFH>
 where
     UFH: UnitFinalizationHandler,
-    MK: MultiKeychain,
 {
-    pub fn new(handler: Consensus<UFH, MK>, io: IO<UFH::Data, MK>) -> Self {
+    pub fn new(handler: Consensus<UFH>, io: IO<UFH::Data>) -> Self {
         let IO {
             backup_units_for_saver,
             backup_units_from_saver,
@@ -84,7 +82,7 @@ where
         self.exiting = true;
     }
 
-    fn handle_result(&mut self, result: ConsensusResult<UFH::Data, MK>) {
+    fn handle_result(&mut self, result: ConsensusResult<UFH::Data>) {
         let ConsensusResult {
             units,
             alerts,
@@ -103,12 +101,12 @@ where
         }
     }
 
-    fn on_unit_received(&mut self, unit: UncheckedSignedUnit<UFH::Data, MK::Signature>) {
+    fn on_unit_received(&mut self, unit: UncheckedSignedUnit<UFH::Data>) {
         let result = self.handler.process_incoming_unit(unit);
         self.handle_result(result);
     }
 
-    fn on_unit_message(&mut self, message: DisseminationMessage<UFH::Data, MK::Signature>) {
+    fn on_unit_message(&mut self, message: DisseminationMessage<UFH::Data>) {
         use DisseminationMessage::*;
         match message {
             Unit(u) => {
@@ -144,10 +142,7 @@ where
         }
     }
 
-    fn on_forking_notification(
-        &mut self,
-        notification: ForkingNotification<UFH::Data, MK::Signature>,
-    ) {
+    fn on_forking_notification(&mut self, notification: ForkingNotification<UFH::Data>) {
         let result = self.handler.process_forking_notification(notification);
         self.handle_result(result);
     }
@@ -158,14 +153,14 @@ where
         }
     }
 
-    fn on_unit_reconstructed(&mut self, unit: DagUnit<UFH::Data, MK>) {
+    fn on_unit_reconstructed(&mut self, unit: DagUnit<UFH::Data>) {
         trace!(target: LOG_TARGET, "Unit {:?} {} reconstructed.", unit.hash(), unit.coord());
         if self.backup_units_for_saver.unbounded_send(unit).is_err() {
             self.crucial_channel_closed("Backup");
         }
     }
 
-    fn on_unit_backup_saved(&mut self, unit: DagUnit<UFH::Data, MK>) {
+    fn on_unit_backup_saved(&mut self, unit: DagUnit<UFH::Data>) {
         if self
             .parents_for_creator
             .unbounded_send(unit.clone())
@@ -180,7 +175,7 @@ where
 
     fn send_message_for_network(
         &mut self,
-        notification: Addressed<DisseminationMessage<UFH::Data, MK::Signature>>,
+        notification: Addressed<DisseminationMessage<UFH::Data>>,
     ) {
         for recipient in notification.recipients() {
             if self
@@ -199,7 +194,7 @@ where
 
     pub async fn run(
         mut self,
-        data_from_backup: Vec<UncheckedSignedUnit<UFH::Data, MK::Signature>>,
+        data_from_backup: Vec<UncheckedSignedUnit<UFH::Data>>,
         mut terminator: Terminator,
     ) {
         let status_ticker_delay = Duration::from_secs(10);

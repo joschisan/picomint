@@ -1,7 +1,6 @@
 use crate::{
     units::{UncheckedSignedUnit, Unit},
-    Data, Index, Keychain, MultiKeychain, PartialMultisignature, PeerId, Signable, Signature,
-    UncheckedSigned, UnitHash,
+    Data, Index, PeerId, Signable, Signature, UncheckedSigned, UnitHash,
 };
 use aleph_bft_rmc::Message as RmcMessage;
 use derivative::Derivative;
@@ -13,25 +12,24 @@ mod service;
 pub use handler::Handler;
 pub use service::{Service, IO};
 
-pub type ForkProof<D, S> = (UncheckedSignedUnit<D, S>, UncheckedSignedUnit<D, S>);
+pub type ForkProof<D> = (UncheckedSignedUnit<D>, UncheckedSignedUnit<D>);
 
-pub type NetworkMessage<D, MK> =
-    AlertMessage<D, <MK as Keychain>::Signature, <MK as MultiKeychain>::PartialMultisignature>;
+pub type NetworkMessage<D> = AlertMessage<D>;
 
 #[derive(Clone, Debug, Decodable, Derivative, Encodable)]
 #[derivative(Eq, PartialEq, Hash)]
-pub struct Alert<D: Data, S: Signature> {
+pub struct Alert<D: Data> {
     sender: PeerId,
-    proof: ForkProof<D, S>,
-    legit_units: Vec<UncheckedSignedUnit<D, S>>,
+    proof: ForkProof<D>,
+    legit_units: Vec<UncheckedSignedUnit<D>>,
 }
 
-impl<D: Data, S: Signature> Alert<D, S> {
+impl<D: Data> Alert<D> {
     pub fn new(
         sender: PeerId,
-        proof: ForkProof<D, S>,
-        legit_units: Vec<UncheckedSignedUnit<D, S>>,
-    ) -> Alert<D, S> {
+        proof: ForkProof<D>,
+        legit_units: Vec<UncheckedSignedUnit<D>>,
+    ) -> Alert<D> {
         Alert {
             sender,
             proof,
@@ -54,13 +52,13 @@ impl<D: Data, S: Signature> Alert<D, S> {
     }
 }
 
-impl<D: Data, S: Signature> Index for Alert<D, S> {
+impl<D: Data> Index for Alert<D> {
     fn index(&self) -> PeerId {
         self.sender
     }
 }
 
-impl<D: Data, S: Signature> Signable for Alert<D, S> {
+impl<D: Data> Signable for Alert<D> {
     type Hash = UnitHash;
     fn hash(&self) -> Self::Hash {
         crate::hash(&self.consensus_encode_to_vec())
@@ -70,16 +68,16 @@ impl<D: Data, S: Signature> Signable for Alert<D, S> {
 /// A message concerning alerts.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 #[allow(clippy::large_enum_variant)]
-pub enum AlertMessage<D: Data, S: Signature, MS: PartialMultisignature> {
+pub enum AlertMessage<D: Data> {
     /// Alert regarding forks, signed by the person claiming misconduct.
-    ForkAlert(UncheckedSigned<Alert<D, S>, S>),
+    ForkAlert(UncheckedSigned<Alert<D>, Signature>),
     /// An internal RMC message, together with the id of the sender.
-    RmcMessage(PeerId, RmcMessage<UnitHash, S, MS>),
+    RmcMessage(PeerId, RmcMessage<UnitHash>),
     /// A request by a node for a fork alert identified by the given hash.
     AlertRequest(PeerId, UnitHash),
 }
 
-impl<D: Data, S: Signature, MS: PartialMultisignature> AlertMessage<D, S, MS> {
+impl<D: Data> AlertMessage<D> {
     pub fn included_data(&self) -> Vec<D> {
         match self {
             Self::ForkAlert(unchecked_alert) => unchecked_alert.as_signable().included_data(),
@@ -93,7 +91,7 @@ impl<D: Data, S: Signature, MS: PartialMultisignature> AlertMessage<D, S, MS> {
 // legitimized units.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 #[allow(clippy::large_enum_variant)]
-pub enum ForkingNotification<D: Data, S: Signature> {
-    Forker(ForkProof<D, S>),
-    Units(Vec<UncheckedSignedUnit<D, S>>),
+pub enum ForkingNotification<D: Data> {
+    Forker(ForkProof<D>),
+    Units(Vec<UncheckedSignedUnit<D>>),
 }

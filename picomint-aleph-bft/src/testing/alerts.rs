@@ -1,10 +1,10 @@
 use crate::{
     alerts::{Alert, AlertMessage, ForkProof, ForkingNotification, Handler, Service},
     units::{ControlHash, FullUnit, PreUnit},
-    Index, Indexed, Keychain as _, NodeMap, NumPeers, PeerId, Recipient, Round, Signable, Signed,
-    Terminator, UncheckedSigned,
+    Index, Indexed, Keychain, NodeMap, NumPeers, PeerId, Recipient, Round, Signable, Signature,
+    Signed, Terminator, UncheckedSigned,
 };
-use aleph_bft_mock::{Data, Keychain, PartialMultisignature, Signature};
+use aleph_bft_mock::{keychain, Data};
 use aleph_bft_rmc::Message as RmcMessage;
 use futures::{
     channel::{mpsc, oneshot},
@@ -12,16 +12,17 @@ use futures::{
 };
 use futures_timer::Delay;
 use log::trace;
+use picomint_encoding::Encodable;
 use std::{
     collections::{HashMap, HashSet},
     hash::Hash,
     time::Duration,
 };
 
-type TestMessage = AlertMessage<Data, Signature, PartialMultisignature>;
-type TestAlert = Alert<Data, Signature>;
-type TestNotification = ForkingNotification<Data, Signature>;
-type TestForkProof = ForkProof<Data, Signature>;
+type TestMessage = AlertMessage<Data>;
+type TestAlert = Alert<Data>;
+type TestNotification = ForkingNotification<Data>;
+type TestForkProof = ForkProof<Data>;
 type TestFullUnit = FullUnit<Data>;
 
 enum Input {
@@ -29,16 +30,61 @@ enum Input {
     Alert(TestAlert),
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug)]
 enum Output {
     Outgoing(TestMessage, Recipient),
     Notification(TestNotification),
 }
 
+/// A signature-stripped key for test outputs, since schnorr signatures are
+/// non-deterministic and so two structurally-equal messages have unequal bytes.
+#[derive(Debug, Eq, PartialEq, Hash)]
+struct OutputKey(Vec<u8>);
+
+fn semantic_key(output: &Output) -> OutputKey {
+    let mut bytes = Vec::new();
+    match output {
+        Output::Outgoing(msg, recipient) => {
+            bytes.push(0);
+            bytes.extend(recipient.consensus_encode_to_vec());
+            match msg {
+                AlertMessage::ForkAlert(unchecked) => {
+                    bytes.push(0);
+                    bytes.extend(unchecked.as_signable().consensus_encode_to_vec());
+                }
+                AlertMessage::RmcMessage(sender, rmc) => {
+                    bytes.push(1);
+                    bytes.extend(sender.consensus_encode_to_vec());
+                    match rmc {
+                        RmcMessage::SignedHash(uchecked) => {
+                            bytes.push(0);
+                            bytes.extend(uchecked.as_signable().consensus_encode_to_vec());
+                        }
+                        RmcMessage::MultisignedHash(uchecked) => {
+                            bytes.push(1);
+                            bytes.extend(uchecked.as_signable().consensus_encode_to_vec());
+                        }
+                    }
+                }
+                AlertMessage::AlertRequest(p, h) => {
+                    bytes.push(2);
+                    bytes.extend(p.consensus_encode_to_vec());
+                    bytes.extend(h.consensus_encode_to_vec());
+                }
+            }
+        }
+        Output::Notification(n) => {
+            bytes.push(1);
+            bytes.extend(n.consensus_encode_to_vec());
+        }
+    }
+    OutputKey(bytes)
+}
+
 struct Segment {
     inputs: Vec<Input>,
-    expected: HashMap<Output, usize>,
-    unexpected: HashSet<Output>,
+    expected: HashMap<OutputKey, usize>,
+    unexpected: HashSet<OutputKey>,
 }
 
 impl Segment {
@@ -51,17 +97,18 @@ impl Segment {
     }
 
     fn check_output(&mut self, output: Output) {
+        let key = semantic_key(&output);
         assert!(
-            !self.unexpected.contains(&output),
+            !self.unexpected.contains(&key),
             "Unexpected {:?} emitted by alerter.",
             output
         );
-        match self.expected.get_mut(&output) {
+        match self.expected.get_mut(&key) {
             Some(count) => *count -= 1,
             None => trace!("Possibly unnecessary {:?} emitted by alerter.", output),
         }
-        if self.expected.get(&output) == Some(&0) {
-            self.expected.remove(&output);
+        if self.expected.get(&key) == Some(&0) {
+            self.expected.remove(&key);
         }
     }
 }
@@ -75,7 +122,7 @@ impl TestCase {
     fn new(n_members: NumPeers) -> Self {
         let mut keychains = Vec::new();
         for i in 0..n_members.total() {
-            keychains.push(Keychain::new(n_members, PeerId::new(i as u8)))
+            keychains.push(keychain(n_members, PeerId::new(i as u8)))
         }
         Self {
             keychains,
@@ -108,9 +155,7 @@ impl TestCase {
             PreUnit::new(
                 forker,
                 round,
-                ControlHash::new(&NodeMap::with_size(
-                    self.keychain(PeerId::new(0 as u8)).node_count(),
-                )),
+                ControlHash::new(&NodeMap::with_size(NumPeers::from(self.keychains.len()))),
             ),
             Some(variant),
             0,
@@ -164,42 +209,46 @@ impl TestCase {
     }
 
     fn outgoing_message(&mut self, message: TestMessage, recipient: Recipient) -> &mut Self {
+        let key = semantic_key(&Output::Outgoing(message, recipient));
         *self
             .segments
             .last_mut()
             .expect("there is a segment")
             .expected
-            .entry(Output::Outgoing(message, recipient))
+            .entry(key)
             .or_insert(0) += 1;
         self
     }
 
     fn outgoing_notification(&mut self, notification: TestNotification) -> &mut Self {
+        let key = semantic_key(&Output::Notification(notification));
         *self
             .segments
             .last_mut()
             .expect("there is a segment")
             .expected
-            .entry(Output::Notification(notification))
+            .entry(key)
             .or_insert(0) += 1;
         self
     }
 
     fn unexpected_message(&mut self, message: TestMessage, recipient: Recipient) -> &mut Self {
+        let key = semantic_key(&Output::Outgoing(message, recipient));
         self.segments
             .last_mut()
             .expect("there is a segment")
             .unexpected
-            .insert(Output::Outgoing(message, recipient));
+            .insert(key);
         self
     }
 
     fn unexpected_notification(&mut self, notification: TestNotification) -> &mut Self {
+        let key = semantic_key(&Output::Notification(notification));
         self.segments
             .last_mut()
             .expect("there is a segment")
             .unexpected
-            .insert(Output::Notification(notification));
+            .insert(key);
         self
     }
 
@@ -215,7 +264,7 @@ impl TestCase {
         let (alerts_for_alerter, alerts_from_units) = mpsc::unbounded();
         let (exit_alerter_tx, exit_alerter_rx) = oneshot::channel();
 
-        let alerter_handler = Handler::new(keychain, 0);
+        let alerter_handler = Handler::new(keychain.clone(), 0);
         let mut alerter_service = Service::new(
             keychain,
             crate::alerts::IO {
@@ -267,7 +316,7 @@ impl TestCase {
     }
 
     async fn run(self, run_as: PeerId) {
-        let keychain = *self.keychain(run_as);
+        let keychain = self.keychain(run_as).clone();
         let mut timeout = Delay::new(Duration::from_millis(500)).fuse();
         futures::select! {
             _ = self.test(keychain).fuse() => {},

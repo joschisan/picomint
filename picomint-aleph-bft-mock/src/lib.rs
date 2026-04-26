@@ -6,10 +6,7 @@ mod hasher;
 mod network;
 mod spawner;
 
-pub use crypto::{
-    BadSigning, Keychain, PartialMultisignature, Signable, Signature, bad_schnorr, schnorr,
-    schnorr_set,
-};
+pub use crypto::{bad_keychain, keychain, keychain_set, Signable};
 pub use dataio::{Data, DataProvider, FinalizationHandler, Loader, Saver, StalledDataProvider};
 pub use hasher::Hasher64;
 pub use network::{

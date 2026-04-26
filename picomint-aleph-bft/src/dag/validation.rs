@@ -7,19 +7,19 @@ use crate::{
         SignedUnit, UncheckedSignedUnit, Unit, UnitStore, UnitStoreStatus, ValidationError,
         Validator as UnitValidator, WrappedUnit,
     },
-    Data, MultiKeychain, PeerId, Round, UnitHash,
+    Data, PeerId, Round, UnitHash,
 };
 
 /// What can go wrong when validating a unit.
 #[derive(Eq, PartialEq)]
-pub enum Error<D: Data, MK: MultiKeychain> {
-    Invalid(ValidationError<D, MK::Signature>),
-    Duplicate(SignedUnit<D, MK>),
-    Uncommitted(SignedUnit<D, MK>),
-    NewForker(Box<Alert<D, MK::Signature>>),
+pub enum Error<D: Data> {
+    Invalid(ValidationError<D>),
+    Duplicate(SignedUnit<D>),
+    Uncommitted(SignedUnit<D>),
+    NewForker(Box<Alert<D>>),
 }
 
-impl<D: Data, MK: MultiKeychain> Debug for Error<D, MK> {
+impl<D: Data> Debug for Error<D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         use Error::*;
         match self {
@@ -31,8 +31,8 @@ impl<D: Data, MK: MultiKeychain> Debug for Error<D, MK> {
     }
 }
 
-impl<D: Data, MK: MultiKeychain> From<ValidationError<D, MK::Signature>> for Error<D, MK> {
-    fn from(e: ValidationError<D, MK::Signature>) -> Self {
+impl<D: Data> From<ValidationError<D>> for Error<D> {
+    fn from(e: ValidationError<D>) -> Self {
         Error::Invalid(e)
     }
 }
@@ -60,18 +60,18 @@ impl Display for ValidatorStatus {
     }
 }
 
-type ValidatorResult<D, MK> = Result<SignedUnit<D, MK>, Error<D, MK>>;
+type ValidatorResult<D> = Result<SignedUnit<D>, Error<D>>;
 
 /// A validator that checks basic properties of units and catches forks.
-pub struct Validator<D: Data, MK: MultiKeychain> {
-    unit_validator: UnitValidator<MK>,
-    processing_units: UnitStore<SignedUnit<D, MK>>,
+pub struct Validator<D: Data> {
+    unit_validator: UnitValidator,
+    processing_units: UnitStore<SignedUnit<D>>,
     known_forkers: BTreeSet<PeerId>,
 }
 
-impl<D: Data, MK: MultiKeychain> Validator<D, MK> {
+impl<D: Data> Validator<D> {
     /// A new validator using the provided unit validator under the hood.
-    pub fn new(unit_validator: UnitValidator<MK>) -> Self {
+    pub fn new(unit_validator: UnitValidator) -> Self {
         let node_count = unit_validator.node_count();
         Validator {
             unit_validator,
@@ -84,11 +84,11 @@ impl<D: Data, MK: MultiKeychain> Validator<D, MK> {
         self.known_forkers.contains(&node_id)
     }
 
-    fn mark_forker<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
+    fn mark_forker<U: WrappedUnit<Wrapped = SignedUnit<D>>>(
         &mut self,
         forker: PeerId,
         store: &UnitStore<U>,
-    ) -> Vec<UncheckedSignedUnit<D, MK::Signature>> {
+    ) -> Vec<UncheckedSignedUnit<D>> {
         assert!(!self.is_forker(forker), "we shouldn't mark a forker twice");
         self.known_forkers.insert(forker);
         store
@@ -105,11 +105,11 @@ impl<D: Data, MK: MultiKeychain> Validator<D, MK> {
     }
 
     #[allow(clippy::result_large_err)]
-    fn pre_validate<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
+    fn pre_validate<U: WrappedUnit<Wrapped = SignedUnit<D>>>(
         &mut self,
-        unit: UncheckedSignedUnit<D, MK::Signature>,
+        unit: UncheckedSignedUnit<D>,
         store: &UnitStore<U>,
-    ) -> ValidatorResult<D, MK> {
+    ) -> ValidatorResult<D> {
         let unit = self.unit_validator.validate_unit(unit)?;
         let unit_hash = unit.as_signable().hash();
         if store.unit(&unit_hash).is_some() || self.processing_units.unit(&unit_hash).is_some() {
@@ -120,11 +120,11 @@ impl<D: Data, MK: MultiKeychain> Validator<D, MK> {
 
     /// Validate an incoming unit.
     #[allow(clippy::result_large_err)]
-    pub fn validate<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
+    pub fn validate<U: WrappedUnit<Wrapped = SignedUnit<D>>>(
         &mut self,
-        unit: UncheckedSignedUnit<D, MK::Signature>,
+        unit: UncheckedSignedUnit<D>,
         store: &UnitStore<U>,
-    ) -> ValidatorResult<D, MK> {
+    ) -> ValidatorResult<D> {
         use Error::*;
         let unit = self.pre_validate(unit, store)?;
         let unit_coord = unit.as_signable().coord();
@@ -150,11 +150,11 @@ impl<D: Data, MK: MultiKeychain> Validator<D, MK> {
 
     /// Validate a committed unit, it has to be from a forker.
     #[allow(clippy::result_large_err)]
-    pub fn validate_committed<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
+    pub fn validate_committed<U: WrappedUnit<Wrapped = SignedUnit<D>>>(
         &mut self,
-        unit: UncheckedSignedUnit<D, MK::Signature>,
+        unit: UncheckedSignedUnit<D>,
         store: &UnitStore<U>,
-    ) -> ValidatorResult<D, MK> {
+    ) -> ValidatorResult<D> {
         let unit = self.pre_validate(unit, store)?;
         assert!(
             self.is_forker(unit.creator()),
@@ -165,7 +165,7 @@ impl<D: Data, MK: MultiKeychain> Validator<D, MK> {
     }
 
     /// The store of units currently being processed.
-    pub fn processing_units(&self) -> &UnitStore<SignedUnit<D, MK>> {
+    pub fn processing_units(&self) -> &UnitStore<SignedUnit<D>> {
         &self.processing_units
     }
 
@@ -194,7 +194,7 @@ mod test {
         },
         NumPeers, PeerId, Signed,
     };
-    use aleph_bft_mock::Keychain;
+    use aleph_bft_mock::keychain;
 
     #[test]
     fn validates_trivially_correct() {
@@ -203,10 +203,14 @@ mod test {
         let max_round = 2137;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let mut validator = Validator::new(UnitValidator::new(session_id, keychains[0], max_round));
+        let mut validator = Validator::new(UnitValidator::new(
+            session_id,
+            keychains[0].clone(),
+            max_round,
+        ));
         for unit in random_full_parent_units_up_to(4, node_count, session_id)
             .iter()
             .flatten()
@@ -226,10 +230,14 @@ mod test {
         let max_round = 2137;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let mut validator = Validator::new(UnitValidator::new(session_id, keychains[0], max_round));
+        let mut validator = Validator::new(UnitValidator::new(
+            session_id,
+            keychains[0].clone(),
+            max_round,
+        ));
         let unit = random_full_parent_units_up_to(0, node_count, session_id)
             .first()
             .expect("we have the first round")
@@ -254,10 +262,14 @@ mod test {
         let max_round = 2137;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let mut store = UnitStore::new(node_count);
-        let mut validator = Validator::new(UnitValidator::new(session_id, keychains[0], max_round));
+        let mut validator = Validator::new(UnitValidator::new(
+            session_id,
+            keychains[0].clone(),
+            max_round,
+        ));
         let unit = random_full_parent_units_up_to(0, node_count, session_id)
             .first()
             .expect("we have the first round")
@@ -280,10 +292,14 @@ mod test {
         let produced_round = 4;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let mut validator = Validator::new(UnitValidator::new(session_id, keychains[0], max_round));
+        let mut validator = Validator::new(UnitValidator::new(
+            session_id,
+            keychains[0].clone(),
+            max_round,
+        ));
         for unit in random_full_parent_units_up_to(produced_round, node_count, session_id)
             .iter()
             .flatten()
@@ -315,10 +331,14 @@ mod test {
         let produced_round = 4;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let mut store = UnitStore::new(node_count);
-        let mut validator = Validator::new(UnitValidator::new(session_id, keychains[0], max_round));
+        let mut validator = Validator::new(UnitValidator::new(
+            session_id,
+            keychains[0].clone(),
+            max_round,
+        ));
         for unit in random_full_parent_units_up_to(produced_round, node_count, session_id)
             .iter()
             .flatten()
@@ -347,10 +367,14 @@ mod test {
         let produced_round = 4;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let mut validator = Validator::new(UnitValidator::new(session_id, keychains[0], max_round));
+        let mut validator = Validator::new(UnitValidator::new(
+            session_id,
+            keychains[0].clone(),
+            max_round,
+        ));
         let fork = random_full_parent_units_up_to(2, node_count, session_id)
             .get(2)
             .expect("we have the requested round")
@@ -395,10 +419,14 @@ mod test {
         let produced_round = 4;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let mut validator = Validator::new(UnitValidator::new(session_id, keychains[0], max_round));
+        let mut validator = Validator::new(UnitValidator::new(
+            session_id,
+            keychains[0].clone(),
+            max_round,
+        ));
         let fork = random_full_parent_units_up_to(2, node_count, session_id)
             .get(2)
             .expect("we have the requested round")

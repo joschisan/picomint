@@ -8,7 +8,7 @@ use std::collections::HashMap;
 mod dag;
 mod parents;
 
-use aleph_bft_types::{Data, MultiKeychain, OrderedUnit, PeerId, Round, Signed};
+use aleph_bft_types::{Data, OrderedUnit, PeerId, Round, Signed};
 use dag::Dag;
 use parents::Reconstruction as ParentReconstruction;
 
@@ -98,14 +98,14 @@ impl<U: Unit> UnitWithParents for ReconstructedUnit<U> {
     }
 }
 
-impl<D: Data, K: MultiKeychain> From<ReconstructedUnit<Signed<FullUnit<D>, K>>> for Option<D> {
-    fn from(value: ReconstructedUnit<Signed<FullUnit<D>, K>>) -> Self {
+impl<D: Data> From<ReconstructedUnit<Signed<FullUnit<D>>>> for Option<D> {
+    fn from(value: ReconstructedUnit<Signed<FullUnit<D>>>) -> Self {
         value.unpack().into_signable().into()
     }
 }
 
-impl<D: Data, K: MultiKeychain> From<ReconstructedUnit<Signed<FullUnit<D>, K>>> for OrderedUnit<D> {
-    fn from(unit: ReconstructedUnit<Signed<FullUnit<D>, K>>) -> Self {
+impl<D: Data> From<ReconstructedUnit<Signed<FullUnit<D>>>> for OrderedUnit<D> {
+    fn from(unit: ReconstructedUnit<Signed<FullUnit<D>>>) -> Self {
         let parents = unit.parents().cloned().collect();
         let unit = unit.unpack();
         let creator = unit.creator();

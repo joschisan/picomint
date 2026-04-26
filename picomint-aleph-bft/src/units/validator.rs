@@ -10,15 +10,15 @@ use std::{
 
 /// All that can be wrong with a unit except control hash issues.
 #[derive(Eq, PartialEq, Debug)]
-pub enum ValidationError<D: Data, S: Signature> {
-    WrongSignature(UncheckedSignedUnit<D, S>),
+pub enum ValidationError<D: Data> {
+    WrongSignature(UncheckedSignedUnit<D>),
     WrongSession(FullUnit<D>),
     RoundTooHigh(FullUnit<D>),
     WrongNumberOfMembers(PreUnit),
     ParentValidationFailed(PreUnit, ControlHashError),
 }
 
-impl<D: Data, S: Signature> Display for ValidationError<D, S> {
+impl<D: Data> Display for ValidationError<D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         use ValidationError::*;
         match self {
@@ -40,23 +40,23 @@ impl<D: Data, S: Signature> Display for ValidationError<D, S> {
     }
 }
 
-impl<D: Data, S: Signature> From<SignatureError<FullUnit<D>, S>> for ValidationError<D, S> {
-    fn from(se: SignatureError<FullUnit<D>, S>) -> Self {
+impl<D: Data> From<SignatureError<FullUnit<D>, Signature>> for ValidationError<D> {
+    fn from(se: SignatureError<FullUnit<D>, Signature>) -> Self {
         ValidationError::WrongSignature(se.unchecked)
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Hash)]
-pub struct Validator<K: Keychain> {
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct Validator {
     session_id: SessionId,
-    keychain: K,
+    keychain: Keychain,
     max_round: Round,
 }
 
-type Result<D, K> = StdResult<SignedUnit<D, K>, ValidationError<D, <K as Keychain>::Signature>>;
+type Result<D> = StdResult<SignedUnit<D>, ValidationError<D>>;
 
-impl<K: Keychain> Validator<K> {
-    pub fn new(session_id: SessionId, keychain: K, max_round: Round) -> Self {
+impl Validator {
+    pub fn new(session_id: SessionId, keychain: Keychain, max_round: Round) -> Self {
         Validator {
             session_id,
             keychain,
@@ -69,16 +69,14 @@ impl<K: Keychain> Validator<K> {
     }
 
     pub fn index(&self) -> PeerId {
-        self.keychain.index()
+        self.keychain.identity()
     }
 
     #[allow(clippy::result_large_err)]
-    pub fn validate_unit<D: Data>(&self, uu: UncheckedSignedUnit<D, K::Signature>) -> Result<D, K> {
+    pub fn validate_unit<D: Data>(&self, uu: UncheckedSignedUnit<D>) -> Result<D> {
         let su = uu.check(&self.keychain)?;
         let full_unit = su.as_signable();
         if full_unit.session_id() != self.session_id {
-            // NOTE: this implies malicious behavior as the unit's session_id
-            // is incompatible with session_id of the message it arrived in.
             return Err(ValidationError::WrongSession(full_unit.clone()));
         }
         if full_unit.round() > self.max_round {
@@ -88,7 +86,7 @@ impl<K: Keychain> Validator<K> {
     }
 
     #[allow(clippy::result_large_err)]
-    fn validate_unit_parents<D: Data>(&self, su: SignedUnit<D, K>) -> Result<D, K> {
+    fn validate_unit_parents<D: Data>(&self, su: SignedUnit<D>) -> Result<D> {
         let pre_unit = su.as_signable().as_pre_unit();
         let n_members = pre_unit.n_members();
         if n_members != self.keychain.node_count() {
@@ -105,7 +103,7 @@ impl<K: Keychain> Validator<K> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ValidationError::*, Validator as GenericValidator};
+    use super::{ValidationError::*, Validator};
     use crate::{
         units::{
             full_unit_to_unchecked_signed_unit, preunit_to_unchecked_signed_unit,
@@ -114,10 +112,8 @@ mod tests {
         },
         NumPeers, PeerId,
     };
-    use aleph_bft_mock::Keychain;
+    use aleph_bft_mock::keychain;
     use picomint_encoding::{Decodable, Encodable};
-
-    type Validator = GenericValidator<Keychain>;
 
     #[test]
     fn validates_initial_unit() {
@@ -125,10 +121,10 @@ mod tests {
         let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let max_round = 2;
-        let keychain = Keychain::new(n_members, creator_id);
-        let validator = Validator::new(session_id, keychain, max_round);
+        let kc = keychain(n_members, creator_id);
+        let validator = Validator::new(session_id, kc.clone(), max_round);
         let full_unit = random_full_parent_units_up_to(0, n_members, session_id)[0][0].clone();
-        let unchecked_unit = full_unit_to_unchecked_signed_unit(full_unit, &keychain);
+        let unchecked_unit = full_unit_to_unchecked_signed_unit(full_unit, &kc);
         let checked_unit = validator
             .validate_unit(unchecked_unit.clone())
             .expect("Unit should validate.");
@@ -141,15 +137,13 @@ mod tests {
         let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let max_round = 2;
-        let keychain = Keychain::new(n_members, creator_id);
-        let validator = Validator::new(session_id, keychain, max_round);
+        let kc = keychain(n_members, creator_id);
+        let validator = Validator::new(session_id, kc.clone(), max_round);
         let preunit = random_full_parent_units_up_to(0, n_members, session_id)[0][0]
             .as_pre_unit()
             .clone();
         let mut control_hash = preunit.control_hash().clone();
         let encoded = control_hash.consensus_encode_to_vec();
-        // ControlHash = (parents: NodeMap<Round>, combined_hash: UnitHash). Replace the
-        // trailing 32-byte hash with zeros so decode succeeds but recomputation won't match.
         let prefix_len = encoded.len() - 32;
         let mut borked_control_hash_bytes = encoded[..prefix_len].to_vec();
         borked_control_hash_bytes.extend([0u8; 32]);
@@ -157,8 +151,7 @@ mod tests {
             ControlHash::consensus_decode_partial(&mut borked_control_hash_bytes.as_slice())
                 .expect("should decode correctly");
         let preunit = PreUnit::new(preunit.creator(), preunit.round(), control_hash);
-        let unchecked_unit =
-            preunit_to_unchecked_signed_unit(preunit.clone(), session_id, &keychain);
+        let unchecked_unit = preunit_to_unchecked_signed_unit(preunit.clone(), session_id, &kc);
         let other_preunit = match validator.validate_unit(unchecked_unit.clone()) {
             Ok(_) => panic!("Validated bad unit."),
             Err(ParentValidationFailed(unit, ControlHashError::RoundZeroBadControlHash(_, _))) => {
@@ -176,11 +169,11 @@ mod tests {
         let session_id = 0;
         let wrong_session_id = 43;
         let max_round = 2;
-        let keychain = Keychain::new(n_members, creator_id);
-        let validator = Validator::new(session_id, keychain, max_round);
+        let kc = keychain(n_members, creator_id);
+        let validator = Validator::new(session_id, kc.clone(), max_round);
         let full_unit =
             random_full_parent_units_up_to(0, n_members, wrong_session_id)[0][0].clone();
-        let unchecked_unit = full_unit_to_unchecked_signed_unit(full_unit, &keychain);
+        let unchecked_unit = full_unit_to_unchecked_signed_unit(full_unit, &kc);
         let full_unit = match validator.validate_unit(unchecked_unit.clone()) {
             Ok(_) => panic!("Validated bad unit."),
             Err(WrongSession(full_unit)) => full_unit,
@@ -196,11 +189,11 @@ mod tests {
         let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let max_round = 2;
-        let keychain = Keychain::new(n_plus_one_members, creator_id);
-        let validator = Validator::new(session_id, keychain, max_round);
+        let kc = keychain(n_plus_one_members, creator_id);
+        let validator = Validator::new(session_id, kc.clone(), max_round);
         let full_unit = random_full_parent_units_up_to(0, n_members, session_id)[0][0].clone();
         let preunit = full_unit.as_pre_unit().clone();
-        let unchecked_unit = full_unit_to_unchecked_signed_unit(full_unit, &keychain);
+        let unchecked_unit = full_unit_to_unchecked_signed_unit(full_unit, &kc);
         let other_preunit = match validator.validate_unit(unchecked_unit) {
             Ok(_) => panic!("Validated bad unit."),
             Err(WrongNumberOfMembers(other_preunit)) => other_preunit,
@@ -222,9 +215,9 @@ mod tests {
             .collect();
         let unit = random_unit_with_parents(creator_id, &parents, 1);
         let preunit = unit.as_pre_unit().clone();
-        let keychain = Keychain::new(n_members, creator_id);
-        let unchecked_unit = full_unit_to_unchecked_signed_unit(unit, &keychain);
-        let validator = Validator::new(session_id, keychain, max_round);
+        let kc = keychain(n_members, creator_id);
+        let unchecked_unit = full_unit_to_unchecked_signed_unit(unit, &kc);
+        let validator = Validator::new(session_id, kc, max_round);
         let other_preunit = match validator.validate_unit(unchecked_unit) {
             Ok(_) => panic!("Validated bad unit."),
             Err(ParentValidationFailed(
@@ -242,10 +235,10 @@ mod tests {
         let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let max_round = 2;
-        let keychain = Keychain::new(n_members, creator_id);
-        let validator = Validator::new(session_id, keychain, max_round);
+        let kc = keychain(n_members, creator_id);
+        let validator = Validator::new(session_id, kc.clone(), max_round);
         let full_unit = random_full_parent_units_up_to(3, n_members, session_id)[3][0].clone();
-        let unchecked_unit = full_unit_to_unchecked_signed_unit(full_unit, &keychain);
+        let unchecked_unit = full_unit_to_unchecked_signed_unit(full_unit, &kc);
         let full_unit = match validator.validate_unit(unchecked_unit.clone()) {
             Ok(_) => panic!("Validated bad unit."),
             Err(RoundTooHigh(full_unit)) => full_unit,

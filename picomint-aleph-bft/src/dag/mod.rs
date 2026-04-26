@@ -6,7 +6,7 @@ use crate::{
     units::{
         SignedUnit, UncheckedSignedUnit, Unit, UnitStore, Validator as UnitValidator, WrappedUnit,
     },
-    Data, MultiKeychain, UnitHash,
+    Data, UnitHash,
 };
 use log::{debug, trace, warn};
 
@@ -20,19 +20,19 @@ use validation::{Error as ValidationError, Validator};
 
 const LOG_TARGET: &str = "AlephBFT-dag";
 
-pub type DagUnit<D, MK> = ReconstructedUnit<SignedUnit<D, MK>>;
+pub type DagUnit<D> = ReconstructedUnit<SignedUnit<D>>;
 
 /// The result of sending some information to the Dag.
-pub struct DagResult<D: Data, MK: MultiKeychain> {
+pub struct DagResult<D: Data> {
     /// Units added to the dag.
-    pub units: Vec<DagUnit<D, MK>>,
+    pub units: Vec<DagUnit<D>>,
     /// Requests for more information.
     pub requests: Vec<Request>,
     /// Alerts raised due to encountered forks.
-    pub alerts: Vec<Alert<D, MK::Signature>>,
+    pub alerts: Vec<Alert<D>>,
 }
 
-impl<D: Data, MK: MultiKeychain> DagResult<D, MK> {
+impl<D: Data> DagResult<D> {
     fn empty() -> Self {
         DagResult {
             units: Vec::new(),
@@ -41,7 +41,7 @@ impl<D: Data, MK: MultiKeychain> DagResult<D, MK> {
         }
     }
 
-    fn alert(alert: Alert<D, MK::Signature>) -> Self {
+    fn alert(alert: Alert<D>) -> Self {
         DagResult {
             units: Vec::new(),
             requests: Vec::new(),
@@ -49,11 +49,11 @@ impl<D: Data, MK: MultiKeychain> DagResult<D, MK> {
         }
     }
 
-    fn add_alert(&mut self, alert: Alert<D, MK::Signature>) {
+    fn add_alert(&mut self, alert: Alert<D>) {
         self.alerts.push(alert);
     }
 
-    fn accumulate(&mut self, other: DagResult<D, MK>) {
+    fn accumulate(&mut self, other: DagResult<D>) {
         let DagResult {
             mut units,
             mut requests,
@@ -65,10 +65,8 @@ impl<D: Data, MK: MultiKeychain> DagResult<D, MK> {
     }
 }
 
-impl<D: Data, MK: MultiKeychain> From<ReconstructionResult<SignedUnit<D, MK>>>
-    for DagResult<D, MK>
-{
-    fn from(other: ReconstructionResult<SignedUnit<D, MK>>) -> Self {
+impl<D: Data> From<ReconstructionResult<SignedUnit<D>>> for DagResult<D> {
+    fn from(other: ReconstructionResult<SignedUnit<D>>) -> Self {
         let ReconstructionResult { units, requests } = other;
         DagResult {
             units,
@@ -79,21 +77,21 @@ impl<D: Data, MK: MultiKeychain> From<ReconstructionResult<SignedUnit<D, MK>>>
 }
 
 /// The Dag ensuring that all units from the network get returned reconstructed in the correct order.
-pub struct Dag<D: Data, MK: MultiKeychain> {
-    validator: Validator<D, MK>,
-    reconstruction: Reconstruction<SignedUnit<D, MK>>,
+pub struct Dag<D: Data> {
+    validator: Validator<D>,
+    reconstruction: Reconstruction<SignedUnit<D>>,
 }
 
-impl<D: Data, MK: MultiKeychain> Dag<D, MK> {
+impl<D: Data> Dag<D> {
     /// A new dag using the provided unit validator under the hood.
-    pub fn new(unit_validator: UnitValidator<MK>) -> Self {
+    pub fn new(unit_validator: UnitValidator) -> Self {
         Dag {
             validator: Validator::new(unit_validator),
             reconstruction: Reconstruction::new(),
         }
     }
 
-    fn handle_validation_error(error: ValidationError<D, MK>) -> DagResult<D, MK> {
+    fn handle_validation_error(error: ValidationError<D>) -> DagResult<D> {
         use ValidationError::*;
         match error {
             Invalid(e) => {
@@ -117,11 +115,11 @@ impl<D: Data, MK: MultiKeychain> Dag<D, MK> {
     }
 
     /// Add a unit to the Dag.
-    pub fn add_unit<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
+    pub fn add_unit<U: WrappedUnit<Wrapped = SignedUnit<D>>>(
         &mut self,
-        unit: UncheckedSignedUnit<D, MK::Signature>,
+        unit: UncheckedSignedUnit<D>,
         store: &UnitStore<U>,
-    ) -> DagResult<D, MK> {
+    ) -> DagResult<D> {
         match self.validator.validate(unit, store) {
             Ok(unit) => self.reconstruction.add_unit(unit).into(),
             Err(e) => Self::handle_validation_error(e),
@@ -129,12 +127,12 @@ impl<D: Data, MK: MultiKeychain> Dag<D, MK> {
     }
 
     /// Add parents of a unit to the Dag.
-    pub fn add_parents<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
+    pub fn add_parents<U: WrappedUnit<Wrapped = SignedUnit<D>>>(
         &mut self,
         unit_hash: UnitHash,
-        parents: Vec<UncheckedSignedUnit<D, MK::Signature>>,
+        parents: Vec<UncheckedSignedUnit<D>>,
         store: &UnitStore<U>,
-    ) -> DagResult<D, MK> {
+    ) -> DagResult<D> {
         use ValidationError::*;
         let mut result = DagResult::empty();
         let mut parent_hashes = HashMap::new();
@@ -177,11 +175,11 @@ impl<D: Data, MK: MultiKeychain> Dag<D, MK> {
     }
 
     /// Process a forking notification, potentially returning a lot of unit processing results.
-    pub fn process_forking_notification<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
+    pub fn process_forking_notification<U: WrappedUnit<Wrapped = SignedUnit<D>>>(
         &mut self,
-        notification: ForkingNotification<D, MK::Signature>,
+        notification: ForkingNotification<D>,
         store: &UnitStore<U>,
-    ) -> DagResult<D, MK> {
+    ) -> DagResult<D> {
         use ForkingNotification::*;
         let mut result = DagResult::empty();
         match notification {
@@ -204,7 +202,7 @@ impl<D: Data, MK: MultiKeychain> Dag<D, MK> {
     }
 
     /// The store of units currently being processed by this dag.
-    pub fn processing_units(&self) -> &UnitStore<SignedUnit<D, MK>> {
+    pub fn processing_units(&self) -> &UnitStore<SignedUnit<D>> {
         self.validator.processing_units()
     }
 
@@ -229,7 +227,7 @@ mod test {
         },
         NumPeers, PeerId, Signed,
     };
-    use aleph_bft_mock::Keychain;
+    use aleph_bft_mock::keychain;
 
     #[test]
     fn accepts_initial_units() {
@@ -239,10 +237,11 @@ mod test {
         let max_round = 2137;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
+        let validator =
+            UnitValidator::new(session_id, keychains[node_id.to_usize()].clone(), max_round);
         let mut dag = Dag::new(validator);
         for unit in random_full_parent_units_up_to(0, node_count, session_id)
             .into_iter()
@@ -273,10 +272,11 @@ mod test {
         let max_round = 2137;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
+        let validator =
+            UnitValidator::new(session_id, keychains[node_id.to_usize()].clone(), max_round);
         let mut dag = Dag::new(validator);
         for unit in random_full_parent_units_up_to(13, node_count, session_id)
             .into_iter()
@@ -308,10 +308,11 @@ mod test {
         let total_rounds = 13;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
+        let validator =
+            UnitValidator::new(session_id, keychains[node_id.to_usize()].clone(), max_round);
         let mut dag = Dag::new(validator);
         for unit in random_full_parent_units_up_to(total_rounds, node_count, session_id)
             .into_iter()
@@ -358,10 +359,11 @@ mod test {
         let max_round = 2137;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let mut store = UnitStore::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
+        let validator =
+            UnitValidator::new(session_id, keychains[node_id.to_usize()].clone(), max_round);
         let mut dag = Dag::new(validator);
         let forker_id = PeerId::new(3 as u8);
         let keychain = keychains
@@ -418,10 +420,11 @@ mod test {
         let max_round = 2137;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
+        let validator =
+            UnitValidator::new(session_id, keychains[node_id.to_usize()].clone(), max_round);
         let mut dag = Dag::new(validator);
         let unit = random_full_parent_units_up_to(2, node_count, session_id)
             .get(2)
@@ -461,10 +464,11 @@ mod test {
         let produced_round = 4;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
+        let validator =
+            UnitValidator::new(session_id, keychains[node_id.to_usize()].clone(), max_round);
         let mut dag = Dag::new(validator);
         let units = random_full_parent_units_up_to(produced_round, node_count, session_id);
         let fork_parents = units
@@ -545,10 +549,11 @@ mod test {
         let produced_round = 4;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
+        let validator =
+            UnitValidator::new(session_id, keychains[node_id.to_usize()].clone(), max_round);
         let mut dag = Dag::new(validator);
         let units = random_full_parent_units_up_to(produced_round, node_count, session_id);
         let fork_parents = units

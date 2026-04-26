@@ -5,7 +5,7 @@ use crate::{
     units::Unit,
     Index, NumPeers, PeerId, Round, Signed, SpawnHandle,
 };
-use aleph_bft_mock::{BadSigning, DataProvider, Keychain, NetworkHook, Router, Spawner};
+use aleph_bft_mock::{bad_keychain, DataProvider, NetworkHook, Router, Spawner};
 use futures::StreamExt;
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -31,9 +31,10 @@ impl NetworkHook<NetworkData> for CorruptPacket {
             let full_unit = us.clone().into_signable();
             let index = full_unit.index();
             if full_unit.round() == self.round && full_unit.creator() == self.creator {
-                let bad_keychain: BadSigning<Keychain> =
-                    Keychain::new(NumPeers::from(0 as usize), index).into();
-                *us = Signed::sign(full_unit, &bad_keychain).into();
+                // Build a "bad" keychain whose secret key is not the one registered for `index`.
+                // Use n_members = 4 (size of the federation in this test).
+                let bad_kc = bad_keychain(NumPeers::new(4 as usize), index);
+                *us = Signed::sign(full_unit, &bad_kc).into();
             }
         }
         vec![(data, sender, recipient)]

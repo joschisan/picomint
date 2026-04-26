@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
     units::{PreUnit, SignedUnit, Unit},
-    DataProvider, MultiKeychain, Receiver, Round, Sender, Terminator,
+    DataProvider, Keychain, Receiver, Round, Sender, Terminator,
 };
 use futures::{
     channel::{
@@ -33,9 +33,9 @@ impl<T> From<TrySendError<T>> for CreatorError {
     }
 }
 
-pub struct IO<U: Unit, MK: MultiKeychain, DP: DataProvider> {
+pub struct IO<U: Unit, DP: DataProvider> {
     pub incoming_parents: Receiver<U>,
-    pub outgoing_units: Sender<SignedUnit<DP::Output, MK>>,
+    pub outgoing_units: Sender<SignedUnit<DP::Output>>,
     pub data_provider: DP,
 }
 
@@ -108,10 +108,10 @@ async fn keep_processing_units_until<U: Unit>(
 ///
 /// We refer to the documentation https://cardinal-cryptography.github.io/AlephBFT/internals.html
 /// Section 5.1 for a discussion of this component.
-pub async fn run<U: Unit, MK: MultiKeychain, DP: DataProvider>(
+pub async fn run<U: Unit, DP: DataProvider>(
     conf: Config,
-    mut io: IO<U, MK, DP>,
-    keychain: MK,
+    mut io: IO<U, DP>,
+    keychain: Keychain,
     mut starting_round: oneshot::Receiver<Option<Round>>,
     mut terminator: Terminator,
 ) {
@@ -125,10 +125,10 @@ pub async fn run<U: Unit, MK: MultiKeychain, DP: DataProvider>(
     terminator.terminate_sync().await;
 }
 
-async fn read_starting_round_and_run_creator<U: Unit, MK: MultiKeychain, DP: DataProvider>(
+async fn read_starting_round_and_run_creator<U: Unit, DP: DataProvider>(
     conf: Config,
-    io: &mut IO<U, MK, DP>,
-    keychain: MK,
+    io: &mut IO<U, DP>,
+    keychain: Keychain,
     starting_round: &mut oneshot::Receiver<Option<Round>>,
 ) {
     let maybe_round = starting_round.await;
@@ -156,10 +156,10 @@ async fn read_starting_round_and_run_creator<U: Unit, MK: MultiKeychain, DP: Dat
     }
 }
 
-async fn run_creator<U: Unit, MK: MultiKeychain, DP: DataProvider>(
+async fn run_creator<U: Unit, DP: DataProvider>(
     conf: Config,
-    io: &mut IO<U, MK, DP>,
-    keychain: MK,
+    io: &mut IO<U, DP>,
+    keychain: Keychain,
     starting_round: Round,
 ) -> anyhow::Result<(), CreatorError> {
     let node_id = conf.node_ix();

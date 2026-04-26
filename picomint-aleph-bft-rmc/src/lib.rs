@@ -1,5 +1,5 @@
 pub use aleph_bft_crypto::{
-    Indexed, MultiKeychain, Multisigned, NumPeers, PartialMultisignature, PartiallyMultisigned,
+    Indexed, Keychain, Multisigned, NumPeers, PartialMultisignature, PartiallyMultisigned,
     Signable, Signature, Signed, UncheckedSigned,
 };
 use core::fmt::Debug;
@@ -16,12 +16,12 @@ pub use service::Service;
 
 /// An RMC message consisting of either a signed (indexed) hash, or a multisigned hash.
 #[derive(Debug, Encodable, Decodable, Clone, PartialEq, Eq, Hash)]
-pub enum Message<H: Signable, S: Signature, M: PartialMultisignature> {
-    SignedHash(UncheckedSigned<Indexed<H>, S>),
-    MultisignedHash(UncheckedSigned<H, M>),
+pub enum Message<H: Signable> {
+    SignedHash(UncheckedSigned<Indexed<H>, Signature>),
+    MultisignedHash(UncheckedSigned<H, PartialMultisignature>),
 }
 
-impl<H: Signable, S: Signature, M: PartialMultisignature> Message<H, S, M> {
+impl<H: Signable> Message<H> {
     pub fn hash(&self) -> &H {
         match self {
             Message::SignedHash(unchecked) => unchecked.as_signable_strip_index(),

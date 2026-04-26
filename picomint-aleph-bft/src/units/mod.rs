@@ -1,8 +1,7 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use crate::{
-    Data, Index, MultiKeychain, NumPeers, PeerId, Round, SessionId, Signable, Signed,
-    UncheckedSigned, UnitHash,
+    Data, Index, NumPeers, PeerId, Round, SessionId, Signable, Signed, UncheckedSigned, UnitHash,
 };
 use derivative::Derivative;
 use picomint_encoding::{Decodable, Encodable};
@@ -132,9 +131,9 @@ impl<D: Data> Index for FullUnit<D> {
     }
 }
 
-pub(crate) type UncheckedSignedUnit<D, S> = UncheckedSigned<FullUnit<D>, S>;
+pub(crate) type UncheckedSignedUnit<D> = UncheckedSigned<FullUnit<D>, crate::Signature>;
 
-pub(crate) type SignedUnit<D, K> = Signed<FullUnit<D>, K>;
+pub(crate) type SignedUnit<D> = Signed<FullUnit<D>>;
 
 /// Abstract representation of a unit from the Dag point of view.
 pub trait Unit: 'static + Send + Clone {
@@ -187,7 +186,7 @@ impl<D: Data> Unit for FullUnit<D> {
     }
 }
 
-impl<D: Data, MK: MultiKeychain> Unit for SignedUnit<D, MK> {
+impl<D: Data> Unit for SignedUnit<D> {
     fn hash(&self) -> UnitHash {
         Unit::hash(self.as_signable())
     }

@@ -1,4 +1,4 @@
-use crate::{dag::DagUnit, MultiKeychain, UnitFinalizationHandler};
+use crate::{dag::DagUnit, UnitFinalizationHandler};
 
 mod election;
 mod extender;
@@ -12,15 +12,12 @@ use extender::Extender;
 /// to finalize subsequent rounds of the Dag. More specifically whenever a new unit is received
 /// this process checks whether a new round can be finalized and if so, it computes the batch of
 /// units that should be finalized, and uses the finalization handler to report that to the user.
-///
-/// We refer to the documentation https://cardinal-cryptography.github.io/AlephBFT/internals.html
-/// Section 5.4 for a discussion of this component.
-pub struct Ordering<MK: MultiKeychain, UFH: UnitFinalizationHandler> {
-    extender: Extender<DagUnit<UFH::Data, MK>>,
+pub struct Ordering<UFH: UnitFinalizationHandler> {
+    extender: Extender<DagUnit<UFH::Data>>,
     finalization_handler: UFH,
 }
 
-impl<MK: MultiKeychain, UFH: UnitFinalizationHandler> Ordering<MK, UFH> {
+impl<UFH: UnitFinalizationHandler> Ordering<UFH> {
     pub fn new(finalization_handler: UFH) -> Self {
         let extender = Extender::new();
         Ordering {
@@ -29,7 +26,7 @@ impl<MK: MultiKeychain, UFH: UnitFinalizationHandler> Ordering<MK, UFH> {
         }
     }
 
-    pub fn add_unit(&mut self, unit: DagUnit<UFH::Data, MK>) {
+    pub fn add_unit(&mut self, unit: DagUnit<UFH::Data>) {
         for batch in self.extender.add_unit(unit) {
             self.finalization_handler
                 .batch_finalized(batch.into_iter().map(|unit| unit.into()).collect());

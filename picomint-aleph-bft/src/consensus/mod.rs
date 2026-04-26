@@ -10,7 +10,7 @@ use crate::{
     interface::LocalIO,
     network::{Hub as NetworkHub, NetworkData},
     units::Validator,
-    Config, DataProvider, MultiKeychain, Network, SpawnHandle, Terminator, UnitFinalizationHandler,
+    Config, DataProvider, Keychain, Network, SpawnHandle, Terminator, UnitFinalizationHandler,
 };
 use futures::{
     channel::{mpsc, oneshot},
@@ -34,19 +34,18 @@ pub async fn run_session<
     UFH: UnitFinalizationHandler<Data = DP::Output>,
     US: AsyncWrite + Send + Sync + 'static,
     UL: AsyncRead + Send + Sync + 'static,
-    N: Network<NetworkData<DP::Output, MK::Signature, MK::PartialMultisignature>>,
+    N: Network<NetworkData<DP::Output>>,
     SH: SpawnHandle,
-    MK: MultiKeychain,
 >(
     config: Config,
     local_io: LocalIO<DP, UFH, US, UL>,
     network: N,
-    keychain: MK,
+    keychain: Keychain,
     spawn_handle: SH,
     mut terminator: Terminator,
 ) {
     info!(target: LOG_TARGET, "Starting a new session.");
-    let index = keychain.index();
+    let index = keychain.identity();
     let session_id = config.session_id();
     let (data_provider, finalization_handler, unit_saver, unit_loader) = local_io.into_components();
 

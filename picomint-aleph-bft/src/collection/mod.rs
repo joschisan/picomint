@@ -2,8 +2,7 @@ use crate::{
     config::DelaySchedule,
     network::UnitMessageTo,
     units::{UncheckedSignedUnit, Validator},
-    Data, Keychain, MultiKeychain, PeerId, Receiver, Round, Sender, Signable, Signature,
-    UncheckedSigned,
+    Data, Keychain, PeerId, Receiver, Round, Sender, Signable, Signature, UncheckedSigned,
 };
 use futures::{channel::oneshot, Future};
 use picomint_encoding::{Decodable, Encodable};
@@ -29,14 +28,14 @@ fn generate_salt() -> Salt {
 
 /// A response to the request for the newest unit.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default, Decodable, Encodable)]
-pub struct NewestUnitResponse<D: Data, S: Signature> {
+pub struct NewestUnitResponse<D: Data> {
     requester: PeerId,
     responder: PeerId,
-    unit: Option<UncheckedSignedUnit<D, S>>,
+    unit: Option<UncheckedSignedUnit<D>>,
     salt: Salt,
 }
 
-impl<D: Data, S: Signature> Signable for NewestUnitResponse<D, S> {
+impl<D: Data> Signable for NewestUnitResponse<D> {
     type Hash = Vec<u8>;
 
     fn hash(&self) -> Self::Hash {
@@ -44,18 +43,18 @@ impl<D: Data, S: Signature> Signable for NewestUnitResponse<D, S> {
     }
 }
 
-impl<D: Data, S: Signature> crate::Index for NewestUnitResponse<D, S> {
+impl<D: Data> crate::Index for NewestUnitResponse<D> {
     fn index(&self) -> PeerId {
         self.responder
     }
 }
 
-impl<D: Data, S: Signature> NewestUnitResponse<D, S> {
+impl<D: Data> NewestUnitResponse<D> {
     /// Create a newest unit response.
     pub fn new(
         requester: PeerId,
         responder: PeerId,
-        unit: Option<UncheckedSignedUnit<D, S>>,
+        unit: Option<UncheckedSignedUnit<D>>,
         salt: Salt,
     ) -> Self {
         NewestUnitResponse {
@@ -75,19 +74,16 @@ impl<D: Data, S: Signature> NewestUnitResponse<D, S> {
     }
 }
 
-pub type CollectionResponse<D, MK> = UncheckedSigned<
-    NewestUnitResponse<D, <MK as Keychain>::Signature>,
-    <MK as Keychain>::Signature,
->;
+pub type CollectionResponse<D> = UncheckedSigned<NewestUnitResponse<D>, Signature>;
 
 #[cfg(feature = "initial_unit_collection")]
-pub fn initial_unit_collection<'a, D: Data, MK: MultiKeychain>(
-    keychain: &'a MK,
-    validator: &'a Validator<MK>,
-    messages_for_network: Sender<UnitMessageTo<D, MK::Signature>>,
+pub fn initial_unit_collection<'a, D: Data>(
+    keychain: &'a Keychain,
+    validator: &'a Validator,
+    messages_for_network: Sender<UnitMessageTo<D>>,
     starting_round_sender: oneshot::Sender<Option<Round>>,
     starting_round_from_backup: Round,
-    responses_from_network: Receiver<CollectionResponse<D, MK>>,
+    responses_from_network: Receiver<CollectionResponse<D>>,
     request_delay: DelaySchedule,
 ) -> Result<impl Future<Output = ()> + 'a, ()> {
     let collection = Collection::new(keychain, validator);
@@ -105,17 +101,17 @@ pub fn initial_unit_collection<'a, D: Data, MK: MultiKeychain>(
 
 /// A trivial start that doesn't actually perform the initial unit collection.
 #[cfg(not(feature = "initial_unit_collection"))]
-pub fn initial_unit_collection(
-    _keychain: &'a MK,
-    _validator: &'a Validator<MK>,
-    _messages_for_network: Sender<UnitMessageTo<D, MK::Signature>>,
+pub fn initial_unit_collection<D: Data>(
+    _keychain: &Keychain,
+    _validator: &Validator,
+    _messages_for_network: Sender<UnitMessageTo<D>>,
     starting_round_sender: oneshot::Sender<Option<Round>>,
     starting_round_from_backup: Round,
-    _responses_from_network: Receiver<CollectionResponse<D, MK>>,
+    _responses_from_network: Receiver<CollectionResponse<D>>,
     _request_delay: DelaySchedule,
 ) -> Result<impl Future<Output = ()>, ()> {
     if let Err(e) = starting_round_sender.send(Some(starting_round_from_backup)) {
-        error!(target: LOG_TARGET, "Unable to send the starting round: {}", e);
+        log::error!(target: LOG_TARGET, "Unable to send the starting round: {}", e);
         return Err(());
     }
     Ok(async {})

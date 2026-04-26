@@ -4,8 +4,7 @@ use crate::{
     dissemination::{Addressed, DisseminationMessage, ReconstructionRequest, LOG_TARGET},
     task_queue::TaskQueue,
     units::{SignedUnit, Unit, UnitCoord, UnitStore, WrappedUnit},
-    Data, DelayConfig, MultiKeychain, NodeMap, NumPeers, PeerId, Recipient, Round, Signature,
-    UnitHash,
+    Data, DelayConfig, NodeMap, NumPeers, PeerId, Recipient, Round, UnitHash,
 };
 use itertools::Itertools;
 use log::trace;
@@ -25,7 +24,7 @@ pub enum DisseminationTask {
     Broadcast(UnitHash),
 }
 
-enum TaskDetails<D: Data, S: Signature> {
+enum TaskDetails<D: Data> {
     Cancel,
     Delay(Duration),
     BetterInstead {
@@ -33,7 +32,7 @@ enum TaskDetails<D: Data, S: Signature> {
         delay: Duration,
     },
     Perform {
-        message: Addressed<DisseminationMessage<D, S>>,
+        message: Addressed<DisseminationMessage<D>>,
         delay: Duration,
     },
 }
@@ -209,13 +208,13 @@ impl Manager {
             .collect()
     }
 
-    fn coord_request_details<D: Data, MK: MultiKeychain>(
+    fn coord_request_details<D: Data>(
         &mut self,
         coord: UnitCoord,
         counter: usize,
-        stored_units: &UnitStore<DagUnit<D, MK>>,
-        processing_units: &UnitStore<SignedUnit<D, MK>>,
-    ) -> TaskDetails<D, MK::Signature> {
+        stored_units: &UnitStore<DagUnit<D>>,
+        processing_units: &UnitStore<SignedUnit<D>>,
+    ) -> TaskDetails<D> {
         use Request::*;
         use TaskDetails::*;
         if stored_units.canonical_unit(coord).is_some() {
@@ -246,13 +245,13 @@ impl Manager {
         }
     }
 
-    fn request_details<D: Data, MK: MultiKeychain>(
+    fn request_details<D: Data>(
         &mut self,
         request: &Request,
         counter: usize,
-        stored_units: &UnitStore<DagUnit<D, MK>>,
-        processing_units: &UnitStore<SignedUnit<D, MK>>,
-    ) -> TaskDetails<D, MK::Signature> {
+        stored_units: &UnitStore<DagUnit<D>>,
+        processing_units: &UnitStore<SignedUnit<D>>,
+    ) -> TaskDetails<D> {
         use Request::*;
         use TaskDetails::*;
         match request {
@@ -272,12 +271,12 @@ impl Manager {
         }
     }
 
-    fn task_details<D: Data, MK: MultiKeychain>(
+    fn task_details<D: Data>(
         &mut self,
         task: &RepeatableTask,
-        stored_units: &UnitStore<DagUnit<D, MK>>,
-        processing_units: &UnitStore<SignedUnit<D, MK>>,
-    ) -> TaskDetails<D, MK::Signature> {
+        stored_units: &UnitStore<DagUnit<D>>,
+        processing_units: &UnitStore<SignedUnit<D>>,
+    ) -> TaskDetails<D> {
         use DisseminationTask::*;
         use TaskDetails::*;
         match &task.task {
@@ -301,11 +300,11 @@ impl Manager {
     }
 
     /// Trigger all the ready tasks and get all the messages that should be sent now.
-    pub fn trigger_tasks<D: Data, MK: MultiKeychain>(
+    pub fn trigger_tasks<D: Data>(
         &mut self,
-        stored_units: &UnitStore<DagUnit<D, MK>>,
-        processing_units: &UnitStore<SignedUnit<D, MK>>,
-    ) -> Vec<Addressed<DisseminationMessage<D, MK::Signature>>> {
+        stored_units: &UnitStore<DagUnit<D>>,
+        processing_units: &UnitStore<SignedUnit<D>>,
+    ) -> Vec<Addressed<DisseminationMessage<D>>> {
         trace!(target: LOG_TARGET, "Checking for due tasks.");
         use TaskDetails::*;
         let mut result = Vec::new();
@@ -354,10 +353,10 @@ impl Manager {
 
     /// Add a unit that should potentially be broadcast. Returns a message for immediate broadcast
     /// of own units.
-    pub fn add_unit<D: Data, MK: MultiKeychain>(
+    pub fn add_unit<D: Data>(
         &mut self,
-        unit: &DagUnit<D, MK>,
-    ) -> Option<Addressed<DisseminationMessage<D, MK::Signature>>> {
+        unit: &DagUnit<D>,
+    ) -> Option<Addressed<DisseminationMessage<D>>> {
         trace!(target: LOG_TARGET, "New unit with hash {:?} at {}.", unit.hash(), unit.coord());
         let hash = unit.hash();
         let round = unit.round();
@@ -400,7 +399,7 @@ mod tests {
         },
         NumPeers, PeerId, Recipient,
     };
-    use aleph_bft_mock::Keychain;
+    use aleph_bft_mock::keychain;
     use std::thread::sleep;
 
     #[test]
@@ -423,7 +422,7 @@ mod tests {
         let session_id = 43;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
 
         let units =
@@ -470,7 +469,7 @@ mod tests {
         let session_id = 43;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
 
         let units =
@@ -508,7 +507,7 @@ mod tests {
         let session_id = 43;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
 
         let units =
@@ -547,7 +546,7 @@ mod tests {
         let session_id = 43;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
 
         let units =
@@ -604,7 +603,7 @@ mod tests {
         let session_id = 43;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
 
         let units =
@@ -672,7 +671,7 @@ mod tests {
         let session_id = 43;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
 
         let units =
@@ -718,7 +717,7 @@ mod tests {
         let session_id = 43;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
 
         let units =
@@ -775,7 +774,7 @@ mod tests {
         let session_id = 43;
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|node_id| Keychain::new(node_count, node_id))
+            .map(|node_id| keychain(node_count, node_id))
             .collect();
 
         let units =

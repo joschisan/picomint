@@ -10,7 +10,7 @@ use picomint_encoding::Decodable;
 
 use crate::{
     units::{UncheckedSignedUnit, Unit, UnitCoord},
-    Data, PeerId, Round, SessionId, Signature,
+    Data, PeerId, Round, SessionId,
 };
 
 /// Backup read error. Could be either caused by io error from `BackupReader`, or by decoding.
@@ -55,15 +55,15 @@ impl From<std::io::Error> for LoaderError {
     }
 }
 
-pub struct BackupLoader<D: Data, S: Signature, R: AsyncRead> {
+pub struct BackupLoader<D: Data, R: AsyncRead> {
     backup: Pin<Box<R>>,
     index: PeerId,
     session_id: SessionId,
-    _phantom: PhantomData<(D, S)>,
+    _phantom: PhantomData<D>,
 }
 
-impl<D: Data, S: Signature, R: AsyncRead> BackupLoader<D, S, R> {
-    pub fn new(backup: R, index: PeerId, session_id: SessionId) -> BackupLoader<D, S, R> {
+impl<D: Data, R: AsyncRead> BackupLoader<D, R> {
+    pub fn new(backup: R, index: PeerId, session_id: SessionId) -> BackupLoader<D, R> {
         BackupLoader {
             backup: Box::pin(backup),
             index,
@@ -72,20 +72,18 @@ impl<D: Data, S: Signature, R: AsyncRead> BackupLoader<D, S, R> {
         }
     }
 
-    async fn load(&mut self) -> Result<Vec<UncheckedSignedUnit<D, S>>, LoaderError> {
+    async fn load(&mut self) -> Result<Vec<UncheckedSignedUnit<D>>, LoaderError> {
         let mut buf = Vec::new();
         self.backup.read_to_end(&mut buf).await?;
         let input = &mut &buf[..];
         let mut result = Vec::new();
         while !input.is_empty() {
-            result.push(<UncheckedSignedUnit<D, S>>::consensus_decode_partial(
-                input,
-            )?);
+            result.push(<UncheckedSignedUnit<D>>::consensus_decode_partial(input)?);
         }
         Ok(result)
     }
 
-    fn verify_units(&self, units: &Vec<UncheckedSignedUnit<D, S>>) -> Result<(), LoaderError> {
+    fn verify_units(&self, units: &Vec<UncheckedSignedUnit<D>>) -> Result<(), LoaderError> {
         let mut already_loaded_coords = HashSet::new();
 
         for unit in units {
@@ -115,7 +113,7 @@ impl<D: Data, S: Signature, R: AsyncRead> BackupLoader<D, S, R> {
 
     pub async fn load_backup(
         &mut self,
-    ) -> Result<(Vec<UncheckedSignedUnit<D, S>>, Round), LoaderError> {
+    ) -> Result<(Vec<UncheckedSignedUnit<D>>, Round), LoaderError> {
         let units = self.load().await?;
         self.verify_units(&units)?;
         let next_round: Round = units
@@ -134,7 +132,7 @@ impl<D: Data, S: Signature, R: AsyncRead> BackupLoader<D, S, R> {
 mod tests {
     use picomint_encoding::Encodable;
 
-    use aleph_bft_mock::{Data, Keychain, Loader, Signature};
+    use aleph_bft_mock::{keychain, Data, Loader};
 
     use crate::{
         backup::{loader::LoaderError, BackupLoader as GenericLoader},
@@ -145,8 +143,8 @@ mod tests {
         NumPeers, PeerId, Round, SessionId,
     };
 
-    type UncheckedSignedUnit = GenericUncheckedSignedUnit<Data, Signature>;
-    type BackupLoader<R> = GenericLoader<Data, Signature, R>;
+    type UncheckedSignedUnit = GenericUncheckedSignedUnit<Data>;
+    type BackupLoader<R> = GenericLoader<Data, R>;
 
     const SESSION_ID: SessionId = 43;
     const NODE_ID: PeerId = PeerId::new(0 as u8);
@@ -155,7 +153,7 @@ mod tests {
     fn produce_units(rounds: usize, session_id: SessionId) -> Vec<Vec<UncheckedSignedUnit>> {
         let mut creators = creator_set(N_MEMBERS);
         let keychains: Vec<_> = (0..N_MEMBERS.total())
-            .map(|id| Keychain::new(N_MEMBERS, PeerId::new(id as u8)))
+            .map(|id| keychain(N_MEMBERS, PeerId::new(id as u8)))
             .collect();
 
         let mut units_per_round = Vec::with_capacity(rounds);
@@ -172,16 +170,14 @@ mod tests {
             }
 
             let mut unchecked_signed_units = Vec::with_capacity(pre_units.len());
-            for (pre_unit, keychain) in pre_units.into_iter().zip(keychains.iter()) {
-                unchecked_signed_units.push(preunit_to_unchecked_signed_unit(
-                    pre_unit, session_id, keychain,
-                ))
+            for (pre_unit, kc) in pre_units.into_iter().zip(keychains.iter()) {
+                unchecked_signed_units
+                    .push(preunit_to_unchecked_signed_unit(pre_unit, session_id, kc))
             }
 
             units_per_round.push(unchecked_signed_units);
         }
 
-        // units_per_round[i][j] is the unit produced in round i by creator j
         units_per_round
     }
 
@@ -227,7 +223,7 @@ mod tests {
         let items: Vec<_> = produce_units(5, SESSION_ID).into_iter().flatten().collect();
         let mut item_encodings = encode_all(items);
         let unit2_encoding_len = item_encodings[2].len();
-        item_encodings[2].resize(unit2_encoding_len - 1, 0); // remove the last byte
+        item_encodings[2].resize(unit2_encoding_len - 1, 0);
         let encoded_items = item_encodings.into_iter().flatten().collect();
 
         assert!(matches!(
@@ -241,7 +237,7 @@ mod tests {
     #[tokio::test]
     async fn backup_with_missing_parent_fails() {
         let mut items: Vec<_> = produce_units(5, SESSION_ID).into_iter().flatten().collect();
-        items.remove(2); // it is a parent of all units of round 3
+        items.remove(2);
         let encoded_items = encode_all(items).into_iter().flatten().collect();
 
         assert!(matches!(

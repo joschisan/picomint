@@ -84,7 +84,7 @@ mod test {
         units::{random_full_parent_reconstrusted_units_up_to, TestingDagUnit, Unit},
         NumPeers,
     };
-    use aleph_bft_mock::Keychain;
+    use aleph_bft_mock::keychain_set;
 
     #[test]
     fn initially_empty() {
@@ -98,7 +98,7 @@ mod test {
         let mut units = Units::new();
         let n_members = NumPeers::new(4 as usize);
         let session_id = 2137;
-        let keychains = Keychain::new_vec(n_members);
+        let keychains = keychain_set(n_members);
         let unit =
             &random_full_parent_reconstrusted_units_up_to(0, n_members, session_id, &keychains)[0]
                 [0];
@@ -114,7 +114,7 @@ mod test {
         let n_members = NumPeers::new(4 as usize);
         let max_round = 43;
         let session_id = 2137;
-        let keychains = Keychain::new_vec(n_members);
+        let keychains = keychain_set(n_members);
         let mut heads = Vec::new();
         for (round, round_units) in random_full_parent_reconstrusted_units_up_to(
             max_round, n_members, session_id, &keychains,
@@ -142,7 +142,7 @@ mod test {
         let n_members = NumPeers::new(4 as usize);
         let max_round = 43;
         let session_id = 2137;
-        let keychains = Keychain::new_vec(n_members);
+        let keychains = keychain_set(n_members);
         let mut heads = Vec::new();
         for (round, round_units) in random_full_parent_reconstrusted_units_up_to(
             max_round, n_members, session_id, &keychains,

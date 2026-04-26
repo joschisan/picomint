@@ -3,7 +3,7 @@ use std::pin::Pin;
 use crate::{
     dag::DagUnit,
     units::{UncheckedSignedUnit, WrappedUnit},
-    Data, MultiKeychain, Receiver, Sender, Terminator,
+    Data, Receiver, Sender, Terminator,
 };
 use futures::{AsyncWrite, AsyncWriteExt, FutureExt, StreamExt};
 use log::{debug, error};
@@ -12,20 +12,18 @@ use picomint_encoding::Encodable;
 const LOG_TARGET: &str = "AlephBFT-backup-saver";
 
 /// Component responsible for saving units into backup.
-/// It waits for items to appear on its receivers, and writes them to backup.
-/// It announces a successful write through an appropriate response sender.
-pub struct BackupSaver<D: Data, MK: MultiKeychain, W: AsyncWrite> {
-    units_from_consensus: Receiver<DagUnit<D, MK>>,
-    responses_for_consensus: Sender<DagUnit<D, MK>>,
+pub struct BackupSaver<D: Data, W: AsyncWrite> {
+    units_from_consensus: Receiver<DagUnit<D>>,
+    responses_for_consensus: Sender<DagUnit<D>>,
     backup: Pin<Box<W>>,
 }
 
-impl<D: Data, MK: MultiKeychain, W: AsyncWrite> BackupSaver<D, MK, W> {
+impl<D: Data, W: AsyncWrite> BackupSaver<D, W> {
     pub fn new(
-        units_from_consensus: Receiver<DagUnit<D, MK>>,
-        responses_for_consensus: Sender<DagUnit<D, MK>>,
+        units_from_consensus: Receiver<DagUnit<D>>,
+        responses_for_consensus: Sender<DagUnit<D>>,
         backup: W,
-    ) -> BackupSaver<D, MK, W> {
+    ) -> BackupSaver<D, W> {
         BackupSaver {
             units_from_consensus,
             responses_for_consensus,
@@ -33,8 +31,8 @@ impl<D: Data, MK: MultiKeychain, W: AsyncWrite> BackupSaver<D, MK, W> {
         }
     }
 
-    pub async fn save_unit(&mut self, unit: &DagUnit<D, MK>) -> Result<(), std::io::Error> {
-        let unit: UncheckedSignedUnit<_, _> = unit.clone().unpack().into();
+    pub async fn save_unit(&mut self, unit: &DagUnit<D>) -> Result<(), std::io::Error> {
+        let unit: UncheckedSignedUnit<_> = unit.clone().unpack().into();
         self.backup
             .write_all(&unit.consensus_encode_to_vec())
             .await?;
@@ -84,7 +82,7 @@ mod tests {
         StreamExt,
     };
 
-    use aleph_bft_mock::{Data, Keychain, Saver};
+    use aleph_bft_mock::{keychain, Data, Saver};
 
     use crate::{
         backup::BackupSaver,
@@ -94,7 +92,7 @@ mod tests {
     };
 
     type TestUnit = ReconstructedUnit<TestingSignedUnit>;
-    type TestBackupSaver = BackupSaver<Data, Keychain, Saver>;
+    type TestBackupSaver = BackupSaver<Data, Saver>;
     struct PrepareSaverResponse<F: futures::Future> {
         task: F,
         units_for_saver: mpsc::UnboundedSender<TestUnit>,
@@ -142,7 +140,7 @@ mod tests {
         let creators = creator_set(node_count);
         let keychains: Vec<_> = node_count
             .peer_ids()
-            .map(|id| Keychain::new(node_count, id))
+            .map(|id| keychain(node_count, id))
             .collect();
         let units: Vec<TestUnit> = node_count
             .peer_ids()

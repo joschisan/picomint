@@ -4,13 +4,13 @@ use crate::{
     units::{SignedUnit as GenericSignedUnit, Unit as GenericUnit},
     NumPeers, Receiver, Round, Sender, Terminator,
 };
-use aleph_bft_mock::{Data, DataProvider, Keychain};
+use aleph_bft_mock::{keychain, Data, DataProvider};
 use futures::{
     channel::{mpsc, oneshot},
     FutureExt, StreamExt,
 };
 
-type SignedUnit = GenericSignedUnit<Data, Keychain>;
+type SignedUnit = GenericSignedUnit<Data>;
 
 struct TestController {
     max_round_per_creator: Vec<Round>,
@@ -81,7 +81,7 @@ fn setup_test(n_members: NumPeers) -> TestSetup {
 
         units_for_creators.push(parents_for_creator);
 
-        let keychain = Keychain::new(n_members, node_ix);
+        let kc = keychain(n_members, node_ix);
 
         let (killer, exit) = oneshot::channel::<()>();
 
@@ -89,7 +89,7 @@ fn setup_test(n_members: NumPeers) -> TestSetup {
             run(
                 config,
                 io,
-                keychain,
+                kc,
                 starting_round,
                 Terminator::create_root(exit, "AlephBFT-creator"),
             )

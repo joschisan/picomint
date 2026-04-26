@@ -75,7 +75,7 @@ mod test {
         extension::extender::Extender, units::random_full_parent_reconstrusted_units_up_to,
         NumPeers, Round,
     };
-    use aleph_bft_mock::Keychain;
+    use aleph_bft_mock::keychain_set;
 
     #[test]
     fn easy_elections() {
@@ -83,7 +83,7 @@ mod test {
         let n_members = NumPeers::new(4 as usize);
         let max_round: Round = 43;
         let session_id = 2137;
-        let keychains = Keychain::new_vec(n_members);
+        let keychains = keychain_set(n_members);
         let mut batches = Vec::new();
         for round_units in random_full_parent_reconstrusted_units_up_to(
             max_round, n_members, session_id, &keychains,
@@ -106,7 +106,7 @@ mod test {
         let threshold = n_members.threshold();
         let max_round: Round = 11;
         let session_id = 2137;
-        let keychains = Keychain::new_vec(n_members);
+        let keychains = keychain_set(n_members);
         let mut batches = Vec::new();
         let (dag, _) =
             minimal_reconstructed_dag_units_up_to(max_round, n_members, session_id, &keychains);

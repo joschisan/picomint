@@ -66,32 +66,32 @@ impl<T> Addressed<T> {
 
 /// Responses to requests.
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub enum DisseminationResponse<D: Data, S: Signature> {
+pub enum DisseminationResponse<D: Data> {
     /// Response to a coord request, just a single unit.
-    Coord(UncheckedSignedUnit<D, S>),
+    Coord(UncheckedSignedUnit<D>),
     /// All the parents of the specified unit.
-    Parents(UnitHash, Vec<UncheckedSignedUnit<D, S>>),
+    Parents(UnitHash, Vec<UncheckedSignedUnit<D>>),
     /// The newest unit response for initial unit collection.
-    NewestUnit(UncheckedSigned<NewestUnitResponse<D, S>, S>),
+    NewestUnit(UncheckedSigned<NewestUnitResponse<D>, Signature>),
 }
 
 /// A message that has to be passed between committee members for consensus to work.
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub enum DisseminationMessage<D: Data, S: Signature> {
+pub enum DisseminationMessage<D: Data> {
     /// Unit, either broadcast or in response to a coord request.
-    Unit(UncheckedSignedUnit<D, S>),
+    Unit(UncheckedSignedUnit<D>),
     /// Request coming from the specified node for something.
     Request(PeerId, ReconstructionRequest),
     /// Response to a parent request.
-    ParentsResponse(UnitHash, Vec<UncheckedSignedUnit<D, S>>),
+    ParentsResponse(UnitHash, Vec<UncheckedSignedUnit<D>>),
     /// Initial unit collection request.
     NewestUnitRequest(PeerId, Salt),
     /// Response to initial unit collection.
-    NewestUnitResponse(UncheckedSigned<NewestUnitResponse<D, S>, S>),
+    NewestUnitResponse(UncheckedSigned<NewestUnitResponse<D>, Signature>),
 }
 
-impl<D: Data, S: Signature> From<UnitMessage<D, S>> for DisseminationMessage<D, S> {
-    fn from(message: UnitMessage<D, S>) -> Self {
+impl<D: Data> From<UnitMessage<D>> for DisseminationMessage<D> {
+    fn from(message: UnitMessage<D>) -> Self {
         use DisseminationMessage::*;
         match message {
             UnitMessage::Unit(u) => Unit(u),
@@ -108,8 +108,8 @@ impl<D: Data, S: Signature> From<UnitMessage<D, S>> for DisseminationMessage<D, 
     }
 }
 
-impl<D: Data, S: Signature> From<DisseminationMessage<D, S>> for UnitMessage<D, S> {
-    fn from(message: DisseminationMessage<D, S>) -> Self {
+impl<D: Data> From<DisseminationMessage<D>> for UnitMessage<D> {
+    fn from(message: DisseminationMessage<D>) -> Self {
         use DisseminationMessage::*;
         match message {
             Unit(u) => UnitMessage::Unit(u),
@@ -126,8 +126,8 @@ impl<D: Data, S: Signature> From<DisseminationMessage<D, S>> for UnitMessage<D, 
     }
 }
 
-impl<D: Data, S: Signature> From<DisseminationResponse<D, S>> for DisseminationMessage<D, S> {
-    fn from(message: DisseminationResponse<D, S>) -> Self {
+impl<D: Data> From<DisseminationResponse<D>> for DisseminationMessage<D> {
+    fn from(message: DisseminationResponse<D>) -> Self {
         use DisseminationMessage::*;
         use DisseminationResponse::*;
         match message {

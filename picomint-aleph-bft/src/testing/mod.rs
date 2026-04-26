@@ -12,14 +12,14 @@ use crate::{
     PeerId, SpawnHandle, TaskHandle, Terminator,
 };
 use aleph_bft_mock::{
-    Data, DataProvider, FinalizationHandler, Keychain, Loader, Network as MockNetwork,
-    PartialMultisignature, ReconnectSender as ReconnectSenderGeneric, Saver, Signature, Spawner,
+    keychain, Data, DataProvider, FinalizationHandler, Loader, Network as MockNetwork,
+    ReconnectSender as ReconnectSenderGeneric, Saver, Spawner,
 };
 use futures::channel::{mpsc::UnboundedReceiver, oneshot};
 use parking_lot::Mutex;
 use std::{sync::Arc, time::Duration};
 
-pub type NetworkData = crate::NetworkData<Data, Signature, PartialMultisignature>;
+pub type NetworkData = crate::NetworkData<Data>;
 
 pub type Network = MockNetwork<NetworkData>;
 pub type ReconnectSender = ReconnectSenderGeneric<NetworkData>;
@@ -80,12 +80,12 @@ pub fn spawn_honest_member(
     let unit_saver: Saver = saved_state.clone().into();
     let local_io = LocalIO::new(data_provider, finalization_handler, unit_saver, unit_loader);
     let member_task = async move {
-        let keychain = Keychain::new(n_members, node_index);
+        let kc = keychain(n_members, node_index);
         run_session(
             config,
             local_io,
             network,
-            keychain,
+            kc,
             spawner_inner,
             Terminator::create_root(exit_rx, "AlephBFT-member"),
         )

@@ -1,29 +1,26 @@
 use crate::{
     alerts::AlertMessage,
     network::{NetworkData, NetworkDataInner, UnitMessage},
-    Data, Network, PartialMultisignature, Receiver, Recipient, Sender, Signature, Terminator,
+    Data, Network, Receiver, Recipient, Sender, Terminator,
 };
 use futures::{FutureExt, StreamExt};
 use log::{debug, error, warn};
 
-pub struct Hub<D: Data, S: Signature, MS: PartialMultisignature, N: Network<NetworkData<D, S, MS>>>
-{
+pub struct Hub<D: Data, N: Network<NetworkData<D>>> {
     network: N,
-    units_to_send: Receiver<(UnitMessage<D, S>, Recipient)>,
-    units_received: Sender<UnitMessage<D, S>>,
-    alerts_to_send: Receiver<(AlertMessage<D, S, MS>, Recipient)>,
-    alerts_received: Sender<AlertMessage<D, S, MS>>,
+    units_to_send: Receiver<(UnitMessage<D>, Recipient)>,
+    units_received: Sender<UnitMessage<D>>,
+    alerts_to_send: Receiver<(AlertMessage<D>, Recipient)>,
+    alerts_received: Sender<AlertMessage<D>>,
 }
 
-impl<D: Data, S: Signature, MS: PartialMultisignature, N: Network<NetworkData<D, S, MS>>>
-    Hub<D, S, MS, N>
-{
+impl<D: Data, N: Network<NetworkData<D>>> Hub<D, N> {
     pub fn new(
         network: N,
-        units_to_send: Receiver<(UnitMessage<D, S>, Recipient)>,
-        units_received: Sender<UnitMessage<D, S>>,
-        alerts_to_send: Receiver<(AlertMessage<D, S, MS>, Recipient)>,
-        alerts_received: Sender<AlertMessage<D, S, MS>>,
+        units_to_send: Receiver<(UnitMessage<D>, Recipient)>,
+        units_received: Sender<UnitMessage<D>>,
+        alerts_to_send: Receiver<(AlertMessage<D>, Recipient)>,
+        alerts_received: Sender<AlertMessage<D>>,
     ) -> Self {
         Hub {
             network,
@@ -34,11 +31,11 @@ impl<D: Data, S: Signature, MS: PartialMultisignature, N: Network<NetworkData<D,
         }
     }
 
-    fn send(&self, data: NetworkData<D, S, MS>, recipient: Recipient) {
+    fn send(&self, data: NetworkData<D>, recipient: Recipient) {
         self.network.send(data, recipient);
     }
 
-    fn handle_incoming(&self, network_data: NetworkData<D, S, MS>) {
+    fn handle_incoming(&self, network_data: NetworkData<D>) {
         let NetworkData(network_data) = network_data;
         use NetworkDataInner::*;
         match network_data {

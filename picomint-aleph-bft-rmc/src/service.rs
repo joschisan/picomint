@@ -4,7 +4,7 @@ use crate::{
     scheduler::TaskScheduler,
     Message,
 };
-pub use aleph_bft_crypto::{MultiKeychain, Multisigned, Signable};
+pub use aleph_bft_crypto::{Multisigned, Signable};
 use core::fmt::Debug;
 use log::{debug, warn};
 use std::hash::Hash;
@@ -13,36 +13,31 @@ const LOG_TARGET: &str = "AlephBFT-rmc";
 
 /// Reliable Multicast Box
 ///
-/// The instance of [`Service<H, MK, SCH>`] is used to reliably broadcasts hashes of type `H`.
+/// The instance of [`Service<H, SCH>`] is used to reliably broadcast hashes of type `H`.
 /// It collects the signed hashes and upon receiving a large enough number of them it yields
 /// the multisigned hash.
 ///
-/// A node with an instance of [`Service<H, MK, SCH>`] can initiate broadcasting a message `msg: H`
+/// A node with an instance of [`Service<H, SCH>`] can initiate broadcasting a message `msg: H`
 /// by calling [`Service::start_rmc`]. As a result, the node signs `msg` and starts scheduling
 /// messages for broadcast which can be obtained by awaiting on [`Service::next_message`]. When
 /// sufficiently many nodes initiate rmc with the same message `msg` and a node collects enough
 /// signatures to form a complete multisignature under the message, [`Service::process_message`]
 /// will return the multisigned hash.
-///
-/// We refer to the documentation https://cardinal-cryptography.github.io/AlephBFT/reliable_broadcast.html
-/// for a high-level description of this protocol and how it is used for fork alerts.
-pub struct Service<H, MK, SCH>
+pub struct Service<H, SCH>
 where
     H: Signable + Hash,
-    MK: MultiKeychain,
-    SCH: TaskScheduler<Message<H, MK::Signature, MK::PartialMultisignature>>,
+    SCH: TaskScheduler<Message<H>>,
 {
     scheduler: SCH,
-    handler: Handler<H, MK>,
+    handler: Handler<H>,
 }
 
-impl<H, MK, SCH> Service<H, MK, SCH>
+impl<H, SCH> Service<H, SCH>
 where
     H: Signable + Hash + Eq + Clone + Debug,
-    MK: MultiKeychain,
-    SCH: TaskScheduler<Message<H, MK::Signature, MK::PartialMultisignature>>,
+    SCH: TaskScheduler<Message<H>>,
 {
-    pub fn new(scheduler: SCH, handler: Handler<H, MK>) -> Self {
+    pub fn new(scheduler: SCH, handler: Handler<H>) -> Self {
         Service { scheduler, handler }
     }
 
@@ -51,7 +46,7 @@ where
     /// If the multisignature is not completed, `None` is returned. If the multisignature was
     /// already completed when starting rmc, no tasks are scheduled. Otherwise the signed hash
     /// is scheduled for the broadcasts.
-    pub fn start_rmc(&mut self, hash: H) -> Option<Multisigned<H, MK>> {
+    pub fn start_rmc(&mut self, hash: H) -> Option<Multisigned<H>> {
         debug!(target: LOG_TARGET, "starting rmc for {:?}", hash);
         match self.handler.on_start_rmc(hash) {
             OnStartRmcResponse::SignedHash(signed_hash) => {
@@ -73,10 +68,7 @@ where
     /// person, it adds it to the collective signature. If it completes the multisignature, it is
     /// returned. Otherwise `None` is returned. If the message is a multisigned hash, it returns
     /// the multisignature, if we haven't seen it before. Otherwise `None` is returned.
-    pub fn process_message(
-        &mut self,
-        message: Message<H, MK::Signature, MK::PartialMultisignature>,
-    ) -> Option<Multisigned<H, MK>> {
+    pub fn process_message(&mut self, message: Message<H>) -> Option<Multisigned<H>> {
         match message {
             Message::SignedHash(unchecked) => match self.handler.on_signed_hash(unchecked) {
                 Ok(Some(multisigned)) => {
@@ -109,7 +101,7 @@ where
     }
 
     /// Obtain the next message scheduled for broadcast.
-    pub async fn next_message(&mut self) -> Message<H, MK::Signature, MK::PartialMultisignature> {
+    pub async fn next_message(&mut self) -> Message<H> {
         self.scheduler.next_task().await
     }
 }
@@ -118,7 +110,7 @@ where
 mod tests {
     use crate::{DoublingDelayScheduler, Handler, Message, Service};
     use aleph_bft_crypto::{Multisigned, NumPeers, PeerId, Signed};
-    use aleph_bft_mock::{BadSigning, Keychain, PartialMultisignature, Signable, Signature};
+    use aleph_bft_mock::{bad_keychain, keychain, Signable};
     use futures::{
         channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
         future, StreamExt,
@@ -126,15 +118,15 @@ mod tests {
     use rand::Rng;
     use std::{collections::HashMap, time::Duration};
 
-    type TestMessage = Message<Signable, Signature, PartialMultisignature>;
+    type TestMessage = Message<Signable>;
 
     struct TestEnvironment {
-        rmc_services: Vec<Service<Signable, Keychain, DoublingDelayScheduler<TestMessage>>>,
+        rmc_services: Vec<Service<Signable, DoublingDelayScheduler<TestMessage>>>,
         rmc_start_tx: UnboundedSender<(Signable, PeerId)>,
         rmc_start_rx: UnboundedReceiver<(Signable, PeerId)>,
         broadcast_tx: UnboundedSender<(TestMessage, PeerId)>,
         broadcast_rx: UnboundedReceiver<(TestMessage, PeerId)>,
-        hashes: HashMap<PeerId, Multisigned<Signable, Keychain>>,
+        hashes: HashMap<PeerId, Multisigned<Signable>>,
         message_filter: Box<dyn FnMut(PeerId, TestMessage) -> bool>,
     }
 
@@ -156,7 +148,7 @@ mod tests {
             for i in 0..node_count.total() {
                 let service = Service::new(
                     DoublingDelayScheduler::new(Duration::from_millis(1)),
-                    Handler::new(Keychain::new(node_count, PeerId::new(i as u8))),
+                    Handler::new(keychain(node_count, PeerId::new(i as u8))),
                 );
                 rmc_services.push(service);
             }
@@ -222,7 +214,7 @@ mod tests {
         async fn collect_multisigned_hashes(
             mut self,
             expected_multisigs: usize,
-        ) -> HashMap<PeerId, Multisigned<Signable, Keychain>> {
+        ) -> HashMap<PeerId, Multisigned<Signable>> {
             while self.hashes.len() < expected_multisigs {
                 match self.next_event().await {
                     EnvironmentEvent::StartRmc(hash, node_index) => {
@@ -321,18 +313,16 @@ mod tests {
     #[tokio::test]
     async fn bad_signatures_and_multisignatures_are_ignored() {
         let node_count = NumPeers::new(10 as usize);
-        let _keychains = Keychain::new_vec(node_count);
         let environment = TestEnvironment::new(node_count, |_, _| true);
 
         let bad_hash: Signable = "65".into();
-        let bad_keychain: BadSigning<Keychain> = Keychain::new(node_count, 0.into()).into();
-        let bad_msg = TestMessage::SignedHash(
-            Signed::sign_with_index(bad_hash.clone(), &bad_keychain).into(),
-        );
+        let bad_kc = bad_keychain(node_count, 0.into());
+        let bad_msg =
+            TestMessage::SignedHash(Signed::sign_with_index(bad_hash.clone(), &bad_kc).into());
         environment.broadcast_message(bad_msg, PeerId::new(0 as u8));
         let bad_msg = TestMessage::MultisignedHash(
-            Signed::sign_with_index(bad_hash.clone(), &bad_keychain)
-                .into_partially_multisigned(&bad_keychain)
+            Signed::sign_with_index(bad_hash.clone(), &bad_kc)
+                .into_partially_multisigned(&bad_kc)
                 .into_unchecked(),
         );
         environment.broadcast_message(bad_msg, PeerId::new(0 as u8));

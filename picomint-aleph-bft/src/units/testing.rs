@@ -9,15 +9,16 @@ use crate::{
     },
     NodeMap, NumPeers, PeerId, Round, SessionId, Signed, UnitHash,
 };
-use aleph_bft_mock::{Data, Keychain, Signature};
+use aleph_bft_mock::Data;
+use aleph_bft_types::Keychain;
 use rand::prelude::IteratorRandom;
 
 type ControlHash = GenericControlHash;
 type Creator = GenericCreator;
 type PreUnit = GenericPreUnit;
 pub type FullUnit = GenericFullUnit<Data>;
-type UncheckedSignedUnit = GenericUncheckedSignedUnit<Data, Signature>;
-pub type SignedUnit = GenericSignedUnit<Data, Keychain>;
+type UncheckedSignedUnit = GenericUncheckedSignedUnit<Data>;
+pub type SignedUnit = GenericSignedUnit<Data>;
 pub type DagUnit = ReconstructedUnit<SignedUnit>;
 
 #[derive(Clone)]

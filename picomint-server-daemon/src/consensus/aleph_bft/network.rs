@@ -12,11 +12,7 @@ use super::super::db::SIGNED_SESSION_OUTCOME;
 use super::data_provider::is_valid;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
-pub type NetworkData = aleph_bft::NetworkData<
-    Vec<ConsensusItem>,
-    <aleph_bft::Schnorr as aleph_bft::Keychain>::Signature,
-    <aleph_bft::Schnorr as aleph_bft::MultiKeychain>::PartialMultisignature,
->;
+pub type NetworkData = aleph_bft::NetworkData<Vec<ConsensusItem>>;
 
 pub struct Network {
     connections: ReconnectP2PConnections<P2PMessage>,

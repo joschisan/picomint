@@ -13,20 +13,19 @@ use log::{debug, error, info, warn};
 use std::{
     cmp::max,
     fmt::{Display, Formatter, Result as FmtResult},
-    hash::Hash,
     time::Duration,
 };
 
 /// Ways in which a newest unit response might be wrong.
 #[derive(Eq, PartialEq, Debug)]
-pub enum Error<D: Data, S: Signature> {
+pub enum Error<D: Data> {
     WrongSignature,
     SaltMismatch(Salt, Salt),
-    InvalidUnit(ValidationError<D, S>),
+    InvalidUnit(ValidationError<D>),
     ForeignUnit(PeerId),
 }
 
-impl<D: Data, S: Signature> Display for Error<D, S> {
+impl<D: Data> Display for Error<D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         use Error::*;
         match self {
@@ -40,14 +39,14 @@ impl<D: Data, S: Signature> Display for Error<D, S> {
     }
 }
 
-impl<D: Data, S: Signature> From<ValidationError<D, S>> for Error<D, S> {
-    fn from(ve: ValidationError<D, S>) -> Self {
+impl<D: Data> From<ValidationError<D>> for Error<D> {
+    fn from(ve: ValidationError<D>) -> Self {
         Error::InvalidUnit(ve)
     }
 }
 
-impl<D: Data, S: Signature> From<SignatureError<NewestUnitResponse<D, S>, S>> for Error<D, S> {
-    fn from(_: SignatureError<NewestUnitResponse<D, S>, S>) -> Self {
+impl<D: Data> From<SignatureError<NewestUnitResponse<D>, Signature>> for Error<D> {
+    fn from(_: SignatureError<NewestUnitResponse<D>, Signature>) -> Self {
         Error::WrongSignature
     }
 }
@@ -64,22 +63,20 @@ pub enum Status {
 }
 
 /// Initial unit collection to figure out at which round we should start unit production.
-/// Unfortunately this isn't quite BFT, but it's good enough in many situations.
-#[derive(Clone, Eq, PartialEq, Debug, Hash)]
-pub struct Collection<'a, MK: Keychain> {
-    keychain: &'a MK,
-    validator: &'a Validator<MK>,
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct Collection<'a> {
+    keychain: &'a Keychain,
+    validator: &'a Validator,
     collected_starting_rounds: NodeMap<Round>,
     salt: Salt,
 }
 
-impl<'a, MK: Keychain> Collection<'a, MK> {
+impl<'a> Collection<'a> {
     /// Create a new collection instance ready to collect responses.
-    /// The returned salt should be used to initiate newest unit requests.
-    pub fn new(keychain: &'a MK, validator: &'a Validator<MK>) -> Self {
+    pub fn new(keychain: &'a Keychain, validator: &'a Validator) -> Self {
         let salt = generate_salt();
         let mut collected_starting_rounds = NodeMap::with_size(keychain.node_count());
-        collected_starting_rounds.insert(keychain.index(), 0);
+        collected_starting_rounds.insert(keychain.identity(), 0);
         Collection {
             keychain,
             validator,
@@ -89,15 +86,15 @@ impl<'a, MK: Keychain> Collection<'a, MK> {
     }
 
     fn index(&self) -> PeerId {
-        self.keychain.index()
+        self.keychain.identity()
     }
 
     /// Process a response to a newest unit request.
     #[allow(clippy::result_large_err)]
     pub fn on_newest_response<D: Data>(
         &mut self,
-        unchecked_response: UncheckedSigned<NewestUnitResponse<D, MK::Signature>, MK::Signature>,
-    ) -> Result<Status, Error<D, MK::Signature>> {
+        unchecked_response: UncheckedSigned<NewestUnitResponse<D>, Signature>,
+    ) -> Result<Status, Error<D>> {
         let response = unchecked_response.check(self.keychain)?.into_signable();
         if response.salt != self.salt {
             return Err(Error::SaltMismatch(self.salt, response.salt));
@@ -106,7 +103,7 @@ impl<'a, MK: Keychain> Collection<'a, MK> {
             Some(unchecked_unit) => {
                 let checked_signed_unit = self.validator.validate_unit(unchecked_unit)?;
                 let checked_unit = checked_signed_unit.as_signable();
-                if checked_unit.creator() != self.keychain.index() {
+                if checked_unit.creator() != self.keychain.identity() {
                     return Err(Error::ForeignUnit(checked_unit.creator()));
                 }
                 checked_unit.round() + 1
@@ -144,7 +141,7 @@ impl<'a, MK: Keychain> Collection<'a, MK> {
     }
 
     /// Returns a request addressed to the appropriate nodes.
-    pub fn prepare_request<D: Data>(&self) -> Addressed<DisseminationMessage<D, MK::Signature>> {
+    pub fn prepare_request<D: Data>(&self) -> Addressed<DisseminationMessage<D>> {
         Addressed::new(
             DisseminationMessage::NewestUnitRequest(self.index(), self.salt()),
             self.missing_responders(),
@@ -167,23 +164,23 @@ impl<'a, MK: Keychain> Collection<'a, MK> {
 }
 
 /// A runnable wrapper around initial unit collection.
-pub struct IO<'a, D: Data, MK: Keychain> {
+pub struct IO<'a, D: Data> {
     round_for_creator: oneshot::Sender<Option<Round>>,
     round_from_backup: Round,
-    responses_from_network: Receiver<CollectionResponse<D, MK>>,
-    requests_for_network: Sender<UnitMessageTo<D, MK::Signature>>,
-    collection: Collection<'a, MK>,
+    responses_from_network: Receiver<CollectionResponse<D>>,
+    requests_for_network: Sender<UnitMessageTo<D>>,
+    collection: Collection<'a>,
     request_delay: DelaySchedule,
 }
 
-impl<'a, D: Data, MK: Keychain> IO<'a, D, MK> {
+impl<'a, D: Data> IO<'a, D> {
     /// Create the IO instance for the specified collection and channels associated with it.
     pub fn new(
         round_for_creator: oneshot::Sender<Option<Round>>,
         round_from_backup: Round,
-        responses_from_network: Receiver<CollectionResponse<D, MK>>,
-        requests_for_network: Sender<UnitMessageTo<D, MK::Signature>>,
-        collection: Collection<'a, MK>,
+        responses_from_network: Receiver<CollectionResponse<D>>,
+        requests_for_network: Sender<UnitMessageTo<D>>,
+        collection: Collection<'a>,
         request_delay: DelaySchedule,
     ) -> Self {
         IO {
@@ -198,8 +195,6 @@ impl<'a, D: Data, MK: Keychain> IO<'a, D, MK> {
 
     fn starting_round(&self, round_from_collection: Round) -> Option<Round> {
         if self.round_from_backup < round_from_collection {
-            // Our newest unit doesn't appear in the backup. This indicates a serious issue, for example
-            // a different node running with the same pair of keys. It's safer not to continue.
             error!(
                 target: LOG_TARGET, "Backup state behind unit collection state. Next round inferred from: collection: {:?}, backup: {:?}",
                 round_from_collection,
@@ -209,8 +204,6 @@ impl<'a, D: Data, MK: Keychain> IO<'a, D, MK> {
         };
 
         if round_from_collection < self.round_from_backup {
-            // Our newest unit didn't reach any peer, but it resides in our backup. One possible reason
-            // is that our node was taken down after saving the unit, but before broadcasting it.
             warn!(
                 target: LOG_TARGET, "Backup state ahead of than unit collection state. Next round inferred from: collection: {:?}, backup: {:?}",
                 self.round_from_backup,
@@ -309,51 +302,50 @@ impl<'a, D: Data, MK: Keychain> IO<'a, D, MK> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Collection as GenericCollection, Error, NewestUnitResponse as GenericNewestUnitResponse,
-        Status::*,
-    };
+    use super::{Collection, Error, NewestUnitResponse as GenericNewestUnitResponse, Status::*};
     use crate::{
         creation::Creator as GenericCreator,
         dissemination::DisseminationMessage,
         units::{
             FullUnit as GenericFullUnit, PreUnit as GenericPreUnit,
-            UncheckedSignedUnit as GenericUncheckedSignedUnit, Validator as GenericValidator,
+            UncheckedSignedUnit as GenericUncheckedSignedUnit, Validator,
         },
-        Index, NumPeers, PeerId, SessionId, Signed, UncheckedSigned,
+        NumPeers, PeerId, SessionId, Signed, UncheckedSigned,
     };
-    use aleph_bft_mock::{Data, Keychain, Signature};
+    use aleph_bft_mock::{keychain, Data};
+    use aleph_bft_types::Signature;
     use std::iter::{once, repeat, repeat_n};
 
-    type Collection<'a> = GenericCollection<'a, Keychain>;
-    type Validator = GenericValidator<Keychain>;
     type Creator = GenericCreator;
     type PreUnit = GenericPreUnit;
     type FullUnit = GenericFullUnit<Data>;
-    type UncheckedSignedUnit = GenericUncheckedSignedUnit<Data, Signature>;
-    type NewestUnitResponse = GenericNewestUnitResponse<Data, Signature>;
+    type UncheckedSignedUnit = GenericUncheckedSignedUnit<Data>;
+    type NewestUnitResponse = GenericNewestUnitResponse<Data>;
     type UncheckedSignedNewestUnitResponse = UncheckedSigned<NewestUnitResponse, Signature>;
 
-    fn keychain_set(n_members: NumPeers) -> Vec<Keychain> {
+    fn keychain_set(n_members: NumPeers) -> Vec<aleph_bft_types::Keychain> {
         let mut result = Vec::new();
         for i in 0..n_members.total() {
-            result.push(Keychain::new(n_members, PeerId::new(i as u8)));
+            result.push(keychain(n_members, PeerId::new(i as u8)));
         }
         result
     }
 
-    fn create_responses<'a, R: Iterator<Item = (&'a Keychain, Option<UncheckedSignedUnit>)>>(
+    fn create_responses<
+        'a,
+        R: Iterator<Item = (&'a aleph_bft_types::Keychain, Option<UncheckedSignedUnit>)>,
+    >(
         presponses: R,
-        request: DisseminationMessage<Data, Signature>,
+        request: DisseminationMessage<Data>,
     ) -> Vec<UncheckedSignedNewestUnitResponse> {
         let (requester, salt) = match request {
             DisseminationMessage::NewestUnitRequest(requester, salt) => (requester, salt),
             _ => panic!("Cannot create newest unit response for a non-request."),
         };
         let mut result = Vec::new();
-        for (keychain, maybe_unit) in presponses {
-            let response = NewestUnitResponse::new(requester, keychain.index(), maybe_unit, salt);
-            result.push(Signed::sign(response, keychain).into_unchecked());
+        for (kc, maybe_unit) in presponses {
+            let response = NewestUnitResponse::new(requester, kc.identity(), maybe_unit, salt);
+            result.push(Signed::sign(response, kc).into_unchecked());
         }
         result
     }
@@ -361,10 +353,10 @@ mod tests {
     fn preunit_to_unchecked_signed_unit(
         pu: PreUnit,
         session_id: SessionId,
-        keychain: &Keychain,
+        kc: &aleph_bft_types::Keychain,
     ) -> UncheckedSignedUnit {
         let full_unit = FullUnit::new(pu, Some(0), session_id);
-        let signed_unit = Signed::sign(full_unit, keychain);
+        let signed_unit = Signed::sign(full_unit, kc);
         signed_unit.into()
     }
 
@@ -374,9 +366,9 @@ mod tests {
         let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let max_round = 2;
-        let keychain = Keychain::new(n_members, creator_id);
-        let validator = Validator::new(session_id, keychain, max_round);
-        let collection = Collection::new(&keychain, &validator);
+        let kc = keychain(n_members, creator_id);
+        let validator = Validator::new(session_id, kc.clone(), max_round);
+        let collection = Collection::new(&kc, &validator);
         assert_eq!(collection.status(), Pending);
         assert_eq!(
             collection.prepare_request::<Data>().recipients().len(),
@@ -390,9 +382,9 @@ mod tests {
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
-        let keychain = &keychains[0];
-        let validator = Validator::new(session_id, *keychain, max_round);
-        let mut collection = Collection::new(keychain, &validator);
+        let kc = &keychains[0];
+        let validator = Validator::new(session_id, kc.clone(), max_round);
+        let mut collection = Collection::new(kc, &validator);
         let request = collection.prepare_request().message().clone();
         let responses =
             create_responses(keychains.iter().skip(1).take(3).zip(repeat(None)), request);
@@ -409,9 +401,9 @@ mod tests {
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
-        let keychain = &keychains[0];
-        let validator = Validator::new(session_id, *keychain, max_round);
-        let mut collection = Collection::new(keychain, &validator);
+        let kc = &keychains[0];
+        let validator = Validator::new(session_id, kc.clone(), max_round);
+        let mut collection = Collection::new(kc, &validator);
         let request = collection.prepare_request().message().clone();
         let responses = create_responses(repeat_n(&keychains[1], 43).zip(repeat(None)), request);
         for response in responses {
@@ -427,9 +419,9 @@ mod tests {
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
-        let keychain = &keychains[0];
-        let validator = Validator::new(session_id, *keychain, max_round);
-        let mut collection = Collection::new(keychain, &validator);
+        let kc = &keychains[0];
+        let validator = Validator::new(session_id, kc.clone(), max_round);
+        let mut collection = Collection::new(kc, &validator);
         let request = collection.prepare_request().message().clone();
         let responses =
             create_responses(keychains.iter().skip(1).take(4).zip(repeat(None)), request);
@@ -451,13 +443,13 @@ mod tests {
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
-        let keychain = &keychains[0];
+        let kc = &keychains[0];
         let creator = Creator::new(creator_id, n_members);
-        let validator = Validator::new(session_id, *keychain, max_round);
-        let mut collection = Collection::new(keychain, &validator);
+        let validator = Validator::new(session_id, kc.clone(), max_round);
+        let mut collection = Collection::new(kc, &validator);
         let request = collection.prepare_request().message().clone();
         let preunit = creator.create_unit(0).expect("Creation should succeed.");
-        let unit = preunit_to_unchecked_signed_unit(preunit, session_id, keychain);
+        let unit = preunit_to_unchecked_signed_unit(preunit, session_id, kc);
         let responses = create_responses(
             keychains
                 .iter()
@@ -487,9 +479,9 @@ mod tests {
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
-        let keychain = &keychains[0];
-        let validator = Validator::new(session_id, *keychain, max_round);
-        let mut collection = Collection::new(keychain, &validator);
+        let kc = &keychains[0];
+        let validator = Validator::new(session_id, kc.clone(), max_round);
+        let mut collection = Collection::new(kc, &validator);
         let request = collection.prepare_request::<Data>().message().clone();
         let wrong_salt_request = match request {
             DisseminationMessage::NewestUnitRequest(requester, salt) => {
@@ -518,13 +510,13 @@ mod tests {
         let wrong_session_id = 43;
         let max_round = 2;
         let keychains = keychain_set(n_members);
-        let keychain = &keychains[0];
+        let kc = &keychains[0];
         let creator = Creator::new(creator_id, n_members);
-        let validator = Validator::new(session_id, *keychain, max_round);
-        let mut collection = Collection::new(keychain, &validator);
+        let validator = Validator::new(session_id, kc.clone(), max_round);
+        let mut collection = Collection::new(kc, &validator);
         let request = collection.prepare_request().message().clone();
         let preunit = creator.create_unit(0).expect("Creation should succeed.");
-        let unit = preunit_to_unchecked_signed_unit(preunit, wrong_session_id, keychain);
+        let unit = preunit_to_unchecked_signed_unit(preunit, wrong_session_id, kc);
         let responses = create_responses(keychains.iter().skip(1).zip(repeat(Some(unit))), request);
         for response in responses {
             match collection.on_newest_response(response) {
@@ -542,10 +534,10 @@ mod tests {
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
-        let keychain = &keychains[0];
+        let kc = &keychains[0];
         let creator = Creator::new(other_creator_id, n_members);
-        let validator = Validator::new(session_id, *keychain, max_round);
-        let mut collection = Collection::new(keychain, &validator);
+        let validator = Validator::new(session_id, kc.clone(), max_round);
+        let mut collection = Collection::new(kc, &validator);
         let request = collection.prepare_request().message().clone();
         let preunit = creator.create_unit(0).expect("Creation should succeed.");
         let unit = preunit_to_unchecked_signed_unit(preunit, session_id, &keychains[1]);

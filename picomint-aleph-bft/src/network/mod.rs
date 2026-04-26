@@ -1,6 +1,5 @@
-use crate::{alerts::AlertMessage, Data, PartialMultisignature, Recipient, Signature};
+use crate::{alerts::AlertMessage, Data, Recipient};
 use picomint_encoding::{Decodable, Encodable};
-use std::fmt::Debug;
 
 mod hub;
 mod unit;
@@ -8,15 +7,15 @@ mod unit;
 pub use hub::Hub;
 pub use unit::UnitMessage;
 
-pub type UnitMessageTo<D, S> = (UnitMessage<D, S>, Recipient);
+pub type UnitMessageTo<D> = (UnitMessage<D>, Recipient);
 
 #[derive(Clone, Eq, PartialEq, Debug, Decodable, Encodable)]
-pub(crate) enum NetworkDataInner<D: Data, S: Signature, MS: PartialMultisignature> {
-    Units(UnitMessage<D, S>),
-    Alert(AlertMessage<D, S, MS>),
+pub(crate) enum NetworkDataInner<D: Data> {
+    Units(UnitMessage<D>),
+    Alert(AlertMessage<D>),
 }
 
-impl<D: Data, S: Signature, MS: PartialMultisignature> NetworkDataInner<D, S, MS> {
+impl<D: Data> NetworkDataInner<D> {
     pub(crate) fn included_data(&self) -> Vec<D> {
         match self {
             Self::Units(message) => message.included_data(),
@@ -27,11 +26,9 @@ impl<D: Data, S: Signature, MS: PartialMultisignature> NetworkDataInner<D, S, MS
 
 /// NetworkData is the opaque format for all data that a committee member needs to send to other nodes.
 #[derive(Clone, Eq, PartialEq, Debug, Decodable, Encodable)]
-pub struct NetworkData<D: Data, S: Signature, MS: PartialMultisignature>(
-    pub(crate) NetworkDataInner<D, S, MS>,
-);
+pub struct NetworkData<D: Data>(pub(crate) NetworkDataInner<D>);
 
-impl<D: Data, S: Signature, MS: PartialMultisignature> NetworkData<D, S, MS> {
+impl<D: Data> NetworkData<D> {
     /// Returns all the Data in the network message that might end up in the ordering as a result
     /// of accepting this message. Useful for ensuring data availability, if Data only represents
     /// the objects the user wants to order, and facilitates access to the Data before it is
@@ -52,29 +49,22 @@ mod tests {
         units::{ControlHash, FullUnit, PreUnit, UncheckedSignedUnit, UnitCoord},
         NumPeers, PeerId, Round, Signed,
     };
-    use aleph_bft_mock::{Data, Keychain, PartialMultisignature, Signature};
+    use aleph_bft_mock::{keychain, Data};
     use aleph_bft_types::NodeMap;
     use picomint_encoding::{Decodable, Encodable};
 
-    fn test_unchecked_unit(
-        creator: PeerId,
-        round: Round,
-        data: Data,
-    ) -> UncheckedSignedUnit<Data, Signature> {
+    fn test_unchecked_unit(creator: PeerId, round: Round, data: Data) -> UncheckedSignedUnit<Data> {
         let control_hash = ControlHash::new(&NodeMap::with_size(7.into()));
         let pu = PreUnit::new(creator, round, control_hash);
         let signable = FullUnit::new(pu, Some(data), 0);
-        Signed::sign(
-            signable,
-            &Keychain::new(NumPeers::from(0 as usize), creator),
-        )
-        .into_unchecked()
+        // Use a federation of size > peer index so the keychain has the creator registered.
+        Signed::sign(signable, &keychain(NumPeers::from(20 as usize), creator)).into_unchecked()
     }
 
-    type TestNetworkData = super::NetworkData<Data, Signature, PartialMultisignature>;
+    type TestNetworkData = super::NetworkData<Data>;
     impl TestNetworkData {
-        fn new(inner: super::NetworkDataInner<Data, Signature, PartialMultisignature>) -> Self {
-            super::NetworkData::<Data, Signature, PartialMultisignature>(inner)
+        fn new(inner: super::NetworkDataInner<Data>) -> Self {
+            super::NetworkData(inner)
         }
     }
 
@@ -212,7 +202,7 @@ mod tests {
         let nd = TestNetworkData::new(Alert(ForkAlert(
             Signed::sign(
                 alert.clone(),
-                &Keychain::new(NumPeers::from(0 as usize), sender),
+                &keychain(NumPeers::from(20 as usize), sender),
             )
             .into_unchecked(),
         )));

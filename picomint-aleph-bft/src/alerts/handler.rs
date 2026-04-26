@@ -1,8 +1,8 @@
 use crate::{
     alerts::{Alert, AlertMessage, ForkProof, ForkingNotification},
     units::Unit,
-    Data, Keychain, MultiKeychain, Multisigned, PartialMultisignature, PeerId, Recipient,
-    SessionId, Signable, Signature, Signed, UncheckedSigned, UnitHash,
+    Data, Keychain, Multisigned, PeerId, Recipient, SessionId, Signable, Signature, Signed,
+    UncheckedSigned, UnitHash,
 };
 use aleph_bft_rmc::Message as RmcMessage;
 use aleph_bft_types::Round;
@@ -46,45 +46,32 @@ impl Display for Error {
     }
 }
 
-type KnownAlerts<D, MK> = HashMap<UnitHash, Signed<Alert<D, <MK as Keychain>::Signature>, MK>>;
+type KnownAlerts<D> = HashMap<UnitHash, Signed<Alert<D>>>;
 
-pub type OnOwnAlertResponse<D, MK> = (
-    AlertMessage<D, <MK as Keychain>::Signature, <MK as MultiKeychain>::PartialMultisignature>,
-    Recipient,
-    UnitHash,
-);
+pub type OnOwnAlertResponse<D> = (AlertMessage<D>, Recipient, UnitHash);
 
-pub type OnNetworkAlertResponse<D, MK> = (
-    Option<ForkingNotification<D, <MK as Keychain>::Signature>>,
-    UnitHash,
-);
+pub type OnNetworkAlertResponse<D> = (Option<ForkingNotification<D>>, UnitHash);
 
-type OnAlertRequestResponse<D, MK> = (
-    UncheckedSigned<Alert<D, <MK as Keychain>::Signature>, <MK as Keychain>::Signature>,
-    Recipient,
-);
+type OnAlertRequestResponse<D> = (UncheckedSigned<Alert<D>, Signature>, Recipient);
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
-pub enum RmcResponse<S: Signature, MS: PartialMultisignature> {
-    RmcMessage(RmcMessage<UnitHash, S, MS>),
+pub enum RmcResponse {
+    RmcMessage(RmcMessage<UnitHash>),
     AlertRequest(UnitHash, Recipient),
     Noop,
 }
 
-/// The component responsible for fork alerts in AlephBFT. We refer to the documentation
-/// https://cardinal-cryptography.github.io/AlephBFT/how_alephbft_does_it.html Section 2.5 and
-/// https://cardinal-cryptography.github.io/AlephBFT/reliable_broadcast.html and to the Aleph
-/// paper https://arxiv.org/abs/1908.05156 Appendix A1 for a discussion.
-pub struct Handler<D: Data, MK: MultiKeychain> {
+/// The component responsible for fork alerts in AlephBFT.
+pub struct Handler<D: Data> {
     session_id: SessionId,
-    keychain: MK,
-    known_forkers: HashMap<PeerId, ForkProof<D, MK::Signature>>,
-    known_alerts: KnownAlerts<D, MK>,
+    keychain: Keychain,
+    known_forkers: HashMap<PeerId, ForkProof<D>>,
+    known_alerts: KnownAlerts<D>,
     known_rmcs: HashMap<(PeerId, PeerId), UnitHash>,
 }
 
-impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
-    pub fn new(keychain: MK, session_id: SessionId) -> Self {
+impl<D: Data> Handler<D> {
+    pub fn new(keychain: Keychain, session_id: SessionId) -> Self {
         Self {
             session_id,
             keychain,
@@ -98,7 +85,7 @@ impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
         self.known_forkers.contains_key(&forker)
     }
 
-    fn on_new_forker_detected(&mut self, forker: PeerId, proof: ForkProof<D, MK::Signature>) {
+    fn on_new_forker_detected(&mut self, forker: PeerId, proof: ForkProof<D>) {
         self.known_forkers.insert(forker, proof);
     }
 
@@ -106,10 +93,7 @@ impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
     // 1) All units must be created by forker
     // 2) All units must come from different rounds
     // 3) There must be fewer of them than the maximum defined in the configuration.
-    // Note that these units will have to be validated before being used in the consensus.
-    // This is alright, if someone uses their alert to commit to incorrect units it's their own
-    // problem.
-    fn verify_commitment(&self, alert: &Alert<D, MK::Signature>) -> Result<(), Error> {
+    fn verify_commitment(&self, alert: &Alert<D>) -> Result<(), Error> {
         let mut rounds = HashSet::new();
         for u in &alert.legit_units {
             let u = match u.clone().check(&self.keychain) {
@@ -128,7 +112,7 @@ impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
         Ok(())
     }
 
-    fn verify_fork(&self, alert: &Alert<D, MK::Signature>) -> Result<(), Error> {
+    fn verify_fork(&self, alert: &Alert<D>) -> Result<(), Error> {
         let (u1, u2) = &alert.proof;
         let (u1, u2) = {
             let u1 = u1.clone().check(&self.keychain);
@@ -157,11 +141,7 @@ impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
     }
 
     /// Registers the RMC but does not actually send it; the returned hash must be passed to `start_rmc()` separately
-    fn rmc_alert(
-        &mut self,
-        forker: PeerId,
-        alert: Signed<Alert<D, MK::Signature>, MK>,
-    ) -> UnitHash {
+    fn rmc_alert(&mut self, forker: PeerId, alert: Signed<Alert<D>>) -> UnitHash {
         let hash = alert.as_signable().hash();
         self.known_rmcs
             .insert((alert.as_signable().sender, forker), hash);
@@ -170,7 +150,7 @@ impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
     }
 
     /// Registers RMCs and messages but does not actually send them; make sure the returned values are forwarded to IO
-    pub fn on_own_alert(&mut self, alert: Alert<D, MK::Signature>) -> OnOwnAlertResponse<D, MK> {
+    pub fn on_own_alert(&mut self, alert: Alert<D>) -> OnOwnAlertResponse<D> {
         let forker = alert.forker();
         self.known_forkers.insert(forker, alert.proof.clone());
         let alert = Signed::sign(alert, &self.keychain);
@@ -185,8 +165,8 @@ impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
     /// May return a `ForkingNotification`, which should be propagated
     pub fn on_network_alert(
         &mut self,
-        alert: UncheckedSigned<Alert<D, MK::Signature>, MK::Signature>,
-    ) -> Result<OnNetworkAlertResponse<D, MK>, Error> {
+        alert: UncheckedSigned<Alert<D>, Signature>,
+    ) -> Result<OnNetworkAlertResponse<D>, Error> {
         let alert = match alert.check(&self.keychain) {
             Ok(alert) => alert,
             Err(_) => {
@@ -210,32 +190,19 @@ impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
         };
         let hash_for_rmc = self.rmc_alert(forker, alert);
 
-        // A response to a valid fork alert.
-        // It should be handled by starting RMC on the contained hash
-        // and sending the contained notification (if present) to consensus.
         Ok((maybe_notification, hash_for_rmc))
     }
 
-    // returns AlerterResponse::{AlertRequest, RmcMessage} or None (no error, can't fail)
-    pub fn on_rmc_message(
-        &self,
-        sender: PeerId,
-        message: RmcMessage<UnitHash, MK::Signature, MK::PartialMultisignature>,
-    ) -> RmcResponse<MK::Signature, MK::PartialMultisignature> {
+    pub fn on_rmc_message(&self, sender: PeerId, message: RmcMessage<UnitHash>) -> RmcResponse {
         let hash = message.hash();
         if let Some(alert) = self.known_alerts.get(hash) {
             let alert_id = (alert.as_signable().sender, alert.as_signable().forker());
             if self.known_rmcs.get(&alert_id) == Some(hash) || message.is_complete() {
-                // An internal RMC message, with the sender being the local node.
-                // It should be handled by sending the message.
                 RmcResponse::RmcMessage(message)
             } else {
-                // Should be handled by doing nothing.
                 RmcResponse::Noop
             }
         } else {
-            // A request for a fork alert from another node.
-            // It should be handled by sending the request via the network to the contained recipient.
             RmcResponse::AlertRequest(*hash, Recipient::Peer(sender))
         }
     }
@@ -244,13 +211,9 @@ impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
         &self,
         node: PeerId,
         hash: UnitHash,
-    ) -> Result<OnAlertRequestResponse<D, MK>, Error> {
+    ) -> Result<OnAlertRequestResponse<D>, Error> {
         match self.known_alerts.get(&hash) {
-            Some(alert) => {
-                // A copy of a fork alert.
-                // It should be handled by sending the contained `Alert` via the network to the contained recipient.
-                Ok((alert.clone().into_unchecked(), Recipient::Peer(node)))
-            }
+            Some(alert) => Ok((alert.clone().into_unchecked(), Recipient::Peer(node))),
             None => Err(Error::UnknownAlertRequest),
         }
     }
@@ -258,8 +221,8 @@ impl<D: Data, MK: MultiKeychain> Handler<D, MK> {
     /// May return a `ForkingNotification`, which should be propagated
     pub fn alert_confirmed(
         &mut self,
-        multisigned: Multisigned<UnitHash, MK>,
-    ) -> Result<ForkingNotification<D, MK::Signature>, Error> {
+        multisigned: Multisigned<UnitHash>,
+    ) -> Result<ForkingNotification<D>, Error> {
         let alert = match self.known_alerts.get(multisigned.as_signable()) {
             Some(alert) => alert.as_signable(),
             None => return Err(Error::UnknownAlertRMC),
@@ -282,11 +245,11 @@ mod tests {
         units::{FullUnit, PreUnit},
         PartiallyMultisigned, Recipient, Round,
     };
-    use aleph_bft_mock::{Data, Keychain, Signature};
+    use aleph_bft_mock::{keychain, Data};
     use aleph_bft_rmc::Message;
-    use aleph_bft_types::{NodeMap, NumPeers, PeerId, Signable, Signed};
+    use aleph_bft_types::{Keychain, NodeMap, NumPeers, PeerId, Signable, Signed};
 
-    type TestForkProof = ForkProof<Data, Signature>;
+    type TestForkProof = ForkProof<Data>;
 
     fn full_unit(
         n_members: NumPeers,
@@ -305,17 +268,16 @@ mod tests {
         )
     }
 
-    /// Fabricates proof of a fork by a particular node, given its private key.
     fn make_fork_proof(
         node_id: PeerId,
-        keychain: &Keychain,
+        kc: &Keychain,
         round: Round,
         n_members: NumPeers,
     ) -> TestForkProof {
         let unit_0 = full_unit(n_members, node_id, round, Some(0));
         let unit_1 = full_unit(n_members, node_id, round, Some(1));
-        let signed_unit_0 = Signed::sign(unit_0, keychain).into_unchecked();
-        let signed_unit_1 = Signed::sign(unit_1, keychain).into_unchecked();
+        let signed_unit_0 = Signed::sign(unit_0, kc).into_unchecked();
+        let signed_unit_1 = Signed::sign(unit_1, kc).into_unchecked();
         (signed_unit_0, signed_unit_1)
     }
 
@@ -324,21 +286,18 @@ mod tests {
         let n_members = NumPeers::new(7 as usize);
         let own_index = PeerId::new(0 as u8);
         let forker_index = PeerId::new(6 as u8);
-        let own_keychain = Keychain::new(n_members, own_index);
-        let forker_keychain = Keychain::new(n_members, forker_index);
-        let mut this = Handler::new(own_keychain, 0);
-        let fork_proof = make_fork_proof(forker_index, &forker_keychain, 0, n_members);
+        let own_kc = keychain(n_members, own_index);
+        let forker_kc = keychain(n_members, forker_index);
+        let mut this = Handler::new(own_kc.clone(), 0);
+        let fork_proof = make_fork_proof(forker_index, &forker_kc, 0, n_members);
         let alert = Alert::new(own_index, fork_proof, vec![]);
-        let signed_alert = Signed::sign(alert.clone(), &this.keychain).into_unchecked();
         let alert_hash = Signable::hash(&alert);
-        assert_eq!(
-            this.on_own_alert(alert),
-            (
-                AlertMessage::ForkAlert(signed_alert),
-                Recipient::Everyone,
-                alert_hash,
-            ),
-        );
+        match this.on_own_alert(alert.clone()) {
+            (AlertMessage::ForkAlert(_), Recipient::Everyone, h) => {
+                assert_eq!(h, alert_hash);
+            }
+            other => panic!("unexpected response {:?}", other),
+        }
     }
 
     #[test]
@@ -346,13 +305,13 @@ mod tests {
         let n_members = NumPeers::new(7 as usize);
         let own_index = PeerId::new(1 as u8);
         let forker_index = PeerId::new(6 as u8);
-        let own_keychain = Keychain::new(n_members, own_index);
-        let forker_keychain = Keychain::new(n_members, forker_index);
-        let mut this = Handler::new(own_keychain, 0);
-        let fork_proof = make_fork_proof(forker_index, &forker_keychain, 0, n_members);
+        let own_kc = keychain(n_members, own_index);
+        let forker_kc = keychain(n_members, forker_index);
+        let mut this = Handler::new(own_kc.clone(), 0);
+        let fork_proof = make_fork_proof(forker_index, &forker_kc, 0, n_members);
         let alert = Alert::new(own_index, fork_proof.clone(), vec![]);
         let alert_hash = Signable::hash(&alert);
-        let signed_alert = Signed::sign(alert, &this.keychain).into_unchecked();
+        let signed_alert = Signed::sign(alert, &own_kc).into_unchecked();
         assert_eq!(
             this.on_network_alert(signed_alert),
             Ok((Some(ForkingNotification::Forker(fork_proof)), alert_hash)),
@@ -365,19 +324,18 @@ mod tests {
         let own_index = PeerId::new(0 as u8);
         let alerter_index = PeerId::new(1 as u8);
         let forker_index = PeerId::new(6 as u8);
-        let own_keychain = Keychain::new(n_members, own_index);
-        let alerter_keychain = Keychain::new(n_members, alerter_index);
-        let forker_keychain = Keychain::new(n_members, forker_index);
-        let this: Handler<Data, _> = Handler::new(own_keychain, 0);
-        let fork_proof = make_fork_proof(forker_index, &forker_keychain, 0, n_members);
+        let own_kc = keychain(n_members, own_index);
+        let alerter_kc = keychain(n_members, alerter_index);
+        let forker_kc = keychain(n_members, forker_index);
+        let this: Handler<Data> = Handler::new(own_kc, 0);
+        let fork_proof = make_fork_proof(forker_index, &forker_kc, 0, n_members);
         let alert = Alert::new(alerter_index, fork_proof, vec![]);
         let alert_hash = Signable::hash(&alert);
-        let signed_alert_hash =
-            Signed::sign_with_index(alert_hash, &alerter_keychain).into_unchecked();
+        let signed_alert_hash = Signed::sign_with_index(alert_hash, &alerter_kc).into_unchecked();
         let response = this.on_rmc_message(alerter_index, Message::SignedHash(signed_alert_hash));
         assert_eq!(
             response,
-            RmcResponse::AlertRequest(alert_hash, Recipient::Peer(alerter_index),),
+            RmcResponse::AlertRequest(alert_hash, Recipient::Peer(alerter_index)),
         );
     }
 
@@ -386,17 +344,14 @@ mod tests {
         let n_members = NumPeers::new(7 as usize);
         let own_index = PeerId::new(0 as u8);
         let forker_index = PeerId::new(6 as u8);
-        let own_keychain = Keychain::new(n_members, own_index);
-        let forker_keychain = Keychain::new(n_members, forker_index);
-        let mut this = Handler::new(own_keychain, 0);
-        let valid_unit = Signed::sign(
-            full_unit(n_members, forker_index, 0, Some(0)),
-            &forker_keychain,
-        )
-        .into_unchecked();
+        let own_kc = keychain(n_members, own_index);
+        let forker_kc = keychain(n_members, forker_index);
+        let mut this = Handler::new(own_kc.clone(), 0);
+        let valid_unit = Signed::sign(full_unit(n_members, forker_index, 0, Some(0)), &forker_kc)
+            .into_unchecked();
         let wrong_fork_proof = (valid_unit.clone(), valid_unit);
         let wrong_alert = Alert::new(own_index, wrong_fork_proof, vec![]);
-        let signed_wrong_alert = Signed::sign(wrong_alert, &own_keychain).into_unchecked();
+        let signed_wrong_alert = Signed::sign(wrong_alert, &own_kc).into_unchecked();
         assert_eq!(
             this.on_network_alert(signed_wrong_alert),
             Err(Error::SingleUnit(own_index)),
@@ -408,22 +363,22 @@ mod tests {
         let n_members = NumPeers::new(7 as usize);
         let own_index = PeerId::new(0 as u8);
         let forker_index = PeerId::new(6 as u8);
-        let own_keychain = Keychain::new(n_members, own_index);
-        let forker_keychain = Keychain::new(n_members, forker_index);
-        let mut this = Handler::new(own_keychain, 0);
+        let own_kc = keychain(n_members, own_index);
+        let forker_kc = keychain(n_members, forker_index);
+        let mut this = Handler::new(own_kc.clone(), 0);
         let alert = Alert::new(
             own_index,
-            make_fork_proof(forker_index, &forker_keychain, 0, n_members),
+            make_fork_proof(forker_index, &forker_kc, 0, n_members),
             vec![],
         );
         let alert_hash = Signable::hash(&alert);
-        let signed_alert = Signed::sign(alert, &own_keychain).into_unchecked();
+        let signed_alert = Signed::sign(alert, &own_kc).into_unchecked();
         this.on_network_alert(signed_alert.clone()).unwrap();
         for i in 1..n_members.total() {
             let node_id = PeerId::new(i as u8);
             assert_eq!(
                 this.on_alert_request(node_id, alert_hash),
-                Ok((signed_alert.clone(), Recipient::Peer(node_id),)),
+                Ok((signed_alert.clone(), Recipient::Peer(node_id))),
             );
         }
     }
@@ -435,27 +390,22 @@ mod tests {
         let other_honest_node = PeerId::new(1 as u8);
         let double_committer = PeerId::new(5 as u8);
         let forker_index = PeerId::new(6 as u8);
-        let keychains: Vec<_> = (0..n_members.total())
-            .map(|i| Keychain::new(n_members, PeerId::new(i as u8)))
+        let kcs: Vec<_> = (0..n_members.total())
+            .map(|i| keychain(n_members, PeerId::new(i as u8)))
             .collect();
-        let mut this = Handler::new(keychains[own_index.to_usize()], 0);
-        let fork_proof = make_fork_proof(
-            forker_index,
-            &keychains[forker_index.to_usize()],
-            0,
-            n_members,
-        );
+        let mut this = Handler::new(kcs[own_index.to_usize()].clone(), 0);
+        let fork_proof = make_fork_proof(forker_index, &kcs[forker_index.to_usize()], 0, n_members);
         let empty_alert = Alert::new(double_committer, fork_proof.clone(), vec![]);
         let empty_alert_hash = Signable::hash(&empty_alert);
         let signed_empty_alert =
-            Signed::sign(empty_alert, &keychains[double_committer.to_usize()]).into_unchecked();
+            Signed::sign(empty_alert, &kcs[double_committer.to_usize()]).into_unchecked();
         let signed_empty_alert_hash =
-            Signed::sign_with_index(empty_alert_hash, &keychains[double_committer.to_usize()])
+            Signed::sign_with_index(empty_alert_hash, &kcs[double_committer.to_usize()])
                 .into_unchecked();
         let multisigned_empty_alert_hash = signed_empty_alert_hash
-            .check(&keychains[double_committer.to_usize()])
+            .check(&kcs[double_committer.to_usize()])
             .expect("the signature is correct")
-            .into_partially_multisigned(&keychains[double_committer.to_usize()]);
+            .into_partially_multisigned(&kcs[double_committer.to_usize()]);
         assert_eq!(
             this.on_network_alert(signed_empty_alert),
             Ok((
@@ -472,24 +422,24 @@ mod tests {
         let nonempty_alert = Alert::new(double_committer, fork_proof, vec![forker_unit]);
         let nonempty_alert_hash = Signable::hash(&nonempty_alert);
         let signed_nonempty_alert =
-            Signed::sign(nonempty_alert, &keychains[double_committer.to_usize()]).into_unchecked();
+            Signed::sign(nonempty_alert, &kcs[double_committer.to_usize()]).into_unchecked();
         let signed_nonempty_alert_hash =
-            Signed::sign_with_index(nonempty_alert_hash, &keychains[double_committer.to_usize()])
+            Signed::sign_with_index(nonempty_alert_hash, &kcs[double_committer.to_usize()])
                 .into_unchecked();
         let mut multisigned_nonempty_alert_hash = signed_nonempty_alert_hash
-            .check(&keychains[double_committer.to_usize()])
+            .check(&kcs[double_committer.to_usize()])
             .expect("the signature is correct")
-            .into_partially_multisigned(&keychains[double_committer.to_usize()]);
+            .into_partially_multisigned(&kcs[double_committer.to_usize()]);
         for i in 1..n_members.total() - 2 {
             let node_id = PeerId::new(i as u8);
             let signed_nonempty_alert_hash =
-                Signed::sign_with_index(nonempty_alert_hash, &keychains[node_id.to_usize()])
+                Signed::sign_with_index(nonempty_alert_hash, &kcs[node_id.to_usize()])
                     .into_unchecked();
             multisigned_nonempty_alert_hash = multisigned_nonempty_alert_hash.add_signature(
                 signed_nonempty_alert_hash
-                    .check(&keychains[double_committer.to_usize()])
+                    .check(&kcs[double_committer.to_usize()])
                     .expect("the signature is correct"),
-                &keychains[double_committer.to_usize()],
+                &kcs[double_committer.to_usize()],
             );
         }
         let message = Message::MultisignedHash(multisigned_nonempty_alert_hash.into_unchecked());
@@ -510,20 +460,15 @@ mod tests {
         let other_honest_node = PeerId::new(1 as u8);
         let double_committer = PeerId::new(5 as u8);
         let forker_index = PeerId::new(6 as u8);
-        let keychains: Vec<_> = (0..n_members.total())
-            .map(|i| Keychain::new(n_members, PeerId::new(i as u8)))
+        let kcs: Vec<_> = (0..n_members.total())
+            .map(|i| keychain(n_members, PeerId::new(i as u8)))
             .collect();
-        let mut this = Handler::new(keychains[own_index.to_usize()], 0);
-        let fork_proof = make_fork_proof(
-            forker_index,
-            &keychains[forker_index.to_usize()],
-            0,
-            n_members,
-        );
+        let mut this = Handler::new(kcs[own_index.to_usize()].clone(), 0);
+        let fork_proof = make_fork_proof(forker_index, &kcs[forker_index.to_usize()], 0, n_members);
         let empty_alert = Alert::new(double_committer, fork_proof.clone(), vec![]);
         let empty_alert_hash = Signable::hash(&empty_alert);
         let signed_empty_alert =
-            Signed::sign(empty_alert, &keychains[double_committer.to_usize()]).into_unchecked();
+            Signed::sign(empty_alert, &kcs[double_committer.to_usize()]).into_unchecked();
         assert_eq!(
             this.on_network_alert(signed_empty_alert),
             Ok((
@@ -535,24 +480,24 @@ mod tests {
         let nonempty_alert = Alert::new(double_committer, fork_proof, vec![forker_unit]);
         let nonempty_alert_hash = Signable::hash(&nonempty_alert);
         let signed_nonempty_alert =
-            Signed::sign(nonempty_alert, &keychains[double_committer.to_usize()]).into_unchecked();
+            Signed::sign(nonempty_alert, &kcs[double_committer.to_usize()]).into_unchecked();
         let signed_nonempty_alert_hash =
-            Signed::sign_with_index(nonempty_alert_hash, &keychains[double_committer.to_usize()])
+            Signed::sign_with_index(nonempty_alert_hash, &kcs[double_committer.to_usize()])
                 .into_unchecked();
         let mut multisigned_nonempty_alert_hash = signed_nonempty_alert_hash
-            .check(&keychains[double_committer.to_usize()])
+            .check(&kcs[double_committer.to_usize()])
             .expect("the signature is correct")
-            .into_partially_multisigned(&keychains[double_committer.to_usize()]);
+            .into_partially_multisigned(&kcs[double_committer.to_usize()]);
         for i in 1..3 {
             let node_id = PeerId::new(i as u8);
             let signed_nonempty_alert_hash =
-                Signed::sign_with_index(nonempty_alert_hash, &keychains[node_id.to_usize()])
+                Signed::sign_with_index(nonempty_alert_hash, &kcs[node_id.to_usize()])
                     .into_unchecked();
             multisigned_nonempty_alert_hash = multisigned_nonempty_alert_hash.add_signature(
                 signed_nonempty_alert_hash
-                    .check(&keychains[double_committer.to_usize()])
+                    .check(&kcs[double_committer.to_usize()])
                     .expect("the signature is correct"),
-                &keychains[double_committer.to_usize()],
+                &kcs[double_committer.to_usize()],
             );
         }
         let message = Message::MultisignedHash(multisigned_nonempty_alert_hash.into_unchecked());
@@ -571,10 +516,10 @@ mod tests {
         let n_members = NumPeers::new(7 as usize);
         let own_index = PeerId::new(0 as u8);
         let forker_index = PeerId::new(6 as u8);
-        let own_keychain = Keychain::new(n_members, own_index);
-        let forker_keychain = Keychain::new(n_members, forker_index);
-        let this = Handler::new(own_keychain, 0);
-        let fork_proof = make_fork_proof(forker_index, &forker_keychain, 0, n_members);
+        let own_kc = keychain(n_members, own_index);
+        let forker_kc = keychain(n_members, forker_index);
+        let this: Handler<Data> = Handler::new(own_kc, 0);
+        let fork_proof = make_fork_proof(forker_index, &forker_kc, 0, n_members);
         let alert = Alert::new(own_index, fork_proof, vec![]);
         assert_eq!(this.verify_fork(&alert), Ok(()));
     }
@@ -584,10 +529,10 @@ mod tests {
         let n_members = NumPeers::new(7 as usize);
         let own_index = PeerId::new(0 as u8);
         let forker_index = PeerId::new(6 as u8);
-        let own_keychain = Keychain::new(n_members, own_index);
-        let forker_keychain = Keychain::new(n_members, forker_index);
-        let this = Handler::new(own_keychain, 1);
-        let fork_proof = make_fork_proof(forker_index, &forker_keychain, 0, n_members);
+        let own_kc = keychain(n_members, own_index);
+        let forker_kc = keychain(n_members, forker_index);
+        let this: Handler<Data> = Handler::new(own_kc, 1);
+        let fork_proof = make_fork_proof(forker_index, &forker_kc, 0, n_members);
         let alert = Alert::new(own_index, fork_proof, vec![]);
         assert_eq!(
             this.verify_fork(&alert),
@@ -598,15 +543,15 @@ mod tests {
     #[test]
     fn verify_fork_different_creators() {
         let n_members = NumPeers::new(7 as usize);
-        let keychains: Vec<_> = (0..n_members.total())
-            .map(|i| Keychain::new(n_members, PeerId::new(i as u8)))
+        let kcs: Vec<_> = (0..n_members.total())
+            .map(|i| keychain(n_members, PeerId::new(i as u8)))
             .collect();
-        let this = Handler::new(keychains[0], 0);
+        let this: Handler<Data> = Handler::new(kcs[0].clone(), 0);
         let fork_proof = {
             let unit_0 = full_unit(n_members, PeerId::new(6 as u8), 0, Some(0));
             let unit_1 = full_unit(n_members, PeerId::new(5 as u8), 0, Some(0));
-            let signed_unit_0 = Signed::sign(unit_0, &keychains[6]).into_unchecked();
-            let signed_unit_1 = Signed::sign(unit_1, &keychains[5]).into_unchecked();
+            let signed_unit_0 = Signed::sign(unit_0, &kcs[6]).into_unchecked();
+            let signed_unit_1 = Signed::sign(unit_1, &kcs[5]).into_unchecked();
             (signed_unit_0, signed_unit_1)
         };
         let sender = PeerId::new(0 as u8);
@@ -619,14 +564,14 @@ mod tests {
         let n_members = NumPeers::new(7 as usize);
         let own_index = PeerId::new(0 as u8);
         let forker_index = PeerId::new(6 as u8);
-        let own_keychain = Keychain::new(n_members, own_index);
-        let forker_keychain = Keychain::new(n_members, forker_index);
-        let this = Handler::new(own_keychain, 0);
+        let own_kc = keychain(n_members, own_index);
+        let forker_kc = keychain(n_members, forker_index);
+        let this: Handler<Data> = Handler::new(own_kc, 0);
         let fork_proof = {
             let unit_0 = full_unit(n_members, forker_index, 0, Some(0));
             let unit_1 = full_unit(n_members, forker_index, 1, Some(0));
-            let signed_unit_0 = Signed::sign(unit_0, &forker_keychain).into_unchecked();
-            let signed_unit_1 = Signed::sign(unit_1, &forker_keychain).into_unchecked();
+            let signed_unit_0 = Signed::sign(unit_0, &forker_kc).into_unchecked();
+            let signed_unit_1 = Signed::sign(unit_1, &forker_kc).into_unchecked();
             (signed_unit_0, signed_unit_1)
         };
         let alert = Alert::new(own_index, fork_proof, vec![]);
@@ -655,48 +600,42 @@ mod tests {
         let n_members = NumPeers::new(7 as usize);
         let own_index = PeerId::new(1 as u8);
         let forker_index = PeerId::new(6 as u8);
-        let keychains: Vec<_> = (0..n_members.total())
-            .map(|i| Keychain::new(n_members, PeerId::new(i as u8)))
+        let kcs: Vec<_> = (0..n_members.total())
+            .map(|i| keychain(n_members, PeerId::new(i as u8)))
             .collect();
-        let mut this = Handler::new(keychains[own_index.to_usize()], 0);
+        let mut this = Handler::new(kcs[own_index.to_usize()].clone(), 0);
         let fork_proof = if good_commitment {
-            make_fork_proof(
-                forker_index,
-                &keychains[forker_index.to_usize()],
-                0,
-                n_members,
-            )
+            make_fork_proof(forker_index, &kcs[forker_index.to_usize()], 0, n_members)
         } else {
             let unit_0 = full_unit(n_members, forker_index, 0, Some(0));
             let unit_1 = full_unit(n_members, forker_index, 1, Some(1));
             let signed_unit_0 =
-                Signed::sign(unit_0, &keychains[forker_index.to_usize()]).into_unchecked();
+                Signed::sign(unit_0, &kcs[forker_index.to_usize()]).into_unchecked();
             let signed_unit_1 =
-                Signed::sign(unit_1, &keychains[forker_index.to_usize()]).into_unchecked();
+                Signed::sign(unit_1, &kcs[forker_index.to_usize()]).into_unchecked();
             (signed_unit_0, signed_unit_1)
         };
         let alert = Alert::new(own_index, fork_proof, vec![]);
         let alert_hash = Signable::hash(&alert);
-        let signed_alert = Signed::sign(alert, &keychains[own_index.to_usize()]).into_unchecked();
+        let signed_alert = Signed::sign(alert, &kcs[own_index.to_usize()]).into_unchecked();
         if make_known {
             let _ = this.on_network_alert(signed_alert);
         }
         let signed_alert_hash =
-            Signed::sign_with_index(alert_hash, &keychains[own_index.to_usize()]).into_unchecked();
+            Signed::sign_with_index(alert_hash, &kcs[own_index.to_usize()]).into_unchecked();
         let mut multisigned_alert_hash = signed_alert_hash
-            .check(&keychains[forker_index.to_usize()])
+            .check(&kcs[forker_index.to_usize()])
             .expect("the signature is correct")
-            .into_partially_multisigned(&keychains[own_index.to_usize()]);
+            .into_partially_multisigned(&kcs[own_index.to_usize()]);
         for i in 1..n_members.total() - 1 {
             let node_id = PeerId::new(i as u8);
             let signed_alert_hash =
-                Signed::sign_with_index(alert_hash, &keychains[node_id.to_usize()])
-                    .into_unchecked();
+                Signed::sign_with_index(alert_hash, &kcs[node_id.to_usize()]).into_unchecked();
             multisigned_alert_hash = multisigned_alert_hash.add_signature(
                 signed_alert_hash
-                    .check(&keychains[forker_index.to_usize()])
+                    .check(&kcs[forker_index.to_usize()])
                     .expect("the signature is correct"),
-                &keychains[forker_index.to_usize()],
+                &kcs[forker_index.to_usize()],
             );
         }
         assert!(multisigned_alert_hash.is_complete());
