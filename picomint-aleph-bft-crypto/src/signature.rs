@@ -401,14 +401,19 @@ mod tests {
 
     #[test]
     fn test_invalid_signatures() {
+        use picomint_core::secp256k1::schnorr::Signature as SchnorrSig;
         let node_count: NumPeers = 1.into();
         let mut chains = keychains(node_count);
         let keychain = chains.pop().unwrap();
         let msg = test_message();
         let signed_msg = Signed::sign_with_index(msg, &keychain);
         let mut unchecked_msg = signed_msg.into_unchecked();
-        // Flip a byte in the signature to make it invalid.
-        unchecked_msg.signature[0] ^= 0xFF;
+        // Tamper the signature: serialize, flip a byte, deserialize. The result
+        // is well-formed (still 64 bytes) but won't verify under the original key.
+        let mut bytes = unchecked_msg.signature.serialize();
+        bytes[0] ^= 0xFF;
+        unchecked_msg.signature =
+            SchnorrSig::from_slice(&bytes).expect("64 bytes is a valid schnorr sig length");
         assert!(
             unchecked_msg.check(&keychain).is_err(),
             "tampered signature should not validate"

@@ -1,25 +1,21 @@
 //! Concrete schnorr-backed [`Keychain`] holding the federation's public-key
 //! set, this peer's identity, and this peer's secret key.
 //!
-//! Produces and verifies BIP340 schnorr signatures. The signature type is a
-//! fixed-size byte array (`[u8; SIGNATURE_LEN]`), and the partial-multisig
-//! type is a sparse `NodeMap` of those bytes.
+//! Produces and verifies BIP340 schnorr signatures. The signature type is
+//! [`secp256k1::schnorr::Signature`] (re-exported as [`Signature`]); the
+//! partial-multisig type is a sparse [`NodeMap`] of those signatures.
 
 use std::collections::BTreeMap;
 
+pub use picomint_core::secp256k1::schnorr::Signature;
+
 use picomint_core::bitcoin::hashes::Hash;
 use picomint_core::secp256k1::hashes::sha256;
-use picomint_core::secp256k1::{schnorr, Message, PublicKey, SecretKey, SECP256K1};
+use picomint_core::secp256k1::{Message, PublicKey, SecretKey, SECP256K1};
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_encoding::Encodable;
 
 use crate::node::{Index, NodeMap};
-
-/// Length in bytes of a serialized schnorr signature.
-pub const SIGNATURE_LEN: usize = 64;
-
-/// A single peer's signature over some message — fixed-size schnorr bytes.
-pub type Signature = [u8; SIGNATURE_LEN];
 
 /// A sparse map of peer signatures forming a partial multisignature.
 pub type PartialMultisignature = NodeMap<Signature>;
@@ -64,18 +60,14 @@ impl Keychain {
         self.secret_key
             .keypair(SECP256K1)
             .sign_schnorr(Self::message(msg))
-            .serialize()
     }
 
     pub fn verify(&self, msg: &[u8], signature: &Signature, peer_id: PeerId) -> bool {
         let Some(pk) = self.public_keys.get(&peer_id) else {
             return false;
         };
-        let Ok(sig) = schnorr::Signature::from_slice(signature) else {
-            return false;
-        };
         SECP256K1
-            .verify_schnorr(&sig, &Self::message(msg), &pk.x_only_public_key().0)
+            .verify_schnorr(signature, &Self::message(msg), &pk.x_only_public_key().0)
             .is_ok()
     }
 
@@ -93,30 +85,17 @@ impl Keychain {
     }
 
     /// Sign a typed message — encodes via [`Encodable`] then schnorr-signs.
-    /// Used by the engine's session-header signing path which works in
-    /// terms of `schnorr::Signature` rather than `[u8; 64]`.
-    pub fn sign_typed<T: Encodable + ?Sized>(&self, message: &T) -> schnorr::Signature {
-        self.secret_key
-            .keypair(SECP256K1)
-            .sign_schnorr(Self::message(&message.consensus_encode_to_vec()))
+    pub fn sign_typed<T: Encodable + ?Sized>(&self, message: &T) -> Signature {
+        self.sign(&message.consensus_encode_to_vec())
     }
 
     pub fn verify_typed<T: Encodable + ?Sized>(
         &self,
         message: &T,
-        signature: &schnorr::Signature,
+        signature: &Signature,
         peer_id: PeerId,
     ) -> bool {
-        let Some(pk) = self.public_keys.get(&peer_id) else {
-            return false;
-        };
-        SECP256K1
-            .verify_schnorr(
-                signature,
-                &Self::message(&message.consensus_encode_to_vec()),
-                &pk.x_only_public_key().0,
-            )
-            .is_ok()
+        self.verify(&message.consensus_encode_to_vec(), signature, peer_id)
     }
 }
 
