@@ -12,8 +12,8 @@ impl Encodable for Scalar {
 }
 
 impl Decodable for Scalar {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        let bytes = <[u8; 32]>::consensus_decode(r)?;
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        let bytes = <[u8; 32]>::consensus_decode_partial(r)?;
         Option::from(Self::from_bytes(&bytes))
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid bls Scalar"))
     }
@@ -26,8 +26,8 @@ impl Encodable for G1Affine {
 }
 
 impl Decodable for G1Affine {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        let bytes = <[u8; 48]>::consensus_decode(r)?;
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        let bytes = <[u8; 48]>::consensus_decode_partial(r)?;
         Option::from(Self::from_compressed(&bytes))
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid bls G1Affine"))
     }
@@ -40,8 +40,8 @@ impl Encodable for G2Affine {
 }
 
 impl Decodable for G2Affine {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        let bytes = <[u8; 96]>::consensus_decode(r)?;
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        let bytes = <[u8; 96]>::consensus_decode_partial(r)?;
         Option::from(Self::from_compressed(&bytes))
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid bls G2Affine"))
     }
@@ -54,8 +54,8 @@ impl Encodable for G1Projective {
 }
 
 impl Decodable for G1Projective {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        Ok(Self::from(G1Affine::consensus_decode(r)?))
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Ok(Self::from(G1Affine::consensus_decode_partial(r)?))
     }
 }
 
@@ -66,7 +66,7 @@ impl Encodable for G2Projective {
 }
 
 impl Decodable for G2Projective {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        Ok(Self::from(G2Affine::consensus_decode(r)?))
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Ok(Self::from(G2Affine::consensus_decode_partial(r)?))
     }
 }

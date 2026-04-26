@@ -22,7 +22,7 @@ pub fn decode<T: Decodable>(s: &str) -> anyhow::Result<T> {
 
     let bytes = decode_bytes(&s[PREFIX.len()..])?;
 
-    Ok(T::consensus_decode_exact(&bytes)?)
+    Ok(T::consensus_decode(&bytes)?)
 }
 
 fn encode_bytes(input: &[u8]) -> String {

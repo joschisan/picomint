@@ -19,7 +19,7 @@ macro_rules! impl_bitcoin_bridge {
         }
 
         impl Decodable for $ty {
-            fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
+            fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
                 bitcoin::consensus::Decodable::consensus_decode(bitcoin_io::from_std_mut(r))
                     .map_err(invalid)
             }
@@ -41,9 +41,9 @@ impl Encodable for bitcoin::Network {
 }
 
 impl Decodable for bitcoin::Network {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
         Self::from_magic(bitcoin::p2p::Magic::from_bytes(
-            <[u8; 4]>::consensus_decode(r)?,
+            <[u8; 4]>::consensus_decode_partial(r)?,
         ))
         .ok_or_else(|| invalid("unknown network magic"))
     }
@@ -56,8 +56,8 @@ impl Encodable for bitcoin::Amount {
 }
 
 impl Decodable for bitcoin::Amount {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        Ok(Self::from_sat(u64::consensus_decode(r)?))
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Ok(Self::from_sat(u64::consensus_decode_partial(r)?))
     }
 }
 
@@ -68,8 +68,10 @@ impl Encodable for bitcoin::hashes::sha256::Hash {
 }
 
 impl Decodable for bitcoin::hashes::sha256::Hash {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        Ok(Self::from_byte_array(<[u8; 32]>::consensus_decode(r)?))
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Ok(Self::from_byte_array(<[u8; 32]>::consensus_decode_partial(
+            r,
+        )?))
     }
 }
 
@@ -80,8 +82,10 @@ impl Encodable for bitcoin::hashes::hash160::Hash {
 }
 
 impl Decodable for bitcoin::hashes::hash160::Hash {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        Ok(Self::from_byte_array(<[u8; 20]>::consensus_decode(r)?))
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Ok(Self::from_byte_array(<[u8; 20]>::consensus_decode_partial(
+            r,
+        )?))
     }
 }
 
@@ -92,8 +96,10 @@ impl Encodable for lightning_invoice::Bolt11Invoice {
 }
 
 impl Decodable for lightning_invoice::Bolt11Invoice {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        String::consensus_decode(r)?.parse().map_err(invalid)
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        String::consensus_decode_partial(r)?
+            .parse()
+            .map_err(invalid)
     }
 }
 
@@ -121,7 +127,7 @@ mod tests {
         let raw: Vec<u8> = FromHex::from_hex(
             "02000000000101d35b66c54cf6c09b81a8d94cd5d179719cd7595c258449452a9305ab9b12df250200000000fdffffff020cd50a0000000000160014ae5d450b71c04218e6e81c86fcc225882d7b7caae695b22100000000160014f60834ef165253c571b11ce9fa74e46692fc5ec10248304502210092062c609f4c8dc74cd7d4596ecedc1093140d90b3fd94b4bdd9ad3e102ce3bc02206bb5a6afc68d583d77d5d9bcfb6252a364d11a307f3418be1af9f47f7b1b3d780121026e5628506ecd33242e5ceb5fdafe4d3066b5c0f159b3c05a621ef65f177ea28600000000"
         ).unwrap();
-        let tx = bitcoin::Transaction::consensus_decode_exact(&raw).unwrap();
+        let tx = bitcoin::Transaction::consensus_decode(&raw).unwrap();
         test_roundtrip(&tx);
     }
 

@@ -1,10 +1,11 @@
 //! Consensus-critical binary encoding.
 //!
-//! Two traits, one method each: [`Encodable::consensus_encode`] and
-//! [`Decodable::consensus_decode`]. Fixed-width big-endian for integers,
-//! length-prefixed (u32 BE) for `Vec` / `String` / maps. No varints, no
-//! module decoder registry, no partial / whole / from-finite-reader tree,
-//! no `DecodeError` — just `io::Error`.
+//! Two traits: [`Encodable`] (one primary method, `consensus_encode`)
+//! and [`Decodable`] (`consensus_decode_partial` for stream reads,
+//! `consensus_decode` for whole-buffer reads that reject trailing bytes).
+//! Fixed-width big-endian for integers, length-prefixed (u32 BE) for `Vec` /
+//! `String` / maps. No varints, no module decoder registry, no
+//! `DecodeError` — just `io::Error`.
 //!
 //! Callers that want to guard against malicious input size should bound
 //! the reader (e.g. wrap in `std::io::Take`) or frame the data at the
@@ -69,12 +70,15 @@ pub trait Encodable {
 
 /// Types that can decode themselves from a byte stream.
 pub trait Decodable: Sized {
-    fn consensus_decode<R: Read>(reader: &mut R) -> io::Result<Self>;
+    /// Decode from a `Read`, consuming only this type's bytes. Used by nested
+    /// decoders that share a stream; outer callers should prefer
+    /// [`Decodable::consensus_decode`] so trailing bytes are rejected.
+    fn consensus_decode_partial<R: Read>(reader: &mut R) -> io::Result<Self>;
 
     /// Decode from a byte slice, erroring if any bytes remain.
-    fn consensus_decode_exact(bytes: &[u8]) -> io::Result<Self> {
+    fn consensus_decode(bytes: &[u8]) -> io::Result<Self> {
         let mut reader = bytes;
-        let value = Self::consensus_decode(&mut reader)?;
+        let value = Self::consensus_decode_partial(&mut reader)?;
         if !reader.is_empty() {
             return Err(invalid_data(format!(
                 "trailing bytes after decoding {}",
@@ -113,8 +117,8 @@ impl<T> Decodable for Box<T>
 where
     T: Decodable,
 {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        Ok(Self::new(T::consensus_decode(r)?))
+    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
+        Ok(Self::new(T::consensus_decode_partial(r)?))
     }
 }
 
@@ -129,7 +133,7 @@ macro_rules! impl_encode_decode_int {
         }
 
         impl Decodable for $ty {
-            fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+            fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
                 let mut buf = [0u8; std::mem::size_of::<$ty>()];
                 r.read_exact(&mut buf)?;
                 Ok(Self::from_be_bytes(buf))
@@ -152,8 +156,8 @@ impl Encodable for bool {
 }
 
 impl Decodable for bool {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        match u8::consensus_decode(r)? {
+    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
+        match u8::consensus_decode_partial(r)? {
             0 => Ok(false),
             1 => Ok(true),
             n => Err(invalid_data(format!("bool: expected 0/1, got {n}"))),
@@ -170,7 +174,7 @@ impl Encodable for () {
 }
 
 impl Decodable for () {
-    fn consensus_decode<R: Read>(_: &mut R) -> io::Result<Self> {
+    fn consensus_decode_partial<R: Read>(_: &mut R) -> io::Result<Self> {
         Ok(())
     }
 }
@@ -190,8 +194,8 @@ macro_rules! impl_encode_decode_tuple {
 
         #[allow(non_snake_case)]
         impl<$($ty: Decodable),*> Decodable for ($($ty,)*) {
-            fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-                Ok(($({ let $ty = <$ty as Decodable>::consensus_decode(r)?; $ty },)*))
+            fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
+                Ok(($({ let $ty = <$ty as Decodable>::consensus_decode_partial(r)?; $ty },)*))
             }
         }
     };
@@ -218,10 +222,10 @@ impl<T: Encodable> Encodable for Option<T> {
 }
 
 impl<T: Decodable> Decodable for Option<T> {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        match u8::consensus_decode(r)? {
+    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
+        match u8::consensus_decode_partial(r)? {
             0 => Ok(None),
-            1 => Ok(Some(T::consensus_decode(r)?)),
+            1 => Ok(Some(T::consensus_decode_partial(r)?)),
             n => Err(invalid_data(format!("Option: expected 0/1, got {n}"))),
         }
     }
@@ -243,10 +247,10 @@ impl<T: Encodable, E: Encodable> Encodable for Result<T, E> {
 }
 
 impl<T: Decodable, E: Decodable> Decodable for Result<T, E> {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        match u8::consensus_decode(r)? {
-            0 => Ok(Err(E::consensus_decode(r)?)),
-            1 => Ok(Ok(T::consensus_decode(r)?)),
+    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
+        match u8::consensus_decode_partial(r)? {
+            0 => Ok(Err(E::consensus_decode_partial(r)?)),
+            1 => Ok(Ok(T::consensus_decode_partial(r)?)),
             n => Err(invalid_data(format!("Result: expected 0/1, got {n}"))),
         }
     }
@@ -261,8 +265,8 @@ impl Encodable for String {
 }
 
 impl Decodable for String {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        Self::from_utf8(Vec::<u8>::consensus_decode(r)?)
+    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
+        Self::from_utf8(Vec::<u8>::consensus_decode_partial(r)?)
             .map_err(|e| invalid_data(format!("invalid UTF-8: {e}")))
     }
 }
@@ -280,8 +284,8 @@ impl Encodable for Cow<'static, str> {
 }
 
 impl Decodable for Cow<'static, str> {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        Ok(Cow::Owned(String::consensus_decode(r)?))
+    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
+        Ok(Cow::Owned(String::consensus_decode_partial(r)?))
     }
 }
 
@@ -325,8 +329,8 @@ impl<T> Decodable for Vec<T>
 where
     T: Decodable + 'static,
 {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        let len = u32::consensus_decode(r)? as usize;
+    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
+        let len = u32::consensus_decode_partial(r)? as usize;
         if TypeId::of::<T>() == TypeId::of::<u8>() {
             let mut bytes = vec![0u8; len];
             r.read_exact(&mut bytes)?;
@@ -338,7 +342,7 @@ where
         // only as the reader yields bytes.
         let mut v = Vec::new();
         for _ in 0..len {
-            v.push(T::consensus_decode(r)?);
+            v.push(T::consensus_decode_partial(r)?);
         }
         Ok(v)
     }
@@ -366,7 +370,7 @@ impl<T, const N: usize> Decodable for [T; N]
 where
     T: Decodable + Debug + Default + Copy + 'static,
 {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
+    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
         if TypeId::of::<T>() == TypeId::of::<u8>() {
             let mut bytes = [0u8; N];
             r.read_exact(&mut bytes)?;
@@ -376,7 +380,7 @@ where
         }
         let mut data = [T::default(); N];
         for item in &mut data {
-            *item = T::consensus_decode(r)?;
+            *item = T::consensus_decode_partial(r)?;
         }
         Ok(data)
     }
@@ -406,15 +410,15 @@ where
     K: Decodable + Ord,
     V: Decodable,
 {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        let len = u32::consensus_decode(r)? as usize;
+    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
+        let len = u32::consensus_decode_partial(r)? as usize;
         let mut map = Self::new();
         for _ in 0..len {
-            let k = K::consensus_decode(r)?;
+            let k = K::consensus_decode_partial(r)?;
             if map.last_key_value().is_some_and(|(prev, _)| k <= *prev) {
                 return Err(invalid_data("BTreeMap: non-canonical key order"));
             }
-            let v = V::consensus_decode(r)?;
+            let v = V::consensus_decode_partial(r)?;
             if map.insert(k, v).is_some() {
                 return Err(invalid_data("BTreeMap: duplicate key"));
             }
@@ -442,11 +446,11 @@ impl<K> Decodable for BTreeSet<K>
 where
     K: Decodable + Ord,
 {
-    fn consensus_decode<R: Read>(r: &mut R) -> io::Result<Self> {
-        let len = u32::consensus_decode(r)? as usize;
+    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
+        let len = u32::consensus_decode_partial(r)? as usize;
         let mut set = Self::new();
         for _ in 0..len {
-            let k = K::consensus_decode(r)?;
+            let k = K::consensus_decode_partial(r)?;
             if set.last().is_some_and(|prev| k <= *prev) {
                 return Err(invalid_data("BTreeSet: non-canonical order"));
             }
@@ -471,7 +475,7 @@ pub(crate) mod tests {
         T: Encodable + Decodable + Eq + Debug,
     {
         let bytes = value.consensus_encode_to_vec();
-        let decoded = T::consensus_decode_exact(&bytes).unwrap();
+        let decoded = T::consensus_decode(&bytes).unwrap();
         assert_eq!(value, &decoded);
     }
 
@@ -481,7 +485,7 @@ pub(crate) mod tests {
     {
         let bytes = value.consensus_encode_to_vec();
         assert_eq!(expected, &bytes[..]);
-        let decoded = T::consensus_decode_exact(&bytes).unwrap();
+        let decoded = T::consensus_decode(&bytes).unwrap();
         assert_eq!(value, &decoded);
     }
 
@@ -544,14 +548,14 @@ pub(crate) mod tests {
         1u32.consensus_encode(&mut bad).unwrap();
         "a".to_string().consensus_encode(&mut bad).unwrap();
         2u32.consensus_encode(&mut bad).unwrap();
-        assert!(BTreeMap::<String, u32>::consensus_decode_exact(&bad).is_err());
+        assert!(BTreeMap::<String, u32>::consensus_decode(&bad).is_err());
     }
 
     #[test]
     fn trailing_bytes_rejected() {
         let mut bytes = 42u32.consensus_encode_to_vec();
         bytes.push(0);
-        assert!(u32::consensus_decode_exact(&bytes).is_err());
+        assert!(u32::consensus_decode(&bytes).is_err());
     }
 
     #[derive(Debug, Eq, PartialEq, Encodable, Decodable)]
@@ -573,7 +577,7 @@ pub(crate) mod tests {
         // Variant index 99 doesn't exist.
         let mut bytes = Vec::new();
         99u64.consensus_encode(&mut bytes).unwrap();
-        assert!(TestEnum::consensus_decode_exact(&bytes).is_err());
+        assert!(TestEnum::consensus_decode(&bytes).is_err());
     }
 
     #[derive(Debug, Encodable, Decodable)]
@@ -581,7 +585,7 @@ pub(crate) mod tests {
 
     #[test]
     fn derive_empty_enum_always_errors() {
-        assert!(NotConstructable::consensus_decode_exact(&[0]).is_err());
+        assert!(NotConstructable::consensus_decode(&[0]).is_err());
     }
 
     #[derive(Debug, Encodable, Decodable, Eq, PartialEq)]
@@ -625,7 +629,7 @@ pub(crate) mod tests {
     }
 
     fn decode_value<T: Decodable>(bytes: &[u8]) -> T {
-        T::consensus_decode_exact(bytes).unwrap()
+        T::consensus_decode(bytes).unwrap()
     }
 
     fn preserves_numeric_order<T>(mut values: Vec<T>)

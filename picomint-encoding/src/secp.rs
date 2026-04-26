@@ -13,8 +13,8 @@ impl Encodable for secp256k1::ecdsa::Signature {
 }
 
 impl Decodable for secp256k1::ecdsa::Signature {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        Self::from_compact(&<[u8; 64]>::consensus_decode(r)?).map_err(invalid)
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Self::from_compact(&<[u8; 64]>::consensus_decode_partial(r)?).map_err(invalid)
     }
 }
 
@@ -25,8 +25,8 @@ impl Encodable for secp256k1::PublicKey {
 }
 
 impl Decodable for secp256k1::PublicKey {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        Self::from_slice(&<[u8; 33]>::consensus_decode(r)?).map_err(invalid)
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Self::from_slice(&<[u8; 33]>::consensus_decode_partial(r)?).map_err(invalid)
     }
 }
 
@@ -37,8 +37,8 @@ impl Encodable for secp256k1::XOnlyPublicKey {
 }
 
 impl Decodable for secp256k1::XOnlyPublicKey {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        Self::from_slice(&<[u8; 32]>::consensus_decode(r)?).map_err(invalid)
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Self::from_slice(&<[u8; 32]>::consensus_decode_partial(r)?).map_err(invalid)
     }
 }
 
@@ -49,8 +49,9 @@ impl Encodable for secp256k1::schnorr::Signature {
 }
 
 impl Decodable for secp256k1::schnorr::Signature {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        let bytes = <[u8; secp256k1::constants::SCHNORR_SIGNATURE_SIZE]>::consensus_decode(r)?;
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        let bytes =
+            <[u8; secp256k1::constants::SCHNORR_SIGNATURE_SIZE]>::consensus_decode_partial(r)?;
         Self::from_slice(&bytes).map_err(invalid)
     }
 }
@@ -62,8 +63,8 @@ impl Encodable for secp256k1::SecretKey {
 }
 
 impl Decodable for secp256k1::SecretKey {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        Self::from_slice(&<[u8; 32]>::consensus_decode(r)?).map_err(invalid)
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Self::from_slice(&<[u8; 32]>::consensus_decode_partial(r)?).map_err(invalid)
     }
 }
 
@@ -74,8 +75,8 @@ impl Encodable for bitcoin::key::Keypair {
 }
 
 impl Decodable for bitcoin::key::Keypair {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        let bytes = <[u8; 32]>::consensus_decode(r)?;
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        let bytes = <[u8; 32]>::consensus_decode_partial(r)?;
         Self::from_seckey_slice(bitcoin::secp256k1::global::SECP256K1, &bytes).map_err(invalid)
     }
 }

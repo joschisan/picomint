@@ -52,7 +52,7 @@ pub fn derive_decodable(input: TokenStream) -> TokenStream {
 
     quote! {
         impl #impl_generics ::picomint_encoding::Decodable for #ident #ty_generics #where_clause {
-            fn consensus_decode<R: ::std::io::Read>(reader: &mut R) -> ::std::io::Result<Self> {
+            fn consensus_decode_partial<R: ::std::io::Read>(reader: &mut R) -> ::std::io::Result<Self> {
                 #decode_body
             }
         }
@@ -146,7 +146,7 @@ fn derive_struct_decode(ident: &Ident, fields: &Fields) -> TokenStream2 {
             .map(|(i, _)| format_ident!("f{i}"))
             .collect::<Vec<_>>();
         quote! {
-            #(let #binds = ::picomint_encoding::Decodable::consensus_decode(reader)?;)*
+            #(let #binds = ::picomint_encoding::Decodable::consensus_decode_partial(reader)?;)*
             Ok(#ident(#(#binds),*))
         }
     } else if fields.is_empty() {
@@ -157,7 +157,7 @@ fn derive_struct_decode(ident: &Ident, fields: &Fields) -> TokenStream2 {
             .map(|f| f.ident.clone().unwrap())
             .collect::<Vec<_>>();
         quote! {
-            #(let #names = ::picomint_encoding::Decodable::consensus_decode(reader)?;)*
+            #(let #names = ::picomint_encoding::Decodable::consensus_decode_partial(reader)?;)*
             Ok(#ident { #(#names),* })
         }
     }
@@ -186,7 +186,7 @@ fn derive_enum_decode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> T
                 .collect::<Vec<_>>();
             quote! {
                 {
-                    #(let #binds = ::picomint_encoding::Decodable::consensus_decode(reader)?;)*
+                    #(let #binds = ::picomint_encoding::Decodable::consensus_decode_partial(reader)?;)*
                     Ok(#ident::#vname(#(#binds),*))
                 }
             }
@@ -200,7 +200,7 @@ fn derive_enum_decode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> T
                 .collect::<Vec<_>>();
             quote! {
                 {
-                    #(let #names = ::picomint_encoding::Decodable::consensus_decode(reader)?;)*
+                    #(let #names = ::picomint_encoding::Decodable::consensus_decode_partial(reader)?;)*
                     Ok(#ident::#vname { #(#names),* })
                 }
             }
@@ -210,7 +210,7 @@ fn derive_enum_decode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> T
     });
 
     quote! {
-        let variant = <u64 as ::picomint_encoding::Decodable>::consensus_decode(reader)?;
+        let variant = <u64 as ::picomint_encoding::Decodable>::consensus_decode_partial(reader)?;
         match variant {
             #(#arms)*
             other => Err(::std::io::Error::new(

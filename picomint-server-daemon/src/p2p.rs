@@ -108,7 +108,7 @@ impl P2PConnection {
     ) -> anyhow::Result<M> {
         let bytes = stream.read_to_end(MAX_P2P_MESSAGE_SIZE).await?;
 
-        Ok(M::consensus_decode_exact(&bytes)?)
+        Ok(M::consensus_decode(&bytes)?)
     }
 
     pub fn rtt(&self) -> Option<Duration> {

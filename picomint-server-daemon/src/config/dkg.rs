@@ -104,7 +104,7 @@ impl<'a> DkgHandle<'a> {
     ) -> anyhow::Result<BTreeMap<PeerId, T>> {
         let mut decoded = BTreeMap::new();
         for (k, bytes) in self.exchange_bytes(data.consensus_encode_to_vec()).await? {
-            decoded.insert(k, T::consensus_decode_exact(&bytes)?);
+            decoded.insert(k, T::consensus_decode(&bytes)?);
         }
         Ok(decoded)
     }

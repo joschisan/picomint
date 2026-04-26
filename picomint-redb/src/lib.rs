@@ -58,8 +58,8 @@ macro_rules! consensus_value {
             where
                 Self: 'a,
             {
-                <$ty as ::picomint_encoding::Decodable>::consensus_decode_exact(data)
-                    .expect("consensus_decode failed")
+                <$ty as ::picomint_encoding::Decodable>::consensus_decode(data)
+                    .expect("consensus_decode_partial failed")
             }
 
             fn as_bytes<'a, 'b: 'a>(value: &'a Self) -> ::std::vec::Vec<u8>

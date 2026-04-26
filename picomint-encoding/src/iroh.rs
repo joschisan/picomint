@@ -9,8 +9,8 @@ impl Encodable for iroh_base::PublicKey {
 }
 
 impl Decodable for iroh_base::PublicKey {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        Self::from_bytes(&<[u8; 32]>::consensus_decode(r)?)
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Self::from_bytes(&<[u8; 32]>::consensus_decode_partial(r)?)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
     }
 }
@@ -22,7 +22,7 @@ impl Encodable for iroh_base::SecretKey {
 }
 
 impl Decodable for iroh_base::SecretKey {
-    fn consensus_decode<R: io::Read>(r: &mut R) -> io::Result<Self> {
-        Ok(Self::from_bytes(&<[u8; 32]>::consensus_decode(r)?))
+    fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
+        Ok(Self::from_bytes(&<[u8; 32]>::consensus_decode_partial(r)?))
     }
 }

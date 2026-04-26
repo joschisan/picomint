@@ -313,7 +313,7 @@ async fn handle_request(
     _request_permit: tokio::sync::OwnedSemaphorePermit,
 ) -> anyhow::Result<()> {
     let request = recv_stream.read_to_end(100_000).await?;
-    let method = Method::consensus_decode_exact(&request)?;
+    let method = Method::consensus_decode(&request)?;
 
     let response = dispatch(consensus_api, method).await;
     let response = response.consensus_encode_to_vec();

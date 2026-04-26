@@ -194,7 +194,7 @@ impl FederationApi {
         Ret: Decodable,
     {
         self.request_raw(peer, method).await.and_then(|bytes| {
-            Ret::consensus_decode_exact(&bytes)
+            Ret::consensus_decode(&bytes)
                 .map_err(|e| ServerError::ResponseDeserialization(e.into()))
         })
     }
@@ -210,7 +210,7 @@ impl FederationApi {
         self.request_raw(peer_id, method.clone())
             .await
             .and_then(|bytes| {
-                FedRet::consensus_decode_exact(&bytes)
+                FedRet::consensus_decode(&bytes)
                     .map_err(|e| ServerError::ResponseDeserialization(e.into()))
             })
             .map_err(|e| error::FederationError::new_one_peer(peer_id, method, e))
@@ -443,7 +443,7 @@ async fn request_over_connection(connection: &Connection, method: Method) -> Ser
         .await
         .map_err(|e| ServerError::Transport(e.into()))?;
 
-    let response = <Result<Vec<u8>, ApiError>>::consensus_decode_exact(&response)
+    let response = <Result<Vec<u8>, ApiError>>::consensus_decode(&response)
         .map_err(|e| ServerError::InvalidResponse(e.into()))?;
 
     response.map_err(|e| ServerError::InvalidResponse(anyhow::anyhow!("Api Error: {:?}", e)))

@@ -257,7 +257,7 @@ impl ConsensusEngine {
                     }
 
                     if let Some(UnitData(bytes)) = ordered_unit.data {
-                        match Vec::<ConsensusItem>::consensus_decode_exact(&bytes) {
+                        match Vec::<ConsensusItem>::consensus_decode(&bytes) {
                             Ok(items) => {
                                 for item in items {
                                     if let Ok(()) = self.process_consensus_item(
