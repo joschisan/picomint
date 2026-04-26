@@ -1,6 +1,7 @@
 use std::sync::Arc;
+use std::time::Duration;
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail, ensure};
 use picomint_client::Client;
 use serde_json::Value;
 use tracing::info;
@@ -19,26 +20,36 @@ const WIPED_PEERS: [usize; 3] = [1, 2, 3];
 /// indefinitely without one of its members ever returning.
 const RESTORED_PEERS: [usize; 2] = [1, 2];
 
-/// Poll until guardian `peer_idx`'s finalized session count exceeds `floor`.
-async fn retry_session_count_above(env: &TestEnv, peer_idx: usize, floor: u64) -> Result<u64> {
+/// Poll until guardian `peer_idx`'s finalized session count exceeds `floor`,
+/// for up to `budget`. We take a custom budget here because the post-restore
+/// case is much slower than the pre-wipe case: peer 0's iroh QUIC idle
+/// timeout (~30s) gates the moment it notices the wiped peers have died and
+/// reconnects to the freshly-restarted ones, after which session 2 must
+/// finalize at exact threshold capacity (3 of 4 alive) with no slack.
+async fn retry_session_count_above(
+    env: &TestEnv,
+    peer_idx: usize,
+    floor: u64,
+    budget: Duration,
+) -> Result<u64> {
     let data_dir = env.data_dir.join(format!("server-{peer_idx}"));
-    retry(
-        &format!("server-{peer_idx} session count > {floor}"),
-        || {
-            let data_dir = data_dir.clone();
-            async move {
-                let count = cli::server_session_count(&data_dir)?;
-                ensure!(count > floor, "session count still {count}");
-                Ok(count)
-            }
-        },
-    )
-    .await
+    let deadline = std::time::Instant::now() + budget;
+    loop {
+        let count = cli::server_session_count(&data_dir)?;
+        if count > floor {
+            return Ok(count);
+        }
+        if std::time::Instant::now() >= deadline {
+            bail!("server-{peer_idx} session count still {count} after {budget:?}");
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 pub async fn run_test(env: &TestEnv, client: &Arc<Client>) -> Result<()> {
     info!("waiting for federation to finalize a session");
-    let pre_wipe_count = retry_session_count_above(env, WIPED_PEERS[0], 0).await?;
+    let pre_wipe_count =
+        retry_session_count_above(env, WIPED_PEERS[0], 0, Duration::from_secs(60)).await?;
     info!("pre-wipe session count = {pre_wipe_count}");
 
     info!("backing up configs of peers {:?}", RESTORED_PEERS);
@@ -78,7 +89,7 @@ pub async fn run_test(env: &TestEnv, client: &Arc<Client>) -> Result<()> {
 
     info!("waiting for federation to advance past pre-wipe session count");
     for &peer_idx in &RESTORED_PEERS {
-        retry_session_count_above(env, peer_idx, pre_wipe_count).await?;
+        retry_session_count_above(env, peer_idx, pre_wipe_count, Duration::from_secs(180)).await?;
     }
 
     info!("verifying restored configs match originals");
