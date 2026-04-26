@@ -174,6 +174,19 @@ impl TestEnv {
         Ok(())
     }
 
+    /// Indices of guardians whose process is currently running (i.e. that
+    /// haven't been wiped without restart). Use this instead of iterating
+    /// `0..NUM_GUARDIANS` for any operation that talks to a guardian's CLI
+    /// socket — wiped-without-restart guardians no longer have one.
+    pub async fn alive_guardians(&self) -> Vec<usize> {
+        let procs = self.guardian_processes.lock().await;
+        procs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, p)| p.as_ref().map(|_| i))
+            .collect()
+    }
+
     fn connect_bitcoind(
         runtime: &tokio::runtime::Runtime,
     ) -> anyhow::Result<bitcoincore_rpc::Client> {

@@ -8,10 +8,16 @@ use tracing::info;
 use crate::cli;
 use crate::env::{TestEnv, retry};
 
-/// Peers we wipe and restore. With NUM_GUARDIANS = 4 and threshold = 3,
-/// wiping 3 leaves the federation below threshold until at least 2 of the
-/// restored peers come back online — exercising the rejoin path under load.
-const WIPED_PEERS: [usize; 2] = [2, 3];
+/// Peers we kill and wipe. With NUM_GUARDIANS = 4 and threshold = 3,
+/// wiping 3 leaves only one peer alive — well below threshold. The
+/// federation halts until at least two of the wiped peers come back
+/// online (via [`RESTORED_PEERS`]).
+const WIPED_PEERS: [usize; 3] = [1, 2, 3];
+
+/// Peers we restore from backup. The remaining wiped peer (3) stays
+/// dead — exercising the case where the federation must continue
+/// indefinitely without one of its members ever returning.
+const RESTORED_PEERS: [usize; 2] = [1, 2];
 
 /// Poll until guardian `peer_idx`'s finalized session count exceeds `floor`.
 async fn retry_session_count_above(env: &TestEnv, peer_idx: usize, floor: u64) -> Result<u64> {
@@ -35,9 +41,9 @@ pub async fn run_test(env: &TestEnv, client: &Arc<Client>) -> Result<()> {
     let pre_wipe_count = retry_session_count_above(env, WIPED_PEERS[0], 0).await?;
     info!("pre-wipe session count = {pre_wipe_count}");
 
-    info!("backing up configs of peers {:?}", WIPED_PEERS);
+    info!("backing up configs of peers {:?}", RESTORED_PEERS);
     let mut backups: Vec<(usize, Value, std::path::PathBuf)> = Vec::new();
-    for &peer_idx in &WIPED_PEERS {
+    for &peer_idx in &RESTORED_PEERS {
         let data_dir = env.data_dir.join(format!("server-{peer_idx}"));
         let cfg = cli::server_config(&data_dir)?;
         let backup_path = env.data_dir.join(format!("config-{peer_idx}.json"));
@@ -50,13 +56,13 @@ pub async fn run_test(env: &TestEnv, client: &Arc<Client>) -> Result<()> {
         env.wipe_guardian(peer_idx).await?;
     }
 
-    info!("restarting wiped peers (fresh data dirs)");
-    for &peer_idx in &WIPED_PEERS {
+    info!("restarting peers {:?} (fresh data dirs)", RESTORED_PEERS);
+    for &peer_idx in &RESTORED_PEERS {
         env.restart_guardian(peer_idx).await?;
     }
 
-    info!("waiting for wiped peers to enter setup mode");
-    for &peer_idx in &WIPED_PEERS {
+    info!("waiting for restored peers to enter setup mode");
+    for &peer_idx in &RESTORED_PEERS {
         let data_dir = env.data_dir.join(format!("server-{peer_idx}"));
         retry(&format!("server-{peer_idx} in setup mode"), || async {
             cli::server_setup_status(&data_dir)
@@ -71,7 +77,7 @@ pub async fn run_test(env: &TestEnv, client: &Arc<Client>) -> Result<()> {
     }
 
     info!("waiting for federation to advance past pre-wipe session count");
-    for &peer_idx in &WIPED_PEERS {
+    for &peer_idx in &RESTORED_PEERS {
         retry_session_count_above(env, peer_idx, pre_wipe_count).await?;
     }
 

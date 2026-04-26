@@ -31,7 +31,7 @@ use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::cli;
-use crate::env::{NUM_GUARDIANS, TestEnv, retry};
+use crate::env::{TestEnv, retry};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -87,20 +87,20 @@ fn try_parse_ln_event(
 }
 
 pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
-    register_gateway(env, &env.gw_public)?;
+    register_gateway(env, &env.gw_public).await?;
     test_payments(env, client_send).await?;
     test_lnurl_recurringd_roundtrip(env).await?;
-    deregister_gateway(env, &env.gw_public)?;
+    deregister_gateway(env, &env.gw_public).await?;
 
     let mock_gw = spawn_mock_gateway().await?;
 
-    register_gateway(env, &mock_gw)?;
+    register_gateway(env, &mock_gw).await?;
     test_mock_send_exactly_once(client_send).await?;
     test_mock_send_refund_forfeit(client_send).await?;
     test_mock_wrong_network(client_send).await?;
     test_claim_outgoing_contract(client_send).await?;
     test_unilateral_refund(env, client_send).await?;
-    deregister_gateway(env, &mock_gw)?;
+    deregister_gateway(env, &mock_gw).await?;
 
     test_direct_ln_payments(env).await?;
 
@@ -109,16 +109,16 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     Ok(())
 }
 
-fn register_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
-    for peer in 0..NUM_GUARDIANS {
+async fn register_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
+    for peer in env.alive_guardians().await {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
         assert!(cli::server_ln_gateway_add(&data_dir, gateway)?);
     }
     Ok(())
 }
 
-fn deregister_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
-    for peer in 0..NUM_GUARDIANS {
+async fn deregister_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
+    for peer in env.alive_guardians().await {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
         assert!(cli::server_ln_gateway_remove(&data_dir, gateway)?);
     }
