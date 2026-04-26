@@ -6,7 +6,7 @@ use serde_json::Value;
 use tracing::info;
 
 use crate::cli;
-use crate::env::{TestEnv, retry};
+use crate::env::{TestEnv, retry, retry_n};
 
 /// Peers we kill and wipe. With NUM_GUARDIANS = 4 and threshold = 3,
 /// wiping 3 leaves only one peer alive — well below threshold. The
@@ -20,10 +20,14 @@ const WIPED_PEERS: [usize; 3] = [1, 2, 3];
 const RESTORED_PEERS: [usize; 2] = [1, 2];
 
 /// Poll until guardian `peer_idx`'s finalized session count exceeds `floor`.
+/// Uses a 3-minute budget — post-wipe iroh reconnection in CI (slower CPUs,
+/// cold caches, multiple peers re-establishing connections simultaneously)
+/// can take well over the default 1-minute retry budget.
 async fn retry_session_count_above(env: &TestEnv, peer_idx: usize, floor: u64) -> Result<u64> {
     let data_dir = env.data_dir.join(format!("server-{peer_idx}"));
-    retry(
+    retry_n(
         &format!("server-{peer_idx} session count > {floor}"),
+        720,
         || {
             let data_dir = data_dir.clone();
             async move {

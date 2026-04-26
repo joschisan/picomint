@@ -484,12 +484,24 @@ where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<T>>,
 {
-    for i in 0..240 {
+    retry_n(name, 240, f).await
+}
+
+/// Same as [`retry`] but with a configurable attempt count for callers
+/// that need a longer (or shorter) bounded wait.
+pub async fn retry_n<F, Fut, T>(name: &str, attempts: usize, f: F) -> anyhow::Result<T>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    for i in 0..attempts {
         match f().await {
             Ok(v) => return Ok(v),
             Err(e) => {
-                if i == 239 {
-                    return Err(e).context(format!("retry '{name}' exhausted after 240 attempts"));
+                if i == attempts - 1 {
+                    return Err(e).context(format!(
+                        "retry '{name}' exhausted after {attempts} attempts"
+                    ));
                 }
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
