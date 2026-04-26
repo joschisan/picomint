@@ -35,7 +35,9 @@ impl DataProvider {
 }
 
 #[async_trait::async_trait]
-impl aleph_bft::DataProvider<UnitData> for DataProvider {
+impl aleph_bft::DataProvider for DataProvider {
+    type Output = UnitData;
+
     async fn get_data(&mut self) -> Option<UnitData> {
         // the length of a vector is encoded in at most 9 bytes
         let mut n_bytes = 9;

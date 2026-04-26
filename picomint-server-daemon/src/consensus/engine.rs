@@ -19,7 +19,7 @@ use tracing::{debug, error, info, instrument, trace};
 
 use crate::LOG_CONSENSUS;
 use crate::config::ServerConfig;
-use crate::consensus::aleph_bft::backup::{BackupReader, BackupWriter};
+use crate::consensus::aleph_bft::backup::{UnitLoader, UnitSaver};
 use crate::consensus::aleph_bft::data_provider::{DataProvider, UnitData};
 use crate::consensus::aleph_bft::finalization_handler::{FinalizationHandler, OrderedUnit};
 use crate::consensus::aleph_bft::keychain::Keychain;
@@ -164,11 +164,11 @@ impl ConsensusEngine {
 
         let aleph_handle = tokio::spawn(aleph_bft::run_session(
             config,
-            aleph_bft::LocalIO::new(
+            aleph_bft::LocalIO::new_with_unit_finalization_handler(
                 DataProvider::new(self.submission_receiver.clone()),
                 FinalizationHandler::new(unit_data_sender),
-                BackupWriter::new(self.db.clone()).await,
-                BackupReader::new(self.db.clone()),
+                UnitSaver::new(self.db.clone()),
+                UnitLoader::new(self.db.clone()),
             ),
             Network::new(
                 connections.clone(),

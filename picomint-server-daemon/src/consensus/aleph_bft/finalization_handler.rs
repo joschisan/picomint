@@ -1,7 +1,8 @@
-use aleph_bft::{NodeIndex, Round};
+use aleph_bft::Round;
 use picomint_core::PeerId;
 
 use super::data_provider::UnitData;
+use super::network::Hasher;
 
 pub struct OrderedUnit {
     pub creator: PeerId,
@@ -19,19 +20,20 @@ impl FinalizationHandler {
     }
 }
 
-impl aleph_bft::FinalizationHandler<UnitData> for FinalizationHandler {
-    fn data_finalized(&mut self, _data: UnitData) {
-        unreachable!("This method is not called")
-    }
+impl aleph_bft::UnitFinalizationHandler for FinalizationHandler {
+    type Data = UnitData;
+    type Hasher = Hasher;
 
-    fn unit_finalized(&mut self, creator: NodeIndex, round: Round, data: Option<UnitData>) {
-        // the channel is unbounded
-        self.sender
-            .try_send(OrderedUnit {
-                creator: super::to_peer_id(creator),
-                round,
-                data,
-            })
-            .ok();
+    fn batch_finalized(&mut self, batch: Vec<aleph_bft::OrderedUnit<Self::Data, Self::Hasher>>) {
+        for unit in batch {
+            // the channel is unbounded
+            self.sender
+                .try_send(OrderedUnit {
+                    creator: super::to_peer_id(unit.creator),
+                    round: unit.round,
+                    data: unit.data,
+                })
+                .ok();
+        }
     }
 }
