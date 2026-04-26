@@ -2,7 +2,7 @@ pub use aleph_bft_crypto::{
     Indexed, MultiKeychain, Multisigned, NodeCount, PartialMultisignature, PartiallyMultisigned,
     Signable, Signature, Signed, UncheckedSigned,
 };
-use codec::{Decode, Encode};
+use picomint_encoding::{Decodable, Encodable};
 use core::fmt::Debug;
 use std::hash::Hash;
 
@@ -15,7 +15,7 @@ pub use scheduler::DoublingDelayScheduler;
 pub use service::Service;
 
 /// An RMC message consisting of either a signed (indexed) hash, or a multisigned hash.
-#[derive(Debug, Encode, Decode, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Encodable, Decodable, Clone, PartialEq, Eq, Hash)]
 pub enum Message<H: Signable, S: Signature, M: PartialMultisignature> {
     SignedHash(UncheckedSigned<Indexed<H>, S>),
     MultisignedHash(UncheckedSigned<H, M>),

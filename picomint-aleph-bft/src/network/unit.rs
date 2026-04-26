@@ -3,10 +3,10 @@ use crate::{
     units::{UncheckedSignedUnit, UnitCoord},
     Data, NodeIndex, Signature, UncheckedSigned, UnitHash,
 };
-use codec::{Decode, Encode};
+use picomint_encoding::{Decodable, Encodable};
 
 /// A message concerning units, either about new units or some requests for them.
-#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Debug, Decodable, Encodable)]
 pub enum UnitMessage<D: Data, S: Signature> {
     /// For disseminating newly created units.
     Unit(UncheckedSignedUnit<D, S>),

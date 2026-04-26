@@ -1,9 +1,9 @@
 use crate::NodeIndex;
 
-use codec::{Decode, Encode};
+use picomint_encoding::{Decodable, Encodable};
 
 /// A recipient of a message, either a specific node or everyone.
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 pub enum Recipient {
     Everyone,
     Node(NodeIndex),

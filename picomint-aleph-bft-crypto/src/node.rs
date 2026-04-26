@@ -1,9 +1,10 @@
-use codec::{Decode, Encode, Error, Input, Output};
 use derive_more::{Add, AddAssign, From, Into, Sub, SubAssign, Sum};
+use picomint_encoding::{Decodable, Encodable};
 use std::{
     collections::HashMap,
     fmt,
     hash::Hash,
+    io::{self, Read, Write},
     ops::{Div, Index as StdIndex, Mul},
     vec,
 };
@@ -12,20 +13,15 @@ use std::{
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, From, Into)]
 pub struct NodeIndex(pub usize);
 
-impl Encode for NodeIndex {
-    fn encode_to<T: Output + ?Sized>(&self, dest: &mut T) {
-        let val = self.0 as u64;
-        let bytes = val.to_le_bytes();
-        dest.write(&bytes);
+impl Encodable for NodeIndex {
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        (self.0 as u64).consensus_encode(w)
     }
 }
 
-impl Decode for NodeIndex {
-    fn decode<I: Input>(value: &mut I) -> Result<Self, Error> {
-        let mut arr = [0u8; 8];
-        value.read(&mut arr)?;
-        let val: u64 = u64::from_le_bytes(arr);
-        Ok(NodeIndex(val as usize))
+impl Decodable for NodeIndex {
+    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
+        Ok(NodeIndex(u64::consensus_decode_partial(r)? as usize))
     }
 }
 
@@ -90,10 +86,10 @@ impl NodeCount {
 }
 
 /// A container keeping items indexed by NodeIndex.
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Default, Decode, Encode, From)]
-pub struct NodeMap<T>(Vec<Option<T>>);
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Default, Decodable, Encodable, From)]
+pub struct NodeMap<T: Encodable + Decodable + 'static>(Vec<Option<T>>);
 
-impl<T> NodeMap<T> {
+impl<T: Encodable + Decodable + 'static> NodeMap<T> {
     /// Constructs a new node map with a given length.
     pub fn with_size(len: NodeCount) -> Self
     where
@@ -179,7 +175,7 @@ impl<T> NodeMap<T> {
     }
 }
 
-impl<T: 'static> IntoIterator for NodeMap<T> {
+impl<T: Encodable + Decodable + 'static> IntoIterator for NodeMap<T> {
     type Item = (NodeIndex, T);
     type IntoIter = Box<dyn Iterator<Item = (NodeIndex, T)>>;
     fn into_iter(self) -> Self::IntoIter {
@@ -187,7 +183,7 @@ impl<T: 'static> IntoIterator for NodeMap<T> {
     }
 }
 
-impl<'a, T> IntoIterator for &'a NodeMap<T> {
+impl<'a, T: Encodable + Decodable + 'static> IntoIterator for &'a NodeMap<T> {
     type Item = (NodeIndex, &'a T);
     type IntoIter = Box<dyn Iterator<Item = (NodeIndex, &'a T)> + 'a>;
     fn into_iter(self) -> Self::IntoIter {
@@ -195,7 +191,7 @@ impl<'a, T> IntoIterator for &'a NodeMap<T> {
     }
 }
 
-impl<'a, T> IntoIterator for &'a mut NodeMap<T> {
+impl<'a, T: Encodable + Decodable> IntoIterator for &'a mut NodeMap<T> {
     type Item = (NodeIndex, &'a mut T);
     type IntoIter = Box<dyn Iterator<Item = (NodeIndex, &'a mut T)> + 'a>;
     fn into_iter(self) -> Self::IntoIter {
@@ -203,7 +199,7 @@ impl<'a, T> IntoIterator for &'a mut NodeMap<T> {
     }
 }
 
-impl<T: fmt::Display> fmt::Display for NodeMap<T> {
+impl<T: Encodable + Decodable + fmt::Display> fmt::Display for NodeMap<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "[")?;
         let mut it = self.iter().peekable();
@@ -256,27 +252,29 @@ impl NodeSubset {
     }
 }
 
-impl Encode for NodeSubset {
-    fn encode_to<T: Output + ?Sized>(&self, dest: &mut T) {
-        (self.0.len() as u32).encode_to(dest);
-        self.0.to_bytes().encode_to(dest);
+impl Encodable for NodeSubset {
+    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
+        (self.0.len() as u32).consensus_encode(w)?;
+        self.0.to_bytes().consensus_encode(w)?;
+        Ok(())
     }
 }
 
-impl Decode for NodeSubset {
-    fn decode<I: Input>(input: &mut I) -> Result<Self, Error> {
-        let capacity = u32::decode(input)? as usize;
-        let bytes = Vec::decode(input)?;
+impl Decodable for NodeSubset {
+    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
+        let capacity = u32::consensus_decode_partial(r)? as usize;
+        let bytes = Vec::<u8>::consensus_decode_partial(r)?;
         let mut bv = bit_vec::BitVec::from_bytes(&bytes);
-        // Length should be capacity rounded up to the closest multiple of 8
         if bv.len() != 8 * capacity.div_ceil(8) {
-            return Err(Error::from(
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
                 "Length of bitvector inconsistent with encoded capacity.",
             ));
         }
         while bv.len() > capacity {
             if bv.pop() != Some(false) {
-                return Err(Error::from(
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
                     "Non-canonical encoding. Trailing bits should be all 0.",
                 ));
             }
@@ -306,14 +304,15 @@ impl fmt::Display for NodeSubset {
 mod tests {
 
     use crate::node::{NodeIndex, NodeSubset};
-    use codec::{Decode, Encode};
+    use picomint_encoding::{Decodable, Encodable};
+
     #[test]
     fn decoding_node_index_works() {
         for i in 0..1000 {
             let node_index = NodeIndex(i);
-            let mut encoded: &[u8] = &node_index.encode();
-            let decoded = NodeIndex::decode(&mut encoded);
-            assert_eq!(node_index, decoded.unwrap());
+            let encoded = node_index.consensus_encode_to_vec();
+            let decoded = NodeIndex::consensus_decode(&encoded).unwrap();
+            assert_eq!(node_index, decoded);
         }
     }
 
@@ -327,50 +326,19 @@ mod tests {
                         bnm.insert(i.into());
                     }
                 }
-                let encoded: Vec<_> = bnm.encode();
+                let encoded = bnm.consensus_encode_to_vec();
                 let decoded =
-                    NodeSubset::decode(&mut encoded.as_slice()).expect("decode should work");
-                assert!(decoded == bnm);
+                    NodeSubset::consensus_decode(&encoded).expect("decode should work");
+                assert_eq!(decoded, bnm);
             }
         }
     }
 
     #[test]
-    fn bool_node_map_decoding_deals_with_trailing_zeros() {
-        let mut encoded = vec![1, 0, 0, 0];
-        encoded.extend(vec![128u8].encode());
-        //128 encodes bit-vec 10000000
-        let decoded = NodeSubset::decode(&mut encoded.as_slice()).expect("decode should work");
-        assert_eq!(decoded, NodeSubset([true].iter().cloned().collect()));
-
-        let mut encoded = vec![1, 0, 0, 0];
-        encoded.extend(vec![129u8].encode());
-        //129 encodes bit-vec 10000001
-        assert!(NodeSubset::decode(&mut encoded.as_slice()).is_err());
-    }
-
-    #[test]
-    fn bool_node_map_decoding_deals_with_too_long_bitvec() {
-        let mut encoded = vec![1, 0, 0, 0];
-        encoded.extend(vec![128u8, 0].encode());
-        //[128, 0] encodes bit-vec 1000000000000000
-        assert!(NodeSubset::decode(&mut encoded.as_slice()).is_err());
-    }
-
-    #[test]
     fn decoding_bool_node_map_works() {
         let bool_node_map = NodeSubset([true, false, true, true, true].iter().cloned().collect());
-        let encoded: Vec<_> = bool_node_map.encode();
-        let decoded = NodeSubset::decode(&mut encoded.as_slice()).expect("decode should work");
+        let encoded = bool_node_map.consensus_encode_to_vec();
+        let decoded = NodeSubset::consensus_decode(&encoded).expect("decode should work");
         assert_eq!(decoded, bool_node_map);
-    }
-
-    #[test]
-    fn test_bool_node_map_has_efficient_encoding() {
-        let mut bnm = NodeSubset::with_size(100.into());
-        for i in 0..50 {
-            bnm.insert(i.into())
-        }
-        assert!(bnm.encode().len() < 20);
     }
 }

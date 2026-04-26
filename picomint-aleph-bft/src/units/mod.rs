@@ -4,7 +4,7 @@ use crate::{
     Data, Index, MultiKeychain, NodeCount, NodeIndex, Round, SessionId, Signable, Signed,
     UncheckedSigned, UnitHash,
 };
-use codec::{Decode, Encode};
+use picomint_encoding::{Decodable, Encodable};
 use derivative::Derivative;
 
 mod control_hash;
@@ -28,7 +28,7 @@ pub use validator::{ValidationError, Validator};
 
 /// The coordinates of a unit, i.e. creator and round. In the absence of forks this uniquely
 /// determines a unit within a session.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default, Encode, Decode)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default, Encodable, Decodable)]
 pub struct UnitCoord {
     round: Round,
     creator: NodeIndex,
@@ -55,7 +55,7 @@ impl Display for UnitCoord {
 }
 
 /// The simplest type representing a unit, consisting of coordinates and a control hash
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 pub struct PreUnit {
     coord: UnitCoord,
     control_hash: ControlHash,
@@ -86,7 +86,7 @@ impl PreUnit {
     }
 }
 
-#[derive(Clone, Debug, Decode, Derivative, Encode)]
+#[derive(Clone, Debug, Decodable, Derivative, Encodable)]
 #[derivative(Eq, PartialEq, Hash)]
 pub struct FullUnit<D: Data> {
     pre_unit: PreUnit,
@@ -171,7 +171,7 @@ pub trait UnitWithParents: Unit {
 
 impl<D: Data> Unit for FullUnit<D> {
     fn hash(&self) -> UnitHash {
-        self.using_encoded(crate::hash)
+        crate::hash(&self.consensus_encode_to_vec())
     }
 
     fn coord(&self) -> UnitCoord {
@@ -212,7 +212,7 @@ pub mod tests {
         NodeCount,
     };
     use aleph_bft_mock::Data;
-    use codec::{Decode, Encode};
+    use picomint_encoding::{Decodable, Encodable};
 
     pub type TestFullUnit = FullUnit<Data>;
 
@@ -222,7 +222,7 @@ pub mod tests {
             .into_iter()
             .flatten()
         {
-            let hash = full_unit.using_encoded(crate::hash);
+            let hash = crate::hash(&full_unit.consensus_encode_to_vec());
             assert_eq!(full_unit.hash(), hash);
         }
     }
@@ -233,9 +233,9 @@ pub mod tests {
             .into_iter()
             .flatten()
         {
-            let encoded = full_unit.encode();
+            let encoded = full_unit.consensus_encode_to_vec();
             let decoded =
-                TestFullUnit::decode(&mut encoded.as_slice()).expect("should decode correctly");
+                TestFullUnit::consensus_decode_partial(&mut encoded.as_slice()).expect("should decode correctly");
             assert_eq!(decoded, full_unit);
         }
     }

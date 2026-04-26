@@ -1,5 +1,5 @@
 use crate::{units::UnitCoord, NodeCount, NodeIndex, NodeMap, Round, UnitHash};
-use codec::{Decode, Encode};
+use picomint_encoding::{Decodable, Encodable};
 use std::{
     fmt::{Display, Formatter, Result as FmtResult},
     hash::Hash,
@@ -54,7 +54,7 @@ impl Display for Error {
 
 /// Combined hashes of the parents of a unit together with the set of indices of creators of the
 /// parents. By parent here we mean a parent hash and its round.
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 pub struct ControlHash {
     parents: NodeMap<Round>,
     combined_hash: UnitHash,
@@ -75,7 +75,7 @@ impl ControlHash {
 
     /// Calculate parent control hash, which includes all parent hashes and their rounds into account.
     pub fn create_control_hash(parent_map: &NodeMap<(UnitHash, Round)>) -> UnitHash {
-        parent_map.using_encoded(crate::hash)
+        crate::hash(&parent_map.consensus_encode_to_vec())
     }
 
     pub fn combined_hash(&self) -> UnitHash {
@@ -169,14 +169,14 @@ impl ControlHash {
 pub mod tests {
     use crate::units::{control_hash::Error, ControlHash, NodeCount, NodeIndex, UnitCoord};
     use aleph_bft_types::{NodeMap, Round};
-    use codec::{Decode, Encode};
+    use picomint_encoding::{Decodable, Encodable};
 
     #[test]
     fn given_control_hash_is_encoded_when_same_control_hash_is_decoded_then_results_are_the_same() {
         let ch = ControlHash::new(&vec![Some(([0; 32], 2)), None, Some(([1; 32], 2))].into());
-        let encoded = ch.encode();
+        let encoded = ch.consensus_encode_to_vec();
         let decoded =
-            ControlHash::decode(&mut encoded.as_slice()).expect("should decode correctly");
+            ControlHash::consensus_decode_partial(&mut encoded.as_slice()).expect("should decode correctly");
         assert_eq!(decoded, ch);
     }
 
@@ -247,13 +247,13 @@ pub mod tests {
         // is valid generic Hasher64 representation, but validation should not work
 
         let correct_control_hash = ControlHash::new(&NodeMap::with_size(NodeCount(4)));
-        let encoded_control_hash = correct_control_hash.encode();
+        let encoded_control_hash = correct_control_hash.consensus_encode_to_vec();
         let mut borked_control_hash_bytes = encoded_control_hash[0..=7].to_vec();
         borked_control_hash_bytes.extend([
             129, 100, 217, 65, 183, 158, 24, 201, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0,
         ]);
-        let borked_ch = ControlHash::decode(&mut borked_control_hash_bytes.as_slice())
+        let borked_ch = ControlHash::consensus_decode_partial(&mut borked_control_hash_bytes.as_slice())
             .expect("should decode correctly");
 
         assert_eq!(

@@ -14,10 +14,10 @@ doctest = false
 [dependencies]
 aleph-bft-crypto = { workspace = true }
 async-trait = { workspace = true }
-codec = { package = "parity-scale-codec", version = "3.0", default-features = false, features = ["derive"] }
 futures = { workspace = true }
 futures-timer = "3.0"
 log = "0.4"
+picomint-encoding = { workspace = true }
 
 [dev-dependencies]
 aleph-bft-mock = { workspace = true }

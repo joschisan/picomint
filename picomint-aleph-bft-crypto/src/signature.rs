@@ -1,14 +1,14 @@
 use crate::{Index, NodeCount, NodeIndex, NodeMap};
-use codec::{Codec, Decode, Encode};
+use picomint_encoding::{Decodable, Encodable};
 use log::warn;
 use std::{fmt::Debug, hash::Hash};
 
 /// The type used as a signature.
 ///
 /// The Signature typically does not contain the index of the node who signed the data.
-pub trait Signature: Debug + Clone + Codec + Send + Sync + Eq + 'static {}
+pub trait Signature: Debug + Clone + Encodable + Decodable + Send + Sync + Eq + 'static {}
 
-impl<T: Debug + Clone + Codec + Send + Sync + Eq + 'static> Signature for T {}
+impl<T: Debug + Clone + Encodable + Decodable + Send + Sync + Eq + 'static> Signature for T {}
 
 /// Abstraction of the signing data and verifying signatures.
 ///
@@ -76,13 +76,13 @@ impl<S: Signature> PartialMultisignature for SignatureSet<S> {
 /// Signable data should provide a hash of type [`Self::Hash`] which is build from all parts of the
 /// data which should be signed. The type [`Self::Hash`] should implement [`AsRef<[u8]>`], and
 /// the bytes returned by `hash.as_ref()` are used by a [`MultiKeychain`] to sign the data.
-pub trait Signable {
+pub trait Signable: Encodable + Decodable {
     type Hash: AsRef<[u8]>;
     /// Return a hash for signing.
     fn hash(&self) -> Self::Hash;
 }
 
-impl<T: AsRef<[u8]> + Clone> Signable for T {
+impl<T: AsRef<[u8]> + Clone + Encodable + Decodable> Signable for T {
     type Hash = T;
     fn hash(&self) -> Self::Hash {
         self.clone()
@@ -93,7 +93,7 @@ impl<T: AsRef<[u8]> + Clone> Signable for T {
 ///
 /// The method `[UncheckedSigned::check]` can be used to upgrade this `struct` to
 /// `[Signed<T, K>]` which ensures that the signature matches the signed object.
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 pub struct UncheckedSigned<T: Signable, S: Signature> {
     signable: T,
     signature: S,
@@ -120,7 +120,7 @@ impl<T: Signable, S: Signature> UncheckedSigned<Indexed<T>, S> {
 }
 
 /// Error type returned when a verification of a signature fails.
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 pub struct SignatureError<T: Signable, S: Signature> {
     pub unchecked: UncheckedSigned<T, S>,
 }
@@ -174,7 +174,7 @@ impl<T: Signable, S: Signature> From<UncheckedSigned<Indexed<T>, S>> for Uncheck
 }
 
 /// A correctly signed object of type `T`.
-#[derive(Eq, PartialEq, Hash, Debug, Decode, Encode)]
+#[derive(Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 pub struct Signed<T: Signable + Index, K: Keychain> {
     unchecked: UncheckedSigned<T, K::Signature>,
 }
@@ -255,7 +255,7 @@ impl<T: Signable + Index, K: Keychain> From<Signed<T, K>> for UncheckedSigned<T,
 /// use this wrapper transparently. Note that in the implementation of `Signable` for `Indexed<T>`,
 /// the hash is the hash of the underlying data `T`. Therefore, instances of the type
 /// [`Signed<Indexed<T>, MK>`] can be aggregated into `Multisigned<T, MK>`
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 pub struct Indexed<T: Signable> {
     signable: T,
     index: NodeIndex,
@@ -294,7 +294,7 @@ impl<T: Signable> Index for Indexed<T> {
 /// An instance of `Multisigned<T: Signable, MK: MultiKeychain>` consists of a data of type `T`
 /// together with a multisignature which is valid and complete according to a multikeychain
 /// reference `MK`.
-#[derive(Eq, PartialEq, Hash, Debug, Decode, Encode)]
+#[derive(Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 pub struct Multisigned<T: Signable, MK: MultiKeychain> {
     unchecked: UncheckedSigned<T, MK::PartialMultisignature>,
 }
@@ -346,7 +346,7 @@ impl<T: Signable + Clone, MK: MultiKeychain> Clone for Multisigned<T, MK> {
 ///
 /// The alternative solution could be to make `Signature: Hash` or add a phantom marker using
 /// `MK::PartialMultisignature` type.
-#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Debug, Decodable, Encodable)]
 pub struct IncompleteMultisignatureError<T: Signable, MK: MultiKeychain> {
     pub partial: PartiallyMultisigned<T, MK>,
 }
@@ -356,7 +356,7 @@ pub struct IncompleteMultisignatureError<T: Signable, MK: MultiKeychain> {
 /// Instances of this type keep track whether the partial multisignautre is complete or not.
 /// If the multisignature is complete, you can get [`Multisigned`] by pattern matching
 /// against the variant [`PartiallyMultisigned::Complete`].
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 pub enum PartiallyMultisigned<T: Signable, MK: MultiKeychain> {
     Incomplete {
         unchecked: UncheckedSigned<T, MK::PartialMultisignature>,
@@ -428,7 +428,7 @@ mod tests {
         Index, Keychain, MultiKeychain, NodeCount, NodeIndex, PartialMultisignature,
         PartiallyMultisigned, Signable, SignatureSet, Signed,
     };
-    use codec::{Decode, Encode};
+    use picomint_encoding::{Decodable, Encodable};
     use std::fmt::Debug;
 
     /// Keychain wrapper which implements MultiKeychain such that a partial multisignature is a list of
@@ -495,7 +495,7 @@ mod tests {
         }
     }
 
-    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    #[derive(Clone, Debug, Default, PartialEq, Eq, Encodable, Decodable)]
     struct TestMessage {
         msg: Vec<u8>,
     }
@@ -513,7 +513,7 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+    #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
     struct TestSignature {
         msg: Vec<u8>,
         index: NodeIndex,

@@ -10,9 +10,9 @@ repository = { workspace = true }
 [dependencies]
 aleph-bft-types = { workspace = true }
 async-trait = { workspace = true }
-codec = { package = "parity-scale-codec", version = "3.0", default-features = false, features = ["derive"] }
 futures = { workspace = true }
 log = "0.4"
 parking_lot = "0.12"
+picomint-encoding = { workspace = true }
 rand = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }

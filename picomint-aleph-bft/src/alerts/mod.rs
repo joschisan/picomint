@@ -4,7 +4,7 @@ use crate::{
     UncheckedSigned, UnitHash,
 };
 use aleph_bft_rmc::Message as RmcMessage;
-use codec::{Decode, Encode};
+use picomint_encoding::{Decodable, Encodable};
 use derivative::Derivative;
 
 mod handler;
@@ -18,7 +18,7 @@ pub type ForkProof<D, S> = (UncheckedSignedUnit<D, S>, UncheckedSignedUnit<D, S>
 pub type NetworkMessage<D, MK> =
     AlertMessage<D, <MK as Keychain>::Signature, <MK as MultiKeychain>::PartialMultisignature>;
 
-#[derive(Clone, Debug, Decode, Derivative, Encode)]
+#[derive(Clone, Debug, Decodable, Derivative, Encodable)]
 #[derivative(Eq, PartialEq, Hash)]
 pub struct Alert<D: Data, S: Signature> {
     sender: NodeIndex,
@@ -63,12 +63,12 @@ impl<D: Data, S: Signature> Index for Alert<D, S> {
 impl<D: Data, S: Signature> Signable for Alert<D, S> {
     type Hash = UnitHash;
     fn hash(&self) -> Self::Hash {
-        self.using_encoded(crate::hash)
+        crate::hash(&self.consensus_encode_to_vec())
     }
 }
 
 /// A message concerning alerts.
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 #[allow(clippy::large_enum_variant)]
 pub enum AlertMessage<D: Data, S: Signature, MS: PartialMultisignature> {
     /// Alert regarding forks, signed by the person claiming misconduct.
@@ -91,7 +91,7 @@ impl<D: Data, S: Signature, MS: PartialMultisignature> AlertMessage<D, S, MS> {
 
 // Notifications being sent to consensus, so that it can learn about proven forkers and receive
 // legitimized units.
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 #[allow(clippy::large_enum_variant)]
 pub enum ForkingNotification<D: Data, S: Signature> {
     Forker(ForkProof<D, S>),

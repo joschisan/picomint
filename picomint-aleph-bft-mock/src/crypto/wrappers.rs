@@ -2,7 +2,6 @@ use crate::crypto::{PartialMultisignature, Signature};
 use aleph_bft_types::{
     Index, Keychain as KeychainT, MultiKeychain as MultiKeychainT, NodeCount, NodeIndex,
 };
-use codec::{Decode, Encode};
 use std::fmt::Debug;
 
 pub trait MK:
@@ -18,7 +17,7 @@ impl<
 }
 
 /// Keychain wrapper which produces incorrect signatures
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Default, Encode, Decode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct BadSigning<T: MK>(T);
 
 impl<T: MK> From<T> for BadSigning<T> {

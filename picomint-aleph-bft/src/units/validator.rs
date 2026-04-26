@@ -115,7 +115,7 @@ mod tests {
         NodeCount, NodeIndex,
     };
     use aleph_bft_mock::Keychain;
-    use codec::{Decode, Encode};
+    use picomint_encoding::{Decodable, Encodable};
 
     type Validator = GenericValidator<Keychain>;
 
@@ -147,13 +147,13 @@ mod tests {
             .as_pre_unit()
             .clone();
         let mut control_hash = preunit.control_hash().clone();
-        let encoded = control_hash.encode();
-        // first 8 bytes is encoded NodeMap of size 7; remaining bytes are the 32-byte
-        // sha256 combined hash. Replace the hash with garbage that decodes but won't
-        // match a recomputation.
-        let mut borked_control_hash_bytes = encoded[0..=7].to_vec();
+        let encoded = control_hash.consensus_encode_to_vec();
+        // ControlHash = (parents: NodeMap<Round>, combined_hash: UnitHash). Replace the
+        // trailing 32-byte hash with zeros so decode succeeds but recomputation won't match.
+        let prefix_len = encoded.len() - 32;
+        let mut borked_control_hash_bytes = encoded[..prefix_len].to_vec();
         borked_control_hash_bytes.extend([0u8; 32]);
-        control_hash = ControlHash::decode(&mut borked_control_hash_bytes.as_slice())
+        control_hash = ControlHash::consensus_decode_partial(&mut borked_control_hash_bytes.as_slice())
             .expect("should decode correctly");
         let preunit = PreUnit::new(preunit.creator(), preunit.round(), control_hash);
         let unchecked_unit =

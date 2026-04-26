@@ -23,13 +23,13 @@ initial_unit_collection = []
 aleph-bft-rmc = { workspace = true }
 aleph-bft-types = { workspace = true }
 anyhow = { workspace = true }
-codec = { package = "parity-scale-codec", version = "3.0", default-features = false, features = ["derive"] }
 derivative = "2.2.0"
 futures = { workspace = true }
 futures-timer = "3.0"
 itertools = "0.13"
 log = "0.4"
 parking_lot = "0.12"
+picomint-encoding = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
 

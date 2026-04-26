@@ -1,5 +1,5 @@
 use crate::{alerts::AlertMessage, Data, PartialMultisignature, Recipient, Signature};
-use codec::{Decode, Encode};
+use picomint_encoding::{Decodable, Encodable};
 use std::fmt::Debug;
 
 mod hub;
@@ -10,7 +10,7 @@ pub use unit::UnitMessage;
 
 pub type UnitMessageTo<D, S> = (UnitMessage<D, S>, Recipient);
 
-#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Debug, Decodable, Encodable)]
 pub(crate) enum NetworkDataInner<D: Data, S: Signature, MS: PartialMultisignature> {
     Units(UnitMessage<D, S>),
     Alert(AlertMessage<D, S, MS>),
@@ -26,7 +26,7 @@ impl<D: Data, S: Signature, MS: PartialMultisignature> NetworkDataInner<D, S, MS
 }
 
 /// NetworkData is the opaque format for all data that a committee member needs to send to other nodes.
-#[derive(Clone, Eq, PartialEq, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Debug, Decodable, Encodable)]
 pub struct NetworkData<D: Data, S: Signature, MS: PartialMultisignature>(
     pub(crate) NetworkDataInner<D, S, MS>,
 );
@@ -54,7 +54,7 @@ mod tests {
     };
     use aleph_bft_mock::{Data, Keychain, PartialMultisignature, Signature};
     use aleph_bft_types::NodeMap;
-    use codec::{Decode, Encode};
+    use picomint_encoding::{Decodable, Encodable};
 
     fn test_unchecked_unit(
         creator: NodeIndex,
@@ -81,7 +81,7 @@ mod tests {
         let uu = test_unchecked_unit(5.into(), 43, 1729);
         let included_data = uu.as_signable().included_data();
         let nd = TestNetworkData::new(Units(Unit(uu.clone())));
-        let decoded = TestNetworkData::decode(&mut &nd.encode()[..]);
+        let decoded = TestNetworkData::consensus_decode_partial(&mut &nd.consensus_encode_to_vec()[..]);
         assert!(decoded.is_ok(), "Bug in encode/decode for Unit");
         let decoded = decoded.unwrap();
         assert_eq!(
@@ -107,7 +107,7 @@ mod tests {
         let ni = 7.into();
         let uc = UnitCoord::new(3, 13.into());
         let nd = TestNetworkData::new(Units(CoordRequest(ni, uc)));
-        let decoded = TestNetworkData::decode(&mut &nd.encode()[..]);
+        let decoded = TestNetworkData::consensus_decode_partial(&mut &nd.consensus_encode_to_vec()[..]);
         assert!(decoded.is_ok(), "Bug in encode/decode for CoordRequest");
         let decoded = decoded.unwrap();
         assert!(
@@ -126,9 +126,9 @@ mod tests {
         use UnitMessage::ParentsRequest;
 
         let ni = 7.into();
-        let h = 43.using_encoded(crate::hash);
+        let h = crate::hash(&43u32.consensus_encode_to_vec());
         let nd = TestNetworkData::new(Units(ParentsRequest(ni, h)));
-        let decoded = TestNetworkData::decode(&mut &nd.encode()[..]);
+        let decoded = TestNetworkData::consensus_decode_partial(&mut &nd.consensus_encode_to_vec()[..]);
         assert!(decoded.is_ok(), "Bug in encode/decode for ParentsRequest");
         let decoded = decoded.unwrap();
         assert!(
@@ -146,7 +146,7 @@ mod tests {
     fn decoding_network_data_units_response_parents() {
         use UnitMessage::ParentsResponse;
 
-        let h = 43.using_encoded(crate::hash);
+        let h = crate::hash(&43u32.consensus_encode_to_vec());
         let p1 = test_unchecked_unit(5.into(), 43, 1729);
         let p2 = test_unchecked_unit(13.into(), 43, 1729);
         let p3 = test_unchecked_unit(17.into(), 43, 1729);
@@ -160,7 +160,7 @@ mod tests {
         let parents = vec![p1, p2, p3];
 
         let nd = TestNetworkData::new(Units(ParentsResponse(h, parents.clone())));
-        let decoded = TestNetworkData::decode(&mut &nd.encode()[..]);
+        let decoded = TestNetworkData::consensus_decode_partial(&mut &nd.consensus_encode_to_vec()[..]);
         assert!(decoded.is_ok(), "Bug in encode/decode for ParentsResponse");
         let decoded = decoded.unwrap();
         assert_eq!(
@@ -204,7 +204,7 @@ mod tests {
         let nd = TestNetworkData::new(Alert(ForkAlert(
             Signed::sign(alert.clone(), &Keychain::new(0.into(), sender)).into_unchecked(),
         )));
-        let decoded = TestNetworkData::decode(&mut &nd.encode()[..]);
+        let decoded = TestNetworkData::consensus_decode_partial(&mut &nd.consensus_encode_to_vec()[..]);
         assert!(decoded.is_ok(), "Bug in encode/decode for ForkAlert");
         let decoded = decoded.unwrap();
         assert_eq!(

@@ -6,7 +6,7 @@ use crate::{
 };
 use aleph_bft_rmc::Message as RmcMessage;
 use aleph_bft_types::Round;
-use codec::{Decode, Encode};
+use picomint_encoding::{Decodable, Encodable};
 use std::{
     collections::{HashMap, HashSet},
     fmt::{Display, Formatter},
@@ -64,7 +64,7 @@ type OnAlertRequestResponse<D, MK> = (
     Recipient,
 );
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 pub enum RmcResponse<S: Signature, MS: PartialMultisignature> {
     RmcMessage(RmcMessage<UnitHash, S, MS>),
     AlertRequest(UnitHash, Recipient),

@@ -643,12 +643,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "793db76d6187cd04dff33004d8e6c9cc4e05cd330500379d2394209271b4aeee"
 
 [[package]]
-name = "byte-slice-cast"
-version = "1.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7575182f7272186991736b70173b0ea045398f984bf5ebbb3804736ce1330c9d"
-
-[[package]]
 name = "bytemuck"
 version = "1.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -861,26 +855,6 @@ name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
-
-[[package]]
-name = "const_format"
-version = "0.2.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "126f97965c8ad46d6d9163268ff28432e8f6a1196a55578867832e3049df63dd"
-dependencies = [
- "const_format_proc_macros",
-]
-
-[[package]]
-name = "const_format_proc_macros"
-version = "0.2.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d57c2eccfb16dbac1f4e61e206105db5820c9d26c3c472bc17c774259ef7744"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-xid",
-]
 
 [[package]]
 name = "constant_time_eq"
@@ -2347,17 +2321,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "impl-trait-for-tuples"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0eb5a3343abf848c0984fe4604b2b105da9539376e24fc0a3b0007411ae4fd9"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3577,34 +3540,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "parity-scale-codec"
-version = "3.7.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "799781ae679d79a948e13d4824a40970bfa500058d245760dd857301059810fa"
-dependencies = [
- "arrayvec",
- "bitvec",
- "byte-slice-cast",
- "const_format",
- "impl-trait-for-tuples",
- "parity-scale-codec-derive",
- "rustversion",
- "serde",
-]
-
-[[package]]
-name = "parity-scale-codec-derive"
-version = "3.7.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34b4653168b563151153c9e4c08ebed57fb8262bebfa79711552fa983c623e7a"
-dependencies = [
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3691,11 +3626,11 @@ dependencies = [
  "futures-timer",
  "itertools 0.13.0",
  "log",
- "parity-scale-codec",
  "parking_lot",
  "picomint-aleph-bft-mock",
  "picomint-aleph-bft-rmc",
  "picomint-aleph-bft-types",
+ "picomint-encoding",
  "rand 0.8.5",
  "serial_test",
  "thiserror 2.0.18",
@@ -3709,7 +3644,7 @@ dependencies = [
  "bit-vec",
  "derive_more 1.0.0",
  "log",
- "parity-scale-codec",
+ "picomint-encoding",
  "tokio",
 ]
 
@@ -3720,9 +3655,9 @@ dependencies = [
  "async-trait",
  "futures",
  "log",
- "parity-scale-codec",
  "parking_lot",
  "picomint-aleph-bft-types",
+ "picomint-encoding",
  "rand 0.8.5",
  "tokio",
 ]
@@ -3735,9 +3670,9 @@ dependencies = [
  "futures",
  "futures-timer",
  "log",
- "parity-scale-codec",
  "picomint-aleph-bft-crypto",
  "picomint-aleph-bft-mock",
+ "picomint-encoding",
  "rand 0.8.5",
  "tokio",
 ]
@@ -3749,8 +3684,8 @@ dependencies = [
  "async-trait",
  "bitcoin_hashes",
  "futures",
- "parity-scale-codec",
  "picomint-aleph-bft-crypto",
+ "picomint-encoding",
 ]
 
 [[package]]
@@ -4090,7 +4025,6 @@ dependencies = [
  "iroh-base",
  "maud",
  "miniscript",
- "parity-scale-codec",
  "picomint-aleph-bft",
  "picomint-base32",
  "picomint-bitcoin-rpc",

@@ -35,7 +35,6 @@ iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false, features = ["key"] }
 maud = { workspace = true }
 miniscript = { workspace = true }
-parity-scale-codec = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-bitcoin-rpc = { workspace = true }
 picomint-core = { workspace = true }

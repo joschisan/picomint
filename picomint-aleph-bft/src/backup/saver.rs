@@ -5,7 +5,7 @@ use crate::{
     units::{UncheckedSignedUnit, WrappedUnit},
     Data, MultiKeychain, Receiver, Sender, Terminator,
 };
-use codec::Encode;
+use picomint_encoding::Encodable;
 use futures::{AsyncWrite, AsyncWriteExt, FutureExt, StreamExt};
 use log::{debug, error};
 
@@ -35,7 +35,7 @@ impl<D: Data, MK: MultiKeychain, W: AsyncWrite> BackupSaver<D, MK, W> {
 
     pub async fn save_unit(&mut self, unit: &DagUnit<D, MK>) -> Result<(), std::io::Error> {
         let unit: UncheckedSignedUnit<_, _> = unit.clone().unpack().into();
-        self.backup.write_all(&unit.encode()).await?;
+        self.backup.write_all(&unit.consensus_encode_to_vec()).await?;
         self.backup.flush().await
     }
 

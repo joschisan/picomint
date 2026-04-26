@@ -1,6 +1,6 @@
 use crate::UnitHash;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt::{Display, Formatter, Result as FmtResult},
 };
 
@@ -32,7 +32,7 @@ impl Display for UnitStoreStatus {
 /// See `remove` for limitation on trusting canonical units, although they don't impact our usecases.
 pub struct UnitStore<U: Unit> {
     by_hash: HashMap<UnitHash, U>,
-    canonical_units: NodeMap<HashMap<Round, UnitHash>>,
+    canonical_units: NodeMap<BTreeMap<Round, UnitHash>>,
     top_row: NodeMap<Round>,
 }
 
@@ -41,7 +41,7 @@ impl<U: Unit> UnitStore<U> {
     pub fn new(node_count: NodeCount) -> Self {
         let mut canonical_units = NodeMap::with_size(node_count);
         for node_id in node_count.into_iterator() {
-            canonical_units.insert(node_id, HashMap::new());
+            canonical_units.insert(node_id, BTreeMap::new());
         }
         let top_row = NodeMap::with_size(node_count);
         UnitStore {
@@ -51,13 +51,13 @@ impl<U: Unit> UnitStore<U> {
         }
     }
 
-    fn mut_hashes_by(&mut self, creator: NodeIndex) -> &mut HashMap<Round, UnitHash> {
+    fn mut_hashes_by(&mut self, creator: NodeIndex) -> &mut BTreeMap<Round, UnitHash> {
         self.canonical_units
             .get_mut(creator)
             .expect("all hashmaps initialized")
     }
 
-    fn hashes_by(&self, creator: NodeIndex) -> &HashMap<Round, UnitHash> {
+    fn hashes_by(&self, creator: NodeIndex) -> &BTreeMap<Round, UnitHash> {
         self.canonical_units
             .get(creator)
             .expect("all hashmaps initialized")

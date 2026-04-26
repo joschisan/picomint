@@ -3,13 +3,11 @@ use std::collections::BTreeSet;
 use picomint_core::TransactionId;
 use picomint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
 use picomint_core::transaction::ConsensusItem;
-use picomint_encoding::Encodable;
+use picomint_encoding::{Decodable, Encodable};
 
 use crate::LOG_CONSENSUS;
 
-#[derive(
-    Clone, Debug, PartialEq, Eq, Hash, parity_scale_codec::Encode, parity_scale_codec::Decode,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct UnitData(pub Vec<u8>);
 
 impl UnitData {

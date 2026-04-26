@@ -5,8 +5,8 @@ use std::{
     pin::Pin,
 };
 
-use codec::{Decode, Error as CodecError};
 use futures::{AsyncRead, AsyncReadExt};
+use picomint_encoding::Decodable;
 
 use crate::{
     units::{UncheckedSignedUnit, Unit, UnitCoord},
@@ -17,7 +17,6 @@ use crate::{
 #[derive(Debug)]
 pub enum LoaderError {
     IO(std::io::Error),
-    Codec(CodecError),
     InconsistentData(UnitCoord),
     WrongSession(UnitCoord, SessionId, SessionId),
 }
@@ -31,9 +30,6 @@ impl fmt::Display for LoaderError {
                     "received IO error while reading from backup source: {}",
                     err
                 )
-            }
-            LoaderError::Codec(err) => {
-                write!(f, "received Codec error while decoding backup: {}", err)
             }
             LoaderError::InconsistentData(coord) => {
                 write!(
@@ -56,12 +52,6 @@ impl fmt::Display for LoaderError {
 impl From<std::io::Error> for LoaderError {
     fn from(err: std::io::Error) -> Self {
         Self::IO(err)
-    }
-}
-
-impl From<CodecError> for LoaderError {
-    fn from(err: CodecError) -> Self {
-        Self::Codec(err)
     }
 }
 
@@ -88,7 +78,7 @@ impl<D: Data, S: Signature, R: AsyncRead> BackupLoader<D, S, R> {
         let input = &mut &buf[..];
         let mut result = Vec::new();
         while !input.is_empty() {
-            result.push(<UncheckedSignedUnit<D, S>>::decode(input)?);
+            result.push(<UncheckedSignedUnit<D, S>>::consensus_decode_partial(input)?);
         }
         Ok(result)
     }
@@ -140,7 +130,7 @@ impl<D: Data, S: Signature, R: AsyncRead> BackupLoader<D, S, R> {
 
 #[cfg(test)]
 mod tests {
-    use codec::Encode;
+    use picomint_encoding::Encodable;
 
     use aleph_bft_mock::{Data, Keychain, Loader, Signature};
 
@@ -204,7 +194,7 @@ mod tests {
     }
 
     fn encode_all(items: Vec<UncheckedSignedUnit>) -> Vec<Vec<u8>> {
-        items.iter().map(|u| u.encode()).collect()
+        items.iter().map(|u| u.consensus_encode_to_vec()).collect()
     }
 
     #[tokio::test]
@@ -242,7 +232,7 @@ mod tests {
             BackupLoader::new(Loader::new(encoded_items), NODE_ID, SESSION_ID)
                 .load_backup()
                 .await,
-            Err(LoaderError::Codec(_))
+            Err(LoaderError::IO(_))
         ));
     }
 

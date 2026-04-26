@@ -1,6 +1,6 @@
 use aleph_bft_types::{DataProvider as DataProviderT, FinalizationHandler as FinalizationHandlerT};
 use async_trait::async_trait;
-use codec::{Decode, Encode};
+use picomint_encoding::{Decodable, Encodable};
 use futures::{channel::mpsc::unbounded, future::pending, AsyncWrite};
 use log::error;
 use parking_lot::Mutex;
@@ -60,7 +60,7 @@ impl DataProviderT for DataProvider {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Decode, Encode)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Decodable, Encodable)]
 pub struct StalledDataProvider {}
 
 impl StalledDataProvider {

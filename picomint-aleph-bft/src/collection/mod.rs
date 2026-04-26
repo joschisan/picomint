@@ -5,7 +5,7 @@ use crate::{
     Data, Keychain, MultiKeychain, NodeIndex, Receiver, Round, Sender, Signable, Signature,
     UncheckedSigned,
 };
-use codec::{Decode, Encode};
+use picomint_encoding::{Decodable, Encodable};
 use futures::{channel::oneshot, Future};
 use std::{
     collections::hash_map::DefaultHasher,
@@ -28,7 +28,7 @@ fn generate_salt() -> Salt {
 }
 
 /// A response to the request for the newest unit.
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Default, Decode, Encode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Default, Decodable, Encodable)]
 pub struct NewestUnitResponse<D: Data, S: Signature> {
     requester: NodeIndex,
     responder: NodeIndex,
@@ -40,7 +40,7 @@ impl<D: Data, S: Signature> Signable for NewestUnitResponse<D, S> {
     type Hash = Vec<u8>;
 
     fn hash(&self) -> Self::Hash {
-        self.encode()
+        self.consensus_encode_to_vec()
     }
 }
 

@@ -14,9 +14,9 @@ doctest = false
 
 [dependencies]
 bit-vec = "0.8"
-codec = { package = "parity-scale-codec", version = "3.0", default-features = false, features = ["derive"] }
 derive_more = { version = "1.0", features = ["full"] }
 log = "0.4"
+picomint-encoding = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }

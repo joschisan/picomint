@@ -1,6 +1,6 @@
 use async_channel::Sender;
-use parity_scale_codec::{Decode, Encode, IoReader};
 use picomint_core::PeerId;
+use picomint_encoding::{Decodable, Encodable};
 use picomint_core::secp256k1::schnorr;
 use picomint_core::session_outcome::SignedSessionOutcome;
 use picomint_logging::LOG_CONSENSUS;
@@ -53,7 +53,7 @@ impl aleph_bft::Network<NetworkData> for Network {
         };
 
         self.connections
-            .send(recipient, P2PMessage::Aleph(network_data.encode()));
+            .send(recipient, P2PMessage::Aleph(network_data.consensus_encode_to_vec()));
     }
 
     async fn next_event(&mut self) -> Option<NetworkData> {
@@ -62,7 +62,7 @@ impl aleph_bft::Network<NetworkData> for Network {
 
             match message {
                 P2PMessage::Aleph(bytes) => {
-                    match NetworkData::decode(&mut IoReader(bytes.as_slice())) {
+                    match NetworkData::consensus_decode_partial(&mut bytes.as_slice()) {
                         Ok(network_data) => {
                             // in order to bound the RAM consumption of a session we have to bound
                             // the size of an individual unit in memory

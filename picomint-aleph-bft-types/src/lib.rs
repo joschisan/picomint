@@ -14,13 +14,13 @@ pub use network::{Network, Recipient};
 pub use tasks::{SpawnHandle, TaskHandle};
 
 use bitcoin_hashes::{sha256, Hash as BitcoinHash};
-use codec::Codec;
+use picomint_encoding::{Decodable, Encodable};
 use std::{fmt::Debug, hash::Hash as StdHash};
 
 /// Data type that we want to order.
-pub trait Data: Eq + Clone + Send + Sync + Debug + StdHash + Codec + 'static {}
+pub trait Data: Eq + Clone + Send + Sync + Debug + StdHash + Encodable + Decodable + 'static {}
 
-impl<T> Data for T where T: Eq + Clone + Send + Sync + Debug + StdHash + Codec + 'static {}
+impl<T> Data for T where T: Eq + Clone + Send + Sync + Debug + StdHash + Encodable + Decodable + 'static {}
 
 /// Hash of a unit or other consensus message — sha256 of the consensus encoding.
 pub type UnitHash = [u8; 32];

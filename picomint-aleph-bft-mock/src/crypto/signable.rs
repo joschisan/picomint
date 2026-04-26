@@ -1,6 +1,7 @@
 use aleph_bft_types::Signable as SignableT;
+use picomint_encoding::{Decodable, Encodable};
 
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Encodable, Decodable)]
 pub struct Signable(String);
 
 impl SignableT for Signable {

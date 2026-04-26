@@ -1,8 +1,8 @@
 use aleph_bft_types::{Index, NodeIndex, SignatureSet};
-use codec::{Decode, Encode};
+use picomint_encoding::{Decodable, Encodable};
 use std::hash::Hash;
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Default, Encode, Decode)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Default, Encodable, Decodable)]
 pub struct Signature {
     msg: Vec<u8>,
     index: NodeIndex,
