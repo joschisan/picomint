@@ -6,7 +6,6 @@ use crate::{
 };
 use codec::{Decode, Encode};
 use derivative::Derivative;
-use parking_lot::RwLock;
 
 mod control_hash;
 mod store;
@@ -87,32 +86,17 @@ impl PreUnit {
     }
 }
 
-#[derive(Debug, Decode, Derivative, Encode)]
+#[derive(Clone, Debug, Decode, Derivative, Encode)]
 #[derivative(Eq, PartialEq, Hash)]
 pub struct FullUnit<D: Data> {
     pre_unit: PreUnit,
     data: Option<D>,
     session_id: SessionId,
-    #[codec(skip)]
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    hash: RwLock<Option<UnitHash>>,
 }
 
 impl<D: Data> From<FullUnit<D>> for Option<D> {
     fn from(value: FullUnit<D>) -> Self {
         value.data
-    }
-}
-
-impl<D: Data> Clone for FullUnit<D> {
-    fn clone(&self) -> Self {
-        let hash = self.hash.try_read().and_then(|guard| *guard);
-        FullUnit {
-            pre_unit: self.pre_unit.clone(),
-            data: self.data.clone(),
-            session_id: self.session_id,
-            hash: RwLock::new(hash),
-        }
     }
 }
 
@@ -122,7 +106,6 @@ impl<D: Data> FullUnit<D> {
             pre_unit,
             data,
             session_id,
-            hash: RwLock::new(None),
         }
     }
     pub(crate) fn as_pre_unit(&self) -> &PreUnit {
@@ -188,15 +171,7 @@ pub trait UnitWithParents: Unit {
 
 impl<D: Data> Unit for FullUnit<D> {
     fn hash(&self) -> UnitHash {
-        let hash = *self.hash.read();
-        match hash {
-            Some(hash) => hash,
-            None => {
-                let hash = self.using_encoded(crate::hash);
-                *self.hash.write() = Some(hash);
-                hash
-            }
-        }
+        self.using_encoded(crate::hash)
     }
 
     fn coord(&self) -> UnitCoord {

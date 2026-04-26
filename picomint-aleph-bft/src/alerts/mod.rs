@@ -6,8 +6,6 @@ use crate::{
 use aleph_bft_rmc::Message as RmcMessage;
 use codec::{Decode, Encode};
 use derivative::Derivative;
-use parking_lot::RwLock;
-use std::ops::Deref;
 
 mod handler;
 mod service;
@@ -20,31 +18,12 @@ pub type ForkProof<D, S> = (UncheckedSignedUnit<D, S>, UncheckedSignedUnit<D, S>
 pub type NetworkMessage<D, MK> =
     AlertMessage<D, <MK as Keychain>::Signature, <MK as MultiKeychain>::PartialMultisignature>;
 
-#[derive(Debug, Decode, Derivative, Encode)]
+#[derive(Clone, Debug, Decode, Derivative, Encode)]
 #[derivative(Eq, PartialEq, Hash)]
 pub struct Alert<D: Data, S: Signature> {
     sender: NodeIndex,
     proof: ForkProof<D, S>,
     legit_units: Vec<UncheckedSignedUnit<D, S>>,
-    #[codec(skip)]
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
-    hash: RwLock<Option<UnitHash>>,
-}
-
-impl<D: Data, S: Signature> Clone for Alert<D, S> {
-    fn clone(&self) -> Self {
-        let hash = match self.hash.try_read() {
-            None => None,
-            Some(guard) => *guard.deref(),
-        };
-        Alert {
-            sender: self.sender,
-            proof: self.proof.clone(),
-            legit_units: self.legit_units.clone(),
-            hash: RwLock::new(hash),
-        }
-    }
 }
 
 impl<D: Data, S: Signature> Alert<D, S> {
@@ -57,19 +36,6 @@ impl<D: Data, S: Signature> Alert<D, S> {
             sender,
             proof,
             legit_units,
-            hash: RwLock::new(None),
-        }
-    }
-
-    fn hash(&self) -> UnitHash {
-        let hash = *self.hash.read();
-        match hash {
-            Some(hash) => hash,
-            None => {
-                let hash = self.using_encoded(crate::hash);
-                *self.hash.write() = Some(hash);
-                hash
-            }
         }
     }
 
@@ -97,7 +63,7 @@ impl<D: Data, S: Signature> Index for Alert<D, S> {
 impl<D: Data, S: Signature> Signable for Alert<D, S> {
     type Hash = UnitHash;
     fn hash(&self) -> Self::Hash {
-        self.hash()
+        self.using_encoded(crate::hash)
     }
 }
 

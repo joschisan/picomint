@@ -2,7 +2,7 @@ use crate::{
     alerts::{Alert, AlertMessage, ForkProof, ForkingNotification},
     units::Unit,
     Data, Keychain, MultiKeychain, Multisigned, NodeIndex, PartialMultisignature, Recipient,
-    SessionId, Signature, Signed, UncheckedSigned, UnitHash,
+    SessionId, Signable, Signature, Signed, UncheckedSigned, UnitHash,
 };
 use aleph_bft_rmc::Message as RmcMessage;
 use aleph_bft_types::Round;
