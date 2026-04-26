@@ -21,7 +21,7 @@ use crate::signature::{Keychain, MultiKeychain, SignatureSet};
 /// Length in bytes of a serialized schnorr signature.
 pub const SIGNATURE_LEN: usize = 64;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Schnorr {
     public_keys: BTreeMap<PeerId, PublicKey>,
     identity: PeerId,

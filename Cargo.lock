@@ -3651,6 +3651,7 @@ dependencies = [
  "log",
  "parking_lot",
  "picomint-aleph-bft-types",
+ "picomint-core",
  "picomint-encoding",
  "rand 0.8.5",
  "tokio",
