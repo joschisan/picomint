@@ -1,0 +1,22 @@
+[package]
+name = "picomint-aleph-bft-crypto"
+description = "Inline fork of aleph-bft-crypto 0.11.0 (Cardinal Cryptography), vendored into picomint so phase-3 cleanup can replace parity-scale-codec with picomint-encoding."
+edition = "2021"
+license = "Apache-2.0"
+version = { workspace = true }
+authors = ["Cardinal Cryptography", "joschisan"]
+repository = { workspace = true }
+
+[lib]
+# Upstream's doc tests reference `aleph_bft_crypto::...`; that path only
+# resolves through the `package = "..."` rename in consumers. Skip them.
+doctest = false
+
+[dependencies]
+bit-vec = "0.8"
+codec = { package = "parity-scale-codec", version = "3.0", default-features = false, features = ["derive"] }
+derive_more = { version = "1.0", features = ["full"] }
+log = "0.4"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }

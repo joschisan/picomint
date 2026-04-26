@@ -1,0 +1,25 @@
+[package]
+name = "picomint-aleph-bft-rmc"
+description = "Inline fork of aleph-bft-rmc 0.16.0 (Cardinal Cryptography), vendored into picomint so phase-3 cleanup can replace parity-scale-codec with picomint-encoding."
+edition = "2021"
+license = "Apache-2.0"
+version = { workspace = true }
+authors = ["Cardinal Cryptography", "joschisan"]
+repository = { workspace = true }
+
+[lib]
+# Upstream doctests are written against the unrenamed `aleph_bft_rmc` path.
+doctest = false
+
+[dependencies]
+aleph-bft-crypto = { workspace = true }
+async-trait = { workspace = true }
+codec = { package = "parity-scale-codec", version = "3.0", default-features = false, features = ["derive"] }
+futures = { workspace = true }
+futures-timer = "3.0"
+log = "0.4"
+
+[dev-dependencies]
+aleph-bft-mock = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }

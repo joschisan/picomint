@@ -1,0 +1,40 @@
+[package]
+name = "picomint-aleph-bft"
+description = "Inline fork of Cardinal Cryptography's aleph-bft 0.45.4, vendored into picomint so we can replace its parity-scale-codec encoding and backup IO with picomint's own primitives. See README.md for upstream context."
+edition = "2021"
+license = "Apache-2.0"
+version = { workspace = true }
+authors = ["Cardinal Cryptography", "joschisan"]
+repository = { workspace = true }
+readme = "README.md"
+
+[lib]
+name = "aleph_bft"
+path = "src/lib.rs"
+# Upstream doctests reference `aleph_bft::...` paths that only resolve through
+# the consumer-side `package = "..."` rename. Skip them.
+doctest = false
+
+[features]
+default = ["initial_unit_collection"]
+initial_unit_collection = []
+
+[dependencies]
+aleph-bft-rmc = { workspace = true }
+aleph-bft-types = { workspace = true }
+anyhow = { workspace = true }
+codec = { package = "parity-scale-codec", version = "3.0", default-features = false, features = ["derive"] }
+derivative = "2.2.0"
+futures = { workspace = true }
+futures-timer = "3.0"
+itertools = "0.13"
+log = "0.4"
+parking_lot = "0.12"
+rand = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+aleph-bft-mock = { workspace = true }
+env_logger = { workspace = true }
+serial_test = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }

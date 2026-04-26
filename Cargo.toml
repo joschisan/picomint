@@ -3,6 +3,11 @@
 members = [
     "crypto/picomint-tbs",
     "crypto/picomint-tpe",
+    "picomint-aleph-bft",
+    "picomint-aleph-bft-crypto",
+    "picomint-aleph-bft-mock",
+    "picomint-aleph-bft-rmc",
+    "picomint-aleph-bft-types",
     "picomint-base32",
     "picomint-bitcoin-rpc",
     "picomint-client",
@@ -49,7 +54,11 @@ readme = "README.md"
 repository = "https://github.com/joschisan/picomint"
 
 [workspace.dependencies]
-aleph-bft = "0.45.4"
+aleph-bft = { path = "picomint-aleph-bft", package = "picomint-aleph-bft" }
+aleph-bft-crypto = { path = "picomint-aleph-bft-crypto", package = "picomint-aleph-bft-crypto" }
+aleph-bft-mock = { path = "picomint-aleph-bft-mock", package = "picomint-aleph-bft-mock" }
+aleph-bft-rmc = { path = "picomint-aleph-bft-rmc", package = "picomint-aleph-bft-rmc" }
+aleph-bft-types = { path = "picomint-aleph-bft-types", package = "picomint-aleph-bft-types" }
 anyhow = "1.0.98"
 aquamarine = "0.5.0"
 argon2 = "0.5.3"
@@ -82,6 +91,7 @@ clap_complete = "4.5.66"
 criterion = "0.5.1"
 derive_more = { version = "2.1.1", features = ["display", "from_str"] }
 dirs = "6.0.0"
+env_logger = "0.11"
 erased-serde = "0.4"
 esplora-client = { version = "0.12.3", default-features = false, features = [
     "async-https-rustls",
@@ -159,6 +169,7 @@ serde_json = { version = "1.0.149", features = ["preserve_order"] }
 serde_millis = "0.1.1"
 serde_with = { version = "3", features = ["hex"] }
 serdect = "0.2.0"
+serial_test = "3.2"
 sha3 = "0.10.8"
 slotmap = "1.0.7"
 strum = { version = "0.27", features = ["derive"] }
@@ -200,9 +211,11 @@ opt-level = 3
 # in dev mode optimize crates that are perf-critical (usually just crypto crates)
 [profile.dev.package]
 ahash = { opt-level = 3 }
-aleph-bft-crypto = { opt-level = 3 }
-aleph-bft-rmc = { opt-level = 3 }
-aleph-bft-types = { opt-level = 3 }
+picomint-aleph-bft = { opt-level = 3 }
+picomint-aleph-bft-crypto = { opt-level = 3 }
+picomint-aleph-bft-mock = { opt-level = 3 }
+picomint-aleph-bft-rmc = { opt-level = 3 }
+picomint-aleph-bft-types = { opt-level = 3 }
 bitcoin_hashes = { opt-level = 3 }
 bls12_381 = { opt-level = 3 }
 byteorder = { opt-level = 3 }

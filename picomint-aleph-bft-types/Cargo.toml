@@ -1,0 +1,14 @@
+[package]
+name = "picomint-aleph-bft-types"
+description = "Inline fork of aleph-bft-types 0.16.0 (Cardinal Cryptography), vendored into picomint so phase-3 cleanup can replace parity-scale-codec with picomint-encoding."
+edition = "2021"
+license = "Apache-2.0"
+version = { workspace = true }
+authors = ["Cardinal Cryptography", "joschisan"]
+repository = { workspace = true }
+
+[dependencies]
+aleph-bft-crypto = { workspace = true }
+async-trait = { workspace = true }
+codec = { package = "parity-scale-codec", version = "3.0", default-features = false, features = ["derive"] }
+futures = { workspace = true }

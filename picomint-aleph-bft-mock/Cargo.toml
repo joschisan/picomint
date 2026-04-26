@@ -1,0 +1,18 @@
+[package]
+name = "picomint-aleph-bft-mock"
+description = "Inline fork of aleph-bft-mock 0.18.0 (Cardinal Cryptography), vendored into picomint so the upstream test fixtures keep linking against our vendored aleph-bft-types instead of the registry copy."
+edition = "2021"
+license = "Apache-2.0"
+version = { workspace = true }
+authors = ["Cardinal Cryptography", "joschisan"]
+repository = { workspace = true }
+
+[dependencies]
+aleph-bft-types = { workspace = true }
+async-trait = { workspace = true }
+codec = { package = "parity-scale-codec", version = "3.0", default-features = false, features = ["derive"] }
+futures = { workspace = true }
+log = "0.4"
+parking_lot = "0.12"
+rand = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
