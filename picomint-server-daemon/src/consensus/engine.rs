@@ -21,7 +21,7 @@ use crate::config::ServerConfig;
 use crate::consensus::aleph_bft::backup::{UnitLoader, UnitSaver};
 use crate::consensus::aleph_bft::data_provider::DataProvider;
 use crate::consensus::aleph_bft::finalization_handler::{FinalizationHandler, OrderedUnit};
-use crate::consensus::aleph_bft::keychain::Keychain;
+use crate::consensus::aleph_bft::keychain;
 use crate::consensus::aleph_bft::network::Network;
 use crate::consensus::aleph_bft::spawner::Spawner;
 use crate::consensus::db::{
@@ -175,7 +175,7 @@ impl ConsensusEngine {
                 signatures_sender,
                 self.db.clone(),
             ),
-            Keychain::new(&self.cfg),
+            keychain::from_cfg(&self.cfg),
             Spawner::new(self.task_group.make_subgroup()),
             aleph_bft::Terminator::create_root(terminator_receiver, "Terminator"),
         ));
@@ -357,9 +357,9 @@ impl ConsensusEngine {
             "Signing session header..."
         );
 
-        let keychain = Keychain::new(&self.cfg);
+        let keychain = keychain::from_cfg(&self.cfg);
 
-        let our_signature = keychain.sign_schnorr(&header);
+        let our_signature = keychain.sign_typed(&header);
 
         let mut signatures = BTreeMap::from_iter([(self.identity(), our_signature)]);
 
@@ -373,7 +373,7 @@ impl ConsensusEngine {
                 result = signatures_receiver.recv() => {
                     let (peer_id, signature) = result.ok()?;
 
-                    if keychain.verify_schnorr(&header, &signature, peer_id) {
+                    if keychain.verify_typed(&header, &signature, peer_id) {
                         signatures.insert(peer_id, signature);
 
                         info!(
@@ -463,13 +463,13 @@ impl ConsensusEngine {
             return false;
         }
 
-        let keychain = Keychain::new(&self.cfg);
+        let keychain = keychain::from_cfg(&self.cfg);
         let header = outcome.session_outcome.header(session_index);
 
         outcome
             .signatures
             .iter()
-            .all(|(signer_id, sig)| keychain.verify_schnorr(&header, sig, *signer_id))
+            .all(|(signer_id, sig)| keychain.verify_typed(&header, sig, *signer_id))
     }
 
     pub async fn pending_accepted_items(&self) -> Vec<AcceptedItem> {

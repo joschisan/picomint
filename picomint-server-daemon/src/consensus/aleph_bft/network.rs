@@ -10,13 +10,12 @@ use tracing::error;
 
 use super::super::db::SIGNED_SESSION_OUTCOME;
 use super::data_provider::is_valid;
-use super::keychain::Keychain;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
 pub type NetworkData = aleph_bft::NetworkData<
     Vec<ConsensusItem>,
-    <Keychain as aleph_bft::Keychain>::Signature,
-    <Keychain as aleph_bft::MultiKeychain>::PartialMultisignature,
+    <aleph_bft::Schnorr as aleph_bft::Keychain>::Signature,
+    <aleph_bft::Schnorr as aleph_bft::MultiKeychain>::PartialMultisignature,
 >;
 
 pub struct Network {
