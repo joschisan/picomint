@@ -208,12 +208,7 @@ pub enum Accepted {
 pub type P2PStatusSenders = BTreeMap<PeerId, watch::Sender<Option<P2PConnectionStatus>>>;
 pub type P2PStatusReceivers = BTreeMap<PeerId, watch::Receiver<Option<P2PConnectionStatus>>>;
 
-/// This enum defines the intended recipient of a p2p message.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Recipient {
-    Everyone,
-    Peer(PeerId),
-}
+pub use picomint_core::p2p::Recipient;
 
 pub fn p2p_status_channels(peers: Vec<PeerId>) -> (P2PStatusSenders, P2PStatusReceivers) {
     let mut senders = BTreeMap::new();

@@ -47,6 +47,8 @@ pub mod methods;
 pub mod mint;
 /// Extendable module sysystem
 pub mod module;
+/// Peer-to-peer messaging primitives shared across binaries.
+pub mod p2p;
 /// `PeerId` type
 mod peer_id;
 /// Consensus session outcome types (AcceptedItem, SessionOutcome, …).
