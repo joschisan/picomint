@@ -227,29 +227,29 @@ mod test {
             random_full_parent_units_up_to, random_unit_with_parents, Unit, UnitStore,
             Validator as UnitValidator, WrappedSignedUnit,
         },
-        NodeCount, NodeIndex, Signed,
+        NumPeers, PeerId, Signed,
     };
     use aleph_bft_mock::Keychain;
 
     #[test]
     fn accepts_initial_units() {
-        let node_count = NodeCount(4);
-        let node_id = NodeIndex(0);
+        let node_count = NumPeers::new(4 as usize);
+        let node_id = PeerId::new(0 as u8);
         let session_id = 43;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.0], max_round);
+        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
         let mut dag = Dag::new(validator);
         for unit in random_full_parent_units_up_to(0, node_count, session_id)
             .into_iter()
             .flatten()
             .map(|unit| {
                 let keychain = keychains
-                    .get(unit.creator().0)
+                    .get(unit.creator().to_usize())
                     .expect("we have the keychains");
                 Signed::sign(unit, keychain)
             })
@@ -267,23 +267,23 @@ mod test {
 
     #[test]
     fn accepts_units_in_order() {
-        let node_count = NodeCount(4);
-        let node_id = NodeIndex(0);
+        let node_count = NumPeers::new(4 as usize);
+        let node_id = PeerId::new(0 as u8);
         let session_id = 43;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.0], max_round);
+        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
         let mut dag = Dag::new(validator);
         for unit in random_full_parent_units_up_to(13, node_count, session_id)
             .into_iter()
             .flatten()
             .map(|unit| {
                 let keychain = keychains
-                    .get(unit.creator().0)
+                    .get(unit.creator().to_usize())
                     .expect("we have the keychains");
                 Signed::sign(unit, keychain)
             })
@@ -301,17 +301,17 @@ mod test {
 
     #[test]
     fn accepts_units_in_reverse_order() {
-        let node_count = NodeCount(4);
-        let node_id = NodeIndex(0);
+        let node_count = NumPeers::new(4 as usize);
+        let node_id = PeerId::new(0 as u8);
         let session_id = 43;
         let max_round = 2137;
         let total_rounds = 13;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.0], max_round);
+        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
         let mut dag = Dag::new(validator);
         for unit in random_full_parent_units_up_to(total_rounds, node_count, session_id)
             .into_iter()
@@ -319,7 +319,7 @@ mod test {
             .rev()
             .map(|unit| {
                 let keychain = keychains
-                    .get(unit.creator().0)
+                    .get(unit.creator().to_usize())
                     .expect("we have the keychains");
                 Signed::sign(unit, keychain)
             })
@@ -333,16 +333,15 @@ mod test {
             } = dag.add_unit(unit.into(), &store);
             assert!(alerts.is_empty());
             match unit_round {
-                0 => match unit_creator {
-                    NodeIndex(0) => {
+                0 => {
+                    if unit_creator == PeerId::from(0u8) {
                         assert_eq!(units.len(), (total_rounds * 4 + 1).into());
                         assert!(requests.is_empty());
-                    }
-                    _ => {
+                    } else {
                         assert_eq!(units.len(), 1);
                         assert!(requests.is_empty());
                     }
-                },
+                }
                 _ => {
                     assert_eq!(requests.len(), 4);
                     assert!(units.is_empty());
@@ -353,30 +352,32 @@ mod test {
 
     #[test]
     fn alerts_on_fork() {
-        let node_count = NodeCount(4);
-        let node_id = NodeIndex(0);
+        let node_count = NumPeers::new(4 as usize);
+        let node_id = PeerId::new(0 as u8);
         let session_id = 43;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let mut store = UnitStore::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.0], max_round);
+        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
         let mut dag = Dag::new(validator);
-        let forker_id = NodeIndex(3);
-        let keychain = keychains.get(forker_id.0).expect("we have the keychain");
+        let forker_id = PeerId::new(3 as u8);
+        let keychain = keychains
+            .get(forker_id.to_usize())
+            .expect("we have the keychain");
         let unit = random_full_parent_units_up_to(0, node_count, session_id)
             .first()
             .expect("we have initial units")
-            .get(forker_id.0)
+            .get(forker_id.to_usize())
             .expect("We have the forker")
             .clone();
         let unit = Signed::sign(unit, keychain);
         let mut fork = random_full_parent_units_up_to(0, node_count, session_id)
             .first()
             .expect("we have initial units")
-            .get(forker_id.0)
+            .get(forker_id.to_usize())
             .expect("We have the forker")
             .clone();
         // we might have randomly created an identical "fork"
@@ -384,7 +385,7 @@ mod test {
             fork = random_full_parent_units_up_to(0, node_count, session_id)
                 .first()
                 .expect("we have initial units")
-                .get(forker_id.0)
+                .get(forker_id.to_usize())
                 .expect("We have the forker")
                 .clone();
         }
@@ -410,32 +411,32 @@ mod test {
 
     #[test]
     fn detects_fork_through_notification() {
-        let node_count = NodeCount(7);
-        let node_id = NodeIndex(0);
-        let forker_id = NodeIndex(3);
+        let node_count = NumPeers::new(7 as usize);
+        let node_id = PeerId::new(0 as u8);
+        let forker_id = PeerId::new(3 as u8);
         let session_id = 0;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.0], max_round);
+        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
         let mut dag = Dag::new(validator);
         let unit = random_full_parent_units_up_to(2, node_count, session_id)
             .get(2)
             .expect("we have the requested round")
-            .get(forker_id.0)
+            .get(forker_id.to_usize())
             .expect("we have the unit for the forker")
             .clone();
-        let unit = Signed::sign(unit, &keychains[forker_id.0]);
+        let unit = Signed::sign(unit, &keychains[forker_id.to_usize()]);
         let fork = random_full_parent_units_up_to(2, node_count, session_id)
             .get(2)
             .expect("we have the requested round")
-            .get(forker_id.0)
+            .get(forker_id.to_usize())
             .expect("we have the unit for the forker")
             .clone();
-        let fork = Signed::sign(fork, &keychains[forker_id.0]);
+        let fork = Signed::sign(fork, &keychains[forker_id.to_usize()]);
         let DagResult {
             units,
             requests,
@@ -446,24 +447,24 @@ mod test {
         );
         // parents were not passed, so the correct unit does not yet get returned
         assert!(units.is_empty());
-        assert_eq!(requests.len(), node_count.0);
+        assert_eq!(requests.len(), node_count.total());
         assert_eq!(alerts.len(), 1);
     }
 
     #[test]
     fn accepts_committed() {
-        let node_count = NodeCount(7);
-        let node_id = NodeIndex(0);
-        let forker_id = NodeIndex(3);
+        let node_count = NumPeers::new(7 as usize);
+        let node_id = PeerId::new(0 as u8);
+        let forker_id = PeerId::new(3 as u8);
         let session_id = 0;
         let max_round = 2137;
         let produced_round = 4;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.0], max_round);
+        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
         let mut dag = Dag::new(validator);
         let units = random_full_parent_units_up_to(produced_round, node_count, session_id);
         let fork_parents = units
@@ -474,14 +475,14 @@ mod test {
             .cloned()
             .collect();
         let fork = random_unit_with_parents(forker_id, &fork_parents, 3);
-        let fork = Signed::sign(fork, &keychains[forker_id.0]);
+        let fork = Signed::sign(fork, &keychains[forker_id.to_usize()]);
         let unit = units
             .get(3)
             .expect("we have the requested round")
-            .get(forker_id.0)
+            .get(forker_id.to_usize())
             .expect("we have the forker's unit")
             .clone();
-        let unit = Signed::sign(unit, &keychains[forker_id.0]);
+        let unit = Signed::sign(unit, &keychains[forker_id.to_usize()]);
         let DagResult {
             units: reconstructed_units,
             requests,
@@ -491,13 +492,13 @@ mod test {
             &store,
         );
         assert!(reconstructed_units.is_empty());
-        assert_eq!(requests.len(), node_count.0);
+        assert_eq!(requests.len(), node_count.total());
         assert_eq!(alerts.len(), 1);
         // normally adding forker units should no longer work now, so trying to add all units only adds initial units of non-forkers
         let mut units_added = 0;
         for unit in units.iter().flatten().map(|unit| {
             let keychain = keychains
-                .get(unit.creator().0)
+                .get(unit.creator().to_usize())
                 .expect("we have the keychains");
             Signed::sign(unit.clone(), keychain)
         }) {
@@ -509,17 +510,17 @@ mod test {
             units_added += units.len();
             assert!(alerts.is_empty());
         }
-        assert_eq!(units_added, node_count.0 - 1);
+        assert_eq!(units_added, node_count.total() - 1);
         let committed_units = units
             .iter()
             .take(3)
             .map(|units| {
                 units
-                    .get(forker_id.0)
+                    .get(forker_id.to_usize())
                     .expect("we have the forker's unit")
                     .clone()
             })
-            .map(|unit| Signed::sign(unit, &keychains[forker_id.0]))
+            .map(|unit| Signed::sign(unit, &keychains[forker_id.to_usize()]))
             .chain(Some(fork))
             .map(|unit| unit.into())
             .collect();
@@ -531,23 +532,23 @@ mod test {
         assert!(alerts.is_empty());
         // the non-fork unit was added first in the forking notif, so all units reconstruct successfully
         assert!(requests.is_empty());
-        assert_eq!(reconstructed_units.len(), node_count.0 * 4 + 1);
+        assert_eq!(reconstructed_units.len(), node_count.total() * 4 + 1);
     }
 
     #[test]
     fn handles_explicit_parents() {
-        let node_count = NodeCount(7);
-        let node_id = NodeIndex(0);
-        let forker_id = NodeIndex(3);
+        let node_count = NumPeers::new(7 as usize);
+        let node_id = PeerId::new(0 as u8);
+        let forker_id = PeerId::new(3 as u8);
         let session_id = 0;
         let max_round = 2137;
         let produced_round = 4;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
-        let validator = UnitValidator::new(session_id, keychains[node_id.0], max_round);
+        let validator = UnitValidator::new(session_id, keychains[node_id.to_usize()], max_round);
         let mut dag = Dag::new(validator);
         let units = random_full_parent_units_up_to(produced_round, node_count, session_id);
         let fork_parents = units
@@ -558,14 +559,14 @@ mod test {
             .cloned()
             .collect();
         let fork = random_unit_with_parents(forker_id, &fork_parents, 3);
-        let fork = Signed::sign(fork, &keychains[forker_id.0]);
+        let fork = Signed::sign(fork, &keychains[forker_id.to_usize()]);
         let unit = units
             .get(3)
             .expect("we have the requested round")
-            .get(forker_id.0)
+            .get(forker_id.to_usize())
             .expect("we have the forker's unit")
             .clone();
-        let unit = Signed::sign(unit, &keychains[forker_id.0]);
+        let unit = Signed::sign(unit, &keychains[forker_id.to_usize()]);
         let DagResult {
             units: reconstructed_units,
             requests,
@@ -583,7 +584,7 @@ mod test {
         let mut all_requests = Vec::new();
         for unit in units.iter().flatten().map(|unit| {
             let keychain = keychains
-                .get(unit.creator().0)
+                .get(unit.creator().to_usize())
                 .expect("we have the keychains");
             Signed::sign(unit.clone(), keychain)
         }) {
@@ -596,7 +597,7 @@ mod test {
             all_requests.append(&mut requests);
             assert!(alerts.is_empty());
         }
-        assert_eq!(units_added, node_count.0 - 1);
+        assert_eq!(units_added, node_count.total() - 1);
         let mut parent_requests: Vec<_> = all_requests
             .into_iter()
             .filter_map(|request| match request {
@@ -605,17 +606,17 @@ mod test {
             })
             .collect();
         // all the round 4 non-forker units should be confused
-        assert_eq!(parent_requests.len(), node_count.0 - 1);
+        assert_eq!(parent_requests.len(), node_count.total() - 1);
         let committed_units = units
             .iter()
             .take(3)
             .map(|units| {
                 units
-                    .get(forker_id.0)
+                    .get(forker_id.to_usize())
                     .expect("we have the forker's unit")
                     .clone()
             })
-            .map(|unit| Signed::sign(unit, &keychains[forker_id.0]))
+            .map(|unit| Signed::sign(unit, &keychains[forker_id.to_usize()]))
             .chain(Some(fork))
             .map(|unit| unit.into())
             .collect();
@@ -634,11 +635,11 @@ mod test {
             .take(4)
             .map(|units| {
                 units
-                    .get(forker_id.0)
+                    .get(forker_id.to_usize())
                     .expect("we have the forker's unit")
                     .clone()
             })
-            .map(|unit| Signed::sign(unit, &keychains[forker_id.0]).into())
+            .map(|unit| Signed::sign(unit, &keychains[forker_id.to_usize()]).into())
             .collect();
         let DagResult {
             units: reconstructed_units,
@@ -653,7 +654,7 @@ mod test {
             .get(3)
             .expect("we have round 3 units")
             .iter()
-            .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().0]))
+            .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().to_usize()]))
             .map(|unit| unit.into())
             .collect();
         let DagResult {

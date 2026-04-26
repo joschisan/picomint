@@ -1,8 +1,8 @@
 use crate::{
     alerts::{Alert, AlertMessage, ForkProof, ForkingNotification, Handler, Service},
     units::{ControlHash, FullUnit, PreUnit},
-    Index, Indexed, Keychain as _, NodeCount, NodeIndex, NodeMap, Recipient, Round, Signable,
-    Signed, Terminator, UncheckedSigned,
+    Index, Indexed, Keychain as _, NodeMap, NumPeers, PeerId, Recipient, Round, Signable, Signed,
+    Terminator, UncheckedSigned,
 };
 use aleph_bft_mock::{Data, Keychain, PartialMultisignature, Signature};
 use aleph_bft_rmc::Message as RmcMessage;
@@ -72,10 +72,10 @@ struct TestCase {
 }
 
 impl TestCase {
-    fn new(n_members: NodeCount) -> Self {
+    fn new(n_members: NumPeers) -> Self {
         let mut keychains = Vec::new();
-        for i in 0..n_members.0 {
-            keychains.push(Keychain::new(n_members, NodeIndex(i)))
+        for i in 0..n_members.total() {
+            keychains.push(Keychain::new(n_members, PeerId::new(i as u8)))
         }
         Self {
             keychains,
@@ -83,14 +83,14 @@ impl TestCase {
         }
     }
 
-    fn keychain(&self, node: NodeIndex) -> &Keychain {
-        &self.keychains[node.0]
+    fn keychain(&self, node: PeerId) -> &Keychain {
+        &self.keychains[node.to_usize()]
     }
 
     fn unchecked_signed<T: Signable + Index>(
         &self,
         to_sign: T,
-        signer: NodeIndex,
+        signer: PeerId,
     ) -> UncheckedSigned<T, Signature> {
         Signed::sign(to_sign, self.keychain(signer)).into()
     }
@@ -98,18 +98,18 @@ impl TestCase {
     fn indexed_unchecked_signed<T: Signable>(
         &self,
         to_sign: T,
-        signer: NodeIndex,
+        signer: PeerId,
     ) -> UncheckedSigned<Indexed<T>, Signature> {
         Signed::sign_with_index(to_sign, self.keychain(signer)).into()
     }
 
-    fn full_unit(&self, forker: NodeIndex, round: Round, variant: u32) -> TestFullUnit {
+    fn full_unit(&self, forker: PeerId, round: Round, variant: u32) -> TestFullUnit {
         FullUnit::new(
             PreUnit::new(
                 forker,
                 round,
                 ControlHash::new(&NodeMap::with_size(
-                    self.keychain(NodeIndex(0)).node_count(),
+                    self.keychain(PeerId::new(0 as u8)).node_count(),
                 )),
             ),
             Some(variant),
@@ -119,14 +119,14 @@ impl TestCase {
 
     fn unchecked_signed_unit(
         &self,
-        creator: NodeIndex,
+        creator: PeerId,
         round: Round,
         variant: u32,
     ) -> UncheckedSigned<TestFullUnit, Signature> {
         self.unchecked_signed(self.full_unit(creator, round, variant), creator)
     }
 
-    fn fork_proof(&self, forker: NodeIndex, round: Round) -> TestForkProof {
+    fn fork_proof(&self, forker: PeerId, round: Round) -> TestForkProof {
         let u0 = self.unchecked_signed_unit(forker, round, 0);
         let u1 = self.unchecked_signed_unit(forker, round, 1);
         (u0, u1)
@@ -134,14 +134,14 @@ impl TestCase {
 
     fn alert_with_commitment(
         &self,
-        sender: NodeIndex,
+        sender: PeerId,
         proof: TestForkProof,
         commitment: Vec<UncheckedSigned<TestFullUnit, Signature>>,
     ) -> TestAlert {
         Alert::new(sender, proof, commitment)
     }
 
-    fn alert(&self, sender: NodeIndex, proof: TestForkProof) -> TestAlert {
+    fn alert(&self, sender: PeerId, proof: TestForkProof) -> TestAlert {
         self.alert_with_commitment(sender, proof, Vec::new())
     }
 
@@ -266,7 +266,7 @@ impl TestCase {
             .expect("exit channel shouldn't be closed");
     }
 
-    async fn run(self, run_as: NodeIndex) {
+    async fn run(self, run_as: PeerId) {
         let keychain = *self.keychain(run_as);
         let mut timeout = Delay::new(Duration::from_millis(500)).fuse();
         futures::select! {
@@ -280,9 +280,9 @@ impl TestCase {
 
 #[tokio::test]
 async fn distributes_alert_from_units() {
-    let n_members = NodeCount(7);
-    let own_index = NodeIndex(0);
-    let forker = NodeIndex(6);
+    let n_members = NumPeers::new(7 as usize);
+    let own_index = PeerId::new(0 as u8);
+    let forker = PeerId::new(6 as u8);
     let mut test_case = TestCase::new(n_members);
     let alert = test_case.alert(own_index, test_case.fork_proof(forker, 0));
     let signed_alert = test_case.unchecked_signed(alert.clone(), own_index);
@@ -294,10 +294,10 @@ async fn distributes_alert_from_units() {
 
 #[tokio::test]
 async fn reacts_to_correctly_incoming_alert() {
-    let n_members = NodeCount(7);
-    let own_index = NodeIndex(0);
-    let alerter_index = NodeIndex(1);
-    let forker = NodeIndex(6);
+    let n_members = NumPeers::new(7 as usize);
+    let own_index = PeerId::new(0 as u8);
+    let alerter_index = PeerId::new(1 as u8);
+    let forker = PeerId::new(6 as u8);
     let mut test_case = TestCase::new(n_members);
     let fork_proof = test_case.fork_proof(forker, 0);
     let alert = test_case.alert(alerter_index, fork_proof.clone());
@@ -315,10 +315,10 @@ async fn reacts_to_correctly_incoming_alert() {
 
 #[tokio::test]
 async fn notifies_about_finished_alert() {
-    let n_members = NodeCount(7);
-    let own_index = NodeIndex(0);
-    let alerter_index = NodeIndex(1);
-    let forker = NodeIndex(6);
+    let n_members = NumPeers::new(7 as usize);
+    let own_index = PeerId::new(0 as u8);
+    let alerter_index = PeerId::new(1 as u8);
+    let forker = PeerId::new(6 as u8);
     let mut test_case = TestCase::new(n_members);
     let fork_proof = test_case.fork_proof(forker, 0);
     let alert = test_case.alert(alerter_index, fork_proof.clone());
@@ -328,8 +328,8 @@ async fn notifies_about_finished_alert() {
         .incoming_message(AlertMessage::ForkAlert(signed_alert))
         .outgoing_notification(ForkingNotification::Forker(fork_proof))
         .wait();
-    for i in 1..n_members.0 - 1 {
-        let node_id = NodeIndex(i);
+    for i in 1..n_members.total() - 1 {
+        let node_id = PeerId::new(i as u8);
         let signed_alert_hash = test_case.indexed_unchecked_signed(alert_hash, node_id);
         test_case.incoming_message(AlertMessage::RmcMessage(
             node_id,
@@ -342,10 +342,10 @@ async fn notifies_about_finished_alert() {
 
 #[tokio::test]
 async fn asks_about_unknown_alert() {
-    let n_members = NodeCount(7);
-    let own_index = NodeIndex(0);
-    let alerter_index = NodeIndex(1);
-    let forker = NodeIndex(6);
+    let n_members = NumPeers::new(7 as usize);
+    let own_index = PeerId::new(0 as u8);
+    let alerter_index = PeerId::new(1 as u8);
+    let forker = PeerId::new(6 as u8);
     let mut test_case = TestCase::new(n_members);
     let fork_proof = test_case.fork_proof(forker, 0);
     let alert = test_case.alert(alerter_index, fork_proof.clone());
@@ -365,10 +365,10 @@ async fn asks_about_unknown_alert() {
 
 #[tokio::test]
 async fn ignores_wrong_alert() {
-    let n_members = NodeCount(7);
-    let own_index = NodeIndex(0);
-    let alerter_index = NodeIndex(1);
-    let forker = NodeIndex(6);
+    let n_members = NumPeers::new(7 as usize);
+    let own_index = PeerId::new(0 as u8);
+    let alerter_index = PeerId::new(1 as u8);
+    let forker = PeerId::new(6 as u8);
     let mut test_case = TestCase::new(n_members);
     let valid_unit = test_case.unchecked_signed_unit(alerter_index, 0, 0);
     let wrong_fork_proof = (valid_unit.clone(), valid_unit);
@@ -379,13 +379,13 @@ async fn ignores_wrong_alert() {
     test_case
         .incoming_message(AlertMessage::ForkAlert(signed_wrong_alert))
         .unexpected_notification(ForkingNotification::Forker(wrong_fork_proof));
-    for i in 1..n_members.0 {
+    for i in 1..n_members.total() {
         test_case.unexpected_message(
             AlertMessage::RmcMessage(
                 own_index,
                 RmcMessage::SignedHash(signed_wrong_alert_hash.clone()),
             ),
-            Recipient::Node(NodeIndex(i)),
+            Recipient::Node(PeerId::new(i as u8)),
         );
     }
     // We also make a proper alert to actually have something to wait for.
@@ -400,10 +400,10 @@ async fn ignores_wrong_alert() {
 
 #[tokio::test]
 async fn responds_to_alert_queries() {
-    let n_members = NodeCount(7);
-    let own_index = NodeIndex(0);
-    let querier = NodeIndex(1);
-    let forker = NodeIndex(6);
+    let n_members = NumPeers::new(7 as usize);
+    let own_index = PeerId::new(0 as u8);
+    let querier = PeerId::new(1 as u8);
+    let forker = PeerId::new(6 as u8);
     let mut test_case = TestCase::new(n_members);
     let alert = test_case.alert(own_index, test_case.fork_proof(forker, 0));
     let alert_hash = Signable::hash(&alert);
@@ -425,8 +425,8 @@ async fn responds_to_alert_queries() {
             AlertMessage::ForkAlert(signed_alert.clone()),
             Recipient::Node(querier),
         );
-    for i in 1..n_members.0 {
-        let node_id = NodeIndex(i);
+    for i in 1..n_members.total() {
+        let node_id = PeerId::new(i as u8);
         test_case
             .incoming_message(AlertMessage::AlertRequest(node_id, alert_hash))
             .outgoing_message(
@@ -439,11 +439,11 @@ async fn responds_to_alert_queries() {
 
 #[tokio::test]
 async fn notifies_only_about_multisigned_alert() {
-    let n_members = NodeCount(7);
-    let own_index = NodeIndex(0);
-    let other_honest_node = NodeIndex(1);
-    let double_committer = NodeIndex(5);
-    let forker = NodeIndex(6);
+    let n_members = NumPeers::new(7 as usize);
+    let own_index = PeerId::new(0 as u8);
+    let other_honest_node = PeerId::new(1 as u8);
+    let double_committer = PeerId::new(5 as u8);
+    let forker = PeerId::new(6 as u8);
     let mut test_case = TestCase::new(n_members);
     let fork_proof = test_case.fork_proof(forker, 0);
     let empty_alert = test_case.alert(double_committer, fork_proof.clone());
@@ -476,8 +476,8 @@ async fn notifies_only_about_multisigned_alert() {
         .check(keychain)
         .expect("the signature is correct")
         .into_partially_multisigned(keychain);
-    for i in 1..n_members.0 - 2 {
-        let node_id = NodeIndex(i);
+    for i in 1..n_members.total() - 2 {
+        let node_id = PeerId::new(i as u8);
         let signed_nonempty_alert_hash =
             test_case.indexed_unchecked_signed(nonempty_alert_hash, node_id);
         multisigned_nonempty_alert_hash = multisigned_nonempty_alert_hash.add_signature(

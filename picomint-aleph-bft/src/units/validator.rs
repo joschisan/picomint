@@ -1,7 +1,7 @@
 use crate::units::{ControlHashError, UnitCoord};
 use crate::{
     units::{FullUnit, PreUnit, SignedUnit, UncheckedSignedUnit, Unit},
-    Data, Keychain, NodeCount, NodeIndex, Round, SessionId, Signature, SignatureError,
+    Data, Keychain, NumPeers, PeerId, Round, SessionId, Signature, SignatureError,
 };
 use std::{
     fmt::{Display, Formatter, Result as FmtResult},
@@ -64,11 +64,11 @@ impl<K: Keychain> Validator<K> {
         }
     }
 
-    pub fn node_count(&self) -> NodeCount {
+    pub fn node_count(&self) -> NumPeers {
         self.keychain.node_count()
     }
 
-    pub fn index(&self) -> NodeIndex {
+    pub fn index(&self) -> PeerId {
         self.keychain.index()
     }
 
@@ -112,7 +112,7 @@ mod tests {
             random_full_parent_units_up_to, random_unit_with_parents, PreUnit,
             {ControlHash, ControlHashError},
         },
-        NodeCount, NodeIndex,
+        NumPeers, PeerId,
     };
     use aleph_bft_mock::Keychain;
     use picomint_encoding::{Decodable, Encodable};
@@ -121,8 +121,8 @@ mod tests {
 
     #[test]
     fn validates_initial_unit() {
-        let n_members = NodeCount(7);
-        let creator_id = NodeIndex(0);
+        let n_members = NumPeers::new(7 as usize);
+        let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let max_round = 2;
         let keychain = Keychain::new(n_members, creator_id);
@@ -137,8 +137,8 @@ mod tests {
 
     #[test]
     fn detects_wrong_initial_control_hash() {
-        let n_members = NodeCount(7);
-        let creator_id = NodeIndex(0);
+        let n_members = NumPeers::new(7 as usize);
+        let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let max_round = 2;
         let keychain = Keychain::new(n_members, creator_id);
@@ -171,8 +171,8 @@ mod tests {
 
     #[test]
     fn detects_wrong_session_id() {
-        let n_members = NodeCount(7);
-        let creator_id = NodeIndex(0);
+        let n_members = NumPeers::new(7 as usize);
+        let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let wrong_session_id = 43;
         let max_round = 2;
@@ -191,9 +191,9 @@ mod tests {
 
     #[test]
     fn detects_wrong_number_of_members() {
-        let n_members = NodeCount(7);
-        let n_plus_one_members = NodeCount(8);
-        let creator_id = NodeIndex(0);
+        let n_members = NumPeers::new(7 as usize);
+        let n_plus_one_members = NumPeers::new(8 as usize);
+        let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let max_round = 2;
         let keychain = Keychain::new(n_plus_one_members, creator_id);
@@ -211,8 +211,8 @@ mod tests {
 
     #[test]
     fn detects_below_threshold() {
-        let n_members = NodeCount(7);
-        let creator_id = NodeIndex(0);
+        let n_members = NumPeers::new(7 as usize);
+        let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let max_round = 2;
         let parents = random_full_parent_units_up_to(0, n_members, session_id)[0]
@@ -238,8 +238,8 @@ mod tests {
 
     #[test]
     fn detects_too_high_round() {
-        let n_members = NodeCount(7);
-        let creator_id = NodeIndex(0);
+        let n_members = NumPeers::new(7 as usize);
+        let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let max_round = 2;
         let keychain = Keychain::new(n_members, creator_id);

@@ -9,6 +9,7 @@ use picomint_redb::consensus_key;
 
 #[derive(
     Debug,
+    Default,
     Clone,
     Copy,
     PartialEq,
@@ -28,6 +29,10 @@ pub struct PeerId(u8);
 consensus_key!(PeerId);
 
 impl PeerId {
+    pub const fn new(id: u8) -> Self {
+        Self(id)
+    }
+
     pub fn to_usize(self) -> usize {
         self.0 as usize
     }
@@ -46,10 +51,14 @@ impl From<PeerId> for u8 {
 }
 
 /// The number of guardians in a federation.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NumPeers(usize);
 
 impl NumPeers {
+    pub const fn new(n: usize) -> Self {
+        Self(n)
+    }
+
     /// Returns an iterator over all peer IDs in the federation.
     pub fn peer_ids(self) -> impl Iterator<Item = PeerId> {
         (0u8..(self.0 as u8)).map(PeerId)

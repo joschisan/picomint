@@ -4,8 +4,8 @@ use crate::{
     dissemination::{Addressed, DisseminationMessage},
     network::UnitMessageTo,
     units::{Unit, ValidationError, Validator},
-    Data, Keychain, NodeCount, NodeIndex, NodeMap, Receiver, Recipient, Round, Sender, Signature,
-    SignatureError, UncheckedSigned,
+    Data, Keychain, NodeMap, PeerId, Receiver, Recipient, Round, Sender, Signature, SignatureError,
+    UncheckedSigned,
 };
 use futures::{channel::oneshot, FutureExt, StreamExt};
 use futures_timer::Delay;
@@ -23,7 +23,7 @@ pub enum Error<D: Data, S: Signature> {
     WrongSignature,
     SaltMismatch(Salt, Salt),
     InvalidUnit(ValidationError<D, S>),
-    ForeignUnit(NodeIndex),
+    ForeignUnit(PeerId),
 }
 
 impl<D: Data, S: Signature> Display for Error<D, S> {
@@ -88,7 +88,7 @@ impl<'a, MK: Keychain> Collection<'a, MK> {
         }
     }
 
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> PeerId {
         self.keychain.index()
     }
 
@@ -118,7 +118,7 @@ impl<'a, MK: Keychain> Collection<'a, MK> {
             .get(response.responder)
             .unwrap_or(&round);
         if current_round != round {
-            debug!(target: LOG_TARGET, "Node {} responded with starting unit {}, but now says {}", response.responder.0, current_round, round);
+            debug!(target: LOG_TARGET, "Node {} responded with starting unit {}, but now says {}", response.responder.to_usize(), current_round, round);
         }
         self.collected_starting_rounds
             .insert(response.responder, max(current_round, round));
@@ -130,14 +130,14 @@ impl<'a, MK: Keychain> Collection<'a, MK> {
         self.salt
     }
 
-    fn threshold(&self) -> NodeCount {
-        self.collected_starting_rounds.size().consensus_threshold()
+    fn threshold(&self) -> usize {
+        self.collected_starting_rounds.size().threshold()
     }
 
     fn missing_responders(&self) -> Vec<Recipient> {
         self.collected_starting_rounds
             .size()
-            .into_iterator()
+            .peer_ids()
             .filter(|idx| self.collected_starting_rounds.get(*idx).is_none())
             .map(Recipient::Node)
             .collect()
@@ -154,9 +154,9 @@ impl<'a, MK: Keychain> Collection<'a, MK> {
     /// The current status of the collection.
     pub fn status(&self) -> Status {
         use Status::*;
-        let responders = NodeCount(self.collected_starting_rounds.item_count());
+        let responders = self.collected_starting_rounds.item_count();
         let starting_round: Round = *self.collected_starting_rounds.values().max().unwrap_or(&0);
-        if responders == self.keychain.node_count() {
+        if responders == self.keychain.node_count().total() {
             return Finished(starting_round);
         }
         if responders >= self.threshold() {
@@ -320,7 +320,7 @@ mod tests {
             FullUnit as GenericFullUnit, PreUnit as GenericPreUnit,
             UncheckedSignedUnit as GenericUncheckedSignedUnit, Validator as GenericValidator,
         },
-        Index, NodeCount, NodeIndex, SessionId, Signed, UncheckedSigned,
+        Index, NumPeers, PeerId, SessionId, Signed, UncheckedSigned,
     };
     use aleph_bft_mock::{Data, Keychain, Signature};
     use std::iter::{once, repeat, repeat_n};
@@ -334,10 +334,10 @@ mod tests {
     type NewestUnitResponse = GenericNewestUnitResponse<Data, Signature>;
     type UncheckedSignedNewestUnitResponse = UncheckedSigned<NewestUnitResponse, Signature>;
 
-    fn keychain_set(n_members: NodeCount) -> Vec<Keychain> {
+    fn keychain_set(n_members: NumPeers) -> Vec<Keychain> {
         let mut result = Vec::new();
-        for i in 0..n_members.0 {
-            result.push(Keychain::new(n_members, NodeIndex(i)));
+        for i in 0..n_members.total() {
+            result.push(Keychain::new(n_members, PeerId::new(i as u8)));
         }
         result
     }
@@ -370,8 +370,8 @@ mod tests {
 
     #[test]
     fn pending_with_no_messages() {
-        let n_members = NodeCount(7);
-        let creator_id = NodeIndex(0);
+        let n_members = NumPeers::new(7 as usize);
+        let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let max_round = 2;
         let keychain = Keychain::new(n_members, creator_id);
@@ -380,13 +380,13 @@ mod tests {
         assert_eq!(collection.status(), Pending);
         assert_eq!(
             collection.prepare_request::<Data>().recipients().len(),
-            n_members.0 - 1
+            n_members.total() - 1
         );
     }
 
     #[test]
     fn pending_with_too_few_messages() {
-        let n_members = NodeCount(7);
+        let n_members = NumPeers::new(7 as usize);
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
@@ -405,7 +405,7 @@ mod tests {
 
     #[test]
     fn pending_with_repeated_messages() {
-        let n_members = NodeCount(7);
+        let n_members = NumPeers::new(7 as usize);
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
@@ -423,7 +423,7 @@ mod tests {
 
     #[test]
     fn ready_with_just_enough_messages() {
-        let n_members = NodeCount(7);
+        let n_members = NumPeers::new(7 as usize);
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
@@ -446,8 +446,8 @@ mod tests {
 
     #[test]
     fn finished_and_higher_starting_round_with_last_message() {
-        let n_members = NodeCount(7);
-        let creator_id = NodeIndex(0);
+        let n_members = NumPeers::new(7 as usize);
+        let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
@@ -483,7 +483,7 @@ mod tests {
 
     #[test]
     fn detects_salt_mismatch() {
-        let n_members = NodeCount(7);
+        let n_members = NumPeers::new(7 as usize);
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
@@ -512,8 +512,8 @@ mod tests {
 
     #[test]
     fn detects_invalid_unit() {
-        let n_members = NodeCount(7);
-        let creator_id = NodeIndex(0);
+        let n_members = NumPeers::new(7 as usize);
+        let creator_id = PeerId::new(0 as u8);
         let session_id = 0;
         let wrong_session_id = 43;
         let max_round = 2;
@@ -537,8 +537,8 @@ mod tests {
 
     #[test]
     fn detects_foreign_unit() {
-        let n_members = NodeCount(7);
-        let other_creator_id = NodeIndex(1);
+        let n_members = NumPeers::new(7 as usize);
+        let other_creator_id = PeerId::new(1 as u8);
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);

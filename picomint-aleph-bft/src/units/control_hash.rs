@@ -1,4 +1,4 @@
-use crate::{units::UnitCoord, NodeCount, NodeIndex, NodeMap, Round, UnitHash};
+use crate::{units::UnitCoord, NodeMap, NumPeers, PeerId, Round, UnitHash};
 use picomint_encoding::{Decodable, Encodable};
 use std::{
     fmt::{Display, Formatter, Result as FmtResult},
@@ -7,9 +7,9 @@ use std::{
 
 #[derive(Eq, Debug, PartialEq)]
 pub enum Error {
-    RoundZeroWithSomeParents(NodeCount),
+    RoundZeroWithSomeParents(NumPeers),
     RoundZeroBadControlHash(UnitHash, UnitHash),
-    NotDescendantOfPreviousUnit(NodeIndex),
+    NotDescendantOfPreviousUnit(PeerId),
     DescendantOfPreviousUnitHasWrongRound(Round),
     NotEnoughParentsForRound(Round),
     ParentsHigherThanRound(Round),
@@ -90,7 +90,7 @@ impl ControlHash {
     }
 
     /// Returns number of all members in abft consensus
-    pub fn n_members(&self) -> NodeCount {
+    pub fn n_members(&self) -> NumPeers {
         self.parents.size()
     }
 
@@ -104,7 +104,9 @@ impl ControlHash {
     fn validate_initial_round(&self) -> Result<(), Error> {
         let parents_count = self.parents().count();
         if parents_count > 0 {
-            return Err(Error::RoundZeroWithSomeParents(NodeCount(parents_count)));
+            return Err(Error::RoundZeroWithSomeParents(NumPeers::new(
+                parents_count as usize,
+            )));
         }
         let recalculated_control_hash =
             ControlHash::create_control_hash(&NodeMap::with_size(self.n_members()));
@@ -143,7 +145,7 @@ impl ControlHash {
             .parents()
             .filter(|&parent| parent.round == round - 1)
             .count();
-        if previous_round_parents < self.n_members().consensus_threshold().0 {
+        if previous_round_parents < self.n_members().threshold() {
             return Err(Error::NotEnoughParentsForRound(round - 1));
         }
         Ok(())
@@ -167,7 +169,7 @@ impl ControlHash {
 
 #[cfg(test)]
 pub mod tests {
-    use crate::units::{control_hash::Error, ControlHash, NodeCount, NodeIndex, UnitCoord};
+    use crate::units::{control_hash::Error, ControlHash, NumPeers, PeerId, UnitCoord};
     use aleph_bft_types::{NodeMap, Round};
     use picomint_encoding::{Decodable, Encodable};
 
@@ -202,16 +204,16 @@ pub mod tests {
         );
 
         assert_eq!(ch.parents().count(), 6);
-        assert_eq!(ch.n_members(), NodeCount(7));
+        assert_eq!(ch.n_members(), NumPeers::new(7 as usize));
 
         let parents: Vec<_> = ch.parents().collect();
         let expected_parents = vec![
-            UnitCoord::new(2, NodeIndex(0)),
-            UnitCoord::new(2, NodeIndex(2)),
-            UnitCoord::new(2, NodeIndex(3)),
-            UnitCoord::new(2, NodeIndex(4)),
-            UnitCoord::new(2, NodeIndex(5)),
-            UnitCoord::new(1, NodeIndex(6)),
+            UnitCoord::new(2, PeerId::new(0 as u8)),
+            UnitCoord::new(2, PeerId::new(2 as u8)),
+            UnitCoord::new(2, PeerId::new(3 as u8)),
+            UnitCoord::new(2, PeerId::new(4 as u8)),
+            UnitCoord::new(2, PeerId::new(5 as u8)),
+            UnitCoord::new(1, PeerId::new(6 as u8)),
         ];
         assert_eq!(parents, expected_parents);
     }
@@ -230,9 +232,9 @@ pub mod tests {
         .into();
         let ch = ControlHash::new(&parent_map);
         assert_eq!(
-            ch.validate(UnitCoord::new(0, NodeIndex(1)))
+            ch.validate(UnitCoord::new(0, PeerId::new(1 as u8)))
                 .expect_err("validate() should return error, returned Ok(()) instead"),
-            Error::RoundZeroWithSomeParents(NodeCount(parent_map.item_count()))
+            Error::RoundZeroWithSomeParents(NumPeers::from(parent_map.item_count()))
         );
     }
 
@@ -246,7 +248,7 @@ pub mod tests {
         // hash algorithm, just trying to send us garbage. Decode still work, as 8 random bytes is
         // is valid generic Hasher64 representation, but validation should not work
 
-        let correct_control_hash = ControlHash::new(&NodeMap::with_size(NodeCount(4)));
+        let correct_control_hash = ControlHash::new(&NodeMap::with_size(NumPeers::new(4 as usize)));
         let encoded_control_hash = correct_control_hash.consensus_encode_to_vec();
         let mut borked_control_hash_bytes = encoded_control_hash[0..=7].to_vec();
         borked_control_hash_bytes.extend([
@@ -259,11 +261,11 @@ pub mod tests {
 
         assert_eq!(
             borked_ch
-                .validate(UnitCoord::new(0, NodeIndex(4)))
+                .validate(UnitCoord::new(0, PeerId::new(4 as u8)))
                 .expect_err("validate() should return error, returned Ok(()) instead"),
             Error::RoundZeroBadControlHash(
                 borked_ch.combined_hash,
-                ControlHash::create_control_hash(&NodeMap::with_size(NodeCount(4)))
+                ControlHash::create_control_hash(&NodeMap::with_size(NumPeers::new(4 as usize)))
             )
         );
     }
@@ -281,7 +283,7 @@ pub mod tests {
         ]
         .into();
         let ch = ControlHash::new(&parent_map);
-        assert!(ch.validate(UnitCoord::new(3, NodeIndex(2))).is_ok());
+        assert!(ch.validate(UnitCoord::new(3, PeerId::new(2 as u8))).is_ok());
     }
 
     #[test]
@@ -296,9 +298,9 @@ pub mod tests {
         .into();
         let ch = ControlHash::new(&parent_map);
         assert_eq!(
-            ch.validate(UnitCoord::new(3, NodeIndex(1)))
+            ch.validate(UnitCoord::new(3, PeerId::new(1 as u8)))
                 .expect_err("validate() should return error, returned Ok(()) instead"),
-            Error::NotDescendantOfPreviousUnit(NodeIndex(1))
+            Error::NotDescendantOfPreviousUnit(PeerId::new(1 as u8))
         );
     }
 
@@ -314,7 +316,7 @@ pub mod tests {
         .into();
         let ch = ControlHash::new(&parent_map);
         assert_eq!(
-            ch.validate(UnitCoord::new(3, NodeIndex(1)))
+            ch.validate(UnitCoord::new(3, PeerId::new(1 as u8)))
                 .expect_err("validate() should return error, returned Ok(()) instead"),
             Error::DescendantOfPreviousUnitHasWrongRound(1)
         );
@@ -332,7 +334,7 @@ pub mod tests {
         .into();
         let ch = ControlHash::new(&parent_map);
         assert_eq!(
-            ch.validate(UnitCoord::new(3, NodeIndex(1)))
+            ch.validate(UnitCoord::new(3, PeerId::new(1 as u8)))
                 .expect_err("validate() should return error, returned Ok(()) instead"),
             Error::NotEnoughParentsForRound(2)
         );
@@ -350,7 +352,7 @@ pub mod tests {
         .into();
         let ch = ControlHash::new(&parent_map);
         assert_eq!(
-            ch.validate(UnitCoord::new(3, NodeIndex(1)))
+            ch.validate(UnitCoord::new(3, PeerId::new(1 as u8)))
                 .expect_err("validate() should return error, returned Ok(()) instead"),
             Error::ParentsHigherThanRound(2)
         );
@@ -395,7 +397,7 @@ pub mod tests {
 
         let mut parents_from_round_three_but_one_hash_replaced = parents_from_round_three.clone();
         parents_from_round_three_but_one_hash_replaced.insert(
-            NodeIndex(2),
+            PeerId::new(2 as u8),
             (
                 [
                     234, 170, 183, 55, 61, 24, 31, 143, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -414,7 +416,7 @@ pub mod tests {
         let mut parents_from_round_three_but_one_unit_round_replaced =
             parents_from_round_three.clone();
         parents_from_round_three_but_one_unit_round_replaced.insert(
-            NodeIndex(2),
+            PeerId::new(2 as u8),
             (
                 [
                     12, 108, 24, 87, 75, 135, 37, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,

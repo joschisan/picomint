@@ -7,7 +7,7 @@ use crate::{
         SignedUnit as GenericSignedUnit, UncheckedSignedUnit as GenericUncheckedSignedUnit, Unit,
         UnitCoord, WrappedUnit,
     },
-    NodeCount, NodeIndex, NodeMap, Round, SessionId, Signed, UnitHash,
+    NodeMap, NumPeers, PeerId, Round, SessionId, Signed, UnitHash,
 };
 use aleph_bft_mock::{Data, Keychain, Signature};
 use rand::prelude::IteratorRandom;
@@ -49,9 +49,9 @@ impl WrappedUnit for WrappedSignedUnit {
     }
 }
 
-pub fn creator_set(n_members: NodeCount) -> Vec<Creator> {
-    (0..n_members.0)
-        .map(|i| Creator::new(NodeIndex(i), n_members))
+pub fn creator_set(n_members: NumPeers) -> Vec<Creator> {
+    (0..n_members.total())
+        .map(|i| Creator::new(PeerId::new(i as u8), n_members))
         .collect()
 }
 
@@ -103,31 +103,31 @@ pub fn preunit_to_unchecked_signed_unit(
     preunit_to_signed_unit(pu, session_id, keychain).into()
 }
 
-fn initial_preunit(n_members: NodeCount, node_id: NodeIndex) -> PreUnit {
+fn initial_preunit(n_members: NumPeers, node_id: PeerId) -> PreUnit {
     PreUnit::new(
         node_id,
         0,
-        ControlHash::new(&vec![None; n_members.0].into()),
+        ControlHash::new(&vec![None; n_members.total()].into()),
     )
 }
 
-fn random_initial_units(n_members: NodeCount, session_id: SessionId) -> Vec<FullUnit> {
+fn random_initial_units(n_members: NumPeers, session_id: SessionId) -> Vec<FullUnit> {
     n_members
-        .into_iterator()
+        .peer_ids()
         .map(|node_id| initial_preunit(n_members, node_id))
         .map(|preunit| preunit_to_full_unit(preunit, session_id))
         .collect()
 }
 
 fn random_initial_reconstructed_units(
-    n_members: NodeCount,
+    n_members: NumPeers,
     session_id: SessionId,
     keychains: &[Keychain],
 ) -> Vec<DagUnit> {
     random_initial_units(n_members, session_id)
         .into_iter()
         .map(|full_unit| {
-            let keychain = &keychains[full_unit.creator().0];
+            let keychain = &keychains[full_unit.creator().to_usize()];
             ReconstructedUnit::initial(full_unit_to_signed_unit(full_unit, keychain))
         })
         .collect()
@@ -147,7 +147,7 @@ fn parent_map<U: Unit>(parents: &Vec<U>) -> NodeMap<(UnitHash, Round)> {
 }
 
 pub fn random_unit_with_parents<U: Unit>(
-    creator: NodeIndex,
+    creator: PeerId,
     parents: &Vec<U>,
     round: Round,
 ) -> FullUnit {
@@ -159,7 +159,7 @@ pub fn random_unit_with_parents<U: Unit>(
 }
 
 pub fn random_reconstructed_unit_with_parents<U: Unit>(
-    creator: NodeIndex,
+    creator: PeerId,
     parents: &Vec<U>,
     keychain: &Keychain,
     round: Round,
@@ -174,13 +174,13 @@ pub fn random_reconstructed_unit_with_parents<U: Unit>(
 
 pub fn random_full_parent_units_up_to(
     round: Round,
-    n_members: NodeCount,
+    n_members: NumPeers,
     session_id: SessionId,
 ) -> Vec<Vec<FullUnit>> {
     let mut result = vec![random_initial_units(n_members, session_id)];
     for r in 1..=round {
         let units = n_members
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| {
                 random_unit_with_parents(node_id, result.last().expect("previous round present"), r)
             })
@@ -194,7 +194,7 @@ pub fn random_full_parent_units_up_to(
 /// of nodes in the DAG
 pub fn random_full_parent_reconstrusted_units_up_to(
     round: Round,
-    n_members: NodeCount,
+    n_members: NumPeers,
     session_id: SessionId,
     keychains: &[Keychain],
 ) -> Vec<Vec<DagUnit>> {
@@ -203,12 +203,12 @@ pub fn random_full_parent_reconstrusted_units_up_to(
     )];
     for r in 1..=round {
         let units = n_members
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| {
                 random_reconstructed_unit_with_parents(
                     node_id,
                     result.last().expect("previous round present"),
-                    &keychains[node_id.0],
+                    &keychains[node_id.to_usize()],
                     r,
                 )
             })
@@ -222,12 +222,12 @@ pub fn random_full_parent_reconstrusted_units_up_to(
 /// N is number of nodes in the DAG. At least one node from N/3 group has some non-direct parents.
 pub fn minimal_reconstructed_dag_units_up_to(
     round: Round,
-    n_members: NodeCount,
+    n_members: NumPeers,
     session_id: SessionId,
     keychains: &[Keychain],
 ) -> (Vec<Vec<DagUnit>>, DagUnit) {
     let mut rng = rand::thread_rng();
-    let threshold = n_members.consensus_threshold().0;
+    let threshold = n_members.threshold();
 
     let mut dag = vec![random_initial_reconstructed_units(
         n_members, session_id, keychains,
@@ -253,15 +253,20 @@ pub fn minimal_reconstructed_dag_units_up_to(
             let ancestor_unit = dag
                 .first()
                 .expect("first round present")
-                .get(inactive_node.0)
+                .get(inactive_node.to_usize())
                 .expect("inactive node unit present");
             parents.push(ancestor_unit.clone());
         }
         let units = n_members
-            .into_iterator()
+            .peer_ids()
             .filter(|node_id| node_id != &inactive_node)
             .map(|node_id| {
-                random_reconstructed_unit_with_parents(node_id, &parents, &keychains[node_id.0], r)
+                random_reconstructed_unit_with_parents(
+                    node_id,
+                    &parents,
+                    &keychains[node_id.to_usize()],
+                    r,
+                )
             })
             .collect();
         dag.push(units);

@@ -1,6 +1,6 @@
 use crate::{
     units::{UncheckedSignedUnit, Unit},
-    Data, Index, Keychain, MultiKeychain, NodeIndex, PartialMultisignature, Signable, Signature,
+    Data, Index, Keychain, MultiKeychain, PartialMultisignature, PeerId, Signable, Signature,
     UncheckedSigned, UnitHash,
 };
 use aleph_bft_rmc::Message as RmcMessage;
@@ -21,14 +21,14 @@ pub type NetworkMessage<D, MK> =
 #[derive(Clone, Debug, Decodable, Derivative, Encodable)]
 #[derivative(Eq, PartialEq, Hash)]
 pub struct Alert<D: Data, S: Signature> {
-    sender: NodeIndex,
+    sender: PeerId,
     proof: ForkProof<D, S>,
     legit_units: Vec<UncheckedSignedUnit<D, S>>,
 }
 
 impl<D: Data, S: Signature> Alert<D, S> {
     pub fn new(
-        sender: NodeIndex,
+        sender: PeerId,
         proof: ForkProof<D, S>,
         legit_units: Vec<UncheckedSignedUnit<D, S>>,
     ) -> Alert<D, S> {
@@ -41,7 +41,7 @@ impl<D: Data, S: Signature> Alert<D, S> {
 
     /// Simplified forker check, should only be called for alerts that have already been checked to
     /// contain valid proofs.
-    pub fn forker(&self) -> NodeIndex {
+    pub fn forker(&self) -> PeerId {
         self.proof.0.as_signable().creator()
     }
 
@@ -55,7 +55,7 @@ impl<D: Data, S: Signature> Alert<D, S> {
 }
 
 impl<D: Data, S: Signature> Index for Alert<D, S> {
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> PeerId {
         self.sender
     }
 }
@@ -74,9 +74,9 @@ pub enum AlertMessage<D: Data, S: Signature, MS: PartialMultisignature> {
     /// Alert regarding forks, signed by the person claiming misconduct.
     ForkAlert(UncheckedSigned<Alert<D, S>, S>),
     /// An internal RMC message, together with the id of the sender.
-    RmcMessage(NodeIndex, RmcMessage<UnitHash, S, MS>),
+    RmcMessage(PeerId, RmcMessage<UnitHash, S, MS>),
     /// A request by a node for a fork alert identified by the given hash.
-    AlertRequest(NodeIndex, UnitHash),
+    AlertRequest(PeerId, UnitHash),
 }
 
 impl<D: Data, S: Signature, MS: PartialMultisignature> AlertMessage<D, S, MS> {

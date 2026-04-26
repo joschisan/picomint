@@ -3,7 +3,7 @@ use crate::{
     dag::Request as ReconstructionRequest,
     network::UnitMessage,
     units::UncheckedSignedUnit,
-    Data, NodeIndex, Recipient, Signature, UncheckedSigned, UnitHash,
+    Data, PeerId, Recipient, Signature, UncheckedSigned, UnitHash,
 };
 
 mod responder;
@@ -31,7 +31,7 @@ impl<T> Addressed<T> {
     }
 
     /// Message with the single specified recipient.
-    pub fn addressed_to(message: T, node_id: NodeIndex) -> Self {
+    pub fn addressed_to(message: T, node_id: PeerId) -> Self {
         Addressed::new(message, vec![Recipient::Node(node_id)])
     }
 
@@ -81,11 +81,11 @@ pub enum DisseminationMessage<D: Data, S: Signature> {
     /// Unit, either broadcast or in response to a coord request.
     Unit(UncheckedSignedUnit<D, S>),
     /// Request coming from the specified node for something.
-    Request(NodeIndex, ReconstructionRequest),
+    Request(PeerId, ReconstructionRequest),
     /// Response to a parent request.
     ParentsResponse(UnitHash, Vec<UncheckedSignedUnit<D, S>>),
     /// Initial unit collection request.
-    NewestUnitRequest(NodeIndex, Salt),
+    NewestUnitRequest(PeerId, Salt),
     /// Response to initial unit collection.
     NewestUnitResponse(UncheckedSigned<NewestUnitResponse<D, S>, S>),
 }

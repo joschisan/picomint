@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use crate::{
-    Data, Index, MultiKeychain, NodeCount, NodeIndex, Round, SessionId, Signable, Signed,
+    Data, Index, MultiKeychain, NumPeers, PeerId, Round, SessionId, Signable, Signed,
     UncheckedSigned, UnitHash,
 };
 use derivative::Derivative;
@@ -31,15 +31,15 @@ pub use validator::{ValidationError, Validator};
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default, Encodable, Decodable)]
 pub struct UnitCoord {
     round: Round,
-    creator: NodeIndex,
+    creator: PeerId,
 }
 
 impl UnitCoord {
-    pub fn new(round: Round, creator: NodeIndex) -> Self {
+    pub fn new(round: Round, creator: PeerId) -> Self {
         Self { creator, round }
     }
 
-    pub fn creator(&self) -> NodeIndex {
+    pub fn creator(&self) -> PeerId {
         self.creator
     }
 
@@ -50,7 +50,7 @@ impl UnitCoord {
 
 impl Display for UnitCoord {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "(#{} by {})", self.round, self.creator.0)
+        write!(f, "(#{} by {})", self.round, self.creator.to_usize())
     }
 }
 
@@ -62,18 +62,18 @@ pub struct PreUnit {
 }
 
 impl PreUnit {
-    pub(crate) fn new(creator: NodeIndex, round: Round, control_hash: ControlHash) -> Self {
+    pub(crate) fn new(creator: PeerId, round: Round, control_hash: ControlHash) -> Self {
         PreUnit {
             coord: UnitCoord::new(round, creator),
             control_hash,
         }
     }
 
-    pub(crate) fn n_members(&self) -> NodeCount {
+    pub(crate) fn n_members(&self) -> NumPeers {
         self.control_hash.n_members()
     }
 
-    pub(crate) fn creator(&self) -> NodeIndex {
+    pub(crate) fn creator(&self) -> PeerId {
         self.coord.creator()
     }
 
@@ -127,7 +127,7 @@ impl<D: Data> Signable for FullUnit<D> {
 }
 
 impl<D: Data> Index for FullUnit<D> {
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> PeerId {
         self.creator()
     }
 }
@@ -146,7 +146,7 @@ pub trait Unit: 'static + Send + Clone {
 
     fn session_id(&self) -> SessionId;
 
-    fn creator(&self) -> NodeIndex {
+    fn creator(&self) -> PeerId {
         self.coord().creator()
     }
 
@@ -164,9 +164,9 @@ pub trait WrappedUnit: Unit {
 pub trait UnitWithParents: Unit {
     fn parents(&self) -> impl Iterator<Item = &UnitHash>;
     fn direct_parents(&self) -> impl Iterator<Item = &UnitHash>;
-    fn parent_for(&self, index: NodeIndex) -> Option<&UnitHash>;
+    fn parent_for(&self, index: PeerId) -> Option<&UnitHash>;
 
-    fn node_count(&self) -> NodeCount;
+    fn node_count(&self) -> NumPeers;
 }
 
 impl<D: Data> Unit for FullUnit<D> {
@@ -209,7 +209,7 @@ impl<D: Data, MK: MultiKeychain> Unit for SignedUnit<D, MK> {
 pub mod tests {
     use crate::{
         units::{random_full_parent_units_up_to, FullUnit, Unit},
-        NodeCount,
+        NumPeers,
     };
     use aleph_bft_mock::Data;
     use picomint_encoding::{Decodable, Encodable};
@@ -218,7 +218,7 @@ pub mod tests {
 
     #[test]
     fn test_full_unit_hash_is_correct() {
-        for full_unit in random_full_parent_units_up_to(3, NodeCount(4), 43)
+        for full_unit in random_full_parent_units_up_to(3, NumPeers::new(4 as usize), 43)
             .into_iter()
             .flatten()
         {
@@ -229,7 +229,7 @@ pub mod tests {
 
     #[test]
     fn test_full_unit_codec() {
-        for full_unit in random_full_parent_units_up_to(3, NodeCount(4), 43)
+        for full_unit in random_full_parent_units_up_to(3, NumPeers::new(4 as usize), 43)
             .into_iter()
             .flatten()
         {

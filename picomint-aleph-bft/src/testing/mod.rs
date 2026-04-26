@@ -8,8 +8,8 @@ mod dag;
 mod unreliable;
 
 use crate::{
-    create_config, run_session, Config, DelayConfig, LocalIO, Network as NetworkT, NodeCount,
-    NodeIndex, SpawnHandle, TaskHandle, Terminator,
+    create_config, run_session, Config, DelayConfig, LocalIO, Network as NetworkT, NumPeers,
+    PeerId, SpawnHandle, TaskHandle, Terminator,
 };
 use aleph_bft_mock::{
     Data, DataProvider, FinalizationHandler, Keychain, Loader, Network as MockNetwork,
@@ -51,7 +51,7 @@ pub fn gen_delay_config() -> DelayConfig {
     }
 }
 
-pub fn gen_config(node_ix: NodeIndex, n_members: NodeCount, delay_config: DelayConfig) -> Config {
+pub fn gen_config(node_ix: PeerId, n_members: NumPeers, delay_config: DelayConfig) -> Config {
     create_config(n_members, node_ix, 0, 5000, delay_config, Duration::ZERO)
         .expect("Should always succeed with Duration::ZERO")
 }
@@ -65,8 +65,8 @@ pub struct HonestMember {
 
 pub fn spawn_honest_member(
     spawner: Spawner,
-    node_index: NodeIndex,
-    n_members: NodeCount,
+    node_index: PeerId,
+    n_members: NumPeers,
     units: Vec<u8>,
     data_provider: DataProvider,
     network: impl 'static + NetworkT<NetworkData>,

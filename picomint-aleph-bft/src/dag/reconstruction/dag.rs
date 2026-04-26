@@ -119,7 +119,7 @@ mod test {
     use crate::{
         dag::reconstruction::{dag::Dag, ReconstructedUnit},
         units::{random_full_parent_units_up_to, TestingFullUnit, Unit},
-        NodeCount, NodeIndex, NodeMap, UnitHash,
+        NodeMap, NumPeers, PeerId, UnitHash,
     };
     use aleph_bft_types::Round;
     use std::collections::HashSet;
@@ -128,9 +128,9 @@ mod test {
         parents: Vec<UnitHash>,
         parent_round: Round,
     ) -> NodeMap<(UnitHash, Round)> {
-        let mut result = NodeMap::with_size(NodeCount(parents.len()));
+        let mut result = NodeMap::with_size(NumPeers::from(parents.len()));
         for (id, parent) in parents.into_iter().enumerate() {
-            result.insert(NodeIndex(id), (parent, parent_round));
+            result.insert(PeerId::new(id as u8), (parent, parent_round));
         }
         result
     }
@@ -169,9 +169,13 @@ mod test {
     #[test]
     fn reconstructs_initial_units() {
         let mut dag = Dag::new();
-        for unit in reconstructed(random_full_parent_units_up_to(0, NodeCount(4), 43))
-            .pop()
-            .expect("we have initial units")
+        for unit in reconstructed(random_full_parent_units_up_to(
+            0,
+            NumPeers::new(4 as usize),
+            43,
+        ))
+        .pop()
+        .expect("we have initial units")
         {
             let reconstructed = dag.add_unit(unit.clone());
             assert_eq!(reconstructed, vec![unit]);
@@ -181,7 +185,11 @@ mod test {
     #[test]
     fn reconstructs_units_in_order() {
         let mut dag = Dag::new();
-        for units in reconstructed(random_full_parent_units_up_to(7000, NodeCount(4), 43)) {
+        for units in reconstructed(random_full_parent_units_up_to(
+            7000,
+            NumPeers::new(4 as usize),
+            43,
+        )) {
             for unit in units {
                 let reconstructed = dag.add_unit(unit.clone());
                 assert_eq!(reconstructed, vec![unit]);
@@ -191,7 +199,7 @@ mod test {
 
     #[test]
     fn reconstructs_units_in_reverse_order() {
-        let full_unit_dag = random_full_parent_units_up_to(7000, NodeCount(4), 43);
+        let full_unit_dag = random_full_parent_units_up_to(7000, NumPeers::new(4 as usize), 43);
         let mut hash_batches: Vec<_> = full_unit_dag
             .iter()
             .map(unit_hashes)

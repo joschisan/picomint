@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{
-    extension::units::Units, units::UnitWithParents, NodeCount, NodeIndex, Round, UnitHash,
-};
+use crate::{extension::units::Units, units::UnitWithParents, PeerId, Round, UnitHash};
 
 fn common_vote(relative_round: Round) -> bool {
     // This should only be called for relative round >= 2, so to be precise we start with true, false, true, and then
@@ -23,7 +21,7 @@ enum CandidateOutcome {
 
 struct CandidateElection<U: UnitWithParents> {
     round: Round,
-    candidate_creator: NodeIndex,
+    candidate_creator: PeerId,
     candidate_hash: UnitHash,
     votes: HashMap<UnitHash, bool>,
     _phantom: std::marker::PhantomData<U>,
@@ -44,15 +42,12 @@ impl<U: UnitWithParents> CandidateElection<U> {
         .compute_votes(units)
     }
 
-    fn parent_votes(
-        &mut self,
-        parents: Vec<UnitHash>,
-    ) -> Result<(NodeCount, NodeCount), CandidateOutcome> {
-        let (mut votes_for, mut votes_against) = (NodeCount(0), NodeCount(0));
+    fn parent_votes(&mut self, parents: Vec<UnitHash>) -> Result<(usize, usize), CandidateOutcome> {
+        let (mut votes_for, mut votes_against) = (0usize, 0usize);
         for parent in parents {
             match self.votes.get(&parent).expect("units are added in order") {
-                true => votes_for += NodeCount(1),
-                false => votes_against += NodeCount(1),
+                true => votes_for += 1,
+                false => votes_against += 1,
             }
         }
         Ok((votes_for, votes_against))
@@ -61,7 +56,7 @@ impl<U: UnitWithParents> CandidateElection<U> {
     fn vote_from_parents(
         &mut self,
         parents: Vec<UnitHash>,
-        threshold: NodeCount,
+        threshold: usize,
         relative_round: Round,
     ) -> Result<bool, CandidateOutcome> {
         use CandidateOutcome::*;
@@ -83,8 +78,8 @@ impl<U: UnitWithParents> CandidateElection<U> {
 
         // The vote is either identical to all the votes of the parents, or the default vote if that is not possible.
         Ok(match (votes_for, votes_against) {
-            (NodeCount(0), _) => false,
-            (_, NodeCount(0)) => true,
+            (0, _) => false,
+            (_, 0) => true,
             _ => common_vote,
         })
     }
@@ -105,7 +100,7 @@ impl<U: UnitWithParents> CandidateElection<U> {
             1 => voter.parent_for(self.candidate_creator) == Some(&self.candidate_hash),
             // Otherwise we compute the vote based on the parents' votes.
             _ => {
-                let threshold = voter.node_count().consensus_threshold();
+                let threshold = voter.node_count().threshold();
                 let direct_parents = voter.direct_parents().cloned().collect();
                 self.vote_from_parents(direct_parents, threshold, relative_round)?
             }
@@ -221,7 +216,7 @@ mod test {
             minimal_reconstructed_dag_units_up_to, random_full_parent_reconstrusted_units_up_to,
             random_reconstructed_unit_with_parents, TestingDagUnit, Unit,
         },
-        NodeCount,
+        NumPeers,
     };
     use aleph_bft_mock::Keychain;
 
@@ -234,7 +229,7 @@ mod test {
     #[test]
     fn refuses_to_elect_with_insufficient_units() {
         let mut units = Units::new();
-        let n_members = NodeCount(4);
+        let n_members = NumPeers::new(4 as usize);
         let max_round = 2;
         let session_id = 2137;
         let keychains = Keychain::new_vec(n_members);
@@ -252,7 +247,7 @@ mod test {
     fn easy_election() {
         use ElectionResult::*;
         let mut units = Units::new();
-        let n_members = NodeCount(4);
+        let n_members = NumPeers::new(4 as usize);
         let max_round = 4;
         let session_id = 2137;
         let keychains = Keychain::new_vec(n_members);
@@ -283,7 +278,7 @@ mod test {
     fn immediate_election() {
         use ElectionResult::*;
         let mut units = Units::new();
-        let n_members = NodeCount(4);
+        let n_members = NumPeers::new(4 as usize);
         let max_round = 4;
         let session_id = 2137;
         let keychains = Keychain::new_vec(n_members);
@@ -307,7 +302,7 @@ mod test {
     fn eliminates_unpopular() {
         use ElectionResult::*;
         let mut units = Units::new();
-        let n_members = NodeCount(4);
+        let n_members = NumPeers::new(4 as usize);
         let max_round = 4;
         let session_id = 2137;
         let keychains = Keychain::new_vec(n_members);
@@ -338,13 +333,13 @@ mod test {
                 .cloned()
                 .collect();
             for creator in n_members
-                .into_iterator()
+                .peer_ids()
                 .filter(|node_id| node_id != &inactive_node)
             {
                 units.add_unit(random_reconstructed_unit_with_parents(
                     creator,
                     &parents,
-                    &keychains[creator.0],
+                    &keychains[creator.to_usize()],
                     round,
                 ));
             }
@@ -363,7 +358,7 @@ mod test {
     fn given_minimal_dag_with_orphaned_node_when_electing_then_orphaned_node_is_not_head() {
         use ElectionResult::*;
         let mut units = Units::new();
-        let n_members = NodeCount(14);
+        let n_members = NumPeers::new(14 as usize);
         let max_round = 4;
         let session_id = 2137;
         let keychains = Keychain::new_vec(n_members);

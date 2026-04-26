@@ -1,7 +1,7 @@
 use crate::{
     testing::{init_log, spawn_honest_member, HonestMember, Network, ReconnectSender},
     units::{UncheckedSignedUnit, Unit, UnitCoord},
-    NodeCount, NodeIndex, SpawnHandle, TaskHandle,
+    NumPeers, PeerId, SpawnHandle, TaskHandle,
 };
 use aleph_bft_mock::{Data, DataProvider, Router, Signature, Spawner};
 use futures::{
@@ -20,7 +20,7 @@ use std::{
 struct NodeData {
     batch_rx: mpsc::UnboundedReceiver<Data>,
     exit_tx: oneshot::Sender<()>,
-    reconnect_tx: mpsc::UnboundedSender<(NodeIndex, oneshot::Sender<Network>)>,
+    reconnect_tx: mpsc::UnboundedSender<(PeerId, oneshot::Sender<Network>)>,
     handle: TaskHandle,
     saved_units: Arc<Mutex<Vec<u8>>>,
     batches: Vec<Data>,
@@ -55,9 +55,9 @@ impl NodeData {
 
 fn connect_nodes(
     spawner: &Spawner,
-    n_members: NodeCount,
+    n_members: NumPeers,
     networks: Vec<(Network, ReconnectSender)>,
-) -> HashMap<NodeIndex, NodeData> {
+) -> HashMap<PeerId, NodeData> {
     networks
         .into_iter()
         .map(|(network, reconnect_tx)| {
@@ -91,7 +91,7 @@ fn connect_nodes(
 }
 
 /// Kill all of the nodes in `node_data`.
-async fn shutdown(mut node_data: HashMap<NodeIndex, NodeData>) {
+async fn shutdown(mut node_data: HashMap<PeerId, NodeData>) {
     for (_, data) in node_data.drain() {
         data.kill().await;
     }
@@ -99,9 +99,9 @@ async fn shutdown(mut node_data: HashMap<NodeIndex, NodeData>) {
 
 async fn reconnect_nodes(
     spawner: &Spawner,
-    n_members: NodeCount,
-    killed: &HashMap<NodeIndex, (ReconnectSender, Vec<u8>)>,
-) -> Vec<(NodeIndex, NodeData)> {
+    n_members: NumPeers,
+    killed: &HashMap<PeerId, (ReconnectSender, Vec<u8>)>,
+) -> Vec<(PeerId, NodeData)> {
     let mut reconnected_nodes = Vec::new();
 
     for (node_id, (reconnect_tx, saved_units)) in killed.iter() {
@@ -175,10 +175,10 @@ fn verify_backup(buf: &mut &[u8]) -> HashSet<UnitCoord> {
 /// restarted nodes take part in finalization. As it stands, the system does not guarantee that a
 /// restarted node will ever catch up, so if less than `f` nodes are restarted, the restarted nodes
 /// might never be actually needed to finalize anything.
-async fn crashed_nodes_recover(n_members: NodeCount, n_batches: usize) {
+async fn crashed_nodes_recover(n_members: NumPeers, n_batches: usize) {
     init_log();
 
-    let n_kill = (n_members - n_members.consensus_threshold()) + 1.into();
+    let n_kill = n_members.one_honest();
     let spawner = Spawner::new();
     let (net_hub, networks) = Router::new(n_members);
     spawner.spawn("network-hub", net_hub);
@@ -186,14 +186,14 @@ async fn crashed_nodes_recover(n_members: NodeCount, n_batches: usize) {
     let mut node_data = connect_nodes(&spawner, n_members, networks);
 
     for data in node_data.values_mut() {
-        for _ in 0..n_batches * n_members.0 {
+        for _ in 0..n_batches * n_members.total() {
             data.receive().await;
         }
     }
 
     let mut killed = HashMap::new();
 
-    for i in 0..n_kill.0 {
+    for i in 0..n_kill {
         let NodeData {
             exit_tx,
             reconnect_tx,
@@ -201,11 +201,14 @@ async fn crashed_nodes_recover(n_members: NodeCount, n_batches: usize) {
             saved_units,
             ..
         } = node_data
-            .remove(&NodeIndex(i))
+            .remove(&PeerId::new(i as u8))
             .expect("should contain killed node");
         let _ = exit_tx.send(());
         let _ = handle.await;
-        killed.insert(NodeIndex(i), (reconnect_tx, (*saved_units.lock()).clone()));
+        killed.insert(
+            PeerId::new(i as u8),
+            (reconnect_tx, (*saved_units.lock()).clone()),
+        );
     }
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -230,7 +233,7 @@ async fn crashed_nodes_recover(n_members: NodeCount, n_batches: usize) {
         }
     }
 
-    let expected_batches = &node_data[&NodeIndex(0)].batches;
+    let expected_batches = &node_data[&PeerId::new(0 as u8)].batches;
     for (_, data) in node_data.iter() {
         assert_eq!(expected_batches, &data.batches);
     }
@@ -251,7 +254,7 @@ async fn crashed_nodes_recover(n_members: NodeCount, n_batches: usize) {
 async fn saves_units_properly() {
     init_log();
     let n_batches = 2;
-    let n_members = NodeCount(4);
+    let n_members = NumPeers::new(4 as usize);
     let spawner = Spawner::new();
     let (net_hub, networks) = Router::new(n_members);
     spawner.spawn("network-hub", net_hub);
@@ -259,7 +262,7 @@ async fn saves_units_properly() {
     let mut node_data = connect_nodes(&spawner, n_members, networks);
 
     for data in node_data.values_mut() {
-        for _ in 0..n_batches * n_members.0 {
+        for _ in 0..n_batches * n_members.total() {
             data.receive().await;
         }
     }
@@ -280,17 +283,17 @@ async fn saves_units_properly() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn small_node_crash_recovery_small() {
-    crashed_nodes_recover(7.into(), 2).await;
+    crashed_nodes_recover(NumPeers::from(7 as usize), 2).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn small_node_crash_recovery_medium() {
-    crashed_nodes_recover(10.into(), 2).await;
+    crashed_nodes_recover(NumPeers::from(10 as usize), 2).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn medium_node_crash_recovery_large() {
-    crashed_nodes_recover(28.into(), 2).await;
+    crashed_nodes_recover(NumPeers::from(28 as usize), 2).await;
 }

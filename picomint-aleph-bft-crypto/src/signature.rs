@@ -1,4 +1,4 @@
-use crate::{Index, NodeCount, NodeIndex, NodeMap};
+use crate::{Index, NodeMap, NumPeers, PeerId};
 use log::warn;
 use picomint_encoding::{Decodable, Encodable};
 use std::{fmt::Debug, hash::Hash};
@@ -21,12 +21,12 @@ pub trait Keychain: Index + Clone + Send + Sync + 'static {
     type Signature: Signature;
 
     /// Returns the total number of known public keys.
-    fn node_count(&self) -> NodeCount;
+    fn node_count(&self) -> NumPeers;
     /// Signs a message `msg`.
     fn sign(&self, msg: &[u8]) -> Self::Signature;
     /// Verifies whether a node with `index` correctly signed the message `msg`.
     /// Should always return false for indices outside the node range.
-    fn verify(&self, msg: &[u8], sgn: &Self::Signature, index: NodeIndex) -> bool;
+    fn verify(&self, msg: &[u8], sgn: &Self::Signature, index: PeerId) -> bool;
 }
 
 /// A type to which signatures can be aggregated.
@@ -40,7 +40,7 @@ pub trait PartialMultisignature: Signature {
     type Signature: Signature;
     /// Adds the signature.
     #[must_use = "consumes the original and returns the aggregated signature which should be used"]
-    fn add_signature(self, signature: &Self::Signature, index: NodeIndex) -> Self;
+    fn add_signature(self, signature: &Self::Signature, index: PeerId) -> Self;
 }
 
 /// Extends Keychain with multisigning functionalities.
@@ -53,7 +53,7 @@ pub trait MultiKeychain: Keychain {
     fn bootstrap_multi(
         &self,
         signature: &Self::Signature,
-        index: NodeIndex,
+        index: PeerId,
     ) -> Self::PartialMultisignature;
     /// Checks if enough signatures have beed added.
     fn is_complete(&self, msg: &[u8], partial: &Self::PartialMultisignature) -> bool;
@@ -65,7 +65,7 @@ pub type SignatureSet<S> = NodeMap<S>;
 impl<S: Signature> PartialMultisignature for SignatureSet<S> {
     type Signature = S;
 
-    fn add_signature(mut self, signature: &Self::Signature, index: NodeIndex) -> Self {
+    fn add_signature(mut self, signature: &Self::Signature, index: PeerId) -> Self {
         self.insert(index, signature.clone());
         self
     }
@@ -140,7 +140,7 @@ impl<T: Signable + Index, S: Signature> UncheckedSigned<T, S> {
 }
 
 impl<T: Signable + Index, S: Signature> Index for UncheckedSigned<T, S> {
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> PeerId {
         self.signable.index()
     }
 }
@@ -247,7 +247,7 @@ impl<T: Signable + Index, K: Keychain> From<Signed<T, K>> for UncheckedSigned<T,
     }
 }
 
-/// A pair consistsing of signable data and a [`NodeIndex`].
+/// A pair consistsing of signable data and a [`PeerId`].
 ///
 /// This is a wrapper used for signing data which does not implement the [`Index`] trait.
 /// If a node with an index `i` needs to sign some data `signable` which does not
@@ -258,11 +258,11 @@ impl<T: Signable + Index, K: Keychain> From<Signed<T, K>> for UncheckedSigned<T,
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 pub struct Indexed<T: Signable> {
     signable: T,
-    index: NodeIndex,
+    index: PeerId,
 }
 
 impl<T: Signable> Indexed<T> {
-    fn new(signable: T, index: NodeIndex) -> Self {
+    fn new(signable: T, index: PeerId) -> Self {
         Indexed { signable, index }
     }
 
@@ -284,7 +284,7 @@ impl<T: Signable> Signable for Indexed<T> {
 }
 
 impl<T: Signable> Index for Indexed<T> {
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> PeerId {
         self.index
     }
 }
@@ -425,8 +425,8 @@ impl<T: Signable, MK: MultiKeychain> PartiallyMultisigned<T, MK> {
 mod tests {
 
     use crate::{
-        Index, Keychain, MultiKeychain, NodeCount, NodeIndex, PartialMultisignature,
-        PartiallyMultisigned, Signable, SignatureSet, Signed,
+        Index, Keychain, MultiKeychain, NumPeers, PartialMultisignature, PartiallyMultisigned,
+        PeerId, Signable, SignatureSet, Signed,
     };
     use picomint_encoding::{Decodable, Encodable};
     use std::fmt::Debug;
@@ -448,7 +448,7 @@ mod tests {
     }
 
     impl<K: Keychain> Index for DefaultMultiKeychain<K> {
-        fn index(&self) -> NodeIndex {
+        fn index(&self) -> PeerId {
             self.keychain.index()
         }
     }
@@ -456,7 +456,7 @@ mod tests {
     impl<K: Keychain> Keychain for DefaultMultiKeychain<K> {
         type Signature = K::Signature;
 
-        fn node_count(&self) -> NodeCount {
+        fn node_count(&self) -> NumPeers {
             self.keychain.node_count()
         }
 
@@ -464,7 +464,7 @@ mod tests {
             self.keychain.sign(msg)
         }
 
-        fn verify(&self, msg: &[u8], sgn: &Self::Signature, index: NodeIndex) -> bool {
+        fn verify(&self, msg: &[u8], sgn: &Self::Signature, index: PeerId) -> bool {
             self.keychain.verify(msg, sgn, index)
         }
     }
@@ -475,7 +475,7 @@ mod tests {
         fn bootstrap_multi(
             &self,
             signature: &Self::Signature,
-            index: NodeIndex,
+            index: PeerId,
         ) -> Self::PartialMultisignature {
             SignatureSet::add_signature(
                 SignatureSet::with_size(self.node_count()),
@@ -486,7 +486,7 @@ mod tests {
 
         fn is_complete(&self, msg: &[u8], partial: &Self::PartialMultisignature) -> bool {
             let signature_count = partial.iter().count();
-            if signature_count < self.node_count().consensus_threshold().0 {
+            if signature_count < self.node_count().threshold() {
                 return false;
             }
             partial
@@ -516,23 +516,23 @@ mod tests {
     #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
     struct TestSignature {
         msg: Vec<u8>,
-        index: NodeIndex,
+        index: PeerId,
     }
 
     #[derive(Clone, Debug)]
     struct TestKeychain {
-        count: NodeCount,
-        index: NodeIndex,
+        count: NumPeers,
+        index: PeerId,
     }
 
     impl TestKeychain {
-        fn new(count: NodeCount, index: NodeIndex) -> Self {
+        fn new(count: NumPeers, index: PeerId) -> Self {
             TestKeychain { count, index }
         }
     }
 
     impl Index for TestKeychain {
-        fn index(&self) -> NodeIndex {
+        fn index(&self) -> PeerId {
             self.index
         }
     }
@@ -540,7 +540,7 @@ mod tests {
     impl Keychain for TestKeychain {
         type Signature = TestSignature;
 
-        fn node_count(&self) -> NodeCount {
+        fn node_count(&self) -> NumPeers {
             self.count
         }
 
@@ -551,26 +551,27 @@ mod tests {
             }
         }
 
-        fn verify(&self, msg: &[u8], sgn: &Self::Signature, index: NodeIndex) -> bool {
+        fn verify(&self, msg: &[u8], sgn: &Self::Signature, index: PeerId) -> bool {
             index == sgn.index && msg == sgn.msg
         }
     }
 
     type TestMultiKeychain = DefaultMultiKeychain<TestKeychain>;
 
-    fn test_multi_keychain(node_count: NodeCount, index: NodeIndex) -> TestMultiKeychain {
+    fn test_multi_keychain(node_count: NumPeers, index: PeerId) -> TestMultiKeychain {
         let keychain = TestKeychain::new(node_count, index);
         DefaultMultiKeychain::new(keychain)
     }
 
     #[test]
     fn test_valid_signatures() {
-        let node_count: NodeCount = 7.into();
-        let keychains: Vec<TestMultiKeychain> = (0_usize..node_count.0)
-            .map(|i| test_multi_keychain(node_count, i.into()))
+        let node_count: NumPeers = 7.into();
+        let keychains: Vec<TestMultiKeychain> = node_count
+            .peer_ids()
+            .map(|i| test_multi_keychain(node_count, i))
             .collect();
-        for i in 0..node_count.0 {
-            for j in 0..node_count.0 {
+        for i in 0..node_count.total() {
+            for j in 0..node_count.total() {
                 let msg = test_message();
                 let signed_msg = Signed::sign_with_index(msg.clone(), &keychains[i]);
                 let unchecked_msg = signed_msg.into_unchecked();
@@ -584,8 +585,8 @@ mod tests {
 
     #[test]
     fn test_invalid_signatures() {
-        let node_count: NodeCount = 1.into();
-        let index: NodeIndex = 0.into();
+        let node_count: NumPeers = 1.into();
+        let index: PeerId = 0.into();
         let keychain = test_multi_keychain(node_count, index);
         let msg = test_message();
         let signed_msg = Signed::sign_with_index(msg, &keychain);
@@ -601,8 +602,8 @@ mod tests {
     #[test]
     fn test_incomplete_multisignature() {
         let msg = test_message();
-        let index: NodeIndex = 0.into();
-        let node_count: NodeCount = 2.into();
+        let index: PeerId = 0.into();
+        let node_count: NumPeers = 2.into();
         let keychain = test_multi_keychain(node_count, index);
 
         let partial = PartiallyMultisigned::sign(msg, &keychain);
@@ -615,9 +616,10 @@ mod tests {
     #[test]
     fn test_multisignatures() {
         let msg = test_message();
-        let node_count: NodeCount = 7.into();
-        let keychains: Vec<TestMultiKeychain> = (0..node_count.0)
-            .map(|i| test_multi_keychain(node_count, i.into()))
+        let node_count: NumPeers = 7.into();
+        let keychains: Vec<TestMultiKeychain> = node_count
+            .peer_ids()
+            .map(|i| test_multi_keychain(node_count, i))
             .collect();
 
         let mut partial = PartiallyMultisigned::sign(msg.clone(), &keychains[0]);

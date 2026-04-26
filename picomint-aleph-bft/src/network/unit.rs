@@ -1,7 +1,7 @@
 use crate::{
     collection::NewestUnitResponse,
     units::{UncheckedSignedUnit, UnitCoord},
-    Data, NodeIndex, Signature, UncheckedSigned, UnitHash,
+    Data, PeerId, Signature, UncheckedSigned, UnitHash,
 };
 use picomint_encoding::{Decodable, Encodable};
 
@@ -11,13 +11,13 @@ pub enum UnitMessage<D: Data, S: Signature> {
     /// For disseminating newly created units.
     Unit(UncheckedSignedUnit<D, S>),
     /// Request for a unit by its coord.
-    CoordRequest(NodeIndex, UnitCoord),
+    CoordRequest(PeerId, UnitCoord),
     /// Request for the full list of parents of a unit.
-    ParentsRequest(NodeIndex, UnitHash),
+    ParentsRequest(PeerId, UnitHash),
     /// Response to a request for a full list of parents.
     ParentsResponse(UnitHash, Vec<UncheckedSignedUnit<D, S>>),
     /// Request by a node for the newest unit created by them, together with a u64 salt
-    NewestRequest(NodeIndex, u64),
+    NewestRequest(PeerId, u64),
     /// Response to RequestNewest: (our index, maybe unit, salt) signed by us
     NewestResponse(UncheckedSigned<NewestUnitResponse<D, S>, S>),
 }

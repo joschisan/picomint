@@ -26,7 +26,7 @@ impl aleph_bft::UnitFinalizationHandler for FinalizationHandler {
             // the channel is unbounded
             self.sender
                 .try_send(OrderedUnit {
-                    creator: super::to_peer_id(unit.creator),
+                    creator: unit.creator,
                     round: unit.round,
                     data: unit.data,
                 })

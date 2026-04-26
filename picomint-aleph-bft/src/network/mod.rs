@@ -50,21 +50,25 @@ mod tests {
             UnitMessage,
         },
         units::{ControlHash, FullUnit, PreUnit, UncheckedSignedUnit, UnitCoord},
-        NodeIndex, Round, Signed,
+        NumPeers, PeerId, Round, Signed,
     };
     use aleph_bft_mock::{Data, Keychain, PartialMultisignature, Signature};
     use aleph_bft_types::NodeMap;
     use picomint_encoding::{Decodable, Encodable};
 
     fn test_unchecked_unit(
-        creator: NodeIndex,
+        creator: PeerId,
         round: Round,
         data: Data,
     ) -> UncheckedSignedUnit<Data, Signature> {
         let control_hash = ControlHash::new(&NodeMap::with_size(7.into()));
         let pu = PreUnit::new(creator, round, control_hash);
         let signable = FullUnit::new(pu, Some(data), 0);
-        Signed::sign(signable, &Keychain::new(0.into(), creator)).into_unchecked()
+        Signed::sign(
+            signable,
+            &Keychain::new(NumPeers::from(0 as usize), creator),
+        )
+        .into_unchecked()
     }
 
     type TestNetworkData = super::NetworkData<Data, Signature, PartialMultisignature>;
@@ -78,7 +82,7 @@ mod tests {
     fn decoding_network_data_units_new_unit() {
         use UnitMessage::Unit;
 
-        let uu = test_unchecked_unit(5.into(), 43, 1729);
+        let uu = test_unchecked_unit(PeerId::from(5 as u8), 43, 1729);
         let included_data = uu.as_signable().included_data();
         let nd = TestNetworkData::new(Units(Unit(uu.clone())));
         let decoded =
@@ -150,9 +154,9 @@ mod tests {
         use UnitMessage::ParentsResponse;
 
         let h = crate::hash(&43u32.consensus_encode_to_vec());
-        let p1 = test_unchecked_unit(5.into(), 43, 1729);
-        let p2 = test_unchecked_unit(13.into(), 43, 1729);
-        let p3 = test_unchecked_unit(17.into(), 43, 1729);
+        let p1 = test_unchecked_unit(PeerId::from(5 as u8), 43, 1729);
+        let p2 = test_unchecked_unit(PeerId::from(13 as u8), 43, 1729);
+        let p3 = test_unchecked_unit(PeerId::from(17 as u8), 43, 1729);
         let included_data: Vec<Data> = p1
             .as_signable()
             .included_data()
@@ -202,11 +206,15 @@ mod tests {
         let lu2 = test_unchecked_unit(forker, 12, 0);
         let mut included_data = lu1.as_signable().included_data();
         included_data.extend(lu2.as_signable().included_data());
-        let sender: NodeIndex = 7.into();
+        let sender: PeerId = 7.into();
         let alert = crate::alerts::Alert::new(sender, (f1, f2), vec![lu1, lu2]);
 
         let nd = TestNetworkData::new(Alert(ForkAlert(
-            Signed::sign(alert.clone(), &Keychain::new(0.into(), sender)).into_unchecked(),
+            Signed::sign(
+                alert.clone(),
+                &Keychain::new(NumPeers::from(0 as usize), sender),
+            )
+            .into_unchecked(),
         )));
         let decoded =
             TestNetworkData::consensus_decode_partial(&mut &nd.consensus_encode_to_vec()[..]);

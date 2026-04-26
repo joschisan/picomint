@@ -2,7 +2,7 @@ use crate::{
     config::DelaySchedule,
     network::UnitMessageTo,
     units::{UncheckedSignedUnit, Validator},
-    Data, Keychain, MultiKeychain, NodeIndex, Receiver, Round, Sender, Signable, Signature,
+    Data, Keychain, MultiKeychain, PeerId, Receiver, Round, Sender, Signable, Signature,
     UncheckedSigned,
 };
 use futures::{channel::oneshot, Future};
@@ -30,8 +30,8 @@ fn generate_salt() -> Salt {
 /// A response to the request for the newest unit.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default, Decodable, Encodable)]
 pub struct NewestUnitResponse<D: Data, S: Signature> {
-    requester: NodeIndex,
-    responder: NodeIndex,
+    requester: PeerId,
+    responder: PeerId,
     unit: Option<UncheckedSignedUnit<D, S>>,
     salt: Salt,
 }
@@ -45,7 +45,7 @@ impl<D: Data, S: Signature> Signable for NewestUnitResponse<D, S> {
 }
 
 impl<D: Data, S: Signature> crate::Index for NewestUnitResponse<D, S> {
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> PeerId {
         self.responder
     }
 }
@@ -53,8 +53,8 @@ impl<D: Data, S: Signature> crate::Index for NewestUnitResponse<D, S> {
 impl<D: Data, S: Signature> NewestUnitResponse<D, S> {
     /// Create a newest unit response.
     pub fn new(
-        requester: NodeIndex,
-        responder: NodeIndex,
+        requester: PeerId,
+        responder: PeerId,
         unit: Option<UncheckedSignedUnit<D, S>>,
         salt: Salt,
     ) -> Self {

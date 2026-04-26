@@ -1,4 +1,4 @@
-use crate::{NodeCount, NodeIndex, Round, SessionId};
+use crate::{NumPeers, PeerId, Round, SessionId};
 use log::error;
 use std::{
     fmt::{Debug, Formatter},
@@ -65,11 +65,11 @@ impl Debug for DelayConfig {
 #[derive(Clone, Debug)]
 pub struct Config {
     /// Identification number of the Member=0,..,(n_members-1).
-    node_ix: NodeIndex,
+    node_ix: PeerId,
     /// Id of the session for which this instance is run.
     session_id: SessionId,
     /// The size of the committee running the consensus.
-    n_members: NodeCount,
+    n_members: NumPeers,
     /// Configuration of several parameters related to delaying various tasks.
     delay_config: DelayConfig,
     /// Maximum allowable round of a unit.
@@ -77,13 +77,13 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn node_ix(&self) -> NodeIndex {
+    pub fn node_ix(&self) -> PeerId {
         self.node_ix
     }
     pub fn session_id(&self) -> SessionId {
         self.session_id
     }
-    pub fn n_members(&self) -> NodeCount {
+    pub fn n_members(&self) -> NumPeers {
         self.n_members
     }
     pub fn delay_config(&self) -> &DelayConfig {
@@ -117,8 +117,8 @@ pub fn exponential_slowdown(
 /// Creates a [`Config`] which wraps the passed arguments. `time_to_reach_max_round` is a lower bound
 /// on the time needed to reach the maximum round expected by the user and is only used for verification.
 pub fn create_config(
-    n_members: NodeCount,
-    node_ix: NodeIndex,
+    n_members: NumPeers,
+    node_ix: PeerId,
     session_id: SessionId,
     max_round: Round,
     delay_config: DelayConfig,
@@ -145,8 +145,8 @@ pub fn create_config(
 /// set to default, suggested by the creators of this package. `time_to_reach_max_round` is a lower bound
 /// on the time needed to reach the maximum round expected by the user and is only used for verification.
 pub fn default_config(
-    n_members: NodeCount,
-    node_ix: NodeIndex,
+    n_members: NumPeers,
+    node_ix: PeerId,
     session_id: SessionId,
     max_round: Round,
     time_to_reach_max_round: Duration,
@@ -216,7 +216,7 @@ mod tests {
             default_coord_request_delay, default_coord_request_recipients, time_to_reach_round,
             DelaySchedule,
         },
-        create_config, exponential_slowdown, DelayConfig, NodeCount, NodeIndex,
+        create_config, exponential_slowdown, DelayConfig, NumPeers, PeerId,
     };
     use std::{sync::Arc, time::Duration};
 
@@ -273,8 +273,8 @@ mod tests {
     #[test]
     fn low_round_not_causing_slowdown_fails_the_check() {
         let config = create_config(
-            NodeCount(5),
-            NodeIndex(1),
+            NumPeers::new(5 as usize),
+            PeerId::new(1 as u8),
             3,
             5000,
             delay_config_for_tests(),
@@ -287,8 +287,8 @@ mod tests {
     #[test]
     fn high_round_causing_slowdown_passes_the_check() {
         let config = create_config(
-            NodeCount(5),
-            NodeIndex(1),
+            NumPeers::new(5 as usize),
+            PeerId::new(1 as u8),
             3,
             7000,
             delay_config_for_tests(),

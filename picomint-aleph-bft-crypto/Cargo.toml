@@ -15,6 +15,7 @@ doctest = false
 [dependencies]
 derive_more = { version = "1.0", features = ["full"] }
 log = "0.4"
+picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 
 [dev-dependencies]

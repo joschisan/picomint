@@ -140,7 +140,7 @@ impl ConsensusEngine {
 
         let config = aleph_bft::create_config(
             self.num_peers().total().into(),
-            self.identity().to_usize().into(),
+            self.identity(),
             session_index,
             self.cfg
                 .consensus

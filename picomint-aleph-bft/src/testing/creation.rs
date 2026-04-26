@@ -2,7 +2,7 @@ use crate::{
     creation::{run, IO},
     testing::{gen_config, gen_delay_config},
     units::{SignedUnit as GenericSignedUnit, Unit as GenericUnit},
-    NodeCount, Receiver, Round, Sender, Terminator,
+    NumPeers, Receiver, Round, Sender, Terminator,
 };
 use aleph_bft_mock::{Data, DataProvider, Keychain};
 use futures::{
@@ -22,10 +22,10 @@ impl TestController {
     fn new(
         parents_for_creators: Sender<SignedUnit>,
         units_from_creators: Receiver<SignedUnit>,
-        n_members: NodeCount,
+        n_members: NumPeers,
     ) -> Self {
         TestController {
-            max_round_per_creator: vec![0; n_members.0],
+            max_round_per_creator: vec![0; n_members.total()],
             parents_for_creators,
             units_from_creators,
         }
@@ -42,7 +42,7 @@ impl TestController {
             if unit.round() > round_reached {
                 round_reached = unit.round();
             }
-            self.max_round_per_creator[unit.creator().0] += 1;
+            self.max_round_per_creator[unit.creator().to_usize()] += 1;
             self.parents_for_creators
                 .unbounded_send(unit)
                 .expect("Creator input channel isn't closed.");
@@ -58,7 +58,7 @@ struct TestSetup {
     units_for_creators: Vec<Sender<SignedUnit>>,
 }
 
-fn setup_test(n_members: NodeCount) -> TestSetup {
+fn setup_test(n_members: NumPeers) -> TestSetup {
     let (units_for_controller, units_from_creators) = mpsc::unbounded();
     let (units_for_creators, units_from_controller) = mpsc::unbounded();
 
@@ -68,7 +68,7 @@ fn setup_test(n_members: NodeCount) -> TestSetup {
     let mut killers = Vec::new();
     let mut units_for_creators = Vec::new();
 
-    for node_ix in n_members.into_iterator() {
+    for node_ix in n_members.peer_ids() {
         let (parents_for_creator, parents_from_controller) = mpsc::unbounded();
 
         let io = IO {
@@ -125,7 +125,7 @@ async fn finish(killers: Vec<oneshot::Sender<()>>, mut handles: Vec<tokio::task:
 // This test checks if 7 creators that start at the same time will create 50 units each
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn synchronous_creators_should_create_dag() {
-    let n_members = NodeCount(7);
+    let n_members = NumPeers::new(7 as usize);
     let max_round: Round = 50;
 
     let TestSetup {
@@ -159,7 +159,7 @@ async fn synchronous_creators_should_create_dag() {
 // Then it is checked if 5 creators achieve round 75 and rest at least round 73.
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn disconnected_creators_should_create_dag() {
-    let n_members = NodeCount(7);
+    let n_members = NumPeers::new(7 as usize);
     let max_round: Round = 25;
 
     let TestSetup {
@@ -236,7 +236,7 @@ async fn disconnected_creators_should_create_dag() {
 // will reach at least round 47, when at least one reaches round 50.
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn late_creators_should_create_dag() {
-    let n_members = NodeCount(7);
+    let n_members = NumPeers::new(7 as usize);
     let max_round: Round = 25;
 
     let TestSetup {

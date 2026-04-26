@@ -5,21 +5,21 @@ use std::{
 
 use crate::{
     testing::{init_log, spawn_honest_member, HonestMember, NetworkData},
-    NodeCount, NodeIndex, SpawnHandle,
+    NumPeers, PeerId, SpawnHandle,
 };
 use aleph_bft_mock::{DataProvider, NetworkHook, Router, Spawner};
 use futures::StreamExt;
 use log::info;
 
 struct Latency {
-    who: NodeIndex,
-    buffer: VecDeque<(Instant, (NetworkData, NodeIndex, NodeIndex))>,
+    who: PeerId,
+    buffer: VecDeque<(Instant, (NetworkData, PeerId, PeerId))>,
 }
 
 const LATENCY: Duration = Duration::from_millis(300);
 
 impl Latency {
-    pub fn new(who: NodeIndex) -> Self {
+    pub fn new(who: PeerId) -> Self {
         Latency {
             who,
             buffer: VecDeque::new(),
@@ -29,9 +29,9 @@ impl Latency {
     fn add_message(
         &mut self,
         data: NetworkData,
-        sender: NodeIndex,
-        recipient: NodeIndex,
-    ) -> Vec<(NetworkData, NodeIndex, NodeIndex)> {
+        sender: PeerId,
+        recipient: PeerId,
+    ) -> Vec<(NetworkData, PeerId, PeerId)> {
         match sender == self.who || recipient == self.who {
             true => {
                 self.buffer
@@ -42,7 +42,7 @@ impl Latency {
         }
     }
 
-    fn messages_to_send(&mut self) -> Vec<(NetworkData, NodeIndex, NodeIndex)> {
+    fn messages_to_send(&mut self) -> Vec<(NetworkData, PeerId, PeerId)> {
         let mut result = Vec::new();
         while !self.buffer.is_empty() {
             let (when, msg) = self
@@ -63,9 +63,9 @@ impl NetworkHook<NetworkData> for Latency {
     fn process_message(
         &mut self,
         data: NetworkData,
-        sender: NodeIndex,
-        recipient: NodeIndex,
-    ) -> Vec<(NetworkData, NodeIndex, NodeIndex)> {
+        sender: PeerId,
+        recipient: PeerId,
+    ) -> Vec<(NetworkData, PeerId, PeerId)> {
         let mut result = self.add_message(data, sender, recipient);
         result.append(&mut self.messages_to_send());
         result
@@ -74,8 +74,8 @@ impl NetworkHook<NetworkData> for Latency {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delayed_finalized() {
-    let n_members = NodeCount(7);
-    let australian = NodeIndex(0);
+    let n_members = NumPeers::new(7 as usize);
+    let australian = PeerId::new(0 as u8);
     init_log();
     let spawner = Spawner::new();
     let mut batch_rxs = Vec::new();
@@ -99,14 +99,14 @@ async fn delayed_finalized() {
             ix,
             n_members,
             vec![],
-            DataProvider::new_range(ix.0 * 50, (ix.0 + 1) * 50),
+            DataProvider::new_range(ix.to_usize() * 50, (ix.to_usize() + 1) * 50),
             network,
         );
         batch_rxs.push(finalization_rx);
         exits.push(exit_tx);
         handles.push(handle);
     }
-    let to_finalize: HashSet<u32> = (0..((n_members.0) * 50))
+    let to_finalize: HashSet<u32> = (0..((n_members.total()) * 50))
         .map(|number| number as u32)
         .collect();
 

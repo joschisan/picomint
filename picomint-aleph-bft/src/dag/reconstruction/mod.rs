@@ -2,13 +2,13 @@ use crate::{
     units::{ControlHash, FullUnit, Unit, UnitCoord, UnitWithParents, WrappedUnit},
     NodeMap, SessionId, UnitHash,
 };
-use aleph_bft_rmc::NodeCount;
+use aleph_bft_rmc::NumPeers;
 use std::collections::HashMap;
 
 mod dag;
 mod parents;
 
-use aleph_bft_types::{Data, MultiKeychain, NodeIndex, OrderedUnit, Round, Signed};
+use aleph_bft_types::{Data, MultiKeychain, OrderedUnit, PeerId, Round, Signed};
 use dag::Dag;
 use parents::Reconstruction as ParentReconstruction;
 
@@ -89,11 +89,11 @@ impl<U: Unit> UnitWithParents for ReconstructedUnit<U> {
             })
     }
 
-    fn parent_for(&self, index: NodeIndex) -> Option<&UnitHash> {
+    fn parent_for(&self, index: PeerId) -> Option<&UnitHash> {
         self.parents.get(index).map(|(hash, _)| hash)
     }
 
-    fn node_count(&self) -> NodeCount {
+    fn node_count(&self) -> NumPeers {
         self.parents.size()
     }
 }
@@ -233,7 +233,7 @@ mod test {
     use crate::{
         dag::reconstruction::{ReconstructedUnit, Reconstruction, ReconstructionResult, Request},
         units::{random_full_parent_units_up_to, Unit, UnitCoord, UnitWithParents},
-        NodeCount, NodeIndex,
+        NumPeers, PeerId,
     };
     use aleph_bft_types::{NodeMap, Round};
     use rand::Rng;
@@ -242,7 +242,7 @@ mod test {
     #[test]
     fn reconstructs_initial_units() {
         let mut reconstruction = Reconstruction::new();
-        for unit in &random_full_parent_units_up_to(0, NodeCount(4), 43)[0] {
+        for unit in &random_full_parent_units_up_to(0, NumPeers::new(4 as usize), 43)[0] {
             let ReconstructionResult {
                 mut units,
                 requests,
@@ -258,7 +258,7 @@ mod test {
     #[test]
     fn reconstructs_units_coming_in_order() {
         let mut reconstruction = Reconstruction::new();
-        let dag = random_full_parent_units_up_to(7, NodeCount(4), 43);
+        let dag = random_full_parent_units_up_to(7, NumPeers::new(4 as usize), 43);
         for units in &dag {
             for unit in units {
                 let round = unit.round();
@@ -293,7 +293,7 @@ mod test {
     #[test]
     fn requests_all_parents() {
         let mut reconstruction = Reconstruction::new();
-        let dag = random_full_parent_units_up_to(1, NodeCount(4), 43);
+        let dag = random_full_parent_units_up_to(1, NumPeers::new(4 as usize), 43);
         let unit = dag
             .get(1)
             .expect("just created")
@@ -307,7 +307,7 @@ mod test {
     #[test]
     fn requests_single_parent() {
         let mut reconstruction = Reconstruction::new();
-        let dag = random_full_parent_units_up_to(1, NodeCount(4), 43);
+        let dag = random_full_parent_units_up_to(1, NumPeers::new(4 as usize), 43);
         for unit in dag.first().expect("just created").iter().skip(1) {
             reconstruction.add_unit(unit.clone());
         }
@@ -321,14 +321,14 @@ mod test {
         assert_eq!(requests.len(), 1);
         assert_eq!(
             requests.last().expect("just checked"),
-            &Request::Coord(UnitCoord::new(0, NodeIndex(0)))
+            &Request::Coord(UnitCoord::new(0, PeerId::new(0 as u8)))
         );
     }
 
     #[test]
     fn reconstructs_units_coming_in_reverse_order() {
         let mut reconstruction = Reconstruction::new();
-        let mut dag = random_full_parent_units_up_to(7, NodeCount(4), 43);
+        let mut dag = random_full_parent_units_up_to(7, NumPeers::new(4 as usize), 43);
         dag.reverse();
         for units in dag.iter().take(7) {
             for unit in units {
@@ -350,7 +350,7 @@ mod test {
 
     #[test]
     fn handles_bad_hash() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let mut reconstruction = Reconstruction::new();
         let dag = random_full_parent_units_up_to(0, node_count, 43);
         for unit in dag.first().expect("just created") {
@@ -402,7 +402,7 @@ mod test {
         const MAX_ROUND: Round = 7;
 
         let mut rng = rand::thread_rng();
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let mut reconstruction = Reconstruction::new();
 
         let dag = random_full_parent_units_up_to(MAX_ROUND, node_count, 43);
@@ -422,9 +422,9 @@ mod test {
                             "Initial units should not have parents!"
                         );
 
-                        let random_parent_index = rng.gen::<u64>() % node_count.0 as u64;
+                        let random_parent_index = rng.gen::<u64>() % node_count.total() as u64;
                         parents_map.insert(
-                            NodeIndex(random_parent_index as usize),
+                            PeerId::new(random_parent_index as usize as u8),
                             (unit.hash(), 2 as Round),
                         );
                         assert_eq!(
@@ -441,9 +441,9 @@ mod test {
                             "Non-initial rounds should have parents!"
                         );
 
-                        let random_parent_index = rng.gen::<u64>() % node_count.0 as u64;
+                        let random_parent_index = rng.gen::<u64>() % node_count.total() as u64;
                         parents_map.insert(
-                            NodeIndex(random_parent_index as usize),
+                            PeerId::new(random_parent_index as usize as u8),
                             (unit.hash(), round as Round),
                         );
                         assert_eq!(
@@ -462,8 +462,8 @@ mod test {
                             ReconstructedUnit::with_parents(unit.clone(), parents.clone()).is_ok(),
                             "Reconstructed unit control hash does not match unit's control hash!"
                         );
-                        let random_parent_index = rng.gen::<u64>() % node_count.0 as u64;
-                        let random_parent_index = NodeIndex(random_parent_index as usize);
+                        let random_parent_index = rng.gen::<u64>() % node_count.total() as u64;
+                        let random_parent_index = PeerId::new(random_parent_index as usize as u8);
                         let &(parent_hash, _) = parents.get(random_parent_index).unwrap();
                         let wrong_round = match round {
                             1 => MAX_ROUND,

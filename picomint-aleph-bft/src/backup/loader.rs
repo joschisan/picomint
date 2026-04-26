@@ -10,7 +10,7 @@ use picomint_encoding::Decodable;
 
 use crate::{
     units::{UncheckedSignedUnit, Unit, UnitCoord},
-    Data, NodeIndex, Round, SessionId, Signature,
+    Data, PeerId, Round, SessionId, Signature,
 };
 
 /// Backup read error. Could be either caused by io error from `BackupReader`, or by decoding.
@@ -57,13 +57,13 @@ impl From<std::io::Error> for LoaderError {
 
 pub struct BackupLoader<D: Data, S: Signature, R: AsyncRead> {
     backup: Pin<Box<R>>,
-    index: NodeIndex,
+    index: PeerId,
     session_id: SessionId,
     _phantom: PhantomData<(D, S)>,
 }
 
 impl<D: Data, S: Signature, R: AsyncRead> BackupLoader<D, S, R> {
-    pub fn new(backup: R, index: NodeIndex, session_id: SessionId) -> BackupLoader<D, S, R> {
+    pub fn new(backup: R, index: PeerId, session_id: SessionId) -> BackupLoader<D, S, R> {
         BackupLoader {
             backup: Box::pin(backup),
             index,
@@ -142,20 +142,20 @@ mod tests {
             create_preunits, creator_set, preunit_to_full_unit, preunit_to_unchecked_signed_unit,
             UncheckedSignedUnit as GenericUncheckedSignedUnit,
         },
-        NodeCount, NodeIndex, Round, SessionId,
+        NumPeers, PeerId, Round, SessionId,
     };
 
     type UncheckedSignedUnit = GenericUncheckedSignedUnit<Data, Signature>;
     type BackupLoader<R> = GenericLoader<Data, Signature, R>;
 
     const SESSION_ID: SessionId = 43;
-    const NODE_ID: NodeIndex = NodeIndex(0);
-    const N_MEMBERS: NodeCount = NodeCount(4);
+    const NODE_ID: PeerId = PeerId::new(0 as u8);
+    const N_MEMBERS: NumPeers = NumPeers::new(4 as usize);
 
     fn produce_units(rounds: usize, session_id: SessionId) -> Vec<Vec<UncheckedSignedUnit>> {
         let mut creators = creator_set(N_MEMBERS);
-        let keychains: Vec<_> = (0..N_MEMBERS.0)
-            .map(|id| Keychain::new(N_MEMBERS, NodeIndex(id)))
+        let keychains: Vec<_> = (0..N_MEMBERS.total())
+            .map(|id| Keychain::new(N_MEMBERS, PeerId::new(id as u8)))
             .collect();
 
         let mut units_per_round = Vec::with_capacity(rounds);
@@ -187,11 +187,11 @@ mod tests {
 
     fn units_of_creator(
         units: Vec<Vec<UncheckedSignedUnit>>,
-        creator: NodeIndex,
+        creator: PeerId,
     ) -> Vec<UncheckedSignedUnit> {
         units
             .into_iter()
-            .map(|units_per_round| units_per_round[creator.0].clone())
+            .map(|units_per_round| units_per_round[creator.to_usize()].clone())
             .collect()
     }
 
@@ -254,7 +254,10 @@ mod tests {
 
     #[tokio::test]
     async fn backup_with_units_of_one_creator_fails() {
-        let items = units_of_creator(produce_units(5, SESSION_ID), NodeIndex(NODE_ID.0 + 1));
+        let items = units_of_creator(
+            produce_units(5, SESSION_ID),
+            PeerId::from((NODE_ID.to_usize() + 1) as u8),
+        );
         let encoded_items = encode_all(items).into_iter().flatten().collect();
 
         assert!(matches!(

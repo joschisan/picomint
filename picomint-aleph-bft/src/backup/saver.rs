@@ -90,7 +90,7 @@ mod tests {
         backup::BackupSaver,
         dag::ReconstructedUnit,
         units::{creator_set, preunit_to_signed_unit, TestingSignedUnit},
-        NodeCount, Terminator,
+        NumPeers, Terminator,
     };
 
     type TestUnit = ReconstructedUnit<TestingSignedUnit>;
@@ -127,7 +127,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_proper_relative_responses_ordering() {
-        let node_count = NodeCount(5);
+        let node_count = NumPeers::new(5 as usize);
         let PrepareSaverResponse {
             task,
             units_for_saver,
@@ -141,16 +141,16 @@ mod tests {
 
         let creators = creator_set(node_count);
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|id| Keychain::new(node_count, id))
             .collect();
         let units: Vec<TestUnit> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|id| {
                 ReconstructedUnit::initial(preunit_to_signed_unit(
-                    creators[id.0].create_unit(0).unwrap(),
+                    creators[id.to_usize()].create_unit(0).unwrap(),
                     0,
-                    &keychains[id.0],
+                    &keychains[id.to_usize()],
                 ))
             })
             .collect();

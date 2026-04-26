@@ -6,7 +6,7 @@ use crate::{
     dissemination::{Addressed, DisseminationMessage, Responder, TaskManager, TaskManagerStatus},
     extension::Ordering,
     units::{UncheckedSignedUnit, Unit, UnitStore, UnitStoreStatus, Validator},
-    Data, DelayConfig, MultiKeychain, NodeIndex, UnitFinalizationHandler, UnitHash,
+    Data, DelayConfig, MultiKeychain, PeerId, UnitFinalizationHandler, UnitHash,
 };
 use log::{debug, trace};
 use std::{
@@ -135,7 +135,7 @@ where
     pub fn process_request(
         &mut self,
         request: ReconstructionRequest,
-        node_id: NodeIndex,
+        node_id: PeerId,
     ) -> Option<AddressedDisseminationMessage<UFH::Data, MK::Signature>> {
         match self.responder.handle_request(request, &self.store) {
             Ok(response) => Some(Addressed::addressed_to(response.into(), node_id)),
@@ -164,7 +164,7 @@ where
     pub fn process_newest_unit_request(
         &mut self,
         salt: Salt,
-        node_id: NodeIndex,
+        node_id: PeerId,
     ) -> AddressedDisseminationMessage<UFH::Data, MK::Signature> {
         Addressed::addressed_to(
             self.responder

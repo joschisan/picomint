@@ -64,8 +64,8 @@ impl Keychain {
 }
 
 impl aleph_bft::Index for Keychain {
-    fn index(&self) -> aleph_bft::NodeIndex {
-        self.cfg.private.identity.to_usize().into()
+    fn index(&self) -> aleph_bft::PeerId {
+        self.cfg.private.identity
     }
 }
 
@@ -73,7 +73,7 @@ impl aleph_bft::Index for Keychain {
 impl aleph_bft::Keychain for Keychain {
     type Signature = [u8; 64];
 
-    fn node_count(&self) -> aleph_bft::NodeCount {
+    fn node_count(&self) -> aleph_bft::NumPeers {
         self.cfg.consensus.peers.len().into()
     }
 
@@ -85,10 +85,10 @@ impl aleph_bft::Keychain for Keychain {
         &self,
         message: &[u8],
         signature: &Self::Signature,
-        node_index: aleph_bft::NodeIndex,
+        node_index: aleph_bft::PeerId,
     ) -> bool {
         match schnorr::Signature::from_slice(signature) {
-            Ok(sig) => self.verify_schnorr(message, &sig, super::to_peer_id(node_index)),
+            Ok(sig) => self.verify_schnorr(message, &sig, node_index),
             Err(_) => false,
         }
     }
@@ -100,7 +100,7 @@ impl aleph_bft::MultiKeychain for Keychain {
     fn bootstrap_multi(
         &self,
         signature: &Self::Signature,
-        index: aleph_bft::NodeIndex,
+        index: aleph_bft::PeerId,
     ) -> Self::PartialMultisignature {
         let mut partial = aleph_bft::NodeMap::with_size(self.cfg.consensus.peers.len().into());
 

@@ -7,7 +7,7 @@ use crate::{
         SignedUnit, UncheckedSignedUnit, Unit, UnitStore, UnitStoreStatus, ValidationError,
         Validator as UnitValidator, WrappedUnit,
     },
-    Data, MultiKeychain, NodeIndex, Round, UnitHash,
+    Data, MultiKeychain, PeerId, Round, UnitHash,
 };
 
 /// What can go wrong when validating a unit.
@@ -40,7 +40,7 @@ impl<D: Data, MK: MultiKeychain> From<ValidationError<D, MK::Signature>> for Err
 /// The summary status of the validator.
 pub struct ValidatorStatus {
     processing_units: UnitStoreStatus,
-    known_forkers: BTreeSet<NodeIndex>,
+    known_forkers: BTreeSet<PeerId>,
 }
 
 impl ValidatorStatus {
@@ -66,7 +66,7 @@ type ValidatorResult<D, MK> = Result<SignedUnit<D, MK>, Error<D, MK>>;
 pub struct Validator<D: Data, MK: MultiKeychain> {
     unit_validator: UnitValidator<MK>,
     processing_units: UnitStore<SignedUnit<D, MK>>,
-    known_forkers: BTreeSet<NodeIndex>,
+    known_forkers: BTreeSet<PeerId>,
 }
 
 impl<D: Data, MK: MultiKeychain> Validator<D, MK> {
@@ -80,13 +80,13 @@ impl<D: Data, MK: MultiKeychain> Validator<D, MK> {
         }
     }
 
-    fn is_forker(&self, node_id: NodeIndex) -> bool {
+    fn is_forker(&self, node_id: PeerId) -> bool {
         self.known_forkers.contains(&node_id)
     }
 
     fn mark_forker<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(
         &mut self,
-        forker: NodeIndex,
+        forker: PeerId,
         store: &UnitStore<U>,
     ) -> Vec<UncheckedSignedUnit<D, MK::Signature>> {
         assert!(!self.is_forker(forker), "we shouldn't mark a forker twice");
@@ -192,17 +192,17 @@ mod test {
             random_full_parent_units_up_to, Unit, UnitStore, Validator as UnitValidator,
             WrappedSignedUnit,
         },
-        NodeCount, NodeIndex, Signed,
+        NumPeers, PeerId, Signed,
     };
     use aleph_bft_mock::Keychain;
 
     #[test]
     fn validates_trivially_correct() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let session_id = 0;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
@@ -210,7 +210,7 @@ mod test {
         for unit in random_full_parent_units_up_to(4, node_count, session_id)
             .iter()
             .flatten()
-            .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().0]))
+            .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().to_usize()]))
         {
             assert_eq!(
                 validator.validate(unit.clone().into(), &store),
@@ -221,11 +221,11 @@ mod test {
 
     #[test]
     fn refuses_processing_duplicates() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let session_id = 0;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
@@ -249,11 +249,11 @@ mod test {
 
     #[test]
     fn refuses_external_duplicates() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let session_id = 0;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let mut store = UnitStore::new(node_count);
@@ -274,12 +274,12 @@ mod test {
 
     #[test]
     fn detects_processing_fork() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let session_id = 0;
         let max_round = 2137;
         let produced_round = 4;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
@@ -287,7 +287,7 @@ mod test {
         for unit in random_full_parent_units_up_to(produced_round, node_count, session_id)
             .iter()
             .flatten()
-            .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().0]))
+            .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().to_usize()]))
         {
             assert_eq!(
                 validator.validate(unit.clone().into(), &store),
@@ -309,12 +309,12 @@ mod test {
 
     #[test]
     fn detects_external_fork() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let session_id = 0;
         let max_round = 2137;
         let produced_round = 4;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let mut store = UnitStore::new(node_count);
@@ -322,7 +322,7 @@ mod test {
         for unit in random_full_parent_units_up_to(produced_round, node_count, session_id)
             .iter()
             .flatten()
-            .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().0]))
+            .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().to_usize()]))
         {
             store.insert(WrappedSignedUnit(unit));
         }
@@ -341,12 +341,12 @@ mod test {
 
     #[test]
     fn refuses_uncommitted() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let session_id = 0;
         let max_round = 2137;
         let produced_round = 4;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
@@ -361,8 +361,8 @@ mod test {
         for unit in random_full_parent_units_up_to(produced_round, node_count, session_id)
             .iter()
             .flatten()
-            .filter(|unit| unit.creator() == NodeIndex(0))
-            .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().0]))
+            .filter(|unit| unit.creator() == PeerId::new(0 as u8))
+            .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().to_usize()]))
         {
             match unit.round() {
                 0..=1 => assert_eq!(
@@ -389,12 +389,12 @@ mod test {
 
     #[test]
     fn accepts_committed() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let session_id = 0;
         let max_round = 2137;
         let produced_round = 4;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
         let store = UnitStore::<WrappedSignedUnit>::new(node_count);
@@ -409,8 +409,8 @@ mod test {
         let units: Vec<_> = random_full_parent_units_up_to(produced_round, node_count, session_id)
             .iter()
             .flatten()
-            .filter(|unit| unit.creator() == NodeIndex(0))
-            .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().0]))
+            .filter(|unit| unit.creator() == PeerId::new(0 as u8))
+            .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().to_usize()]))
             .collect();
         for unit in units.iter().take(3) {
             assert_eq!(

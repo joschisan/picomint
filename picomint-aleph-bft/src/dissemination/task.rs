@@ -4,7 +4,7 @@ use crate::{
     dissemination::{Addressed, DisseminationMessage, ReconstructionRequest, LOG_TARGET},
     task_queue::TaskQueue,
     units::{SignedUnit, Unit, UnitCoord, UnitStore, WrappedUnit},
-    Data, DelayConfig, MultiKeychain, NodeCount, NodeIndex, NodeMap, Recipient, Round, Signature,
+    Data, DelayConfig, MultiKeychain, NodeMap, NumPeers, PeerId, Recipient, Round, Signature,
     UnitHash,
 };
 use itertools::Itertools;
@@ -62,7 +62,7 @@ impl Display for RepeatableTask {
 
 /// Manager for tasks. Controls which tasks are performed and when.
 pub struct Manager {
-    own_id: NodeIndex,
+    own_id: PeerId,
     peers: Vec<Recipient>,
     tick_interval: Duration,
     unit_rebroadcast_interval_min: Duration,
@@ -154,7 +154,7 @@ impl Display for ManagerStatus {
 
 impl Manager {
     /// Create a new Manager.
-    pub fn new(own_id: NodeIndex, n_members: NodeCount, delay_config: DelayConfig) -> Self {
+    pub fn new(own_id: PeerId, n_members: NumPeers, delay_config: DelayConfig) -> Self {
         let DelayConfig {
             tick_interval,
             unit_rebroadcast_interval_min,
@@ -165,8 +165,8 @@ impl Manager {
             parent_request_recipients,
             ..
         } = delay_config;
-        let peers = (0..n_members.0)
-            .map(NodeIndex)
+        let peers = n_members
+            .peer_ids()
             .filter(|x| *x != own_id)
             .map(Recipient::Node)
             .collect();
@@ -186,7 +186,7 @@ impl Manager {
         }
     }
 
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> PeerId {
         self.own_id
     }
 
@@ -398,15 +398,15 @@ mod tests {
         units::{
             random_full_parent_reconstrusted_units_up_to, Unit, UnitCoord, UnitStore, WrappedUnit,
         },
-        NodeCount, NodeIndex, Recipient,
+        NumPeers, PeerId, Recipient,
     };
     use aleph_bft_mock::Keychain;
     use std::thread::sleep;
 
     #[test]
     fn correct_tick_interval() {
-        let node_ix = NodeIndex(7);
-        let node_count = NodeCount(20);
+        let node_ix = PeerId::new(7 as u8);
+        let node_count = NumPeers::new(20 as usize);
         let delay_config = gen_delay_config();
         let manager: Manager = Manager::new(node_ix, node_count, delay_config.clone());
 
@@ -415,14 +415,14 @@ mod tests {
 
     #[test]
     fn broadcasts_own_unit() {
-        let node_ix = NodeIndex(7);
-        let node_count = NodeCount(20);
+        let node_ix = PeerId::new(7 as u8);
+        let node_count = NumPeers::new(20 as usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
         let session_id = 43;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
 
@@ -430,7 +430,7 @@ mod tests {
             random_full_parent_reconstrusted_units_up_to(0, node_count, session_id, &keychains)
                 .pop()
                 .expect("just created initial round");
-        let own_unit = units[node_ix.0].clone();
+        let own_unit = units[node_ix.to_usize()].clone();
 
         let message = manager
             .add_unit(&own_unit)
@@ -462,14 +462,14 @@ mod tests {
 
     #[test]
     fn broadcasts_other_unit() {
-        let node_ix = NodeIndex(7);
-        let node_count = NodeCount(20);
+        let node_ix = PeerId::new(7 as u8);
+        let node_count = NumPeers::new(20 as usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
         let session_id = 43;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
 
@@ -500,14 +500,14 @@ mod tests {
 
     #[test]
     fn doesnt_broadcast_old_unit() {
-        let node_ix = NodeIndex(7);
-        let node_count = NodeCount(20);
+        let node_ix = PeerId::new(7 as u8);
+        let node_count = NumPeers::new(20 as usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
         let session_id = 43;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
 
@@ -539,14 +539,14 @@ mod tests {
 
     #[test]
     fn requests_coord() {
-        let node_ix = NodeIndex(7);
-        let node_count = NodeCount(20);
+        let node_ix = PeerId::new(7 as u8);
+        let node_count = NumPeers::new(20 as usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
         let session_id = 43;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
 
@@ -596,14 +596,14 @@ mod tests {
 
     #[test]
     fn requests_ancient_coord_when_far_behind() {
-        let node_ix = NodeIndex(7);
-        let node_count = NodeCount(20);
+        let node_ix = PeerId::new(7 as u8);
+        let node_count = NumPeers::new(20 as usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
         let session_id = 43;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
 
@@ -616,7 +616,7 @@ mod tests {
         let mut store = UnitStore::new(node_count);
         store.insert(unit_to_make_typing_easier);
         let processing_store = UnitStore::new(node_count);
-        manager.add_request(Request::Coord(UnitCoord::new(2137, NodeIndex(0))));
+        manager.add_request(Request::Coord(UnitCoord::new(2137, PeerId::new(0 as u8))));
         let mut messages = manager.trigger_tasks(&store, &processing_store);
         assert_eq!(messages.len(), 1);
         let message = messages.pop().expect("just checked");
@@ -629,7 +629,7 @@ mod tests {
                 assert_eq!(requesting_node, &node_ix);
                 match request {
                     Request::Coord(coord) => {
-                        assert_eq!(coord.creator(), NodeIndex(0));
+                        assert_eq!(coord.creator(), PeerId::new(0 as u8));
                         assert!(coord.round() < 100);
                     }
                     r => panic!("Unexpected request: {:?}", r),
@@ -652,7 +652,7 @@ mod tests {
                 assert_eq!(requesting_node, &node_ix);
                 match request {
                     Request::Coord(coord) => {
-                        assert_eq!(coord.creator(), NodeIndex(0));
+                        assert_eq!(coord.creator(), PeerId::new(0 as u8));
                         assert!(coord.round() < 100);
                     }
                     r => panic!("Unexpected request: {:?}", r),
@@ -664,14 +664,14 @@ mod tests {
 
     #[test]
     fn stops_requesting_coord_when_has_unit() {
-        let node_ix = NodeIndex(7);
-        let node_count = NodeCount(20);
+        let node_ix = PeerId::new(7 as u8);
+        let node_count = NumPeers::new(20 as usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
         let session_id = 43;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
 
@@ -710,14 +710,14 @@ mod tests {
 
     #[test]
     fn requests_parents() {
-        let node_ix = NodeIndex(7);
-        let node_count = NodeCount(20);
+        let node_ix = PeerId::new(7 as u8);
+        let node_count = NumPeers::new(20 as usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
         let session_id = 43;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
 
@@ -767,14 +767,14 @@ mod tests {
 
     #[test]
     fn stops_requesting_parents_when_has_unit() {
-        let node_ix = NodeIndex(7);
-        let node_count = NodeCount(20);
+        let node_ix = PeerId::new(7 as u8);
+        let node_count = NumPeers::new(20 as usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
         let session_id = 43;
         let keychains: Vec<_> = node_count
-            .into_iterator()
+            .peer_ids()
             .map(|node_id| Keychain::new(node_count, node_id))
             .collect();
 

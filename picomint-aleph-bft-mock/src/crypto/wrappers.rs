@@ -1,6 +1,6 @@
 use crate::crypto::{PartialMultisignature, Signature};
 use aleph_bft_types::{
-    Index, Keychain as KeychainT, MultiKeychain as MultiKeychainT, NodeCount, NodeIndex,
+    Index, Keychain as KeychainT, MultiKeychain as MultiKeychainT, NumPeers, PeerId,
 };
 use std::fmt::Debug;
 
@@ -27,7 +27,7 @@ impl<T: MK> From<T> for BadSigning<T> {
 }
 
 impl<T: MK> Index for BadSigning<T> {
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> PeerId {
         self.0.index()
     }
 }
@@ -35,7 +35,7 @@ impl<T: MK> Index for BadSigning<T> {
 impl<T: MK> KeychainT for BadSigning<T> {
     type Signature = T::Signature;
 
-    fn node_count(&self) -> NodeCount {
+    fn node_count(&self) -> NumPeers {
         self.0.node_count()
     }
 
@@ -46,7 +46,7 @@ impl<T: MK> KeychainT for BadSigning<T> {
         Signature::new(msg, signature.index())
     }
 
-    fn verify(&self, msg: &[u8], sgn: &Self::Signature, index: NodeIndex) -> bool {
+    fn verify(&self, msg: &[u8], sgn: &Self::Signature, index: PeerId) -> bool {
         self.0.verify(msg, sgn, index)
     }
 }
@@ -57,7 +57,7 @@ impl<T: MK> MultiKeychainT for BadSigning<T> {
     fn bootstrap_multi(
         &self,
         signature: &Self::Signature,
-        index: NodeIndex,
+        index: PeerId,
     ) -> Self::PartialMultisignature {
         self.0.bootstrap_multi(signature, index)
     }

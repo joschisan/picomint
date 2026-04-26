@@ -1,19 +1,19 @@
 use crate::{
     creation::collector::{ConstraintError, UnitsCollector},
     units::{ControlHash, PreUnit, Unit},
-    NodeCount, NodeIndex, NodeMap, Round,
+    NodeMap, NumPeers, PeerId, Round,
 };
 use anyhow::Result;
 use std::cmp;
 
 pub struct Creator {
     round_collectors: Vec<UnitsCollector>,
-    node_id: NodeIndex,
-    n_members: NodeCount,
+    node_id: PeerId,
+    n_members: NumPeers,
 }
 
 impl Creator {
-    pub fn new(node_id: NodeIndex, n_members: NodeCount) -> Self {
+    pub fn new(node_id: PeerId, n_members: NumPeers) -> Self {
         Creator {
             node_id,
             n_members,
@@ -71,16 +71,16 @@ mod tests {
         units::{
             create_preunits, creator_set, preunit_to_full_unit, random_full_parent_units_up_to,
         },
-        NodeCount, NodeIndex,
+        NumPeers, PeerId,
     };
 
     type Creator = GenericCreator;
 
     #[test]
     fn creates_initial_unit() {
-        let n_members = NodeCount(7);
+        let n_members = NumPeers::new(7 as usize);
         let round = 0;
-        let creator = Creator::new(NodeIndex(0), n_members);
+        let creator = Creator::new(PeerId::new(0 as u8), n_members);
         assert_eq!(creator.current_round(), round);
         let preunit = creator
             .create_unit(round)
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn creates_unit_with_all_parents() {
-        let n_members = NodeCount(7);
+        let n_members = NumPeers::new(7 as usize);
         let mut creators = creator_set(n_members);
         let new_units = create_preunits(creators.iter(), 0);
         let new_units: Vec<_> = new_units
@@ -107,8 +107,8 @@ mod tests {
         assert_eq!(preunit.round(), round);
     }
 
-    fn create_unit_with_minimal_parents(n_members: NodeCount) {
-        let n_parents = n_members.consensus_threshold().0;
+    fn create_unit_with_minimal_parents(n_members: NumPeers) {
+        let n_parents = n_members.threshold();
         let mut creators = creator_set(n_members);
         let new_units = create_preunits(creators.iter().take(n_parents), 0);
         let new_units: Vec<_> = new_units
@@ -127,28 +127,28 @@ mod tests {
 
     #[test]
     fn creates_unit_with_minimal_parents_4() {
-        create_unit_with_minimal_parents(NodeCount(4));
+        create_unit_with_minimal_parents(NumPeers::new(4 as usize));
     }
 
     #[test]
     fn creates_unit_with_minimal_parents_5() {
-        create_unit_with_minimal_parents(NodeCount(5));
+        create_unit_with_minimal_parents(NumPeers::new(5 as usize));
     }
 
     #[test]
     fn creates_unit_with_minimal_parents_6() {
-        create_unit_with_minimal_parents(NodeCount(6));
+        create_unit_with_minimal_parents(NumPeers::new(6 as usize));
     }
 
     #[test]
     fn creates_unit_with_minimal_parents_7() {
-        create_unit_with_minimal_parents(NodeCount(7));
+        create_unit_with_minimal_parents(NumPeers::new(7 as usize));
     }
 
-    fn dont_create_unit_below_parents_threshold(n_members: NodeCount) {
-        let n_parents = n_members.consensus_threshold() - NodeCount(1);
+    fn dont_create_unit_below_parents_threshold(n_members: NumPeers) {
+        let n_parents = n_members.threshold() - 1;
         let mut creators = creator_set(n_members);
-        let new_units = create_preunits(creators.iter().take(n_parents.0), 0);
+        let new_units = create_preunits(creators.iter().take(n_parents), 0);
         let new_units: Vec<_> = new_units
             .into_iter()
             .map(|pu| preunit_to_full_unit(pu, 0))
@@ -162,27 +162,27 @@ mod tests {
 
     #[test]
     fn cannot_create_unit_below_parents_threshold_4() {
-        dont_create_unit_below_parents_threshold(NodeCount(4));
+        dont_create_unit_below_parents_threshold(NumPeers::new(4 as usize));
     }
 
     #[test]
     fn cannot_create_unit_below_parents_threshold_5() {
-        dont_create_unit_below_parents_threshold(NodeCount(5));
+        dont_create_unit_below_parents_threshold(NumPeers::new(5 as usize));
     }
 
     #[test]
     fn cannot_create_unit_below_parents_threshold_6() {
-        dont_create_unit_below_parents_threshold(NodeCount(6));
+        dont_create_unit_below_parents_threshold(NumPeers::new(6 as usize));
     }
 
     #[test]
     fn cannot_create_unit_below_parents_threshold_7() {
-        dont_create_unit_below_parents_threshold(NodeCount(7));
+        dont_create_unit_below_parents_threshold(NumPeers::new(7 as usize));
     }
 
     #[test]
     fn creates_two_units_when_possible() {
-        let n_members = NodeCount(7);
+        let n_members = NumPeers::new(7 as usize);
         let mut creators = creator_set(n_members);
         for round in 0..2 {
             let new_units = create_preunits(creators.iter().skip(1), round);
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn cannot_create_unit_without_predecessor() {
-        let n_members = NodeCount(7);
+        let n_members = NumPeers::new(7 as usize);
         let mut creators = creator_set(n_members);
         let new_units = create_preunits(creators.iter().skip(1), 0);
         let new_units: Vec<_> = new_units
@@ -223,8 +223,8 @@ mod tests {
 
     #[test]
     fn creates_unit_with_ancient_parents() {
-        let n_members = NodeCount(7);
-        let mut creator = Creator::new(NodeIndex(0), n_members);
+        let n_members = NumPeers::new(7 as usize);
+        let mut creator = Creator::new(PeerId::new(0 as u8), n_members);
         let units = random_full_parent_units_up_to(1, n_members, 43);
         creator.add_units(&units[0]);
         for unit in units[1].iter().take(5) {
@@ -251,8 +251,8 @@ mod tests {
 
     #[test]
     fn creates_unit_with_ancient_parents_weird_order() {
-        let n_members = NodeCount(7);
-        let mut creator = Creator::new(NodeIndex(0), n_members);
+        let n_members = NumPeers::new(7 as usize);
+        let mut creator = Creator::new(PeerId::new(0 as u8), n_members);
         let units = random_full_parent_units_up_to(1, n_members, 43);
         for unit in units[1].iter().take(5) {
             creator.add_unit(unit);
@@ -279,8 +279,8 @@ mod tests {
 
     #[test]
     fn creates_old_unit_with_best_parents() {
-        let n_members = NodeCount(7);
-        let mut creator = Creator::new(NodeIndex(0), n_members);
+        let n_members = NumPeers::new(7 as usize);
+        let mut creator = Creator::new(PeerId::new(0 as u8), n_members);
         let units = random_full_parent_units_up_to(2, n_members, 43);
         for round_units in &units {
             for unit in round_units.iter().take(5) {

@@ -73,14 +73,14 @@ mod test {
     use crate::units::{minimal_reconstructed_dag_units_up_to, Unit, UnitWithParents};
     use crate::{
         extension::extender::Extender, units::random_full_parent_reconstrusted_units_up_to,
-        NodeCount, Round,
+        NumPeers, Round,
     };
     use aleph_bft_mock::Keychain;
 
     #[test]
     fn easy_elections() {
         let mut extender = Extender::new();
-        let n_members = NodeCount(4);
+        let n_members = NumPeers::new(4 as usize);
         let max_round: Round = 43;
         let session_id = 2137;
         let keychains = Keychain::new_vec(n_members);
@@ -95,15 +95,15 @@ mod test {
         assert_eq!(batches.len(), (max_round - 3).into());
         assert_eq!(batches[0].len(), 1);
         for batch in batches.iter().skip(1) {
-            assert_eq!(batch.len(), n_members.0);
+            assert_eq!(batch.len(), n_members.total());
         }
     }
 
     #[test]
     fn given_minimal_dag_with_orphaned_node_when_producing_batches_have_correct_length() {
         let mut extender = Extender::new();
-        let n_members = NodeCount(4);
-        let threshold = n_members.consensus_threshold();
+        let n_members = NumPeers::new(4 as usize);
+        let threshold = n_members.threshold();
         let max_round: Round = 11;
         let session_id = 2137;
         let keychains = Keychain::new_vec(n_members);
@@ -119,8 +119,8 @@ mod test {
         assert_eq!(batches[0].len(), 1);
         assert_eq!(batches[0][0].round(), 0);
         for batch in batches.iter().skip(1) {
-            assert!(batch.len() == threshold.0 || batch.len() == n_members.0);
-            if batch.len() == n_members.0 {
+            assert!(batch.len() == threshold || batch.len() == n_members.total());
+            if batch.len() == n_members.total() {
                 // the batch that should have ancient unit
                 assert!(batch.iter().any(|unit| unit.parents().count() == 0));
             }

@@ -136,14 +136,14 @@ mod tests {
         handler::{Error, OnStartRmcResponse},
         Handler,
     };
-    use aleph_bft_crypto::{NodeCount, NodeIndex, PartiallyMultisigned, Signed};
+    use aleph_bft_crypto::{NumPeers, PartiallyMultisigned, PeerId, Signed};
     use aleph_bft_mock::{BadSigning, Keychain, Signable};
 
     fn apply_signatures(
         handler: &mut Handler<Signable, Keychain>,
         hash: &Signable,
-        count: NodeCount,
-        nodes: impl Iterator<Item = NodeIndex>,
+        count: NumPeers,
+        nodes: impl Iterator<Item = PeerId>,
     ) {
         for i in nodes {
             let keychain_i = Keychain::new(count, i);
@@ -157,8 +157,8 @@ mod tests {
     fn apply_signatures_and_get_multisigned(
         handler: &mut Handler<Signable, Keychain>,
         hash: &Signable,
-        count: NodeCount,
-        nodes: impl Iterator<Item = NodeIndex>,
+        count: NumPeers,
+        nodes: impl Iterator<Item = PeerId>,
     ) -> Option<PartiallyMultisigned<Signable, Keychain>> {
         let mut multisigned = None;
         for i in nodes {
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn on_start_rmc_before_reaching_quorum_returns_signed() {
         let hash: Signable = "13".into();
-        let keychain = Keychain::new(7.into(), 0.into());
+        let keychain = Keychain::new(NumPeers::from(7 as usize), 0.into());
         let mut handler = Handler::new(keychain);
         let expected = Signed::sign_with_index(hash.clone(), &keychain);
         assert_eq!(
@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn on_start_rmc_reaching_quorum_returns_multisigned() {
         let hash: Signable = "13".into();
-        let keychain = Keychain::new(7.into(), 0.into());
+        let keychain = Keychain::new(NumPeers::from(7 as usize), 0.into());
         let mut handler = Handler::new(keychain);
         let multisigned = apply_signatures_and_get_multisigned(
             &mut handler,
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn on_start_rmc_after_reaching_quorum_returns_noop() {
         let hash: Signable = "13".into();
-        let keychain = Keychain::new(7.into(), 0.into());
+        let keychain = Keychain::new(NumPeers::from(7 as usize), 0.into());
         let mut handler = Handler::new(keychain);
         apply_signatures(&mut handler, &hash, 7.into(), (1..6).map(|i| i.into())); // should already reach the quorum
         assert_eq!(handler.on_start_rmc(hash), OnStartRmcResponse::Noop);
@@ -222,9 +222,9 @@ mod tests {
     #[test]
     fn on_signed_hash_before_reaching_quorum_returns_none() {
         let hash: Signable = "13".into();
-        let keychain = Keychain::new(7.into(), 0.into());
+        let keychain = Keychain::new(NumPeers::from(7 as usize), 0.into());
         let mut handler = Handler::new(keychain);
-        let peer_keychain = Keychain::new(7.into(), 1.into());
+        let peer_keychain = Keychain::new(NumPeers::from(7 as usize), 1.into());
         let peer_signed = Signed::sign_with_index(hash, &peer_keychain);
         assert_eq!(
             handler.on_signed_hash(peer_signed.into_unchecked()),
@@ -235,9 +235,9 @@ mod tests {
     #[test]
     fn on_signed_hash_reaching_quorum_returns_multisigned() {
         let hash: Signable = "13".into();
-        let keychain = Keychain::new(7.into(), 0.into());
+        let keychain = Keychain::new(NumPeers::from(7 as usize), 0.into());
         let mut handler = Handler::new(keychain);
-        let peer_keychain = Keychain::new(7.into(), 1.into());
+        let peer_keychain = Keychain::new(NumPeers::from(7 as usize), 1.into());
         let multisigned = apply_signatures_and_get_multisigned(
             &mut handler,
             &hash,
@@ -259,7 +259,7 @@ mod tests {
     #[test]
     fn on_signed_hash_after_reaching_quorum_returns_none() {
         let hash: Signable = "13".into();
-        let keychain = Keychain::new(7.into(), 0.into());
+        let keychain = Keychain::new(NumPeers::from(7 as usize), 0.into());
         let mut handler = Handler::new(keychain);
         apply_signatures(&mut handler, &hash, 7.into(), (1..6).map(|i| i.into()));
         let our_signed = Signed::sign_with_index(hash, &keychain);
@@ -272,9 +272,10 @@ mod tests {
     #[test]
     fn on_signed_hash_with_bad_signature_fails() {
         let hash: Signable = "13".into();
-        let keychain = Keychain::new(7.into(), 0.into());
+        let keychain = Keychain::new(NumPeers::from(7 as usize), 0.into());
         let mut handler = Handler::new(keychain);
-        let bad_keychain: BadSigning<Keychain> = Keychain::new(NodeCount(7), NodeIndex(1)).into();
+        let bad_keychain: BadSigning<Keychain> =
+            Keychain::new(NumPeers::new(7 as usize), PeerId::new(1 as u8)).into();
         let bad_signed = Signed::sign_with_index(hash, &bad_keychain);
         assert_eq!(
             handler.on_signed_hash(bad_signed.into_unchecked()),
@@ -285,9 +286,9 @@ mod tests {
     #[test]
     fn on_multisigned_hash_with_new_multisigned_returns_multisigned() {
         let hash: Signable = "13".into();
-        let keychain = Keychain::new(7.into(), 0.into());
+        let keychain = Keychain::new(NumPeers::from(7 as usize), 0.into());
         let mut handler = Handler::new(keychain);
-        let peer_keychain = Keychain::new(7.into(), 1.into());
+        let peer_keychain = Keychain::new(NumPeers::from(7 as usize), 1.into());
         let mut peer_handler = Handler::new(peer_keychain);
         let multisigned = apply_signatures_and_get_multisigned(
             &mut peer_handler,
@@ -308,7 +309,7 @@ mod tests {
     #[test]
     fn on_multisigned_hash_with_known_multisigned_returns_none() {
         let hash: Signable = "13".into();
-        let keychain = Keychain::new(7.into(), 0.into());
+        let keychain = Keychain::new(NumPeers::from(7 as usize), 0.into());
         let mut handler = Handler::new(keychain);
         let multisigned = apply_signatures_and_get_multisigned(
             &mut handler,
@@ -329,7 +330,7 @@ mod tests {
     #[test]
     fn on_multisigned_hash_with_bad_multisignature_fails() {
         let hash: Signable = "13".into();
-        let keychain = Keychain::new(7.into(), 0.into());
+        let keychain = Keychain::new(NumPeers::from(7 as usize), 0.into());
         let mut handler = Handler::new(keychain);
         let multisigned = apply_signatures_and_get_multisigned(
             &mut handler,

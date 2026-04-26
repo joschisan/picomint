@@ -1,4 +1,4 @@
-use aleph_bft_types::{Network as NetworkT, NodeCount, NodeIndex, Recipient};
+use aleph_bft_types::{Network as NetworkT, NumPeers, PeerId, Recipient};
 use futures::{
     channel::{
         mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
@@ -15,23 +15,23 @@ use std::{
     task::{Context, Poll},
 };
 
-pub type NetworkReceiver<D> = UnboundedReceiver<(D, NodeIndex)>;
-pub type NetworkSender<D> = UnboundedSender<(D, NodeIndex)>;
+pub type NetworkReceiver<D> = UnboundedReceiver<(D, PeerId)>;
+pub type NetworkSender<D> = UnboundedSender<(D, PeerId)>;
 
 #[derive(Debug)]
 pub struct Network<D: Debug> {
     rx: NetworkReceiver<D>,
     tx: NetworkSender<D>,
-    peers: Vec<NodeIndex>,
-    index: NodeIndex,
+    peers: Vec<PeerId>,
+    index: PeerId,
 }
 
 impl<D: Debug> Network<D> {
     pub fn new(
         rx: NetworkReceiver<D>,
         tx: NetworkSender<D>,
-        peers: Vec<NodeIndex>,
-        index: NodeIndex,
+        peers: Vec<PeerId>,
+        index: PeerId,
     ) -> Self {
         Network {
             rx,
@@ -41,11 +41,11 @@ impl<D: Debug> Network<D> {
         }
     }
 
-    pub fn index(&self) -> NodeIndex {
+    pub fn index(&self) -> PeerId {
         self.index
     }
 
-    pub fn peers(&self) -> Vec<NodeIndex> {
+    pub fn peers(&self) -> Vec<PeerId> {
         self.peers.clone()
     }
 }
@@ -83,9 +83,9 @@ pub trait NetworkHook<D>: Send {
     fn process_message(
         &mut self,
         data: D,
-        sender: NodeIndex,
-        recipient: NodeIndex,
-    ) -> Vec<(D, NodeIndex, NodeIndex)>;
+        sender: PeerId,
+        recipient: PeerId,
+    ) -> Vec<(D, PeerId, PeerId)>;
 }
 
 pub struct UnreliableHook {
@@ -103,9 +103,9 @@ impl<D> NetworkHook<D> for UnreliableHook {
     fn process_message(
         &mut self,
         data: D,
-        sender: NodeIndex,
-        recipient: NodeIndex,
-    ) -> Vec<(D, NodeIndex, NodeIndex)> {
+        sender: PeerId,
+        recipient: PeerId,
+    ) -> Vec<(D, PeerId, PeerId)> {
         let rand_sample = rand::random::<f64>();
         if rand_sample > self.reliability {
             debug!("Simulated network fail.");
@@ -116,12 +116,12 @@ impl<D> NetworkHook<D> for UnreliableHook {
     }
 }
 
-type ReconnectReceiver<D> = UnboundedReceiver<(NodeIndex, oneshot::Sender<Network<D>>)>;
-pub type ReconnectSender<D> = UnboundedSender<(NodeIndex, oneshot::Sender<Network<D>>)>;
+type ReconnectReceiver<D> = UnboundedReceiver<(PeerId, oneshot::Sender<Network<D>>)>;
+pub type ReconnectSender<D> = UnboundedSender<(PeerId, oneshot::Sender<Network<D>>)>;
 
 pub struct Router<D: Debug> {
-    peers: RefCell<HashMap<NodeIndex, Peer<D>>>,
-    peer_list: Vec<NodeIndex>,
+    peers: RefCell<HashMap<PeerId, Peer<D>>>,
+    peer_list: Vec<PeerId>,
     hook_list: RefCell<Vec<Box<dyn NetworkHook<D>>>>,
     peer_reconnect_rx: ReconnectReceiver<D>,
 }
@@ -138,8 +138,8 @@ impl<D: Debug> Debug for Router<D> {
 type RouterWithNetworks<D> = (Router<D>, Vec<(Network<D>, ReconnectSender<D>)>);
 
 impl<D: Debug> Router<D> {
-    pub fn new(n_members: NodeCount) -> RouterWithNetworks<D> {
-        let peer_list = n_members.into_iterator().collect();
+    pub fn new(n_members: NumPeers) -> RouterWithNetworks<D> {
+        let peer_list = n_members.peer_ids().collect();
         let (reconnect_tx, peer_reconnect_rx) = unbounded();
         let mut router = Router {
             peers: RefCell::new(HashMap::new()),
@@ -148,7 +148,7 @@ impl<D: Debug> Router<D> {
             peer_reconnect_rx,
         };
         let mut networks = Vec::new();
-        for ix in n_members.into_iterator() {
+        for ix in n_members.peer_ids() {
             let network = router.connect_peer(ix);
             networks.push((network, reconnect_tx.clone()));
         }
@@ -159,7 +159,7 @@ impl<D: Debug> Router<D> {
         self.hook_list.borrow_mut().push(Box::new(hook));
     }
 
-    pub fn connect_peer(&mut self, peer: NodeIndex) -> Network<D> {
+    pub fn connect_peer(&mut self, peer: PeerId) -> Network<D> {
         assert!(
             self.peer_list.contains(&peer),
             "Must connect a peer in the list."
@@ -178,7 +178,7 @@ impl<D: Debug> Router<D> {
         Network::new(rx_out_hub, tx_in_hub, self.peer_list.clone(), peer)
     }
 
-    pub fn peer_list(&self) -> Vec<NodeIndex> {
+    pub fn peer_list(&self) -> Vec<PeerId> {
         self.peer_list.clone()
     }
 }
@@ -187,7 +187,7 @@ impl<D: Debug> Future for Router<D> {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut self;
-        let mut disconnected_peers: Vec<NodeIndex> = Vec::new();
+        let mut disconnected_peers: Vec<PeerId> = Vec::new();
         let mut buffer = Vec::new();
         for (peer_id, peer) in this.peers.borrow_mut().iter_mut() {
             loop {

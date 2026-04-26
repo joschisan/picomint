@@ -1,15 +1,15 @@
-use aleph_bft_types::{Index, NodeIndex, SignatureSet};
+use aleph_bft_types::{Index, PeerId, SignatureSet};
 use picomint_encoding::{Decodable, Encodable};
 use std::hash::Hash;
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default, Encodable, Decodable)]
 pub struct Signature {
     msg: Vec<u8>,
-    index: NodeIndex,
+    index: PeerId,
 }
 
 impl Signature {
-    pub fn new(msg: Vec<u8>, index: NodeIndex) -> Self {
+    pub fn new(msg: Vec<u8>, index: PeerId) -> Self {
         Self { msg, index }
     }
 
@@ -19,7 +19,7 @@ impl Signature {
 }
 
 impl Index for Signature {
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> PeerId {
         self.index
     }
 }

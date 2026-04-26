@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::{Data, NodeIndex, Round, UnitHash};
+use crate::{Data, PeerId, Round, UnitHash};
 
 /// The source of data items that consensus should order.
 ///
@@ -38,7 +38,7 @@ pub struct OrderedUnit<D: Data> {
     pub data: Option<D>,
     pub parents: Vec<UnitHash>,
     pub hash: UnitHash,
-    pub creator: NodeIndex,
+    pub creator: PeerId,
     pub round: Round,
 }
 

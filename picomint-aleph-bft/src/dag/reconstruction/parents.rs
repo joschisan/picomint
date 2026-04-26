@@ -1,7 +1,7 @@
 use crate::{
     dag::reconstruction::{ReconstructedUnit, ReconstructionResult, Request},
     units::{ControlHash, Unit, UnitCoord},
-    NodeIndex, NodeMap, UnitHash,
+    NodeMap, PeerId, UnitHash,
 };
 use aleph_bft_types::Round;
 use std::collections::{hash_map::Entry, HashMap};
@@ -39,7 +39,7 @@ impl<U: Unit> ReconstructingUnit<U> {
 
     fn reconstruct_parent(
         self,
-        parent_id: NodeIndex,
+        parent_id: PeerId,
         parent_hash: UnitHash,
         parent_round: Round,
     ) -> SingleParentReconstructionResult<U> {
@@ -116,7 +116,7 @@ impl<U: Unit> Reconstruction<U> {
     fn reconstruct_parent(
         &mut self,
         child_hash: UnitHash,
-        parent_id: NodeIndex,
+        parent_id: PeerId,
         parent_hash: UnitHash,
         parent_round: Round,
     ) -> ReconstructionResult<U> {
@@ -225,13 +225,13 @@ mod test {
             parents::Reconstruction, ReconstructedUnit, ReconstructionResult, Request,
         },
         units::{random_full_parent_units_up_to, Unit, UnitCoord, UnitWithParents},
-        NodeCount, NodeIndex,
+        NumPeers, PeerId,
     };
 
     #[test]
     fn reconstructs_initial_units() {
         let mut reconstruction = Reconstruction::new();
-        for unit in &random_full_parent_units_up_to(0, NodeCount(4), 43)[0] {
+        for unit in &random_full_parent_units_up_to(0, NumPeers::new(4 as usize), 43)[0] {
             let ReconstructionResult {
                 mut units,
                 requests,
@@ -247,7 +247,7 @@ mod test {
     #[test]
     fn reconstructs_units_coming_in_order() {
         let mut reconstruction = Reconstruction::new();
-        let dag = random_full_parent_units_up_to(7, NodeCount(4), 43);
+        let dag = random_full_parent_units_up_to(7, NumPeers::new(4 as usize), 43);
         for units in &dag {
             for unit in units {
                 let round = unit.round();
@@ -282,7 +282,7 @@ mod test {
     #[test]
     fn requests_all_parents() {
         let mut reconstruction = Reconstruction::new();
-        let dag = random_full_parent_units_up_to(1, NodeCount(4), 43);
+        let dag = random_full_parent_units_up_to(1, NumPeers::new(4 as usize), 43);
         let unit = dag
             .get(1)
             .expect("just created")
@@ -296,7 +296,7 @@ mod test {
     #[test]
     fn requests_single_parent() {
         let mut reconstruction = Reconstruction::new();
-        let dag = random_full_parent_units_up_to(1, NodeCount(4), 43);
+        let dag = random_full_parent_units_up_to(1, NumPeers::new(4 as usize), 43);
         for unit in dag.first().expect("just created").iter().skip(1) {
             reconstruction.add_unit(unit.clone());
         }
@@ -310,14 +310,14 @@ mod test {
         assert_eq!(requests.len(), 1);
         assert_eq!(
             requests.last().expect("just checked"),
-            &Request::Coord(UnitCoord::new(0, NodeIndex(0)))
+            &Request::Coord(UnitCoord::new(0, PeerId::new(0 as u8)))
         );
     }
 
     #[test]
     fn reconstructs_units_coming_in_reverse_order() {
         let mut reconstruction = Reconstruction::new();
-        let mut dag = random_full_parent_units_up_to(7, NodeCount(4), 43);
+        let mut dag = random_full_parent_units_up_to(7, NumPeers::new(4 as usize), 43);
         dag.reverse();
         for unit in dag.first().expect("we have the top units") {
             let ReconstructionResult { units, requests } = reconstruction.add_unit(unit.clone());
@@ -343,11 +343,11 @@ mod test {
     #[test]
     fn handles_bad_hash() {
         let mut reconstruction = Reconstruction::new();
-        let dag = random_full_parent_units_up_to(0, NodeCount(4), 43);
+        let dag = random_full_parent_units_up_to(0, NumPeers::new(4 as usize), 43);
         for unit in dag.first().expect("just created") {
             reconstruction.add_unit(unit.clone());
         }
-        let other_dag = random_full_parent_units_up_to(1, NodeCount(4), 43);
+        let other_dag = random_full_parent_units_up_to(1, NumPeers::new(4 as usize), 43);
         let unit = other_dag
             .get(1)
             .expect("just created")

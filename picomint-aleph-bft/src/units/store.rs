@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     units::{Unit, UnitCoord},
-    NodeCount, NodeIndex, NodeMap, Round,
+    NodeMap, NumPeers, PeerId, Round,
 };
 
 /// An overview of what is in the unit store.
@@ -38,9 +38,9 @@ pub struct UnitStore<U: Unit> {
 
 impl<U: Unit> UnitStore<U> {
     /// Create a new unit store for the given number of nodes.
-    pub fn new(node_count: NodeCount) -> Self {
+    pub fn new(node_count: NumPeers) -> Self {
         let mut canonical_units = NodeMap::with_size(node_count);
-        for node_id in node_count.into_iterator() {
+        for node_id in node_count.peer_ids() {
             canonical_units.insert(node_id, BTreeMap::new());
         }
         let top_row = NodeMap::with_size(node_count);
@@ -51,13 +51,13 @@ impl<U: Unit> UnitStore<U> {
         }
     }
 
-    fn mut_hashes_by(&mut self, creator: NodeIndex) -> &mut BTreeMap<Round, UnitHash> {
+    fn mut_hashes_by(&mut self, creator: PeerId) -> &mut BTreeMap<Round, UnitHash> {
         self.canonical_units
             .get_mut(creator)
             .expect("all hashmaps initialized")
     }
 
-    fn hashes_by(&self, creator: NodeIndex) -> &BTreeMap<Round, UnitHash> {
+    fn hashes_by(&self, creator: PeerId) -> &BTreeMap<Round, UnitHash> {
         self.canonical_units
             .get(creator)
             .expect("all hashmaps initialized")
@@ -121,7 +121,7 @@ impl<U: Unit> UnitStore<U> {
     }
 
     /// All the canonical units for the given creator, in order of rounds.
-    pub fn canonical_units(&self, creator: NodeIndex) -> impl Iterator<Item = &U> {
+    pub fn canonical_units(&self, creator: PeerId) -> impl Iterator<Item = &U> {
         let canonical_hashes = self.hashes_by(creator);
         let max_round = canonical_hashes.keys().max().cloned().unwrap_or(0);
         (0..=max_round)
@@ -135,7 +135,7 @@ impl<U: Unit> UnitStore<U> {
     }
 
     /// The highest known round for the given creator.
-    pub fn top_round_for(&self, creator: NodeIndex) -> Option<Round> {
+    pub fn top_round_for(&self, creator: PeerId) -> Option<Round> {
         self.top_row.get(creator).copied()
     }
 
@@ -154,23 +154,23 @@ mod test {
 
     use crate::{
         units::{random_full_parent_units_up_to, TestingFullUnit, Unit, UnitCoord, UnitStore},
-        NodeCount, NodeIndex,
+        NumPeers, PeerId,
     };
 
     #[test]
     fn empty_has_no_units() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let store = UnitStore::<TestingFullUnit>::new(node_count);
         assert!(store
-            .canonical_unit(UnitCoord::new(0, NodeIndex(0)))
+            .canonical_unit(UnitCoord::new(0, PeerId::new(0 as u8)))
             .is_none());
-        assert!(store.canonical_units(NodeIndex(0)).next().is_none());
-        assert!(store.top_round_for(NodeIndex(0)).is_none());
+        assert!(store.canonical_units(PeerId::new(0 as u8)).next().is_none());
+        assert!(store.top_round_for(PeerId::new(0 as u8)).is_none());
     }
 
     #[test]
     fn single_unit_basic_operations() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let mut store = UnitStore::new(node_count);
         let unit = random_full_parent_units_up_to(0, node_count, 43)
             .first()
@@ -197,7 +197,7 @@ mod test {
 
     #[test]
     fn first_variant_is_canonical() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let mut store = UnitStore::new(node_count);
         // only unique variants
         #[allow(clippy::mutable_key_type)]
@@ -242,7 +242,7 @@ mod test {
 
     #[test]
     fn stores_lots_of_units() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let mut store = UnitStore::new(node_count);
         let max_round = 15;
         let units = random_full_parent_units_up_to(max_round, node_count, 43);
@@ -257,12 +257,12 @@ mod test {
                 assert_eq!(store.canonical_unit(unit.coord()), Some(unit));
             }
         }
-        for node_id in node_count.into_iterator() {
+        for node_id in node_count.peer_ids() {
             let mut canonical_units = store.canonical_units(node_id);
             for round in 0..=max_round {
                 assert_eq!(
                     canonical_units.next(),
-                    Some(&units[round as usize][node_id.0])
+                    Some(&units[round as usize][node_id.to_usize()])
                 );
             }
             assert_eq!(canonical_units.next(), None);
@@ -271,7 +271,7 @@ mod test {
 
     #[test]
     fn handles_fragmented_canonical() {
-        let node_count = NodeCount(7);
+        let node_count = NumPeers::new(7 as usize);
         let mut store = UnitStore::new(node_count);
         let max_round = 15;
         let units = random_full_parent_units_up_to(max_round, node_count, 43);
@@ -283,18 +283,18 @@ mod test {
         for round_units in &units {
             for unit in round_units {
                 // remove some units with a weird criterion
-                if (unit.round() as usize).is_multiple_of(unit.creator().0 + 1) {
+                if (unit.round() as usize).is_multiple_of(unit.creator().to_usize() + 1) {
                     store.remove(&unit.hash());
                 }
             }
         }
-        for node_id in node_count.into_iterator() {
+        for node_id in node_count.peer_ids() {
             let mut canonical_units = store.canonical_units(node_id);
             for round in 0..=max_round {
-                if !(round as usize).is_multiple_of(node_id.0 + 1) {
+                if !(round as usize).is_multiple_of(node_id.to_usize() + 1) {
                     assert_eq!(
                         canonical_units.next(),
-                        Some(&units[round as usize][node_id.0])
+                        Some(&units[round as usize][node_id.to_usize()])
                     );
                 }
             }

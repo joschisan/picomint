@@ -1,5 +1,5 @@
 pub use aleph_bft_crypto::{
-    Indexed, MultiKeychain, Multisigned, NodeCount, PartialMultisignature, PartiallyMultisigned,
+    Indexed, MultiKeychain, Multisigned, NumPeers, PartialMultisignature, PartiallyMultisigned,
     Signable, Signature, Signed, UncheckedSigned,
 };
 use core::fmt::Debug;

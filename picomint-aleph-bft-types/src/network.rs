@@ -1,4 +1,4 @@
-use crate::NodeIndex;
+use crate::PeerId;
 
 use picomint_encoding::{Decodable, Encodable};
 
@@ -6,7 +6,7 @@ use picomint_encoding::{Decodable, Encodable};
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Decodable, Encodable)]
 pub enum Recipient {
     Everyone,
-    Node(NodeIndex),
+    Node(PeerId),
 }
 
 /// Network represents an interface for sending and receiving NetworkData.

@@ -3,7 +3,7 @@ use crate::{
         handler::{Handler, RmcResponse},
         Alert, AlertMessage, ForkingNotification, NetworkMessage,
     },
-    Data, MultiKeychain, Multisigned, NodeIndex, Receiver, Recipient, Sender, Terminator, UnitHash,
+    Data, MultiKeychain, Multisigned, PeerId, Receiver, Recipient, Sender, Terminator, UnitHash,
 };
 use aleph_bft_rmc::{DoublingDelayScheduler, Message as RmcMessage};
 use futures::{FutureExt, StreamExt};
@@ -19,7 +19,7 @@ pub struct Service<D: Data, MK: MultiKeychain> {
     messages_from_network: Receiver<NetworkMessage<D, MK>>,
     notifications_for_units: Sender<ForkingNotification<D, MK::Signature>>,
     alerts_from_units: Receiver<Alert<D, MK::Signature>>,
-    node_index: NodeIndex,
+    node_index: PeerId,
     exiting: bool,
     handler: Handler<D, MK>,
     rmc_service: RmcService<MK, MK::Signature, MK::PartialMultisignature>,

@@ -3,7 +3,7 @@ use crate::{
     dag::{DagUnit, Request},
     dissemination::DisseminationResponse,
     units::{UnitCoord, UnitStore, UnitWithParents, WrappedUnit},
-    Data, MultiKeychain, NodeIndex, Signed, UnitHash,
+    Data, MultiKeychain, PeerId, Signed, UnitHash,
 };
 use std::marker::PhantomData;
 use thiserror::Error;
@@ -32,7 +32,7 @@ impl<D: Data, MK: MultiKeychain> Responder<D, MK> {
         }
     }
 
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> PeerId {
         self.keychain.index()
     }
 
@@ -73,7 +73,7 @@ impl<D: Data, MK: MultiKeychain> Responder<D, MK> {
 
     fn on_request_newest(
         &self,
-        requester: NodeIndex,
+        requester: PeerId,
         salt: Salt,
         units: &UnitStore<DagUnit<D, MK>>,
     ) -> DisseminationResponse<D, MK::Signature> {
@@ -104,7 +104,7 @@ impl<D: Data, MK: MultiKeychain> Responder<D, MK> {
     /// Handle an incoming request for the newest unit of a given node we know of.
     pub fn handle_newest_unit_request(
         &self,
-        requester: NodeIndex,
+        requester: PeerId,
         salt: Salt,
         units: &UnitStore<DagUnit<D, MK>>,
     ) -> DisseminationResponse<D, MK::Signature> {
@@ -124,13 +124,13 @@ mod test {
             random_full_parent_reconstrusted_units_up_to, TestingDagUnit, Unit, UnitCoord,
             UnitStore, UnitWithParents, WrappedUnit,
         },
-        NodeCount, NodeIndex,
+        NumPeers, PeerId,
     };
     use aleph_bft_mock::{Data, Keychain};
     use std::iter::zip;
 
-    const NODE_ID: NodeIndex = NodeIndex(0);
-    const NODE_COUNT: NodeCount = NodeCount(7);
+    const NODE_ID: PeerId = PeerId::new(0 as u8);
+    const NODE_COUNT: NumPeers = NumPeers::new(7 as usize);
 
     fn setup() -> (
         Responder<Data, Keychain>,
@@ -139,7 +139,7 @@ mod test {
     ) {
         let keychains = Keychain::new_vec(NODE_COUNT);
         (
-            Responder::new(keychains[NODE_ID.0]),
+            Responder::new(keychains[NODE_ID.to_usize()]),
             UnitStore::new(NODE_COUNT),
             keychains,
         )
@@ -148,7 +148,7 @@ mod test {
     #[test]
     fn empty_fails_to_respond_to_coords() {
         let (responder, store, _) = setup();
-        let coord = UnitCoord::new(0, NodeIndex(1));
+        let coord = UnitCoord::new(0, PeerId::new(1 as u8));
         let request = Request::Coord(coord);
         match responder.handle_request(request, &store) {
             Ok(response) => panic!("Unexpected response: {:?}.", response),
@@ -177,12 +177,12 @@ mod test {
     #[test]
     fn empty_newest_responds_with_no_units() {
         let (responder, store, keychains) = setup();
-        let requester = NodeIndex(1);
+        let requester = PeerId::new(1 as u8);
         let response = responder.handle_newest_unit_request(requester, rand::random(), &store);
         match response {
             DisseminationResponse::NewestUnit(newest_unit_response) => {
                 let checked_newest_unit_response = newest_unit_response
-                    .check(&keychains[NODE_ID.0])
+                    .check(&keychains[NODE_ID.to_usize()])
                     .expect("should sign correctly");
                 assert!(checked_newest_unit_response
                     .as_signable()
@@ -197,7 +197,7 @@ mod test {
     fn responds_to_coords_when_possible() {
         let (responder, mut store, keychains) = setup();
         let session_id = 2137;
-        let coord = UnitCoord::new(3, NodeIndex(1));
+        let coord = UnitCoord::new(3, PeerId::new(1 as u8));
         let units = random_full_parent_reconstrusted_units_up_to(
             coord.round() + 1,
             NODE_COUNT,
@@ -216,7 +216,7 @@ mod test {
         match response {
             DisseminationResponse::Coord(unit) => assert_eq!(
                 unit,
-                units[coord.round() as usize][coord.creator().0]
+                units[coord.round() as usize][coord.creator().to_usize()]
                     .clone()
                     .unpack()
                     .into_unchecked()
@@ -229,7 +229,7 @@ mod test {
     fn fails_to_responds_to_too_new_coords() {
         let (responder, mut store, keychains) = setup();
         let session_id = 2137;
-        let coord = UnitCoord::new(3, NodeIndex(1));
+        let coord = UnitCoord::new(3, PeerId::new(1 as u8));
         let units = random_full_parent_reconstrusted_units_up_to(
             coord.round() - 1,
             NODE_COUNT,
@@ -317,12 +317,12 @@ mod test {
                 store.insert(unit.clone());
             }
         }
-        let requester = NodeIndex(1);
+        let requester = PeerId::new(1 as u8);
         let response = responder.handle_newest_unit_request(requester, rand::random(), &store);
         match response {
             DisseminationResponse::NewestUnit(newest_unit_response) => {
                 newest_unit_response
-                    .check(&keychains[NODE_ID.0])
+                    .check(&keychains[NODE_ID.to_usize()])
                     .expect("should sign correctly");
             }
             other => panic!("Unexpected response: {:?}.", other),

@@ -82,7 +82,7 @@ mod test {
     use crate::{
         extension::units::Units,
         units::{random_full_parent_reconstrusted_units_up_to, TestingDagUnit, Unit},
-        NodeCount,
+        NumPeers,
     };
     use aleph_bft_mock::Keychain;
 
@@ -96,7 +96,7 @@ mod test {
     #[test]
     fn accepts_unit() {
         let mut units = Units::new();
-        let n_members = NodeCount(4);
+        let n_members = NumPeers::new(4 as usize);
         let session_id = 2137;
         let keychains = Keychain::new_vec(n_members);
         let unit =
@@ -111,7 +111,7 @@ mod test {
     #[test]
     fn returns_batches_all_parents() {
         let mut units = Units::new();
-        let n_members = NodeCount(4);
+        let n_members = NumPeers::new(4 as usize);
         let max_round = 43;
         let session_id = 2137;
         let keychains = Keychain::new_vec(n_members);
@@ -122,7 +122,7 @@ mod test {
         .into_iter()
         .enumerate()
         {
-            heads.push(round_units[round % n_members.0].clone());
+            heads.push(round_units[round % n_members.total()].clone());
             for unit in round_units {
                 units.add_unit(unit);
             }
@@ -139,7 +139,7 @@ mod test {
     fn batch_order_constant_with_different_insertion_order() {
         let mut units = Units::new();
         let mut units_but_backwards = Units::new();
-        let n_members = NodeCount(4);
+        let n_members = NumPeers::new(4 as usize);
         let max_round = 43;
         let session_id = 2137;
         let keychains = Keychain::new_vec(n_members);
@@ -150,7 +150,7 @@ mod test {
         .into_iter()
         .enumerate()
         {
-            heads.push(round_units[round % n_members.0].clone());
+            heads.push(round_units[round % n_members.total()].clone());
             for unit in &round_units {
                 units.add_unit(unit.clone());
             }

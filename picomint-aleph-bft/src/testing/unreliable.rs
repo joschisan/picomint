@@ -3,7 +3,7 @@ use crate::{
     network::UnitMessage,
     testing::{init_log, spawn_honest_member, HonestMember, NetworkData},
     units::Unit,
-    Index, NodeCount, NodeIndex, Round, Signed, SpawnHandle,
+    Index, NumPeers, PeerId, Round, Signed, SpawnHandle,
 };
 use aleph_bft_mock::{BadSigning, DataProvider, Keychain, NetworkHook, Router, Spawner};
 use futures::StreamExt;
@@ -11,9 +11,9 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 
 struct CorruptPacket {
-    recipient: NodeIndex,
-    sender: NodeIndex,
-    creator: NodeIndex,
+    recipient: PeerId,
+    sender: PeerId,
+    creator: PeerId,
     round: Round,
 }
 
@@ -21,9 +21,9 @@ impl NetworkHook<NetworkData> for CorruptPacket {
     fn process_message(
         &mut self,
         mut data: NetworkData,
-        sender: NodeIndex,
-        recipient: NodeIndex,
-    ) -> Vec<(NetworkData, NodeIndex, NodeIndex)> {
+        sender: PeerId,
+        recipient: PeerId,
+    ) -> Vec<(NetworkData, PeerId, PeerId)> {
         if self.recipient != recipient || self.sender != sender {
             return vec![(data, sender, recipient)];
         }
@@ -31,7 +31,8 @@ impl NetworkHook<NetworkData> for CorruptPacket {
             let full_unit = us.clone().into_signable();
             let index = full_unit.index();
             if full_unit.round() == self.round && full_unit.creator() == self.creator {
-                let bad_keychain: BadSigning<Keychain> = Keychain::new(0.into(), index).into();
+                let bad_keychain: BadSigning<Keychain> =
+                    Keychain::new(NumPeers::from(0 as usize), index).into();
                 *us = Signed::sign(full_unit, &bad_keychain).into();
             }
         }
@@ -40,8 +41,8 @@ impl NetworkHook<NetworkData> for CorruptPacket {
 }
 
 struct NoteRequest {
-    sender: NodeIndex,
-    creator: NodeIndex,
+    sender: PeerId,
+    creator: PeerId,
     round: Round,
     requested: Arc<Mutex<bool>>,
 }
@@ -50,9 +51,9 @@ impl NetworkHook<NetworkData> for NoteRequest {
     fn process_message(
         &mut self,
         data: NetworkData,
-        sender: NodeIndex,
-        recipient: NodeIndex,
-    ) -> Vec<(NetworkData, NodeIndex, NodeIndex)> {
+        sender: PeerId,
+        recipient: PeerId,
+    ) -> Vec<(NetworkData, PeerId, PeerId)> {
         use NetworkDataInner::Units;
         use UnitMessage::CoordRequest;
         if sender == self.sender {
@@ -70,9 +71,9 @@ impl NetworkHook<NetworkData> for NoteRequest {
 async fn request_missing_coord() {
     init_log();
 
-    let n_members = NodeCount(4);
-    let censored_node = NodeIndex(0);
-    let censoring_node = NodeIndex(1);
+    let n_members = NumPeers::new(4 as usize);
+    let censored_node = PeerId::new(0 as u8);
+    let censoring_node = PeerId::new(1 as u8);
     let censoring_round = 5;
 
     let (mut net_hub, networks) = Router::new(n_members);
@@ -118,8 +119,8 @@ async fn request_missing_coord() {
         }
         batches.push(batches_per_ix);
     }
-    for node_ix in n_members.into_iterator().skip(1) {
-        assert_eq!(batches[0], batches[node_ix.0]);
+    for node_ix in n_members.peer_ids().skip(1) {
+        assert_eq!(batches[0], batches[node_ix.to_usize()]);
     }
     for exit in exits {
         let _ = exit.send(());

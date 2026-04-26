@@ -117,7 +117,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{DoublingDelayScheduler, Handler, Message, Service};
-    use aleph_bft_crypto::{Multisigned, NodeCount, NodeIndex, Signed};
+    use aleph_bft_crypto::{Multisigned, NumPeers, PeerId, Signed};
     use aleph_bft_mock::{BadSigning, Keychain, PartialMultisignature, Signable, Signature};
     use futures::{
         channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
@@ -130,33 +130,33 @@ mod tests {
 
     struct TestEnvironment {
         rmc_services: Vec<Service<Signable, Keychain, DoublingDelayScheduler<TestMessage>>>,
-        rmc_start_tx: UnboundedSender<(Signable, NodeIndex)>,
-        rmc_start_rx: UnboundedReceiver<(Signable, NodeIndex)>,
-        broadcast_tx: UnboundedSender<(TestMessage, NodeIndex)>,
-        broadcast_rx: UnboundedReceiver<(TestMessage, NodeIndex)>,
-        hashes: HashMap<NodeIndex, Multisigned<Signable, Keychain>>,
-        message_filter: Box<dyn FnMut(NodeIndex, TestMessage) -> bool>,
+        rmc_start_tx: UnboundedSender<(Signable, PeerId)>,
+        rmc_start_rx: UnboundedReceiver<(Signable, PeerId)>,
+        broadcast_tx: UnboundedSender<(TestMessage, PeerId)>,
+        broadcast_rx: UnboundedReceiver<(TestMessage, PeerId)>,
+        hashes: HashMap<PeerId, Multisigned<Signable, Keychain>>,
+        message_filter: Box<dyn FnMut(PeerId, TestMessage) -> bool>,
     }
 
     enum EnvironmentEvent {
-        NetworkMessage(TestMessage, NodeIndex),
-        ManualBroadcast(TestMessage, NodeIndex),
-        StartRmc(Signable, NodeIndex),
+        NetworkMessage(TestMessage, PeerId),
+        ManualBroadcast(TestMessage, PeerId),
+        StartRmc(Signable, PeerId),
     }
 
     impl TestEnvironment {
         fn new(
-            node_count: NodeCount,
-            message_filter: impl FnMut(NodeIndex, TestMessage) -> bool + 'static,
+            node_count: NumPeers,
+            message_filter: impl FnMut(PeerId, TestMessage) -> bool + 'static,
         ) -> Self {
             let mut rmc_services = vec![];
             let (rmc_start_tx, rmc_start_rx) = unbounded();
             let (broadcast_tx, broadcast_rx) = unbounded();
 
-            for i in 0..node_count.0 {
+            for i in 0..node_count.total() {
                 let service = Service::new(
                     DoublingDelayScheduler::new(Duration::from_millis(1)),
-                    Handler::new(Keychain::new(node_count, NodeIndex(i))),
+                    Handler::new(Keychain::new(node_count, PeerId::new(i as u8))),
                 );
                 rmc_services.push(service);
             }
@@ -172,32 +172,28 @@ mod tests {
             }
         }
 
-        fn start_rmc(&self, hash: Signable, node_index: NodeIndex) {
+        fn start_rmc(&self, hash: Signable, node_index: PeerId) {
             self.rmc_start_tx
                 .unbounded_send((hash, node_index))
                 .expect("our channel should be open");
         }
 
-        fn broadcast_message(&self, message: TestMessage, node_index: NodeIndex) {
+        fn broadcast_message(&self, message: TestMessage, node_index: PeerId) {
             self.broadcast_tx
                 .unbounded_send((message, node_index))
                 .expect("our channel should be open");
         }
 
-        fn handle_message(
-            &mut self,
-            message: TestMessage,
-            node_index: NodeIndex,
-            use_filter: bool,
-        ) {
+        fn handle_message(&mut self, message: TestMessage, node_index: PeerId, use_filter: bool) {
             for (j, service) in self.rmc_services.iter_mut().enumerate() {
-                if j == node_index.0
-                    || (use_filter && !(self.message_filter)(j.into(), message.clone()))
+                if j == node_index.to_usize()
+                    || (use_filter
+                        && !(self.message_filter)(PeerId::from(j as u8), message.clone()))
                 {
                     continue;
                 }
                 if let Some(multisigned) = service.process_message(message.clone()) {
-                    assert_eq!(self.hashes.insert(j.into(), multisigned), None);
+                    assert_eq!(self.hashes.insert(PeerId::from(j as u8), multisigned), None);
                     // there should be only one multisig per node
                 }
             }
@@ -210,7 +206,7 @@ mod tests {
                 .map(|serv| Box::pin(serv.next_message()));
             tokio::select! {
                 (message, i, _) = future::select_all(message_futures) => {
-                    EnvironmentEvent::NetworkMessage(message, NodeIndex(i))
+                    EnvironmentEvent::NetworkMessage(message, PeerId::new(i as u8))
                 }
                 maybe_message = self.broadcast_rx.next() => {
                     let (message, node_index) = maybe_message.expect("our channel should be open");
@@ -226,13 +222,13 @@ mod tests {
         async fn collect_multisigned_hashes(
             mut self,
             expected_multisigs: usize,
-        ) -> HashMap<NodeIndex, Multisigned<Signable, Keychain>> {
+        ) -> HashMap<PeerId, Multisigned<Signable, Keychain>> {
             while self.hashes.len() < expected_multisigs {
                 match self.next_event().await {
                     EnvironmentEvent::StartRmc(hash, node_index) => {
                         let service = self
                             .rmc_services
-                            .get_mut(node_index.0)
+                            .get_mut(node_index.to_usize())
                             .expect("service should exist");
                         if let Some(multisigned) = service.start_rmc(hash) {
                             assert_eq!(self.hashes.insert(node_index, multisigned), None);
@@ -254,17 +250,19 @@ mod tests {
     /// Create 10 honest nodes and let each of them start rmc for the same hash.
     #[tokio::test]
     async fn simple_scenario() {
-        let node_count = NodeCount(10);
+        let node_count = NumPeers::new(10 as usize);
         let environment = TestEnvironment::new(node_count, |_, _| true);
         let hash: Signable = "56".into();
-        for i in 0..node_count.0 {
-            environment.start_rmc(hash.clone(), NodeIndex(i));
+        for i in 0..node_count.total() {
+            environment.start_rmc(hash.clone(), PeerId::new(i as u8));
         }
 
-        let hashes = environment.collect_multisigned_hashes(node_count.0).await;
-        assert_eq!(hashes.len(), node_count.0);
-        for i in 0..node_count.0 {
-            let multisignature = &hashes[&i.into()];
+        let hashes = environment
+            .collect_multisigned_hashes(node_count.total())
+            .await;
+        assert_eq!(hashes.len(), node_count.total());
+        for i in 0..node_count.total() {
+            let multisignature = &hashes[&PeerId::from(i as u8)];
             assert_eq!(multisignature.as_signable(), &hash);
         }
     }
@@ -272,19 +270,21 @@ mod tests {
     /// Each message is delivered with 20% probability
     #[tokio::test]
     async fn faulty_network() {
-        let node_count = NodeCount(10);
+        let node_count = NumPeers::new(10 as usize);
         let mut rng = rand::thread_rng();
         let environment = TestEnvironment::new(node_count, move |_, _| rng.gen_range(0..5) == 0);
 
         let hash: Signable = "56".into();
-        for i in 0..node_count.0 {
-            environment.start_rmc(hash.clone(), NodeIndex(i));
+        for i in 0..node_count.total() {
+            environment.start_rmc(hash.clone(), PeerId::new(i as u8));
         }
 
-        let hashes = environment.collect_multisigned_hashes(node_count.0).await;
-        assert_eq!(hashes.len(), node_count.0);
-        for i in 0..node_count.0 {
-            let multisignature = &hashes[&i.into()];
+        let hashes = environment
+            .collect_multisigned_hashes(node_count.total())
+            .await;
+        assert_eq!(hashes.len(), node_count.total());
+        for i in 0..node_count.total() {
+            let multisignature = &hashes[&PeerId::from(i as u8)];
             assert_eq!(multisignature.as_signable(), &hash);
         }
     }
@@ -293,21 +293,26 @@ mod tests {
     /// is delivered only messages with complete multisignatures
     #[tokio::test]
     async fn node_hearing_only_multisignatures() {
-        let node_count = NodeCount(10);
+        let node_count = NumPeers::new(10 as usize);
         let environment = TestEnvironment::new(node_count, move |node_ix, message| {
-            !matches!((node_ix.0, message), (0, TestMessage::SignedHash(_)))
+            !matches!(
+                (node_ix.to_usize(), message),
+                (0, TestMessage::SignedHash(_))
+            )
         });
 
-        let threshold = node_count.consensus_threshold();
+        let threshold = node_count.threshold();
         let hash: Signable = "56".into();
-        for i in 0..threshold.0 {
-            environment.start_rmc(hash.clone(), NodeIndex(i));
+        for i in 0..threshold {
+            environment.start_rmc(hash.clone(), PeerId::new(i as u8));
         }
 
-        let hashes = environment.collect_multisigned_hashes(node_count.0).await;
-        assert_eq!(hashes.len(), node_count.0);
-        for i in 0..node_count.0 {
-            let multisignature = &hashes[&i.into()];
+        let hashes = environment
+            .collect_multisigned_hashes(node_count.total())
+            .await;
+        assert_eq!(hashes.len(), node_count.total());
+        for i in 0..node_count.total() {
+            let multisignature = &hashes[&PeerId::from(i as u8)];
             assert_eq!(multisignature.as_signable(), &hash);
         }
     }
@@ -315,7 +320,7 @@ mod tests {
     /// 7 honest nodes and 3 dishonest nodes which emit bad signatures and multisignatures
     #[tokio::test]
     async fn bad_signatures_and_multisignatures_are_ignored() {
-        let node_count = NodeCount(10);
+        let node_count = NumPeers::new(10 as usize);
         let _keychains = Keychain::new_vec(node_count);
         let environment = TestEnvironment::new(node_count, |_, _| true);
 
@@ -324,23 +329,25 @@ mod tests {
         let bad_msg = TestMessage::SignedHash(
             Signed::sign_with_index(bad_hash.clone(), &bad_keychain).into(),
         );
-        environment.broadcast_message(bad_msg, NodeIndex(0));
+        environment.broadcast_message(bad_msg, PeerId::new(0 as u8));
         let bad_msg = TestMessage::MultisignedHash(
             Signed::sign_with_index(bad_hash.clone(), &bad_keychain)
                 .into_partially_multisigned(&bad_keychain)
                 .into_unchecked(),
         );
-        environment.broadcast_message(bad_msg, NodeIndex(0));
+        environment.broadcast_message(bad_msg, PeerId::new(0 as u8));
 
         let hash: Signable = "56".into();
-        for i in 0..node_count.0 {
-            environment.start_rmc(hash.clone(), NodeIndex(i));
+        for i in 0..node_count.total() {
+            environment.start_rmc(hash.clone(), PeerId::new(i as u8));
         }
 
-        let hashes = environment.collect_multisigned_hashes(node_count.0).await;
-        assert_eq!(hashes.len(), node_count.0);
-        for i in 0..node_count.0 {
-            let multisignature = &hashes[&i.into()];
+        let hashes = environment
+            .collect_multisigned_hashes(node_count.total())
+            .await;
+        assert_eq!(hashes.len(), node_count.total());
+        for i in 0..node_count.total() {
+            let multisignature = &hashes[&PeerId::from(i as u8)];
             assert_eq!(multisignature.as_signable(), &hash);
         }
     }

@@ -47,9 +47,7 @@ impl aleph_bft::Network<NetworkData> for Network {
     fn send(&self, network_data: NetworkData, recipient: aleph_bft::Recipient) {
         // convert from aleph_bft::Recipient to session::Recipient
         let recipient = match recipient {
-            aleph_bft::Recipient::Node(node_index) => {
-                Recipient::Peer(super::to_peer_id(node_index))
-            }
+            aleph_bft::Recipient::Node(node_index) => Recipient::Peer(node_index),
             aleph_bft::Recipient::Everyone => Recipient::Everyone,
         };
 
