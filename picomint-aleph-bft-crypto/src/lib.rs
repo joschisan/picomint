@@ -3,7 +3,7 @@
 mod node;
 mod signature;
 
-pub use node::{Index, NodeCount, NodeIndex, NodeMap, NodeSubset};
+pub use node::{Index, NodeCount, NodeIndex, NodeMap};
 pub use signature::{
     IncompleteMultisignatureError, Indexed, Keychain, MultiKeychain, Multisigned,
     PartialMultisignature, PartiallyMultisigned, Signable, Signature, SignatureError, SignatureSet,

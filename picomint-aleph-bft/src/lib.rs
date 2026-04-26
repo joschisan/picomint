@@ -22,10 +22,10 @@ mod testing;
 
 pub use aleph_bft_types::{
     hash, Data, DataProvider, FinalizationHandler, IncompleteMultisignatureError, Index, Indexed,
-    Keychain, MultiKeychain, Multisigned, Network, NodeCount, NodeIndex, NodeMap, NodeSubset,
-    OrderedUnit, PartialMultisignature, PartiallyMultisigned, Recipient, Round, SessionId,
-    Signable, Signature, SignatureError, SignatureSet, Signed, SpawnHandle, TaskHandle,
-    UncheckedSigned, UnitFinalizationHandler, UnitHash,
+    Keychain, MultiKeychain, Multisigned, Network, NodeCount, NodeIndex, NodeMap, OrderedUnit,
+    PartialMultisignature, PartiallyMultisigned, Recipient, Round, SessionId, Signable, Signature,
+    SignatureError, SignatureSet, Signed, SpawnHandle, TaskHandle, UncheckedSigned,
+    UnitFinalizationHandler, UnitHash,
 };
 pub use config::{
     create_config, default_config, default_delay_config, exponential_slowdown, Config, DelayConfig,

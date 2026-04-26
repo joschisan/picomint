@@ -5,7 +5,7 @@ use std::{
     fmt,
     hash::Hash,
     io::{self, Read, Write},
-    ops::{Div, Index as StdIndex, Mul},
+    ops::{Div, Mul},
     vec,
 };
 
@@ -166,10 +166,6 @@ impl<T: Encodable + Decodable + 'static> NodeMap<T> {
         self.0[node_id.0] = None
     }
 
-    pub fn to_subset(&self) -> NodeSubset {
-        NodeSubset(self.0.iter().map(Option::is_some).collect())
-    }
-
     pub fn item_count(&self) -> usize {
         self.iter().count()
     }
@@ -214,96 +210,10 @@ impl<T: Encodable + Decodable + fmt::Display> fmt::Display for NodeMap<T> {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
-pub struct NodeSubset(bit_vec::BitVec<u32>);
-
-impl NodeSubset {
-    pub fn with_size(capacity: NodeCount) -> Self {
-        NodeSubset(bit_vec::BitVec::from_elem(capacity.0, false))
-    }
-
-    pub fn insert(&mut self, i: NodeIndex) {
-        self.0.set(i.0, true);
-    }
-
-    pub fn size(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn elements(&self) -> impl Iterator<Item = NodeIndex> + '_ {
-        self.0
-            .iter()
-            .enumerate()
-            .filter_map(|(i, b)| if b { Some(i.into()) } else { None })
-    }
-
-    pub fn complement(&self) -> NodeSubset {
-        let mut result = self.0.clone();
-        result.negate();
-        NodeSubset(result)
-    }
-
-    pub fn len(&self) -> usize {
-        self.elements().count()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-
-impl Encodable for NodeSubset {
-    fn consensus_encode<W: Write>(&self, w: &mut W) -> io::Result<()> {
-        (self.0.len() as u32).consensus_encode(w)?;
-        self.0.to_bytes().consensus_encode(w)?;
-        Ok(())
-    }
-}
-
-impl Decodable for NodeSubset {
-    fn consensus_decode_partial<R: Read>(r: &mut R) -> io::Result<Self> {
-        let capacity = u32::consensus_decode_partial(r)? as usize;
-        let bytes = Vec::<u8>::consensus_decode_partial(r)?;
-        let mut bv = bit_vec::BitVec::from_bytes(&bytes);
-        if bv.len() != 8 * capacity.div_ceil(8) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Length of bitvector inconsistent with encoded capacity.",
-            ));
-        }
-        while bv.len() > capacity {
-            if bv.pop() != Some(false) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Non-canonical encoding. Trailing bits should be all 0.",
-                ));
-            }
-        }
-        bv.truncate(capacity);
-        Ok(NodeSubset(bv))
-    }
-}
-
-impl StdIndex<NodeIndex> for NodeSubset {
-    type Output = bool;
-
-    fn index(&self, vidx: NodeIndex) -> &bool {
-        &self.0[vidx.0]
-    }
-}
-
-impl fmt::Display for NodeSubset {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut v: Vec<usize> = self.elements().map(|n| n.into()).collect();
-        v.sort();
-        write!(f, "{:?}", v)
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
-    use crate::node::{NodeIndex, NodeSubset};
+    use crate::node::NodeIndex;
     use picomint_encoding::{Decodable, Encodable};
 
     #[test]
@@ -314,30 +224,5 @@ mod tests {
             let decoded = NodeIndex::consensus_decode(&encoded).unwrap();
             assert_eq!(node_index, decoded);
         }
-    }
-
-    #[test]
-    fn bool_node_map_decoding_works() {
-        for len in 0..12 {
-            for mask in 0..(1 << len) {
-                let mut bnm = NodeSubset::with_size(len.into());
-                for i in 0..len {
-                    if (1 << i) & mask != 0 {
-                        bnm.insert(i.into());
-                    }
-                }
-                let encoded = bnm.consensus_encode_to_vec();
-                let decoded = NodeSubset::consensus_decode(&encoded).expect("decode should work");
-                assert_eq!(decoded, bnm);
-            }
-        }
-    }
-
-    #[test]
-    fn decoding_bool_node_map_works() {
-        let bool_node_map = NodeSubset([true, false, true, true, true].iter().cloned().collect());
-        let encoded = bool_node_map.consensus_encode_to_vec();
-        let decoded = NodeSubset::consensus_decode(&encoded).expect("decode should work");
-        assert_eq!(decoded, bool_node_map);
     }
 }

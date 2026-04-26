@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 
 use crate::{
@@ -6,7 +7,7 @@ use crate::{
         SignedUnit, UncheckedSignedUnit, Unit, UnitStore, UnitStoreStatus, ValidationError,
         Validator as UnitValidator, WrappedUnit,
     },
-    Data, MultiKeychain, NodeIndex, NodeSubset, Round, UnitHash,
+    Data, MultiKeychain, NodeIndex, Round, UnitHash,
 };
 
 /// What can go wrong when validating a unit.
@@ -39,7 +40,7 @@ impl<D: Data, MK: MultiKeychain> From<ValidationError<D, MK::Signature>> for Err
 /// The summary status of the validator.
 pub struct ValidatorStatus {
     processing_units: UnitStoreStatus,
-    known_forkers: NodeSubset,
+    known_forkers: BTreeSet<NodeIndex>,
 }
 
 impl ValidatorStatus {
@@ -53,7 +54,7 @@ impl Display for ValidatorStatus {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(
             f,
-            "processing units: ({}), forkers: {}",
+            "processing units: ({}), forkers: {:?}",
             self.processing_units, self.known_forkers
         )
     }
@@ -65,7 +66,7 @@ type ValidatorResult<D, MK> = Result<SignedUnit<D, MK>, Error<D, MK>>;
 pub struct Validator<D: Data, MK: MultiKeychain> {
     unit_validator: UnitValidator<MK>,
     processing_units: UnitStore<SignedUnit<D, MK>>,
-    known_forkers: NodeSubset,
+    known_forkers: BTreeSet<NodeIndex>,
 }
 
 impl<D: Data, MK: MultiKeychain> Validator<D, MK> {
@@ -75,12 +76,12 @@ impl<D: Data, MK: MultiKeychain> Validator<D, MK> {
         Validator {
             unit_validator,
             processing_units: UnitStore::new(node_count),
-            known_forkers: NodeSubset::with_size(node_count),
+            known_forkers: BTreeSet::new(),
         }
     }
 
     fn is_forker(&self, node_id: NodeIndex) -> bool {
-        self.known_forkers[node_id]
+        self.known_forkers.contains(&node_id)
     }
 
     fn mark_forker<U: WrappedUnit<Wrapped = SignedUnit<D, MK>>>(

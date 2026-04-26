@@ -6,8 +6,8 @@ mod tasks;
 
 pub use aleph_bft_crypto::{
     IncompleteMultisignatureError, Index, Indexed, Keychain, MultiKeychain, Multisigned, NodeCount,
-    NodeIndex, NodeMap, NodeSubset, PartialMultisignature, PartiallyMultisigned, Signable,
-    Signature, SignatureError, SignatureSet, Signed, UncheckedSigned,
+    NodeIndex, NodeMap, PartialMultisignature, PartiallyMultisigned, Signable, Signature,
+    SignatureError, SignatureSet, Signed, UncheckedSigned,
 };
 pub use dataio::{DataProvider, FinalizationHandler, OrderedUnit, UnitFinalizationHandler};
 pub use network::{Network, Recipient};
