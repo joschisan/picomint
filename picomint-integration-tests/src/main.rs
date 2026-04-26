@@ -26,6 +26,9 @@ fn main() -> anyhow::Result<()> {
     info!("Running wallet tests...");
     runtime.block_on(wallet::run_tests(&env, &client_send))?;
 
+    info!("Running guardian backup/restore test...");
+    runtime.block_on(restore::run_test(&env, &client_send))?;
+
     info!("Running ln + mint tests in parallel...");
     runtime.block_on(async {
         tokio::try_join!(
@@ -37,9 +40,6 @@ fn main() -> anyhow::Result<()> {
     info!("Shutting down the primary test client!");
 
     runtime.block_on(client_send.shutdown());
-
-    info!("Running guardian backup/restore test...");
-    runtime.block_on(restore::run_test(&env))?;
 
     info!(
         total_ms = t_total.elapsed().as_millis() as u64,

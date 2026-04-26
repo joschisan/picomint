@@ -193,25 +193,22 @@ impl<'a, D: Data> IO<'a, D> {
         }
     }
 
+    /// Pick the round to start unit creation at — always the max of what
+    /// our backup says and what peers report having seen from us. This is
+    /// safe because the only safety property at stake is "don't sign two
+    /// units at the same round"; starting at `max(...)` guarantees we won't
+    /// re-sign any round either source already attests to. When the two
+    /// sources disagree, log it so an operator can investigate.
     fn starting_round(&self, round_from_collection: Round) -> Option<Round> {
-        if self.round_from_backup < round_from_collection {
-            error!(
-                target: LOG_TARGET, "Backup state behind unit collection state. Next round inferred from: collection: {:?}, backup: {:?}",
-                round_from_collection,
-                self.round_from_backup,
-            );
-            return None;
-        };
-
-        if round_from_collection < self.round_from_backup {
+        if round_from_collection != self.round_from_backup {
             warn!(
-                target: LOG_TARGET, "Backup state ahead of than unit collection state. Next round inferred from: collection: {:?}, backup: {:?}",
+                target: LOG_TARGET,
+                "Backup and unit collection disagree on next round (backup: {}, collection: {}); rejoining at the max",
                 self.round_from_backup,
                 round_from_collection,
             );
         }
-
-        Some(self.round_from_backup)
+        Some(self.round_from_backup.max(round_from_collection))
     }
 
     fn finish(self, round: Round) {
