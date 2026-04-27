@@ -12,12 +12,20 @@ use crate::env::{TestEnv, retry, retry_n};
 /// wiping 3 leaves only one peer alive — well below threshold. The
 /// federation halts until at least two of the wiped peers come back
 /// online (via [`RESTORED_PEERS`]).
-const WIPED_PEERS: [usize; 3] = [1, 2, 3];
+///
+/// We wipe the *lowest-id* peers and keep peer 3 alive on purpose: the
+/// p2p reconnect rule (`our_id < peer_id`) means the lower side dials.
+/// With a high-id survivor, the freshly-restarted peers dial in
+/// immediately — peer 3 just accepts incoming connections and replaces
+/// its stale ones. Wiping the high-id peers and leaving peer 0 alive
+/// would force peer 0 to detect every dead connection via QUIC's ~30s
+/// idle timeout before retrying, dominating recovery time.
+const WIPED_PEERS: [usize; 3] = [0, 1, 2];
 
-/// Peers we restore from backup. The remaining wiped peer (3) stays
+/// Peers we restore from backup. The remaining wiped peer (2) stays
 /// dead — exercising the case where the federation must continue
 /// indefinitely without one of its members ever returning.
-const RESTORED_PEERS: [usize; 2] = [1, 2];
+const RESTORED_PEERS: [usize; 2] = [0, 1];
 
 /// Poll until guardian `peer_idx`'s finalized session count exceeds `floor`.
 /// Uses a 3-minute budget — post-wipe iroh reconnection in CI (slower CPUs,
