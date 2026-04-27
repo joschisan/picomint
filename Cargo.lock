@@ -3649,7 +3649,6 @@ dependencies = [
  "async-trait",
  "futures",
  "log",
- "parking_lot",
  "picomint-aleph-bft-types",
  "picomint-core",
  "picomint-encoding",

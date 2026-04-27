@@ -242,7 +242,7 @@ mod tests {
     /// Create 10 honest nodes and let each of them start rmc for the same hash.
     #[tokio::test]
     async fn simple_scenario() {
-        let node_count = NumPeers::new(10 as usize);
+        let node_count = NumPeers::new(10_usize);
         let environment = TestEnvironment::new(node_count, |_, _| true);
         let hash: Signable = "56".into();
         for i in 0..node_count.total() {
@@ -262,7 +262,7 @@ mod tests {
     /// Each message is delivered with 20% probability
     #[tokio::test]
     async fn faulty_network() {
-        let node_count = NumPeers::new(10 as usize);
+        let node_count = NumPeers::new(10_usize);
         let mut rng = rand::thread_rng();
         let environment = TestEnvironment::new(node_count, move |_, _| rng.gen_range(0..5) == 0);
 
@@ -285,7 +285,7 @@ mod tests {
     /// is delivered only messages with complete multisignatures
     #[tokio::test]
     async fn node_hearing_only_multisignatures() {
-        let node_count = NumPeers::new(10 as usize);
+        let node_count = NumPeers::new(10_usize);
         let environment = TestEnvironment::new(node_count, move |node_ix, message| {
             !matches!(
                 (node_ix.to_usize(), message),
@@ -312,20 +312,20 @@ mod tests {
     /// 7 honest nodes and 3 dishonest nodes which emit bad signatures and multisignatures
     #[tokio::test]
     async fn bad_signatures_and_multisignatures_are_ignored() {
-        let node_count = NumPeers::new(10 as usize);
+        let node_count = NumPeers::new(10_usize);
         let environment = TestEnvironment::new(node_count, |_, _| true);
 
         let bad_hash: Signable = "65".into();
         let bad_kc = bad_keychain(node_count, 0.into());
         let bad_msg =
             TestMessage::SignedHash(Signed::sign_with_index(bad_hash.clone(), &bad_kc).into());
-        environment.broadcast_message(bad_msg, PeerId::new(0 as u8));
+        environment.broadcast_message(bad_msg, PeerId::new(0_u8));
         let bad_msg = TestMessage::MultisignedHash(
             Signed::sign_with_index(bad_hash.clone(), &bad_kc)
                 .into_partially_multisigned(&bad_kc)
                 .into_unchecked(),
         );
-        environment.broadcast_message(bad_msg, PeerId::new(0 as u8));
+        environment.broadcast_message(bad_msg, PeerId::new(0_u8));
 
         let hash: Signable = "56".into();
         for i in 0..node_count.total() {

@@ -231,7 +231,7 @@ mod test {
     #[test]
     fn reconstructs_initial_units() {
         let mut reconstruction = Reconstruction::new();
-        for unit in &random_full_parent_units_up_to(0, NumPeers::new(4 as usize), 43)[0] {
+        for unit in &random_full_parent_units_up_to(0, NumPeers::new(4_usize), 43)[0] {
             let ReconstructionResult {
                 mut units,
                 requests,
@@ -247,7 +247,7 @@ mod test {
     #[test]
     fn reconstructs_units_coming_in_order() {
         let mut reconstruction = Reconstruction::new();
-        let dag = random_full_parent_units_up_to(7, NumPeers::new(4 as usize), 43);
+        let dag = random_full_parent_units_up_to(7, NumPeers::new(4_usize), 43);
         for units in &dag {
             for unit in units {
                 let round = unit.round();
@@ -282,7 +282,7 @@ mod test {
     #[test]
     fn requests_all_parents() {
         let mut reconstruction = Reconstruction::new();
-        let dag = random_full_parent_units_up_to(1, NumPeers::new(4 as usize), 43);
+        let dag = random_full_parent_units_up_to(1, NumPeers::new(4_usize), 43);
         let unit = dag
             .get(1)
             .expect("just created")
@@ -296,7 +296,7 @@ mod test {
     #[test]
     fn requests_single_parent() {
         let mut reconstruction = Reconstruction::new();
-        let dag = random_full_parent_units_up_to(1, NumPeers::new(4 as usize), 43);
+        let dag = random_full_parent_units_up_to(1, NumPeers::new(4_usize), 43);
         for unit in dag.first().expect("just created").iter().skip(1) {
             reconstruction.add_unit(unit.clone());
         }
@@ -310,14 +310,14 @@ mod test {
         assert_eq!(requests.len(), 1);
         assert_eq!(
             requests.last().expect("just checked"),
-            &Request::Coord(UnitCoord::new(0, PeerId::new(0 as u8)))
+            &Request::Coord(UnitCoord::new(0, PeerId::new(0_u8)))
         );
     }
 
     #[test]
     fn reconstructs_units_coming_in_reverse_order() {
         let mut reconstruction = Reconstruction::new();
-        let mut dag = random_full_parent_units_up_to(7, NumPeers::new(4 as usize), 43);
+        let mut dag = random_full_parent_units_up_to(7, NumPeers::new(4_usize), 43);
         dag.reverse();
         for unit in dag.first().expect("we have the top units") {
             let ReconstructionResult { units, requests } = reconstruction.add_unit(unit.clone());
@@ -343,11 +343,11 @@ mod test {
     #[test]
     fn handles_bad_hash() {
         let mut reconstruction = Reconstruction::new();
-        let dag = random_full_parent_units_up_to(0, NumPeers::new(4 as usize), 43);
+        let dag = random_full_parent_units_up_to(0, NumPeers::new(4_usize), 43);
         for unit in dag.first().expect("just created") {
             reconstruction.add_unit(unit.clone());
         }
-        let other_dag = random_full_parent_units_up_to(1, NumPeers::new(4 as usize), 43);
+        let other_dag = random_full_parent_units_up_to(1, NumPeers::new(4_usize), 43);
         let unit = other_dag
             .get(1)
             .expect("just created")

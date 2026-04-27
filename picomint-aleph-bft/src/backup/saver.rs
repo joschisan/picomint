@@ -120,7 +120,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_proper_relative_responses_ordering() {
-        let node_count = NumPeers::new(5 as usize);
+        let node_count = NumPeers::new(5_usize);
         let PrepareSaverResponse {
             task,
             units_for_saver,

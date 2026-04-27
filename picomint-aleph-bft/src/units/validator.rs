@@ -117,8 +117,8 @@ mod tests {
 
     #[test]
     fn validates_initial_unit() {
-        let n_members = NumPeers::new(7 as usize);
-        let creator_id = PeerId::new(0 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let creator_id = PeerId::new(0_u8);
         let session_id = 0;
         let max_round = 2;
         let kc = keychain(n_members, creator_id);
@@ -133,8 +133,8 @@ mod tests {
 
     #[test]
     fn detects_wrong_initial_control_hash() {
-        let n_members = NumPeers::new(7 as usize);
-        let creator_id = PeerId::new(0 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let creator_id = PeerId::new(0_u8);
         let session_id = 0;
         let max_round = 2;
         let kc = keychain(n_members, creator_id);
@@ -164,8 +164,8 @@ mod tests {
 
     #[test]
     fn detects_wrong_session_id() {
-        let n_members = NumPeers::new(7 as usize);
-        let creator_id = PeerId::new(0 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let creator_id = PeerId::new(0_u8);
         let session_id = 0;
         let wrong_session_id = 43;
         let max_round = 2;
@@ -184,9 +184,9 @@ mod tests {
 
     #[test]
     fn detects_wrong_number_of_members() {
-        let n_members = NumPeers::new(7 as usize);
-        let n_plus_one_members = NumPeers::new(8 as usize);
-        let creator_id = PeerId::new(0 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let n_plus_one_members = NumPeers::new(8_usize);
+        let creator_id = PeerId::new(0_u8);
         let session_id = 0;
         let max_round = 2;
         let kc = keychain(n_plus_one_members, creator_id);
@@ -204,8 +204,8 @@ mod tests {
 
     #[test]
     fn detects_below_threshold() {
-        let n_members = NumPeers::new(7 as usize);
-        let creator_id = PeerId::new(0 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let creator_id = PeerId::new(0_u8);
         let session_id = 0;
         let max_round = 2;
         let parents = random_full_parent_units_up_to(0, n_members, session_id)[0]
@@ -231,8 +231,8 @@ mod tests {
 
     #[test]
     fn detects_too_high_round() {
-        let n_members = NumPeers::new(7 as usize);
-        let creator_id = PeerId::new(0 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let creator_id = PeerId::new(0_u8);
         let session_id = 0;
         let max_round = 2;
         let kc = keychain(n_members, creator_id);

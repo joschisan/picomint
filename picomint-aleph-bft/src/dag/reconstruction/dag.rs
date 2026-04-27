@@ -171,7 +171,7 @@ mod test {
         let mut dag = Dag::new();
         for unit in reconstructed(random_full_parent_units_up_to(
             0,
-            NumPeers::new(4 as usize),
+            NumPeers::new(4_usize),
             43,
         ))
         .pop()
@@ -187,7 +187,7 @@ mod test {
         let mut dag = Dag::new();
         for units in reconstructed(random_full_parent_units_up_to(
             7000,
-            NumPeers::new(4 as usize),
+            NumPeers::new(4_usize),
             43,
         )) {
             for unit in units {
@@ -199,7 +199,7 @@ mod test {
 
     #[test]
     fn reconstructs_units_in_reverse_order() {
-        let full_unit_dag = random_full_parent_units_up_to(7000, NumPeers::new(4 as usize), 43);
+        let full_unit_dag = random_full_parent_units_up_to(7000, NumPeers::new(4_usize), 43);
         let mut hash_batches: Vec<_> = full_unit_dag
             .iter()
             .map(unit_hashes)

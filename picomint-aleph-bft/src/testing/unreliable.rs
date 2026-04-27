@@ -33,7 +33,7 @@ impl NetworkHook<NetworkData> for CorruptPacket {
             if full_unit.round() == self.round && full_unit.creator() == self.creator {
                 // Build a "bad" keychain whose secret key is not the one registered for `index`.
                 // Use n_members = 4 (size of the federation in this test).
-                let bad_kc = bad_keychain(NumPeers::new(4 as usize), index);
+                let bad_kc = bad_keychain(NumPeers::new(4_usize), index);
                 *us = Signed::sign(full_unit, &bad_kc).into();
             }
         }
@@ -72,9 +72,9 @@ impl NetworkHook<NetworkData> for NoteRequest {
 async fn request_missing_coord() {
     init_log();
 
-    let n_members = NumPeers::new(4 as usize);
-    let censored_node = PeerId::new(0 as u8);
-    let censoring_node = PeerId::new(1 as u8);
+    let n_members = NumPeers::new(4_usize);
+    let censored_node = PeerId::new(0_u8);
+    let censoring_node = PeerId::new(1_u8);
     let censoring_round = 5;
 
     let (mut net_hub, networks) = Router::new(n_members);

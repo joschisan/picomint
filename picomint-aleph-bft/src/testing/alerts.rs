@@ -329,9 +329,9 @@ impl TestCase {
 
 #[tokio::test]
 async fn distributes_alert_from_units() {
-    let n_members = NumPeers::new(7 as usize);
-    let own_index = PeerId::new(0 as u8);
-    let forker = PeerId::new(6 as u8);
+    let n_members = NumPeers::new(7_usize);
+    let own_index = PeerId::new(0_u8);
+    let forker = PeerId::new(6_u8);
     let mut test_case = TestCase::new(n_members);
     let alert = test_case.alert(own_index, test_case.fork_proof(forker, 0));
     let signed_alert = test_case.unchecked_signed(alert.clone(), own_index);
@@ -343,10 +343,10 @@ async fn distributes_alert_from_units() {
 
 #[tokio::test]
 async fn reacts_to_correctly_incoming_alert() {
-    let n_members = NumPeers::new(7 as usize);
-    let own_index = PeerId::new(0 as u8);
-    let alerter_index = PeerId::new(1 as u8);
-    let forker = PeerId::new(6 as u8);
+    let n_members = NumPeers::new(7_usize);
+    let own_index = PeerId::new(0_u8);
+    let alerter_index = PeerId::new(1_u8);
+    let forker = PeerId::new(6_u8);
     let mut test_case = TestCase::new(n_members);
     let fork_proof = test_case.fork_proof(forker, 0);
     let alert = test_case.alert(alerter_index, fork_proof.clone());
@@ -364,10 +364,10 @@ async fn reacts_to_correctly_incoming_alert() {
 
 #[tokio::test]
 async fn notifies_about_finished_alert() {
-    let n_members = NumPeers::new(7 as usize);
-    let own_index = PeerId::new(0 as u8);
-    let alerter_index = PeerId::new(1 as u8);
-    let forker = PeerId::new(6 as u8);
+    let n_members = NumPeers::new(7_usize);
+    let own_index = PeerId::new(0_u8);
+    let alerter_index = PeerId::new(1_u8);
+    let forker = PeerId::new(6_u8);
     let mut test_case = TestCase::new(n_members);
     let fork_proof = test_case.fork_proof(forker, 0);
     let alert = test_case.alert(alerter_index, fork_proof.clone());
@@ -391,10 +391,10 @@ async fn notifies_about_finished_alert() {
 
 #[tokio::test]
 async fn asks_about_unknown_alert() {
-    let n_members = NumPeers::new(7 as usize);
-    let own_index = PeerId::new(0 as u8);
-    let alerter_index = PeerId::new(1 as u8);
-    let forker = PeerId::new(6 as u8);
+    let n_members = NumPeers::new(7_usize);
+    let own_index = PeerId::new(0_u8);
+    let alerter_index = PeerId::new(1_u8);
+    let forker = PeerId::new(6_u8);
     let mut test_case = TestCase::new(n_members);
     let fork_proof = test_case.fork_proof(forker, 0);
     let alert = test_case.alert(alerter_index, fork_proof.clone());
@@ -414,10 +414,10 @@ async fn asks_about_unknown_alert() {
 
 #[tokio::test]
 async fn ignores_wrong_alert() {
-    let n_members = NumPeers::new(7 as usize);
-    let own_index = PeerId::new(0 as u8);
-    let alerter_index = PeerId::new(1 as u8);
-    let forker = PeerId::new(6 as u8);
+    let n_members = NumPeers::new(7_usize);
+    let own_index = PeerId::new(0_u8);
+    let alerter_index = PeerId::new(1_u8);
+    let forker = PeerId::new(6_u8);
     let mut test_case = TestCase::new(n_members);
     let valid_unit = test_case.unchecked_signed_unit(alerter_index, 0, 0);
     let wrong_fork_proof = (valid_unit.clone(), valid_unit);
@@ -449,10 +449,10 @@ async fn ignores_wrong_alert() {
 
 #[tokio::test]
 async fn responds_to_alert_queries() {
-    let n_members = NumPeers::new(7 as usize);
-    let own_index = PeerId::new(0 as u8);
-    let querier = PeerId::new(1 as u8);
-    let forker = PeerId::new(6 as u8);
+    let n_members = NumPeers::new(7_usize);
+    let own_index = PeerId::new(0_u8);
+    let querier = PeerId::new(1_u8);
+    let forker = PeerId::new(6_u8);
     let mut test_case = TestCase::new(n_members);
     let alert = test_case.alert(own_index, test_case.fork_proof(forker, 0));
     let alert_hash = Signable::hash(&alert);
@@ -488,11 +488,11 @@ async fn responds_to_alert_queries() {
 
 #[tokio::test]
 async fn notifies_only_about_multisigned_alert() {
-    let n_members = NumPeers::new(7 as usize);
-    let own_index = PeerId::new(0 as u8);
-    let other_honest_node = PeerId::new(1 as u8);
-    let double_committer = PeerId::new(5 as u8);
-    let forker = PeerId::new(6 as u8);
+    let n_members = NumPeers::new(7_usize);
+    let own_index = PeerId::new(0_u8);
+    let other_honest_node = PeerId::new(1_u8);
+    let double_committer = PeerId::new(5_u8);
+    let forker = PeerId::new(6_u8);
     let mut test_case = TestCase::new(n_members);
     let fork_proof = test_case.fork_proof(forker, 0);
     let empty_alert = test_case.alert(double_committer, fork_proof.clone());

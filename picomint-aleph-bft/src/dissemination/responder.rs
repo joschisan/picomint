@@ -130,8 +130,8 @@ mod test {
     use aleph_bft_types::Keychain;
     use std::iter::zip;
 
-    const NODE_ID: PeerId = PeerId::new(0 as u8);
-    const NODE_COUNT: NumPeers = NumPeers::new(7 as usize);
+    const NODE_ID: PeerId = PeerId::new(0_u8);
+    const NODE_COUNT: NumPeers = NumPeers::new(7_usize);
 
     fn keychain_set() -> Vec<Keychain> {
         (0..NODE_COUNT.total())
@@ -151,7 +151,7 @@ mod test {
     #[test]
     fn empty_fails_to_respond_to_coords() {
         let (responder, store, _) = setup();
-        let coord = UnitCoord::new(0, PeerId::new(1 as u8));
+        let coord = UnitCoord::new(0, PeerId::new(1_u8));
         let request = Request::Coord(coord);
         match responder.handle_request(request, &store) {
             Ok(response) => panic!("Unexpected response: {:?}.", response),
@@ -180,7 +180,7 @@ mod test {
     #[test]
     fn empty_newest_responds_with_no_units() {
         let (responder, store, keychains) = setup();
-        let requester = PeerId::new(1 as u8);
+        let requester = PeerId::new(1_u8);
         let response = responder.handle_newest_unit_request(requester, rand::random(), &store);
         match response {
             DisseminationResponse::NewestUnit(newest_unit_response) => {
@@ -200,7 +200,7 @@ mod test {
     fn responds_to_coords_when_possible() {
         let (responder, mut store, keychains) = setup();
         let session_id = 2137;
-        let coord = UnitCoord::new(3, PeerId::new(1 as u8));
+        let coord = UnitCoord::new(3, PeerId::new(1_u8));
         let units = random_full_parent_reconstrusted_units_up_to(
             coord.round() + 1,
             NODE_COUNT,
@@ -232,7 +232,7 @@ mod test {
     fn fails_to_responds_to_too_new_coords() {
         let (responder, mut store, keychains) = setup();
         let session_id = 2137;
-        let coord = UnitCoord::new(3, PeerId::new(1 as u8));
+        let coord = UnitCoord::new(3, PeerId::new(1_u8));
         let units = random_full_parent_reconstrusted_units_up_to(
             coord.round() - 1,
             NODE_COUNT,
@@ -320,7 +320,7 @@ mod test {
                 store.insert(unit.clone());
             }
         }
-        let requester = PeerId::new(1 as u8);
+        let requester = PeerId::new(1_u8);
         let response = responder.handle_newest_unit_request(requester, rand::random(), &store);
         match response {
             DisseminationResponse::NewestUnit(newest_unit_response) => {

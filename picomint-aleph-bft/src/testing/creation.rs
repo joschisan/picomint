@@ -125,7 +125,7 @@ async fn finish(killers: Vec<oneshot::Sender<()>>, mut handles: Vec<tokio::task:
 // This test checks if 7 creators that start at the same time will create 50 units each
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn synchronous_creators_should_create_dag() {
-    let n_members = NumPeers::new(7 as usize);
+    let n_members = NumPeers::new(7_usize);
     let max_round: Round = 50;
 
     let TestSetup {
@@ -159,7 +159,7 @@ async fn synchronous_creators_should_create_dag() {
 // Then it is checked if 5 creators achieve round 75 and rest at least round 73.
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn disconnected_creators_should_create_dag() {
-    let n_members = NumPeers::new(7 as usize);
+    let n_members = NumPeers::new(7_usize);
     let max_round: Round = 25;
 
     let TestSetup {
@@ -236,7 +236,7 @@ async fn disconnected_creators_should_create_dag() {
 // will reach at least round 47, when at least one reaches round 50.
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn late_creators_should_create_dag() {
-    let n_members = NumPeers::new(7 as usize);
+    let n_members = NumPeers::new(7_usize);
     let max_round: Round = 25;
 
     let TestSetup {

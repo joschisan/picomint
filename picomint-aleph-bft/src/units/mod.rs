@@ -217,7 +217,7 @@ pub mod tests {
 
     #[test]
     fn test_full_unit_hash_is_correct() {
-        for full_unit in random_full_parent_units_up_to(3, NumPeers::new(4 as usize), 43)
+        for full_unit in random_full_parent_units_up_to(3, NumPeers::new(4_usize), 43)
             .into_iter()
             .flatten()
         {
@@ -228,7 +228,7 @@ pub mod tests {
 
     #[test]
     fn test_full_unit_codec() {
-        for full_unit in random_full_parent_units_up_to(3, NumPeers::new(4 as usize), 43)
+        for full_unit in random_full_parent_units_up_to(3, NumPeers::new(4_usize), 43)
             .into_iter()
             .flatten()
         {

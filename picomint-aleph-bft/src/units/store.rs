@@ -159,18 +159,18 @@ mod test {
 
     #[test]
     fn empty_has_no_units() {
-        let node_count = NumPeers::new(7 as usize);
+        let node_count = NumPeers::new(7_usize);
         let store = UnitStore::<TestingFullUnit>::new(node_count);
         assert!(store
-            .canonical_unit(UnitCoord::new(0, PeerId::new(0 as u8)))
+            .canonical_unit(UnitCoord::new(0, PeerId::new(0_u8)))
             .is_none());
-        assert!(store.canonical_units(PeerId::new(0 as u8)).next().is_none());
-        assert!(store.top_round_for(PeerId::new(0 as u8)).is_none());
+        assert!(store.canonical_units(PeerId::new(0_u8)).next().is_none());
+        assert!(store.top_round_for(PeerId::new(0_u8)).is_none());
     }
 
     #[test]
     fn single_unit_basic_operations() {
-        let node_count = NumPeers::new(7 as usize);
+        let node_count = NumPeers::new(7_usize);
         let mut store = UnitStore::new(node_count);
         let unit = random_full_parent_units_up_to(0, node_count, 43)
             .first()
@@ -197,7 +197,7 @@ mod test {
 
     #[test]
     fn first_variant_is_canonical() {
-        let node_count = NumPeers::new(7 as usize);
+        let node_count = NumPeers::new(7_usize);
         let mut store = UnitStore::new(node_count);
         // only unique variants
         #[allow(clippy::mutable_key_type)]
@@ -242,7 +242,7 @@ mod test {
 
     #[test]
     fn stores_lots_of_units() {
-        let node_count = NumPeers::new(7 as usize);
+        let node_count = NumPeers::new(7_usize);
         let mut store = UnitStore::new(node_count);
         let max_round = 15;
         let units = random_full_parent_units_up_to(max_round, node_count, 43);
@@ -271,7 +271,7 @@ mod test {
 
     #[test]
     fn handles_fragmented_canonical() {
-        let node_count = NumPeers::new(7 as usize);
+        let node_count = NumPeers::new(7_usize);
         let mut store = UnitStore::new(node_count);
         let max_round = 15;
         let units = random_full_parent_units_up_to(max_round, node_count, 43);

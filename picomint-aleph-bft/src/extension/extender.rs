@@ -80,7 +80,7 @@ mod test {
     #[test]
     fn easy_elections() {
         let mut extender = Extender::new();
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let max_round: Round = 43;
         let session_id = 2137;
         let keychains = keychain_set(n_members);
@@ -102,7 +102,7 @@ mod test {
     #[test]
     fn given_minimal_dag_with_orphaned_node_when_producing_batches_have_correct_length() {
         let mut extender = Extender::new();
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let threshold = n_members.threshold();
         let max_round: Round = 11;
         let session_id = 2137;

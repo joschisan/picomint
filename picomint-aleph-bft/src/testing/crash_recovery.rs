@@ -229,7 +229,7 @@ async fn crashed_nodes_recover(n_members: NumPeers, n_batches: usize) {
         }
     }
 
-    let expected_batches = &node_data[&PeerId::new(0 as u8)].batches;
+    let expected_batches = &node_data[&PeerId::new(0_u8)].batches;
     for (_, data) in node_data.iter() {
         assert_eq!(expected_batches, &data.batches);
     }
@@ -250,7 +250,7 @@ async fn crashed_nodes_recover(n_members: NumPeers, n_batches: usize) {
 async fn saves_units_properly() {
     init_log();
     let n_batches = 2;
-    let n_members = NumPeers::new(4 as usize);
+    let n_members = NumPeers::new(4_usize);
     let spawner = Spawner::new();
     let (net_hub, networks) = Router::new(n_members);
     spawner.spawn("network-hub", net_hub);
@@ -279,17 +279,17 @@ async fn saves_units_properly() {
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn small_node_crash_recovery_small() {
-    crashed_nodes_recover(NumPeers::from(7 as usize), 2).await;
+    crashed_nodes_recover(NumPeers::from(7_usize), 2).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn small_node_crash_recovery_medium() {
-    crashed_nodes_recover(NumPeers::from(10 as usize), 2).await;
+    crashed_nodes_recover(NumPeers::from(10_usize), 2).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn medium_node_crash_recovery_large() {
-    crashed_nodes_recover(NumPeers::from(28 as usize), 2).await;
+    crashed_nodes_recover(NumPeers::from(28_usize), 2).await;
 }

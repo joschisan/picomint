@@ -96,7 +96,7 @@ mod test {
     #[test]
     fn accepts_unit() {
         let mut units = Units::new();
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let session_id = 2137;
         let keychains = keychain_set(n_members);
         let unit =
@@ -111,7 +111,7 @@ mod test {
     #[test]
     fn returns_batches_all_parents() {
         let mut units = Units::new();
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let max_round = 43;
         let session_id = 2137;
         let keychains = keychain_set(n_members);
@@ -139,7 +139,7 @@ mod test {
     fn batch_order_constant_with_different_insertion_order() {
         let mut units = Units::new();
         let mut units_but_backwards = Units::new();
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let max_round = 43;
         let session_id = 2137;
         let keychains = keychain_set(n_members);

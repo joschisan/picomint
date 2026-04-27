@@ -198,7 +198,7 @@ mod test {
 
     #[test]
     fn validates_trivially_correct() {
-        let node_count = NumPeers::new(7 as usize);
+        let node_count = NumPeers::new(7_usize);
         let session_id = 0;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
@@ -225,7 +225,7 @@ mod test {
 
     #[test]
     fn refuses_processing_duplicates() {
-        let node_count = NumPeers::new(7 as usize);
+        let node_count = NumPeers::new(7_usize);
         let session_id = 0;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
@@ -257,7 +257,7 @@ mod test {
 
     #[test]
     fn refuses_external_duplicates() {
-        let node_count = NumPeers::new(7 as usize);
+        let node_count = NumPeers::new(7_usize);
         let session_id = 0;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
@@ -286,7 +286,7 @@ mod test {
 
     #[test]
     fn detects_processing_fork() {
-        let node_count = NumPeers::new(7 as usize);
+        let node_count = NumPeers::new(7_usize);
         let session_id = 0;
         let max_round = 2137;
         let produced_round = 4;
@@ -325,7 +325,7 @@ mod test {
 
     #[test]
     fn detects_external_fork() {
-        let node_count = NumPeers::new(7 as usize);
+        let node_count = NumPeers::new(7_usize);
         let session_id = 0;
         let max_round = 2137;
         let produced_round = 4;
@@ -361,7 +361,7 @@ mod test {
 
     #[test]
     fn refuses_uncommitted() {
-        let node_count = NumPeers::new(7 as usize);
+        let node_count = NumPeers::new(7_usize);
         let session_id = 0;
         let max_round = 2137;
         let produced_round = 4;
@@ -385,7 +385,7 @@ mod test {
         for unit in random_full_parent_units_up_to(produced_round, node_count, session_id)
             .iter()
             .flatten()
-            .filter(|unit| unit.creator() == PeerId::new(0 as u8))
+            .filter(|unit| unit.creator() == PeerId::new(0_u8))
             .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().to_usize()]))
         {
             match unit.round() {
@@ -413,7 +413,7 @@ mod test {
 
     #[test]
     fn accepts_committed() {
-        let node_count = NumPeers::new(7 as usize);
+        let node_count = NumPeers::new(7_usize);
         let session_id = 0;
         let max_round = 2137;
         let produced_round = 4;
@@ -437,7 +437,7 @@ mod test {
         let units: Vec<_> = random_full_parent_units_up_to(produced_round, node_count, session_id)
             .iter()
             .flatten()
-            .filter(|unit| unit.creator() == PeerId::new(0 as u8))
+            .filter(|unit| unit.creator() == PeerId::new(0_u8))
             .map(|unit| Signed::sign(unit.clone(), &keychains[unit.creator().to_usize()]))
             .collect();
         for unit in units.iter().take(3) {

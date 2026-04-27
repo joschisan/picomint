@@ -228,7 +228,7 @@ impl<'a, D: Data> IO<'a, D> {
         for recipient in request.recipients() {
             if let Err(e) = self
                 .requests_for_network
-                .unbounded_send((request.message().clone().into(), recipient.clone()))
+                .unbounded_send((request.message().clone().into(), *recipient))
             {
                 warn!(target: LOG_TARGET, "unable to send request:  {}", e);
             }
@@ -359,8 +359,8 @@ mod tests {
 
     #[test]
     fn pending_with_no_messages() {
-        let n_members = NumPeers::new(7 as usize);
-        let creator_id = PeerId::new(0 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let creator_id = PeerId::new(0_u8);
         let session_id = 0;
         let max_round = 2;
         let kc = keychain(n_members, creator_id);
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn pending_with_too_few_messages() {
-        let n_members = NumPeers::new(7 as usize);
+        let n_members = NumPeers::new(7_usize);
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn pending_with_repeated_messages() {
-        let n_members = NumPeers::new(7 as usize);
+        let n_members = NumPeers::new(7_usize);
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn ready_with_just_enough_messages() {
-        let n_members = NumPeers::new(7 as usize);
+        let n_members = NumPeers::new(7_usize);
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
@@ -435,8 +435,8 @@ mod tests {
 
     #[test]
     fn finished_and_higher_starting_round_with_last_message() {
-        let n_members = NumPeers::new(7 as usize);
-        let creator_id = PeerId::new(0 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let creator_id = PeerId::new(0_u8);
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn detects_salt_mismatch() {
-        let n_members = NumPeers::new(7 as usize);
+        let n_members = NumPeers::new(7_usize);
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);
@@ -501,8 +501,8 @@ mod tests {
 
     #[test]
     fn detects_invalid_unit() {
-        let n_members = NumPeers::new(7 as usize);
-        let creator_id = PeerId::new(0 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let creator_id = PeerId::new(0_u8);
         let session_id = 0;
         let wrong_session_id = 43;
         let max_round = 2;
@@ -526,8 +526,8 @@ mod tests {
 
     #[test]
     fn detects_foreign_unit() {
-        let n_members = NumPeers::new(7 as usize);
-        let other_creator_id = PeerId::new(1 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let other_creator_id = PeerId::new(1_u8);
         let session_id = 0;
         let max_round = 2;
         let keychains = keychain_set(n_members);

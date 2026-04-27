@@ -273,8 +273,8 @@ mod tests {
     #[test]
     fn low_round_not_causing_slowdown_fails_the_check() {
         let config = create_config(
-            NumPeers::new(5 as usize),
-            PeerId::new(1 as u8),
+            NumPeers::new(5_usize),
+            PeerId::new(1_u8),
             3,
             5000,
             delay_config_for_tests(),
@@ -287,8 +287,8 @@ mod tests {
     #[test]
     fn high_round_causing_slowdown_passes_the_check() {
         let config = create_config(
-            NumPeers::new(5 as usize),
-            PeerId::new(1 as u8),
+            NumPeers::new(5_usize),
+            PeerId::new(1_u8),
             3,
             7000,
             delay_config_for_tests(),

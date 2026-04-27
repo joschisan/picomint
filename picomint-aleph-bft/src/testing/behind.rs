@@ -74,8 +74,8 @@ impl NetworkHook<NetworkData> for Latency {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delayed_finalized() {
-    let n_members = NumPeers::new(7 as usize);
-    let australian = PeerId::new(0 as u8);
+    let n_members = NumPeers::new(7_usize);
+    let australian = PeerId::new(0_u8);
     init_log();
     let spawner = Spawner::new();
     let mut batch_rxs = Vec::new();

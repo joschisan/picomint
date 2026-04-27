@@ -283,9 +283,9 @@ mod tests {
 
     #[test]
     fn distributes_alert_from_units() {
-        let n_members = NumPeers::new(7 as usize);
-        let own_index = PeerId::new(0 as u8);
-        let forker_index = PeerId::new(6 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let own_index = PeerId::new(0_u8);
+        let forker_index = PeerId::new(6_u8);
         let own_kc = keychain(n_members, own_index);
         let forker_kc = keychain(n_members, forker_index);
         let mut this = Handler::new(own_kc.clone(), 0);
@@ -302,9 +302,9 @@ mod tests {
 
     #[test]
     fn reacts_to_correctly_incoming_alert() {
-        let n_members = NumPeers::new(7 as usize);
-        let own_index = PeerId::new(1 as u8);
-        let forker_index = PeerId::new(6 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let own_index = PeerId::new(1_u8);
+        let forker_index = PeerId::new(6_u8);
         let own_kc = keychain(n_members, own_index);
         let forker_kc = keychain(n_members, forker_index);
         let mut this = Handler::new(own_kc.clone(), 0);
@@ -320,10 +320,10 @@ mod tests {
 
     #[test]
     fn asks_about_unknown_alert() {
-        let n_members = NumPeers::new(7 as usize);
-        let own_index = PeerId::new(0 as u8);
-        let alerter_index = PeerId::new(1 as u8);
-        let forker_index = PeerId::new(6 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let own_index = PeerId::new(0_u8);
+        let alerter_index = PeerId::new(1_u8);
+        let forker_index = PeerId::new(6_u8);
         let own_kc = keychain(n_members, own_index);
         let alerter_kc = keychain(n_members, alerter_index);
         let forker_kc = keychain(n_members, forker_index);
@@ -341,9 +341,9 @@ mod tests {
 
     #[test]
     fn ignores_wrong_alert() {
-        let n_members = NumPeers::new(7 as usize);
-        let own_index = PeerId::new(0 as u8);
-        let forker_index = PeerId::new(6 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let own_index = PeerId::new(0_u8);
+        let forker_index = PeerId::new(6_u8);
         let own_kc = keychain(n_members, own_index);
         let forker_kc = keychain(n_members, forker_index);
         let mut this = Handler::new(own_kc.clone(), 0);
@@ -360,9 +360,9 @@ mod tests {
 
     #[test]
     fn responds_to_alert_queries() {
-        let n_members = NumPeers::new(7 as usize);
-        let own_index = PeerId::new(0 as u8);
-        let forker_index = PeerId::new(6 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let own_index = PeerId::new(0_u8);
+        let forker_index = PeerId::new(6_u8);
         let own_kc = keychain(n_members, own_index);
         let forker_kc = keychain(n_members, forker_index);
         let mut this = Handler::new(own_kc.clone(), 0);
@@ -385,11 +385,11 @@ mod tests {
 
     #[test]
     fn notifies_only_about_multisigned_alert() {
-        let n_members = NumPeers::new(7 as usize);
-        let own_index = PeerId::new(0 as u8);
-        let other_honest_node = PeerId::new(1 as u8);
-        let double_committer = PeerId::new(5 as u8);
-        let forker_index = PeerId::new(6 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let own_index = PeerId::new(0_u8);
+        let other_honest_node = PeerId::new(1_u8);
+        let double_committer = PeerId::new(5_u8);
+        let forker_index = PeerId::new(6_u8);
         let kcs: Vec<_> = (0..n_members.total())
             .map(|i| keychain(n_members, PeerId::new(i as u8)))
             .collect();
@@ -455,11 +455,11 @@ mod tests {
 
     #[test]
     fn ignores_insufficiently_multisigned_alert() {
-        let n_members = NumPeers::new(7 as usize);
-        let own_index = PeerId::new(0 as u8);
-        let other_honest_node = PeerId::new(1 as u8);
-        let double_committer = PeerId::new(5 as u8);
-        let forker_index = PeerId::new(6 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let own_index = PeerId::new(0_u8);
+        let other_honest_node = PeerId::new(1_u8);
+        let double_committer = PeerId::new(5_u8);
+        let forker_index = PeerId::new(6_u8);
         let kcs: Vec<_> = (0..n_members.total())
             .map(|i| keychain(n_members, PeerId::new(i as u8)))
             .collect();
@@ -513,9 +513,9 @@ mod tests {
 
     #[test]
     fn verify_fork_ok() {
-        let n_members = NumPeers::new(7 as usize);
-        let own_index = PeerId::new(0 as u8);
-        let forker_index = PeerId::new(6 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let own_index = PeerId::new(0_u8);
+        let forker_index = PeerId::new(6_u8);
         let own_kc = keychain(n_members, own_index);
         let forker_kc = keychain(n_members, forker_index);
         let this: Handler<Data> = Handler::new(own_kc, 0);
@@ -526,9 +526,9 @@ mod tests {
 
     #[test]
     fn verify_fork_wrong_session() {
-        let n_members = NumPeers::new(7 as usize);
-        let own_index = PeerId::new(0 as u8);
-        let forker_index = PeerId::new(6 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let own_index = PeerId::new(0_u8);
+        let forker_index = PeerId::new(6_u8);
         let own_kc = keychain(n_members, own_index);
         let forker_kc = keychain(n_members, forker_index);
         let this: Handler<Data> = Handler::new(own_kc, 1);
@@ -542,28 +542,28 @@ mod tests {
 
     #[test]
     fn verify_fork_different_creators() {
-        let n_members = NumPeers::new(7 as usize);
+        let n_members = NumPeers::new(7_usize);
         let kcs: Vec<_> = (0..n_members.total())
             .map(|i| keychain(n_members, PeerId::new(i as u8)))
             .collect();
         let this: Handler<Data> = Handler::new(kcs[0].clone(), 0);
         let fork_proof = {
-            let unit_0 = full_unit(n_members, PeerId::new(6 as u8), 0, Some(0));
-            let unit_1 = full_unit(n_members, PeerId::new(5 as u8), 0, Some(0));
+            let unit_0 = full_unit(n_members, PeerId::new(6_u8), 0, Some(0));
+            let unit_1 = full_unit(n_members, PeerId::new(5_u8), 0, Some(0));
             let signed_unit_0 = Signed::sign(unit_0, &kcs[6]).into_unchecked();
             let signed_unit_1 = Signed::sign(unit_1, &kcs[5]).into_unchecked();
             (signed_unit_0, signed_unit_1)
         };
-        let sender = PeerId::new(0 as u8);
+        let sender = PeerId::new(0_u8);
         let alert = Alert::new(sender, fork_proof, vec![]);
         assert_eq!(this.verify_fork(&alert), Err(Error::WrongCreator(sender)));
     }
 
     #[test]
     fn verify_fork_different_rounds() {
-        let n_members = NumPeers::new(7 as usize);
-        let own_index = PeerId::new(0 as u8);
-        let forker_index = PeerId::new(6 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let own_index = PeerId::new(0_u8);
+        let forker_index = PeerId::new(6_u8);
         let own_kc = keychain(n_members, own_index);
         let forker_kc = keychain(n_members, forker_index);
         let this: Handler<Data> = Handler::new(own_kc, 0);
@@ -597,9 +597,9 @@ mod tests {
     }
 
     fn alert_confirmed(make_known: bool, good_commitment: bool) {
-        let n_members = NumPeers::new(7 as usize);
-        let own_index = PeerId::new(1 as u8);
-        let forker_index = PeerId::new(6 as u8);
+        let n_members = NumPeers::new(7_usize);
+        let own_index = PeerId::new(1_u8);
+        let forker_index = PeerId::new(6_u8);
         let kcs: Vec<_> = (0..n_members.total())
             .map(|i| keychain(n_members, PeerId::new(i as u8)))
             .collect();

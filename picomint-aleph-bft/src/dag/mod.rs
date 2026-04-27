@@ -231,8 +231,8 @@ mod test {
 
     #[test]
     fn accepts_initial_units() {
-        let node_count = NumPeers::new(4 as usize);
-        let node_id = PeerId::new(0 as u8);
+        let node_count = NumPeers::new(4_usize);
+        let node_id = PeerId::new(0_u8);
         let session_id = 43;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
@@ -266,8 +266,8 @@ mod test {
 
     #[test]
     fn accepts_units_in_order() {
-        let node_count = NumPeers::new(4 as usize);
-        let node_id = PeerId::new(0 as u8);
+        let node_count = NumPeers::new(4_usize);
+        let node_id = PeerId::new(0_u8);
         let session_id = 43;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
@@ -301,8 +301,8 @@ mod test {
 
     #[test]
     fn accepts_units_in_reverse_order() {
-        let node_count = NumPeers::new(4 as usize);
-        let node_id = PeerId::new(0 as u8);
+        let node_count = NumPeers::new(4_usize);
+        let node_id = PeerId::new(0_u8);
         let session_id = 43;
         let max_round = 2137;
         let total_rounds = 13;
@@ -353,8 +353,8 @@ mod test {
 
     #[test]
     fn alerts_on_fork() {
-        let node_count = NumPeers::new(4 as usize);
-        let node_id = PeerId::new(0 as u8);
+        let node_count = NumPeers::new(4_usize);
+        let node_id = PeerId::new(0_u8);
         let session_id = 43;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
@@ -365,7 +365,7 @@ mod test {
         let validator =
             UnitValidator::new(session_id, keychains[node_id.to_usize()].clone(), max_round);
         let mut dag = Dag::new(validator);
-        let forker_id = PeerId::new(3 as u8);
+        let forker_id = PeerId::new(3_u8);
         let keychain = keychains
             .get(forker_id.to_usize())
             .expect("we have the keychain");
@@ -413,9 +413,9 @@ mod test {
 
     #[test]
     fn detects_fork_through_notification() {
-        let node_count = NumPeers::new(7 as usize);
-        let node_id = PeerId::new(0 as u8);
-        let forker_id = PeerId::new(3 as u8);
+        let node_count = NumPeers::new(7_usize);
+        let node_id = PeerId::new(0_u8);
+        let forker_id = PeerId::new(3_u8);
         let session_id = 0;
         let max_round = 2137;
         let keychains: Vec<_> = node_count
@@ -456,9 +456,9 @@ mod test {
 
     #[test]
     fn accepts_committed() {
-        let node_count = NumPeers::new(7 as usize);
-        let node_id = PeerId::new(0 as u8);
-        let forker_id = PeerId::new(3 as u8);
+        let node_count = NumPeers::new(7_usize);
+        let node_id = PeerId::new(0_u8);
+        let forker_id = PeerId::new(3_u8);
         let session_id = 0;
         let max_round = 2137;
         let produced_round = 4;
@@ -541,9 +541,9 @@ mod test {
 
     #[test]
     fn handles_explicit_parents() {
-        let node_count = NumPeers::new(7 as usize);
-        let node_id = PeerId::new(0 as u8);
-        let forker_id = PeerId::new(3 as u8);
+        let node_count = NumPeers::new(7_usize);
+        let node_id = PeerId::new(0_u8);
+        let forker_id = PeerId::new(3_u8);
         let session_id = 0;
         let max_round = 2137;
         let produced_round = 4;

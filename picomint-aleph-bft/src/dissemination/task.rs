@@ -404,8 +404,8 @@ mod tests {
 
     #[test]
     fn correct_tick_interval() {
-        let node_ix = PeerId::new(7 as u8);
-        let node_count = NumPeers::new(20 as usize);
+        let node_ix = PeerId::new(7_u8);
+        let node_count = NumPeers::new(20_usize);
         let delay_config = gen_delay_config();
         let manager: Manager = Manager::new(node_ix, node_count, delay_config.clone());
 
@@ -414,8 +414,8 @@ mod tests {
 
     #[test]
     fn broadcasts_own_unit() {
-        let node_ix = PeerId::new(7 as u8);
-        let node_count = NumPeers::new(20 as usize);
+        let node_ix = PeerId::new(7_u8);
+        let node_count = NumPeers::new(20_usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
@@ -461,8 +461,8 @@ mod tests {
 
     #[test]
     fn broadcasts_other_unit() {
-        let node_ix = PeerId::new(7 as u8);
-        let node_count = NumPeers::new(20 as usize);
+        let node_ix = PeerId::new(7_u8);
+        let node_count = NumPeers::new(20_usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
@@ -499,8 +499,8 @@ mod tests {
 
     #[test]
     fn doesnt_broadcast_old_unit() {
-        let node_ix = PeerId::new(7 as u8);
-        let node_count = NumPeers::new(20 as usize);
+        let node_ix = PeerId::new(7_u8);
+        let node_count = NumPeers::new(20_usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
@@ -538,8 +538,8 @@ mod tests {
 
     #[test]
     fn requests_coord() {
-        let node_ix = PeerId::new(7 as u8);
-        let node_count = NumPeers::new(20 as usize);
+        let node_ix = PeerId::new(7_u8);
+        let node_count = NumPeers::new(20_usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
@@ -595,8 +595,8 @@ mod tests {
 
     #[test]
     fn requests_ancient_coord_when_far_behind() {
-        let node_ix = PeerId::new(7 as u8);
-        let node_count = NumPeers::new(20 as usize);
+        let node_ix = PeerId::new(7_u8);
+        let node_count = NumPeers::new(20_usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
@@ -615,7 +615,7 @@ mod tests {
         let mut store = UnitStore::new(node_count);
         store.insert(unit_to_make_typing_easier);
         let processing_store = UnitStore::new(node_count);
-        manager.add_request(Request::Coord(UnitCoord::new(2137, PeerId::new(0 as u8))));
+        manager.add_request(Request::Coord(UnitCoord::new(2137, PeerId::new(0_u8))));
         let mut messages = manager.trigger_tasks(&store, &processing_store);
         assert_eq!(messages.len(), 1);
         let message = messages.pop().expect("just checked");
@@ -628,7 +628,7 @@ mod tests {
                 assert_eq!(requesting_node, &node_ix);
                 match request {
                     Request::Coord(coord) => {
-                        assert_eq!(coord.creator(), PeerId::new(0 as u8));
+                        assert_eq!(coord.creator(), PeerId::new(0_u8));
                         assert!(coord.round() < 100);
                     }
                     r => panic!("Unexpected request: {:?}", r),
@@ -651,7 +651,7 @@ mod tests {
                 assert_eq!(requesting_node, &node_ix);
                 match request {
                     Request::Coord(coord) => {
-                        assert_eq!(coord.creator(), PeerId::new(0 as u8));
+                        assert_eq!(coord.creator(), PeerId::new(0_u8));
                         assert!(coord.round() < 100);
                     }
                     r => panic!("Unexpected request: {:?}", r),
@@ -663,8 +663,8 @@ mod tests {
 
     #[test]
     fn stops_requesting_coord_when_has_unit() {
-        let node_ix = PeerId::new(7 as u8);
-        let node_count = NumPeers::new(20 as usize);
+        let node_ix = PeerId::new(7_u8);
+        let node_count = NumPeers::new(20_usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
@@ -709,8 +709,8 @@ mod tests {
 
     #[test]
     fn requests_parents() {
-        let node_ix = PeerId::new(7 as u8);
-        let node_count = NumPeers::new(20 as usize);
+        let node_ix = PeerId::new(7_u8);
+        let node_count = NumPeers::new(20_usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 
@@ -766,8 +766,8 @@ mod tests {
 
     #[test]
     fn stops_requesting_parents_when_has_unit() {
-        let node_ix = PeerId::new(7 as u8);
-        let node_count = NumPeers::new(20 as usize);
+        let node_ix = PeerId::new(7_u8);
+        let node_count = NumPeers::new(20_usize);
         let delay_config = gen_delay_config();
         let mut manager = Manager::new(node_ix, node_count, delay_config.clone());
 

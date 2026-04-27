@@ -229,7 +229,7 @@ mod test {
     #[test]
     fn refuses_to_elect_with_insufficient_units() {
         let mut units = Units::new();
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let max_round = 2;
         let session_id = 2137;
         let keychains = keychain_set(n_members);
@@ -247,7 +247,7 @@ mod test {
     fn easy_election() {
         use ElectionResult::*;
         let mut units = Units::new();
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let max_round = 4;
         let session_id = 2137;
         let keychains = keychain_set(n_members);
@@ -278,7 +278,7 @@ mod test {
     fn immediate_election() {
         use ElectionResult::*;
         let mut units = Units::new();
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let max_round = 4;
         let session_id = 2137;
         let keychains = keychain_set(n_members);
@@ -302,7 +302,7 @@ mod test {
     fn eliminates_unpopular() {
         use ElectionResult::*;
         let mut units = Units::new();
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let max_round = 4;
         let session_id = 2137;
         let keychains = keychain_set(n_members);
@@ -358,7 +358,7 @@ mod test {
     fn given_minimal_dag_with_orphaned_node_when_electing_then_orphaned_node_is_not_head() {
         use ElectionResult::*;
         let mut units = Units::new();
-        let n_members = NumPeers::new(14 as usize);
+        let n_members = NumPeers::new(14_usize);
         let max_round = 4;
         let session_id = 2137;
         let keychains = keychain_set(n_members);

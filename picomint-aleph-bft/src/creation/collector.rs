@@ -81,31 +81,31 @@ mod tests {
 
     #[test]
     fn initial_fails_without_parents() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let units_collector = UnitsCollector::new_initial(n_members);
 
         let err = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect_err("should fail without parents");
         assert_eq!(err, ConstraintError::NotEnoughParents);
     }
 
     #[test]
     fn initial_fails_with_too_few_parents() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let mut units_collector = UnitsCollector::new_initial(n_members);
         let units = random_full_parent_units_up_to(0, n_members, 43);
         units_collector.add_unit(&units[0][0]);
 
         let err = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect_err("should fail without parents");
         assert_eq!(err, ConstraintError::NotEnoughParents);
     }
 
     #[test]
     fn initial_fails_without_own_parent() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let mut units_collector = UnitsCollector::new_initial(n_members);
         let units = random_full_parent_units_up_to(0, n_members, 43);
         for unit in units[0].iter().skip(1) {
@@ -113,14 +113,14 @@ mod tests {
         }
 
         let err = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect_err("should fail without parents");
         assert_eq!(err, ConstraintError::MissingOwnParent);
     }
 
     #[test]
     fn initial_successfully_computes_minimal_parents() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let mut units_collector = UnitsCollector::new_initial(n_members);
         let units = random_full_parent_units_up_to(0, n_members, 43);
         for unit in units[0].iter().take(3) {
@@ -128,7 +128,7 @@ mod tests {
         }
 
         let parents = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect("we should be able to retrieve parents");
         assert_eq!(parents.item_count(), 3);
 
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn initial_successfully_computes_full_parents() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let mut units_collector = UnitsCollector::new_initial(n_members);
         let units = random_full_parent_units_up_to(0, n_members, 43);
         for unit in &units[0] {
@@ -151,7 +151,7 @@ mod tests {
         }
 
         let parents = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect("we should be able to retrieve parents");
         assert_eq!(parents.item_count(), 4);
 
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn initial_ignores_future_rounds() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let mut units_collector = UnitsCollector::new_initial(n_members);
         let units = random_full_parent_units_up_to(2, n_members, 43);
         for round_units in &units {
@@ -175,7 +175,7 @@ mod tests {
         }
 
         let parents = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect("we should be able to retrieve parents");
         assert_eq!(parents.item_count(), 4);
 
@@ -189,33 +189,33 @@ mod tests {
 
     #[test]
     fn following_fails_without_parents() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let initial_units_collector = UnitsCollector::new_initial(n_members);
         let units_collector = UnitsCollector::from_previous(&initial_units_collector);
 
         let err = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect_err("should fail without parents");
         assert_eq!(err, ConstraintError::NotEnoughParents);
     }
 
     #[test]
     fn following_fails_with_too_few_parents() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(1, n_members, 43);
         units_collector.add_unit(&units[1][0]);
 
         let err = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect_err("should fail without parents");
         assert_eq!(err, ConstraintError::NotEnoughParents);
     }
 
     #[test]
     fn following_fails_with_too_old_parents() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(0, n_members, 43);
@@ -224,14 +224,14 @@ mod tests {
         }
 
         let err = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect_err("should fail without parents");
         assert_eq!(err, ConstraintError::NotEnoughParents);
     }
 
     #[test]
     fn following_fails_without_own_parent() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(1, n_members, 43);
@@ -240,14 +240,14 @@ mod tests {
         }
 
         let err = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect_err("should fail without parents");
         assert_eq!(err, ConstraintError::MissingOwnParent);
     }
 
     #[test]
     fn following_fails_with_too_old_own_parent() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(1, n_members, 43);
@@ -257,14 +257,14 @@ mod tests {
         units_collector.add_unit(&units[0][0]);
 
         let err = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect_err("should fail without parents");
         assert_eq!(err, ConstraintError::MissingOwnParent);
     }
 
     #[test]
     fn following_successfully_computes_minimal_parents() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(1, n_members, 43);
@@ -273,7 +273,7 @@ mod tests {
         }
 
         let parents = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect("we should be able to retrieve parents");
         assert_eq!(parents.item_count(), 3);
 
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn following_successfully_computes_minimal_parents_with_ancient() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(1, n_members, 43);
@@ -298,7 +298,7 @@ mod tests {
         units_collector.add_unit(&units[0][3]);
 
         let parents = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect("we should be able to retrieve parents");
         assert_eq!(parents.item_count(), 4);
 
@@ -314,7 +314,7 @@ mod tests {
 
     #[test]
     fn following_successfully_computes_full_parents() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let initial_units_collector = UnitsCollector::new_initial(n_members);
         let mut units_collector = UnitsCollector::from_previous(&initial_units_collector);
         let units = random_full_parent_units_up_to(1, n_members, 43);
@@ -323,7 +323,7 @@ mod tests {
         }
 
         let parents = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect("we should be able to retrieve parents");
         assert_eq!(parents.item_count(), 4);
 
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn following_inherits_units() {
-        let n_members = NumPeers::new(4 as usize);
+        let n_members = NumPeers::new(4_usize);
         let mut initial_units_collector = UnitsCollector::new_initial(n_members);
         let units = random_full_parent_units_up_to(1, n_members, 43);
         for unit in &units[0] {
@@ -349,7 +349,7 @@ mod tests {
         }
 
         let parents = units_collector
-            .prospective_parents(PeerId::new(0 as u8))
+            .prospective_parents(PeerId::new(0_u8))
             .expect("we should be able to retrieve parents");
         assert_eq!(parents.item_count(), 4);
 

@@ -180,7 +180,7 @@ where
         for recipient in notification.recipients() {
             if self
                 .unit_messages_for_network
-                .unbounded_send((notification.message().clone().into(), recipient.clone()))
+                .unbounded_send((notification.message().clone().into(), *recipient))
                 .is_err()
             {
                 self.crucial_channel_closed("Network");

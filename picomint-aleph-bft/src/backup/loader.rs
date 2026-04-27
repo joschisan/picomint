@@ -136,8 +136,8 @@ mod tests {
     type BackupLoader = GenericLoader<Data, MockSource<Data>>;
 
     const SESSION_ID: SessionId = 43;
-    const NODE_ID: PeerId = PeerId::new(0 as u8);
-    const N_MEMBERS: NumPeers = NumPeers::new(4 as usize);
+    const NODE_ID: PeerId = PeerId::new(0_u8);
+    const N_MEMBERS: NumPeers = NumPeers::new(4_usize);
 
     fn produce_units(rounds: usize, session_id: SessionId) -> Vec<Vec<UncheckedSignedUnit>> {
         let mut creators = creator_set(N_MEMBERS);
