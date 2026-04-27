@@ -7,7 +7,7 @@ mod network;
 mod spawner;
 
 pub use crypto::{bad_keychain, keychain, keychain_set, Signable};
-pub use dataio::{Data, DataProvider, FinalizationHandler, Loader, Saver, StalledDataProvider};
+pub use dataio::{Data, DataProvider, FinalizationHandler, StalledDataProvider};
 pub use hasher::Hasher64;
 pub use network::{
     Network, NetworkHook, NetworkReceiver, NetworkSender, Peer, ReconnectSender, Router,

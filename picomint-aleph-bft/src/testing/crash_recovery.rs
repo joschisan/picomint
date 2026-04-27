@@ -1,5 +1,5 @@
 use crate::{
-    testing::{init_log, spawn_honest_member, HonestMember, Network, ReconnectSender},
+    testing::{init_log, spawn_honest_member, HonestMember, Network, ReconnectSender, SavedUnits},
     units::{UncheckedSignedUnit, Unit, UnitCoord},
     NumPeers, PeerId, SpawnHandle, TaskHandle,
 };
@@ -8,12 +8,9 @@ use futures::{
     channel::{mpsc, oneshot},
     StreamExt,
 };
-use parking_lot::Mutex;
-use picomint_encoding::Decodable;
 use serial_test::serial;
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
     time::Duration,
 };
 
@@ -22,7 +19,7 @@ struct NodeData {
     exit_tx: oneshot::Sender<()>,
     reconnect_tx: mpsc::UnboundedSender<(PeerId, oneshot::Sender<Network>)>,
     handle: TaskHandle,
-    saved_units: Arc<Mutex<Vec<u8>>>,
+    saved_units: SavedUnits,
     batches: Vec<Data>,
 }
 
@@ -71,7 +68,7 @@ fn connect_nodes(
                 *spawner,
                 ix,
                 n_members,
-                vec![],
+                Vec::new(),
                 DataProvider::new(),
                 network,
             );
@@ -100,7 +97,7 @@ async fn shutdown(mut node_data: HashMap<PeerId, NodeData>) {
 async fn reconnect_nodes(
     spawner: &Spawner,
     n_members: NumPeers,
-    killed: &HashMap<PeerId, (ReconnectSender, Vec<u8>)>,
+    killed: &HashMap<PeerId, (ReconnectSender, Vec<UncheckedSignedUnit<Data>>)>,
 ) -> Vec<(PeerId, NodeData)> {
     let mut reconnected_nodes = Vec::new();
 
@@ -139,11 +136,10 @@ async fn reconnect_nodes(
     reconnected_nodes
 }
 
-fn verify_backup(buf: &mut &[u8]) -> HashSet<UnitCoord> {
+fn verify_backup(units: &[UncheckedSignedUnit<Data>]) -> HashSet<UnitCoord> {
     let mut already_saved = HashSet::new();
 
-    while !buf.is_empty() {
-        let unit = <UncheckedSignedUnit<Data>>::consensus_decode_partial(buf).unwrap();
+    for unit in units {
         let full_unit = unit.as_signable();
         let coord = full_unit.coord();
         let control_hash = &full_unit.as_pre_unit().control_hash();
@@ -239,10 +235,10 @@ async fn crashed_nodes_recover(n_members: NumPeers, n_batches: usize) {
     }
 
     for (ix, (_, saved_units_before)) in killed {
-        let saved_before_coords = verify_backup(&mut &saved_units_before[..]);
+        let saved_before_coords = verify_backup(&saved_units_before);
         let NodeData { saved_units, .. } = node_data.get(&ix).expect("should contain killed node");
 
-        let saved_after_coords = verify_backup(&mut &saved_units.lock()[..]);
+        let saved_after_coords = verify_backup(&saved_units.lock());
         assert!(saved_before_coords.is_subset(&saved_after_coords));
     }
 
@@ -276,7 +272,7 @@ async fn saves_units_properly() {
     }
 
     for (_, saved_units) in killed {
-        let _ = verify_backup(&mut &saved_units[..]);
+        let _ = verify_backup(&saved_units);
     }
 }
 

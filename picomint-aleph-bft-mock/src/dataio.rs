@@ -1,15 +1,8 @@
 use aleph_bft_types::{DataProvider as DataProviderT, FinalizationHandler as FinalizationHandlerT};
 use async_trait::async_trait;
-use futures::{channel::mpsc::unbounded, future::pending, AsyncWrite};
+use futures::{channel::mpsc::unbounded, future::pending};
 use log::error;
-use parking_lot::Mutex;
 use picomint_encoding::{Decodable, Encodable};
-use std::{
-    io::{self},
-    pin::Pin,
-    sync::Arc,
-    task::{self, Poll},
-};
 
 type Receiver<T> = futures::channel::mpsc::UnboundedReceiver<T>;
 type Sender<T> = futures::channel::mpsc::UnboundedSender<T>;
@@ -100,43 +93,3 @@ impl FinalizationHandler {
         (Self { tx }, rx)
     }
 }
-
-#[derive(Clone, Debug, Default)]
-pub struct Saver {
-    data: Arc<Mutex<Vec<u8>>>,
-}
-
-impl Saver {
-    pub fn new() -> Self {
-        Self {
-            data: Arc::new(Mutex::new(vec![])),
-        }
-    }
-}
-
-impl AsyncWrite for Saver {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        _: &mut task::Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        self.data.lock().extend_from_slice(buf);
-        Poll::Ready(Ok(buf.len()))
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, _: &mut task::Context<'_>) -> Poll<io::Result<()>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn poll_close(self: Pin<&mut Self>, _: &mut task::Context<'_>) -> Poll<io::Result<()>> {
-        Poll::Ready(Ok(()))
-    }
-}
-
-impl From<Arc<Mutex<Vec<u8>>>> for Saver {
-    fn from(data: Arc<Mutex<Vec<u8>>>) -> Self {
-        Self { data }
-    }
-}
-
-pub type Loader = futures::io::Cursor<Vec<u8>>;

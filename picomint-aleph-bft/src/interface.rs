@@ -1,5 +1,7 @@
-use crate::{Data, DataProvider, FinalizationHandler, OrderedUnit, UnitFinalizationHandler};
-use futures::{AsyncRead, AsyncWrite};
+use crate::{
+    backup::{BackupSink, BackupSource},
+    Data, DataProvider, FinalizationHandler, OrderedUnit, UnitFinalizationHandler,
+};
 use std::marker::PhantomData;
 
 /// This adapter allows to map an implementation of [`FinalizationHandler`] onto implementation of [`UnitFinalizationHandler`].
@@ -31,22 +33,25 @@ impl<D: Data, FH: FinalizationHandler<D>> UnitFinalizationHandler
     }
 }
 
-/// The local interface of the consensus algorithm. Contains a [`DataProvider`] as a source of data
-/// to order, a [`UnitFinalizationHandler`] for handling ordered units, and a pair of read/write
-/// structs intended for saving and restorin the state of the algorithm within the session, as a
-/// contingency in the case of a crash.
+/// The local interface of the consensus algorithm. Bundles the data
+/// provider, the unit finalization handler, and the typed backup sink/source
+/// pair used to durably persist in-progress units across crashes.
 #[derive(Clone)]
-pub struct LocalIO<DP: DataProvider, UFH: UnitFinalizationHandler, US: AsyncWrite, UL: AsyncRead> {
+pub struct LocalIO<DP: DataProvider, UFH: UnitFinalizationHandler, US, UL> {
     data_provider: DP,
     finalization_handler: UFH,
     unit_saver: US,
     unit_loader: UL,
 }
 
-impl<DP: DataProvider, FH: FinalizationHandler<DP::Output>, US: AsyncWrite, UL: AsyncRead>
-    LocalIO<DP, FinalizationHandlerAdapter<FH, DP::Output>, US, UL>
+impl<
+        DP: DataProvider,
+        FH: FinalizationHandler<DP::Output>,
+        US: BackupSink<DP::Output>,
+        UL: BackupSource<DP::Output>,
+    > LocalIO<DP, FinalizationHandlerAdapter<FH, DP::Output>, US, UL>
 {
-    /// Create a new local interface. Note that this uses the simplified, and recommended,
+    /// Create a new local interface. Uses the simplified, recommended
     /// finalization handler that only deals with ordered data.
     pub fn new(
         data_provider: DP,
@@ -63,13 +68,18 @@ impl<DP: DataProvider, FH: FinalizationHandler<DP::Output>, US: AsyncWrite, UL: 
     }
 }
 
-impl<DP: DataProvider, UFH: UnitFinalizationHandler, US: AsyncWrite, UL: AsyncRead>
-    LocalIO<DP, UFH, US, UL>
+impl<
+        DP: DataProvider,
+        UFH: UnitFinalizationHandler,
+        US: BackupSink<UFH::Data>,
+        UL: BackupSource<UFH::Data>,
+    > LocalIO<DP, UFH, US, UL>
 {
     /// Create a new local interface, providing a full implementation of a
-    /// [`UnitFinalizationHandler`].Implementing [`UnitFinalizationHandler`] directly is more
-    /// complex, and should be unnecessary for most usecases. Implement [`FinalizationHandler`]
-    /// and use `new` instead, unless you absolutely know what you are doing.
+    /// [`UnitFinalizationHandler`]. Implementing [`UnitFinalizationHandler`]
+    /// directly is more complex and should be unnecessary for most usecases.
+    /// Implement [`FinalizationHandler`] and use `new` instead, unless you
+    /// absolutely know what you are doing.
     pub fn new_with_unit_finalization_handler(
         data_provider: DP,
         finalization_handler: UFH,

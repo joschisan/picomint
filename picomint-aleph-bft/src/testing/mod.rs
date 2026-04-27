@@ -8,12 +8,15 @@ mod dag;
 mod unreliable;
 
 use crate::{
-    create_config, run_session, Config, DelayConfig, LocalIO, Network as NetworkT, NumPeers,
-    PeerId, SpawnHandle, TaskHandle, Terminator,
+    backup::mock::{MockSink, MockSource},
+    create_config, run_session,
+    units::UncheckedSignedUnit,
+    Config, DelayConfig, LocalIO, Network as NetworkT, NumPeers, PeerId, SpawnHandle, TaskHandle,
+    Terminator,
 };
 use aleph_bft_mock::{
-    keychain, Data, DataProvider, FinalizationHandler, Loader, Network as MockNetwork,
-    ReconnectSender as ReconnectSenderGeneric, Saver, Spawner,
+    keychain, Data, DataProvider, FinalizationHandler, Network as MockNetwork,
+    ReconnectSender as ReconnectSenderGeneric, Spawner,
 };
 use futures::channel::{mpsc::UnboundedReceiver, oneshot};
 use parking_lot::Mutex;
@@ -23,6 +26,7 @@ pub type NetworkData = crate::NetworkData<Data>;
 
 pub type Network = MockNetwork<NetworkData>;
 pub type ReconnectSender = ReconnectSenderGeneric<NetworkData>;
+pub type SavedUnits = Arc<Mutex<Vec<UncheckedSignedUnit<Data>>>>;
 
 pub fn init_log() {
     let _ = env_logger::builder()
@@ -58,7 +62,7 @@ pub fn gen_config(node_ix: PeerId, n_members: NumPeers, delay_config: DelayConfi
 
 pub struct HonestMember {
     finalization_rx: UnboundedReceiver<Data>,
-    saved_state: Arc<Mutex<Vec<u8>>>,
+    saved_state: SavedUnits,
     exit_tx: oneshot::Sender<()>,
     handle: TaskHandle,
 }
@@ -67,7 +71,7 @@ pub fn spawn_honest_member(
     spawner: Spawner,
     node_index: PeerId,
     n_members: NumPeers,
-    units: Vec<u8>,
+    units: Vec<UncheckedSignedUnit<Data>>,
     data_provider: DataProvider,
     network: impl 'static + NetworkT<NetworkData>,
 ) -> HonestMember {
@@ -75,9 +79,9 @@ pub fn spawn_honest_member(
     let config = gen_config(node_index, n_members, gen_delay_config());
     let (exit_tx, exit_rx) = oneshot::channel();
     let spawner_inner = spawner;
-    let unit_loader = Loader::new(units);
-    let saved_state = Arc::new(Mutex::new(vec![]));
-    let unit_saver: Saver = saved_state.clone().into();
+    let unit_loader = MockSource::new(units);
+    let saved_state: SavedUnits = Arc::new(Mutex::new(Vec::new()));
+    let unit_saver = MockSink::from_shared(saved_state.clone());
     let local_io = LocalIO::new(data_provider, finalization_handler, unit_saver, unit_loader);
     let member_task = async move {
         let kc = keychain(n_members, node_index);

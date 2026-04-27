@@ -131,7 +131,7 @@ impl<D: Data> Index for FullUnit<D> {
     }
 }
 
-pub(crate) type UncheckedSignedUnit<D> = UncheckedSigned<FullUnit<D>, crate::Signature>;
+pub type UncheckedSignedUnit<D> = UncheckedSigned<FullUnit<D>, crate::Signature>;
 
 pub(crate) type SignedUnit<D> = Signed<FullUnit<D>>;
 

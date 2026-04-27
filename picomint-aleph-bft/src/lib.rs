@@ -26,6 +26,7 @@ pub use aleph_bft_types::{
     PartiallyMultisigned, PeerId, Recipient, Round, SessionId, Signable, Signature, SignatureError,
     Signed, SpawnHandle, TaskHandle, UncheckedSigned, UnitFinalizationHandler, UnitHash,
 };
+pub use backup::{BackupSink, BackupSource};
 pub use config::{
     create_config, default_config, default_delay_config, exponential_slowdown, Config, DelayConfig,
 };
@@ -33,6 +34,7 @@ pub use consensus::run_session;
 pub use interface::LocalIO;
 pub use network::NetworkData;
 pub use terminator::{handle_task_termination, Terminator};
+pub use units::{FullUnit, UncheckedSignedUnit};
 
 type Receiver<T> = futures::channel::mpsc::UnboundedReceiver<T>;
 type Sender<T> = futures::channel::mpsc::UnboundedSender<T>;

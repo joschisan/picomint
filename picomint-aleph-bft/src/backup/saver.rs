@@ -1,42 +1,37 @@
-use std::pin::Pin;
-
 use crate::{
+    backup::BackupSink,
     dag::DagUnit,
     units::{UncheckedSignedUnit, WrappedUnit},
     Data, Receiver, Sender, Terminator,
 };
-use futures::{AsyncWrite, AsyncWriteExt, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt};
 use log::{debug, error};
-use picomint_encoding::Encodable;
 
 const LOG_TARGET: &str = "AlephBFT-backup-saver";
 
 /// Component responsible for saving units into backup.
-pub struct BackupSaver<D: Data, W: AsyncWrite> {
+pub struct BackupSaver<D: Data, S: BackupSink<D>> {
     units_from_consensus: Receiver<DagUnit<D>>,
     responses_for_consensus: Sender<DagUnit<D>>,
-    backup: Pin<Box<W>>,
+    backup: S,
 }
 
-impl<D: Data, W: AsyncWrite> BackupSaver<D, W> {
+impl<D: Data, S: BackupSink<D>> BackupSaver<D, S> {
     pub fn new(
         units_from_consensus: Receiver<DagUnit<D>>,
         responses_for_consensus: Sender<DagUnit<D>>,
-        backup: W,
-    ) -> BackupSaver<D, W> {
+        backup: S,
+    ) -> BackupSaver<D, S> {
         BackupSaver {
             units_from_consensus,
             responses_for_consensus,
-            backup: Box::pin(backup),
+            backup,
         }
     }
 
-    pub async fn save_unit(&mut self, unit: &DagUnit<D>) -> Result<(), std::io::Error> {
-        let unit: UncheckedSignedUnit<_> = unit.clone().unpack().into();
-        self.backup
-            .write_all(&unit.consensus_encode_to_vec())
-            .await?;
-        self.backup.flush().await
+    pub fn save_unit(&mut self, unit: &DagUnit<D>) -> std::io::Result<()> {
+        let unit: UncheckedSignedUnit<D> = unit.clone().unpack().into();
+        self.backup.save(unit)
     }
 
     pub async fn run(&mut self, mut terminator: Terminator) {
@@ -51,7 +46,7 @@ impl<D: Data, W: AsyncWrite> BackupSaver<D, W> {
                             break;
                         },
                     };
-                    if let Err(e) = self.save_unit(&item).await {
+                    if let Err(e) = self.save_unit(&item) {
                         error!(target: LOG_TARGET, "couldn't save item to backup: {:?}", e);
                         break;
                     }
@@ -82,17 +77,17 @@ mod tests {
         StreamExt,
     };
 
-    use aleph_bft_mock::{keychain, Data, Saver};
+    use aleph_bft_mock::{keychain, Data};
 
     use crate::{
-        backup::BackupSaver,
+        backup::{mock::MockSink, BackupSaver},
         dag::ReconstructedUnit,
         units::{creator_set, preunit_to_signed_unit, TestingSignedUnit},
         NumPeers, Terminator,
     };
 
     type TestUnit = ReconstructedUnit<TestingSignedUnit>;
-    type TestBackupSaver = BackupSaver<Data, Saver>;
+    type TestBackupSaver = BackupSaver<Data, MockSink<Data>>;
     struct PrepareSaverResponse<F: futures::Future> {
         task: F,
         units_for_saver: mpsc::UnboundedSender<TestUnit>,
@@ -104,7 +99,7 @@ mod tests {
         let (units_for_saver, units_from_consensus) = mpsc::unbounded();
         let (units_for_consensus, units_from_saver) = mpsc::unbounded();
         let (exit_tx, exit_rx) = oneshot::channel();
-        let backup = Saver::new();
+        let backup = MockSink::new();
 
         let task = {
             let mut saver: TestBackupSaver =

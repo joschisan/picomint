@@ -1,23 +1,29 @@
 use std::io;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
-use futures::io::{AsyncRead, AsyncWrite, Cursor};
+use aleph_bft::{BackupSink, BackupSource, UncheckedSignedUnit};
+use picomint_core::transaction::ConsensusItem;
 use picomint_redb::Database;
 use tracing::info;
 
 use crate::LOG_CONSENSUS;
-use crate::consensus::db::ALEPH_UNITS;
+use crate::consensus::db::{ALEPH_UNITS, AlephUnit};
 
 pub struct UnitLoader {
-    cursor: Cursor<Vec<u8>>,
+    db: Database,
 }
 
 impl UnitLoader {
     pub fn new(db: Database) -> Self {
-        let units: Vec<Vec<u8>> = db
+        Self { db }
+    }
+}
+
+impl BackupSource<Vec<ConsensusItem>> for UnitLoader {
+    fn load(self) -> io::Result<Vec<UncheckedSignedUnit<Vec<ConsensusItem>>>> {
+        let units: Vec<UncheckedSignedUnit<Vec<ConsensusItem>>> = self
+            .db
             .begin_read()
-            .iter(&ALEPH_UNITS, |r| r.map(|(_, v)| v).collect());
+            .iter(&ALEPH_UNITS, |r| r.map(|(_, AlephUnit(u))| u).collect());
 
         if !units.is_empty() {
             info!(
@@ -27,26 +33,13 @@ impl UnitLoader {
             );
         }
 
-        Self {
-            cursor: Cursor::new(units.into_iter().flatten().collect()),
-        }
-    }
-}
-
-impl AsyncRead for UnitLoader {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.cursor).poll_read(cx, buf)
+        Ok(units)
     }
 }
 
 pub struct UnitSaver {
     db: Database,
     units_index: u64,
-    buf: Vec<u8>,
 }
 
 impl UnitSaver {
@@ -55,39 +48,16 @@ impl UnitSaver {
             .begin_read()
             .iter(&ALEPH_UNITS, |r| r.next_back().map_or(0, |(k, _)| k + 1));
 
-        Self {
-            db,
-            units_index,
-            buf: Vec::new(),
-        }
+        Self { db, units_index }
     }
 }
 
-impl AsyncWrite for UnitSaver {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        self.buf.extend_from_slice(buf);
-        Poll::Ready(Ok(buf.len()))
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        let this = self.get_mut();
-
-        if !this.buf.is_empty() {
-            let tx = this.db.begin_write();
-            let unit = std::mem::take(&mut this.buf);
-            tx.insert(&ALEPH_UNITS, &this.units_index, &unit);
-            this.units_index += 1;
-            tx.commit();
-        }
-
-        Poll::Ready(Ok(()))
-    }
-
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.poll_flush(cx)
+impl BackupSink<Vec<ConsensusItem>> for UnitSaver {
+    fn save(&mut self, unit: UncheckedSignedUnit<Vec<ConsensusItem>>) -> io::Result<()> {
+        let tx = self.db.begin_write();
+        tx.insert(&ALEPH_UNITS, &self.units_index, &AlephUnit(unit));
+        tx.commit();
+        self.units_index += 1;
+        Ok(())
     }
 }

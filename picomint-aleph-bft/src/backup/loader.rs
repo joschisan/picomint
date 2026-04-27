@@ -1,19 +1,15 @@
 use std::{
-    collections::HashSet,
     fmt::{self, Debug},
     marker::PhantomData,
-    pin::Pin,
 };
 
-use futures::{AsyncRead, AsyncReadExt};
-use picomint_encoding::Decodable;
-
 use crate::{
+    backup::BackupSource,
     units::{UncheckedSignedUnit, Unit, UnitCoord},
     Data, PeerId, Round, SessionId,
 };
 
-/// Backup read error. Could be either caused by io error from `BackupReader`, or by decoding.
+/// Backup load error.
 #[derive(Debug)]
 pub enum LoaderError {
     IO(std::io::Error),
@@ -55,70 +51,35 @@ impl From<std::io::Error> for LoaderError {
     }
 }
 
-pub struct BackupLoader<D: Data, R: AsyncRead> {
-    backup: Pin<Box<R>>,
+pub struct BackupLoader<D: Data, S: BackupSource<D>> {
+    backup: S,
     index: PeerId,
     session_id: SessionId,
     _phantom: PhantomData<D>,
 }
 
-impl<D: Data, R: AsyncRead> BackupLoader<D, R> {
-    pub fn new(backup: R, index: PeerId, session_id: SessionId) -> BackupLoader<D, R> {
+impl<D: Data, S: BackupSource<D>> BackupLoader<D, S> {
+    pub fn new(backup: S, index: PeerId, session_id: SessionId) -> Self {
         BackupLoader {
-            backup: Box::pin(backup),
+            backup,
             index,
             session_id,
             _phantom: PhantomData,
         }
     }
 
-    async fn load(&mut self) -> Result<Vec<UncheckedSignedUnit<D>>, LoaderError> {
-        let mut buf = Vec::new();
-        self.backup.read_to_end(&mut buf).await?;
-        let input = &mut &buf[..];
-        let mut result = Vec::new();
-        while !input.is_empty() {
-            result.push(<UncheckedSignedUnit<D>>::consensus_decode_partial(input)?);
-        }
-        Ok(result)
-    }
-
-    fn verify_units(&self, units: &Vec<UncheckedSignedUnit<D>>) -> Result<(), LoaderError> {
-        let mut already_loaded_coords = HashSet::new();
-
-        for unit in units {
-            let full_unit = unit.as_signable();
-            let coord = full_unit.coord();
-
-            if full_unit.session_id() != self.session_id {
-                return Err(LoaderError::WrongSession(
-                    coord,
-                    self.session_id,
-                    full_unit.session_id(),
-                ));
-            }
-
-            // Sanity check: verify that all unit's parents appeared in backup before it.
-            for parent in full_unit.as_pre_unit().control_hash().parents() {
-                if !already_loaded_coords.contains(&parent) {
-                    return Err(LoaderError::InconsistentData(coord));
-                }
-            }
-
-            already_loaded_coords.insert(coord);
-        }
-
-        Ok(())
-    }
-
-    pub async fn load_backup(
-        &mut self,
-    ) -> Result<(Vec<UncheckedSignedUnit<D>>, Round), LoaderError> {
-        let units = self.load().await?;
-        self.verify_units(&units)?;
+    pub async fn load_backup(self) -> Result<(Vec<UncheckedSignedUnit<D>>, Round), LoaderError> {
+        let Self {
+            backup,
+            index,
+            session_id,
+            ..
+        } = self;
+        let units = backup.load()?;
+        verify_units(&units, session_id)?;
         let next_round: Round = units
             .iter()
-            .filter(|u| u.as_signable().creator() == self.index)
+            .filter(|u| u.as_signable().creator() == index)
             .map(|u| u.as_signable().round())
             .max()
             .map(|round| round + 1)
@@ -128,14 +89,42 @@ impl<D: Data, R: AsyncRead> BackupLoader<D, R> {
     }
 }
 
+fn verify_units<D: Data>(
+    units: &Vec<UncheckedSignedUnit<D>>,
+    session_id: SessionId,
+) -> Result<(), LoaderError> {
+    let mut already_loaded_coords = std::collections::HashSet::new();
+
+    for unit in units {
+        let full_unit = unit.as_signable();
+        let coord = full_unit.coord();
+
+        if full_unit.session_id() != session_id {
+            return Err(LoaderError::WrongSession(
+                coord,
+                session_id,
+                full_unit.session_id(),
+            ));
+        }
+
+        for parent in full_unit.as_pre_unit().control_hash().parents() {
+            if !already_loaded_coords.contains(&parent) {
+                return Err(LoaderError::InconsistentData(coord));
+            }
+        }
+
+        already_loaded_coords.insert(coord);
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use picomint_encoding::Encodable;
-
-    use aleph_bft_mock::{keychain, Data, Loader};
+    use aleph_bft_mock::{keychain, Data};
 
     use crate::{
-        backup::{loader::LoaderError, BackupLoader as GenericLoader},
+        backup::{loader::LoaderError, mock::MockSource, BackupLoader as GenericLoader},
         units::{
             create_preunits, creator_set, preunit_to_full_unit, preunit_to_unchecked_signed_unit,
             UncheckedSignedUnit as GenericUncheckedSignedUnit,
@@ -144,7 +133,7 @@ mod tests {
     };
 
     type UncheckedSignedUnit = GenericUncheckedSignedUnit<Data>;
-    type BackupLoader<R> = GenericLoader<Data, R>;
+    type BackupLoader = GenericLoader<Data, MockSource<Data>>;
 
     const SESSION_ID: SessionId = 43;
     const NODE_ID: PeerId = PeerId::new(0 as u8);
@@ -191,13 +180,9 @@ mod tests {
             .collect()
     }
 
-    fn encode_all(items: Vec<UncheckedSignedUnit>) -> Vec<Vec<u8>> {
-        items.iter().map(|u| u.consensus_encode_to_vec()).collect()
-    }
-
     #[tokio::test]
     async fn loads_nothing() {
-        let (units, round) = BackupLoader::new(Loader::new(Vec::new()), NODE_ID, SESSION_ID)
+        let (units, round) = BackupLoader::new(MockSource::new(Vec::new()), NODE_ID, SESSION_ID)
             .load_backup()
             .await
             .expect("should load correctly");
@@ -208,9 +193,8 @@ mod tests {
     #[tokio::test]
     async fn loads_some_units() {
         let items: Vec<_> = produce_units(5, SESSION_ID).into_iter().flatten().collect();
-        let encoded_items = encode_all(items.clone()).into_iter().flatten().collect();
 
-        let (units, round) = BackupLoader::new(Loader::new(encoded_items), NODE_ID, SESSION_ID)
+        let (units, round) = BackupLoader::new(MockSource::new(items.clone()), NODE_ID, SESSION_ID)
             .load_backup()
             .await
             .expect("should load correctly");
@@ -219,29 +203,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn backup_with_corrupted_encoding_fails() {
-        let items: Vec<_> = produce_units(5, SESSION_ID).into_iter().flatten().collect();
-        let mut item_encodings = encode_all(items);
-        let unit2_encoding_len = item_encodings[2].len();
-        item_encodings[2].resize(unit2_encoding_len - 1, 0);
-        let encoded_items = item_encodings.into_iter().flatten().collect();
-
-        assert!(matches!(
-            BackupLoader::new(Loader::new(encoded_items), NODE_ID, SESSION_ID)
-                .load_backup()
-                .await,
-            Err(LoaderError::IO(_))
-        ));
-    }
-
-    #[tokio::test]
     async fn backup_with_missing_parent_fails() {
         let mut items: Vec<_> = produce_units(5, SESSION_ID).into_iter().flatten().collect();
         items.remove(2);
-        let encoded_items = encode_all(items).into_iter().flatten().collect();
 
         assert!(matches!(
-            BackupLoader::new(Loader::new(encoded_items), NODE_ID, SESSION_ID)
+            BackupLoader::new(MockSource::new(items), NODE_ID, SESSION_ID)
                 .load_backup()
                 .await,
             Err(LoaderError::InconsistentData(_))
@@ -254,10 +221,9 @@ mod tests {
             produce_units(5, SESSION_ID),
             PeerId::from((NODE_ID.to_usize() + 1) as u8),
         );
-        let encoded_items = encode_all(items).into_iter().flatten().collect();
 
         assert!(matches!(
-            BackupLoader::new(Loader::new(encoded_items), NODE_ID, SESSION_ID)
+            BackupLoader::new(MockSource::new(items), NODE_ID, SESSION_ID)
                 .load_backup()
                 .await,
             Err(LoaderError::InconsistentData(_))
@@ -270,10 +236,9 @@ mod tests {
             .into_iter()
             .flatten()
             .collect();
-        let encoded_items = encode_all(items).into_iter().flatten().collect();
 
         assert!(matches!(
-            BackupLoader::new(Loader::new(encoded_items), NODE_ID, SESSION_ID)
+            BackupLoader::new(MockSource::new(items), NODE_ID, SESSION_ID)
                 .load_backup()
                 .await,
             Err(LoaderError::WrongSession(..))

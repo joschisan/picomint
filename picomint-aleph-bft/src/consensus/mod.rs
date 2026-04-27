@@ -15,8 +15,10 @@ use crate::{
 use futures::{
     channel::{mpsc, oneshot},
     future::pending,
-    pin_mut, AsyncRead, AsyncWrite, FutureExt,
+    pin_mut, FutureExt,
 };
+
+use crate::backup::{BackupSink, BackupSource};
 use log::{debug, error, info};
 
 mod handler;
@@ -32,8 +34,8 @@ const LOG_TARGET: &str = "AlephBFT-consensus";
 pub async fn run_session<
     DP: DataProvider,
     UFH: UnitFinalizationHandler<Data = DP::Output>,
-    US: AsyncWrite + Send + Sync + 'static,
-    UL: AsyncRead + Send + Sync + 'static,
+    US: BackupSink<DP::Output>,
+    UL: BackupSource<DP::Output>,
     N: Network<NetworkData<DP::Output>>,
     SH: SpawnHandle,
 >(
