@@ -388,6 +388,15 @@ async fn advance_round<D: UnitData, P: DataProvider<D>>(
     ordered_tx: &Sender<(Round, PeerId, D)>,
     data_provider: &mut P,
 ) -> Round {
+    // After a wipe-and-restore, peers can fill our slot via `Status`
+    // gap-fill (a `Confirmed` carrying our own prior round-N unit) before
+    // we've reached the create-timer arm. Adopt those slots — building a
+    // *different* unit at the same `(round, own_id)` would fork against
+    // peers that already endorsed the old one.
+    while graph.entry(next_round_to_create, own_id).is_some() {
+        next_round_to_create += 1;
+    }
+
     if let Some(parents) = graph.parents_for(next_round_to_create, own_id) {
         let round = next_round_to_create;
 
