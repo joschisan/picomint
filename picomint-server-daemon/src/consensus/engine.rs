@@ -4,27 +4,26 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail};
 use async_channel::Receiver;
-use picomint_core::secp256k1::schnorr;
+use bitcoin::hashes::sha256;
+use picomint_aleph_bft::{
+    Graph as AlephGraph, INetwork, Keychain as AlephKeychain, Round as AlephRound, run as run_aleph,
+};
+use picomint_core::secp256k1::{SECP256K1, schnorr};
 use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use picomint_core::task::{TaskGroup, TaskHandle};
 use picomint_core::transaction::ConsensusItem;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
-use picomint_encoding::Decodable;
+use picomint_encoding::Encodable;
 use picomint_redb::{Database, ReadTransaction, WriteTransaction};
 use rand::Rng;
 use rand::seq::IteratorRandom;
 use tokio::sync::watch;
 use tokio::time::sleep;
-use tracing::{debug, error, info, instrument, trace};
+use tracing::{debug, info, instrument, trace};
 
 use crate::LOG_CONSENSUS;
 use crate::config::ServerConfig;
-use crate::consensus::aleph_bft::backup::{BackupReader, BackupWriter};
-use crate::consensus::aleph_bft::data_provider::{DataProvider, UnitData};
-use crate::consensus::aleph_bft::finalization_handler::{FinalizationHandler, OrderedUnit};
-use crate::consensus::aleph_bft::keychain::Keychain;
-use crate::consensus::aleph_bft::network::Network;
-use crate::consensus::aleph_bft::spawner::Spawner;
+use crate::consensus::aleph::{DataProvider, Network, RedbBackup};
 use crate::consensus::db::{
     ACCEPTED_ITEM, ACCEPTED_TRANSACTION, ALEPH_UNITS, SIGNED_SESSION_OUTCOME,
 };
@@ -64,12 +63,9 @@ impl ConsensusEngine {
         while !task_handle.is_shutting_down() {
             let session_index = self.get_finished_session_count().await;
 
-            let is_recovery = self.is_recovery().await;
-
             info!(
                 target: LOG_CONSENSUS,
                 session_index,
-                is_recovery,
                 "Starting consensus session"
             );
 
@@ -116,75 +112,58 @@ impl ConsensusEngine {
         // broadcast instance is therefore bound by:
         //
         // self.keychain.peer_count()
-        //      * (aleph_rounds_per_session + EXP_SLOWDOWN_ROUNDS)
+        //      * (broadcast_rounds_per_session + 1000)
         //      * ALEPH_BFT_UNIT_BYTE_LIMIT
 
-        const EXP_SLOWDOWN_ROUNDS: u16 = 1000;
+        /// AlephBFT round delay (ms). Byzantine-fault-only; the ordering floor is
+        /// dominated by network latency in practice.
+        const ROUND_DELAY_MS: f64 = 50.0;
         const BASE: f64 = 1.02;
 
         let rounds_per_session = self.cfg.consensus.aleph_rounds_per_session;
-        let round_delay = f64::from(crate::config::ALEPH_ROUND_DELAY_MS);
 
-        let mut delay_config = aleph_bft::default_delay_config();
-
-        delay_config.unit_creation_delay = Arc::new(move |round_index| {
+        let unit_delay = Box::new(move |round_index: u16| {
             let delay = if round_index == 0 {
                 0.0
             } else {
-                round_delay
-                    * BASE.powf(round_index.saturating_sub(rounds_per_session as usize) as f64)
+                ROUND_DELAY_MS
+                    * BASE.powf(round_index.saturating_sub(rounds_per_session) as f64)
                     * rand::thread_rng().gen_range(0.5..=1.5)
             };
 
             Duration::from_millis(delay.round() as u64)
         });
 
-        let config = aleph_bft::create_config(
-            self.num_peers().total().into(),
-            self.identity().to_usize().into(),
-            session_index,
-            self.cfg
-                .consensus
-                .aleph_rounds_per_session
-                .checked_add(EXP_SLOWDOWN_ROUNDS)
-                .expect("Rounds per session exceed maximum of u16::Max - EXP_SLOWDOWN_ROUNDS"),
-            delay_config,
-            Duration::from_hours(87600),
-        )
-        .expect("The exponential slowdown exceeds 10 years");
-
-        // we can use an unbounded channel here since the number and size of units
-        // ordered in a single aleph session is bounded as described above
-        let (unit_data_sender, unit_data_receiver) = async_channel::unbounded();
-        let (terminator_sender, terminator_receiver) = futures::channel::oneshot::channel();
-
-        // Create channels for P2P session sync
+        let (ordered_sender, ordered_receiver) =
+            async_channel::unbounded::<(AlephRound, PeerId, ConsensusItem)>();
         let (signed_outcomes_sender, signed_outcomes_receiver) = async_channel::unbounded();
         let (signatures_sender, signatures_receiver) = async_channel::unbounded();
 
-        let aleph_handle = tokio::spawn(aleph_bft::run_session(
-            config,
-            aleph_bft::LocalIO::new(
-                DataProvider::new(self.submission_receiver.clone()),
-                FinalizationHandler::new(unit_data_sender),
-                BackupWriter::new(self.db.clone()).await,
-                BackupReader::new(self.db.clone()),
-            ),
-            Network::new(
-                connections.clone(),
-                signed_outcomes_sender,
-                signatures_sender,
-                self.db.clone(),
-            ),
-            Keychain::new(&self.cfg),
-            Spawner::new(self.task_group.make_subgroup()),
-            aleph_bft::Terminator::create_root(terminator_receiver, "Terminator"),
+        let network = Network::new(
+            connections.clone(),
+            signed_outcomes_sender,
+            signatures_sender,
+            self.db.clone(),
+        )
+        .into_dyn();
+
+        let backup = Arc::new(RedbBackup::new(self.db.clone()));
+
+        let aleph_handle = tokio::spawn(run_aleph(
+            self.identity(),
+            AlephGraph::new(self.num_peers(), session_index),
+            build_keychain(&self.cfg),
+            network,
+            backup,
+            DataProvider::new(self.submission_receiver.clone()),
+            ordered_sender,
+            unit_delay,
         ));
 
         let signed_session_outcome = self
             .complete_signed_session_outcome(
                 session_index,
-                unit_data_receiver,
+                ordered_receiver,
                 signed_outcomes_receiver,
                 signatures_receiver,
                 connections,
@@ -198,30 +177,22 @@ impl ConsensusEngine {
 
         info!(target: LOG_CONSENSUS, ?session_index, "Terminating Aleph BFT session");
 
-        // We can terminate the session instead of waiting for other peers to complete
-        // it since they can always download the signed session outcome from us
-        terminator_sender.send(()).ok();
+        // The engine has no internal stopping condition; abort it now that
+        // we hold the signed outcome — peers that still need it will fetch
+        // via SessionIndex/SignedSessionOutcome.
+        aleph_handle.abort();
         aleph_handle.await.ok();
 
-        // This method removes the backup of the current session from the database
-        // and therefore has to be called after we have waited for the session to
-        // shut down, or we risk write-write conflicts with the UnitSaver
         self.complete_session(session_index, signed_session_outcome)
             .await;
 
         Some(())
     }
 
-    async fn is_recovery(&self) -> bool {
-        self.db
-            .begin_read()
-            .iter(&ALEPH_UNITS, |r| r.next().is_some())
-    }
-
     pub async fn complete_signed_session_outcome(
         &self,
         session_index: u64,
-        ordered_unit_receiver: Receiver<OrderedUnit>,
+        ordered_receiver: Receiver<(AlephRound, PeerId, ConsensusItem)>,
         signed_outcomes_receiver: Receiver<(PeerId, SignedSessionOutcome)>,
         signatures_receiver: Receiver<(PeerId, schnorr::Signature)>,
         connections: ReconnectP2PConnections<P2PMessage>,
@@ -244,10 +215,10 @@ impl ConsensusEngine {
         // session outcome is obtained from our peers
         loop {
             tokio::select! {
-                result = ordered_unit_receiver.recv() => {
-                    let ordered_unit = result.ok()?;
+                result = ordered_receiver.recv() => {
+                    let (round, creator, item) = result.ok()?;
 
-                    if ordered_unit.round >= self.cfg.consensus.aleph_rounds_per_session {
+                    if round >= self.cfg.consensus.aleph_rounds_per_session {
                         info!(
                             target: LOG_CONSENSUS,
                             session_index,
@@ -256,30 +227,11 @@ impl ConsensusEngine {
                         break;
                     }
 
-                    if let Some(UnitData(bytes)) = ordered_unit.data {
-                        match Vec::<ConsensusItem>::consensus_decode(&bytes) {
-                            Ok(items) => {
-                                for item in items {
-                                    if let Ok(()) = self.process_consensus_item(
-                                        session_index,
-                                        item_index,
-                                        item.clone(),
-                                        ordered_unit.creator
-                                    ).await {
-                                        item_index += 1;
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                error!(
-                                    target: LOG_CONSENSUS,
-                                    session_index,
-                                    peer = %ordered_unit.creator,
-                                    err = %err,
-                                    "Failed to decode consensus items from peer"
-                                );
-                            }
-                        }
+                    if let Ok(()) = self
+                        .process_consensus_item(session_index, item_index, item, creator)
+                        .await
+                    {
+                        item_index += 1;
                     }
                 },
                 result = signed_outcomes_receiver.recv() => {
@@ -371,9 +323,11 @@ impl ConsensusEngine {
             "Signing session header..."
         );
 
-        let keychain = Keychain::new(&self.cfg);
+        let keychain = build_keychain(&self.cfg);
 
-        let our_signature = keychain.sign_schnorr(&header);
+        let header_hash = header.consensus_hash::<sha256::Hash>();
+
+        let our_signature = keychain.sign(&header_hash);
 
         let mut signatures = BTreeMap::from_iter([(self.identity(), our_signature)]);
 
@@ -387,7 +341,7 @@ impl ConsensusEngine {
                 result = signatures_receiver.recv() => {
                     let (peer_id, signature) = result.ok()?;
 
-                    if keychain.verify_schnorr(&header, &signature, peer_id) {
+                    if keychain.verify(&header_hash, &signature, peer_id) {
                         signatures.insert(peer_id, signature);
 
                         info!(
@@ -477,13 +431,16 @@ impl ConsensusEngine {
             return false;
         }
 
-        let keychain = Keychain::new(&self.cfg);
-        let header = outcome.session_outcome.header(session_index);
+        let keychain = build_keychain(&self.cfg);
+        let header_hash = outcome
+            .session_outcome
+            .header(session_index)
+            .consensus_hash::<sha256::Hash>();
 
         outcome
             .signatures
             .iter()
-            .all(|(signer_id, sig)| keychain.verify_schnorr(&header, sig, *signer_id))
+            .all(|(signer_id, sig)| keychain.verify(&header_hash, sig, *signer_id))
     }
 
     pub async fn pending_accepted_items(&self) -> Vec<AcceptedItem> {
@@ -499,8 +456,8 @@ impl ConsensusEngine {
     ) {
         let tx = self.db.begin_write();
 
-        tx.as_ref().delete_table(&ALEPH_UNITS);
         tx.as_ref().delete_table(&ACCEPTED_ITEM);
+        tx.as_ref().delete_table(&ALEPH_UNITS);
 
         assert!(
             tx.insert(
@@ -638,4 +595,17 @@ pub async fn get_finished_session_count_static(tx: &ReadTransaction) -> u64 {
     tx.iter(&SIGNED_SESSION_OUTCOME, |r| {
         r.next_back().map_or(0, |(k, _)| k + 1)
     })
+}
+
+fn build_keychain(cfg: &ServerConfig) -> AlephKeychain {
+    let keypair = cfg.private.broadcast_secret_key.keypair(SECP256K1);
+
+    let pubkeys = cfg
+        .consensus
+        .peers
+        .iter()
+        .map(|(id, ep)| (*id, ep.broadcast_pk.x_only_public_key().0))
+        .collect();
+
+    AlephKeychain::new(keypair, pubkeys)
 }

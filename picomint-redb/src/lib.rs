@@ -38,8 +38,8 @@ use tokio::sync::Notify;
 /// ```
 #[macro_export]
 macro_rules! consensus_value {
-    ($ty:ty) => {
-        impl $crate::redb::Value for $ty {
+    ([$($g:tt)*] $ty:ty) => {
+        impl<$($g)*> $crate::redb::Value for $ty {
             type SelfType<'a>
                 = $ty
             where
@@ -73,6 +73,9 @@ macro_rules! consensus_value {
                 $crate::redb::TypeName::new(concat!("picomint::", stringify!($ty)))
             }
         }
+    };
+    ($ty:ty) => {
+        $crate::consensus_value!([] $ty);
     };
 }
 

@@ -36,10 +36,6 @@ pub mod setup;
 /// How many concurrent Iroh API connections the server will accept.
 pub const MAX_CLIENT_CONNECTIONS: u32 = 1000;
 
-/// AlephBFT round delay (ms). Byzantine-fault-only; the ordering floor is
-/// dominated by network latency in practice.
-pub const ALEPH_ROUND_DELAY_MS: u16 = 50;
-
 /// AlephBFT rounds per session. Controls session duration (3 min prod / 10 s
 /// regtest).
 const DEFAULT_ALEPH_ROUNDS_PER_SESSION: u16 = 3600;
