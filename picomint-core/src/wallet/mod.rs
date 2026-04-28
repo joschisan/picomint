@@ -102,7 +102,7 @@ pub enum WalletConsensusItem {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct WalletInput {
     pub output_index: u64,
-    pub tweak: PublicKey,
+    pub tweak: XOnlyPublicKey,
     pub fee: bitcoin::Amount,
 }
 

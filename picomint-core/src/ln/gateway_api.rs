@@ -4,8 +4,8 @@
 
 use std::ops::Add;
 
-use bitcoin::secp256k1::PublicKey;
 use bitcoin::secp256k1::schnorr::Signature;
+use bitcoin::secp256k1::{PublicKey, XOnlyPublicKey};
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
@@ -41,7 +41,7 @@ pub struct GatewayInfo {
     pub lightning_public_key: PublicKey,
     /// The public key of the gateway's client module. Used to claim or
     /// cancel outgoing contracts and refund incoming contracts.
-    pub module_public_key: PublicKey,
+    pub module_public_key: XOnlyPublicKey,
     /// Fee the gateway charges on outgoing payments. Enforced exactly —
     /// the sender's contract must pay `send_fee` on top of the invoice
     /// amount for direct swaps, and `send_fee + ln_fee` for external LN.

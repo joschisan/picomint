@@ -604,7 +604,7 @@ fn build_keychain(cfg: &ServerConfig) -> AlephKeychain {
         .consensus
         .peers
         .iter()
-        .map(|(id, ep)| (*id, ep.broadcast_pk.x_only_public_key().0))
+        .map(|(id, ep)| (*id, ep.broadcast_pk))
         .collect();
 
     AlephKeychain::new(keypair, pubkeys)

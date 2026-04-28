@@ -21,9 +21,9 @@ pub const ALEPH_BFT_UNIT_BYTE_LIMIT: usize = 50_000;
 pub struct PeerEndpoint {
     /// The peer's iroh API public key (QUIC transport identity).
     pub iroh_pk: iroh_base::PublicKey,
-    /// The peer's secp256k1 public key used to authenticate atomic-broadcast
-    /// messages.
-    pub broadcast_pk: secp256k1::PublicKey,
+    /// The peer's x-only secp256k1 public key used to authenticate
+    /// atomic-broadcast messages.
+    pub broadcast_pk: secp256k1::XOnlyPublicKey,
     /// The peer's name.
     pub name: String,
 }

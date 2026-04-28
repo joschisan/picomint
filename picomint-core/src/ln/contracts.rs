@@ -3,7 +3,7 @@ use bitcoin::hashes::sha256;
 use bitcoin::secp256k1;
 use picomint_encoding::{Decodable, Encodable};
 use secp256k1::schnorr::Signature;
-use secp256k1::{Message, PublicKey, SecretKey};
+use secp256k1::{Message, PublicKey, SecretKey, XOnlyPublicKey};
 use serde::{Deserialize, Serialize};
 use tpe::{
     AggregateDecryptionKey, AggregatePublicKey, CipherText, DecryptionKeyShare, PublicKeyShare,
@@ -34,8 +34,8 @@ pub struct Commitment {
     pub payment_image: PaymentImage,
     pub amount: Amount,
     pub expiration: u64,
-    pub claim_pk: PublicKey,
-    pub refund_pk: PublicKey,
+    pub claim_pk: XOnlyPublicKey,
+    pub refund_pk: XOnlyPublicKey,
     pub ephemeral_pk: PublicKey,
 }
 
@@ -48,8 +48,8 @@ impl IncomingContract {
         payment_image: PaymentImage,
         amount: Amount,
         expiration: u64,
-        claim_pk: PublicKey,
-        refund_pk: PublicKey,
+        claim_pk: XOnlyPublicKey,
+        refund_pk: XOnlyPublicKey,
         ephemeral_pk: PublicKey,
     ) -> Self {
         let commitment = Commitment {
@@ -135,8 +135,8 @@ pub struct OutgoingContract {
     pub payment_image: PaymentImage,
     pub amount: Amount,
     pub expiration: u64,
-    pub claim_pk: PublicKey,
-    pub refund_pk: PublicKey,
+    pub claim_pk: XOnlyPublicKey,
+    pub refund_pk: XOnlyPublicKey,
     pub tweak: [u8; 16],
 }
 
@@ -157,11 +157,7 @@ impl OutgoingContract {
 
     pub fn verify_forfeit_signature(&self, signature: &Signature) -> bool {
         secp256k1::global::SECP256K1
-            .verify_schnorr(
-                signature,
-                &self.forfeit_message(),
-                &self.claim_pk.x_only_public_key().0,
-            )
+            .verify_schnorr(signature, &self.forfeit_message(), &self.claim_pk)
             .is_ok()
     }
 
@@ -177,7 +173,7 @@ impl OutgoingContract {
             .verify_schnorr(
                 signature,
                 &Message::from_digest(*message.as_ref()),
-                &self.refund_pk.x_only_public_key().0,
+                &self.refund_pk,
             )
             .is_ok()
     }

@@ -176,7 +176,7 @@ impl AppState {
 
         Ok(GatewayInfo {
             lightning_public_key: self.node.node_id(),
-            module_public_key: client.gw().keypair.public_key(),
+            module_public_key: client.gw().keypair.x_only_public_key().0,
             send_fee: self.send_fee,
             receive_fee: self.receive_fee,
             ln_fee: self.ln_fee,
@@ -200,7 +200,7 @@ impl AppState {
         // --- Verify the request ---------------------------------------------
 
         ensure!(
-            payload.contract.claim_pk == f1_client.gw().keypair.public_key(),
+            payload.contract.claim_pk == f1_client.gw().keypair.x_only_public_key().0,
             "The outgoing contract is keyed to another gateway"
         );
 

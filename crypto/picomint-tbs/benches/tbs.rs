@@ -45,7 +45,7 @@ fn eval_polynomial(coefficients: &[Scalar], x: &Scalar) -> Scalar {
 fn bench_blinding(c: &mut Criterion) {
     c.bench_function("blinding", |b| {
         b.iter(|| {
-            let msg = Message::from_public_key([7_u8; 33]);
+            let msg = Message::from_public_key([7_u8; 32]);
             let bkey = BlindingKey(Scalar::random(OsRng));
             blind_message(msg, bkey)
         })
@@ -53,7 +53,7 @@ fn bench_blinding(c: &mut Criterion) {
 }
 
 fn bench_signing(c: &mut Criterion) {
-    let msg = Message::from_public_key([7_u8; 33]);
+    let msg = Message::from_public_key([7_u8; 32]);
     let bkey = BlindingKey(Scalar::random(OsRng));
     let bmsg = blind_message(msg, bkey);
     let (_pk, _pks, sks) = dealer_keygen(4, 5);
@@ -62,7 +62,7 @@ fn bench_signing(c: &mut Criterion) {
 }
 
 fn bench_aggregate(c: &mut Criterion) {
-    let msg = Message::from_public_key([7_u8; 33]);
+    let msg = Message::from_public_key([7_u8; 32]);
     let bkey = BlindingKey(Scalar::random(OsRng));
     let bmsg = blind_message(msg, bkey);
     let (_pk, _pks, sks) = dealer_keygen(4, 5);
@@ -77,7 +77,7 @@ fn bench_aggregate(c: &mut Criterion) {
 }
 
 fn bench_unblind(c: &mut Criterion) {
-    let msg = Message::from_public_key([7_u8; 33]);
+    let msg = Message::from_public_key([7_u8; 32]);
     let bkey = BlindingKey(Scalar::random(OsRng));
     let bmsg = blind_message(msg, bkey);
     let (_pk, _pks, sks) = dealer_keygen(4, 5);
@@ -93,7 +93,7 @@ fn bench_unblind(c: &mut Criterion) {
 }
 
 fn bench_verify(c: &mut Criterion) {
-    let msg = Message::from_public_key([7_u8; 33]);
+    let msg = Message::from_public_key([7_u8; 32]);
     let bkey = BlindingKey(Scalar::random(OsRng));
     let bmsg = blind_message(msg, bkey);
     let (pk, _pks, sks) = dealer_keygen(4, 5);
@@ -110,7 +110,7 @@ fn bench_verify(c: &mut Criterion) {
 }
 
 fn bench_decode_signature(c: &mut Criterion) {
-    let msg = Message::from_public_key([7_u8; 33]);
+    let msg = Message::from_public_key([7_u8; 32]);
     let bkey = BlindingKey(Scalar::random(OsRng));
     let bmsg = blind_message(msg, bkey);
     let (_pk, _pks, sks) = dealer_keygen(4, 5);
