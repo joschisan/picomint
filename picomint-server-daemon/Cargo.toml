@@ -19,7 +19,6 @@ path = "src/lib.rs"
 default = []
 
 [dependencies]
-aleph-bft = { workspace = true }
 anyhow = { workspace = true }
 async-channel = { workspace = true }
 async-trait = { workspace = true }
@@ -35,7 +34,7 @@ iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false, features = ["key"] }
 maud = { workspace = true }
 miniscript = { workspace = true }
-parity-scale-codec = { workspace = true }
+picomint-aleph-bft = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-bitcoin-rpc = { workspace = true }
 picomint-core = { workspace = true }

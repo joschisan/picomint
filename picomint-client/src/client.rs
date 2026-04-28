@@ -285,7 +285,7 @@ impl Client {
     /// Returns the guardian public key set from the client config.
     pub async fn get_guardian_public_keys_blocking(
         &self,
-    ) -> BTreeMap<PeerId, picomint_core::secp256k1::PublicKey> {
+    ) -> BTreeMap<PeerId, picomint_core::secp256k1::XOnlyPublicKey> {
         self.config()
             .await
             .peers

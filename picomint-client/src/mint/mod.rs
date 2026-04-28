@@ -26,7 +26,7 @@ use picomint_core::core::OperationId;
 use picomint_core::mint::config::{MintConfigConsensus, client_denominations};
 use picomint_core::mint::{Denomination, MintInput, Note, RecoveryItem};
 use picomint_core::secp256k1::rand::{Rng, thread_rng};
-use picomint_core::secp256k1::{Keypair, PublicKey};
+use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_core::task::TaskGroup;
 use picomint_core::{Amount, PeerId, TransactionId, wire};
 use picomint_encoding::{Decodable, Encodable};
@@ -62,8 +62,8 @@ impl SpendableNote {
 }
 
 impl SpendableNote {
-    fn nonce(&self) -> PublicKey {
-        self.keypair.public_key()
+    fn nonce(&self) -> XOnlyPublicKey {
+        self.keypair.x_only_public_key().0
     }
 
     fn note(&self) -> Note {

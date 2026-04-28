@@ -1,0 +1,32 @@
+[package]
+authors = { workspace = true }
+description = "Minimal AlephBFT-style atomic broadcast with consistent-broadcast unit dissemination"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-aleph-bft"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[lib]
+name = "picomint_aleph_bft"
+path = "src/lib.rs"
+
+[dependencies]
+async-channel = { workspace = true }
+async-trait = { workspace = true }
+bitcoin = { workspace = true }
+picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
+picomint-redb = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true, features = ["macros", "time"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

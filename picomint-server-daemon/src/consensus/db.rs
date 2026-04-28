@@ -1,5 +1,7 @@
-use picomint_core::TransactionId;
+use picomint_aleph_bft::{Entry, Round};
 use picomint_core::session_outcome::{AcceptedItem, SignedSessionOutcome};
+use picomint_core::transaction::ConsensusItem;
+use picomint_core::{PeerId, TransactionId};
 use picomint_redb::table;
 
 table!(
@@ -20,8 +22,12 @@ table!(
     "signed-session-outcome",
 );
 
+// One row per `(round, creator)` slot holding the `Entry` for that slot.
+// Overwritten in place as the entry's signature set grows; iterating in
+// natural key order yields `(round, peer)` lex order — the order the
+// engine expects for restore.
 table!(
     ALEPH_UNITS,
-    u64 => Vec<u8>,
+    (Round, PeerId) => Entry<ConsensusItem>,
     "aleph-units",
 );

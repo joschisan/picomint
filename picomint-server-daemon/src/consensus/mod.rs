@@ -1,4 +1,4 @@
-pub mod aleph_bft;
+pub mod aleph;
 pub mod api;
 pub mod db;
 pub mod engine;

@@ -1,6 +1,6 @@
 use bitcoin_hashes::{Hash, hash160, sha256};
 use picomint_core::mint::{Denomination, MintOutput, nonce_message};
-use picomint_core::secp256k1::{Keypair, PublicKey};
+use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedMessage, BlindedSignature, BlindingKey, blind_message, unblind_signature};
 
@@ -44,7 +44,10 @@ impl NoteIssuanceRequest {
     }
 
     pub fn blinded_message(&self) -> BlindedMessage {
-        blind_message(nonce_message(self.keypair.public_key()), self.blinding_key)
+        blind_message(
+            nonce_message(self.keypair.x_only_public_key().0),
+            self.blinding_key,
+        )
     }
 }
 
@@ -89,8 +92,8 @@ fn keypair(secret: &OutputSecret) -> Keypair {
         .note_nonce_keypair(secret.denomination, secret.tweak)
 }
 
-pub fn nonce(secret: &OutputSecret) -> PublicKey {
-    keypair(secret).public_key()
+pub fn nonce(secret: &OutputSecret) -> XOnlyPublicKey {
+    keypair(secret).x_only_public_key().0
 }
 
 fn blinding_key(secret: &OutputSecret) -> BlindingKey {

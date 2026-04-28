@@ -171,7 +171,9 @@ async fn create_contract_and_fetch_invoice(
 
     let claim_pk = recipient_pk
         .mul_tweak(secp256k1::SECP256K1, &claim_tweak)
-        .expect("Tweak is valid");
+        .expect("Tweak is valid")
+        .x_only_public_key()
+        .0;
 
     let (gateway_info, gateway) = select_gateway(gateways, federation_id).await?;
 

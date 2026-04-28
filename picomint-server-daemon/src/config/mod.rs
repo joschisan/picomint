@@ -1,11 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
 use bitcoin::Network;
 use dkg::DkgHandle;
-use futures::future::select_all;
 use picomint_core::config::ConsensusConfig;
 pub use picomint_core::config::{FederationId, PeerEndpoint};
 use picomint_core::invite_code::InviteCode;
@@ -16,9 +15,8 @@ use picomint_core::wallet::config::{WalletConfig, WalletConfigPrivate};
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
 use picomint_logging::LOG_NET_PEER_DKG;
 use rand::rngs::OsRng;
-use secp256k1::{PublicKey, Secp256k1, SecretKey};
+use secp256k1::{Secp256k1, SecretKey, XOnlyPublicKey};
 use serde::{Deserialize, Serialize};
-use tokio::select;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 
@@ -35,10 +33,6 @@ pub mod setup;
 
 /// How many concurrent Iroh API connections the server will accept.
 pub const MAX_CLIENT_CONNECTIONS: u32 = 1000;
-
-/// AlephBFT round delay (ms). Byzantine-fault-only; the ordering floor is
-/// dominated by network latency in practice.
-pub const ALEPH_ROUND_DELAY_MS: u16 = 50;
 
 /// AlephBFT rounds per session. Controls session duration (3 min prod / 10 s
 /// regtest).
@@ -126,7 +120,7 @@ impl ServerConfig {
     pub fn from(
         params: ConfigGenParams,
         identity: PeerId,
-        broadcast_public_keys: BTreeMap<PeerId, PublicKey>,
+        broadcast_public_keys: BTreeMap<PeerId, XOnlyPublicKey>,
         broadcast_secret_key: SecretKey,
         mint: MintConfig,
         ln: picomint_core::ln::config::LightningConfig,
@@ -205,7 +199,9 @@ impl ServerConfig {
         let my_public_key = self
             .private
             .broadcast_secret_key
-            .public_key(&Secp256k1::new());
+            .public_key(&Secp256k1::new())
+            .x_only_public_key()
+            .0;
 
         if Some(my_public_key) != peers.get(identity).map(|p| p.broadcast_pk) {
             bail!("Broadcast secret key doesn't match corresponding public key");
@@ -228,7 +224,7 @@ impl ServerConfig {
     pub async fn distributed_gen(
         params: &ConfigGenParams,
         connections: ReconnectP2PConnections<P2PMessage>,
-        mut p2p_status_receivers: P2PStatusReceivers,
+        p2p_status_receivers: P2PStatusReceivers,
     ) -> anyhow::Result<Self> {
         info!(
             target: LOG_NET_PEER_DKG,
@@ -236,22 +232,14 @@ impl ServerConfig {
         );
 
         loop {
-            let mut pending_connection_receivers: Vec<_> = p2p_status_receivers
-                .iter_mut()
-                .filter_map(|(p, r)| {
-                    r.mark_unchanged();
-                    r.borrow().is_none().then_some((*p, r.clone()))
-                })
+            let disconnected_peers: BTreeSet<PeerId> = p2p_status_receivers
+                .iter()
+                .filter_map(|(p, r)| r.borrow().is_none().then_some(*p))
                 .collect();
 
-            if pending_connection_receivers.is_empty() {
+            if disconnected_peers.is_empty() {
                 break;
             }
-
-            let disconnected_peers = pending_connection_receivers
-                .iter()
-                .map(|entry| entry.0)
-                .collect::<Vec<PeerId>>();
 
             info!(
                 target: LOG_NET_PEER_DKG,
@@ -259,10 +247,7 @@ impl ServerConfig {
                 "Waiting for all p2p connections to open..."
             );
 
-            select! {
-                _ = select_all(pending_connection_receivers.iter_mut().map(|r| Box::pin(r.1.changed()))) => {}
-                () = sleep(Duration::from_secs(10)) => {}
-            }
+            sleep(Duration::from_secs(3)).await;
         }
 
         let checksum = params.peers.consensus_hash_sha256();
@@ -313,6 +298,7 @@ impl ServerConfig {
         );
 
         let (broadcast_sk, broadcast_pk) = secp256k1::generate_keypair(&mut OsRng);
+        let broadcast_pk = broadcast_pk.x_only_public_key().0;
 
         let broadcast_public_keys = handle.exchange_encodable(broadcast_pk).await?;
 
