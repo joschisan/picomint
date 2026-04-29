@@ -7,7 +7,7 @@ use tbs::{BlindedMessage, Message};
 use thiserror::Error;
 
 use crate::Amount;
-use crate::secp256k1::PublicKey;
+use crate::secp256k1::XOnlyPublicKey;
 
 pub mod config;
 pub mod methods;
@@ -58,7 +58,7 @@ pub struct MintOutputBlindSignature(pub tbs::BlindedSignature);
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct Note {
     pub denomination: Denomination,
-    pub nonce: PublicKey,
+    pub nonce: XOnlyPublicKey,
     pub signature: tbs::Signature,
 }
 
@@ -105,7 +105,7 @@ pub fn verify_note(note: Note, pk: tbs::AggregatePublicKey) -> bool {
     tbs::verify(nonce_message(note.nonce), note.signature, pk)
 }
 
-pub fn nonce_message(nonce: PublicKey) -> Message {
+pub fn nonce_message(nonce: XOnlyPublicKey) -> Message {
     tbs::Message::from_public_key(nonce.serialize())
 }
 

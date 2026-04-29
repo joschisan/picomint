@@ -33,29 +33,6 @@ pub enum QueryStep<R> {
     Failure(ServerError),
 }
 
-/// Returns when we obtain the first valid responses. RPC call errors or
-/// invalid responses are not retried.
-pub struct FilterMap<R, T> {
-    filter_map: Box<dyn Fn(R) -> ServerResult<T> + Send + Sync>,
-}
-
-impl<R, T> FilterMap<R, T> {
-    pub fn new(filter_map: impl Fn(R) -> ServerResult<T> + Send + Sync + 'static) -> Self {
-        Self {
-            filter_map: Box::new(filter_map),
-        }
-    }
-}
-
-impl<R, T> QueryStrategy<R, T> for FilterMap<R, T> {
-    fn process(&mut self, _peer: PeerId, response: R) -> QueryStep<T> {
-        match (self.filter_map)(response) {
-            Ok(value) => QueryStep::Success(value),
-            Err(e) => QueryStep::Failure(e),
-        }
-    }
-}
-
 /// Returns when we obtain a threshold of valid responses. RPC call errors or
 /// invalid responses are not retried.
 pub struct FilterMapThreshold<R, T> {

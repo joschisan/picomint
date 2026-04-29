@@ -1,24 +1,23 @@
-use std::collections::BTreeMap;
-
 use iroh_base::PublicKey;
 use serde::{Deserialize, Serialize};
 
-use crate::PeerId;
 use crate::config::FederationId;
 use picomint_encoding::{Decodable, Encodable};
 
 /// Everything a client needs to download the federation config and bootstrap.
+/// Carries the federation id (cross-checked against the downloaded config)
+/// and the iroh public key of one bootstrap peer.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct InviteCode {
     pub federation_id: FederationId,
-    pub peers: BTreeMap<PeerId, PublicKey>,
+    pub node_id: PublicKey,
 }
 
 impl InviteCode {
-    pub fn new(node_id: PublicKey, peer: PeerId, federation_id: FederationId) -> Self {
+    pub fn new(node_id: PublicKey, federation_id: FederationId) -> Self {
         Self {
             federation_id,
-            peers: BTreeMap::from([(peer, node_id)]),
+            node_id,
         }
     }
 }

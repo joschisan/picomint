@@ -49,7 +49,7 @@ fn test_roundtrip() {
     const PEERS: u64 = 4;
     const THRESHOLD: u64 = 3;
 
-    let message = Message::from_public_key([7_u8; 33]);
+    let message = Message::from_public_key([7_u8; 32]);
     let blinding_key = BlindingKey(Scalar::random(OsRng));
 
     let b_message = blind_message(message, blinding_key);

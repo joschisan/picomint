@@ -12,7 +12,7 @@ use iroh::Endpoint;
 use iroh::address_lookup::MdnsAddressLookup;
 use iroh::endpoint::presets::N0;
 use picomint_client::{Client, Mnemonic};
-use picomint_core::invite_code::InviteCode;
+use picomint_core::invite::InviteCode;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::block_in_place;

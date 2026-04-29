@@ -221,7 +221,11 @@ impl WalletClientModule {
     fn derive_address(&self, index: u64) -> Address {
         descriptor(
             &self.cfg.bitcoin_pks,
-            &self.derive_tweak(index).public_key().consensus_hash(),
+            &self
+                .derive_tweak(index)
+                .x_only_public_key()
+                .0
+                .consensus_hash(),
         )
         .address(self.client_ctx.network())
     }
@@ -256,7 +260,7 @@ impl WalletClientModule {
             input: wire::Input::Wallet(WalletInput {
                 output_index,
                 fee,
-                tweak: self.derive_tweak(address_index).public_key(),
+                tweak: self.derive_tweak(address_index).x_only_public_key().0,
             }),
             keypair: self.derive_tweak(address_index),
             amount: Amount::from_sats((value - fee).to_sat()),

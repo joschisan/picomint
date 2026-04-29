@@ -7,7 +7,7 @@ use iroh::endpoint::presets::N0;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
-use picomint_core::invite_code::InviteCode;
+use picomint_core::invite::InviteCode;
 use picomint_redb::Database;
 
 use crate::db::{CLIENT_CONFIG, ROOT_ENTROPY};

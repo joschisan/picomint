@@ -733,7 +733,7 @@ async fn mock_gateway_info(Json(_federation_id): Json<FederationId>) -> Json<Opt
     };
     Json(Some(GatewayInfo {
         lightning_public_key: gateway_keypair().public_key(),
-        module_public_key: gateway_keypair().public_key(),
+        module_public_key: gateway_keypair().x_only_public_key().0,
         send_fee: tx_fee,
         receive_fee: tx_fee,
         ln_fee: tx_fee,

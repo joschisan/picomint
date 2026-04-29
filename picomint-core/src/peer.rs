@@ -45,43 +45,52 @@ impl From<PeerId> for u8 {
     }
 }
 
-/// The number of guardians in a federation.
+/// Allowed federation sizes — every entry is `3f + 1` for some f ≥ 1.
+/// `From<usize>` rejects anything outside this list.
+pub const ALLOWED_FEDERATION_SIZES: &[usize] = &[4, 7, 10, 13, 16, 19];
+
+/// The size of a federation, parameterized by `f` (the maximum tolerated
+/// number of byzantine peers). picomint only supports federations of
+/// size `3f + 1`, so storing `f` lets every derived quantity drop out
+/// of one multiplication or addition with no rounding involved.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NumPeers(usize);
 
 impl NumPeers {
     /// Returns an iterator over all peer IDs in the federation.
     pub fn peer_ids(self) -> impl Iterator<Item = PeerId> {
-        (0u8..(self.0 as u8)).map(PeerId)
+        (0u8..(self.total() as u8)).map(PeerId)
     }
 
-    /// Returns the total number of guardians in the federation.
+    /// Total number of guardians: `3f + 1`.
     pub fn total(self) -> usize {
+        3 * self.0 + 1
+    }
+
+    /// Maximum tolerated byzantine peers: `f`.
+    pub fn max_evil(self) -> usize {
         self.0
     }
 
-    /// Returns the number of guardians that can be evil without disrupting the
-    /// federation.
-    pub fn max_evil(self) -> usize {
-        (self.total() - 1) / 3
-    }
-
-    /// Returns the number of guardians to select such that at least one is
-    /// honest (assuming the federation is not compromised).
+    /// Smallest set guaranteed to contain at least one honest peer: `f + 1`.
     pub fn one_honest(self) -> usize {
-        self.max_evil() + 1
+        self.0 + 1
     }
 
-    /// Returns the number of guardians required to achieve consensus and
-    /// produce valid signatures.
+    /// Consensus / signature threshold: `2f + 1`.
     pub fn threshold(self) -> usize {
-        self.total() - self.max_evil()
+        2 * self.0 + 1
     }
 }
 
 impl From<usize> for NumPeers {
-    fn from(value: usize) -> Self {
-        Self(value)
+    fn from(total: usize) -> Self {
+        assert!(
+            ALLOWED_FEDERATION_SIZES.contains(&total),
+            "federation size of {total} is not supported",
+        );
+
+        Self(total / 3)
     }
 }
 
@@ -90,35 +99,14 @@ pub trait NumPeersExt {
     fn to_num_peers(&self) -> NumPeers;
 }
 
-impl<T> From<T> for NumPeers
-where
-    T: NumPeersExt,
-{
-    fn from(value: T) -> Self {
-        value.to_num_peers()
-    }
-}
-
 impl<T> NumPeersExt for BTreeMap<PeerId, T> {
     fn to_num_peers(&self) -> NumPeers {
-        NumPeers(self.len())
-    }
-}
-
-impl NumPeersExt for &[PeerId] {
-    fn to_num_peers(&self) -> NumPeers {
-        NumPeers(self.len())
-    }
-}
-
-impl NumPeersExt for Vec<PeerId> {
-    fn to_num_peers(&self) -> NumPeers {
-        NumPeers(self.len())
+        NumPeers::from(self.len())
     }
 }
 
 impl NumPeersExt for BTreeSet<PeerId> {
     fn to_num_peers(&self) -> NumPeers {
-        NumPeers(self.len())
+        NumPeers::from(self.len())
     }
 }

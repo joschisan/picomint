@@ -207,17 +207,17 @@ mod tests {
 
     use crate::config::poly::{eval_poly_g2, g2};
     use group::Curve;
-    use picomint_core::{NumPeersExt, PeerId};
+    use picomint_core::{NumPeers, PeerId};
 
     use super::{DkgG2, DkgStepG2};
 
     #[test_log::test]
     fn test_dkg_g2() {
-        let peers = (0..7u8).map(PeerId::from).collect::<Vec<PeerId>>();
+        let num_peers = NumPeers::from(7);
 
-        let mut dkgs = peers
-            .iter()
-            .map(|peer| (*peer, DkgG2::new(peers.to_num_peers(), *peer)))
+        let mut dkgs = num_peers
+            .peer_ids()
+            .map(|peer| (peer, DkgG2::new(num_peers, peer)))
             .collect::<BTreeMap<PeerId, DkgG2>>();
 
         let mut steps = dkgs
@@ -227,16 +227,16 @@ mod tests {
 
         let mut keys = BTreeMap::new();
 
-        while keys.len() < peers.len() {
+        while keys.len() < num_peers.total() {
             match steps.pop_front().unwrap() {
                 (send_peer, DkgStepG2::Broadcast(message)) => {
-                    for receive_peer in peers.iter().filter(|p| **p != send_peer) {
+                    for receive_peer in num_peers.peer_ids().filter(|p| *p != send_peer) {
                         let step = dkgs
-                            .get_mut(receive_peer)
+                            .get_mut(&receive_peer)
                             .unwrap()
                             .step(send_peer, message.clone());
 
-                        steps.push_back((*receive_peer, step.unwrap()));
+                        steps.push_back((receive_peer, step.unwrap()));
                     }
                 }
                 (send_peer, DkgStepG2::Messages(messages)) => {

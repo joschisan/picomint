@@ -20,7 +20,7 @@ Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitco
 ### Crates
 - `picomint-core` — shared types, encoding, wire protocol, `ConsensusConfig`, and the per-module common types for `mint`/`wallet`/`ln`
 - `picomint-encoding` / `picomint-derive` — `Encodable`/`Decodable` traits and derive macros
-- `picomint-server-daemon` — federation guardian binary (consensus via AlephBFT); owns the concrete mint/wallet/ln server-side module code under `src/consensus/{mint,wallet,ln}/`
+- `picomint-server-daemon` — federation guardian binary (consensus via picomint-bft); owns the concrete mint/wallet/ln server-side module code under `src/consensus/{mint,wallet,ln}/`
 - `picomint-server-cli` / `picomint-server-cli-core` — admin CLI for the server daemon (HTTP-over-Unix-socket) + shared route/request types
 - `picomint-gateway-daemon` — Lightning gateway binary with embedded LDK node
 - `picomint-gateway-cli` / `picomint-gateway-cli-core` — admin CLI for the gateway daemon + shared route/request types

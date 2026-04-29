@@ -13,7 +13,7 @@ use picomint_encoding::{Decodable, Encodable};
 #[derive(Debug, PartialEq, Eq)]
 pub struct InputMeta {
     pub amount: TransactionItemAmounts,
-    pub pub_key: secp256k1::PublicKey,
+    pub pub_key: secp256k1::XOnlyPublicKey,
 }
 
 /// Information about the amount represented by an input or output.
