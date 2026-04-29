@@ -17,9 +17,14 @@ use crate::unit::{Round, Unit, UnitData};
 ///   entry (with the sigs we hold) to everyone. Refills sig deficits at
 ///   slots receivers already hold and seeds higher rounds at laggards.
 /// - **pull**: for every peer, send a `Request` for the lowest round
-///   where we don't yet have that peer's slot confirmed locally. Pulls
-///   in missing units one round at a time per peer.
-const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_millis(50);
+///   where we don't yet have that peer's slot confirmed locally.
+///
+/// Set to 1s — the steady-state pull is reactive: every fresh insert
+/// in `handle_unit` immediately fires a `Request` for the creator's
+/// *next* round, so most catch-up happens at insert time. This periodic
+/// loop is the safety net for cases the reactive trigger missed (slot
+/// we never had any unit for, or a dropped reactive request).
+const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Drive a single peer's growth indefinitely.
 ///
@@ -197,6 +202,17 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
 
         if let Some(entry) = self.graph.insert_unit(unit, sigs, &self.keychain) {
             self.send_entry(Recipient::Everyone, &entry);
+
+            // Eagerly pull the next slot for this creator. The
+            // periodic anti-entropy at 1s is just the safety net;
+            // most catch-up flows through this reactive request.
+            self.network.send(
+                Recipient::Everyone,
+                Message::Request {
+                    round: entry.unit().round + 1,
+                    creator: entry.unit().creator,
+                },
+            );
         }
     }
 
