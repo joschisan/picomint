@@ -1,26 +1,12 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
 
-use async_channel::{Receiver, Sender};
 use async_trait::async_trait;
+use picomint_core::PeerId;
 use picomint_core::secp256k1::schnorr;
-use picomint_core::{NumPeers, PeerId};
 use picomint_encoding::{Decodable, Encodable};
-use rand::Rng;
 
 use crate::unit::{Round, Unit, UnitData};
-
-/// Per-recipient probability of silently dropping a message in the mock
-/// network. Each unicast send and each fan-out leg of a broadcast rolls
-/// independently.
-const DROP_RATE: f64 = 0.05;
-
-/// Base one-way latency applied to every delivered message in the mock
-/// network. Each send adds `BASE_LATENCY` plus a uniform jitter in
-/// `[0, JITTER]` before the message lands in the recipient's inbox.
-const BASE_LATENCY: Duration = Duration::from_millis(25);
-const JITTER: Duration = Duration::from_millis(15);
 
 /// Wire messages between peers. The sender's `PeerId` is attached by the
 /// network layer; it is never carried in the payload.
@@ -94,98 +80,5 @@ pub trait INetwork<M>: Send + Sync + 'static {
         Self: Sized,
     {
         Arc::new(self)
-    }
-}
-
-/// Channel-backed mock network. Each peer holds one `MockChannel<D>`.
-/// Built via [`MockChannel::mesh`] for an N-peer fully-connected mesh;
-/// sends drop with probability `DROP_RATE` per recipient leg to simulate
-/// an unreliable network. Implements [`INetwork<Message<D>>`].
-pub struct MockChannel<D: UnitData> {
-    own_id: PeerId,
-    senders: BTreeMap<PeerId, Sender<(PeerId, Message<D>)>>,
-    rx: Receiver<(PeerId, Message<D>)>,
-}
-
-impl<D: UnitData> MockChannel<D> {
-    /// Build a fully-connected mesh of channels, one per peer in `n`.
-    pub fn mesh(n: NumPeers) -> BTreeMap<PeerId, MockChannel<D>> {
-        let mut receivers = BTreeMap::new();
-        let mut senders = BTreeMap::new();
-
-        for peer in n.peer_ids() {
-            let (tx, rx) = async_channel::unbounded();
-            senders.insert(peer, tx);
-            receivers.insert(peer, rx);
-        }
-
-        n.peer_ids()
-            .map(|own_id| {
-                let rx = receivers.remove(&own_id).expect("inserted above");
-                let channel = MockChannel {
-                    own_id,
-                    senders: senders.clone(),
-                    rx,
-                };
-                (own_id, channel)
-            })
-            .collect()
-    }
-}
-
-fn delayed_send<D: UnitData>(sender: Sender<(PeerId, Message<D>)>, from: PeerId, msg: Message<D>) {
-    let jitter = Duration::from_micros(rand::thread_rng().gen_range(0..=JITTER.as_micros() as u64));
-    let delay = BASE_LATENCY + jitter;
-
-    tokio::spawn(async move {
-        tokio::time::sleep(delay).await;
-        let _ = sender.try_send((from, msg));
-    });
-}
-
-#[async_trait]
-impl<D: UnitData> INetwork<Message<D>> for MockChannel<D> {
-    fn send(&self, recipient: Recipient, msg: Message<D>) {
-        match recipient {
-            Recipient::Everyone => {
-                for (peer, sender) in &self.senders {
-                    if *peer == self.own_id {
-                        continue;
-                    }
-
-                    if rand::random::<f64>() < DROP_RATE {
-                        continue;
-                    }
-
-                    delayed_send(sender.clone(), self.own_id, msg.clone());
-                }
-            }
-            Recipient::Peer(to) => {
-                assert_ne!(to, self.own_id, "MockChannel send must not target self");
-
-                let sender = self
-                    .senders
-                    .get(&to)
-                    .expect("recipient must be a known peer");
-
-                if rand::random::<f64>() < DROP_RATE {
-                    return;
-                }
-
-                delayed_send(sender.clone(), self.own_id, msg);
-            }
-        }
-    }
-
-    async fn receive(&self) -> Option<(PeerId, Message<D>)> {
-        self.rx.recv().await.ok()
-    }
-
-    async fn receive_from_peer(&self, _peer: PeerId) -> Option<Message<D>> {
-        unimplemented!(
-            "MockChannel multiplexes inbound traffic on a single receiver; \
-             per-peer reads are only meaningful for round-robin DKG, which \
-             picomint-bft doesn't have"
-        )
     }
 }

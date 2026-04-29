@@ -187,13 +187,13 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             return;
         }
 
-        // Splice in our co-sig before insertion. `insert_unit` merges
-        // every sig in the bundle into the slot, so adding ours here is
-        // equivalent to a separate cosign call — and it means a fresh
-        // insert immediately rebroadcasts our contribution alongside
-        // the rest of the bundle. Idempotent: if our sig is already
-        // there, this is a no-op replace with the same value.
-        sigs.insert(self.own_id, self.keychain.sign(&unit));
+        // Splice in our co-sig before insertion only when there's still
+        // room under the threshold — if the bundle already carries the
+        // full threshold, the slot would confirm regardless and adding
+        // our sig would just push the bundle past the cap on the wire.
+        if sigs.len() < self.graph.threshold() {
+            sigs.insert(self.own_id, self.keychain.sign(&unit));
+        }
 
         if let Some(entry) = self.graph.insert_unit(unit, sigs, &self.keychain) {
             self.send_entry(Recipient::Everyone, &entry);

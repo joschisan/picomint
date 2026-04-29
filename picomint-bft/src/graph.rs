@@ -30,11 +30,8 @@ pub struct Entry<D: UnitData> {
 picomint_redb::consensus_value!([D: UnitData] Entry<D>);
 
 impl<D: UnitData> Entry<D> {
-    fn new(unit: Unit<D>) -> Self {
-        Self {
-            unit,
-            sigs: BTreeMap::new(),
-        }
+    fn new(unit: Unit<D>, sigs: BTreeMap<PeerId, schnorr::Signature>) -> Self {
+        Self { unit, sigs }
     }
 
     /// The unit at this slot.
@@ -88,7 +85,6 @@ pub struct Graph<D: UnitData> {
     backup: DynBackup<D>,
     extender: Extender<D>,
 }
-
 
 impl<D: UnitData> Graph<D> {
     /// Build a graph for `session`, restoring any persisted state from
@@ -249,22 +245,31 @@ impl<D: UnitData> Graph<D> {
             return None;
         }
 
-        let key = (unit.round, unit.creator);
-        let is_fresh = !self.units.contains_key(&key);
+        if self.units.contains_key(&(unit.round, unit.creator)) {
+            for (signer, sig) in &sigs {
+                self.record_sig(unit.round, unit.creator, *signer, *sig, keychain);
+            }
 
-        if is_fresh {
+            None
+        } else {
             self.check_parents(&unit).ok()?;
 
-            let entry = Entry::new(unit.clone());
+            let entry = Entry::new(unit.clone(), sigs.clone());
+
             self.backup.save(&entry);
-            self.units.insert(key, entry);
-        }
 
-        for (signer, sig) in &sigs {
-            self.record_sig(unit.round, unit.creator, *signer, *sig, keychain);
-        }
+            self.units.insert((unit.round, unit.creator), entry.clone());
 
-        is_fresh.then(|| self.units.get(&key).expect("just inserted").clone())
+            if entry.sigs.len() == self.n.threshold() {
+                // This sig pushed the slot across the threshold. Hand the
+                // unit to the extender — strict insert means every parent
+                // is already confirmed, so this is the only confirmation
+                // event for the slot and there's no cascade upward.
+                self.extender.add_unit(entry.unit.clone());
+            }
+
+            Some(entry)
+        }
     }
 
     /// Record a co-signature on the unit at `(round, creator)`. The signature
@@ -369,7 +374,11 @@ impl<D: UnitData> Graph<D> {
         let t = self.threshold();
 
         if unit.round == 0 {
-            return if unit.parents.is_empty() { Ok(()) } else { Err(()) };
+            return if unit.parents.is_empty() {
+                Ok(())
+            } else {
+                Err(())
+            };
         }
 
         if unit.parents.len() != t {
