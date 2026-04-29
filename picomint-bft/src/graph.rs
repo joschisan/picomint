@@ -89,58 +89,6 @@ pub struct Graph<D: UnitData> {
     extender: Extender<D>,
 }
 
-/// Outcome of attempting to insert a freshly-received unit.
-///
-/// On `Accepted` the entry has been added to the graph and persisted to
-/// backup as a side effect; the caller doesn't need to follow up. Insert
-/// is *strict* on parents — every parent must already be confirmed
-/// locally; otherwise the unit is rejected with `MissingParents` and the
-/// caller drops it (a later anti-entropy cycle will re-deliver it once
-/// the deficit is repaired).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InsertOutcome {
-    /// Unit was added to the graph at its slot and saved to backup.
-    /// Caller should sign it and gossip the ack so peers union our
-    /// contribution.
-    Accepted,
-    /// Slot already held a different (or identical) unit; ignored. Honest
-    /// peers won't co-sign a second unit at a slot they've already endorsed.
-    Duplicate,
-    /// At least one parent slot is either absent from our graph or
-    /// present-but-unconfirmed. Drop the unit; the periodic anti-entropy
-    /// (broadcast + per-creator pull) will refill the missing prerequisites
-    /// and the unit will be re-delivered on a later cycle.
-    MissingParents,
-    /// Parent set malformed: wrong size for the round, or a parent hash
-    /// doesn't match the entry we already hold at that slot.
-    InvalidParents,
-    /// Unit's `session` doesn't match the graph's session. Likely a
-    /// stale message from a previous session that's still in flight on
-    /// the shared transport.
-    WrongSession,
-    /// Unit's `data` payload, re-encoded to bytes, exceeds
-    /// [`BFT_UNIT_BYTE_LIMIT`]. Caps each peer's per-unit RAM
-    /// footprint regardless of how many items the creator stuffed in.
-    OversizedData,
-}
-
-/// Outcome of recording a co-signature.
-///
-/// On `Accepted` the sig was added to the slot, the entry has been
-/// re-saved to backup, and — if the sig pushed the slot across the
-/// threshold — the unit has been fed to the extender. The caller
-/// doesn't need to follow up. Strict insert means every parent of an
-/// in-graph entry is already confirmed, so a sig flip is purely local
-/// — there is no cascade up to higher-round slots.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SigOutcome {
-    /// Signature was added to the slot.
-    Accepted,
-    /// We don't have a unit at `(round, creator)` yet, or the signature
-    /// doesn't verify against the unit we hold there, or we already had
-    /// this signer's sig, or the slot is already confirmed.
-    Discarded,
-}
 
 impl<D: UnitData> Graph<D> {
     /// Build a graph for `session`, restoring any persisted state from
@@ -263,26 +211,33 @@ impl<D: UnitData> Graph<D> {
         round
     }
 
-    /// Insert a freshly-received unit into the graph.
+    /// Insert a freshly-received unit (with the carried co-signatures)
+    /// into the graph and return the inserted entry on a *fresh* insert.
     ///
-    /// First-seen wins per slot — if we already hold any unit at
-    /// `(unit.round, unit.creator)`, the second is rejected as `Duplicate`,
-    /// even if the bytes differ. This is what makes consistent broadcast
-    /// safe: an honest peer never co-signs two distinct units at the same
-    /// slot, so a forker can't reach threshold on either side.
+    /// First-seen wins per slot — if we already hold a unit at
+    /// `(unit.round, unit.creator)` the body is dropped, but the carried
+    /// sigs are still merged into the existing slot (drop + merge is
+    /// safe: an honest peer never co-signs two distinct units at the
+    /// same slot, so a forker can't reach threshold on either side).
     ///
-    /// Insert is *strict* on parents: every parent must already be present
-    /// and confirmed locally. If any parent is missing or unconfirmed the
-    /// unit is rejected with `MissingParents` and the caller drops it. The
-    /// periodic anti-entropy will refill the prerequisites and the unit
-    /// will be re-delivered (via the periodic broadcast) on a later cycle.
-    pub fn insert_unit(&mut self, unit: Unit<D>) -> InsertOutcome {
+    /// Insert is *strict* on parents: every parent of a fresh unit must
+    /// already be present and confirmed locally; otherwise the unit is
+    /// dropped (the periodic anti-entropy will refill the prerequisites
+    /// and the unit will be re-delivered on a later cycle).
+    ///
+    /// On both fresh and duplicate paths every carried sig is verified
+    /// individually via `record_sig`; bad sigs are silently discarded.
+    /// Returns `Some(entry)` only on a fresh insert — that's the
+    /// caller's signal to rebroadcast — `None` on duplicates and on
+    /// any of the rejection paths above.
+    pub fn insert_unit(
+        &mut self,
+        unit: Unit<D>,
+        sigs: BTreeMap<PeerId, schnorr::Signature>,
+        keychain: &Keychain,
+    ) -> Option<Entry<D>> {
         if unit.session != self.session {
-            return InsertOutcome::WrongSession;
-        }
-
-        if self.units.contains_key(&(unit.round, unit.creator)) {
-            return InsertOutcome::Duplicate;
+            return None;
         }
 
         // Re-encode the payload and reject anything past the byte cap.
@@ -291,21 +246,25 @@ impl<D: UnitData> Graph<D> {
         // many items into one unit gets dropped before we keep the
         // entry around.
         if unit.data.consensus_encode_to_vec().len() > BFT_UNIT_BYTE_LIMIT {
-            return InsertOutcome::OversizedData;
+            return None;
         }
 
-        if let Some(reason) = self.check_parents(&unit) {
-            return reason;
+        let key = (unit.round, unit.creator);
+        let is_fresh = !self.units.contains_key(&key);
+
+        if is_fresh {
+            self.check_parents(&unit).ok()?;
+
+            let entry = Entry::new(unit.clone());
+            self.backup.save(&entry);
+            self.units.insert(key, entry);
         }
 
-        let entry = Entry::new(unit);
+        for (signer, sig) in &sigs {
+            self.record_sig(unit.round, unit.creator, *signer, *sig, keychain);
+        }
 
-        self.backup.save(&entry);
-
-        self.units
-            .insert((entry.unit.round, entry.unit.creator), entry);
-
-        InsertOutcome::Accepted
+        is_fresh.then(|| self.units.get(&key).expect("just inserted").clone())
     }
 
     /// Record a co-signature on the unit at `(round, creator)`. The signature
@@ -317,30 +276,40 @@ impl<D: UnitData> Graph<D> {
     /// Strict insert guarantees the slot's parents are already confirmed,
     /// so when this sig brings the count to threshold the slot flips
     /// directly with no parent re-check and no cascade upward.
-    pub fn record_sig(
+    /// Record a co-signature on the unit at `(round, creator)`. The
+    /// signature is verified against the hash of the unit *we currently
+    /// hold* at that slot — the consistent-broadcast safety check, since
+    /// a forker trying to split co-signers across two distinct units
+    /// will find that each peer's collected sigs only verify against
+    /// their local unit. Stale sigs (verify failure, dupe signer,
+    /// already-confirmed slot) are silently discarded. Strict insert
+    /// guarantees the slot's parents are already confirmed, so when
+    /// this sig brings the count to threshold the slot flips directly
+    /// — no parent re-check, no cascade upward.
+    fn record_sig(
         &mut self,
         round: Round,
         creator: PeerId,
         signer: PeerId,
         signature: schnorr::Signature,
         keychain: &Keychain,
-    ) -> SigOutcome {
+    ) {
         let t = self.threshold();
 
         let Some(entry) = self.units.get_mut(&(round, creator)) else {
-            return SigOutcome::Discarded;
+            return;
         };
 
         if entry.sigs.len() >= t {
-            return SigOutcome::Discarded;
+            return;
         }
 
         if entry.sigs.contains_key(&signer) {
-            return SigOutcome::Discarded;
+            return;
         }
 
         if !keychain.verify(&entry.unit, &signature, signer) {
-            return SigOutcome::Discarded;
+            return;
         }
 
         entry.sigs.insert(signer, signature);
@@ -354,8 +323,6 @@ impl<D: UnitData> Graph<D> {
             // event for the slot and there's no cascade upward.
             self.extender.add_unit(entry.unit.clone());
         }
-
-        SigOutcome::Accepted
     }
 
     /// Build a candidate parent set for a unit at `round`.
@@ -390,38 +357,33 @@ impl<D: UnitData> Graph<D> {
         (parents.len() == t).then_some(parents)
     }
 
-    /// Strict parent check used by `insert_unit`. Returns `Some(reason)`
-    /// when the parent set is unacceptable, `None` when it's good to go.
+    /// Strict parent check used by `insert_unit`. Returns `Err(())` when
+    /// the parent set is malformed (wrong size, hash mismatch) or
+    /// missing/unconfirmed locally; `Ok(())` when it's good to go.
     ///
     /// - Round 0 must have an empty parent set.
     /// - Round R>0 must carry exactly `threshold` parents.
     /// - Every parent slot must already be in our graph and confirmed.
     /// - Every parent's stored hash must match the claim.
-    fn check_parents(&self, unit: &Unit<D>) -> Option<InsertOutcome> {
+    fn check_parents(&self, unit: &Unit<D>) -> Result<(), ()> {
         let t = self.threshold();
 
         if unit.round == 0 {
-            return (!unit.parents.is_empty()).then_some(InsertOutcome::InvalidParents);
+            return if unit.parents.is_empty() { Ok(()) } else { Err(()) };
         }
 
         if unit.parents.len() != t {
-            return Some(InsertOutcome::InvalidParents);
+            return Err(());
         }
 
         for (p_creator, p_hash) in &unit.parents {
-            let Some(parent) = self.units.get(&(unit.round - 1, *p_creator)) else {
-                return Some(InsertOutcome::MissingParents);
-            };
+            let parent = self.units.get(&(unit.round - 1, *p_creator)).ok_or(())?;
 
-            if parent.hash() != *p_hash {
-                return Some(InsertOutcome::InvalidParents);
-            }
-
-            if !parent.is_confirmed(t) {
-                return Some(InsertOutcome::MissingParents);
+            if parent.hash() != *p_hash || !parent.is_confirmed(t) {
+                return Err(());
             }
         }
 
-        None
+        Ok(())
     }
 }

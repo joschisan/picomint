@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use picomint_bft::{
-    Backup, DataProvider, DynNetwork, Graph, INetwork, InsertOutcome, Keychain, Message,
-    NoopBackup, Recipient, Round, Unit, run,
+    Backup, DataProvider, DynNetwork, Graph, INetwork, Keychain, Message, NoopBackup, Recipient,
+    Round, Unit, run,
 };
 use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
 use picomint_core::{NumPeers, PeerId};
@@ -82,17 +82,15 @@ async fn engine_skips_pre_filled_own_slot_after_wipe_restore() {
     let backup: Arc<dyn Backup<u64>> = Arc::new(NoopBackup);
     let (tx, _rx) = async_channel::unbounded::<(Round, PeerId, u64)>();
     let mut graph = Graph::<u64>::new(n, session, backup, tx);
-    assert!(matches!(
-        graph.insert_unit(unit.clone()),
-        InsertOutcome::Accepted
-    ));
 
     let verifier = keychains.get(&own_id).expect("built").clone();
-    for signer in n.peer_ids().take(n.threshold()) {
-        let kc = keychains.get(&signer).expect("built");
-        let sig = kc.sign(&unit);
-        graph.record_sig(0, own_id, signer, sig, &verifier);
-    }
+    let sigs: BTreeMap<_, _> = n
+        .peer_ids()
+        .take(n.threshold())
+        .map(|signer| (signer, keychains.get(&signer).expect("built").sign(&unit)))
+        .collect();
+
+    assert!(graph.insert_unit(unit.clone(), sigs, &verifier).is_some());
     assert!(graph.is_confirmed(0, own_id));
 
     let own_keychain = keychains.remove(&own_id).expect("built");

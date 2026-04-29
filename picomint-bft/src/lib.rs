@@ -21,7 +21,7 @@ mod unit;
 pub use backup::{Backup, DynBackup, NoopBackup};
 pub use data::DataProvider;
 pub use engine::run;
-pub use graph::{Entry, Graph, InsertOutcome, SigOutcome};
+pub use graph::{Entry, Graph};
 pub use keychain::Keychain;
 pub use network::{DynNetwork, INetwork, Message, MockChannel, Recipient};
 pub use unit::{Round, Unit, UnitData, UnitHash};

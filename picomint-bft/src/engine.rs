@@ -6,7 +6,7 @@ use picomint_core::secp256k1::schnorr;
 use tokio::time::{Instant, sleep_until};
 
 use crate::data::DataProvider;
-use crate::graph::{Entry, Graph, InsertOutcome};
+use crate::graph::{Entry, Graph};
 use crate::keychain::Keychain;
 use crate::network::{DynNetwork, Message, Recipient};
 use crate::unit::{Round, Unit, UnitData};
@@ -158,19 +158,12 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         }
     }
 
-    /// Apply one inbound `Unit` message:
-    ///
-    /// - Validate (creator-sig present, sigs cap, every carried sig
-    ///   verifies).
-    /// - Insert (strict — drops anything whose parents aren't confirmed
-    ///   locally; the periodic anti-entropy will refill the
-    ///   prerequisites and the unit will arrive again on a later cycle).
-    /// - Merge each carried sig; the graph internally persists every
-    ///   mutation and feeds the unit to the extender if this sig pushes
-    ///   the slot across the threshold.
-    /// - If we haven't co-signed yet, sign and rebroadcast so peers
-    ///   union our contribution.
-    fn handle_unit(&mut self, unit: Unit<D>, sigs: BTreeMap<PeerId, schnorr::Signature>) {
+    /// Apply one inbound `Unit` message: validate the bundle, splice in
+    /// our own co-sig, and hand the whole thing to the graph. Graph
+    /// internally persists every mutation and feeds confirmed units
+    /// into its extender. On a fresh insert we rebroadcast so peers
+    /// union our contribution.
+    fn handle_unit(&mut self, unit: Unit<D>, mut sigs: BTreeMap<PeerId, schnorr::Signature>) {
         // Creator's sig must be in the bundle: it binds the body to its
         // claimed author. Without this check, a Byzantine peer could
         // send a fabricated body at someone else's slot signed only with
@@ -194,46 +187,16 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             return;
         }
 
-        // Insert the body. `Duplicate` is fine — we already had it.
-        // `WrongSession`, `OversizedData`, `InvalidParents`,
-        // `MissingParents` all drop; `MissingParents` is the expected
-        // steady-state miss when anti-entropy hasn't yet caught us up to
-        // the broadcasting peer.
-        match self.graph.insert_unit(unit.clone()) {
-            InsertOutcome::Accepted | InsertOutcome::Duplicate => {}
-            _ => return,
-        }
+        // Splice in our co-sig before insertion. `insert_unit` merges
+        // every sig in the bundle into the slot, so adding ours here is
+        // equivalent to a separate cosign call — and it means a fresh
+        // insert immediately rebroadcasts our contribution alongside
+        // the rest of the bundle. Idempotent: if our sig is already
+        // there, this is a no-op replace with the same value.
+        sigs.insert(self.own_id, self.keychain.sign(&unit));
 
-        for (signer, sig) in &sigs {
-            self.graph
-                .record_sig(unit.round, unit.creator, *signer, *sig, &self.keychain);
-        }
-
-        // If our own sig isn't yet at this slot — and the slot hasn't
-        // already confirmed — sign now and rebroadcast.
-        let threshold = self.graph.threshold();
-        let needs_cosign = self
-            .graph
-            .entry(unit.round, unit.creator)
-            .is_some_and(|e| !e.sigs().contains_key(&self.own_id) && !e.is_confirmed(threshold));
-
-        if needs_cosign {
-            let our_sig = self.keychain.sign(&unit);
-
-            self.graph.record_sig(
-                unit.round,
-                unit.creator,
-                self.own_id,
-                our_sig,
-                &self.keychain,
-            );
-
-            let entry = self
-                .graph
-                .entry(unit.round, unit.creator)
-                .expect("just signed at this slot");
-
-            self.send_entry(Recipient::Everyone, entry);
+        if let Some(entry) = self.graph.insert_unit(unit, sigs, &self.keychain) {
+            self.send_entry(Recipient::Everyone, &entry);
         }
     }
 
@@ -261,28 +224,19 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             data: self.data_provider.get_data().await,
         };
 
-        let sig = self.keychain.sign(&unit);
-
-        match self.graph.insert_unit(unit.clone()) {
-            InsertOutcome::Accepted => {}
-            outcome => panic!("newly built round-{round} unit must insert: {outcome:?}"),
-        }
+        let sigs = BTreeMap::from([(self.own_id, self.keychain.sign(&unit))]);
 
         // Crash barrier: persist the unit + our self-sig before
         // broadcasting. On restart we'd otherwise be free to build a
         // *different* unit at this slot from a fresh data_provider
         // draw, and peers who saw the original message would consider
         // us a forker.
-        self.graph
-            .record_sig(round, self.own_id, self.own_id, sig, &self.keychain);
+        let entry = self
+            .graph
+            .insert_unit(unit, sigs, &self.keychain)
+            .unwrap_or_else(|| panic!("newly built round-{round} unit must insert"));
 
-        self.network.send(
-            Recipient::Everyone,
-            Message::Unit {
-                unit,
-                sigs: BTreeMap::from([(self.own_id, sig)]),
-            },
-        );
+        self.send_entry(Recipient::Everyone, &entry);
 
         self.next_round += 1;
     }

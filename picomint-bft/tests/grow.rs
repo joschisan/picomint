@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use picomint_bft::{Graph, InsertOutcome, Keychain, NoopBackup, Round, Unit};
+use picomint_bft::{Graph, Keychain, NoopBackup, Round, Unit};
 use picomint_core::PeerId;
 use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
 
@@ -67,22 +67,30 @@ fn grow_dag_across_rounds() {
                 data: Vec::new(),
             };
 
-            // Creator broadcasts the unit; every peer (including creator)
-            // inserts it into their local graph.
-            for graph in graphs.iter_mut() {
+            // Creator broadcasts the unit with its own sig; every peer
+            // (including creator) inserts it into their local graph.
+            let creator_sig = keychains[creator_idx].sign(&unit);
+            for (verifier_idx, graph) in graphs.iter_mut().enumerate() {
+                let sigs = BTreeMap::from([(creator, creator_sig)]);
                 assert!(
-                    matches!(graph.insert_unit(unit.clone()), InsertOutcome::Accepted),
-                    "round {round} creator {creator_idx}: insert failed",
+                    graph
+                        .insert_unit(unit.clone(), sigs, &keychains[verifier_idx])
+                        .is_some(),
+                    "round {round} creator {creator_idx}: insert failed at verifier {verifier_idx}",
                 );
             }
 
-            // Every peer (including creator) co-signs the unit and the sig
-            // is gossiped to everyone. record_sig verifies and counts.
+            // Every other peer co-signs the unit and the sig is
+            // gossiped to everyone via insert_unit's sig-merge path.
             for signer_idx in 0..N_PEERS {
+                if signer_idx == creator_idx {
+                    continue;
+                }
                 let signer = PeerId::from(signer_idx as u8);
                 let sig = keychains[signer_idx].sign(&unit);
                 for (verifier_idx, graph) in graphs.iter_mut().enumerate() {
-                    let _ = graph.record_sig(round, creator, signer, sig, &keychains[verifier_idx]);
+                    let sigs = BTreeMap::from([(signer, sig)]);
+                    let _ = graph.insert_unit(unit.clone(), sigs, &keychains[verifier_idx]);
                 }
             }
 
