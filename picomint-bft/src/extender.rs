@@ -26,6 +26,7 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
+use async_channel::Sender;
 use bitcoin::hashes::sha256;
 use picomint_core::{NumPeers, PeerId};
 use picomint_encoding::Encodable;
@@ -34,44 +35,50 @@ use crate::unit::{Round, Unit, UnitData, UnitHash};
 
 /// Drives leader-vote ordering over a stream of confirmed units.
 ///
-/// Units are fed one at a time via [`Self::add_unit`]; each call returns
-/// every batch unlocked by the new unit. The extender processes leader
-/// rounds strictly in order — round `r+1`'s decision is not attempted
-/// until round `r`'s has resolved.
+/// Units are fed one at a time via [`Self::add_unit`]; whenever the
+/// new unit unlocks one or more leader rounds, every datum from each
+/// committed batch is pushed to `ordered_tx` (oldest-first per batch).
+/// The extender processes leader rounds strictly in order — round
+/// `r+1`'s decision is not attempted until round `r`'s has resolved.
 pub struct Extender<D: UnitData> {
     units: Units<D>,
     num_peers: NumPeers,
     next_round_to_decide: Round,
+    ordered_tx: Sender<(Round, PeerId, D)>,
 }
 
 impl<D: UnitData> Extender<D> {
-    /// Build an empty extender for a federation of size `n`.
-    pub fn new(n: NumPeers) -> Self {
+    /// Build an empty extender for a federation of size `n`. Ordered
+    /// items emitted on commit are pushed to `ordered_tx`.
+    pub fn new(n: NumPeers, ordered_tx: Sender<(Round, PeerId, D)>) -> Self {
         Self {
             units: Units::new(),
             num_peers: n,
             next_round_to_decide: 0,
+            ordered_tx,
         }
     }
 
-    /// Feed a freshly-confirmed unit. Returns the batches (oldest-first
-    /// per batch) unlocked by this unit's arrival; each batch is the
-    /// BFS extraction of one committed leader's not-yet-emitted causal
-    /// ancestors.
-    pub fn add_unit(&mut self, unit: Unit<D>) -> Vec<Vec<Unit<D>>> {
+    /// Feed a freshly-confirmed unit. Every batch unlocked by the
+    /// arrival is BFS-extracted and each contained datum is pushed to
+    /// `ordered_tx` as a `(round, creator, datum)` triple, oldest-first
+    /// per batch.
+    pub fn add_unit(&mut self, unit: Unit<D>) {
         self.units.add(unit);
-
-        let mut batches = Vec::new();
 
         while let Some(decision) = self.try_decide(self.next_round_to_decide) {
             if let Decision::Commit(head) = decision {
-                batches.push(self.units.remove_batch(&head));
+                for u in self.units.remove_batch(&head) {
+                    for d in &u.data {
+                        self.ordered_tx
+                            .try_send((u.round, u.creator, d.clone()))
+                            .expect("ordered channel is unbounded; receiver kept alive");
+                    }
+                }
             }
 
             self.next_round_to_decide += 1;
         }
-
-        batches
     }
 
     /// The deterministic random order in which to walk candidates for

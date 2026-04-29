@@ -1,15 +1,12 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use async_channel::Sender;
 use picomint_core::PeerId;
 use picomint_core::secp256k1::schnorr;
 use tokio::time::{Instant, sleep_until};
 
-use crate::backup::DynBackup;
 use crate::data::DataProvider;
-use crate::extender::Extender;
-use crate::graph::{Entry, Graph, InsertOutcome, SigOutcome};
+use crate::graph::{Entry, Graph, InsertOutcome};
 use crate::keychain::Keychain;
 use crate::network::{DynNetwork, Message, Recipient};
 use crate::unit::{Round, Unit, UnitData};
@@ -28,10 +25,10 @@ const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_millis(50);
 ///
 /// Three concurrent arms drive the loop:
 ///
-/// - **Inbound messages** are verified and folded into the local `Graph`.
-///   Confirmation events fan into the local `Extender`; whenever it
-///   elects a head and extracts a batch, every unit's `data` items are
-///   forwarded as `(round, creator, datum)` triples on `ordered_tx`.
+/// - **Inbound messages** are verified and folded into the local
+///   `Graph`. The graph internally persists every mutation through
+///   `backup` and feeds confirmed units into its extender, which emits
+///   ordered `(round, creator, datum)` triples on `ordered_tx`.
 /// - **Anti-entropy** every `ANTI_ENTROPY_INTERVAL`: push the highest
 ///   known entry per peer to everyone, and pull (one `Request` per peer)
 ///   for the lowest round we don't yet have confirmed.
@@ -45,30 +42,26 @@ const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_millis(50);
 /// The engine has no internal stopping condition — it runs until the
 /// caller drops the task (or until every other peer has done so, which
 /// closes the network).
-#[allow(clippy::too_many_arguments)]
 pub async fn run<D: UnitData, P: DataProvider<D>>(
     own_id: PeerId,
     graph: Graph<D>,
     keychain: Keychain,
     network: DynNetwork<Message<D>>,
-    backup: DynBackup<D>,
     data_provider: P,
-    ordered_tx: Sender<(Round, PeerId, D)>,
     unit_delay: Box<dyn Fn(Round) -> Duration + Send + 'static>,
 ) {
-    let extender = Extender::new(graph.num_peers());
+    let next_round = graph
+        .highest_entry(own_id)
+        .map_or(0, |e| e.unit().round + 1);
 
     Engine {
         own_id,
         graph,
-        extender,
         keychain,
         network,
-        backup,
         data_provider,
-        ordered_tx,
         unit_delay,
-        next_round: 0,
+        next_round,
     }
     .run()
     .await;
@@ -79,24 +72,19 @@ pub async fn run<D: UnitData, P: DataProvider<D>>(
 struct Engine<D: UnitData, P: DataProvider<D>> {
     own_id: PeerId,
     graph: Graph<D>,
-    extender: Extender<D>,
     keychain: Keychain,
     network: DynNetwork<Message<D>>,
-    backup: DynBackup<D>,
     data_provider: P,
-    ordered_tx: Sender<(Round, PeerId, D)>,
     unit_delay: Box<dyn Fn(Round) -> Duration + Send + 'static>,
     /// The next round we'll attempt to create a unit at. Starts at 0
     /// (no genesis pre-population — round 0 is created and disseminated
-    /// like any other round). Bumped past every round we restore from
-    /// backup and past every round we either skip or successfully build.
+    /// like any other round) or one past our highest restored own-slot.
+    /// Bumped past every round we either skip or successfully build.
     next_round: Round,
 }
 
 impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
     async fn run(mut self) {
-        self.restore_from_backup();
-
         let mut next_create_at = Instant::now();
         let mut next_anti_entropy_at = Instant::now();
 
@@ -120,33 +108,6 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
 
                     next_anti_entropy_at = Instant::now() + ANTI_ENTROPY_INTERVAL;
                 }
-            }
-        }
-    }
-
-    /// Replay every persisted entry into the graph, advance our
-    /// create-cursor past anything we'd already authored, and feed
-    /// confirmed entries into the extender so post-restart ordering
-    /// resumes from the right place.
-    fn restore_from_backup(&mut self) {
-        for entry in self.backup.load() {
-            // The backup table is shared across sessions; entries from a
-            // previous (uncompleted) session would otherwise pollute this
-            // session's graph. Filter strictly here so the engine — and
-            // the extender, which can't tolerate cross-session unit
-            // hashes — only ever sees this session's units.
-            if entry.unit().session != self.graph.session() {
-                panic!("backup session does not match graph session");
-            }
-
-            if entry.unit().creator == self.own_id {
-                self.next_round = self.next_round.max(entry.unit().round + 1);
-            }
-
-            self.graph.restore_entry(entry.clone());
-
-            if entry.is_confirmed(self.graph.threshold()) {
-                self.emit_batches(entry.unit().clone());
             }
         }
     }
@@ -204,9 +165,9 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
     /// - Insert (strict — drops anything whose parents aren't confirmed
     ///   locally; the periodic anti-entropy will refill the
     ///   prerequisites and the unit will arrive again on a later cycle).
-    /// - Merge each carried sig; if the slot crosses threshold it
-    ///   confirms immediately (no cascade — strict insert means parents
-    ///   are already confirmed).
+    /// - Merge each carried sig; the graph internally persists every
+    ///   mutation and feeds the unit to the extender if this sig pushes
+    ///   the slot across the threshold.
     /// - If we haven't co-signed yet, sign and rebroadcast so peers
     ///   union our contribution.
     fn handle_unit(&mut self, unit: Unit<D>, sigs: BTreeMap<PeerId, schnorr::Signature>) {
@@ -239,13 +200,13 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         // steady-state miss when anti-entropy hasn't yet caught us up to
         // the broadcasting peer.
         match self.graph.insert_unit(unit.clone()) {
-            InsertOutcome::Accepted(entry) => self.backup.save(&entry),
-            InsertOutcome::Duplicate => {}
+            InsertOutcome::Accepted | InsertOutcome::Duplicate => {}
             _ => return,
         }
 
         for (signer, sig) in &sigs {
-            self.apply_sig(unit.round, unit.creator, *signer, *sig);
+            self.graph
+                .record_sig(unit.round, unit.creator, *signer, *sig, &self.keychain);
         }
 
         // If our own sig isn't yet at this slot — and the slot hasn't
@@ -259,7 +220,13 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         if needs_cosign {
             let our_sig = self.keychain.sign(&unit);
 
-            self.apply_sig(unit.round, unit.creator, self.own_id, our_sig);
+            self.graph.record_sig(
+                unit.round,
+                unit.creator,
+                self.own_id,
+                our_sig,
+                &self.keychain,
+            );
 
             let entry = self
                 .graph
@@ -267,31 +234,6 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
                 .expect("just signed at this slot");
 
             self.send_entry(Recipient::Everyone, entry);
-        }
-    }
-
-    /// Single sig-application path used by all callers (inbound merge,
-    /// self-cosign, create-time self-sign). Persists every mutated entry
-    /// to backup, and on a confirmation transition feeds the unit to the
-    /// extender. Strict insert means a sig flip is purely local — there
-    /// is no cascade to higher rounds.
-    fn apply_sig(
-        &mut self,
-        round: Round,
-        creator: PeerId,
-        signer: PeerId,
-        sig: schnorr::Signature,
-    ) {
-        match self
-            .graph
-            .record_sig(round, creator, signer, sig, &self.keychain)
-        {
-            SigOutcome::Confirmed(entry) => {
-                self.backup.save(&entry);
-                self.emit_batches(entry.unit().clone());
-            }
-            SigOutcome::Recorded(entry) => self.backup.save(&entry),
-            SigOutcome::Discarded => {}
         }
     }
 
@@ -322,7 +264,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         let sig = self.keychain.sign(&unit);
 
         match self.graph.insert_unit(unit.clone()) {
-            InsertOutcome::Accepted(_) => {}
+            InsertOutcome::Accepted => {}
             outcome => panic!("newly built round-{round} unit must insert: {outcome:?}"),
         }
 
@@ -331,7 +273,8 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         // *different* unit at this slot from a fresh data_provider
         // draw, and peers who saw the original message would consider
         // us a forker.
-        self.apply_sig(round, self.own_id, self.own_id, sig);
+        self.graph
+            .record_sig(round, self.own_id, self.own_id, sig, &self.keychain);
 
         self.network.send(
             Recipient::Everyone,
@@ -355,21 +298,5 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
                 sigs: entry.sigs().clone(),
             },
         );
-    }
-
-    fn emit_batches(&mut self, unit: Unit<D>) {
-        for batch in self.extender.add_unit(unit) {
-            for u in batch {
-                for d in &u.data {
-                    // The channel is unbounded, so `try_send` only
-                    // refuses when the receiver has been dropped — the
-                    // consumer has explicitly stopped caring (e.g. the
-                    // engine test breaks its reader after ROUND_LIMIT
-                    // but only aborts engine tasks afterward). Drop
-                    // silently rather than panic.
-                    let _ = self.ordered_tx.try_send((u.round, u.creator, d.clone()));
-                }
-            }
-        }
     }
 }

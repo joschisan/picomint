@@ -144,14 +144,14 @@ impl ConsensusEngine {
 
         let backup = Arc::new(RedbBackup::new(self.db.clone()));
 
+        let graph = BftGraph::new(self.num_peers(), session_index, backup, ordered_sender);
+
         let bft_handle = tokio::spawn(run_bft(
             self.identity(),
-            BftGraph::new(self.num_peers(), session_index),
+            graph,
             build_keychain(&self.cfg),
             network,
-            backup,
             DataProvider::new(self.submission_receiver.clone()),
-            ordered_sender,
             unit_delay,
         ));
 

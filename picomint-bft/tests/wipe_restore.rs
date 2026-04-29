@@ -79,10 +79,12 @@ async fn engine_skips_pre_filled_own_slot_after_wipe_restore() {
         data: vec![],
     };
 
-    let mut graph = Graph::<u64>::new(n, session);
+    let backup: Arc<dyn Backup<u64>> = Arc::new(NoopBackup);
+    let (tx, _rx) = async_channel::unbounded::<(Round, PeerId, u64)>();
+    let mut graph = Graph::<u64>::new(n, session, backup, tx);
     assert!(matches!(
         graph.insert_unit(unit.clone()),
-        InsertOutcome::Accepted(_)
+        InsertOutcome::Accepted
     ));
 
     let verifier = keychains.get(&own_id).expect("built").clone();
@@ -94,18 +96,14 @@ async fn engine_skips_pre_filled_own_slot_after_wipe_restore() {
     assert!(graph.is_confirmed(0, own_id));
 
     let own_keychain = keychains.remove(&own_id).expect("built");
-    let backup: Arc<dyn Backup<u64>> = Arc::new(NoopBackup);
     let network: DynNetwork<Message<u64>> = Arc::new(SilentNetwork);
-    let (tx, _rx) = async_channel::unbounded::<(Round, PeerId, u64)>();
 
     let handle = tokio::spawn(run(
         own_id,
         graph,
         own_keychain,
         network,
-        backup,
         EmptyDataProvider,
-        tx,
         Box::new(|_round| Duration::from_millis(50)),
     ));
 

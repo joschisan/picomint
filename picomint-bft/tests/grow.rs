@@ -4,8 +4,9 @@
 //! triggering end-to-end.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use picomint_bft::{Graph, InsertOutcome, Keychain, Round, Unit};
+use picomint_bft::{Graph, InsertOutcome, Keychain, NoopBackup, Round, Unit};
 use picomint_core::PeerId;
 use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
 
@@ -38,7 +39,14 @@ fn build_peers() -> Vec<Keychain> {
 fn grow_dag_across_rounds() {
     let keychains = build_peers();
     let n = picomint_core::NumPeers::from(N_PEERS);
-    let mut graphs: Vec<Graph<u64>> = (0..N_PEERS).map(|_| Graph::new(n, SESSION)).collect();
+    let mut graphs: Vec<Graph<u64>> = (0..N_PEERS)
+        .map(|_| {
+            // Drop the receiver — this test inspects the graph
+            // directly and doesn't observe the ordered stream.
+            let (tx, _rx) = async_channel::unbounded();
+            Graph::new(n, SESSION, Arc::new(NoopBackup), tx)
+        })
+        .collect();
 
     for round in 0..=ROUNDS {
         // Each creator builds and disseminates one unit at this round.
@@ -63,7 +71,7 @@ fn grow_dag_across_rounds() {
             // inserts it into their local graph.
             for graph in graphs.iter_mut() {
                 assert!(
-                    matches!(graph.insert_unit(unit.clone()), InsertOutcome::Accepted(_)),
+                    matches!(graph.insert_unit(unit.clone()), InsertOutcome::Accepted),
                     "round {round} creator {creator_idx}: insert failed",
                 );
             }

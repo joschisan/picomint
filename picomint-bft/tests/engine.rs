@@ -80,14 +80,14 @@ async fn engines_agree_on_ordered_data() {
 
         let backup: Arc<dyn Backup<u64>> = Arc::new(NoopBackup);
 
+        let graph = Graph::new(n, SESSION, backup, tx);
+
         let h = tokio::spawn(run(
             peer_id,
-            Graph::new(n, SESSION),
+            graph,
             keychains.remove(&peer_id).expect("built above"),
             network,
-            backup,
             TimestampDataProvider,
-            tx,
             Box::new(|_round| UNIT_DELAY),
         ));
 

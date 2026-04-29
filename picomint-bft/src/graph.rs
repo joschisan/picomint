@@ -1,10 +1,13 @@
 use std::collections::BTreeMap;
 
+use async_channel::Sender;
 use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
 use picomint_core::secp256k1::schnorr;
 use picomint_core::{NumPeers, PeerId};
 use picomint_encoding::{Decodable, Encodable};
 
+use crate::backup::DynBackup;
+use crate::extender::Extender;
 use crate::keychain::Keychain;
 use crate::unit::{Round, Unit, UnitData, UnitHash};
 
@@ -58,39 +61,48 @@ impl<D: UnitData> Entry<D> {
     }
 }
 
-/// Per-peer view of the consensus DAG.
+/// Per-peer view of the consensus DAG plus the persistence and
+/// ordering machinery downstream of it.
 ///
-/// The graph is keyed by `(round, creator)` because that's the load-bearing
-/// uniqueness invariant of the protocol — at most one unit per slot can ever
-/// confirm. `BTreeMap` ordering lets us iterate-and-count confirmed units at
-/// a given round via `range`. The graph starts empty; round 0 units are
-/// created and disseminated like every other round, except that they
-/// carry empty parent sets.
+/// The DAG is keyed by `(round, creator)` because that's the
+/// load-bearing uniqueness invariant of the protocol — at most one
+/// unit per slot can ever confirm. `BTreeMap` ordering lets us
+/// iterate-and-count confirmed units at a given round via `range`.
+/// Round-0 units are created and disseminated like every other round
+/// except that they carry empty parent sets.
 ///
-/// The graph is session-scoped: every unit it holds carries the same
-/// `session`, and `insert_unit` rejects any unit whose `session` doesn't
-/// match. A stale unit from a different session can never enter the
-/// graph and so cannot block the current session's `(round, creator)`
-/// slot.
+/// The graph also owns its `Backup` and `Extender`: every mutation
+/// that changes an entry persists it through `backup`, and every
+/// confirmation transition feeds the unit through `extender` so its
+/// causal closure can be ordered. Engine code never touches backup or
+/// extender directly.
+///
+/// Session-scoped: every unit holds the same `session`, and
+/// `insert_unit` rejects mismatches. A stale unit from a previous
+/// session can't enter the graph and so cannot block the current
+/// session's `(round, creator)` slot.
 pub struct Graph<D: UnitData> {
     session: u64,
     n: NumPeers,
     units: BTreeMap<(Round, PeerId), Entry<D>>,
+    backup: DynBackup<D>,
+    extender: Extender<D>,
 }
 
 /// Outcome of attempting to insert a freshly-received unit.
 ///
-/// `Accepted` carries an owned clone of the freshly-inserted [`Entry`] so
-/// the caller can hand it straight to [`crate::Backup::save`] without a
-/// follow-up graph lookup. Insert is *strict* on parents — every parent
-/// must already be confirmed locally; otherwise the unit is rejected with
-/// `MissingParents` and the caller drops it (a later anti-entropy cycle
-/// will re-deliver it once the deficit is repaired).
-#[derive(Debug, Clone)]
-pub enum InsertOutcome<D: UnitData> {
-    /// Unit was added to the graph at its slot. Caller should sign it and
-    /// gossip the ack so peers union our contribution.
-    Accepted(Entry<D>),
+/// On `Accepted` the entry has been added to the graph and persisted to
+/// backup as a side effect; the caller doesn't need to follow up. Insert
+/// is *strict* on parents — every parent must already be confirmed
+/// locally; otherwise the unit is rejected with `MissingParents` and the
+/// caller drops it (a later anti-entropy cycle will re-deliver it once
+/// the deficit is repaired).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InsertOutcome {
+    /// Unit was added to the graph at its slot and saved to backup.
+    /// Caller should sign it and gossip the ack so peers union our
+    /// contribution.
+    Accepted,
     /// Slot already held a different (or identical) unit; ignored. Honest
     /// peers won't co-sign a second unit at a slot they've already endorsed.
     Duplicate,
@@ -112,20 +124,18 @@ pub enum InsertOutcome<D: UnitData> {
     OversizedData,
 }
 
-/// Outcome of recording a co-signature. Both `Recorded` and `Confirmed`
-/// carry the just-mutated [`Entry`]; the caller hands it to
-/// [`crate::Backup::save`] in either case, and additionally feeds the
-/// unit to the extender on `Confirmed`.
+/// Outcome of recording a co-signature.
 ///
-/// Strict insert means every parent of an in-graph entry is already
-/// confirmed, so a sig flip is purely local — there is no cascade up
-/// to higher-round slots.
-#[derive(Debug, Clone)]
-pub enum SigOutcome<D: UnitData> {
-    /// Signature recorded but the slot didn't transition to confirmed.
-    Recorded(Entry<D>),
-    /// Signature recorded; this slot just crossed the sig threshold.
-    Confirmed(Entry<D>),
+/// On `Accepted` the sig was added to the slot, the entry has been
+/// re-saved to backup, and — if the sig pushed the slot across the
+/// threshold — the unit has been fed to the extender. The caller
+/// doesn't need to follow up. Strict insert means every parent of an
+/// in-graph entry is already confirmed, so a sig flip is purely local
+/// — there is no cascade up to higher-round slots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SigOutcome {
+    /// Signature was added to the slot.
+    Accepted,
     /// We don't have a unit at `(round, creator)` yet, or the signature
     /// doesn't verify against the unit we hold there, or we already had
     /// this signer's sig, or the slot is already confirmed.
@@ -133,13 +143,41 @@ pub enum SigOutcome<D: UnitData> {
 }
 
 impl<D: UnitData> Graph<D> {
-    /// Create an empty graph for `session`. Round-0 units are created
-    /// and disseminated like every other round.
-    pub fn new(n: NumPeers, session: u64) -> Self {
+    /// Build a graph for `session`, restoring any persisted state from
+    /// `backup` and feeding the recovered confirmed units into a fresh
+    /// internal extender that emits ordered datums on `ordered_tx`.
+    /// Round-0 units are created and disseminated like every other round.
+    pub fn new(
+        n: NumPeers,
+        session: u64,
+        backup: DynBackup<D>,
+        ordered_tx: Sender<(Round, PeerId, D)>,
+    ) -> Self {
+        // Restore persisted entries in (round, peer) lex order — same
+        // order the BTreeMap would iterate them after insert, so parents
+        // restore before children. Confirmed entries are also fed into
+        // the extender so post-restart ordering resumes from the right
+        // place.
+        let mut extender = Extender::new(n, ordered_tx);
+        let mut units = BTreeMap::new();
+
+        for entry in backup.load() {
+            assert_eq!(
+                entry.unit.session, session,
+                "backup session does not match graph session",
+            );
+            if entry.is_confirmed(n.threshold()) {
+                extender.add_unit(entry.unit.clone());
+            }
+            units.insert((entry.unit.round, entry.unit.creator), entry);
+        }
+
         Self {
             session,
             n,
-            units: BTreeMap::new(),
+            units,
+            backup,
+            extender,
         }
     }
 
@@ -225,24 +263,6 @@ impl<D: UnitData> Graph<D> {
         round
     }
 
-    /// Place a previously-persisted entry back into the graph at its slot.
-    ///
-    /// Used at startup to restore state from [`crate::Backup`]. Skips the
-    /// parent-confirmation check that `insert_unit` enforces — we trust
-    /// what we wrote ourselves, and replaying the saved
-    /// `(round, peer)`-keyed entries in lex order means parents are
-    /// always restored before their children. Caller must filter the
-    /// backup stream by `session()` before calling.
-    pub fn restore_entry(&mut self, entry: Entry<D>) {
-        assert_eq!(
-            entry.unit.session, self.session,
-            "restore_entry called with a unit from a different session",
-        );
-
-        self.units
-            .insert((entry.unit.round, entry.unit.creator), entry);
-    }
-
     /// Insert a freshly-received unit into the graph.
     ///
     /// First-seen wins per slot — if we already hold any unit at
@@ -256,7 +276,7 @@ impl<D: UnitData> Graph<D> {
     /// unit is rejected with `MissingParents` and the caller drops it. The
     /// periodic anti-entropy will refill the prerequisites and the unit
     /// will be re-delivered (via the periodic broadcast) on a later cycle.
-    pub fn insert_unit(&mut self, unit: Unit<D>) -> InsertOutcome<D> {
+    pub fn insert_unit(&mut self, unit: Unit<D>) -> InsertOutcome {
         if unit.session != self.session {
             return InsertOutcome::WrongSession;
         }
@@ -280,10 +300,12 @@ impl<D: UnitData> Graph<D> {
 
         let entry = Entry::new(unit);
 
-        self.units
-            .insert((entry.unit.round, entry.unit.creator), entry.clone());
+        self.backup.save(&entry);
 
-        InsertOutcome::Accepted(entry)
+        self.units
+            .insert((entry.unit.round, entry.unit.creator), entry);
+
+        InsertOutcome::Accepted
     }
 
     /// Record a co-signature on the unit at `(round, creator)`. The signature
@@ -302,7 +324,7 @@ impl<D: UnitData> Graph<D> {
         signer: PeerId,
         signature: schnorr::Signature,
         keychain: &Keychain,
-    ) -> SigOutcome<D> {
+    ) -> SigOutcome {
         let t = self.threshold();
 
         let Some(entry) = self.units.get_mut(&(round, creator)) else {
@@ -323,11 +345,17 @@ impl<D: UnitData> Graph<D> {
 
         entry.sigs.insert(signer, signature);
 
-        if entry.sigs.len() < t {
-            return SigOutcome::Recorded(entry.clone());
+        self.backup.save(entry);
+
+        if entry.sigs.len() == t {
+            // This sig pushed the slot across the threshold. Hand the
+            // unit to the extender — strict insert means every parent
+            // is already confirmed, so this is the only confirmation
+            // event for the slot and there's no cascade upward.
+            self.extender.add_unit(entry.unit.clone());
         }
 
-        SigOutcome::Confirmed(entry.clone())
+        SigOutcome::Accepted
     }
 
     /// Build a candidate parent set for a unit at `round`.
@@ -369,7 +397,7 @@ impl<D: UnitData> Graph<D> {
     /// - Round R>0 must carry exactly `threshold` parents.
     /// - Every parent slot must already be in our graph and confirmed.
     /// - Every parent's stored hash must match the claim.
-    fn check_parents(&self, unit: &Unit<D>) -> Option<InsertOutcome<D>> {
+    fn check_parents(&self, unit: &Unit<D>) -> Option<InsertOutcome> {
         let t = self.threshold();
 
         if unit.round == 0 {
