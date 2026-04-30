@@ -233,6 +233,19 @@ impl Client {
         &self.db
     }
 
+    /// Seed the mint recovery state in `dbtx`. Caller commits this in
+    /// the same tx that persists the federation config so "join + start
+    /// recovery" is atomic. Returns the op-id every recovery event will
+    /// be logged under. The driver is picked up by the next
+    /// [`Client::new`] / [`Client::new_gateway`] on the persisted db.
+    /// Panics if a recovery is already in progress.
+    pub fn init_recovery(
+        dbtx: &picomint_redb::WriteTxRef<'_>,
+        federation_id: FederationId,
+    ) -> OperationId {
+        crate::mint::init_recovery(dbtx, federation_id)
+    }
+
     pub async fn get_balance(&self) -> anyhow::Result<Amount> {
         Ok(self.mint.get_balance(&self.db().begin_read()))
     }

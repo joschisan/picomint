@@ -137,18 +137,6 @@ impl<S: StateMachine> ModuleExecutor<S> {
     pub fn get_active_states(&self) -> Vec<(SmId, S)> {
         self.inner.get_active_states()
     }
-
-    /// Like [`Self::add_state_machine_dbtx`] but does not spawn the driver
-    /// task — the state will be picked up by [`Self::new`] when the executor
-    /// is constructed. Used by pre-init paths (e.g. recovery) that need to
-    /// seed state before the executor exists.
-    pub fn add_state_machine_unstarted(dbtx: &WriteTxRef<'_>, state: S) {
-        let id = SmId::random();
-        assert!(
-            dbtx.insert(&table::<S>(), &id, &state).is_none(),
-            "SmId collision"
-        );
-    }
 }
 
 impl<S: StateMachine> Inner<S> {
