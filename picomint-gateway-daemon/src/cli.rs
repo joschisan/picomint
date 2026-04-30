@@ -534,21 +534,10 @@ async fn federation_join(
         .clients
         .write()
         .expect("clients RwLock poisoned")
-        .insert(invite_code.federation_id, client.clone());
+        .insert(invite_code.federation_id, client);
 
-    crate::analytics::spawn_trailer(
-        &state.task_group,
-        client.clone(),
-        invite_code.federation_id,
-        state.analytics.clone(),
-    );
-
-    crate::trailer::spawn_trailer(
-        &state.task_group,
-        state.clone(),
-        invite_code.federation_id,
-        client,
-    );
+    // Trailers are daemon-wide singletons spawned at startup; new
+    // federations' events flow through the existing global event log.
 
     debug!(target: LOG_GATEWAY, federation_id = %invite_code.federation_id, "Federation connected");
 

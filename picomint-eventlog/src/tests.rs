@@ -43,12 +43,14 @@ async fn sanity_subscribe_operation_events() {
             }
         },
         async {
+            let federation_id = picomint_core::config::FederationId::dummy();
             for i in 0..=4 {
                 let dbtx = db.begin_write();
                 log_event_raw(
                     &dbtx.as_ref(),
                     EventKind::from(format!("{i}")),
                     EventSource::Core,
+                    federation_id,
                     operation_id,
                     vec![],
                 );

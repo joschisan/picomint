@@ -41,7 +41,7 @@ impl Event for ReceiveEvent {
 
 /// Emitted when an issuance state machine successfully finalises new notes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub(crate) struct IssuanceComplete {
+pub struct IssuanceComplete {
     pub txid: TransactionId,
 }
 
@@ -57,4 +57,20 @@ pub struct OutputFailureEvent;
 impl Event for OutputFailureEvent {
     const SOURCE: EventSource = EventSource::Mint;
     const KIND: EventKind = EventKind::from_static("output-failure");
+}
+
+/// Emitted on every recovery-state checkpoint: once at `init_recovery`
+/// (`index = 0`, `total = None`), once after the first driver wake-up
+/// fills in the total, then once per processed slice, ending with the
+/// terminal emission at `index == total` in the same tx that deletes
+/// `RECOVERY_STATE` and adds the bootstrapped issuance state machine.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryEvent {
+    pub index: u64,
+    pub total: Option<u64>,
+}
+
+impl Event for RecoveryEvent {
+    const SOURCE: EventSource = EventSource::Mint;
+    const KIND: EventKind = EventKind::from_static("recovery");
 }

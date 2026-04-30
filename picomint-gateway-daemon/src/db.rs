@@ -42,13 +42,13 @@ table!(
     "processed-ldk-event",
 );
 
-// Per-federation cursor for the trailer task. Value is the next
-// (unprocessed) EventLogId on that federation's client event log. Advanced
-// in the same dbtx that dispatches the external side effect — so a crashed
-// trailer simply re-dispatches idempotently on restart.
+// Cursor for the daemon-wide trailer task. Value is the next (unprocessed)
+// `EventLogId` on the global event log. Advanced in the same dbtx that
+// dispatches the external side effect — so a crashed trailer simply
+// re-dispatches idempotently on restart.
 table!(
     EVENT_CURSOR,
-    FederationId => EventLogId,
+    () => EventLogId,
     "event-cursor",
 );
 

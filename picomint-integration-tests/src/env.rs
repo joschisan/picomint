@@ -104,6 +104,8 @@ impl TestEnv {
             invite_code.clone(),
             data_dir.clone(),
             client_counter.fetch_add(1, Ordering::Relaxed),
+            None,
+            false,
         ))?;
 
         runtime.block_on(start_gateway(base, "gw", GW_PORT, GW_LN_PORT))?;
@@ -192,13 +194,25 @@ impl TestEnv {
         Ok(client)
     }
 
-    pub async fn new_client(&self) -> anyhow::Result<Arc<Client>> {
+    /// Build a fresh client. Pass `Some(mnemonic)` to recover an
+    /// existing client's keys (recovery tests); `None` generates one.
+    /// When `init_recovery` is true, [`Client::init_recovery`] is
+    /// called in the same tx that opens the db — so the constructor's
+    /// recovery-row check in [`Client::new`] picks it up and spawns
+    /// the driver.
+    pub async fn new_client(
+        &self,
+        mnemonic: Option<Mnemonic>,
+        init_recovery: bool,
+    ) -> anyhow::Result<Arc<Client>> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
         build_client(
             self.endpoint.clone(),
             self.invite_code.clone(),
             self.data_dir.clone(),
             n,
+            mnemonic,
+            init_recovery,
         )
         .await
     }
@@ -224,15 +238,29 @@ async fn build_client(
     invite_code: InviteCode,
     data_dir: std::path::PathBuf,
     n: u64,
+    mnemonic: Option<Mnemonic>,
+    init_recovery: bool,
 ) -> anyhow::Result<Arc<Client>> {
     let db_dir = data_dir.join(format!("client-{n}"));
     tokio::fs::create_dir_all(&db_dir).await?;
 
     let db = picomint_redb::Database::open(db_dir.join("database.redb"))?;
 
-    let mnemonic = Mnemonic::generate(12)?;
+    let mnemonic = match mnemonic {
+        Some(m) => m,
+        None => Mnemonic::generate(12)?,
+    };
 
     let config = picomint_client::download(&endpoint, &invite_code).await?;
+
+    // Seed the recovery row BEFORE `Client::new` so its constructor
+    // picks it up via `MintClientModule::new`'s presence check and
+    // spawns the driver.
+    if init_recovery {
+        let dbtx = db.begin_write();
+        Client::init_recovery(&dbtx.as_ref(), config.calculate_federation_id());
+        dbtx.commit();
+    }
 
     let client = Client::new(endpoint, db, &mnemonic, config).await?;
 

@@ -22,13 +22,21 @@ table!(
     "mint-note",
 );
 
-/// Recovery state that can be checkpointed and resumed
+/// Mint recovery checkpoint — single in-flight recovery per client.
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct RecoveryState {
+pub struct Recovery {
+    /// Op-id under which every progress / completion event is logged.
+    /// Picked by `init_recovery` and persisted so a restart's driver
+    /// keeps emitting under the same op-id and a UI subscriber doesn't
+    /// see the stream split.
+    pub operation_id: OperationId,
     /// Next item index to download
     pub next_index: u64,
-    /// Total items (for progress calculation)
-    pub total_items: u64,
+    /// Total items (for progress calculation). `None` after
+    /// `init_recovery` — the driver fills it in on its first awakening
+    /// via `module_api.recovery_count()` so `init_recovery` doesn't
+    /// have to hit the network.
+    pub total_items: Option<u64>,
     /// Already recovered note requests, keyed by `nonce_hash` (for efficient
     /// removal when inputs are seen)
     pub requests: BTreeMap<hash160::Hash, NoteIssuanceRequest>,
@@ -36,10 +44,10 @@ pub struct RecoveryState {
     pub nonces: BTreeSet<hash160::Hash>,
 }
 
-picomint_redb::consensus_value!(RecoveryState);
+picomint_redb::consensus_value!(Recovery);
 
 table!(
-    RECOVERY_STATE,
-    () => RecoveryState,
-    "mint-recovery-state",
+    RECOVERY,
+    () => Recovery,
+    "mint-recovery",
 );

@@ -52,7 +52,7 @@ fn ln_event_stream(
     stream! {
         loop {
             let notified = notify.notified();
-            let events = client.get_event_log(Some(next_id), 100).await;
+            let events = client.get_event_log(next_id, 100).await;
 
             for (id, entry) in events {
                 next_id = id.saturating_add(1);
@@ -556,7 +556,7 @@ async fn test_lnurl_recurringd_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
     info!("ln: test_lnurl_recurringd_roundtrip");
 
     // Fresh client so the receive-event stream starts empty.
-    let client = env.new_client().await?;
+    let client = env.new_client(None, false).await?;
 
     let recurringd: String = env.recurring_url.parse()?;
 

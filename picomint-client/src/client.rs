@@ -233,6 +233,19 @@ impl Client {
         &self.db
     }
 
+    /// Seed the mint recovery state in `dbtx`. Caller commits this in
+    /// the same tx that persists the federation config so "join + start
+    /// recovery" is atomic. Returns the op-id every recovery event will
+    /// be logged under. The driver is picked up by the next
+    /// [`Client::new`] / [`Client::new_gateway`] on the persisted db.
+    /// Panics if a recovery is already in progress.
+    pub fn init_recovery(
+        dbtx: &picomint_redb::WriteTxRef<'_>,
+        federation_id: FederationId,
+    ) -> OperationId {
+        crate::mint::init_recovery(dbtx, federation_id)
+    }
+
     pub async fn get_balance(&self) -> anyhow::Result<Amount> {
         Ok(self.mint.get_balance(&self.db().begin_read()))
     }
@@ -296,19 +309,15 @@ impl Client {
 
     pub async fn get_event_log(
         &self,
-        pos: Option<EventLogId>,
+        pos: EventLogId,
         limit: u64,
     ) -> Vec<(EventLogId, EventLogEntry)> {
-        let pos = pos.unwrap_or(EventLogId::LOG_START);
-        let end = pos.saturating_add(limit);
-        self.db
-            .begin_read()
-            .range(&picomint_eventlog::EVENT_LOG, pos..end, |it| it.collect())
+        picomint_eventlog::get_event_log(&self.db, pos, limit)
     }
 
     /// Shared [`Notify`] that fires on every commit touching the event log.
     pub fn event_notify(&self) -> Arc<tokio::sync::Notify> {
-        self.db.notify_for_table(&picomint_eventlog::EVENT_LOG)
+        picomint_eventlog::event_notify(&self.db)
     }
 
     /// One-shot snapshot of every event currently logged for `operation_id`,

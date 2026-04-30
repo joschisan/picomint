@@ -1,11 +1,13 @@
 //! On-disk SQLite mirror of the gateway's gw-module event log.
 //!
-//! Per-federation trailer tasks read from the client event log and `INSERT`
-//! rows into `{DATA_DIR}/analytics.sqlite`. One table per event kind plus a
-//! `payments` view that stitches sends/receives into a single row per op.
+//! A single daemon-wide trailer task reads from the global event log and
+//! `INSERT`s rows into `{DATA_DIR}/analytics.sqlite`. One table per event
+//! kind plus a `payments` view that stitches sends/receives into a single
+//! row per op. Federation_id is read directly off each event entry — every
+//! event is federation-scoped at log time.
 //!
 //! The file is **wiped on every gateway startup** — analytics state is
-//! derived, not authoritative. The event log in each client's redb is the
+//! derived, not authoritative. The event log in the gateway redb is the
 //! source of truth; the trailer replays from position 0 on every boot.
 //!
 //! Users and agents inspect the db directly via `sqlite3 analytics.sqlite`.
@@ -15,16 +17,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use picomint_client::Client;
 use picomint_client::gw::events::{
     ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent, SendCancelEvent,
     SendEvent, SendSuccessEvent,
 };
-use picomint_core::config::FederationId;
 use picomint_core::task::TaskGroup;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use rusqlite::Connection;
 use tokio::sync::Mutex;
+
+use crate::AppState;
 
 const CHUNK_SIZE: u64 = 10_000;
 
@@ -186,47 +188,37 @@ LEFT JOIN receive_refund  refund
        ON refund.federation_id = r.federation_id AND refund.operation_id = r.operation_id;
 "#;
 
-/// Spawn the per-client trailer: drain the event log forward in chunks and
-/// mirror each gw event into the SQLite analytics DB. Blocks on
-/// `event_notify` only when caught up with the head.
-pub fn spawn_trailer(
-    task_group: &TaskGroup,
-    client: Arc<Client>,
-    federation_id: FederationId,
-    state: Analytics,
-) {
-    task_group.spawn_cancellable(
-        "gw-analytics-trailer",
-        trailer(client, federation_id, state),
-    );
+/// Spawn the daemon-wide trailer: drain the global event log forward in
+/// chunks and mirror each gw event into the SQLite analytics DB. Blocks on
+/// the global `event_notify` only when caught up with the head.
+pub fn spawn_trailer(task_group: &TaskGroup, state: AppState) {
+    task_group.spawn_cancellable("gw-analytics-trailer", trailer(state));
 }
 
-async fn trailer(client: Arc<Client>, federation_id: FederationId, state: Analytics) {
+async fn trailer(state: AppState) {
     let mut cursor = EventLogId::default();
-    let notify = client.event_notify();
-    let fed_id_hex = federation_id.to_string();
+    let notify = picomint_eventlog::event_notify(&state.gateway_db);
 
     loop {
         // Register interest in the next commit BEFORE reading, so we don't
         // miss a commit that lands between the read and `.await`.
         let notified = notify.notified();
 
-        let chunk = client.get_event_log(Some(cursor), CHUNK_SIZE).await;
+        let chunk = picomint_eventlog::get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
+
         if let Some((last_id, _)) = chunk.last() {
             cursor = last_id.saturating_add(1);
             let entries: Vec<EventLogEntry> = chunk.iter().map(|(_, e)| e.clone()).collect();
-            let fed = fed_id_hex.clone();
-            let state = state.clone();
+            let analytics = state.analytics.clone();
             // rusqlite is sync — hop off the tokio runtime's thread pool for
             // the insert batch so we don't block other async work.
-            if let Err(e) =
-                tokio::task::spawn_blocking(move || insert_batch(&state, &fed, &entries))
-                    .await
-                    .expect("spawn_blocking join")
+            if let Err(e) = tokio::task::spawn_blocking(move || insert_batch(&analytics, &entries))
+                .await
+                .expect("spawn_blocking join")
             {
                 tracing::error!(
                     target: picomint_logging::LOG_GATEWAY,
-                    %federation_id, error = %e,
+                    error = %e,
                     "analytics insert failed"
                 );
             }
@@ -241,12 +233,13 @@ async fn trailer(client: Arc<Client>, federation_id: FederationId, state: Analyt
     }
 }
 
-fn insert_batch(state: &Analytics, fed_id: &str, entries: &[EventLogEntry]) -> anyhow::Result<()> {
-    let mut guard = state.conn.blocking_lock();
+fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Result<()> {
+    let mut guard = analytics.conn.blocking_lock();
     let tx = guard.transaction()?;
     for entry in entries {
         let op_id = entry.operation_id.to_string();
         let ts = entry.ts_usecs as i64;
+        let fed_id = entry.federation_id.to_string();
         if let Some(e) = entry.to_event::<SendEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO send \

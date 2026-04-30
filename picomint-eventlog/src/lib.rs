@@ -1,22 +1,31 @@
 #![allow(clippy::needless_lifetimes)]
 
-//! Client Event Log
+//! Event log
 //!
-//! Single, ordered, append-only log of all important client-side events.
+//! Single, ordered, append-only log of all important events on a host.
 //! Events that carry an `operation_id` are additionally duplicated into a
 //! secondary table keyed by `(operation_id, event_log_id)` so a subscriber
 //! can tail events for a specific operation cheaply via a stream API.
+//!
+//! The log lives at the un-isolated root of the redb database regardless
+//! of where callers are operating. All read/write/notify entry points
+//! internally call [`picomint_redb::Database::un_prefixed`] /
+//! [`picomint_redb::WriteTxRef::un_prefixed`], so a caller holding an
+//! isolated handle (e.g. a gateway federation client) still hits the
+//! shared root tables. This makes the log a daemon-wide stream — a
+//! single op-id can carry events from multiple isolated clients (e.g.
+//! both halves of a gateway-internal direct swap).
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use derive_more::{Display, FromStr};
 use futures::Stream;
+use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::time::duration_since_epoch;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::NativeTableDef;
 use picomint_redb::{Database, WriteTxRef};
-use picomint_redb::{consensus_key, consensus_value};
+use picomint_redb::{consensus_key, consensus_value, table};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
@@ -115,6 +124,13 @@ pub struct EventLogEntry {
     /// Where the event came from. See [`EventSource`].
     pub source: EventSource,
 
+    /// Federation this event belongs to. Every event is federation-scoped
+    /// — there are no global events. For events that span two clients in
+    /// the same daemon (e.g. a gateway-internal direct swap), each side
+    /// emits its own entry tagged with its own federation_id; the shared
+    /// `operation_id` lets a subscriber stitch them together.
+    pub federation_id: FederationId,
+
     /// Operation this event belongs to. Used to index the event into
     /// [`EVENT_LOG_BY_OPERATION`] for op-scoped tailing.
     pub operation_id: OperationId,
@@ -136,10 +152,17 @@ impl EventLogEntry {
 
 consensus_value!(EventLogEntry);
 
-pub const EVENT_LOG: NativeTableDef<EventLogId, EventLogEntry> = NativeTableDef::new("event-log");
+table!(
+    EVENT_LOG,
+    EventLogId => EventLogEntry,
+    "global-event-log",
+);
 
-pub const EVENT_LOG_BY_OPERATION: NativeTableDef<(OperationId, EventLogId), EventLogEntry> =
-    NativeTableDef::new("event-log-by-operation");
+table!(
+    EVENT_LOG_BY_OPERATION,
+    (OperationId, EventLogId) => EventLogEntry,
+    "operation-event-log",
+);
 
 /// Append an event to [`EVENT_LOG`] and [`EVENT_LOG_BY_OPERATION`]. IDs are
 /// allocated inline under redb's single-writer serialization. The per-table
@@ -149,22 +172,30 @@ pub fn log_event_raw(
     dbtx: &WriteTxRef<'_>,
     kind: EventKind,
     source: EventSource,
+    federation_id: FederationId,
     operation_id: OperationId,
     payload: Vec<u8>,
 ) {
     tracing::info!(
         kind = %kind,
         source = ?source,
+        %federation_id,
         operation_id = %operation_id,
         payload = %String::from_utf8_lossy(&payload),
         "event",
     );
 
-    let id = next_event_log_id(dbtx);
+    // Always write at the root: the event log is a daemon-wide stream,
+    // not per-client/per-federation. Callers may pass an isolated tx
+    // (e.g. a gateway federation client mid-state-machine commit) but
+    // the events still land in the shared root tables.
+    let dbtx = dbtx.un_prefixed();
+    let id = next_event_log_id(&dbtx);
     let ts_usecs = u64::try_from(duration_since_epoch().as_micros()).unwrap_or(u64::MAX);
     let entry = EventLogEntry {
         kind,
         source,
+        federation_id,
         operation_id,
         ts_usecs,
         payload,
@@ -183,11 +214,17 @@ pub fn log_event_raw(
 }
 
 /// Typed convenience: encode an [`Event`] into the log.
-pub fn log_event<E: Event>(dbtx: &WriteTxRef<'_>, operation_id: OperationId, event: E) {
+pub fn log_event<E: Event>(
+    dbtx: &WriteTxRef<'_>,
+    federation_id: FederationId,
+    operation_id: OperationId,
+    event: E,
+) {
     log_event_raw(
         dbtx,
         E::KIND,
         E::SOURCE,
+        federation_id,
         operation_id,
         serde_json::to_vec(&event).expect("Serialization can't fail"),
     );
@@ -200,11 +237,33 @@ fn next_event_log_id(dbtx: &WriteTxRef<'_>) -> EventLogId {
     })
 }
 
+/// [`Notify`] handle that fires on every commit touching the global event
+/// log. Resolves on the un-prefixed root regardless of `db`'s isolation,
+/// so subscribers always observe the daemon-wide stream.
+pub fn event_notify(db: &Database) -> Arc<Notify> {
+    db.un_prefixed().notify_for_table(&EVENT_LOG)
+}
+
+/// Read up to `limit` consecutive [`EVENT_LOG`] entries starting at
+/// `pos`. Trailers paging through the log in chunks call this in a loop,
+/// advancing `pos` past the last returned id between calls. Pass
+/// [`EventLogId::LOG_START`] to read from the head.
+pub fn get_event_log(
+    db: &Database,
+    pos: EventLogId,
+    limit: u64,
+) -> Vec<(EventLogId, EventLogEntry)> {
+    let end = pos.saturating_add(limit);
+    db.un_prefixed()
+        .begin_read()
+        .range(&EVENT_LOG, pos..end, |it| it.collect())
+}
+
 /// One-shot snapshot of every event currently logged for `operation_id`, in
 /// insertion order. See [`subscribe_operation_events`] for the streaming
 /// variant that also yields events arriving after the call.
 pub fn read_operation_events(db: &Database, operation_id: OperationId) -> Vec<EventLogEntry> {
-    db.begin_read().range(
+    db.un_prefixed().begin_read().range(
         &EVENT_LOG_BY_OPERATION,
         (operation_id, EventLogId::LOG_START)..(operation_id, EventLogId::LOG_END),
         |it| it.map(|(_, v)| v).collect(),
@@ -221,6 +280,7 @@ pub fn subscribe_operation_events(
     event_notify: Arc<Notify>,
     operation_id: OperationId,
 ) -> impl Stream<Item = EventLogEntry> {
+    let db = db.un_prefixed();
     async_stream::stream! {
         let mut next_id = EventLogId::LOG_START;
         loop {
