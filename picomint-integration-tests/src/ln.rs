@@ -556,7 +556,7 @@ async fn test_lnurl_recurringd_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
     info!("ln: test_lnurl_recurringd_roundtrip");
 
     // Fresh client so the receive-event stream starts empty.
-    let client = env.new_client().await?;
+    let client = env.new_client(None, false).await?;
 
     let recurringd: String = env.recurring_url.parse()?;
 

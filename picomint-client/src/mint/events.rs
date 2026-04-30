@@ -41,7 +41,7 @@ impl Event for ReceiveEvent {
 
 /// Emitted when an issuance state machine successfully finalises new notes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub(crate) struct IssuanceComplete {
+pub struct IssuanceComplete {
     pub txid: TransactionId,
 }
 

@@ -1,16 +1,17 @@
 use std::pin::pin;
 use std::sync::Arc;
 
+use anyhow::ensure;
 use async_stream::stream;
 use futures::StreamExt;
-use picomint_client::mint::{ReceiveEvent, SendEvent};
-use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
+use picomint_client::mint::{IssuanceComplete, ReceiveEvent, RecoveryEvent, SendEvent};
+use picomint_client::{Client, Mnemonic, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use tracing::info;
 
-use crate::env::TestEnv;
+use crate::env::{TestEnv, retry};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -55,24 +56,74 @@ fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, MintEvent
     None
 }
 
-/// Await the tx outcome (TxAccept or TxReject) for a specific operation_id.
+/// Tail the global event log and yield only `RecoveryEvent` entries, in
+/// log order. Used by the recovery test, which doesn't carry the
+/// recovery op-id back from `Client::init_recovery`.
+fn recovery_event_stream(client: &Arc<Client>) -> impl futures::Stream<Item = RecoveryEvent> {
+    let client = client.clone();
+    let notify = client.event_notify();
+    let mut next_id = EventLogId::LOG_START;
+
+    stream! {
+        loop {
+            let notified = notify.notified();
+            let events = client.get_event_log(next_id, 100).await;
+
+            for (id, entry) in events {
+                next_id = id.saturating_add(1);
+
+                if let Some(ev) = entry.to_event::<RecoveryEvent>() {
+                    yield ev;
+                }
+            }
+
+            notified.await;
+        }
+    }
+}
+
+/// Wait until a receive operation is fully settled. Returns:
+/// - `Ok` once both `TxAcceptEvent` AND `IssuanceComplete` have been
+///   observed — at that point the spendable notes have been written
+///   to the local NOTE table and the balance reflects the receive.
+/// - `Err` on `TxRejectEvent` (federation rejected the tx).
+///
+/// Callers must wait for `IssuanceComplete`, not just `TxAcceptEvent`,
+/// because the issuance state machine still has to fetch threshold
+/// signatures after the tx is accepted before the notes land. Reading
+/// `get_balance()` between TxAccept and IssuanceComplete returns a
+/// stale (lower) figure.
 async fn await_tx_outcome(client: &Arc<Client>, operation_id: OperationId) -> Result<(), String> {
     let mut stream = client.subscribe_operation_events(operation_id);
+
+    let mut tx_accepted = false;
+
     while let Some(entry) = stream.next().await {
         if entry.to_event::<TxAcceptEvent>().is_some() {
-            return Ok(());
+            tx_accepted = true;
         }
+
         if let Some(ev) = entry.to_event::<TxRejectEvent>() {
             return Err(ev.error);
         }
+
+        if tx_accepted && entry.to_event::<IssuanceComplete>().is_some() {
+            return Ok(());
+        }
     }
+
     unreachable!("stream only ends at client shutdown")
 }
 
 pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
     info!("mint: send_and_receive (10 iterations) + double_spend_is_rejected");
 
-    let client_receive = env.new_client().await?;
+    // Capture the receive client's mnemonic so we can recover it at
+    // the end of the suite, after it has accumulated a balance.
+    let receive_mnemonic = Mnemonic::generate(12)?;
+    let client_receive = env
+        .new_client(Some(receive_mnemonic.clone()), false)
+        .await?;
 
     let mut send_events = pin!(mint_event_stream(client_send));
     let mut receive_events = pin!(mint_event_stream(&client_receive));
@@ -137,7 +188,65 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     info!("mint: double_spend_is_rejected passed");
 
+    // Capture the balance the receive client accumulated, then wipe its
+    // db and recover from the mnemonic. The recovered client must end
+    // up with the same balance.
+    let expected = client_receive.get_balance().await?;
+
+    ensure!(
+        expected != Amount::ZERO,
+        "client_receive should have a non-zero balance before recovery"
+    );
+
     client_receive.shutdown().await;
+
+    info!("mint: recovery (expected balance {expected})");
+
+    // `init_recovery: true` seeds the recovery row in the same call
+    // that opens the db, BEFORE `Client::new` runs — so the
+    // constructor's presence check picks it up and spawns the driver.
+    let recovered = env.new_client(Some(receive_mnemonic), true).await?;
+
+    // Verify the event stream: first `RecoveryEvent` has
+    // `total = None` (init_recovery couldn't know it without hitting
+    // the network), and we eventually see a terminal one with
+    // `index == total` once the driver finishes. We tail the global
+    // event log here rather than `subscribe_operation_events` because
+    // we don't carry the op-id back from `init_recovery`.
+    let mut events = pin!(recovery_event_stream(&recovered));
+
+    let first = events.next().await.expect("first recovery event");
+
+    assert_eq!(first.index, 0);
+    assert_eq!(first.total, None);
+
+    loop {
+        let ev = events.next().await.expect("client running");
+
+        if ev.total.is_some_and(|total| ev.index == total) {
+            break;
+        }
+    }
+
+    // The terminal recovery event fires when the bootstrapped issuance
+    // SM is added; the SM still has to fetch shares and write spendable
+    // notes before the balance reflects the recovered funds. Poll until
+    // the balance matches.
+    retry("recovery balance match", || async {
+        let bal = recovered.get_balance().await?;
+
+        ensure!(
+            bal == expected,
+            "balance not yet matched: {bal} vs {expected}"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    recovered.shutdown().await;
+
+    info!("mint: recovery passed");
 
     Ok(())
 }
