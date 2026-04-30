@@ -204,12 +204,7 @@ async fn trailer(state: AppState) {
         // miss a commit that lands between the read and `.await`.
         let notified = notify.notified();
 
-        let chunk: Vec<(EventLogId, EventLogEntry)> =
-            state.gateway_db.un_prefixed().begin_read().range(
-                &picomint_eventlog::EVENT_LOG,
-                cursor..cursor.saturating_add(CHUNK_SIZE),
-                |it| it.collect(),
-            );
+        let chunk = picomint_eventlog::get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
 
         if let Some((last_id, _)) = chunk.last() {
             cursor = last_id.saturating_add(1);

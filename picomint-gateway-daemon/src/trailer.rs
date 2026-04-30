@@ -48,12 +48,7 @@ async fn run(state: AppState) {
     loop {
         let notified = notify.notified();
 
-        let chunk: Vec<(picomint_eventlog::EventLogId, EventLogEntry)> =
-            state.gateway_db.un_prefixed().begin_read().range(
-                &picomint_eventlog::EVENT_LOG,
-                cursor..cursor.saturating_add(CHUNK_SIZE),
-                |it| it.collect(),
-            );
+        let chunk = picomint_eventlog::get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
 
         for (id, entry) in &chunk {
             let dbtx = state.gateway_db.begin_write();

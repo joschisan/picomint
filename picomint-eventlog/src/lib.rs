@@ -238,6 +238,21 @@ pub fn event_notify(db: &Database) -> Arc<Notify> {
     db.un_prefixed().notify_for_table(&EVENT_LOG)
 }
 
+/// Read up to `limit` consecutive [`EVENT_LOG`] entries starting at
+/// `pos`. Trailers paging through the log in chunks call this in a loop,
+/// advancing `pos` past the last returned id between calls. Pass
+/// [`EventLogId::LOG_START`] to read from the head.
+pub fn get_event_log(
+    db: &Database,
+    pos: EventLogId,
+    limit: u64,
+) -> Vec<(EventLogId, EventLogEntry)> {
+    let end = pos.saturating_add(limit);
+    db.un_prefixed()
+        .begin_read()
+        .range(&EVENT_LOG, pos..end, |it| it.collect())
+}
+
 /// One-shot snapshot of every event currently logged for `operation_id`, in
 /// insertion order. See [`subscribe_operation_events`] for the streaming
 /// variant that also yields events arriving after the call.

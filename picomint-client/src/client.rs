@@ -296,15 +296,10 @@ impl Client {
 
     pub async fn get_event_log(
         &self,
-        pos: Option<EventLogId>,
+        pos: EventLogId,
         limit: u64,
     ) -> Vec<(EventLogId, EventLogEntry)> {
-        let pos = pos.unwrap_or(EventLogId::LOG_START);
-        let end = pos.saturating_add(limit);
-        self.db
-            .un_prefixed()
-            .begin_read()
-            .range(&picomint_eventlog::EVENT_LOG, pos..end, |it| it.collect())
+        picomint_eventlog::get_event_log(&self.db, pos, limit)
     }
 
     /// Shared [`Notify`] that fires on every commit touching the event log.

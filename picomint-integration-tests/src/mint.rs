@@ -29,7 +29,7 @@ fn mint_event_stream(
     stream! {
         loop {
             let notified = notify.notified();
-            let events = client.get_event_log(Some(next_id), 100).await;
+            let events = client.get_event_log(next_id, 100).await;
 
             for (id, entry) in events {
                 next_id = id.saturating_add(1);
