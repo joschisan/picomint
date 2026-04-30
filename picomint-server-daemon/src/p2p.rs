@@ -371,13 +371,13 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
         status_sender: watch::Sender<Option<P2PConnectionStatus>>,
         task_group: &TaskGroup,
     ) -> Self {
-        // Small message queues to avoid outdated messages such as requests for
-        // signed session outcomes queueing up while a peer is disconnected;
-        // the consensus layer is designed for an unreliable network and
-        // re-sends as needed. During DKG we never have more than two messages
-        // in these channels at once.
-        let (outgoing_sender, outgoing_receiver) = bounded(5);
-        let (incoming_sender, incoming_receiver) = bounded(5);
+        // Per-peer message queues. Sized for the BFT engine's anti-entropy
+        // bursts (push + reactive pull at unit-creation cadence) plus
+        // headroom — drops are silent and the consensus layer expects to
+        // resend, but a queue too small causes confirmation propagation
+        // to stall under brief network or drainer slowdowns.
+        let (outgoing_sender, outgoing_receiver) = bounded(1000);
+        let (incoming_sender, incoming_receiver) = bounded(1000);
 
         task_group.spawn_cancellable(
             format!("io-state-machine-{peer_id}"),
