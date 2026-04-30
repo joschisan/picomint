@@ -11,6 +11,7 @@ members = [
     "picomint-derive",
     "picomint-encoding",
     "picomint-eventlog",
+    "picomint-fountain",
     "picomint-gateway-cli",
     "picomint-gateway-cli-core",
     "picomint-gateway-daemon",
@@ -123,6 +124,7 @@ picomint-core = { path = "./picomint-core", version = "=0.1.0" }
 picomint-derive = { path = "./picomint-derive", version = "=0.1.0" }
 picomint-encoding = { path = "./picomint-encoding", version = "=0.1.0" }
 picomint-eventlog = { path = "./picomint-eventlog", version = "=0.1.0" }
+picomint-fountain = { path = "./picomint-fountain", version = "=0.1.0" }
 picomint-gateway-cli-core = { path = "./picomint-gateway-cli-core", version = "=0.1.0" }
 picomint-gateway-daemon = { path = "./picomint-gateway-daemon", version = "=0.1.0" }
 picomint-lnurl = { path = "./picomint-lnurl", version = "=0.1.0" }
