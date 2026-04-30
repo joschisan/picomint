@@ -3662,6 +3662,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-fountain"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "bitcoin_hashes",
+ "picomint-encoding",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+]
+
+[[package]]
 name = "picomint-gateway-cli"
 version = "0.1.0"
 dependencies = [
