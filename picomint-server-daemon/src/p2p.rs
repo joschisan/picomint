@@ -15,10 +15,12 @@ use iroh::address_lookup::MdnsAddressLookup;
 use iroh::endpoint::presets::N0;
 use iroh::endpoint::{Connection, RecvStream};
 use iroh::{Endpoint, PublicKey, SecretKey, Watcher as _};
+use picomint_bft::Message as BftMessage;
 use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
 use picomint_core::module::PICOMINT_ALPN;
 use picomint_core::session_outcome::SignedSessionOutcome;
 use picomint_core::task::TaskGroup;
+use picomint_core::transaction::ConsensusItem;
 use picomint_core::{PeerId, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_logging::{LOG_CONSENSUS, LOG_NET_PEER};
@@ -39,7 +41,13 @@ pub struct P2PConnectionStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
 pub enum P2PMessage {
-    Aleph(Vec<u8>),
+    /// One bft message. Session isolation is enforced inside the
+    /// engine: every `Unit` carries its own `session` field (part of the
+    /// unit hash), and the `Graph` rejects any unit whose session doesn't
+    /// match. A stale `Propose`/`Confirmed` from session N landing in
+    /// session N+1 is therefore discarded at insertion; a stale `Ack`
+    /// fails sig verification against the local-session unit hash.
+    Bft(BftMessage<ConsensusItem>),
     SessionSignature(secp256k1::schnorr::Signature),
     SessionIndex(u64),
     SignedSessionOutcome(SignedSessionOutcome),
@@ -363,13 +371,13 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
         status_sender: watch::Sender<Option<P2PConnectionStatus>>,
         task_group: &TaskGroup,
     ) -> Self {
-        // Small message queues to avoid outdated messages such as requests for
-        // signed session outcomes queueing up while a peer is disconnected;
-        // the consensus layer is designed for an unreliable network and
-        // re-sends as needed. During DKG we never have more than two messages
-        // in these channels at once.
-        let (outgoing_sender, outgoing_receiver) = bounded(5);
-        let (incoming_sender, incoming_receiver) = bounded(5);
+        // Per-peer message queues. Sized for the BFT engine's anti-entropy
+        // bursts (push + reactive pull at unit-creation cadence) plus
+        // headroom — drops are silent and the consensus layer expects to
+        // resend, but a queue too small causes confirmation propagation
+        // to stall under brief network or drainer slowdowns.
+        let (outgoing_sender, outgoing_receiver) = bounded(1000);
+        let (incoming_sender, incoming_receiver) = bounded(1000);
 
         task_group.spawn_cancellable(
             format!("io-state-machine-{peer_id}"),

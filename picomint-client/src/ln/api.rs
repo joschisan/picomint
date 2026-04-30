@@ -9,7 +9,7 @@ use picomint_core::ln::methods::{
     GatewaysRequest, GatewaysResponse, LnMethod,
 };
 use picomint_core::module::Method;
-use picomint_core::{NumPeersExt, OutPoint, PeerId};
+use picomint_core::{OutPoint, PeerId};
 use rand::seq::SliceRandom;
 
 impl FederationApi {
@@ -50,7 +50,7 @@ impl FederationApi {
             .request_with_strategy(
                 FilterMapThreshold::new(
                     |_, resp: GatewaysResponse| Ok(resp.gateways),
-                    self.all_peers().to_num_peers(),
+                    self.num_peers(),
                 ),
                 Method::Ln(LnMethod::Gateways(GatewaysRequest)),
             )

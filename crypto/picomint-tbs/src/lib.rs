@@ -76,11 +76,11 @@ impl std::hash::Hash for BlindingKey {
 }
 
 impl Message {
-    /// Creates a [`Message`] by hashing a 33-byte compressed public key with
+    /// Creates a [`Message`] by hashing a 32-byte x-only public key with
     /// SHA-256 under the domain separator `PICOMINT_TBS_BLS12_381_MESSAGE`,
     /// then mapping the hash to a BLS12-381 G1 curve point via a seeded
     /// [`ChaChaRng`].
-    pub fn from_public_key(bytes: [u8; 33]) -> Message {
+    pub fn from_public_key(bytes: [u8; 32]) -> Message {
         let seed = (TAG, bytes)
             .consensus_hash::<sha256::Hash>()
             .to_byte_array();

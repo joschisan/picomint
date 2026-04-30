@@ -14,16 +14,16 @@ use crate::wallet::config::WalletConfigConsensus;
 use picomint_encoding::{Decodable, Encodable};
 
 // TODO: make configurable
-/// This limits the RAM consumption of a AlephBFT Unit to roughly 50kB
-pub const ALEPH_BFT_UNIT_BYTE_LIMIT: usize = 50_000;
+/// This limits the RAM consumption of a BFT Unit to roughly 50kB
+pub const BFT_UNIT_BYTE_LIMIT: usize = 50_000;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct PeerEndpoint {
     /// The peer's iroh API public key (QUIC transport identity).
     pub iroh_pk: iroh_base::PublicKey,
-    /// The peer's secp256k1 public key used to authenticate atomic-broadcast
-    /// messages.
-    pub broadcast_pk: secp256k1::PublicKey,
+    /// The peer's x-only secp256k1 public key used to authenticate
+    /// atomic-broadcast messages.
+    pub broadcast_pk: secp256k1::XOnlyPublicKey,
     /// The peer's name.
     pub name: String,
 }
@@ -66,8 +66,8 @@ impl FederationId {
 pub struct ConsensusConfig {
     /// Per-peer endpoint info (iroh pk, broadcast pk, name).
     pub peers: BTreeMap<PeerId, PeerEndpoint>,
-    /// Number of AlephBFT rounds per session.
-    pub aleph_rounds_per_session: u16,
+    /// Number of BFT rounds per session.
+    pub bft_rounds_per_session: u16,
     /// Bitcoin network this federation operates on.
     pub network: Network,
     /// Federation name, chosen by the lead guardian during setup.

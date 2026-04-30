@@ -22,7 +22,7 @@ pub use amount::*;
 /// Mostly re-exported for [`Decodable`] macros.
 pub use anyhow;
 pub use bitcoin::hashes::Hash as BitcoinHash;
-pub use peer_id::*;
+pub use peer::*;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 pub use {bitcoin, hex, secp256k1};
@@ -38,7 +38,7 @@ pub mod config;
 /// Fundamental types
 pub mod core;
 /// Federation invite code
-pub mod invite_code;
+pub mod invite;
 /// Lightning module wire types / helpers (shared between client and server).
 pub mod ln;
 /// Guardian wire method names dispatched over Iroh.
@@ -48,7 +48,7 @@ pub mod mint;
 /// Extendable module sysystem
 pub mod module;
 /// `PeerId` type
-mod peer_id;
+mod peer;
 /// Consensus session outcome types (AcceptedItem, SessionOutcome, …).
 pub mod secret;
 

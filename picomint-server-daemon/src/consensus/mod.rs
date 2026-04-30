@@ -1,5 +1,5 @@
-pub mod aleph_bft;
 pub mod api;
+pub mod bft;
 pub mod db;
 pub mod engine;
 pub mod ln;

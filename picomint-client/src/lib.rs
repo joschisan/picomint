@@ -43,15 +43,14 @@ pub mod wallet;
 use std::collections::BTreeMap;
 
 use anyhow::bail;
-use api::{FederationApi, ServerError};
+use api::{FederationApi, request_single_node};
 pub use iroh::Endpoint;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
-use picomint_core::invite_code::InviteCode;
+use picomint_core::invite::InviteCode;
 use picomint_core::methods::{ConfigRequest, ConfigResponse, CoreMethod};
 use picomint_core::module::Method;
 use picomint_logging::LOG_CLIENT_NET;
-use query::FilterMap;
 use tracing::debug;
 
 pub use client::Client;
@@ -93,34 +92,29 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
     debug!(
         target: LOG_CLIENT_NET,
         invite = %picomint_base32::encode(invite),
-        peers = ?invite.peers,
+        node_id = %invite.node_id,
         "Downloading client config via invite code"
     );
 
     let federation_id = invite.federation_id;
-    let api_from_invite = FederationApi::new(endpoint.clone(), invite.peers.clone());
 
-    let query_strategy = FilterMap::new(move |resp: ConfigResponse| {
-        if federation_id != resp.config.calculate_federation_id() {
-            return Err(ServerError::ConditionFailed(anyhow::anyhow!(
-                "FederationId in invite code does not match client config"
-            )));
-        }
+    let invite_resp: ConfigResponse = request_single_node(
+        endpoint,
+        invite.node_id,
+        Method::Core(CoreMethod::Config(ConfigRequest)),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Failed to download client config from invite peer"))?;
 
-        Ok(resp.config.peers.clone())
-    });
+    if invite_resp.config.calculate_federation_id() != federation_id {
+        bail!("FederationId in invite code does not match client config");
+    }
 
-    let api_endpoints: BTreeMap<PeerId, picomint_core::config::PeerEndpoint> = api_from_invite
-        .request_with_strategy(
-            query_strategy,
-            Method::Core(CoreMethod::Config(ConfigRequest)),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("Failed to download client config from invite peer"))?;
-
-    let api_endpoints = api_endpoints
-        .into_iter()
-        .map(|(peer, endpoint)| (peer, endpoint.iroh_pk))
+    let api_endpoints: BTreeMap<PeerId, iroh_base::PublicKey> = invite_resp
+        .config
+        .peers
+        .iter()
+        .map(|(peer, ep)| (*peer, ep.iroh_pk))
         .collect();
 
     debug!(target: LOG_CLIENT_NET, "Verifying client config with all peers");

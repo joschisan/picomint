@@ -12,7 +12,7 @@ use picomint_core::mint::methods::{
 };
 use picomint_core::mint::{Denomination, RecoveryItem};
 use picomint_core::module::Method;
-use picomint_core::{NumPeersExt, PeerId, TransactionId};
+use picomint_core::{PeerId, TransactionId};
 use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 
 use super::NoteIssuanceRequest;
@@ -31,7 +31,7 @@ impl FederationApi {
                     verify_blind_shares(peer, resp.shares, &issuance_requests, &tbs_pks)
                         .map_err(ServerError::InvalidResponse)
                 },
-                self.all_peers().to_num_peers(),
+                self.num_peers(),
             ),
             Method::Mint(MintMethod::SignatureShares(SignatureSharesRequest { txid })),
         )
@@ -54,7 +54,7 @@ impl FederationApi {
                     verify_blind_shares(peer, resp.shares, &issuance_requests, &tbs_pks)
                         .map_err(ServerError::InvalidResponse)
                 },
-                self.all_peers().to_num_peers(),
+                self.num_peers(),
             ),
             Method::Mint(MintMethod::SignatureSharesRecovery(
                 SignatureSharesRecoveryRequest { messages },

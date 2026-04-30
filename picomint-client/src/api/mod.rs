@@ -12,12 +12,12 @@ use futures::{Future, StreamExt};
 use iroh::endpoint::Connection;
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{BackoffBuilder, Retryable, networking_backoff};
-use picomint_core::config::ALEPH_BFT_UNIT_BYTE_LIMIT;
+use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
 use picomint_core::methods::{
     CoreMethod, LivenessRequest, SubmitTransactionRequest, SubmitTransactionResponse,
 };
 use picomint_core::module::{ApiError, Method, PICOMINT_ALPN};
-use picomint_core::{NumPeersExt, PeerId};
+use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_logging::LOG_CLIENT_NET_API;
 use thiserror::Error;
@@ -141,6 +141,11 @@ impl FederationApi {
         &self.peers
     }
 
+    /// Federation size, derived from the per-peer connection state map.
+    pub fn num_peers(&self) -> NumPeers {
+        self.states.to_num_peers()
+    }
+
     /// Stream of live connection status for each peer.
     pub fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>> {
         let streams = self.states.iter().map(|(&peer, rx)| {
@@ -243,7 +248,7 @@ impl FederationApi {
         }
 
         let mut peer_errors = BTreeMap::new();
-        let peer_error_threshold = self.all_peers().to_num_peers().one_honest();
+        let peer_error_threshold = self.num_peers().one_honest();
 
         loop {
             let (peer, result) = futures
@@ -359,22 +364,16 @@ impl FederationApi {
     where
         Ret: Decodable + Eq + Debug + Clone + Send,
     {
-        self.request_with_strategy(
-            ThresholdConsensus::new(self.all_peers().to_num_peers()),
-            method,
-        )
-        .await
+        self.request_with_strategy(ThresholdConsensus::new(self.num_peers()), method)
+            .await
     }
 
     pub async fn request_current_consensus_retry<Ret>(&self, method: Method) -> Ret
     where
         Ret: Decodable + Eq + Debug + Clone + Send,
     {
-        self.request_with_strategy_retry(
-            ThresholdConsensus::new(self.all_peers().to_num_peers()),
-            method,
-        )
-        .await
+        self.request_with_strategy_retry(ThresholdConsensus::new(self.num_peers()), method)
+            .await
     }
 
     /// Submit a transaction and await the final outcome. The server long-
@@ -421,7 +420,26 @@ async fn connection_task(
     }
 }
 
-const IROH_MAX_RESPONSE_BYTES: usize = ALEPH_BFT_UNIT_BYTE_LIMIT * 3600 * 4 * 2;
+const IROH_MAX_RESPONSE_BYTES: usize = BFT_UNIT_BYTE_LIMIT * 3600 * 4 * 2;
+
+/// One-shot request to a specific iroh node without going through a
+/// [`FederationApi`]. Used at bootstrap time to fetch the federation
+/// config from an invite code's lone peer before the full peer set is
+/// known.
+pub async fn request_single_node<Ret: Decodable>(
+    endpoint: &Endpoint,
+    node_id: PublicKey,
+    method: Method,
+) -> ServerResult<Ret> {
+    let conn = endpoint
+        .connect(node_id, PICOMINT_ALPN)
+        .await
+        .map_err(|e| ServerError::Transport(e.into()))?;
+
+    let bytes = request_over_connection(&conn, method).await?;
+
+    Ret::consensus_decode(&bytes).map_err(|e| ServerError::ResponseDeserialization(e.into()))
+}
 
 async fn request_over_connection(connection: &Connection, method: Method) -> ServerResult<Vec<u8>> {
     let request_bytes = method.consensus_encode_to_vec();

@@ -25,7 +25,7 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    pub const MAX_TX_SIZE: usize = crate::config::ALEPH_BFT_UNIT_BYTE_LIMIT - 32;
+    pub const MAX_TX_SIZE: usize = crate::config::BFT_UNIT_BYTE_LIMIT - 32;
 
     pub fn tx_hash(&self) -> TransactionId {
         Self::tx_hash_from_parts(&self.inputs, &self.outputs)
@@ -37,7 +37,7 @@ impl Transaction {
 
     pub fn validate_signatures(
         &self,
-        pub_keys: &[crate::secp256k1::PublicKey],
+        pub_keys: &[crate::secp256k1::XOnlyPublicKey],
     ) -> Result<(), TransactionError> {
         use crate::secp256k1;
 
@@ -50,7 +50,7 @@ impl Transaction {
 
         for (pk, signature) in pub_keys.iter().zip(&self.signatures) {
             if secp256k1::global::SECP256K1
-                .verify_schnorr(signature, &msg, &pk.x_only_public_key().0)
+                .verify_schnorr(signature, &msg, pk)
                 .is_err()
             {
                 return Err(TransactionError::InvalidSignature);

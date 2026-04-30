@@ -6,7 +6,6 @@ use picomint_core::TransactionId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::invite_code::InviteCode;
 use picomint_core::util::BoxStream;
 use picomint_eventlog::{EVENT_LOG, Event, EventLogEntry, EventLogId};
 use picomint_redb::{Database, WriteTxRef};
@@ -70,18 +69,6 @@ impl ClientContext {
 
     pub fn federation_id(&self) -> FederationId {
         self.config.calculate_federation_id()
-    }
-
-    /// Returns an invite code for the federation that points to an arbitrary
-    /// guardian server for fetching the config
-    pub fn get_invite_code(&self) -> InviteCode {
-        let (peer, endpoint) = self
-            .config
-            .peers
-            .iter()
-            .next()
-            .expect("A federation always has at least one guardian");
-        InviteCode::new(endpoint.iroh_pk, *peer, self.federation_id())
     }
 
     /// Shared [`Notify`] that fires on every commit touching the event log.

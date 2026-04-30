@@ -8,7 +8,7 @@ use picomint_core::ln::methods::{DecryptionKeyShareRequest, DecryptionKeyShareRe
 use picomint_core::module::Method;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::wire;
-use picomint_core::{NumPeersExt, OutPoint, PeerId};
+use picomint_core::{OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_logging::LOG_CLIENT_MODULE_GW;
 use picomint_redb::WriteTxRef;
@@ -73,7 +73,7 @@ impl StateMachine for ReceiveStateMachine {
                         }
                         Ok(share)
                     },
-                    ctx.client_ctx.api().all_peers().to_num_peers(),
+                    ctx.client_ctx.api().num_peers(),
                 ),
                 Method::Ln(LnMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
                     outpoint: self.outpoint,

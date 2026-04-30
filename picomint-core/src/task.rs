@@ -26,7 +26,7 @@ use tracing::info;
 ///   (or `serve(...)` etc.) that the top level spawns. They return
 ///   futures/objects; they do not spawn internally.
 /// - Two legitimate "wait for subset" cases use a local `TaskTracker`
-///   + child token: the AlephBFT session scope and the `run_config_gen`
+///   + child token: the BFT session scope and the `run_config_gen`
 ///     setup phase. One acceptable leak below `main`: `run_iroh_api`'s
 ///     per-connection fan-out needs a `TaskTracker` passed in.
 /// - Client library holds `CancellationToken` + `Vec<JoinHandle<()>>`

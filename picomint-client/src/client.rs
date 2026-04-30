@@ -14,7 +14,7 @@ use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::invite_code::InviteCode;
+use picomint_core::invite::InviteCode;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxStream;
 use picomint_eventlog::{EventLogEntry, EventLogId};
@@ -279,13 +279,13 @@ impl Client {
             .await
             .into_iter()
             .find_map(|(peer_id, node_id)| (peer == peer_id).then_some(node_id))
-            .map(|node_id| InviteCode::new(node_id, peer, self.federation_id()))
+            .map(|node_id| InviteCode::new(node_id, self.federation_id()))
     }
 
     /// Returns the guardian public key set from the client config.
     pub async fn get_guardian_public_keys_blocking(
         &self,
-    ) -> BTreeMap<PeerId, picomint_core::secp256k1::PublicKey> {
+    ) -> BTreeMap<PeerId, picomint_core::secp256k1::XOnlyPublicKey> {
         self.config()
             .await
             .peers

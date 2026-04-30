@@ -299,7 +299,7 @@ impl LightningClientModule {
                 + gateway_info.expiration_delta
                 + CONTRACT_CONFIRMATION_BUFFER,
             claim_pk: gateway_info.module_public_key,
-            refund_pk: refund_keypair.public_key(),
+            refund_pk: refund_keypair.x_only_public_key().0,
             tweak,
         };
 
@@ -421,7 +421,9 @@ impl LightningClientModule {
 
         let claim_pk = recipient_pk
             .mul_tweak(secp256k1::SECP256K1, &claim_tweak)
-            .expect("Tweak is valid");
+            .expect("Tweak is valid")
+            .x_only_public_key()
+            .0;
 
         let contract = IncomingContract::new(
             self.cfg.tpe_agg_pk,
@@ -512,7 +514,7 @@ impl LightningClientModule {
             .expect("Tweak is valid")
             .keypair(secp256k1::SECP256K1);
 
-        if claim_keypair.public_key() != contract.commitment.claim_pk {
+        if claim_keypair.x_only_public_key().0 != contract.commitment.claim_pk {
             return None; // The claim key is not derived from our pk
         }
 
