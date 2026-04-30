@@ -24,9 +24,8 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::time::duration_since_epoch;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::NativeTableDef;
 use picomint_redb::{Database, WriteTxRef};
-use picomint_redb::{consensus_key, consensus_value};
+use picomint_redb::{consensus_key, consensus_value, table};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
@@ -153,10 +152,17 @@ impl EventLogEntry {
 
 consensus_value!(EventLogEntry);
 
-pub const EVENT_LOG: NativeTableDef<EventLogId, EventLogEntry> = NativeTableDef::new("event-log");
+table!(
+    EVENT_LOG,
+    EventLogId => EventLogEntry,
+    "global-event-log",
+);
 
-pub const EVENT_LOG_BY_OPERATION: NativeTableDef<(OperationId, EventLogId), EventLogEntry> =
-    NativeTableDef::new("event-log-by-operation");
+table!(
+    EVENT_LOG_BY_OPERATION,
+    (OperationId, EventLogId) => EventLogEntry,
+    "operation-event-log",
+);
 
 /// Append an event to [`EVENT_LOG`] and [`EVENT_LOG_BY_OPERATION`]. IDs are
 /// allocated inline under redb's single-writer serialization. The per-table
