@@ -302,13 +302,14 @@ impl Client {
         let pos = pos.unwrap_or(EventLogId::LOG_START);
         let end = pos.saturating_add(limit);
         self.db
+            .un_prefixed()
             .begin_read()
             .range(&picomint_eventlog::EVENT_LOG, pos..end, |it| it.collect())
     }
 
     /// Shared [`Notify`] that fires on every commit touching the event log.
     pub fn event_notify(&self) -> Arc<tokio::sync::Notify> {
-        self.db.notify_for_table(&picomint_eventlog::EVENT_LOG)
+        picomint_eventlog::event_notify(&self.db)
     }
 
     /// One-shot snapshot of every event currently logged for `operation_id`,

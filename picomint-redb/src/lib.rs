@@ -241,6 +241,18 @@ impl Database {
         }
     }
 
+    /// Sibling handle to the same underlying redb env with no prefix —
+    /// resolves tables at their bare label. The inverse of [`Self::isolate`].
+    /// Used by code that lives "above" the federation namespace (e.g. the
+    /// daemon-wide event log) to read/write root tables from a handle the
+    /// caller already had isolated.
+    pub fn un_prefixed(&self) -> Database {
+        Self {
+            inner: self.inner.clone(),
+            prefix: None,
+        }
+    }
+
     pub fn begin_write(&self) -> WriteTransaction {
         let tx = self
             .inner
@@ -433,6 +445,19 @@ impl<'tx> WriteTxRef<'tx> {
                 on_commit: self.on_commit,
             },
             Some(_) => panic!("You tried to isolate a tx twice"),
+        }
+    }
+
+    /// Sibling view of the same underlying tx with no prefix — resolves
+    /// tables at their bare label. Inverse of [`Self::isolate`]. Used by
+    /// the global event log to write to root tables atomically alongside
+    /// state writes that come in via an isolated [`WriteTxRef`].
+    pub fn un_prefixed(&self) -> WriteTxRef<'_> {
+        WriteTxRef {
+            tx: self.tx,
+            prefix: None,
+            touched: self.touched,
+            on_commit: self.on_commit,
         }
     }
 

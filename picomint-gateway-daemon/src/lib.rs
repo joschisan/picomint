@@ -79,19 +79,10 @@ impl AppState {
             .cloned()
     }
 
-    /// After `load_clients`, spawn one analytics trailer per federation
-    /// client so the SQLite mirror starts backfilling immediately.
-    pub async fn spawn_analytics_trailers(&self) {
-        let clients = self.clients.read().expect("clients RwLock poisoned");
-
-        for (federation_id, client) in clients.iter() {
-            analytics::spawn_trailer(
-                &self.task_group,
-                client.clone(),
-                *federation_id,
-                self.analytics.clone(),
-            );
-        }
+    /// Spawn the daemon-wide analytics trailer that mirrors every event in
+    /// the global event log into the SQLite analytics DB.
+    pub async fn spawn_analytics_trailer(&self) {
+        analytics::spawn_trailer(&self.task_group, self.clone());
     }
 
     /// Load all persisted federation clients on startup.
@@ -123,19 +114,11 @@ impl AppState {
         Ok(())
     }
 
-    /// After `load_clients`, spawn one trailer per federation so receive
-    /// events (`ReceiveSuccess` / `ReceiveRefund` / `ReceiveFailure`) trigger
-    /// the external LN / cross-federation settle work out-of-band.
-    pub async fn spawn_trailers(&self) {
-        let clients = self.clients.read().expect("clients RwLock poisoned");
-        for (federation_id, client) in clients.iter() {
-            trailer::spawn_trailer(
-                &self.task_group,
-                self.clone(),
-                *federation_id,
-                client.clone(),
-            );
-        }
+    /// Spawn the daemon-wide trailer that drives external side effects
+    /// (LDK claim/refund, direct-swap finalize_send) off receive-side
+    /// terminal events on the global event log.
+    pub async fn spawn_trailer(&self) {
+        trailer::spawn_trailer(&self.task_group, self.clone());
     }
 
     /// Get the name of a federation from its client config.

@@ -215,8 +215,8 @@ fn main() -> anyhow::Result<()> {
 
     // 7. Load federation clients + spawn their analytics tails and trailers
     runtime.block_on(state.load_clients())?;
-    runtime.block_on(state.spawn_analytics_trailers());
-    runtime.block_on(state.spawn_trailers());
+    runtime.block_on(state.spawn_analytics_trailer());
+    runtime.block_on(state.spawn_trailer());
 
     // 8. Spawn tasks
     let public_task = runtime.spawn(public::run_public(state.clone(), task_group.make_handle()));

@@ -234,7 +234,10 @@ impl MintClientModule {
 
         let tx_submission_executor = crate::executor::ModuleExecutor::new(
             context.db().clone(),
-            TxSubmissionSmContext { api: context.api() },
+            TxSubmissionSmContext {
+                api: context.api(),
+                federation_id,
+            },
             task_group.clone(),
         )
         .await;

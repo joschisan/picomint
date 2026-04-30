@@ -7,7 +7,7 @@ use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::util::BoxStream;
-use picomint_eventlog::{EVENT_LOG, Event, EventLogEntry, EventLogId};
+use picomint_eventlog::{Event, EventLogEntry, EventLogId};
 use picomint_redb::{Database, WriteTxRef};
 use tokio::sync::Notify;
 
@@ -73,7 +73,7 @@ impl ClientContext {
 
     /// Shared [`Notify`] that fires on every commit touching the event log.
     pub fn event_notify(&self) -> Arc<Notify> {
-        self.db.notify_for_table(&EVENT_LOG)
+        picomint_eventlog::event_notify(&self.db)
     }
 
     /// Read a batch of persisted event log entries starting at `pos`.
@@ -85,6 +85,7 @@ impl ClientContext {
         let pos = pos.unwrap_or(EventLogId::LOG_START);
         let end = pos.saturating_add(limit);
         self.db
+            .un_prefixed()
             .begin_read()
             .range(&picomint_eventlog::EVENT_LOG, pos..end, |it| it.collect())
     }
@@ -121,6 +122,6 @@ impl ClientContext {
     where
         E: Event + Send,
     {
-        picomint_eventlog::log_event(dbtx, operation_id, event);
+        picomint_eventlog::log_event(dbtx, self.federation_id(), operation_id, event);
     }
 }

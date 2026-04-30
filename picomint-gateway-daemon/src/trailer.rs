@@ -1,11 +1,11 @@
-//! Per-federation trailer task.
+//! Daemon-wide trailer task.
 //!
 //! The `ReceiveStateMachine` in `picomint-client::gw` is purely federation-
 //! local — it submits the incoming-contract tx, gathers TPE shares, writes
 //! the terminal `ReceiveSuccess` / `ReceiveRefund` / `ReceiveFailure` event,
-//! and submits the refund tx for refunds. The trailer watches that event log
-//! and drives the external side effect that makes the payment terminal from
-//! the outside world's point of view:
+//! and submits the refund tx for refunds. The trailer watches the global
+//! event log and drives the external side effect that makes the payment
+//! terminal from the outside world's point of view:
 //!
 //! - Direct swap (daemon DB has an `OUTGOING_CONTRACT[op_id]` row): call
 //!   `finalize_send` on the sending federation's client so the sender gets
@@ -14,16 +14,12 @@
 //!   `fail_for_hash` on the LDK node so the upstream LN sender's HTLC
 //!   settles or times out.
 //!
-//! Cursor is persisted per federation in the daemon DB (`EVENT_CURSOR`)
-//! and advanced after each dispatched event. Dispatches are idempotent, so
-//! on a crash the trailer just re-runs the last event on restart.
-use std::sync::Arc;
-
+//! Cursor is persisted daemon-wide in `EVENT_CURSOR` and advanced after
+//! each dispatched event. Dispatches are idempotent, so on a crash the
+//! trailer just re-runs the last event on restart.
 use bitcoin::hashes::{Hash as _, sha256};
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
-use picomint_client::Client;
 use picomint_client::gw::events::{ReceiveRefundEvent, ReceiveSuccessEvent};
-use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::contracts::PaymentImage;
 use picomint_core::task::TaskGroup;
@@ -35,29 +31,29 @@ use crate::db::{EVENT_CURSOR, INCOMING_CONTRACT, OUTGOING_CONTRACT};
 
 const CHUNK_SIZE: u64 = 1_000;
 
-pub fn spawn_trailer(
-    task_group: &TaskGroup,
-    state: AppState,
-    federation_id: FederationId,
-    client: Arc<Client>,
-) {
-    task_group.spawn_cancellable("gw-trailer", run(state, federation_id, client));
+pub fn spawn_trailer(task_group: &TaskGroup, state: AppState) {
+    task_group.spawn_cancellable("gw-trailer", run(state));
 }
 
-async fn run(state: AppState, federation_id: FederationId, client: Arc<Client>) {
+async fn run(state: AppState) {
     let mut cursor = state
         .gateway_db
         .begin_read()
         .as_ref()
-        .get(&EVENT_CURSOR, &federation_id)
+        .get(&EVENT_CURSOR, &())
         .unwrap_or_default();
 
-    let notify = client.event_notify();
+    let notify = picomint_eventlog::event_notify(&state.gateway_db);
 
     loop {
         let notified = notify.notified();
 
-        let chunk = client.get_event_log(Some(cursor), CHUNK_SIZE).await;
+        let chunk: Vec<(picomint_eventlog::EventLogId, EventLogEntry)> =
+            state.gateway_db.un_prefixed().begin_read().range(
+                &picomint_eventlog::EVENT_LOG,
+                cursor..cursor.saturating_add(CHUNK_SIZE),
+                |it| it.collect(),
+            );
 
         for (id, entry) in &chunk {
             let dbtx = state.gateway_db.begin_write();
@@ -66,7 +62,7 @@ async fn run(state: AppState, federation_id: FederationId, client: Arc<Client>) 
 
             cursor = id.saturating_add(1);
 
-            dbtx.insert(&EVENT_CURSOR, &federation_id, &cursor);
+            dbtx.insert(&EVENT_CURSOR, &(), &cursor);
 
             dbtx.commit();
         }
