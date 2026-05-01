@@ -8,7 +8,7 @@
 //! pre-filled slot rather than try to build a duplicate unit at the
 //! same `(round, creator)`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -75,7 +75,7 @@ async fn engine_skips_pre_filled_own_slot_after_wipe_restore() {
         session,
         round: 0,
         creator: own_id,
-        parents: BTreeMap::new(),
+        parents: BTreeSet::new(),
         data: vec![],
     };
 

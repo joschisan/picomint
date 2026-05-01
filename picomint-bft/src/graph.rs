@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use async_channel::Sender;
 use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
@@ -336,8 +336,10 @@ impl<D: UnitData> Graph<D> {
     /// round-0 units are the DAG's roots.
     ///
     /// For `round > 0`, returns the lowest-`PeerId`-keyed `threshold`
-    /// confirmed slots at `round - 1`, or `None` if fewer than
-    /// `threshold` slots at that round are confirmed.
+    /// confirmed creators at `round - 1`, or `None` if fewer than
+    /// `threshold` slots at that round are confirmed. Parent hashes
+    /// aren't tracked: at most one unit per slot can confirm, so the
+    /// creator suffices.
     ///
     /// No chain rule: a creator's own previous-round unit is *not*
     /// forced into the parent set. Recovery is independent of the
@@ -345,31 +347,30 @@ impl<D: UnitData> Graph<D> {
     /// refills sig deficits at slots receivers already hold, and the
     /// per-creator pull (`Message::Request` for the lowest unconfirmed
     /// round) pulls in missing units one round at a time.
-    pub fn parents_for(&self, round: Round) -> Option<BTreeMap<PeerId, UnitHash>> {
+    pub fn parents_for(&self, round: Round) -> Option<BTreeSet<PeerId>> {
         let Some(parent_round) = round.checked_sub(1) else {
-            return Some(BTreeMap::new());
+            return Some(BTreeSet::new());
         };
 
         let t = self.threshold();
 
-        let parents: BTreeMap<PeerId, UnitHash> = self
+        let parents: BTreeSet<PeerId> = self
             .round_units(parent_round)
             .filter(|e| e.is_confirmed(t))
             .take(t)
-            .map(|e| (e.unit.creator, e.hash()))
+            .map(|e| e.unit.creator)
             .collect();
 
         (parents.len() == t).then_some(parents)
     }
 
     /// Strict parent check used by `insert_unit`. Returns `Err(())` when
-    /// the parent set is malformed (wrong size, hash mismatch) or
-    /// missing/unconfirmed locally; `Ok(())` when it's good to go.
+    /// the parent set is malformed (wrong size) or missing/unconfirmed
+    /// locally; `Ok(())` when it's good to go.
     ///
     /// - Round 0 must have an empty parent set.
-    /// - Round R>0 must carry exactly `threshold` parents.
+    /// - Round R>0 must carry exactly `threshold` parent creators.
     /// - Every parent slot must already be in our graph and confirmed.
-    /// - Every parent's stored hash must match the claim.
     fn check_parents(&self, unit: &Unit<D>) -> Result<(), ()> {
         let t = self.threshold();
 
@@ -385,10 +386,10 @@ impl<D: UnitData> Graph<D> {
             return Err(());
         }
 
-        for (p_creator, p_hash) in &unit.parents {
+        for p_creator in &unit.parents {
             let parent = self.units.get(&(unit.round - 1, *p_creator)).ok_or(())?;
 
-            if parent.hash() != *p_hash || !parent.is_confirmed(t) {
+            if !parent.is_confirmed(t) {
                 return Err(());
             }
         }

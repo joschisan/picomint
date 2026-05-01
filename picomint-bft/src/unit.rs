@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt::Debug;
 
 use bitcoin::hashes::sha256;
@@ -32,12 +32,15 @@ impl<T: Debug + Clone + Encodable + Decodable + Send + Sync + 'static> UnitData 
 /// `(round, creator)` slot in distinct sessions are cryptographically
 /// distinct — a stale Propose/Confirmed/Ack from session N arriving at a
 /// peer in session N+1 fails to match the local slot and is discarded.
-/// `parents` maps each parent's creator to its hash; for `round > 0` the
-/// parent set must contain *exactly* `threshold` distinct creators all
-/// at `round - 1`. Round-0 units carry an empty parent set. `data` is
-/// the creator's payload at this slot, generic over the element type
-/// `D`; once the total order is extracted, each unit's `data` items are
-/// emitted in order keyed by the unit's creator.
+/// `parents` is the set of parent creators; for `round > 0` it must
+/// contain *exactly* `threshold` distinct creators, each referring to
+/// the (unique, locally-confirmed) unit at `(round - 1, creator)`.
+/// Round-0 units carry an empty parent set. Parent hashes are not
+/// carried — at most one unit per slot can ever confirm, so the creator
+/// is sufficient to identify the parent. `data` is the creator's
+/// payload at this slot, generic over the element type `D`; once the
+/// total order is extracted, each unit's `data` items are emitted in
+/// order keyed by the unit's creator.
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
 pub struct Unit<D: UnitData> {
     /// The session this unit belongs to. Part of the unit's identity so
@@ -48,8 +51,8 @@ pub struct Unit<D: UnitData> {
     pub round: Round,
     /// `PeerId` of this unit's creator.
     pub creator: PeerId,
-    /// Hashes of this unit's parents, keyed by their creator.
-    pub parents: BTreeMap<PeerId, UnitHash>,
+    /// Creators of this unit's parents at `round - 1`.
+    pub parents: BTreeSet<PeerId>,
     /// Creator's payload for this slot.
     pub data: Vec<D>,
 }
