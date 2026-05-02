@@ -19,7 +19,6 @@ bitcoin = { workspace = true }
 bitcoin_hashes = { workspace = true }
 bls12_381 = { workspace = true }
 derive_more = { workspace = true }
-futures = { workspace = true }
 group = { workspace = true }
 hex = { workspace = true, features = ["serde"] }
 iroh-base = { workspace = true, default-features = false }

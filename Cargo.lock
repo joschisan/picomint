@@ -3436,7 +3436,6 @@ dependencies = [
  "bitcoin_hashes",
  "bls12_381",
  "derive_more",
- "futures",
  "group",
  "hex",
  "iroh-base",
