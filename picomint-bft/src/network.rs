@@ -17,6 +17,7 @@ pub enum Message<D: UnitData> {
     /// 1. The creator's own broadcast at unit-creation time.
     /// 2. The creator's own anti-entropy push of its highest own slot.
     /// 3. A `Request` response (paired with one `Sig` per held cosig).
+    ///
     /// Binding the body to its claimed creator via `creator_sig` is
     /// what blocks a Byzantine peer from fabricating a body at someone
     /// else's slot. Cosig propagation is the `Sig` message's job.
@@ -43,12 +44,12 @@ pub enum Message<D: UnitData> {
         /// Schnorr cosignature over the unit's consensus encoding.
         sig: schnorr::Signature,
     },
-    /// Atomically-confirmed slot view. Carries the body + creator sig
-    /// + exactly `2f` cosigs — the minimal threshold proof. Emitted
-    /// *only* as a response to `Request`, and *only* when the
+    /// Atomically-confirmed slot view. Carries the body, the creator
+    /// sig, and exactly `2f` cosigs — the minimal threshold proof.
+    /// Emitted only as a response to `Request`, and only when the
     /// responder holds the slot at or above threshold locally. The
     /// receiver verifies the bundle and atomically installs (or
-    /// *overwrites*) the slot's entry.
+    /// overwrites) the slot's entry.
     ///
     /// Overwrite is safe by quorum math: at most one body per slot can
     /// ever assemble `1 + 2f` valid sigs, since honest peers cosign at
