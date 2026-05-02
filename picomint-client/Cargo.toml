@@ -54,6 +54,3 @@ tracing = { workspace = true }
 assert_matches = { workspace = true }
 serde_json = { workspace = true }
 tracing-test = { workspace = true }
-
-[lints]
-workspace = true

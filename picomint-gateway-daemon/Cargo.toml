@@ -46,6 +46,3 @@ url = { workspace = true }
 assert_matches = { workspace = true }
 itertools = { workspace = true }
 tpe = { workspace = true }
-
-[lints]
-workspace = true

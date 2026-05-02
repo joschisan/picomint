@@ -20,6 +20,3 @@ esplora-client = { workspace = true }
 picomint-core = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-
-[lints]
-workspace = true

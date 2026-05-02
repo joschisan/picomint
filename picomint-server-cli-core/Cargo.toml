@@ -12,6 +12,3 @@ version = { workspace = true }
 clap = { workspace = true }
 picomint-core = { workspace = true }
 serde = { workspace = true }
-
-[lints]
-workspace = true

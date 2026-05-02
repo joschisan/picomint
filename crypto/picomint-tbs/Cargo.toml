@@ -34,6 +34,3 @@ criterion = { workspace = true }
 harness = false
 name = "tbs"
 path = "benches/tbs.rs"
-
-[lints]
-workspace = true

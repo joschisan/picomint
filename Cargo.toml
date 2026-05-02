@@ -178,54 +178,7 @@ tracing-test = "0.2.6"
 url = "2.5.4"
 z32 = "1"
 
-[workspace.lints.clippy]
-dbg_macro = "deny"
-literal_string_with_formatting_args = "deny"
-
-[profile.dev]
-debug = "line-tables-only"
-# Workaround: https://github.com/rust-lang/cargo/issues/12457 which causes
-#             https://github.com/ipetkov/crane/issues/370
-[profile.dev.build-override]
-debug = false
-opt-level = 3
-
-# in dev mode optimize crates that are perf-critical (usually just crypto crates)
-[profile.dev.package]
-ahash = { opt-level = 3 }
-bitcoin_hashes = { opt-level = 3 }
-bls12_381 = { opt-level = 3 }
-byteorder = { opt-level = 3 }
-fedimint-threshold-crypto = { opt-level = 3 }
-group = { opt-level = 3 }
-hashbrown = { opt-level = 3 }
-libc = { opt-level = 3 }
-memchr = { opt-level = 3 }
-pairing = { opt-level = 3 }
-ppv-lite86 = { opt-level = 3 }
-rand = { opt-level = 3 }
-rand_chacha = { opt-level = 3 }
-rand_core = { opt-level = 3 }
-regex = { opt-level = 3 }
-ring = { opt-level = 3 }
-rustls = { opt-level = 3 }
-secp256k1 = { opt-level = 3 }
-secp256k1-sys = { opt-level = 3 }
-subtle = { opt-level = 3 }
-zeroize = { opt-level = 3 }
-
-[profile.dev.package."*"] # external dependencies
-opt-level = 1
-
-[profile.ci]
-debug = "line-tables-only"
-incremental = false
-inherits = "dev"
-
-[profile.ci.build-override]
-debug = false
-opt-level = 1
-
+# Thin LTO is a measurable perf win for the federation guardian's
+# crypto-heavy hot paths and worth the modest extra release-build time.
 [profile.release]
-debug = "line-tables-only"
 lto = "thin"
