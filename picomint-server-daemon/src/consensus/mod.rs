@@ -21,7 +21,6 @@ use iroh::endpoint::{RecvStream, SendStream};
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
 use picomint_core::module::{ApiAuth, ApiError, Method};
-use picomint_core::task::TaskGroup;
 use picomint_core::transaction::ConsensusItem;
 use picomint_core::wire;
 use picomint_encoding::{Decodable, Encodable};
@@ -53,7 +52,6 @@ pub async fn run(
     foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
     cfg: ServerConfig,
     db: Database,
-    task_group: &TaskGroup,
     bitcoin_backend: Arc<BitcoinBackend>,
     ui_config: Option<(SocketAddr, ApiAuth)>,
     data_dir: &Path,
@@ -67,7 +65,6 @@ pub async fn run(
         } else {
             Duration::from_mins(1)
         },
-        task_group,
     );
 
     // Wait for the bitcoin backend to come up before instantiating modules that
@@ -84,7 +81,6 @@ pub async fn run(
     let wallet = Arc::new(crate::consensus::wallet::Wallet::new(
         cfg.wallet_config(),
         db.clone(),
-        task_group,
         bitcoin_rpc_connection.clone(),
         cfg.consensus.network,
     ));
@@ -125,20 +121,17 @@ pub async fn run(
 
     info!("Starting Consensus Api...");
 
-    task_group.spawn_cancellable(
-        "iroh-api",
-        run_iroh_api(consensus_api.clone(), foreign_conn_rx, task_group.clone()),
-    );
+    tokio::spawn(run_iroh_api(consensus_api.clone(), foreign_conn_rx));
 
     info!("Starting Submission of Module CI proposals...");
 
-    task_group.spawn("citem_proposals", {
+    tokio::spawn({
         let server = consensus_api.server.clone();
         let db = db.clone();
         let submission_sender = submission_sender.clone();
-        move |task_handle| async move {
+        async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
-            while !task_handle.is_shutting_down() {
+            loop {
                 let tx = db.begin_read();
                 for item in server.mint.consensus_proposal(&tx.as_ref()).await {
                     submission_sender
@@ -171,9 +164,8 @@ pub async fn run(
         let ui_listener = TcpListener::bind(ui_addr)
             .await
             .expect("Failed to bind dashboard UI");
-        task_group.spawn("dashboard-ui", move |handle| async move {
+        tokio::spawn(async move {
             axum::serve(ui_listener, ui_service)
-                .with_graceful_shutdown(handle.make_shutdown_rx())
                 .await
                 .expect("Failed to serve dashboard UI");
         });
@@ -185,8 +177,8 @@ pub async fn run(
     {
         let data_dir = data_dir.to_owned();
         let dashboard_router = crate::cli::dashboard_cli_router(consensus_api.clone());
-        task_group.spawn("consensus-cli", move |handle| async move {
-            crate::cli::run_dashboard_cli(&data_dir, dashboard_router, handle).await;
+        tokio::spawn(async move {
+            crate::cli::run_dashboard_cli(&data_dir, dashboard_router).await;
         });
     }
 
@@ -228,7 +220,6 @@ pub async fn run(
         submission_receiver,
         shutdown_receiver,
         server: consensus_api.server.clone(),
-        task_group: task_group.clone(),
     }
     .run()
     .await?;
@@ -239,7 +230,6 @@ pub async fn run(
 async fn run_iroh_api(
     consensus_api: Arc<ConsensusApi>,
     foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
-    task_group: TaskGroup,
 ) {
     let parallel_connections_limit = Arc::new(Semaphore::new(MAX_CONNECTIONS));
 
@@ -255,15 +245,8 @@ async fn run_iroh_api(
             .acquire_owned()
             .await
             .expect("semaphore should not be closed");
-        task_group.spawn_cancellable_silent(
-            "handle-iroh-connection",
-            handle_incoming(
-                consensus_api.clone(),
-                task_group.clone(),
-                connection,
-                permit,
-            )
-            .then(|result| async {
+        tokio::spawn(
+            handle_incoming(consensus_api.clone(), connection, permit).then(|result| async {
                 if let Err(err) = result {
                     warn!(err = %format_args!("{err:#}"), "Failed to handle iroh connection");
                 }
@@ -274,7 +257,6 @@ async fn run_iroh_api(
 
 async fn handle_incoming(
     consensus_api: Arc<ConsensusApi>,
-    task_group: TaskGroup,
     connection: iroh::endpoint::Connection,
     _connection_permit: tokio::sync::OwnedSemaphorePermit,
 ) -> anyhow::Result<()> {
@@ -294,8 +276,7 @@ async fn handle_incoming(
             .acquire_owned()
             .await
             .expect("semaphore should not be closed");
-        task_group.spawn_cancellable_silent(
-            "handle-iroh-request",
+        tokio::spawn(
             handle_request(consensus_api.clone(), send_stream, recv_stream, permit).then(
                 |result| async {
                     if let Err(err) = result {

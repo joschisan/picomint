@@ -6,7 +6,6 @@ use axum::extract::{Json, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::post;
-use picomint_core::task::TaskHandle;
 use picomint_server_cli_core::{
     CLI_SOCKET_FILENAME, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_RESTORE, ROUTE_SETUP_SET_LOCAL_PARAMS,
     ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddPeerRequest, SetupAddPeerResponse,
@@ -61,7 +60,7 @@ impl From<anyhow::Error> for CliError {
 /// Setup CLI server — runs during DKG phase. Binds a Unix socket at
 /// `{data_dir}/{CLI_SOCKET_FILENAME}`; a stale socket from a previous
 /// (crashed) run is unlinked before we bind.
-pub async fn run_cli(data_dir: &Path, state: CliState, handle: TaskHandle) {
+pub async fn run_cli(data_dir: &Path, state: CliState) {
     let socket_path = data_dir.join(CLI_SOCKET_FILENAME);
     std::fs::remove_file(&socket_path).ok();
 
@@ -77,7 +76,6 @@ pub async fn run_cli(data_dir: &Path, state: CliState, handle: TaskHandle) {
         .into_make_service();
 
     axum::serve(listener, router)
-        .with_graceful_shutdown(handle.make_shutdown_rx())
         .await
         .expect("CLI admin server failed");
 }
@@ -206,14 +204,13 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
 /// Dashboard CLI server — runs during consensus phase. Binds a Unix
 /// socket at `{data_dir}/{CLI_SOCKET_FILENAME}`; a stale socket from a
 /// previous (crashed) run is unlinked before we bind.
-pub async fn run_dashboard_cli(data_dir: &Path, router: Router, handle: TaskHandle) {
+pub async fn run_dashboard_cli(data_dir: &Path, router: Router) {
     let socket_path = data_dir.join(CLI_SOCKET_FILENAME);
     std::fs::remove_file(&socket_path).ok();
 
     let listener = UnixListener::bind(&socket_path).expect("Failed to bind module CLI server");
 
     axum::serve(listener, router.into_make_service())
-        .with_graceful_shutdown(handle.make_shutdown_rx())
         .await
         .expect("Module CLI admin server failed");
 }

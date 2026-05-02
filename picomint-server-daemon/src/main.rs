@@ -3,28 +3,21 @@
 //! Parses CLI arguments, opens the database, wires up the bitcoin RPC, and
 //! hands off to [`picomint_server_daemon::run_server`].
 
-use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
-use futures::FutureExt as _;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoindClient, EsploraClient};
-use picomint_core::task::TaskGroup;
 use picomint_server_daemon::config::ConfigGenSettings;
 use picomint_server_daemon::{DB_FILE, run_server};
-use tracing::{debug, error, info};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use url::Url;
-
-/// Time we will wait before forcefully shutting down tasks on exit.
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Parser)]
 #[command(version)]
@@ -83,7 +76,7 @@ struct ServerOpts {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<Infallible> {
+async fn main() -> anyhow::Result<()> {
     let picomint_version = env!("CARGO_PKG_VERSION");
 
     let server_opts = ServerOpts::parse();
@@ -98,8 +91,6 @@ async fn main() -> anyhow::Result<Infallible> {
         .unwrap();
 
     info!("Starting picomint-server-daemon (version: {picomint_version})");
-
-    let root_task_group = TaskGroup::new();
 
     let ui_config = match (server_opts.ui_addr, server_opts.ui_password.clone()) {
         (Some(addr), Some(password)) => Some((addr, picomint_core::module::ApiAuth::new(password))),
@@ -148,37 +139,14 @@ async fn main() -> anyhow::Result<Infallible> {
         },
     );
 
-    root_task_group.install_kill_handler();
-
     tokio_rustls::rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
 
-    let task_group = root_task_group.clone();
-    let data_dir = server_opts.data_dir.clone();
-
-    root_task_group.spawn_cancellable("main", async move {
-        run_server(settings, db, task_group, bitcoin_backend, data_dir)
-            .await
-            .unwrap_or_else(|err| panic!("Main task returned error: {err:#}"));
-    });
-
-    let shutdown_future = root_task_group
-        .make_handle()
-        .make_shutdown_rx()
-        .then(|()| async {
-            info!("Shutdown called");
-        });
-
-    shutdown_future.await;
-
-    debug!("Terminating main task");
-
-    if let Err(err) = root_task_group.join_all(Some(SHUTDOWN_TIMEOUT)).await {
-        error!(err = %format_args!("{err:#}"), "Error while shutting down task group");
-    }
-
-    debug!("Shutdown complete");
-
-    std::process::exit(-1);
+    // Run consensus on the main task. Inner spawned tasks are fire-and-forget
+    // — process death (SIGTERM/SIGKILL) is the shutdown protocol; redb commits
+    // are atomic and BFT sessions resume from disk on next boot. The only
+    // graceful return path is the federation-shutdown-via-API mechanism, which
+    // unwinds the engine cleanly.
+    run_server(settings, db, bitcoin_backend, server_opts.data_dir).await
 }

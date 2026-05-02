@@ -18,10 +18,8 @@ use std::sync::Arc;
 /// Name of the server daemon's database file on disk.
 pub const DB_FILE: &str = "database.redb";
 
-use anyhow::Context;
 use config::ServerConfig;
 use picomint_bitcoin_rpc::BitcoinBackend;
-use picomint_core::task::TaskGroup;
 use picomint_redb::Database;
 use tokio::net::TcpListener;
 use tracing::info;
@@ -67,7 +65,6 @@ use crate::p2p::{
 pub async fn run_server(
     settings: ConfigGenSettings,
     db: Database,
-    task_group: TaskGroup,
     bitcoin_rpc: Arc<BitcoinBackend>,
     data_dir: PathBuf,
 ) -> anyhow::Result<()> {
@@ -96,7 +93,6 @@ pub async fn run_server(
             let connections = ReconnectP2PConnections::<P2PMessage>::new(
                 cfg.private.identity,
                 connector,
-                &task_group,
                 p2p_status_senders,
                 foreign_conn_tx,
             );
@@ -107,7 +103,6 @@ pub async fn run_server(
             Box::pin(run_config_gen(
                 db.clone(),
                 settings.clone(),
-                &task_group,
                 &data_dir,
                 foreign_conn_tx,
             ))
@@ -123,16 +118,11 @@ pub async fn run_server(
         foreign_conn_rx,
         cfg,
         db,
-        &task_group,
         bitcoin_rpc,
         settings.ui_config,
         &data_dir,
     ))
     .await?;
-
-    info!("Shutting down tasks...");
-
-    task_group.shutdown();
 
     Ok(())
 }
@@ -140,7 +130,6 @@ pub async fn run_server(
 pub async fn run_config_gen(
     db: Database,
     settings: ConfigGenSettings,
-    task_group: &TaskGroup,
     data_dir: &Path,
     foreign_conn_tx: async_channel::Sender<iroh::endpoint::Connection>,
 ) -> anyhow::Result<(
@@ -154,31 +143,29 @@ pub async fn run_config_gen(
 
     let setup_api = Arc::new(SetupApi::new(settings.clone(), setup_sender));
 
-    let ui_task_group = TaskGroup::new();
-
-    if let Some((ui_addr, auth)) = settings.ui_config.clone() {
+    let setup_ui_handle = if let Some((ui_addr, auth)) = settings.ui_config.clone() {
         let ui_service = ui::setup::router(setup_api.clone(), auth).into_make_service();
         let ui_listener = TcpListener::bind(ui_addr)
             .await
             .expect("Failed to bind setup UI");
-        ui_task_group.spawn("setup-ui", move |handle| async move {
+        let handle = tokio::spawn(async move {
             axum::serve(ui_listener, ui_service)
-                .with_graceful_shutdown(handle.make_shutdown_rx())
                 .await
                 .expect("Failed to serve setup UI");
         });
         info!("Setup UI running at http://{ui_addr} 🚀");
+        Some(handle)
     } else {
         info!("UI disabled (UI_ADDR unset); driving setup via CLI only");
-    }
+        None
+    };
 
-    let cli_task_group = TaskGroup::new();
     let cli_state = cli::CliState {
         setup_api: setup_api.clone(),
     };
-    let data_dir = data_dir.to_owned();
-    cli_task_group.spawn("setup-cli", move |handle| async move {
-        cli::run_cli(&data_dir, cli_state, handle).await;
+    let cli_data_dir = data_dir.to_owned();
+    let setup_cli_handle = tokio::spawn(async move {
+        cli::run_cli(&cli_data_dir, cli_state).await;
     });
 
     let setup_result = setup_receiver
@@ -186,15 +173,15 @@ pub async fn run_config_gen(
         .await
         .expect("Setup result receiver closed unexpectedly");
 
-    ui_task_group
-        .shutdown_join_all(None)
-        .await
-        .context("Failed to shutdown UI server after config gen")?;
-
-    cli_task_group
-        .shutdown_join_all(None)
-        .await
-        .context("Failed to shutdown CLI server after config gen")?;
+    // Stop the setup UI/CLI listeners before consensus tries to bind the
+    // same TCP port and Unix socket. Aborting drops the listener at the
+    // next await; awaiting the handle confirms the bind is released.
+    if let Some(handle) = setup_ui_handle {
+        handle.abort();
+        handle.await.ok();
+    }
+    setup_cli_handle.abort();
+    setup_cli_handle.await.ok();
 
     match setup_result {
         SetupResult::Dkg(cg_params) => {
@@ -210,7 +197,6 @@ pub async fn run_config_gen(
             let connections = ReconnectP2PConnections::<P2PMessage>::new(
                 cg_params.identity,
                 connector,
-                task_group,
                 p2p_status_senders,
                 foreign_conn_tx,
             );
@@ -245,7 +231,6 @@ pub async fn run_config_gen(
             let connections = ReconnectP2PConnections::<P2PMessage>::new(
                 cfg.private.identity,
                 connector,
-                task_group,
                 p2p_status_senders,
                 foreign_conn_tx,
             );

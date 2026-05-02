@@ -9,7 +9,6 @@ use picomint_bft::{
 };
 use picomint_core::secp256k1::{SECP256K1, schnorr};
 use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
-use picomint_core::task::{TaskGroup, TaskHandle};
 use picomint_core::transaction::ConsensusItem;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_redb::{Database, ReadTransaction, WriteTransaction};
@@ -35,7 +34,6 @@ pub struct ConsensusEngine {
     pub shutdown_receiver: watch::Receiver<Option<u64>>,
     pub connections: ReconnectP2PConnections<P2PMessage>,
     pub ci_status_senders: BTreeMap<PeerId, watch::Sender<Option<u64>>>,
-    pub task_group: TaskGroup,
 }
 
 impl ConsensusEngine {
@@ -49,14 +47,10 @@ impl ConsensusEngine {
 
     #[instrument(name = "run", skip_all, fields(id=%self.cfg.private.identity))]
     pub async fn run(self) -> anyhow::Result<()> {
-        self.run_consensus(self.task_group.make_handle()).await
-    }
-
-    pub async fn run_consensus(&self, task_handle: TaskHandle) -> anyhow::Result<()> {
         // We need four peers to run the atomic broadcast
         assert!(self.num_peers().total() >= 4);
 
-        while !task_handle.is_shutting_down() {
+        loop {
             let session_index = self.get_finished_session_count().await;
 
             info!(session_index, "Starting consensus session");
