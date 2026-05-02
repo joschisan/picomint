@@ -121,7 +121,6 @@ pub async fn run(
         p2p_status_receivers,
         ci_status_receivers,
         bitcoin_rpc_connection: bitcoin_rpc_connection.clone(),
-        task_group: task_group.clone(),
     });
 
     info!("Starting Consensus Api...");
