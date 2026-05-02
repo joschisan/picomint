@@ -8,11 +8,12 @@ mod secret;
 mod send_sm;
 
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::task::TaskGroup;
-use crate::transaction::{Input, Output, TransactionBuilder};
+use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
 use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
 use lightning_invoice::{Bolt11Invoice, Currency};
@@ -29,7 +30,6 @@ use picomint_core::ln::{
 use picomint_core::wire;
 
 pub use self::secret::LnSecret;
-use picomint_core::time::duration_since_epoch;
 use picomint_core::{Amount, OutPoint, PeerId};
 use picomint_encoding::Encodable;
 use picomint_redb::WriteTxRef;
@@ -135,11 +135,9 @@ impl LightningClientModule {
             }
 
             let dbtx = self.client_ctx.db().begin_write();
-            {
-                let tx = dbtx.as_ref();
-                for (key, gateway) in entries {
-                    tx.insert(&GATEWAY, &GatewayKey(key), &gateway);
-                }
+
+            for (key, gateway) in entries {
+                dbtx.as_ref().insert(&GATEWAY, &GatewayKey(key), &gateway);
             }
 
             dbtx.commit();
@@ -250,7 +248,7 @@ impl LightningClientModule {
             });
         }
 
-        let operation_id = OperationId::from_encodable(&invoice.payment_hash());
+        let operation = OperationId::from_encodable(&invoice.payment_hash());
 
         let tweak: [u8; 16] = rand::Rng::r#gen(&mut rand::thread_rng());
 
@@ -303,7 +301,7 @@ impl LightningClientModule {
             tweak,
         };
 
-        let tx_builder = TransactionBuilder::from_output(Output {
+        let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Ln(Box::new(LightningOutput::Outgoing(contract.clone()))),
             amount,
             fee: self.cfg.output_fee,
@@ -313,20 +311,20 @@ impl LightningClientModule {
 
         if dbtx
             .as_ref()
-            .insert(&SEND_OPERATION, &operation_id, &())
+            .insert(&SEND_OPERATION, &operation, &())
             .is_some()
         {
-            return Err(SendPaymentError::InvoiceAlreadyAttempted(operation_id));
+            return Err(SendPaymentError::InvoiceAlreadyAttempted(operation));
         }
 
         let txid = self
             .mint
-            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
+            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder)
             .map_err(|e| SendPaymentError::FailedToFundPayment(e.to_string()))?;
 
         let sm = SendStateMachine {
             common: SendSMCommon {
-                operation_id,
+                operation,
                 outpoint: OutPoint { txid, out_idx: 0 },
                 contract,
                 gateway_api: Some(gateway_api),
@@ -346,12 +344,11 @@ impl LightningClientModule {
             fee,
         };
 
-        self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, event);
+        self.client_ctx.log_event(&dbtx.as_ref(), operation, event);
 
         dbtx.commit();
 
-        Ok(operation_id)
+        Ok(operation)
     }
 
     /// Request an invoice. A random online gateway is selected automatically.
@@ -415,7 +412,9 @@ impl LightningClientModule {
             return Err(ReceiveError::AmountTooSmall);
         }
 
-        let expiration = duration_since_epoch()
+        let expiration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before Unix epoch")
             .as_secs()
             .saturating_add(u64::from(expiry_secs));
 
@@ -474,18 +473,18 @@ impl LightningClientModule {
             return;
         };
 
-        let tx_builder = TransactionBuilder::from_input(Input {
+        let tx_builder = TxBuilder::from_input(Input {
             input: wire::Input::Ln(LightningInput::Incoming(outpoint, agg_dk)),
             keypair: claim_keypair,
             amount: contract.commitment.amount,
             fee: self.cfg.input_fee,
         });
 
-        let operation_id = OperationId::from_encodable(&outpoint);
+        let operation = OperationId::from_encodable(&outpoint);
 
         let txid = self
             .mint
-            .finalize_and_submit_transaction(dbtx, operation_id, tx_builder)
+            .finalize_and_submit_tx(dbtx, operation, tx_builder)
             .expect("Cannot claim input, additional funding needed");
 
         let event = ReceiveEvent {
@@ -493,7 +492,7 @@ impl LightningClientModule {
             amount: contract.commitment.amount,
         };
 
-        self.client_ctx.log_event(dbtx, operation_id, event);
+        self.client_ctx.log_event(dbtx, operation, event);
     }
 
     fn recover_contract_keys(

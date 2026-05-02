@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::task::TaskGroup;
-use crate::transaction::{Input, Output, TransactionBuilder};
+use crate::tx::{Input, Output, TxBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -96,7 +96,7 @@ impl GatewayClientModule {
 
     /// Log a `SendEvent` on this federation's event log. Called by the daemon's
     /// HTTP `/send-payment` handler after it has inserted the outgoing contract
-    /// row in the daemon DB. Called at most once per op id — `send_payment`
+    /// row in the daemon DB. Called at most once per operation id — `send_payment`
     /// short-circuits on the existing `OUTGOING_CONTRACT` row.
     ///
     /// `dbtx` must be scoped to this federation's client DB namespace (see
@@ -104,7 +104,7 @@ impl GatewayClientModule {
     pub fn log_send_started(
         &self,
         dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
+        operation: OperationId,
         outpoint: OutPoint,
         amount: Amount,
         ln_fee: Amount,
@@ -112,7 +112,7 @@ impl GatewayClientModule {
     ) {
         self.client_ctx.log_event(
             dbtx,
-            operation_id,
+            operation,
             SendEvent {
                 outpoint,
                 amount,
@@ -127,8 +127,8 @@ impl GatewayClientModule {
     /// daemon's LDK `PaymentClaimable` handler (for LN receives) and by the
     /// daemon's `/send-payment` direct-swap path.
     ///
-    /// Idempotent on `operation_id`: if the incoming-contract tx has already
-    /// been submitted for this op id, this is a no-op (the existing SM will
+    /// Idempotent on `operation`: if the incoming-contract tx has already
+    /// been submitted for this operation id, this is a no-op (the existing SM will
     /// drive it).
     ///
     /// `dbtx` must be scoped to this federation's client DB namespace (see
@@ -136,22 +136,22 @@ impl GatewayClientModule {
     pub fn start_receive(
         &self,
         dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
+        operation: OperationId,
         contract: IncomingContract,
         fee: Amount,
     ) -> anyhow::Result<()> {
-        let tx_builder = TransactionBuilder::from_output(Output {
+        let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Ln(Box::new(LightningOutput::Incoming(contract.clone()))),
             amount: contract.commitment.amount,
             fee: self.cfg.output_fee,
         });
 
-        // Idempotency: finalize_and_submit_transaction fails if a tx was
-        // already submitted for this op_id. In that case the existing SM is
+        // Idempotency: finalize_and_submit_tx fails if a tx was
+        // already submitted for this operation. In that case the existing SM is
         // already driving the flow — nothing more to do.
         let txid = match self
             .mint
-            .finalize_and_submit_transaction(dbtx, operation_id, tx_builder)
+            .finalize_and_submit_tx(dbtx, operation, tx_builder)
         {
             Ok(txid) => txid,
             Err(_) => return Ok(()),
@@ -162,7 +162,7 @@ impl GatewayClientModule {
         self.receive_executor.add_state_machine_dbtx(
             dbtx,
             ReceiveStateMachine {
-                operation_id,
+                operation,
                 contract: contract.clone(),
                 outpoint,
                 refund_keypair: self.keypair,
@@ -171,7 +171,7 @@ impl GatewayClientModule {
 
         self.client_ctx.log_event(
             dbtx,
-            operation_id,
+            operation,
             ReceiveEvent {
                 txid: outpoint.txid,
                 amount: contract.commitment.amount,
@@ -190,7 +190,7 @@ impl GatewayClientModule {
     /// `SendSuccessEvent`. `None` signs the forfeit message and logs
     /// `SendCancelEvent`.
     ///
-    /// Called at most once per op id: both callers short-circuit re-entry
+    /// Called at most once per operation id: both callers short-circuit re-entry
     /// via upstream markers (`PROCESSED_LDK_EVENT` on the LDK path,
     /// `EVENT_CURSOR` on the trailer path) in the same unified dbtx.
     ///
@@ -199,7 +199,7 @@ impl GatewayClientModule {
     pub fn finalize_send(
         &self,
         dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
+        operation: OperationId,
         contract: OutgoingContract,
         outpoint: OutPoint,
         preimage: Option<[u8; 32]>,
@@ -207,7 +207,7 @@ impl GatewayClientModule {
     ) {
         match preimage {
             Some(preimage) => {
-                let tx_builder = TransactionBuilder::from_input(Input {
+                let tx_builder = TxBuilder::from_input(Input {
                     input: wire::Input::Ln(LightningInput::Outgoing(
                         outpoint,
                         OutgoingWitness::Claim(preimage),
@@ -219,12 +219,12 @@ impl GatewayClientModule {
 
                 let txid = self
                     .mint
-                    .finalize_and_submit_transaction(dbtx, operation_id, tx_builder)
+                    .finalize_and_submit_tx(dbtx, operation, tx_builder)
                     .expect("Cannot claim outgoing contract — additional funding needed");
 
                 self.client_ctx.log_event(
                     dbtx,
-                    operation_id,
+                    operation,
                     SendSuccessEvent {
                         preimage,
                         txid,
@@ -235,18 +235,18 @@ impl GatewayClientModule {
             None => {
                 let signature = self.keypair.sign_schnorr(contract.forfeit_message());
                 self.client_ctx
-                    .log_event(dbtx, operation_id, SendCancelEvent { signature });
+                    .log_event(dbtx, operation, SendCancelEvent { signature });
             }
         }
     }
 
     /// Subscribe to this federation's event log and await either
-    /// `SendSuccessEvent` or `SendCancelEvent` for `operation_id`. Replays
+    /// `SendSuccessEvent` or `SendCancelEvent` for `operation`. Replays
     /// history so a completed op returns immediately.
-    pub async fn subscribe_send(&self, operation_id: OperationId) -> Result<[u8; 32], Signature> {
+    pub async fn subscribe_send(&self, operation: OperationId) -> Result<[u8; 32], Signature> {
         use futures::StreamExt as _;
 
-        let mut stream = self.client_ctx.subscribe_operation_events(operation_id);
+        let mut stream = self.client_ctx.subscribe_operation_events(operation);
         while let Some(entry) = stream.next().await {
             if let Some(ev) = entry.to_event::<SendSuccessEvent>() {
                 return Ok(ev.preimage);

@@ -4,9 +4,9 @@ use picomint_core::module::Method;
 use picomint_core::wallet::methods::{
     ConsensusBlockCountRequest, ConsensusBlockCountResponse, ConsensusFeerateRequest,
     ConsensusFeerateResponse, FederationWalletRequest, FederationWalletResponse,
-    OutputInfoSliceRequest, OutputInfoSliceResponse, PendingTransactionChainRequest,
-    PendingTransactionChainResponse, ReceiveFeeRequest, ReceiveFeeResponse, SendFeeRequest,
-    SendFeeResponse, TransactionIdRequest, TransactionIdResponse, WalletMethod,
+    OutputInfoSliceRequest, OutputInfoSliceResponse, PendingTxChainRequest, PendingTxChainResponse,
+    ReceiveFeeRequest, ReceiveFeeResponse, SendFeeRequest, SendFeeResponse, TxIdRequest,
+    TxIdResponse, WalletMethod,
 };
 use picomint_core::wallet::{FederationWallet, OutputInfo, TxInfo};
 
@@ -52,11 +52,11 @@ impl FederationApi {
     }
 
     pub async fn wallet_pending_tx_chain(&self) -> FederationResult<Vec<TxInfo>> {
-        self.request_current_consensus::<PendingTransactionChainResponse>(Method::Wallet(
-            WalletMethod::PendingTransactionChain(PendingTransactionChainRequest),
+        self.request_current_consensus::<PendingTxChainResponse>(Method::Wallet(
+            WalletMethod::PendingTxChain(PendingTxChainRequest),
         ))
         .await
-        .map(|resp| resp.transactions)
+        .map(|resp| resp.txs)
     }
 
     pub async fn wallet_output_info_slice(
@@ -72,9 +72,9 @@ impl FederationApi {
     }
 
     pub async fn wallet_tx_id(&self, outpoint: OutPoint) -> Option<bitcoin::Txid> {
-        self.request_current_consensus_retry::<TransactionIdResponse>(Method::Wallet(
-            WalletMethod::TransactionId(TransactionIdRequest { outpoint }),
-        ))
+        self.request_current_consensus_retry::<TxIdResponse>(Method::Wallet(WalletMethod::TxId(
+            TxIdRequest { outpoint },
+        )))
         .await
         .txid
     }

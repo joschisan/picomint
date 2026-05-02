@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, ensure};
 use axum::extract::{Path, Query};
@@ -17,7 +18,6 @@ use picomint_core::ln::lnurl::LnurlRequest;
 use picomint_core::ln::routes::{ROUTE_CREATE_BOLT11_INVOICE, ROUTE_GATEWAY_INFO};
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_core::ln::{Bolt11InvoiceDescription, MINIMUM_INCOMING_CONTRACT_AMOUNT};
-use picomint_core::time::duration_since_epoch;
 use picomint_encoding::Encodable;
 use picomint_lnurl::{InvoiceResponse, LnurlResponse, PayResponse, pay_request_tag};
 use reqwest::Method;
@@ -198,7 +198,9 @@ async fn create_contract_and_fetch_invoice(
         "Amount too small"
     );
 
-    let expiration = duration_since_epoch()
+    let expiration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("System time before Unix epoch")
         .as_secs()
         .saturating_add(u64::from(expiry_secs));
 

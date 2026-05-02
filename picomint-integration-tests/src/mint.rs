@@ -46,7 +46,7 @@ fn mint_event_stream(
 }
 
 fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, MintEvent)> {
-    let op = entry.operation_id;
+    let op = entry.operation;
     if let Some(e) = entry.to_event() {
         return Some((op, MintEvent::Send(e)));
     }
@@ -58,7 +58,7 @@ fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, MintEvent
 
 /// Tail the global event log and yield only `RecoveryEvent` entries, in
 /// log order. Used by the recovery test, which doesn't carry the
-/// recovery op-id back from `Client::init_recovery`.
+/// recovery operation id back from `Client::init_recovery`.
 fn recovery_event_stream(client: &Arc<Client>) -> impl futures::Stream<Item = RecoveryEvent> {
     let client = client.clone();
     let notify = client.event_notify();
@@ -93,8 +93,8 @@ fn recovery_event_stream(client: &Arc<Client>) -> impl futures::Stream<Item = Re
 /// signatures after the tx is accepted before the notes land. Reading
 /// `get_balance()` between TxAccept and IssuanceComplete returns a
 /// stale (lower) figure.
-async fn await_tx_outcome(client: &Arc<Client>, operation_id: OperationId) -> Result<(), String> {
-    let mut stream = client.subscribe_operation_events(operation_id);
+async fn await_tx_outcome(client: &Arc<Client>, operation: OperationId) -> Result<(), String> {
+    let mut stream = client.subscribe_operation_events(operation);
 
     let mut tx_accepted = false;
 
@@ -137,14 +137,14 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
             panic!("Expected Send event");
         };
 
-        let operation_id = client_receive.mint().receive(&ecash)?;
+        let operation = client_receive.mint().receive(&ecash)?;
 
         let Some((op, MintEvent::Receive(_))) = receive_events.next().await else {
             panic!("Expected Receive event");
         };
-        assert_eq!(op, operation_id);
+        assert_eq!(op, operation);
 
-        await_tx_outcome(&client_receive, operation_id)
+        await_tx_outcome(&client_receive, operation)
             .await
             .expect("receive tx should be accepted");
     }
@@ -154,8 +154,8 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // Snapshot the receive client's accumulated balance now — *before* the
     // double-spend phase. The rejected receive runs `balance()`, which
     // opportunistically pulls excess notes (>2×TARGET_PER_DENOMINATION) into
-    // the IssuanceSM's `spendable_notes` and only restores them once the SM
-    // transitions on Err. Capturing here avoids racing that restoration.
+    // the IssuanceSM's `spendable_notes` and only recovers them once the SM
+    // transitions on Err. Capturing here avoids racing that recovery.
     let expected = client_receive.get_balance().await?;
 
     ensure!(
@@ -172,29 +172,27 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     };
 
     // First receive succeeds (sender receives own ecash back)
-    let operation_id = client_send.mint().receive(&ecash)?;
+    let operation = client_send.mint().receive(&ecash)?;
 
     let Some((op, MintEvent::Receive(_))) = send_events.next().await else {
         panic!("Expected Receive event");
     };
-    assert_eq!(op, operation_id);
+    assert_eq!(op, operation);
 
-    await_tx_outcome(client_send, operation_id)
+    await_tx_outcome(client_send, operation)
         .await
         .expect("first receive should be accepted");
 
     // Second receive with same ecash is rejected
-    let operation_id = client_receive.mint().receive(&ecash)?;
+    let operation = client_receive.mint().receive(&ecash)?;
 
     let Some((op, MintEvent::Receive(_))) = receive_events.next().await else {
         panic!("Expected Receive event");
     };
-    assert_eq!(op, operation_id);
+    assert_eq!(op, operation);
 
     assert!(
-        await_tx_outcome(&client_receive, operation_id)
-            .await
-            .is_err(),
+        await_tx_outcome(&client_receive, operation).await.is_err(),
         "double-spend receive should be rejected",
     );
 
@@ -214,7 +212,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // the network), and we eventually see a terminal one with
     // `index == total` once the driver finishes. We tail the global
     // event log here rather than `subscribe_operation_events` because
-    // we don't carry the op-id back from `init_recovery`.
+    // we don't carry the operation id back from `init_recovery`.
     let mut events = pin!(recovery_event_stream(&recovered));
 
     let first = events.next().await.expect("first recovery event");

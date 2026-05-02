@@ -242,7 +242,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
     }
 
     /// Derive the next round to attempt creation at from our highest
-    /// own-slot. After wipe-and-restore, peers may have refilled our
+    /// own-slot. After wipe-and-recover, peers may have refilled our
     /// slot via anti-entropy; `highest_entry` accounts for that, so
     /// we resume at `highest + 1` rather than re-forking it.
     fn next_create_round(&self) -> Round {

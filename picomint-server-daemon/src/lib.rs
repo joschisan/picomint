@@ -139,9 +139,9 @@ pub async fn run_config_gen(
 )> {
     info!("Starting config gen");
 
-    let (setup_sender, mut setup_receiver) = tokio::sync::mpsc::channel(1);
+    let (setup_tx, mut setup_rx) = tokio::sync::mpsc::channel(1);
 
-    let setup_api = Arc::new(SetupApi::new(settings.clone(), setup_sender));
+    let setup_api = Arc::new(SetupApi::new(settings.clone(), setup_tx));
 
     let setup_ui_handle = if let Some((ui_addr, auth)) = settings.ui_config.clone() {
         let ui_service = ui::setup::router(setup_api.clone(), auth).into_make_service();
@@ -168,7 +168,7 @@ pub async fn run_config_gen(
         cli::run_cli(&cli_data_dir, cli_state).await;
     });
 
-    let setup_result = setup_receiver
+    let setup_result = setup_rx
         .recv()
         .await
         .expect("Setup result receiver closed unexpectedly");
@@ -212,7 +212,7 @@ pub async fn run_config_gen(
 
             Ok((cfg, connections, p2p_status_receivers))
         }
-        SetupResult::Restored(cfg) => {
+        SetupResult::Recovered(cfg) => {
             let cfg = *cfg;
 
             let connector = P2PConnector::new(

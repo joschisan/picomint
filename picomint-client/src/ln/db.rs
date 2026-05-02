@@ -21,7 +21,7 @@ table!(
 );
 
 // Tracks that a send operation has been started for this [`OperationId`].
-// Used to reject duplicate pay attempts for the same invoice (the op id is
+// Used to reject duplicate pay attempts for the same invoice (the operation id is
 // derived from the invoice payment hash).
 table!(
     SEND_OPERATION,

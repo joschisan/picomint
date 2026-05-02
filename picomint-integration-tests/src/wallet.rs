@@ -51,7 +51,7 @@ fn wallet_event_stream(
 fn try_parse_wallet_event(
     entry: &EventLogEntry,
 ) -> Option<(picomint_core::core::OperationId, WalletEvent)> {
-    let op = entry.operation_id;
+    let op = entry.operation;
     if let Some(e) = entry.to_event() {
         return Some((op, WalletEvent::Send(e)));
     }
@@ -107,7 +107,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     info!(address = %external_address, "Sending on-chain to external address");
 
-    let operation_id = client_send
+    let operation = client_send
         .wallet()
         .send(
             external_address.as_unchecked().clone(),
@@ -119,12 +119,12 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     let Some((op, WalletEvent::Send(_))) = send_events.next().await else {
         panic!("Expected Send event");
     };
-    assert_eq!(op, operation_id);
+    assert_eq!(op, operation);
 
     let Some((op, WalletEvent::SendConfirm(ev))) = send_events.next().await else {
         panic!("Expected SendConfirm event");
     };
-    assert_eq!(op, operation_id);
+    assert_eq!(op, operation);
     let txid = ev.txid;
 
     info!(%txid, "Send confirmed, waiting for tx in mempool");

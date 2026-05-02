@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use crate::api::FederationApi;
 use futures::StreamExt as _;
+use futures::stream::BoxStream;
 use picomint_core::TransactionId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::util::BoxStream;
 use picomint_eventlog::{Event, EventLogEntry, EventLogId};
 use picomint_redb::{Database, WriteTxRef};
 use tokio::sync::Notify;
@@ -44,10 +44,10 @@ impl ClientContext {
 
     pub async fn await_tx_accepted(
         &self,
-        operation_id: OperationId,
+        operation: OperationId,
         query_txid: TransactionId,
     ) -> Result<(), String> {
-        let mut stream = self.subscribe_operation_events(operation_id);
+        let mut stream = self.subscribe_operation_events(operation);
         while let Some(entry) = stream.next().await {
             if let Some(ev) = entry.to_event::<TxAcceptEvent>()
                 && ev.txid == query_txid
@@ -85,16 +85,16 @@ impl ClientContext {
         picomint_eventlog::get_event_log(&self.db, pos, limit)
     }
 
-    /// Stream every event belonging to `operation_id`, starting from the
+    /// Stream every event belonging to `operation`, starting from the
     /// beginning of the log (existing events first, then live ones).
     pub fn subscribe_operation_events(
         &self,
-        operation_id: OperationId,
+        operation: OperationId,
     ) -> BoxStream<'static, EventLogEntry> {
         Box::pin(picomint_eventlog::subscribe_operation_events(
             self.db.clone(),
             self.event_notify(),
-            operation_id,
+            operation,
         ))
     }
 
@@ -102,21 +102,21 @@ impl ClientContext {
     /// entries of kind `E`, decoded.
     pub fn subscribe_operation_events_typed<E>(
         &self,
-        operation_id: OperationId,
+        operation: OperationId,
     ) -> BoxStream<'static, E>
     where
         E: Event + Send + 'static,
     {
         Box::pin(
-            self.subscribe_operation_events(operation_id)
+            self.subscribe_operation_events(operation)
                 .filter_map(|entry| async move { entry.to_event::<E>() }),
         )
     }
 
-    pub fn log_event<E>(&self, dbtx: &WriteTxRef<'_>, operation_id: OperationId, event: E)
+    pub fn log_event<E>(&self, dbtx: &WriteTxRef<'_>, operation: OperationId, event: E)
     where
         E: Event + Send,
     {
-        picomint_eventlog::log_event(dbtx, self.federation_id(), operation_id, event);
+        picomint_eventlog::log_event(dbtx, self.federation_id(), operation, event);
     }
 }

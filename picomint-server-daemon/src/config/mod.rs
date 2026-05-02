@@ -87,11 +87,11 @@ pub struct ConfigGenSettings {
 }
 
 /// Outcome of the setup phase: either fresh DKG params (run a DKG) or a
-/// previously-backed-up `ServerConfig` to restore in place of one.
+/// previously-backed-up `ServerConfig` to recover in place of one.
 #[derive(Debug, Clone)]
 pub enum SetupResult {
     Dkg(Box<ConfigGenParams>),
-    Restored(Box<ServerConfig>),
+    Recovered(Box<ServerConfig>),
 }
 
 #[derive(Debug, Clone)]

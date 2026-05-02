@@ -1,7 +1,7 @@
-//! Regression test for the wipe-and-restore scenario.
+//! Regression test for the wipe-and-recover scenario.
 //!
 //! When a guardian's data dir is wiped and the daemon restarts, the
-//! restored peer rejoins the federation mid-session. Peers may unicast
+//! recovered peer rejoins the federation mid-session. Peers may unicast
 //! `Confirmed { unit, sigs }` for *this peer's own* prior round-0 unit
 //! (via `handle_status`'s gap-fill path) before the engine has had a
 //! chance to call `advance_round`. The engine must skip past that
@@ -65,7 +65,7 @@ impl INetwork<Message<u64>> for SilentNetwork {
 }
 
 #[tokio::test]
-async fn engine_skips_pre_filled_own_slot_after_wipe_restore() {
+async fn engine_skips_pre_filled_own_slot_after_wipe_recover() {
     let n = NumPeers::from(4);
     let mut keychains = build_keychains(n);
     let session = 1u64;
@@ -120,7 +120,7 @@ async fn engine_skips_pre_filled_own_slot_after_wipe_restore() {
 
     assert!(
         !handle.is_finished(),
-        "engine panicked when its own round-0 slot was pre-filled (wipe-restore P2P recovery path)",
+        "engine panicked when its own round-0 slot was pre-filled (wipe-recover P2P recovery path)",
     );
 
     handle.abort();

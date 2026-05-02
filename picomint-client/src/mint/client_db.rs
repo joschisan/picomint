@@ -27,9 +27,9 @@ table!(
 pub struct Recovery {
     /// Op-id under which every progress / completion event is logged.
     /// Picked by `init_recovery` and persisted so a restart's driver
-    /// keeps emitting under the same op-id and a UI subscriber doesn't
+    /// keeps emitting under the same operation id and a UI subscriber doesn't
     /// see the stream split.
-    pub operation_id: OperationId,
+    pub operation: OperationId,
     /// Next item index to download
     pub next_index: u64,
     /// Total items (for progress calculation). `None` after

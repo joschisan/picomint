@@ -2,7 +2,7 @@ mod cli;
 mod env;
 mod ln;
 mod mint;
-mod restore;
+mod recover;
 mod wallet;
 
 use std::sync::Arc;
@@ -48,8 +48,8 @@ fn main() -> anyhow::Result<()> {
 
     runtime.block_on(client_send.shutdown());
 
-    info!("Running guardian backup/restore test...");
-    runtime.block_on(restore::run_test(&env))?;
+    info!("Running guardian backup/recover test...");
+    runtime.block_on(recover::run_test(&env))?;
 
     info!(
         total_ms = t_total.elapsed().as_millis() as u64,

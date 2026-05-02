@@ -178,10 +178,10 @@ pub fn server_setup_start_dkg(data_dir: &Path) -> Result<Value> {
         .run_cli::<Value>()
 }
 
-pub fn server_setup_restore(data_dir: &Path, config_path: &Path) -> Result<Value> {
+pub fn server_setup_recover(data_dir: &Path, config_path: &Path) -> Result<Value> {
     server_cmd(data_dir)
         .arg("setup")
-        .arg("restore")
+        .arg("recover")
         .arg(config_path)
         .run_cli::<Value>()
 }

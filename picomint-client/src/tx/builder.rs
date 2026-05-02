@@ -2,7 +2,7 @@ use bitcoin::key::Keypair;
 use bitcoin::secp256k1::{self, Secp256k1};
 use bitcoin_hashes::Hash;
 use picomint_core::Amount;
-use picomint_core::transaction::Transaction;
+use picomint_core::tx::Transaction;
 use picomint_core::wire;
 
 #[derive(Clone, Debug)]
@@ -21,12 +21,12 @@ pub struct Output {
 }
 
 #[derive(Default, Clone, Debug)]
-pub struct TransactionBuilder {
+pub struct TxBuilder {
     inputs: Vec<Input>,
     outputs: Vec<Output>,
 }
 
-impl TransactionBuilder {
+impl TxBuilder {
     pub fn new() -> Self {
         Self::default()
     }
@@ -93,7 +93,7 @@ impl TransactionBuilder {
         let inputs: Vec<wire::Input> = self.inputs.iter().map(|i| i.input.clone()).collect();
         let outputs: Vec<wire::Output> = self.outputs.iter().map(|o| o.output.clone()).collect();
 
-        let txid = Transaction::tx_hash_from_parts(&inputs, &outputs);
+        let txid = Transaction::compute_txid_from_parts(&inputs, &outputs);
 
         let message = secp256k1::Message::from_digest(txid.0.to_byte_array());
 

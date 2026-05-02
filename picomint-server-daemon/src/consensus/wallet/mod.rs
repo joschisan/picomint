@@ -2,6 +2,7 @@ pub mod db;
 mod rpc;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Duration;
 
 use self::db::{
     BLOCK_COUNT_VOTE, FEDERATION_WALLET, FEE_RATE_VOTE, OUTPUT, Output, SIGNATURES, SPENT_OUTPUT,
@@ -19,7 +20,7 @@ use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletOutput};
 use miniscript::descriptor::Wsh;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::backoff::{Retryable, networking_backoff};
-use picomint_core::module::{ApiError, InputMeta, TransactionItemAmounts};
+use picomint_core::module::{ApiError, InputMeta, TxItemAmounts};
 use picomint_core::wallet as common;
 use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
@@ -324,7 +325,7 @@ impl Wallet {
             .ok_or(WalletInputError::ArithmeticOverflow)?;
 
         Ok(InputMeta {
-            amount: TransactionItemAmounts {
+            amount: TxItemAmounts {
                 amount,
                 fee: self.cfg.consensus.input_fee,
             },
@@ -337,7 +338,7 @@ impl Wallet {
         dbtx: &WriteTxRef<'_>,
         output: &WalletOutput,
         outpoint: OutPoint,
-    ) -> Result<TransactionItemAmounts, WalletOutputError> {
+    ) -> Result<TxItemAmounts, WalletOutputError> {
         if output.value < self.cfg.consensus.dust_limit {
             return Err(WalletOutputError::UnderDustLimit);
         }
@@ -448,7 +449,7 @@ impl Wallet {
             .map(picomint_core::Amount::from_msats)
             .ok_or(WalletOutputError::ArithmeticOverflow)?;
 
-        Ok(TransactionItemAmounts {
+        Ok(TxItemAmounts {
             amount,
             fee: self.cfg.consensus.output_fee,
         })
@@ -468,12 +469,10 @@ impl Wallet {
             WalletMethod::FederationWallet(req) => handler!(federation_wallet, self, req).await,
             WalletMethod::SendFee(req) => handler!(send_fee, self, req).await,
             WalletMethod::ReceiveFee(req) => handler!(receive_fee, self, req).await,
-            WalletMethod::TransactionId(req) => handler!(tx_id, self, req).await,
+            WalletMethod::TxId(req) => handler!(tx_id, self, req).await,
             WalletMethod::OutputInfoSlice(req) => handler!(output_info_slice, self, req).await,
-            WalletMethod::PendingTransactionChain(req) => {
-                handler!(pending_tx_chain, self, req).await
-            }
-            WalletMethod::TransactionChain(req) => handler!(tx_chain, self, req).await,
+            WalletMethod::PendingTxChain(req) => handler!(pending_tx_chain, self, req).await,
+            WalletMethod::TxChain(req) => handler!(tx_chain, self, req).await,
         }
     }
 }
@@ -514,10 +513,15 @@ impl Wallet {
                     .iter(&UNCONFIRMED_TX, |r| r.map(|(_, v)| v).collect());
 
                 for unconfirmed_tx in unconfirmed_txs {
-                    btc_rpc.submit_transaction(unconfirmed_tx.tx).await;
+                    btc_rpc.submit_tx(unconfirmed_tx.tx).await;
                 }
 
-                sleep(common::sleep_duration(network)).await;
+                sleep(Duration::from_secs(if network == Network::Regtest {
+                    1
+                } else {
+                    60
+                }))
+                .await;
             }
         });
     }
@@ -656,7 +660,7 @@ impl Wallet {
 
             dbtx.insert(&UNCONFIRMED_TX, &TxidKey(txid), &unsigned);
 
-            self.btc_rpc.submit_transaction(unsigned.tx).await;
+            self.btc_rpc.submit_tx(unsigned.tx).await;
         }
 
         Ok(())
@@ -674,7 +678,12 @@ impl Wallet {
 
             info!("Waiting for local bitcoin backend to sync to block count {block_count}");
 
-            sleep(common::sleep_duration(self.network)).await;
+            sleep(Duration::from_secs(if self.network == Network::Regtest {
+                1
+            } else {
+                60
+            }))
+            .await;
         }
     }
 

@@ -80,10 +80,10 @@ impl BitcoinBackend {
         }
     }
 
-    pub async fn submit_transaction(&self, transaction: Transaction) {
+    pub async fn submit_tx(&self, tx: Transaction) {
         match self {
-            BitcoinBackend::Bitcoind(c) => c.submit_transaction(transaction).await,
-            BitcoinBackend::Esplora(c) => c.submit_transaction(transaction).await,
+            BitcoinBackend::Bitcoind(c) => c.submit_tx(tx).await,
+            BitcoinBackend::Esplora(c) => c.submit_tx(tx).await,
         }
     }
 
@@ -98,12 +98,12 @@ impl BitcoinBackend {
 #[derive(Debug, Clone)]
 pub struct BitcoinRpcMonitor {
     rpc: Arc<BitcoinBackend>,
-    status_receiver: watch::Receiver<Option<BitcoinRpcStatus>>,
+    status_rx: watch::Receiver<Option<BitcoinRpcStatus>>,
 }
 
 impl BitcoinRpcMonitor {
     pub fn new(rpc: Arc<BitcoinBackend>, update_interval: Duration) -> Self {
-        let (status_sender, status_receiver) = watch::channel(None);
+        let (status_tx, status_rx) = watch::channel(None);
 
         let rpc_clone = rpc.clone();
         debug!(
@@ -117,23 +117,20 @@ impl BitcoinRpcMonitor {
                 interval.tick().await;
                 match Self::fetch_status(&rpc_clone).await {
                     Ok(new_status) => {
-                        status_sender.send_replace(Some(new_status));
+                        status_tx.send_replace(Some(new_status));
                     }
                     Err(err) => {
                         warn!(
                             err = %format_args!("{err:#}"),
                             "Bitcoin status update failed"
                         );
-                        status_sender.send_replace(None);
+                        status_tx.send_replace(None);
                     }
                 }
             }
         });
 
-        Self {
-            rpc,
-            status_receiver,
-        }
+        Self { rpc, status_rx }
     }
 
     async fn fetch_status(rpc: &BitcoinBackend) -> Result<BitcoinRpcStatus> {
@@ -167,12 +164,12 @@ impl BitcoinRpcMonitor {
     }
 
     pub fn status(&self) -> Option<BitcoinRpcStatus> {
-        self.status_receiver.borrow().clone()
+        self.status_rx.borrow().clone()
     }
 
     pub async fn get_block(&self, hash: &BlockHash) -> Result<Block> {
         ensure!(
-            self.status_receiver.borrow().is_some(),
+            self.status_rx.borrow().is_some(),
             "Not connected to bitcoin backend"
         );
 
@@ -181,16 +178,16 @@ impl BitcoinRpcMonitor {
 
     pub async fn get_block_hash(&self, height: u64) -> Result<BlockHash> {
         ensure!(
-            self.status_receiver.borrow().is_some(),
+            self.status_rx.borrow().is_some(),
             "Not connected to bitcoin backend"
         );
 
         self.rpc.get_block_hash(height).await
     }
 
-    pub async fn submit_transaction(&self, tx: Transaction) {
-        if self.status_receiver.borrow().is_some() {
-            self.rpc.submit_transaction(tx).await;
+    pub async fn submit_tx(&self, tx: Transaction) {
+        if self.status_rx.borrow().is_some() {
+            self.rpc.submit_tx(tx).await;
         }
     }
 }

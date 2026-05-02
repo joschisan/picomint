@@ -3,6 +3,8 @@ pub use picomint_core::ln as common;
 mod db;
 mod rpc;
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use anyhow::{Context, ensure};
 use group::Curve;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
@@ -14,8 +16,7 @@ use picomint_core::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
     LightningOutputError, OutgoingWitness,
 };
-use picomint_core::module::{ApiError, InputMeta, TransactionItemAmounts};
-use picomint_core::time::duration_since_epoch;
+use picomint_core::module::{ApiError, InputMeta, TxItemAmounts};
 use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use tpe::{PublicKeyShare, SecretKeyShare};
@@ -94,9 +95,11 @@ impl Lightning {
     pub async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<LightningConsensusItem> {
         // We reduce the time granularity to deduplicate votes more often and not save
         // one consensus item every second.
-        let mut items = vec![LightningConsensusItem::UnixTimeVote(
-            60 * (duration_since_epoch().as_secs() / 60),
-        )];
+        let unix_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before Unix epoch")
+            .as_secs();
+        let mut items = vec![LightningConsensusItem::UnixTimeVote(60 * (unix_secs / 60))];
 
         if let Ok(block_count) = self.get_block_count() {
             trace!(?block_count, "Proposing block count");
@@ -203,7 +206,7 @@ impl Lightning {
         };
 
         Ok(InputMeta {
-            amount: TransactionItemAmounts {
+            amount: TxItemAmounts {
                 amount,
                 fee: self.cfg.consensus.input_fee,
             },
@@ -216,7 +219,7 @@ impl Lightning {
         dbtx: &WriteTxRef<'_>,
         output: &LightningOutput,
         outpoint: OutPoint,
-    ) -> Result<TransactionItemAmounts, LightningOutputError> {
+    ) -> Result<TxItemAmounts, LightningOutputError> {
         let amount = match output {
             LightningOutput::Outgoing(contract) => {
                 dbtx.insert(&OUTGOING_CONTRACT, &outpoint, contract);
@@ -254,7 +257,7 @@ impl Lightning {
             }
         };
 
-        Ok(TransactionItemAmounts {
+        Ok(TxItemAmounts {
             amount,
             fee: self.cfg.consensus.output_fee,
         })
@@ -345,17 +348,17 @@ impl Lightning {
 
     pub async fn add_gateway_ui(&self, gateway: String) -> bool {
         let gateway = gateway.trim_end_matches('/').to_string();
-        let tx = self.db.begin_write();
-        let is_new_entry = tx.insert(&GATEWAY, &gateway, &()).is_none();
-        tx.commit();
+        let dbtx = self.db.begin_write();
+        let is_new_entry = dbtx.insert(&GATEWAY, &gateway, &()).is_none();
+        dbtx.commit();
         is_new_entry
     }
 
     pub async fn remove_gateway_ui(&self, gateway: String) -> bool {
         let gateway = gateway.trim_end_matches('/').to_string();
-        let tx = self.db.begin_write();
-        let entry_existed = tx.remove(&GATEWAY, &gateway).is_some();
-        tx.commit();
+        let dbtx = self.db.begin_write();
+        let entry_existed = dbtx.remove(&GATEWAY, &gateway).is_some();
+        dbtx.commit();
         entry_existed
     }
 

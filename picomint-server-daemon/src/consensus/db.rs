@@ -1,6 +1,6 @@
 use picomint_bft::{Entry, Round};
 use picomint_core::session_outcome::{AcceptedItem, SignedSessionOutcome};
-use picomint_core::transaction::ConsensusItem;
+use picomint_core::tx::ConsensusItem;
 use picomint_core::{PeerId, TransactionId};
 use picomint_redb::table;
 
@@ -11,9 +11,9 @@ table!(
 );
 
 table!(
-    ACCEPTED_TRANSACTION,
+    ACCEPTED_TX,
     TransactionId => (),
-    "accepted-transaction",
+    "accepted-tx",
 );
 
 table!(
@@ -25,7 +25,7 @@ table!(
 // One row per `(round, creator)` slot holding the `Entry` for that slot.
 // Overwritten in place as the entry's signature set grows; iterating in
 // natural key order yields `(round, peer)` lex order — the order the
-// engine expects for restore.
+// engine expects for recover.
 table!(
     BFT_UNITS,
     (Round, PeerId) => Entry<ConsensusItem>,

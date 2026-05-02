@@ -12,9 +12,9 @@ use crate::unit::UnitData;
 /// occupies one row regardless of how many sigs accumulate.
 ///
 /// On startup the engine calls [`Backup::load`] before driving any
-/// timers and re-populates its `Graph` via `Graph::restore_entry`.
+/// timers and re-populates its `Graph` via `Graph::recover_entry`.
 /// Returning entries in canonical `(round, peer)` lex order means
-/// parents always restore before children, so no separate sequencing is
+/// parents always recover before children, so no separate sequencing is
 /// required.
 pub trait Backup<D: UnitData>: Send + Sync + 'static {
     /// Durably persist the current state of the entry's slot. Must be

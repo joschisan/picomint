@@ -22,10 +22,10 @@ impl FederationError {
         }
     }
 
-    pub fn new_one_peer(peer_id: PeerId, method: Method, error: ServerError) -> Self {
+    pub fn new_one_peer(peer: PeerId, method: Method, error: ServerError) -> Self {
         Self {
             method,
-            peer_errors: [(peer_id, error)].into_iter().collect(),
+            peer_errors: [(peer, error)].into_iter().collect(),
         }
     }
 }

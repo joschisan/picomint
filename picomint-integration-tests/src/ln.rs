@@ -16,7 +16,7 @@ use futures::StreamExt;
 use lightning_invoice::{Bolt11Invoice, Currency, InvoiceBuilder, PaymentSecret};
 use picomint_client::ln::SendPaymentError;
 use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
-use picomint_client::transaction::{Input, TransactionBuilder};
+use picomint_client::tx::{Input, TxBuilder};
 use picomint_client::{Client, OperationId};
 use picomint_core::config::FederationId;
 use picomint_core::ln::gateway_api::{GatewayInfo, PaymentFee, SendPaymentPayload};
@@ -70,7 +70,7 @@ fn ln_event_stream(
 fn try_parse_ln_event(
     entry: &EventLogEntry,
 ) -> Option<(picomint_core::core::OperationId, LnEvent)> {
-    let op = entry.operation_id;
+    let op = entry.operation;
     if let Some(e) = entry.to_event() {
         return Some((op, LnEvent::Send(e)));
     }
@@ -171,11 +171,11 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
         2
     );
 
-    // Join key sanity — `operation_id` must match across event tables
+    // Join key sanity — `operation` must match across event tables
     assert_eq!(
         count(
             "SELECT COUNT(*) FROM send s \
-             INNER JOIN send_success ss USING (operation_id)"
+             INNER JOIN send_success ss USING (operation)"
         )?,
         1
     );
@@ -495,7 +495,7 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
 
     // `SendEvent.amount` is already `send_fee.add_to(invoice_amount)` —
     // i.e. the on-chain contract amount. No further fee addition here.
-    let tx_builder = TransactionBuilder::from_input(Input {
+    let tx_builder = TxBuilder::from_input(Input {
         input: wire::Input::Ln(LightningInput::Outgoing(
             outpoint,
             OutgoingWitness::Claim(preimage),
@@ -507,11 +507,9 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
 
     let dbtx = client.db().begin_write();
 
-    client.mint().finalize_and_submit_transaction(
-        &dbtx.as_ref(),
-        OperationId::new_random(),
-        tx_builder,
-    )?;
+    client
+        .mint()
+        .finalize_and_submit_tx(&dbtx.as_ref(), OperationId::new_random(), tx_builder)?;
 
     dbtx.commit();
 
@@ -655,7 +653,7 @@ const INVOICE_SECRET: [u8; 32] = [2; 32];
 // Scenario selectors: embedded in the invoice's `payment_secret` to pick a
 // branch in `mock_send_payment`; the preimage defines the invoice's
 // `payment_hash` (so the federation's preimage check succeeds server-side
-// and each test's operation_id — derived from the payment hash — is unique).
+// and each test's operation — derived from the payment hash — is unique).
 const PAYABLE_PREIMAGE: [u8; 32] = [10; 32];
 const UNPAYABLE_PREIMAGE: [u8; 32] = [11; 32];
 
@@ -682,7 +680,7 @@ fn unpayable_invoice() -> Bolt11Invoice {
 }
 
 /// Invoice that triggers the mock's crash branch (HTTP 500, gateway never
-/// resolves). Each caller supplies its own preimage so its operation_id
+/// resolves). Each caller supplies its own preimage so its operation
 /// (derived from the payment hash) is distinct.
 fn crash_invoice(preimage: [u8; 32]) -> Bolt11Invoice {
     mock_invoice(preimage, CRASH_PAYMENT_SECRET, Currency::Regtest)

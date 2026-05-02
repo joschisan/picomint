@@ -8,6 +8,7 @@ pub mod trailer;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, anyhow, bail, ensure};
 use bitcoin::Network;
@@ -32,7 +33,6 @@ use picomint_core::ln::gateway_api::{
 };
 use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
 use picomint_core::secp256k1::schnorr::Signature;
-use picomint_core::time::duration_since_epoch;
 use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_lnurl::VerifyResponse;
@@ -202,7 +202,7 @@ impl AppState {
             "The invoice's payment hash does not match the contract's payment hash"
         );
 
-        let operation_id = OperationId::from_encodable(invoice.payment_hash());
+        let operation = OperationId::from_encodable(invoice.payment_hash());
 
         let is_direct_swap = self.node.node_id() == invoice.get_payee_pub_key();
 
@@ -226,19 +226,19 @@ impl AppState {
             .gateway_db
             .begin_read()
             .as_ref()
-            .get(&OUTGOING_CONTRACT, &operation_id)
+            .get(&OUTGOING_CONTRACT, &operation)
             .is_some()
         {
-            return Ok(f1_client.gw().subscribe_send(operation_id).await);
+            return Ok(f1_client.gw().subscribe_send(operation).await);
         }
 
         // --- Insert outgoing_contract row + log SendEvent on F1 (one tx) ---
 
-        let tx = self.gateway_db.begin_write();
+        let dbtx = self.gateway_db.begin_write();
 
-        tx.as_ref().insert(
+        dbtx.as_ref().insert(
             &OUTGOING_CONTRACT,
-            &operation_id,
+            &operation,
             &OutgoingContractRow {
                 federation_id: payload.federation_id,
                 contract: payload.contract.clone(),
@@ -248,15 +248,15 @@ impl AppState {
         );
 
         f1_client.gw().log_send_started(
-            &tx.as_ref().isolate(payload.federation_id),
-            operation_id,
+            &dbtx.as_ref().isolate(payload.federation_id),
+            operation,
             payload.outpoint,
             Amount::from_msats(amount),
             ln_fee,
             fee,
         );
 
-        tx.commit();
+        dbtx.commit();
 
         // --- Direct-swap vs external LN -------------------------------------
         if is_direct_swap {
@@ -264,7 +264,7 @@ impl AppState {
                 .gateway_db
                 .begin_read()
                 .as_ref()
-                .get(&INCOMING_CONTRACT, &operation_id)
+                .get(&INCOMING_CONTRACT, &operation)
                 .ok_or_else(|| {
                     anyhow!("Direct-swap target not registered for this payment hash")
                 })?;
@@ -280,17 +280,17 @@ impl AppState {
 
             let incoming_fee = incoming_row.amount - incoming_row.contract.commitment.amount;
 
-            let tx = self.gateway_db.begin_write();
+            let dbtx = self.gateway_db.begin_write();
             f2_client
                 .gw()
                 .start_receive(
-                    &tx.as_ref().isolate(incoming_row.federation_id),
-                    operation_id,
+                    &dbtx.as_ref().isolate(incoming_row.federation_id),
+                    operation,
                     incoming_row.contract,
                     incoming_fee,
                 )
                 .map_err(|e| anyhow!("Failed to start direct-swap receive: {e}"))?;
-            tx.commit();
+            dbtx.commit();
         } else {
             // External LN send: `ln_fee` becomes LDK's hard cap on route cost.
             let max_delay = expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM);
@@ -312,12 +312,12 @@ impl AppState {
         }
 
         // --- Await terminal event on F1 -------------------------------------
-        Ok(f1_client.gw().subscribe_send(operation_id).await)
+        Ok(f1_client.gw().subscribe_send(operation).await)
     }
 
     /// Creates a Bolt11 invoice for an incoming payment. Registers the
     /// `IncomingContract` + the generated invoice in the daemon-global
-    /// `incoming_contract` table. Idempotent on op_id: a retry with the same
+    /// `incoming_contract` table. Idempotent on operation: a retry with the same
     /// contract returns the previously generated invoice.
     pub async fn create_bolt11_invoice(
         &self,
@@ -346,7 +346,12 @@ impl AppState {
             bail!("The contract amount does not pay the correct amount of fees");
         }
 
-        if payload.contract.commitment.expiration <= duration_since_epoch().as_secs() {
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before Unix epoch")
+            .as_secs();
+
+        if payload.contract.commitment.expiration <= now_secs {
             bail!("The contract has already expired");
         }
 
@@ -357,14 +362,14 @@ impl AppState {
             }
         };
 
-        let operation_id = OperationId::from_encodable(&payment_hash);
+        let operation = OperationId::from_encodable(&payment_hash);
 
         // Idempotency: if we already registered this contract, return its invoice.
         if let Some(existing) = self
             .gateway_db
             .begin_read()
             .as_ref()
-            .get(&INCOMING_CONTRACT, &operation_id)
+            .get(&INCOMING_CONTRACT, &operation)
         {
             if existing.federation_id != payload.federation_id {
                 bail!("PaymentHash is already registered on a different federation");
@@ -393,11 +398,11 @@ impl AppState {
             )
             .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))?;
 
-        let tx = self.gateway_db.begin_write();
+        let dbtx = self.gateway_db.begin_write();
 
-        tx.as_ref().insert(
+        dbtx.as_ref().insert(
             &INCOMING_CONTRACT,
-            &operation_id,
+            &operation,
             &IncomingContractRow {
                 federation_id: payload.federation_id,
                 contract: payload.contract,
@@ -406,7 +411,7 @@ impl AppState {
             },
         );
 
-        tx.commit();
+        dbtx.commit();
 
         Ok(invoice)
     }
@@ -416,13 +421,13 @@ impl AppState {
         payment_hash: sha256::Hash,
         wait: bool,
     ) -> anyhow::Result<VerifyResponse> {
-        let operation_id = OperationId::from_encodable(&payment_hash);
+        let operation = OperationId::from_encodable(&payment_hash);
 
         let row = self
             .gateway_db
             .begin_read()
             .as_ref()
-            .get(&INCOMING_CONTRACT, &operation_id)
+            .get(&INCOMING_CONTRACT, &operation)
             .ok_or_else(|| anyhow!("Unknown payment hash"))?;
 
         let client = self
@@ -431,7 +436,7 @@ impl AppState {
 
         if !wait {
             if let Some(preimage) = client
-                .read_operation_events(operation_id)
+                .read_operation_events(operation)
                 .into_iter()
                 .find_map(|entry| entry.to_event::<ReceiveSuccessEvent>().map(|e| e.preimage))
             {
@@ -447,7 +452,7 @@ impl AppState {
             });
         }
 
-        let mut stream = client.subscribe_operation_events(operation_id);
+        let mut stream = client.subscribe_operation_events(operation);
 
         loop {
             let entry = stream

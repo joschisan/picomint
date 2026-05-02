@@ -60,8 +60,8 @@ impl BitcoindClient {
         Ok(feerate)
     }
 
-    pub async fn submit_transaction(&self, transaction: Transaction) {
-        match block_in_place(|| self.client.send_raw_transaction(&transaction)) {
+    pub async fn submit_tx(&self, tx: Transaction) {
+        match block_in_place(|| self.client.send_raw_transaction(&tx)) {
             // Bitcoin core's RPC will return error code -27 if a transaction is already in a block.
             // This is considered a success case, so we don't surface the error log.
             //

@@ -176,23 +176,20 @@ async fn engines_agree_on_ordered_data() {
     let mut handles = Vec::new();
     let mut ordered_rxs = BTreeMap::new();
 
-    for peer_id in n.peer_ids() {
+    for peer in n.peer_ids() {
         let (tx, rx) = async_channel::unbounded::<(Round, PeerId, u64)>();
-        ordered_rxs.insert(peer_id, rx);
+        ordered_rxs.insert(peer, rx);
 
-        let network = channels
-            .remove(&peer_id)
-            .expect("mesh built above")
-            .into_dyn();
+        let network = channels.remove(&peer).expect("mesh built above").into_dyn();
 
         let backup: Arc<dyn Backup<u64>> = Arc::new(NoopBackup);
 
         let graph = Graph::new(n, SESSION, backup, tx);
 
         let h = tokio::spawn(run(
-            peer_id,
+            peer,
             graph,
-            keychains.remove(&peer_id).expect("built above"),
+            keychains.remove(&peer).expect("built above"),
             network,
             TimestampDataProvider,
             Box::new(|_round| UNIT_DELAY),
@@ -202,7 +199,7 @@ async fn engines_agree_on_ordered_data() {
     }
 
     let mut reader_handles = Vec::new();
-    for (peer_id, rx) in ordered_rxs {
+    for (peer, rx) in ordered_rxs {
         reader_handles.push(tokio::spawn(async move {
             let mut seq = Vec::new();
             let mut delays = Vec::new();
@@ -213,23 +210,23 @@ async fn engines_agree_on_ordered_data() {
                 delays.push(now_ms().saturating_sub(datum));
                 seq.push((creator, datum));
             }
-            (peer_id, seq, delays)
+            (peer, seq, delays)
         }));
     }
 
     let mut sequences: BTreeMap<PeerId, Vec<(PeerId, u64)>> = BTreeMap::new();
     let mut delays_by_observer: BTreeMap<PeerId, Vec<u64>> = BTreeMap::new();
     for h in reader_handles {
-        let (peer_id, seq, delays) = h.await.expect("reader task panicked");
-        sequences.insert(peer_id, seq);
-        delays_by_observer.insert(peer_id, delays);
+        let (peer, seq, delays) = h.await.expect("reader task panicked");
+        sequences.insert(peer, seq);
+        delays_by_observer.insert(peer, delays);
     }
 
-    for (peer_id, delays) in &delays_by_observer {
+    for (peer, delays) in &delays_by_observer {
         let n_items = delays.len();
         let avg = delays.iter().sum::<u64>() as f64 / n_items as f64;
         let max = delays.iter().copied().max().unwrap_or(0);
-        println!("peer {peer_id}: items={n_items} avg_delay={avg:.1}ms max_delay={max}ms");
+        println!("peer {peer}: items={n_items} avg_delay={avg:.1}ms max_delay={max}ms");
     }
 
     for h in handles {
@@ -243,7 +240,7 @@ async fn engines_agree_on_ordered_data() {
         .clone();
     assert!(!reference.is_empty(), "expected at least one ordered item");
 
-    for (peer_id, seq) in &sequences {
-        assert_eq!(seq, &reference, "peer {peer_id} disagrees on total order");
+    for (peer, seq) in &sequences {
+        assert_eq!(seq, &reference, "peer {peer} disagrees on total order");
     }
 }

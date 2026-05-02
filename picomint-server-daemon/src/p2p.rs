@@ -19,7 +19,7 @@ use picomint_bft::Message as BftMessage;
 use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
 use picomint_core::module::PICOMINT_ALPN;
 use picomint_core::session_outcome::SignedSessionOutcome;
-use picomint_core::transaction::ConsensusItem;
+use picomint_core::tx::ConsensusItem;
 use picomint_core::{PeerId, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
@@ -252,24 +252,24 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
         let mut connection_senders = BTreeMap::new();
         let mut connections = BTreeMap::new();
 
-        for peer_id in connector.peers() {
-            assert_ne!(peer_id, identity);
+        for peer in connector.peers() {
+            assert_ne!(peer, identity);
 
-            let (connection_sender, connection_receiver) = bounded(4);
+            let (connection_tx, connection_rx) = bounded(4);
 
             let connection = PeerChannel::new(
                 identity,
-                peer_id,
+                peer,
                 connector.clone(),
-                connection_receiver,
+                connection_rx,
                 status_senders
-                    .get(&peer_id)
+                    .get(&peer)
                     .expect("No p2p status sender for peer")
                     .clone(),
             );
 
-            connection_senders.insert(peer_id, connection_sender);
-            connections.insert(peer_id, connection);
+            connection_senders.insert(peer, connection_tx);
+            connections.insert(peer, connection);
         }
 
         tokio::spawn(async move {
@@ -351,25 +351,25 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
 /// machine that (re)establishes the underlying iroh connection.
 #[derive(Clone)]
 struct PeerChannel<M> {
-    outgoing_sender: Sender<M>,
-    incoming_receiver: Receiver<M>,
+    outgoing_tx: Sender<M>,
+    incoming_rx: Receiver<M>,
 }
 
 impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
     fn new(
         our_id: PeerId,
-        peer_id: PeerId,
+        peer: PeerId,
         connector: P2PConnector,
         incoming_connections: Receiver<P2PConnection>,
-        status_sender: watch::Sender<Option<P2PConnectionStatus>>,
+        status_tx: watch::Sender<Option<P2PConnectionStatus>>,
     ) -> Self {
         // Per-peer message queues. Sized for the BFT engine's anti-entropy
         // bursts (push + reactive pull at unit-creation cadence) plus
         // headroom — drops are silent and the consensus layer expects to
         // resend, but a queue too small causes confirmation propagation
         // to stall under brief network or drainer slowdowns.
-        let (outgoing_sender, outgoing_receiver) = bounded(1000);
-        let (incoming_sender, incoming_receiver) = bounded(1000);
+        let (outgoing_tx, outgoing_rx) = bounded(100);
+        let (incoming_tx, incoming_rx) = bounded(100);
 
         tokio::spawn(
             async move {
@@ -377,13 +377,13 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
 
                 let mut state_machine = P2PConnectionStateMachine {
                     common: P2PConnectionSMCommon {
-                        incoming_sender,
-                        outgoing_receiver,
+                        incoming_tx,
+                        outgoing_rx,
                         our_id,
-                        peer_id,
+                        peer,
                         connector,
                         incoming_connections,
-                        status_sender,
+                        status_tx,
                     },
                     state: P2PConnectionSMState::Disconnected(networking_backoff().build()),
                 };
@@ -394,23 +394,23 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
 
                 info!("Shutting down peer connection state machine");
             }
-            .instrument(info_span!("io-state-machine", ?peer_id)),
+            .instrument(info_span!("io-state-machine", ?peer)),
         );
 
         PeerChannel {
-            outgoing_sender,
-            incoming_receiver,
+            outgoing_tx,
+            incoming_rx,
         }
     }
 
     fn try_send(&self, message: M) {
-        if self.outgoing_sender.try_send(message).is_err() {
+        if self.outgoing_tx.try_send(message).is_err() {
             debug!("Outgoing message channel is full");
         }
     }
 
     async fn receive(&self) -> Option<M> {
-        self.incoming_receiver.recv().await.ok()
+        self.incoming_rx.recv().await.ok()
     }
 }
 
@@ -420,13 +420,13 @@ struct P2PConnectionStateMachine<M> {
 }
 
 struct P2PConnectionSMCommon<M> {
-    incoming_sender: async_channel::Sender<M>,
-    outgoing_receiver: async_channel::Receiver<M>,
+    incoming_tx: async_channel::Sender<M>,
+    outgoing_rx: async_channel::Receiver<M>,
     our_id: PeerId,
-    peer_id: PeerId,
+    peer: PeerId,
     connector: P2PConnector,
     incoming_connections: Receiver<P2PConnection>,
-    status_sender: watch::Sender<Option<P2PConnectionStatus>>,
+    status_tx: watch::Sender<Option<P2PConnectionStatus>>,
 }
 
 enum P2PConnectionSMState {
@@ -438,7 +438,7 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionStateMachine<M> {
     async fn state_transition(mut self) -> Option<Self> {
         match self.state {
             P2PConnectionSMState::Disconnected(backoff) => {
-                self.common.status_sender.send_replace(None);
+                self.common.status_tx.send_replace(None);
 
                 self.common.transition_disconnected(backoff).await
             }
@@ -447,7 +447,7 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionStateMachine<M> {
                     rtt: connection.rtt(),
                 };
 
-                self.common.status_sender.send_replace(Some(status));
+                self.common.status_tx.send_replace(Some(status));
 
                 self.common.transition_connected(connection).await
             }
@@ -465,7 +465,7 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
         connection: P2PConnection,
     ) -> Option<P2PConnectionSMState> {
         tokio::select! {
-            message = self.outgoing_receiver.recv() => {
+            message = self.outgoing_rx.recv() => {
                 Some(self.send_message(connection, message.ok()?).await)
             },
             connection = self.incoming_connections.recv() => {
@@ -481,7 +481,7 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
 
                 match P2PConnection::read_frame::<M>(&mut stream).await {
                     Ok(message) => {
-                        if self.incoming_sender.try_send(message).is_err() {
+                        if self.incoming_tx.try_send(message).is_err() {
                             debug!("Incoming message channel is full");
                         }
 
@@ -523,10 +523,10 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
             },
             // To prevent reconnection ping-pongs, only the side with lower
             // PeerId reconnects.
-            () = sleep(backoff.next().expect("Unlimited retries")), if self.our_id < self.peer_id => {
+            () = sleep(backoff.next().expect("Unlimited retries")), if self.our_id < self.peer => {
                 info!("Attempting to reconnect to peer");
 
-                match self.connector.connect(self.peer_id).await {
+                match self.connector.connect(self.peer).await {
                     Ok(connection) => {
                         info!("Connected to peer");
 

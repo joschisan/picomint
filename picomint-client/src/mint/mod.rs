@@ -10,14 +10,14 @@ mod secret;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::task::TaskGroup;
-use crate::transaction::{Input, Output, TransactionBuilder};
-use crate::transaction::{Transaction, TxSubmissionSmContext, TxSubmissionStateMachine};
+use crate::tx::{Input, Output, TxBuilder};
+use crate::tx::{Transaction, TxSubmissionSmContext, TxSubmissionStateMachine};
 use anyhow::{Context as _, bail};
 use bitcoin_hashes::sha256;
 use client_db::{NOTE, RECEIVE_OPERATION, RECOVERY, Recovery};
@@ -79,8 +79,8 @@ impl SpendableNote {
 /// persists their `CLIENT_CONFIG` row, so "join + start recovery" is one
 /// atomic commit. The driver picks the row up the next time
 /// [`MintClientModule::new`] runs and emits `RecoveryEvent`s under the
-/// returned op-id (also persisted in the row, so a restart's driver
-/// keeps emitting under the same op-id).
+/// returned operation id (also persisted in the row, so a restart's driver
+/// keeps emitting under the same operation id).
 ///
 /// `total_items` is left as `None` — the driver fills it in via
 /// `module_api.recovery_count()` on its first awakening, so this entry
@@ -89,10 +89,10 @@ impl SpendableNote {
 ///
 /// Panics if a recovery is already in progress.
 pub fn init_recovery(dbtx: &WriteTxRef<'_>, federation_id: FederationId) -> OperationId {
-    let operation_id = OperationId::new_random();
+    let operation = OperationId::new_random();
 
     let state = Recovery {
-        operation_id,
+        operation,
         next_index: 0,
         total_items: None,
         requests: BTreeMap::new(),
@@ -107,14 +107,14 @@ pub fn init_recovery(dbtx: &WriteTxRef<'_>, federation_id: FederationId) -> Oper
     picomint_eventlog::log_event(
         dbtx,
         federation_id,
-        operation_id,
+        operation,
         events::RecoveryEvent {
             index: 0,
             total: None,
         },
     );
 
-    operation_id
+    operation
 }
 
 /// Drive recovery to completion: fill in `total_items` if missing,
@@ -150,7 +150,7 @@ async fn recovery_driver(
             picomint_eventlog::log_event(
                 &dbtx.as_ref(),
                 federation_id,
-                state.operation_id,
+                state.operation,
                 events::RecoveryEvent {
                     index: state.next_index,
                     total: Some(total),
@@ -238,7 +238,7 @@ async fn recovery_driver(
         picomint_eventlog::log_event(
             &dbtx.as_ref(),
             federation_id,
-            state.operation_id,
+            state.operation,
             events::RecoveryEvent {
                 index: state.next_index,
                 total: Some(total_items),
@@ -251,7 +251,7 @@ async fn recovery_driver(
             // event — all in one tx so a subscriber sees
             // `index == total` and the SM lands together.
             let sm = IssuanceStateMachine {
-                operation_id: state.operation_id,
+                operation: state.operation,
                 spendable_notes: vec![],
                 txid: None,
                 issuance_requests: std::mem::take(&mut state.requests).into_values().collect(),
@@ -264,7 +264,7 @@ async fn recovery_driver(
             picomint_eventlog::log_event(
                 &dbtx.as_ref(),
                 federation_id,
-                state.operation_id,
+                state.operation,
                 events::RecoveryEvent {
                     index: state.next_index,
                     total: Some(total_items),
@@ -288,7 +288,7 @@ impl MintClientModule {
         secret: MintSecret,
         tg: &TaskGroup,
     ) -> anyhow::Result<MintClientModule> {
-        let (tweak_sender, tweak_receiver) = async_channel::bounded(50);
+        let (tweak_tx, tweak_rx) = async_channel::bounded(50);
 
         let filter = secret.tweak_filter();
 
@@ -300,7 +300,7 @@ impl MintClientModule {
                     continue;
                 }
 
-                if tweak_sender.send_blocking(tweak).is_err() {
+                if tweak_tx.send_blocking(tweak).is_err() {
                     return;
                 }
             }
@@ -344,7 +344,7 @@ impl MintClientModule {
             cfg,
             secret,
             client_ctx: context,
-            tweak_receiver,
+            tweak_rx,
             tx_submission_executor,
             executor,
         })
@@ -356,7 +356,7 @@ pub struct MintClientModule {
     cfg: MintConfigConsensus,
     secret: MintSecret,
     client_ctx: ClientContext,
-    tweak_receiver: async_channel::Receiver<[u8; 16]>,
+    tweak_rx: async_channel::Receiver<[u8; 16]>,
     tx_submission_executor: ModuleExecutor<TxSubmissionStateMachine>,
     executor: ModuleExecutor<IssuanceStateMachine>,
 }
@@ -384,19 +384,19 @@ impl MintClientModule {
     /// submit the resulting transaction, and spawn the
     /// `IssuanceStateMachine` that tracks the balance-side notes/requests
     /// (if any).
-    pub fn finalize_and_submit_transaction(
+    pub fn finalize_and_submit_tx(
         &self,
         dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        mut builder: TransactionBuilder,
+        operation: OperationId,
+        mut builder: TxBuilder,
     ) -> anyhow::Result<TransactionId> {
         let (spendable_notes, issuance_requests) = self.balance(dbtx, &mut builder)?;
 
-        let txid = self.submit(dbtx, operation_id, builder)?;
+        let txid = self.submit(dbtx, operation, builder)?;
 
         if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
             let sm = IssuanceStateMachine {
-                operation_id,
+                operation,
                 spendable_notes,
                 txid: Some(txid),
                 issuance_requests,
@@ -414,7 +414,7 @@ impl MintClientModule {
     fn balance(
         &self,
         dbtx: &WriteTxRef<'_>,
-        builder: &mut TransactionBuilder,
+        builder: &mut TxBuilder,
     ) -> anyhow::Result<(Vec<SpendableNote>, Vec<NoteIssuanceRequest>)> {
         let mut spendable_notes = self
             .select_funding_input(dbtx, builder.deficit())
@@ -446,7 +446,7 @@ impl MintClientModule {
 
         for d in denoms {
             let tweak = self
-                .tweak_receiver
+                .tweak_rx
                 .recv_blocking()
                 .expect("Tweak generator task dropped its sender");
 
@@ -471,21 +471,18 @@ impl MintClientModule {
     fn submit(
         &self,
         dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
-        builder: TransactionBuilder,
+        operation: OperationId,
+        builder: TxBuilder,
     ) -> anyhow::Result<TransactionId> {
-        let transaction = builder.build();
+        let tx = builder.build();
 
-        if transaction.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
+        if tx.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
             bail!("The generated transaction is too large.");
         }
 
-        let txid = transaction.tx_hash();
+        let txid = tx.compute_txid();
 
-        let sm = TxSubmissionStateMachine {
-            operation_id,
-            transaction,
-        };
+        let sm = TxSubmissionStateMachine { operation, tx };
 
         self.tx_submission_executor.add_state_machine_dbtx(dbtx, sm);
 
@@ -654,7 +651,7 @@ impl MintClientModule {
             .await
             .map_err(|_| SendECashError::Offline)?;
 
-        let operation_id = OperationId::new_random();
+        let operation = OperationId::new_random();
         let target_denominations = represent_amount(amount);
 
         // Build target issuance requests up-front. Their outputs go into the
@@ -665,13 +662,13 @@ impl MintClientModule {
         let mut issuance_requests: Vec<NoteIssuanceRequest> = Vec::new();
         for d in target_denominations {
             let tweak = self
-                .tweak_receiver
+                .tweak_rx
                 .recv_blocking()
                 .expect("Tweak generator task dropped its sender");
             issuance_requests.push(NoteIssuanceRequest::new(d, tweak, &self.secret));
         }
 
-        let mut builder = TransactionBuilder::new();
+        let mut builder = TxBuilder::new();
         for request in &issuance_requests {
             builder.add_output(Output {
                 output: wire::Output::Mint(request.output()),
@@ -681,34 +678,33 @@ impl MintClientModule {
         }
 
         let dbtx = self.client_ctx.db().begin_write();
-        let tx = dbtx.as_ref();
 
         let (funding_notes, change_requests) = self
-            .balance(&tx, &mut builder)
+            .balance(&dbtx.as_ref(), &mut builder)
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
         let txid = self
-            .submit(&tx, operation_id, builder)
+            .submit(&dbtx.as_ref(), operation, builder)
             .map_err(|_| SendECashError::Failure)?;
 
         issuance_requests.extend(change_requests);
 
         let sm = IssuanceStateMachine {
-            operation_id,
+            operation,
             spendable_notes: funding_notes,
             txid: Some(txid),
             issuance_requests,
         };
 
-        self.executor.add_state_machine_dbtx(&tx, sm);
+        self.executor.add_state_machine_dbtx(&dbtx.as_ref(), sm);
 
         self.client_ctx
-            .log_event(&tx, operation_id, ReissueEvent { txid });
+            .log_event(&dbtx.as_ref(), operation, ReissueEvent { txid });
 
         dbtx.commit();
 
         self.client_ctx
-            .subscribe_operation_events_typed::<events::IssuanceComplete>(operation_id)
+            .subscribe_operation_events_typed::<events::IssuanceComplete>(operation)
             .next()
             .await;
 
@@ -745,11 +741,11 @@ impl MintClientModule {
 
         let ecash = ECash::new(self.federation_id, notes);
         let amount = ecash.amount();
-        let operation_id = OperationId::new_random();
+        let operation = OperationId::new_random();
 
         self.client_ctx.log_event(
             dbtx,
-            operation_id,
+            operation,
             SendEvent {
                 amount,
                 ecash: picomint_base32::encode(&ecash),
@@ -762,7 +758,7 @@ impl MintClientModule {
     /// Receive the `ECash` by reissuing the notes. This method is idempotent
     /// via the deterministic [`OperationId`] derived from the ecash bytes.
     pub fn receive(&self, ecash: &ECash) -> Result<OperationId, ReceiveECashError> {
-        let operation_id = OperationId::from_encodable(ecash);
+        let operation = OperationId::from_encodable(ecash);
 
         if ecash.mint != self.federation_id {
             return Err(ReceiveECashError::WrongFederation);
@@ -776,7 +772,7 @@ impl MintClientModule {
             return Err(ReceiveECashError::UneconomicalDenomination);
         }
 
-        let mut tx_builder = TransactionBuilder::new();
+        let mut tx_builder = TxBuilder::new();
         for note in &ecash.notes {
             tx_builder.add_input(Input {
                 input: wire::Input::Mint(MintInput { note: note.note() }),
@@ -790,14 +786,14 @@ impl MintClientModule {
 
         if dbtx
             .as_ref()
-            .insert(&RECEIVE_OPERATION, &operation_id, &())
+            .insert(&RECEIVE_OPERATION, &operation, &())
             .is_some()
         {
-            return Ok(operation_id);
+            return Ok(operation);
         }
 
         let txid = self
-            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
+            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder)
             .map_err(|_| ReceiveECashError::InsufficientFunds)?;
 
         let event = ReceiveEvent {
@@ -805,12 +801,11 @@ impl MintClientModule {
             amount: ecash.amount(),
         };
 
-        self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, event);
+        self.client_ctx.log_event(&dbtx.as_ref(), operation, event);
 
         dbtx.commit();
 
-        Ok(operation_id)
+        Ok(operation)
     }
 
     fn remove_spendable_note(dbtx: &WriteTxRef<'_>, spendable_note: &SpendableNote) {
@@ -877,10 +872,10 @@ async fn download_slice_with_hash(
 
     loop {
         let peer = peer_selector.choose_peer();
-        let start_time = picomint_core::time::now();
+        let start_time = SystemTime::now();
 
         if let Ok(data) = module_api.recovery_slice(peer, TIMEOUT, start, end).await {
-            let elapsed = picomint_core::time::now()
+            let elapsed = SystemTime::now()
                 .duration_since(start_time)
                 .unwrap_or_default();
 

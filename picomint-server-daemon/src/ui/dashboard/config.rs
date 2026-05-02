@@ -3,7 +3,7 @@ use maud::{Markup, html};
 use super::BACKUP_CONFIG_ROUTE;
 
 /// Card with a download link for the full server config (including
-/// private keys). The user can later restore the guardian from this file.
+/// private keys). The user can later recover the guardian from this file.
 pub fn render() -> Markup {
     html! {
         div class="card h-100" {

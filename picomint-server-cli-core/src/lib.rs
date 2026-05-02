@@ -20,7 +20,7 @@ pub const ROUTE_SETUP_STATUS: &str = "/setup/status";
 pub const ROUTE_SETUP_SET_LOCAL_PARAMS: &str = "/setup/set-local-params";
 pub const ROUTE_SETUP_ADD_PEER: &str = "/setup/add-peer";
 pub const ROUTE_SETUP_START_DKG: &str = "/setup/start-dkg";
-pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
+pub const ROUTE_SETUP_RECOVER: &str = "/setup/recover";
 
 // Dashboard routes
 pub const ROUTE_INVITE: &str = "/invite";

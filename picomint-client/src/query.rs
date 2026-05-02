@@ -13,7 +13,7 @@ use crate::api::{ServerError, ServerResult};
 /// responses from the Federation members. This trait abstracts away the details
 /// of each specific strategy for the generic client Api code.
 pub trait QueryStrategy<IR, OR = IR> {
-    fn process(&mut self, peer_id: PeerId, response: IR) -> QueryStep<OR>;
+    fn process(&mut self, peer: PeerId, response: IR) -> QueryStep<OR>;
 }
 
 /// Results from the strategy handling a response from a peer

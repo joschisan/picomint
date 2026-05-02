@@ -15,9 +15,9 @@ use super::{MintSmContext, NoteIssuanceRequest, SpendableNote};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct IssuanceStateMachine {
-    pub operation_id: OperationId,
+    pub operation: OperationId,
     /// Notes this tx consumed on its input side that originated from our own
-    /// wallet db. Restored to `NOTE` on tx rejection.
+    /// wallet db. Recovered to `NOTE` on tx rejection.
     pub spendable_notes: Vec<SpendableNote>,
     /// `Some(txid)` for normal operation. `None` for recovery-bootstrapped
     /// state machines, which fetch shares via the recovery endpoint instead.
@@ -39,7 +39,7 @@ impl StateMachine for IssuanceStateMachine {
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
         if let Some(txid) = self.txid {
             ctx.client_ctx
-                .await_tx_accepted(self.operation_id, txid)
+                .await_tx_accepted(self.operation, txid)
                 .await?;
 
             let shares = ctx
@@ -91,7 +91,7 @@ impl StateMachine for IssuanceStateMachine {
 
             if !verify_note(spendable_note.note(), pk) {
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation_id, OutputFailureEvent);
+                    .log_event(dbtx, self.operation, OutputFailureEvent);
 
                 return None;
             }
@@ -101,7 +101,7 @@ impl StateMachine for IssuanceStateMachine {
 
         if let Some(txid) = self.txid {
             ctx.client_ctx
-                .log_event(dbtx, self.operation_id, IssuanceComplete { txid });
+                .log_event(dbtx, self.operation, IssuanceComplete { txid });
         }
 
         None

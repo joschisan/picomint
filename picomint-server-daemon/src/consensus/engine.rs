@@ -9,9 +9,9 @@ use picomint_bft::{
 };
 use picomint_core::secp256k1::{SECP256K1, schnorr};
 use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
-use picomint_core::transaction::ConsensusItem;
+use picomint_core::tx::ConsensusItem;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
-use picomint_redb::{Database, ReadTransaction, WriteTransaction};
+use picomint_redb::{Database, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
 use tokio::sync::watch;
 use tokio::time::sleep;
@@ -19,10 +19,8 @@ use tracing::{debug, info, instrument, trace};
 
 use crate::config::ServerConfig;
 use crate::consensus::bft::{DataProvider, Network, RedbBackup};
-use crate::consensus::db::{
-    ACCEPTED_ITEM, ACCEPTED_TRANSACTION, BFT_UNITS, SIGNED_SESSION_OUTCOME,
-};
-use crate::consensus::server::process_transaction_with_server;
+use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TX, BFT_UNITS, SIGNED_SESSION_OUTCOME};
+use crate::consensus::server::process_tx_with_server;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
 /// Runs the main server consensus loop
@@ -30,8 +28,8 @@ pub struct ConsensusEngine {
     pub server: crate::consensus::server::Server,
     pub db: Database,
     pub cfg: ServerConfig,
-    pub submission_receiver: Receiver<ConsensusItem>,
-    pub shutdown_receiver: watch::Receiver<Option<u64>>,
+    pub submission_rx: Receiver<ConsensusItem>,
+    pub shutdown_rx: watch::Receiver<Option<u64>>,
     pub connections: ReconnectP2PConnections<P2PMessage>,
     pub ci_status_senders: BTreeMap<PeerId, watch::Sender<Option<u64>>>,
 }
@@ -65,7 +63,7 @@ impl ConsensusEngine {
 
             info!(?session_index, "Completed consensus session");
 
-            if Some(session_index) == self.shutdown_receiver.borrow().to_owned() {
+            if Some(session_index) == self.shutdown_rx.borrow().to_owned() {
                 info!("Initiating shutdown, waiting for peers to complete the session...");
 
                 sleep(Duration::from_mins(1)).await;
@@ -118,38 +116,38 @@ impl ConsensusEngine {
             Duration::from_millis(delay.round() as u64)
         });
 
-        let (ordered_sender, ordered_receiver) =
+        let (ordered_tx, ordered_rx) =
             async_channel::unbounded::<(BftRound, PeerId, ConsensusItem)>();
-        let (signed_outcomes_sender, signed_outcomes_receiver) = async_channel::unbounded();
-        let (signatures_sender, signatures_receiver) = async_channel::unbounded();
+        let (signed_outcomes_tx, signed_outcomes_rx) = async_channel::unbounded();
+        let (signatures_tx, signatures_rx) = async_channel::unbounded();
 
         let network = Network::new(
             connections.clone(),
-            signed_outcomes_sender,
-            signatures_sender,
+            signed_outcomes_tx,
+            signatures_tx,
             self.db.clone(),
         )
         .into_dyn();
 
         let backup = Arc::new(RedbBackup::new(self.db.clone()));
 
-        let graph = BftGraph::new(self.num_peers(), session_index, backup, ordered_sender);
+        let graph = BftGraph::new(self.num_peers(), session_index, backup, ordered_tx);
 
         let bft_handle = tokio::spawn(run_bft(
             self.identity(),
             graph,
             build_keychain(&self.cfg),
             network,
-            DataProvider::new(self.submission_receiver.clone()),
+            DataProvider::new(self.submission_rx.clone()),
             unit_delay,
         ));
 
         let signed_session_outcome = self
             .complete_signed_session_outcome(
                 session_index,
-                ordered_receiver,
-                signed_outcomes_receiver,
-                signatures_receiver,
+                ordered_rx,
+                signed_outcomes_rx,
+                signatures_rx,
                 connections,
             )
             .await?;
@@ -176,9 +174,9 @@ impl ConsensusEngine {
     pub async fn complete_signed_session_outcome(
         &self,
         session_index: u64,
-        ordered_receiver: Receiver<(BftRound, PeerId, ConsensusItem)>,
-        signed_outcomes_receiver: Receiver<(PeerId, SignedSessionOutcome)>,
-        signatures_receiver: Receiver<(PeerId, schnorr::Signature)>,
+        ordered_rx: Receiver<(BftRound, PeerId, ConsensusItem)>,
+        signed_outcomes_rx: Receiver<(PeerId, SignedSessionOutcome)>,
+        signatures_rx: Receiver<(PeerId, schnorr::Signature)>,
         connections: ReconnectP2PConnections<P2PMessage>,
     ) -> Option<SignedSessionOutcome> {
         // It is guaranteed that bft will always replay all previously processed
@@ -199,7 +197,7 @@ impl ConsensusEngine {
         // session outcome is obtained from our peers
         loop {
             tokio::select! {
-                result = ordered_receiver.recv() => {
+                result = ordered_rx.recv() => {
                     let (round, creator, item) = result.ok()?;
 
                     if round >= self.cfg.consensus.bft_rounds_per_session {
@@ -217,14 +215,14 @@ impl ConsensusEngine {
                         item_index += 1;
                     }
                 },
-                result = signed_outcomes_receiver.recv() => {
-                    let (peer_id, p2p_outcome) = result.ok()?;
+                result = signed_outcomes_rx.recv() => {
+                    let (peer, p2p_outcome) = result.ok()?;
 
                     // Validate signatures
                     if self.validate_signed_session_outcome(&p2p_outcome, session_index) {
                         info!(
                             session_index,
-                            peer_id = %peer_id,
+                            peer = %peer,
                             "Received SignedSessionOutcome via P2P while collection signatures"
                         );
 
@@ -265,7 +263,7 @@ impl ConsensusEngine {
 
                         info!(
                             ?session_index,
-                            peer_id = %peer_id,
+                            peer = %peer,
                             "Successfully recovered session via P2P"
                         );
 
@@ -273,7 +271,7 @@ impl ConsensusEngine {
                     }
 
                     debug!(
-                        %peer_id,
+                        %peer,
                         "Invalid P2P SignedSessionOutcome"
                     );
                 }
@@ -315,27 +313,27 @@ impl ConsensusEngine {
         // signature or a signed session outcome arrives from our peers
         while signatures.len() < self.num_peers().threshold() {
             tokio::select! {
-                result = signatures_receiver.recv() => {
-                    let (peer_id, signature) = result.ok()?;
+                result = signatures_rx.recv() => {
+                    let (peer, signature) = result.ok()?;
 
-                    if keychain.verify(session_index, &header, &signature, peer_id) {
-                        signatures.insert(peer_id, signature);
+                    if keychain.verify(session_index, &header, &signature, peer) {
+                        signatures.insert(peer, signature);
 
                         info!(
                             session_index,
-                            peer_id = %peer_id,
+                            peer = %peer,
                             "Collected signature from peer via P2P"
                         );
                     }
 
                     debug!(
                         session_index,
-                        peer_id = %peer_id,
+                        peer = %peer,
                         "Invalid P2P signature from peer"
                     );
                 }
-                result = signed_outcomes_receiver.recv() => {
-                    let (peer_id, p2p_outcome) = result.ok()?;
+                result = signed_outcomes_rx.recv() => {
+                    let (peer, p2p_outcome) = result.ok()?;
 
                     if self.validate_signed_session_outcome(&p2p_outcome, session_index) {
                         assert_eq!(
@@ -346,7 +344,7 @@ impl ConsensusEngine {
 
                         info!(
                             session_index,
-                            %peer_id,
+                            %peer,
                             "Recovered session via P2P while collecting signatures"
                         );
 
@@ -354,7 +352,7 @@ impl ConsensusEngine {
                     }
 
                     debug!(
-                        %peer_id,
+                        %peer,
                         "Invalid P2P SignedSessionOutcome"
                     );
                 }
@@ -423,13 +421,13 @@ impl ConsensusEngine {
         session_index: u64,
         signed_session_outcome: SignedSessionOutcome,
     ) {
-        let tx = self.db.begin_write();
+        let dbtx = self.db.begin_write();
 
-        tx.as_ref().delete_table(&ACCEPTED_ITEM);
-        tx.as_ref().delete_table(&BFT_UNITS);
+        dbtx.as_ref().delete_table(&ACCEPTED_ITEM);
+        dbtx.as_ref().delete_table(&BFT_UNITS);
 
         assert!(
-            tx.insert(
+            dbtx.insert(
                 &SIGNED_SESSION_OUTCOME,
                 &session_index,
                 &signed_session_outcome,
@@ -438,7 +436,7 @@ impl ConsensusEngine {
             "We tried to overwrite a signed session outcome"
         );
 
-        tx.commit();
+        dbtx.commit();
     }
 
     #[instrument(skip(self, item), level = "info")]
@@ -460,12 +458,12 @@ impl ConsensusEngine {
             .expect("No ci status sender for peer")
             .send_replace(Some(session_index));
 
-        let tx = self.db.begin_write();
+        let dbtx = self.db.begin_write();
 
         // When we recover from a mid-session crash bft will replay the units that
         // were already processed before the crash. We therefore skip all consensus
         // items until we have seen every previously accepted items again.
-        if let Some(existing_item) = tx.get(&ACCEPTED_ITEM, &item_index) {
+        if let Some(existing_item) = dbtx.get(&ACCEPTED_ITEM, &item_index) {
             if existing_item.item == item && existing_item.peer == peer {
                 return Ok(());
             }
@@ -476,7 +474,7 @@ impl ConsensusEngine {
             );
         }
 
-        self.process_consensus_item_with_db_transaction(&tx, item.clone(), peer)
+        self.process_consensus_item_with_dbtx(&dbtx, item.clone(), peer)
             .await
             .inspect_err(|err| {
                 // Rejected items are very common, so only trace level
@@ -488,7 +486,7 @@ impl ConsensusEngine {
                 );
             })?;
 
-        tx.insert(
+        dbtx.insert(
             &ACCEPTED_ITEM,
             &item_index,
             &AcceptedItem {
@@ -503,26 +501,26 @@ impl ConsensusEngine {
             "Processed consensus item"
         );
 
-        tx.commit();
+        dbtx.commit();
 
         Ok(())
     }
 
-    async fn process_consensus_item_with_db_transaction(
+    async fn process_consensus_item_with_dbtx(
         &self,
-        tx: &WriteTransaction,
+        dbtx: &WriteTx,
         consensus_item: ConsensusItem,
-        peer_id: PeerId,
+        peer: PeerId,
     ) -> anyhow::Result<()> {
         match consensus_item {
             ConsensusItem::Module(module_item) => {
                 self.server
-                    .process_consensus_item(&tx.as_ref(), &module_item, peer_id)
+                    .process_consensus_item(&dbtx.as_ref(), &module_item, peer)
                     .await
             }
-            ConsensusItem::Transaction(transaction) => {
-                let txid = transaction.tx_hash();
-                if tx.get(&ACCEPTED_TRANSACTION, &txid).is_some() {
+            ConsensusItem::Tx(tx) => {
+                let txid = tx.compute_txid();
+                if dbtx.get(&ACCEPTED_TX, &txid).is_some() {
                     debug!(
                         %txid,
                         "Transaction already accepted"
@@ -530,14 +528,14 @@ impl ConsensusEngine {
                     bail!("Transaction is already accepted");
                 }
 
-                process_transaction_with_server(&self.server, tx, &transaction)
+                process_tx_with_server(&self.server, dbtx, &tx)
                     .await
                     .map_err(|error| anyhow!(error.to_string()))?;
 
                 debug!(%txid,  "Transaction accepted");
-                tx.insert(&ACCEPTED_TRANSACTION, &txid, &());
+                dbtx.insert(&ACCEPTED_TX, &txid, &());
 
-                let audit = self.server.audit(tx).await;
+                let audit = self.server.audit(dbtx).await;
 
                 assert!(
                     audit.total >= 0,
@@ -556,8 +554,8 @@ impl ConsensusEngine {
     }
 }
 
-pub async fn get_finished_session_count_static(tx: &ReadTransaction) -> u64 {
-    tx.iter(&SIGNED_SESSION_OUTCOME, |r| {
+pub async fn get_finished_session_count_static(dbtx: &ReadTx) -> u64 {
+    dbtx.iter(&SIGNED_SESSION_OUTCOME, |r| {
         r.next_back().map_or(0, |(k, _)| k + 1)
     })
 }

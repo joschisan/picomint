@@ -1,5 +1,5 @@
 use crate::executor::StateMachine;
-use crate::transaction::{Input, TransactionBuilder};
+use crate::tx::{Input, TxBuilder};
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use futures::future::pending;
@@ -38,7 +38,7 @@ impl SendStateMachine {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendSMCommon {
-    pub operation_id: OperationId,
+    pub operation: OperationId,
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
     pub gateway_api: Option<String>,
@@ -75,7 +75,7 @@ impl StateMachine for SendStateMachine {
         match &self.state {
             SendSMState::Funding => SendOutcome::FundingResult(
                 ctx.client_ctx
-                    .await_tx_accepted(self.common.operation_id, self.common.outpoint.txid)
+                    .await_tx_accepted(self.common.operation, self.common.outpoint.txid)
                     .await,
             ),
             SendSMState::Funded => {
@@ -165,12 +165,12 @@ fn transition_gateway_send_payment_sm(
         Ok(preimage) => {
             ctx.client_ctx.log_event(
                 dbtx,
-                old_state.common.operation_id,
+                old_state.common.operation,
                 SendSuccessEvent { preimage },
             );
         }
         Err(signature) => {
-            let tx_builder = TransactionBuilder::from_input(Input {
+            let tx_builder = TxBuilder::from_input(Input {
                 input: wire::Input::Ln(LightningInput::Outgoing(
                     old_state.common.outpoint,
                     OutgoingWitness::Cancel(signature),
@@ -182,14 +182,11 @@ fn transition_gateway_send_payment_sm(
 
             let txid = ctx
                 .mint
-                .finalize_and_submit_transaction(dbtx, old_state.common.operation_id, tx_builder)
+                .finalize_and_submit_tx(dbtx, old_state.common.operation, tx_builder)
                 .expect("Cannot claim input, additional funding needed");
 
-            ctx.client_ctx.log_event(
-                dbtx,
-                old_state.common.operation_id,
-                SendRefundEvent { txid },
-            );
+            ctx.client_ctx
+                .log_event(dbtx, old_state.common.operation, SendRefundEvent { txid });
         }
     }
 }
@@ -224,14 +221,14 @@ fn transition_preimage_sm(
     if let Some(preimage) = preimage {
         ctx.client_ctx.log_event(
             dbtx,
-            old_state.common.operation_id,
+            old_state.common.operation,
             SendSuccessEvent { preimage },
         );
 
         return;
     }
 
-    let tx_builder = TransactionBuilder::from_input(Input {
+    let tx_builder = TxBuilder::from_input(Input {
         input: wire::Input::Ln(LightningInput::Outgoing(
             old_state.common.outpoint,
             OutgoingWitness::Refund,
@@ -243,12 +240,9 @@ fn transition_preimage_sm(
 
     let txid = ctx
         .mint
-        .finalize_and_submit_transaction(dbtx, old_state.common.operation_id, tx_builder)
+        .finalize_and_submit_tx(dbtx, old_state.common.operation, tx_builder)
         .expect("Cannot claim input, additional funding needed");
 
-    ctx.client_ctx.log_event(
-        dbtx,
-        old_state.common.operation_id,
-        SendRefundEvent { txid },
-    );
+    ctx.client_ctx
+        .log_event(dbtx, old_state.common.operation, SendRefundEvent { txid });
 }
