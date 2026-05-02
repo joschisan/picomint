@@ -11,15 +11,16 @@ use crate::keychain::Keychain;
 use crate::network::{DynNetwork, Message, Recipient};
 use crate::unit::{Round, Unit, UnitData};
 
-/// How often each peer fires the periodic anti-entropy push:
-/// for every peer in the federation, send our highest known entry
-/// (with the sigs we hold) to everyone. Refills sig deficits at slots
-/// receivers already hold and seeds higher rounds at laggards.
+/// How often each peer fires the periodic anti-entropy push: send our
+/// own highest entry (with the sigs we currently hold) to everyone.
+/// Each peer is canonical for its own column — pushing only the own
+/// slot gives laggards a reentry point from which they walk back via
+/// demand-pull on missing parents.
 ///
 /// Pull is demand-driven, not periodic: on every received unit, we
 /// unicast a `Request` to the sender for any of that unit's parents
-/// we don't yet hold locally. Re-issued on every receive (fresh or
-/// duplicate), so a dropped `Request` is retried the next time the
+/// we don't yet hold *fed* locally. Re-issued on every receive (fresh
+/// or duplicate), so a dropped `Request` is retried the next time the
 /// pushing peer ships us the same child.
 const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -31,9 +32,10 @@ const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
 ///   `Graph`. The graph internally persists every mutation through
 ///   `backup` and feeds confirmed units into its extender, which emits
 ///   ordered `(round, creator, datum)` triples on `ordered_tx`.
-/// - **Anti-entropy** every `ANTI_ENTROPY_INTERVAL`: push the highest
-///   known entry per peer to everyone, and pull (one `Request` per peer)
-///   for the lowest round we don't yet have confirmed.
+/// - **Anti-entropy** every `ANTI_ENTROPY_INTERVAL`: push our own
+///   highest entry to everyone. Other peers' columns flow only on
+///   explicit `Request` (issued reactively from `handle_unit` and
+///   `handle_sig`).
 /// - **Unit creation** is rate-limited by `unit_delay`, a closure
 ///   `Round → Duration` invoked with the round we're *about* to attempt
 ///   to create. The first deadline fires immediately at startup, so
@@ -107,25 +109,30 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
     fn handle_message(&mut self, sender: PeerId, msg: Message<D>) {
         match msg {
             Message::Unit { unit, sigs } => self.handle_unit(sender, unit, sigs),
+            Message::Sig {
+                round,
+                creator,
+                signer,
+                sig,
+            } => self.handle_sig(sender, round, creator, signer, sig),
             Message::Request { round, creator } => {
                 self.handle_request(sender, round, creator);
             }
         }
     }
 
-    /// Push-only anti-entropy: for every peer, send our highest known
-    /// entry for that peer (with the sigs we currently hold) to
-    /// everyone. Receivers union sigs into their own view, and any
-    /// parents the receiver doesn't hold trigger demand-pull `Request`
-    /// messages back to us via `handle_unit`. So a single push from a
-    /// peer at the head of the DAG bootstraps a recipient that's
-    /// arbitrarily far behind — the pull walks back round-by-round
-    /// until it lands on a parent the recipient already holds.
+    /// Push-only anti-entropy, narrowed to *own* slot only. Each peer
+    /// is canonical for its own column of the DAG: it owns the body and
+    /// accumulates sigs locally as they arrive (via `Sig` broadcasts
+    /// and `Request` responses). Pushing only the own highest slot
+    /// (with whatever sigs we hold) gives laggards a reentry point —
+    /// from any push they walk back via demand-pull on missing parents.
+    /// Other peers' slots flow only on explicit `Request`, so no peer
+    /// has to maintain a redundant view of the federation's whole DAG
+    /// in steady-state push traffic.
     fn broadcast_anti_entropy(&self) {
-        for creator in self.graph.peer_ids() {
-            if let Some(entry) = self.graph.highest_entry(creator) {
-                self.send_entry(Recipient::Everyone, entry);
-            }
+        if let Some(entry) = self.graph.highest_entry(self.own_id) {
+            self.send_entry(Recipient::Everyone, entry);
         }
     }
 
@@ -139,14 +146,20 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
     }
 
     /// Apply one inbound `Unit` message: validate the bundle, splice in
-    /// our own co-sig, hand the whole thing to the graph, and
-    /// demand-pull any of the unit's parents we don't yet hold locally
-    /// from the immediate sender.
+    /// our own co-sig if this is the first time we sign this slot,
+    /// hand the whole thing to the graph, demand-pull any of the unit's
+    /// parents we don't yet hold *fed* from the immediate sender, and
+    /// — only when our own cosig was newly added — broadcast a `Sig`
+    /// message so every other peer learns of our cosignature.
+    ///
+    /// We don't rebroadcast the body. Bodies flow only on creator
+    /// broadcast at unit-creation time, on creator's anti-entropy push
+    /// of own slot, and on `Request` response. Cosig fan-out moves
+    /// through the lighter `Sig` channel.
     ///
     /// Parent pulls run on every receive (fresh or duplicate). Re-issuing
     /// on duplicates makes the mechanism self-healing against dropped
-    /// `Request` messages: the next time the pushing peer ships us the
-    /// same child, we re-ask for the still-missing parents.
+    /// `Request` messages.
     fn handle_unit(
         &mut self,
         sender: PeerId,
@@ -176,22 +189,44 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             return;
         }
 
-        // Splice in our co-sig before insertion only when there's still
-        // room under the threshold — if the bundle already carries the
-        // full threshold, the slot would confirm regardless and adding
-        // our sig would just push the bundle past the cap on the wire.
-        if sigs.len() < self.graph.threshold() {
-            sigs.insert(self.own_id, self.keychain.sign(&unit));
-        }
+        // First-time-cosign detection: have we already signed this slot
+        // locally? Either via a previous insert that stored our sig, or
+        // via the incoming bundle already carrying it. If not, splice
+        // our sig in *and* remember to broadcast it after insert.
+        let already_signed_locally = self
+            .graph
+            .entry(unit.round, unit.creator)
+            .is_some_and(|e| e.sigs().contains_key(&self.own_id));
 
-        // Snapshot the parent coords before consuming `unit`, so we can
-        // demand-pull missing parents whether the insert lands fresh or
-        // is dropped as a duplicate.
+        let new_own_sig = if !already_signed_locally
+            && !sigs.contains_key(&self.own_id)
+            && sigs.len() < self.graph.threshold()
+        {
+            let our_sig = self.keychain.sign(&unit);
+            sigs.insert(self.own_id, our_sig);
+            Some(our_sig)
+        } else {
+            None
+        };
+
+        // Snapshot before consuming `unit` for the parent-pull and
+        // (potentially) the Sig fan-out below.
         let unit_round = unit.round;
+        let unit_creator = unit.creator;
         let parents: Vec<PeerId> = unit.parents.iter().copied().collect();
 
-        if let Some(entry) = self.graph.insert_unit(unit, sigs, &self.keychain) {
-            self.send_entry(Recipient::Everyone, &entry);
+        let _ = self.graph.insert_unit(unit, sigs, &self.keychain);
+
+        if let Some(sig) = new_own_sig {
+            self.network.send(
+                Recipient::Everyone,
+                Message::Sig {
+                    round: unit_round,
+                    creator: unit_creator,
+                    signer: self.own_id,
+                    sig,
+                },
+            );
         }
 
         // Demand-pull every parent slot we don't yet hold *fed*. Covers
@@ -213,6 +248,30 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
                     );
                 }
             }
+        }
+    }
+
+    /// Apply one inbound `Sig` message. If we already hold the slot's
+    /// body, verify and union the sig directly. If we don't, treat the
+    /// `Sig` as a forward reference: drop it on the floor and unicast
+    /// a `Request` to the signer, who definitely has the body — the
+    /// response will arrive as a `Unit` carrying their full sig set
+    /// (which includes `sig`), so we recover both body and sig in one
+    /// roundtrip.
+    fn handle_sig(
+        &mut self,
+        sender: PeerId,
+        round: Round,
+        creator: PeerId,
+        signer: PeerId,
+        sig: schnorr::Signature,
+    ) {
+        if !self
+            .graph
+            .record_cosig(round, creator, signer, sig, &self.keychain)
+        {
+            self.network
+                .send(Recipient::Peer(sender), Message::Request { round, creator });
         }
     }
 

@@ -315,6 +315,27 @@ impl<D: UnitData> Graph<D> {
         self.backup.save(entry);
     }
 
+    /// Apply a sig-only message to the slot at `(round, creator)`.
+    /// Returns `true` iff we held the body and the sig was consumed
+    /// (regardless of whether it was new or a no-op duplicate).
+    /// Returns `false` if we don't yet hold the body — the caller is
+    /// expected to demand-pull the body from the signer in that case.
+    pub fn record_cosig(
+        &mut self,
+        round: Round,
+        creator: PeerId,
+        signer: PeerId,
+        signature: schnorr::Signature,
+        keychain: &Keychain,
+    ) -> bool {
+        if !self.units.contains_key(&(round, creator)) {
+            return false;
+        }
+        self.record_sig(round, creator, signer, signature, keychain);
+        self.try_promote(round, creator);
+        true
+    }
+
     /// Try to promote the slot at `(round, creator)` into the extender;
     /// if it does promote, sweep ascending rounds promoting whatever
     /// became newly eligible, stopping when a full round produces zero

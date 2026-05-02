@@ -12,12 +12,16 @@ use crate::unit::{Round, Unit, UnitData};
 /// network layer; it is never carried in the payload.
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
 pub enum Message<D: UnitData> {
-    /// Unified unit dissemination. Carries the unit body plus a subset
-    /// (1..=threshold) of the co-signatures over it. Receivers union the
-    /// carried sigs with what they already hold — duplicate body and
-    /// duplicate sigs are no-ops. The bundle must contain a sig from the
-    /// unit's creator (binds the body to its claimed author so a Byzantine
-    /// peer can't fabricate a body at someone else's slot).
+    /// Body dissemination. Two paths produce a `Unit` message:
+    /// 1. The creator's own broadcast at unit-creation time (sigs
+    ///    contains just the creator's sig).
+    /// 2. A `Request` response, where the responder sends its current
+    ///    view of the slot (body plus all sigs it holds).
+    /// Receivers union the carried sigs with what they already hold;
+    /// duplicate body and duplicate sigs are no-ops. The bundle must
+    /// contain a sig from the unit's creator — binds the body to its
+    /// claimed author so a Byzantine peer can't fabricate a body at
+    /// someone else's slot.
     Unit {
         /// The unit being disseminated.
         unit: Unit<D>,
@@ -25,10 +29,24 @@ pub enum Message<D: UnitData> {
         /// the creator's sig.
         sigs: BTreeMap<PeerId, schnorr::Signature>,
     },
-    /// Targeted backfill request. Sent every anti-entropy cycle for the
-    /// requester's lowest unconfirmed `(round, creator)` slot per peer;
-    /// the recipient replies with a `Unit` carrying its view of the slot
-    /// (body plus all sigs it currently holds) if it has the entry.
+    /// Cosign-only fan-out. When a peer first cosigns a unit body it
+    /// has received, it broadcasts a `Sig` so every other peer can
+    /// union it into their copy of the slot. The body is *not* carried
+    /// — receivers either already hold it (then `record_sig` against
+    /// the local body), or pull it from the signer via `Request`.
+    Sig {
+        /// Round of the slot being cosigned.
+        round: Round,
+        /// Creator of the slot being cosigned.
+        creator: PeerId,
+        /// The peer whose cosig this is.
+        signer: PeerId,
+        /// Schnorr signature over the unit's consensus encoding.
+        sig: schnorr::Signature,
+    },
+    /// Targeted backfill request. The recipient replies with a `Unit`
+    /// carrying its view of the slot (body plus all sigs it currently
+    /// holds) if it has the entry.
     Request {
         /// Round of the slot the requester wants filled.
         round: Round,
