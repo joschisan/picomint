@@ -98,12 +98,12 @@ impl BitcoinBackend {
 #[derive(Debug, Clone)]
 pub struct BitcoinRpcMonitor {
     rpc: Arc<BitcoinBackend>,
-    status_receiver: watch::Receiver<Option<BitcoinRpcStatus>>,
+    status_rx: watch::Receiver<Option<BitcoinRpcStatus>>,
 }
 
 impl BitcoinRpcMonitor {
     pub fn new(rpc: Arc<BitcoinBackend>, update_interval: Duration) -> Self {
-        let (status_sender, status_receiver) = watch::channel(None);
+        let (status_tx, status_rx) = watch::channel(None);
 
         let rpc_clone = rpc.clone();
         debug!(
@@ -117,14 +117,14 @@ impl BitcoinRpcMonitor {
                 interval.tick().await;
                 match Self::fetch_status(&rpc_clone).await {
                     Ok(new_status) => {
-                        status_sender.send_replace(Some(new_status));
+                        status_tx.send_replace(Some(new_status));
                     }
                     Err(err) => {
                         warn!(
                             err = %format_args!("{err:#}"),
                             "Bitcoin status update failed"
                         );
-                        status_sender.send_replace(None);
+                        status_tx.send_replace(None);
                     }
                 }
             }
@@ -132,7 +132,7 @@ impl BitcoinRpcMonitor {
 
         Self {
             rpc,
-            status_receiver,
+            status_rx,
         }
     }
 
@@ -167,12 +167,12 @@ impl BitcoinRpcMonitor {
     }
 
     pub fn status(&self) -> Option<BitcoinRpcStatus> {
-        self.status_receiver.borrow().clone()
+        self.status_rx.borrow().clone()
     }
 
     pub async fn get_block(&self, hash: &BlockHash) -> Result<Block> {
         ensure!(
-            self.status_receiver.borrow().is_some(),
+            self.status_rx.borrow().is_some(),
             "Not connected to bitcoin backend"
         );
 
@@ -181,7 +181,7 @@ impl BitcoinRpcMonitor {
 
     pub async fn get_block_hash(&self, height: u64) -> Result<BlockHash> {
         ensure!(
-            self.status_receiver.borrow().is_some(),
+            self.status_rx.borrow().is_some(),
             "Not connected to bitcoin backend"
         );
 
@@ -189,7 +189,7 @@ impl BitcoinRpcMonitor {
     }
 
     pub async fn submit_transaction(&self, tx: Transaction) {
-        if self.status_receiver.borrow().is_some() {
+        if self.status_rx.borrow().is_some() {
             self.rpc.submit_transaction(tx).await;
         }
     }

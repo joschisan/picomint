@@ -31,9 +31,9 @@ pub struct ConsensusApi {
     /// Static wire-dispatch handle to the fixed module set
     pub server: Server,
     /// For sending API events to consensus such as transactions
-    pub submission_sender: async_channel::Sender<ConsensusItem>,
-    pub shutdown_receiver: Receiver<Option<u64>>,
-    pub shutdown_sender: Sender<Option<u64>>,
+    pub submission_tx: async_channel::Sender<ConsensusItem>,
+    pub shutdown_rx: Receiver<Option<u64>>,
+    pub shutdown_tx: Sender<Option<u64>>,
     pub p2p_status_receivers: P2PStatusReceivers,
     pub ci_status_receivers: BTreeMap<PeerId, Receiver<Option<u64>>>,
     pub bitcoin_rpc_connection: BitcoinRpcMonitor,
@@ -66,7 +66,7 @@ impl ConsensusApi {
         drop(tx);
 
         if self
-            .submission_sender
+            .submission_tx
             .send(ConsensusItem::Transaction(transaction.clone()))
             .await
             .is_err()
@@ -94,7 +94,7 @@ impl ConsensusApi {
                 }
                 _ = &mut notified_session => {
                     if self
-                        .submission_sender
+                        .submission_tx
                         .send(ConsensusItem::Transaction(transaction.clone()))
                         .await
                         .is_err()

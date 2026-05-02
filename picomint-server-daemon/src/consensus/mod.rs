@@ -94,26 +94,26 @@ pub async fn run(
 
     let server = Server { mint, wallet, ln };
 
-    let (submission_sender, submission_receiver) = async_channel::bounded(TRANSACTION_BUFFER);
-    let (shutdown_sender, shutdown_receiver) = watch::channel(None);
+    let (submission_tx, submission_rx) = async_channel::bounded(TRANSACTION_BUFFER);
+    let (shutdown_tx, shutdown_rx) = watch::channel(None);
 
     let mut ci_status_senders = BTreeMap::new();
     let mut ci_status_receivers = BTreeMap::new();
 
     for peer in cfg.consensus.peers.keys().copied() {
-        let (ci_sender, ci_receiver) = watch::channel(None);
+        let (ci_tx, ci_rx) = watch::channel(None);
 
-        ci_status_senders.insert(peer, ci_sender);
-        ci_status_receivers.insert(peer, ci_receiver);
+        ci_status_senders.insert(peer, ci_tx);
+        ci_status_receivers.insert(peer, ci_rx);
     }
 
     let consensus_api = Arc::new(ConsensusApi {
         cfg: cfg.clone(),
         db: db.clone(),
         server: server.clone(),
-        submission_sender: submission_sender.clone(),
-        shutdown_sender,
-        shutdown_receiver: shutdown_receiver.clone(),
+        submission_tx: submission_tx.clone(),
+        shutdown_tx,
+        shutdown_rx: shutdown_rx.clone(),
         p2p_status_receivers,
         ci_status_receivers,
         bitcoin_rpc_connection: bitcoin_rpc_connection.clone(),
@@ -128,19 +128,19 @@ pub async fn run(
     tokio::spawn({
         let server = consensus_api.server.clone();
         let db = db.clone();
-        let submission_sender = submission_sender.clone();
+        let submission_tx = submission_tx.clone();
         async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             loop {
                 let tx = db.begin_read();
                 for item in server.mint.consensus_proposal(&tx.as_ref()).await {
-                    submission_sender
+                    submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Mint(item)))
                         .await
                         .ok();
                 }
                 for item in server.wallet.consensus_proposal(&tx.as_ref()).await {
-                    submission_sender
+                    submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
                             item,
                         )))
@@ -148,7 +148,7 @@ pub async fn run(
                         .ok();
                 }
                 for item in server.ln.consensus_proposal(&tx.as_ref()).await {
-                    submission_sender
+                    submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
                         .await
                         .ok();
@@ -217,8 +217,8 @@ pub async fn run(
         cfg: cfg.clone(),
         connections,
         ci_status_senders,
-        submission_receiver,
-        shutdown_receiver,
+        submission_rx,
+        shutdown_rx,
         server: consensus_api.server.clone(),
     }
     .run()

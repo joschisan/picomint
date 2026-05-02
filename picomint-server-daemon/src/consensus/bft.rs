@@ -32,22 +32,22 @@ use crate::p2p::{P2PMessage, Recipient as P2PRecipient, ReconnectP2PConnections}
 /// adapter forwards bft traffic uninterpreted regardless of session.
 pub struct Network {
     connections: ReconnectP2PConnections<P2PMessage>,
-    signed_outcomes_sender: Sender<(PeerId, SignedSessionOutcome)>,
-    signatures_sender: Sender<(PeerId, schnorr::Signature)>,
+    signed_outcomes_tx: Sender<(PeerId, SignedSessionOutcome)>,
+    signatures_tx: Sender<(PeerId, schnorr::Signature)>,
     db: Database,
 }
 
 impl Network {
     pub fn new(
         connections: ReconnectP2PConnections<P2PMessage>,
-        signed_outcomes_sender: Sender<(PeerId, SignedSessionOutcome)>,
-        signatures_sender: Sender<(PeerId, schnorr::Signature)>,
+        signed_outcomes_tx: Sender<(PeerId, SignedSessionOutcome)>,
+        signatures_tx: Sender<(PeerId, schnorr::Signature)>,
         db: Database,
     ) -> Self {
         Self {
             connections,
-            signed_outcomes_sender,
-            signatures_sender,
+            signed_outcomes_tx,
+            signatures_tx,
             db,
         }
     }
@@ -76,7 +76,7 @@ impl INetwork<BftMessage<ConsensusItem>> for Network {
                     return Some((peer_id, msg));
                 }
                 P2PMessage::SessionSignature(signature) => {
-                    self.signatures_sender.try_send((peer_id, signature)).ok();
+                    self.signatures_tx.try_send((peer_id, signature)).ok();
                 }
                 P2PMessage::SessionIndex(their_session) => {
                     if let Some(outcome) = self
@@ -91,7 +91,7 @@ impl INetwork<BftMessage<ConsensusItem>> for Network {
                     }
                 }
                 P2PMessage::SignedSessionOutcome(outcome) => {
-                    self.signed_outcomes_sender
+                    self.signed_outcomes_tx
                         .try_send((peer_id, outcome))
                         .ok();
                 }
@@ -118,14 +118,14 @@ impl INetwork<BftMessage<ConsensusItem>> for Network {
 /// trip the `Accepted` assertion in `advance_round` against
 /// `Graph::insert_unit`'s own size check.
 pub struct DataProvider {
-    submission_receiver: Receiver<ConsensusItem>,
+    submission_rx: Receiver<ConsensusItem>,
     leftover_item: Option<ConsensusItem>,
 }
 
 impl DataProvider {
-    pub fn new(submission_receiver: Receiver<ConsensusItem>) -> Self {
+    pub fn new(submission_rx: Receiver<ConsensusItem>) -> Self {
         Self {
-            submission_receiver,
+            submission_rx,
             leftover_item: None,
         }
     }
@@ -154,7 +154,7 @@ impl BftDataProvider<ConsensusItem> for DataProvider {
             }
         }
 
-        while let Ok(item) = self.submission_receiver.try_recv() {
+        while let Ok(item) = self.submission_rx.try_recv() {
             let item_bytes = item.consensus_encode_to_vec().len();
 
             if n_bytes + item_bytes <= BFT_UNIT_BYTE_LIMIT {

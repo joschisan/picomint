@@ -288,7 +288,7 @@ impl MintClientModule {
         secret: MintSecret,
         tg: &TaskGroup,
     ) -> anyhow::Result<MintClientModule> {
-        let (tweak_sender, tweak_receiver) = async_channel::bounded(50);
+        let (tweak_tx, tweak_rx) = async_channel::bounded(50);
 
         let filter = secret.tweak_filter();
 
@@ -300,7 +300,7 @@ impl MintClientModule {
                     continue;
                 }
 
-                if tweak_sender.send_blocking(tweak).is_err() {
+                if tweak_tx.send_blocking(tweak).is_err() {
                     return;
                 }
             }
@@ -344,7 +344,7 @@ impl MintClientModule {
             cfg,
             secret,
             client_ctx: context,
-            tweak_receiver,
+            tweak_rx,
             tx_submission_executor,
             executor,
         })
@@ -356,7 +356,7 @@ pub struct MintClientModule {
     cfg: MintConfigConsensus,
     secret: MintSecret,
     client_ctx: ClientContext,
-    tweak_receiver: async_channel::Receiver<[u8; 16]>,
+    tweak_rx: async_channel::Receiver<[u8; 16]>,
     tx_submission_executor: ModuleExecutor<TxSubmissionStateMachine>,
     executor: ModuleExecutor<IssuanceStateMachine>,
 }
@@ -446,7 +446,7 @@ impl MintClientModule {
 
         for d in denoms {
             let tweak = self
-                .tweak_receiver
+                .tweak_rx
                 .recv_blocking()
                 .expect("Tweak generator task dropped its sender");
 
@@ -665,7 +665,7 @@ impl MintClientModule {
         let mut issuance_requests: Vec<NoteIssuanceRequest> = Vec::new();
         for d in target_denominations {
             let tweak = self
-                .tweak_receiver
+                .tweak_rx
                 .recv_blocking()
                 .expect("Tweak generator task dropped its sender");
             issuance_requests.push(NoteIssuanceRequest::new(d, tweak, &self.secret));
