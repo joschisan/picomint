@@ -74,7 +74,7 @@ async fn dashboard_view(
         .consensus
         .peers
         .iter()
-        .map(|(peer_id, endpoint)| (*peer_id, endpoint.name.clone()))
+        .map(|(peer, endpoint)| (*peer, endpoint.name.clone()))
         .collect();
     let federation_name = api.cfg.consensus.name.clone();
     let session_count = api.session_count().await;

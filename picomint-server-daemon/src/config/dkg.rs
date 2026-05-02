@@ -10,7 +10,7 @@ use super::dkg_g1::run_dkg_g1;
 use super::dkg_g2::run_dkg_g2;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
-/// A handle passed to DKG routines. Encapsulates the peer-id + p2p connection
+/// A handle passed to DKG routines. Encapsulates the peer id + p2p connection
 /// machinery each module needs to run distributed key generation or exchange
 /// arbitrary data with the other guardians.
 #[non_exhaustive]

@@ -29,7 +29,7 @@ use crate::tx::{Input, TxBuilder};
 /// federation's event log.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveStateMachine {
-    pub operation_id: OperationId,
+    pub operation: OperationId,
     pub contract: IncomingContract,
     pub outpoint: OutPoint,
     pub refund_keypair: Keypair,
@@ -45,40 +45,38 @@ impl StateMachine for ReceiveStateMachine {
 
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
         ctx.client_ctx
-            .await_tx_accepted(self.operation_id, self.outpoint.txid)
+            .await_tx_accepted(self.operation, self.outpoint.txid)
             .await
             .map_err(|e| e.to_string())?;
 
         let tpe_pks = ctx.tpe_pks.clone();
         let contract = self.contract.clone();
-        let shares = ctx
-            .client_ctx
-            .api()
-            .request_with_strategy_retry(
-                FilterMapThreshold::new(
-                    move |peer_id, resp: DecryptionKeyShareResponse| {
-                        let share = resp.share;
-                        if !contract.verify_decryption_share(
-                            tpe_pks
-                                .get(&peer_id)
-                                .ok_or(ServerError::InternalClientError(anyhow!(
-                                    "Missing TPE PK for peer {peer_id}?!"
-                                )))?,
-                            &share,
-                        ) {
-                            return Err(ServerError::InvalidResponse(anyhow!(
-                                "Invalid decryption share"
-                            )));
-                        }
-                        Ok(share)
-                    },
-                    ctx.client_ctx.api().num_peers(),
-                ),
-                Method::Ln(LnMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
-                    outpoint: self.outpoint,
-                })),
-            )
-            .await;
+        let shares =
+            ctx.client_ctx
+                .api()
+                .request_with_strategy_retry(
+                    FilterMapThreshold::new(
+                        move |peer, resp: DecryptionKeyShareResponse| {
+                            let share = resp.share;
+                            if !contract.verify_decryption_share(
+                                tpe_pks.get(&peer).ok_or(ServerError::InternalClientError(
+                                    anyhow!("Missing TPE PK for peer {peer}?!"),
+                                ))?,
+                                &share,
+                            ) {
+                                return Err(ServerError::InvalidResponse(anyhow!(
+                                    "Invalid decryption share"
+                                )));
+                            }
+                            Ok(share)
+                        },
+                        ctx.client_ctx.api().num_peers(),
+                    ),
+                    Method::Ln(LnMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
+                        outpoint: self.outpoint,
+                    })),
+                )
+                .await;
 
         Ok(shares)
     }
@@ -92,7 +90,7 @@ impl StateMachine for ReceiveStateMachine {
         let shares = match outcome {
             Err(_) => {
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation_id, ReceiveFailureEvent);
+                    .log_event(dbtx, self.operation, ReceiveFailureEvent);
                 return None;
             }
             Ok(shares) => shares,
@@ -110,13 +108,13 @@ impl StateMachine for ReceiveStateMachine {
         {
             warn!("Aggregate decryption key invalid — TPE config inconsistent");
             ctx.client_ctx
-                .log_event(dbtx, self.operation_id, ReceiveFailureEvent);
+                .log_event(dbtx, self.operation, ReceiveFailureEvent);
             return None;
         }
 
         if let Some(preimage) = self.contract.decrypt_preimage(&agg_decryption_key) {
             ctx.client_ctx
-                .log_event(dbtx, self.operation_id, ReceiveSuccessEvent { preimage });
+                .log_event(dbtx, self.operation, ReceiveSuccessEvent { preimage });
             return None;
         }
 
@@ -129,11 +127,11 @@ impl StateMachine for ReceiveStateMachine {
 
         let txid = ctx
             .mint
-            .finalize_and_submit_tx(dbtx, self.operation_id, tx_builder)
+            .finalize_and_submit_tx(dbtx, self.operation, tx_builder)
             .expect("Cannot claim input, additional funding needed");
 
         ctx.client_ctx
-            .log_event(dbtx, self.operation_id, ReceiveRefundEvent { txid });
+            .log_event(dbtx, self.operation, ReceiveRefundEvent { txid });
         None
     }
 }

@@ -7,7 +7,7 @@
 //! event log and drives the external side effect that makes the payment
 //! terminal from the outside world's point of view:
 //!
-//! - Direct swap (daemon DB has an `OUTGOING_CONTRACT[op_id]` row): call
+//! - Direct swap (daemon DB has an `OUTGOING_CONTRACT[operation]` row): call
 //!   `finalize_send` on the sending federation's client so the sender gets
 //!   the preimage (or refund signature).
 //! - External LN receive (no outgoing row): call `claim_for_hash` /
@@ -72,19 +72,19 @@ fn dispatch(state: &AppState, tx_ref: &WriteTxRef<'_>, entry: &EventLogEntry) {
         return;
     };
 
-    let op_id = entry.operation_id;
+    let operation = entry.operation;
 
-    if let Some(row) = tx_ref.get(&OUTGOING_CONTRACT, &op_id) {
-        dispatch_direct_swap(state, tx_ref, op_id, row, preimage);
+    if let Some(row) = tx_ref.get(&OUTGOING_CONTRACT, &operation) {
+        dispatch_direct_swap(state, tx_ref, operation, row, preimage);
     } else {
-        dispatch_ln_receive(state, tx_ref, op_id, preimage);
+        dispatch_ln_receive(state, tx_ref, operation, preimage);
     }
 }
 
 fn dispatch_direct_swap(
     state: &AppState,
     tx_ref: &WriteTxRef<'_>,
-    op_id: OperationId,
+    operation: OperationId,
     row: crate::db::OutgoingContractRow,
     preimage: Option<[u8; 32]>,
 ) {
@@ -94,7 +94,7 @@ fn dispatch_direct_swap(
 
     source_client.gw().finalize_send(
         &tx_ref.isolate(row.federation_id),
-        op_id,
+        operation,
         row.contract,
         row.outpoint,
         preimage,
@@ -106,7 +106,7 @@ fn dispatch_direct_swap(
 fn dispatch_ln_receive(
     state: &AppState,
     tx_ref: &WriteTxRef<'_>,
-    op_id: OperationId,
+    operation: OperationId,
     preimage: Option<[u8; 32]>,
 ) {
     // Refund path: the federation-side refund tx already reclaims the
@@ -117,7 +117,7 @@ fn dispatch_ln_receive(
     };
 
     let row = tx_ref
-        .get(&INCOMING_CONTRACT, &op_id)
+        .get(&INCOMING_CONTRACT, &operation)
         .expect("incoming_contract row registered by create_bolt11_invoice");
 
     let ph = match row.contract.commitment.payment_image {

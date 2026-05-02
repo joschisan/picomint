@@ -14,7 +14,7 @@ async fn sanity_subscribe_operation_events() {
     let db = Database::open_in_memory();
     let event_notify = db.notify_for_table(&EVENT_LOG);
 
-    let operation_id = picomint_core::core::OperationId::new_random();
+    let operation = picomint_core::core::OperationId::new_random();
     let counter = Arc::new(AtomicU8::new(0));
 
     let _ = try_join!(
@@ -23,8 +23,7 @@ async fn sanity_subscribe_operation_events() {
             let db = db.clone();
             let event_notify = event_notify.clone();
             async move {
-                let mut stream =
-                    Box::pin(subscribe_operation_events(db, event_notify, operation_id));
+                let mut stream = Box::pin(subscribe_operation_events(db, event_notify, operation));
                 while let Some(entry) = stream.next().await {
                     info!("{entry:?}");
                     assert_eq!(
@@ -51,7 +50,7 @@ async fn sanity_subscribe_operation_events() {
                     EventKind::from(format!("{i}")),
                     EventSource::Core,
                     federation_id,
-                    operation_id,
+                    operation,
                     vec![],
                 );
 

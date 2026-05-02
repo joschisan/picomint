@@ -79,8 +79,8 @@ impl SpendableNote {
 /// persists their `CLIENT_CONFIG` row, so "join + start recovery" is one
 /// atomic commit. The driver picks the row up the next time
 /// [`MintClientModule::new`] runs and emits `RecoveryEvent`s under the
-/// returned op-id (also persisted in the row, so a restart's driver
-/// keeps emitting under the same op-id).
+/// returned operation id (also persisted in the row, so a restart's driver
+/// keeps emitting under the same operation id).
 ///
 /// `total_items` is left as `None` — the driver fills it in via
 /// `module_api.recovery_count()` on its first awakening, so this entry
@@ -89,10 +89,10 @@ impl SpendableNote {
 ///
 /// Panics if a recovery is already in progress.
 pub fn init_recovery(dbtx: &WriteTxRef<'_>, federation_id: FederationId) -> OperationId {
-    let operation_id = OperationId::new_random();
+    let operation = OperationId::new_random();
 
     let state = Recovery {
-        operation_id,
+        operation,
         next_index: 0,
         total_items: None,
         requests: BTreeMap::new(),
@@ -107,14 +107,14 @@ pub fn init_recovery(dbtx: &WriteTxRef<'_>, federation_id: FederationId) -> Oper
     picomint_eventlog::log_event(
         dbtx,
         federation_id,
-        operation_id,
+        operation,
         events::RecoveryEvent {
             index: 0,
             total: None,
         },
     );
 
-    operation_id
+    operation
 }
 
 /// Drive recovery to completion: fill in `total_items` if missing,
@@ -150,7 +150,7 @@ async fn recovery_driver(
             picomint_eventlog::log_event(
                 &dbtx.as_ref(),
                 federation_id,
-                state.operation_id,
+                state.operation,
                 events::RecoveryEvent {
                     index: state.next_index,
                     total: Some(total),
@@ -238,7 +238,7 @@ async fn recovery_driver(
         picomint_eventlog::log_event(
             &dbtx.as_ref(),
             federation_id,
-            state.operation_id,
+            state.operation,
             events::RecoveryEvent {
                 index: state.next_index,
                 total: Some(total_items),
@@ -251,7 +251,7 @@ async fn recovery_driver(
             // event — all in one tx so a subscriber sees
             // `index == total` and the SM lands together.
             let sm = IssuanceStateMachine {
-                operation_id: state.operation_id,
+                operation: state.operation,
                 spendable_notes: vec![],
                 txid: None,
                 issuance_requests: std::mem::take(&mut state.requests).into_values().collect(),
@@ -264,7 +264,7 @@ async fn recovery_driver(
             picomint_eventlog::log_event(
                 &dbtx.as_ref(),
                 federation_id,
-                state.operation_id,
+                state.operation,
                 events::RecoveryEvent {
                     index: state.next_index,
                     total: Some(total_items),
@@ -387,16 +387,16 @@ impl MintClientModule {
     pub fn finalize_and_submit_tx(
         &self,
         dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
+        operation: OperationId,
         mut builder: TxBuilder,
     ) -> anyhow::Result<TransactionId> {
         let (spendable_notes, issuance_requests) = self.balance(dbtx, &mut builder)?;
 
-        let txid = self.submit(dbtx, operation_id, builder)?;
+        let txid = self.submit(dbtx, operation, builder)?;
 
         if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
             let sm = IssuanceStateMachine {
-                operation_id,
+                operation,
                 spendable_notes,
                 txid: Some(txid),
                 issuance_requests,
@@ -471,7 +471,7 @@ impl MintClientModule {
     fn submit(
         &self,
         dbtx: &WriteTxRef<'_>,
-        operation_id: OperationId,
+        operation: OperationId,
         builder: TxBuilder,
     ) -> anyhow::Result<TransactionId> {
         let tx = builder.build();
@@ -482,7 +482,7 @@ impl MintClientModule {
 
         let txid = tx.compute_txid();
 
-        let sm = TxSubmissionStateMachine { operation_id, tx };
+        let sm = TxSubmissionStateMachine { operation, tx };
 
         self.tx_submission_executor.add_state_machine_dbtx(dbtx, sm);
 
@@ -651,7 +651,7 @@ impl MintClientModule {
             .await
             .map_err(|_| SendECashError::Offline)?;
 
-        let operation_id = OperationId::new_random();
+        let operation = OperationId::new_random();
         let target_denominations = represent_amount(amount);
 
         // Build target issuance requests up-front. Their outputs go into the
@@ -684,13 +684,13 @@ impl MintClientModule {
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
         let txid = self
-            .submit(&dbtx.as_ref(), operation_id, builder)
+            .submit(&dbtx.as_ref(), operation, builder)
             .map_err(|_| SendECashError::Failure)?;
 
         issuance_requests.extend(change_requests);
 
         let sm = IssuanceStateMachine {
-            operation_id,
+            operation,
             spendable_notes: funding_notes,
             txid: Some(txid),
             issuance_requests,
@@ -699,12 +699,12 @@ impl MintClientModule {
         self.executor.add_state_machine_dbtx(&dbtx.as_ref(), sm);
 
         self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, ReissueEvent { txid });
+            .log_event(&dbtx.as_ref(), operation, ReissueEvent { txid });
 
         dbtx.commit();
 
         self.client_ctx
-            .subscribe_operation_events_typed::<events::IssuanceComplete>(operation_id)
+            .subscribe_operation_events_typed::<events::IssuanceComplete>(operation)
             .next()
             .await;
 
@@ -741,11 +741,11 @@ impl MintClientModule {
 
         let ecash = ECash::new(self.federation_id, notes);
         let amount = ecash.amount();
-        let operation_id = OperationId::new_random();
+        let operation = OperationId::new_random();
 
         self.client_ctx.log_event(
             dbtx,
-            operation_id,
+            operation,
             SendEvent {
                 amount,
                 ecash: picomint_base32::encode(&ecash),
@@ -758,7 +758,7 @@ impl MintClientModule {
     /// Receive the `ECash` by reissuing the notes. This method is idempotent
     /// via the deterministic [`OperationId`] derived from the ecash bytes.
     pub fn receive(&self, ecash: &ECash) -> Result<OperationId, ReceiveECashError> {
-        let operation_id = OperationId::from_encodable(ecash);
+        let operation = OperationId::from_encodable(ecash);
 
         if ecash.mint != self.federation_id {
             return Err(ReceiveECashError::WrongFederation);
@@ -786,14 +786,14 @@ impl MintClientModule {
 
         if dbtx
             .as_ref()
-            .insert(&RECEIVE_OPERATION, &operation_id, &())
+            .insert(&RECEIVE_OPERATION, &operation, &())
             .is_some()
         {
-            return Ok(operation_id);
+            return Ok(operation);
         }
 
         let txid = self
-            .finalize_and_submit_tx(&dbtx.as_ref(), operation_id, tx_builder)
+            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder)
             .map_err(|_| ReceiveECashError::InsufficientFunds)?;
 
         let event = ReceiveEvent {
@@ -801,12 +801,11 @@ impl MintClientModule {
             amount: ecash.amount(),
         };
 
-        self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, event);
+        self.client_ctx.log_event(&dbtx.as_ref(), operation, event);
 
         dbtx.commit();
 
-        Ok(operation_id)
+        Ok(operation)
     }
 
     fn remove_spendable_note(dbtx: &WriteTxRef<'_>, spendable_note: &SpendableNote) {

@@ -35,8 +35,8 @@ pub enum ServerError {
     #[error("Response deserialization error: {0}")]
     ResponseDeserialization(anyhow::Error),
 
-    #[error("Invalid peer id: {peer_id}")]
-    InvalidPeerId { peer_id: PeerId },
+    #[error("Invalid peer id: {peer}")]
+    InvalidPeerId { peer: PeerId },
 
     #[error("Connection failed: {0}")]
     Connection(anyhow::Error),
@@ -79,13 +79,13 @@ impl ServerError {
         }
     }
 
-    pub fn report_if_unusual(&self, peer_id: PeerId, context: &str) {
+    pub fn report_if_unusual(&self, peer: PeerId, context: &str) {
         let unusual = self.is_unusual();
 
         trace!(error = %self, %context, "ServerError");
 
         if unusual {
-            warn!(error = %self, %context, %peer_id, "Unusual ServerError");
+            warn!(error = %self, %context, %peer, "Unusual ServerError");
         }
     }
 }
@@ -117,14 +117,14 @@ impl FederationApi {
     pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, PublicKey>) -> Self {
         let mut states = BTreeMap::new();
 
-        for (peer_id, node_id) in &peers {
+        for (peer, node_id) in &peers {
             let (tx, rx) = watch::channel(None);
             tokio::spawn({
                 let endpoint = endpoint.clone();
                 let node_id = *node_id;
                 async move { connection_task(node_id, endpoint, tx).await }
             });
-            states.insert(*peer_id, rx);
+            states.insert(*peer, rx);
         }
 
         Self {
@@ -161,15 +161,15 @@ impl FederationApi {
 
     #[instrument(
         skip_all,
-        fields(peer_id = %peer_id, method = ?method),
+        fields(peer = %peer, method = ?method),
     )]
-    pub async fn request_raw(&self, peer_id: PeerId, method: Method) -> ServerResult<Vec<u8>> {
-        trace!(%peer_id, ?method, "Api request");
+    pub async fn request_raw(&self, peer: PeerId, method: Method) -> ServerResult<Vec<u8>> {
+        trace!(%peer, ?method, "Api request");
 
         let mut rx = self
             .states
-            .get(&peer_id)
-            .ok_or(ServerError::InvalidPeerId { peer_id })?
+            .get(&peer)
+            .ok_or(ServerError::InvalidPeerId { peer })?
             .clone();
 
         let state = rx
@@ -203,18 +203,18 @@ impl FederationApi {
     pub async fn request_single_peer_federation<FedRet>(
         &self,
         method: Method,
-        peer_id: PeerId,
+        peer: PeerId,
     ) -> FederationResult<FedRet>
     where
         FedRet: Decodable + Eq + Debug + Clone + Send,
     {
-        self.request_raw(peer_id, method.clone())
+        self.request_raw(peer, method.clone())
             .await
             .and_then(|bytes| {
                 FedRet::consensus_decode(&bytes)
                     .map_err(|e| ServerError::ResponseDeserialization(e.into()))
             })
-            .map_err(|e| error::FederationError::new_one_peer(peer_id, method, e))
+            .map_err(|e| error::FederationError::new_one_peer(peer, method, e))
     }
 
     /// Make an aggregate request to federation, using `strategy` to logically

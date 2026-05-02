@@ -288,7 +288,7 @@ Each row in `payments` is one incoming or outgoing operation.
 | Column          | Type           | Notes                                                                                                    |
 |-----------------|----------------|----------------------------------------------------------------------------------------------------------|
 | `federation_id` | TEXT           | Hex-encoded federation id                                                                                |
-| `operation_id`  | TEXT           | Hex-encoded operation id; unique within `(federation_id, direction)`                                     |
+| `operation`     | TEXT           | Hex-encoded operation id; unique within `(federation_id, direction)`                                     |
 | `direction`     | TEXT           | `incoming` or `outgoing`                                                                                 |
 | `status`        | TEXT           | `pending`, `success`, `cancelled` (outgoing only), `failure` (incoming only), `refunded` (incoming only) |
 | `started_at`    | INTEGER        | When the operation was initiated (µs since epoch)                                                        |

@@ -306,7 +306,7 @@ fn handle_payment_claimable(
     payment_hash: [u8; 32],
     amount_msat: u64,
 ) {
-    let operation_id = OperationId::from_encodable(&payment_hash);
+    let operation = OperationId::from_encodable(&payment_hash);
 
     if dbtx
         .insert(&PROCESSED_LDK_EVENT, &payment_hash, &())
@@ -319,7 +319,7 @@ fn handle_payment_claimable(
     // `receive_for_hash` in `create_bolt11_invoice`, which commits the
     // INCOMING_CONTRACT row before returning the invoice.
     let row = dbtx
-        .get(&INCOMING_CONTRACT, &operation_id)
+        .get(&INCOMING_CONTRACT, &operation)
         .expect("PaymentClaimable for an unregistered payment_hash");
 
     if row.amount.msats != amount_msat {
@@ -345,7 +345,7 @@ fn handle_payment_claimable(
             .gw()
             .start_receive(
                 &dbtx.isolate(row.federation_id),
-                operation_id,
+                operation,
                 row.contract,
                 fee,
             )
@@ -372,7 +372,7 @@ fn handle_payment_successful(
     preimage: [u8; 32],
     ln_fee: Amount,
 ) {
-    let operation_id = OperationId::from_encodable(&payment_hash);
+    let operation = OperationId::from_encodable(&payment_hash);
 
     if dbtx
         .insert(&PROCESSED_LDK_EVENT, &payment_hash, &())
@@ -381,14 +381,14 @@ fn handle_payment_successful(
         return;
     }
 
-    if let Some(row) = dbtx.get(&OUTGOING_CONTRACT, &operation_id) {
+    if let Some(row) = dbtx.get(&OUTGOING_CONTRACT, &operation) {
         let client = state
             .select_client(row.federation_id)
             .expect("source federation for outgoing contract is connected");
 
         client.gw().finalize_send(
             &dbtx.isolate(row.federation_id),
-            operation_id,
+            operation,
             row.contract,
             row.outpoint,
             Some(preimage),
@@ -400,7 +400,7 @@ fn handle_payment_successful(
 /// Outbound LN payment failed. Look up the outgoing contract row and tell
 /// the source federation's client to forfeit the contract.
 fn handle_payment_failed(state: &AppState, dbtx: &WriteTxRef<'_>, payment_hash: [u8; 32]) {
-    let operation_id = OperationId::from_encodable(&payment_hash);
+    let operation = OperationId::from_encodable(&payment_hash);
 
     if dbtx
         .insert(&PROCESSED_LDK_EVENT, &payment_hash, &())
@@ -409,13 +409,13 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTxRef<'_>, payment_hash: 
         return;
     }
 
-    if let Some(row) = dbtx.get(&OUTGOING_CONTRACT, &operation_id) {
+    if let Some(row) = dbtx.get(&OUTGOING_CONTRACT, &operation) {
         let client = state
             .select_client(row.federation_id)
             .expect("source federation for outgoing contract is connected");
         client.gw().finalize_send(
             &dbtx.isolate(row.federation_id),
-            operation_id,
+            operation,
             row.contract,
             row.outpoint,
             None,

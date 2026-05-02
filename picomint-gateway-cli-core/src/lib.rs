@@ -250,10 +250,10 @@ pub struct FederationConfigResponse {
 // --- /federation/invite ---
 
 /// Generate an invite code that points new clients at the given guardian
-/// `peer_id` of the chosen federation.
+/// `peer` of the chosen federation.
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationInviteRequest {
-    pub peer_id: PeerId,
+    pub peer: PeerId,
     #[arg(long = "id")]
     pub federation_id: Option<FederationId>,
 }

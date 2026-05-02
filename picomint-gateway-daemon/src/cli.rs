@@ -591,7 +591,7 @@ async fn federation_invite(
 ) -> Result<Json<FederationInviteResponse>, CliError> {
     let client = resolve_client(&state, payload.federation_id).await?;
     let invite_code = client
-        .invite_code(payload.peer_id)
+        .invite_code(payload.peer)
         .await
         .ok_or_else(|| CliError::bad_request("Unknown peer id for this federation"))?;
     Ok(Json(FederationInviteResponse {
@@ -678,12 +678,12 @@ async fn federation_module_mint_receive(
 
     let amount = ecash.amount();
 
-    let operation_id = client
+    let operation = client
         .mint()
         .receive(&ecash)
         .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
 
-    let mut events = client.subscribe_operation_events(operation_id);
+    let mut events = client.subscribe_operation_events(operation);
     while let Some(entry) = events.next().await {
         if entry.to_event::<TxAcceptEvent>().is_some() {
             return Ok(Json(FederationMintReceiveResponse { amount }));
@@ -722,13 +722,13 @@ async fn federation_module_wallet_send(
     Json(payload): Json<FederationWalletSendRequest>,
 ) -> Result<Json<FederationWalletSendResponse>, CliError> {
     let client = resolve_client(&state, payload.federation_id).await?;
-    let operation_id = client
+    let operation = client
         .wallet()
         .send(payload.address, payload.amount, payload.fee)
         .await
         .map_err(|e| CliError::internal(format!("Failed to submit onchain send: {e}")))?;
 
-    let mut events = client.subscribe_operation_events(operation_id);
+    let mut events = client.subscribe_operation_events(operation);
     while let Some(entry) = events.next().await {
         if let Some(e) = entry.to_event::<SendConfirmEvent>() {
             return Ok(Json(FederationWalletSendResponse { txid: e.txid }));

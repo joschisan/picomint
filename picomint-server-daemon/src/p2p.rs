@@ -252,24 +252,24 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
         let mut connection_senders = BTreeMap::new();
         let mut connections = BTreeMap::new();
 
-        for peer_id in connector.peers() {
-            assert_ne!(peer_id, identity);
+        for peer in connector.peers() {
+            assert_ne!(peer, identity);
 
             let (connection_tx, connection_rx) = bounded(4);
 
             let connection = PeerChannel::new(
                 identity,
-                peer_id,
+                peer,
                 connector.clone(),
                 connection_rx,
                 status_senders
-                    .get(&peer_id)
+                    .get(&peer)
                     .expect("No p2p status sender for peer")
                     .clone(),
             );
 
-            connection_senders.insert(peer_id, connection_tx);
-            connections.insert(peer_id, connection);
+            connection_senders.insert(peer, connection_tx);
+            connections.insert(peer, connection);
         }
 
         tokio::spawn(async move {
@@ -358,7 +358,7 @@ struct PeerChannel<M> {
 impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
     fn new(
         our_id: PeerId,
-        peer_id: PeerId,
+        peer: PeerId,
         connector: P2PConnector,
         incoming_connections: Receiver<P2PConnection>,
         status_tx: watch::Sender<Option<P2PConnectionStatus>>,
@@ -380,7 +380,7 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
                         incoming_tx,
                         outgoing_rx,
                         our_id,
-                        peer_id,
+                        peer,
                         connector,
                         incoming_connections,
                         status_tx,
@@ -394,7 +394,7 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
 
                 info!("Shutting down peer connection state machine");
             }
-            .instrument(info_span!("io-state-machine", ?peer_id)),
+            .instrument(info_span!("io-state-machine", ?peer)),
         );
 
         PeerChannel {
@@ -423,7 +423,7 @@ struct P2PConnectionSMCommon<M> {
     incoming_tx: async_channel::Sender<M>,
     outgoing_rx: async_channel::Receiver<M>,
     our_id: PeerId,
-    peer_id: PeerId,
+    peer: PeerId,
     connector: P2PConnector,
     incoming_connections: Receiver<P2PConnection>,
     status_tx: watch::Sender<Option<P2PConnectionStatus>>,
@@ -523,10 +523,10 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
             },
             // To prevent reconnection ping-pongs, only the side with lower
             // PeerId reconnects.
-            () = sleep(backoff.next().expect("Unlimited retries")), if self.our_id < self.peer_id => {
+            () = sleep(backoff.next().expect("Unlimited retries")), if self.our_id < self.peer => {
                 info!("Attempting to reconnect to peer");
 
-                match self.connector.connect(self.peer_id).await {
+                match self.connector.connect(self.peer).await {
                     Ok(connection) => {
                         info!("Connected to peer");
 

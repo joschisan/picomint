@@ -216,13 +216,13 @@ impl ConsensusEngine {
                     }
                 },
                 result = signed_outcomes_rx.recv() => {
-                    let (peer_id, p2p_outcome) = result.ok()?;
+                    let (peer, p2p_outcome) = result.ok()?;
 
                     // Validate signatures
                     if self.validate_signed_session_outcome(&p2p_outcome, session_index) {
                         info!(
                             session_index,
-                            peer_id = %peer_id,
+                            peer = %peer,
                             "Received SignedSessionOutcome via P2P while collection signatures"
                         );
 
@@ -263,7 +263,7 @@ impl ConsensusEngine {
 
                         info!(
                             ?session_index,
-                            peer_id = %peer_id,
+                            peer = %peer,
                             "Successfully recovered session via P2P"
                         );
 
@@ -271,7 +271,7 @@ impl ConsensusEngine {
                     }
 
                     debug!(
-                        %peer_id,
+                        %peer,
                         "Invalid P2P SignedSessionOutcome"
                     );
                 }
@@ -314,26 +314,26 @@ impl ConsensusEngine {
         while signatures.len() < self.num_peers().threshold() {
             tokio::select! {
                 result = signatures_rx.recv() => {
-                    let (peer_id, signature) = result.ok()?;
+                    let (peer, signature) = result.ok()?;
 
-                    if keychain.verify(session_index, &header, &signature, peer_id) {
-                        signatures.insert(peer_id, signature);
+                    if keychain.verify(session_index, &header, &signature, peer) {
+                        signatures.insert(peer, signature);
 
                         info!(
                             session_index,
-                            peer_id = %peer_id,
+                            peer = %peer,
                             "Collected signature from peer via P2P"
                         );
                     }
 
                     debug!(
                         session_index,
-                        peer_id = %peer_id,
+                        peer = %peer,
                         "Invalid P2P signature from peer"
                     );
                 }
                 result = signed_outcomes_rx.recv() => {
-                    let (peer_id, p2p_outcome) = result.ok()?;
+                    let (peer, p2p_outcome) = result.ok()?;
 
                     if self.validate_signed_session_outcome(&p2p_outcome, session_index) {
                         assert_eq!(
@@ -344,7 +344,7 @@ impl ConsensusEngine {
 
                         info!(
                             session_index,
-                            %peer_id,
+                            %peer,
                             "Recovered session via P2P while collecting signatures"
                         );
 
@@ -352,7 +352,7 @@ impl ConsensusEngine {
                     }
 
                     debug!(
-                        %peer_id,
+                        %peer,
                         "Invalid P2P SignedSessionOutcome"
                     );
                 }
@@ -510,12 +510,12 @@ impl ConsensusEngine {
         &self,
         dbtx: &WriteTx,
         consensus_item: ConsensusItem,
-        peer_id: PeerId,
+        peer: PeerId,
     ) -> anyhow::Result<()> {
         match consensus_item {
             ConsensusItem::Module(module_item) => {
                 self.server
-                    .process_consensus_item(&dbtx.as_ref(), &module_item, peer_id)
+                    .process_consensus_item(&dbtx.as_ref(), &module_item, peer)
                     .await
             }
             ConsensusItem::Tx(tx) => {

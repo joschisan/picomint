@@ -151,7 +151,7 @@ impl WalletClientModule {
                 .ok_or(SendError::NoConsensusFeerateAvailable)?,
         };
 
-        let operation_id = OperationId::new_random();
+        let operation = OperationId::new_random();
 
         let destination = StandardScript::from_address(&address.clone().assume_checked())
             .ok_or(SendError::UnsupportedAddress)?;
@@ -170,11 +170,11 @@ impl WalletClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx.as_ref(), operation_id, tx_builder)
+            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder)
             .map_err(|_| SendError::InsufficientFunds)?;
 
         let sm = SendStateMachine {
-            operation_id,
+            operation,
             outpoint: OutPoint { txid, out_idx: 0 },
             value,
             fee,
@@ -190,12 +190,11 @@ impl WalletClientModule {
             fee,
         };
 
-        self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, event);
+        self.client_ctx.log_event(&dbtx.as_ref(), operation, event);
 
         dbtx.commit();
 
-        Ok(operation_id)
+        Ok(operation)
     }
 
     /// Returns the next unused receive address, polling until the initial
@@ -252,7 +251,7 @@ impl WalletClientModule {
         address_index: u64,
         fee: bitcoin::Amount,
     ) -> (OperationId, TransactionId) {
-        let operation_id = OperationId::new_random();
+        let operation = OperationId::new_random();
 
         let tx_builder = TxBuilder::from_input(Input {
             input: wire::Input::Wallet(WalletInput {
@@ -269,7 +268,7 @@ impl WalletClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx.as_ref(), operation_id, tx_builder)
+            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder)
             .expect("Input amount is sufficient to finalize transaction");
 
         let event = ReceiveEvent {
@@ -279,12 +278,11 @@ impl WalletClientModule {
             fee,
         };
 
-        self.client_ctx
-            .log_event(&dbtx.as_ref(), operation_id, event);
+        self.client_ctx.log_event(&dbtx.as_ref(), operation, event);
 
         dbtx.commit();
 
-        (operation_id, txid)
+        (operation, txid)
     }
 
     fn spawn_output_scanner(&self, tg: &TaskGroup) {
@@ -399,7 +397,7 @@ impl WalletClientModule {
                         .ok_or(anyhow!("No consensus feerate is available"))?;
 
                     if output.value > receive_fee {
-                        let (operation_id, txid) = self.receive_output(
+                        let (operation, txid) = self.receive_output(
                             output.index,
                             output.value,
                             address_index,
@@ -407,7 +405,7 @@ impl WalletClientModule {
                         );
 
                         self.client_ctx
-                            .await_tx_accepted(operation_id, txid)
+                            .await_tx_accepted(operation, txid)
                             .await
                             .map_err(|e| anyhow!("Claim transaction was rejected: {e}"))?;
                     }

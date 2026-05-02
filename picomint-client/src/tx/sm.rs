@@ -16,7 +16,7 @@ use crate::{TxAcceptEvent, TxRejectEvent};
 /// invalidated.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct TxSubmissionStateMachine {
-    pub operation_id: OperationId,
+    pub operation: OperationId,
     pub tx: Transaction,
 }
 
@@ -56,7 +56,7 @@ impl StateMachine for TxSubmissionStateMachine {
                 picomint_eventlog::log_event(
                     dbtx,
                     ctx.federation_id,
-                    self.operation_id,
+                    self.operation,
                     TxAcceptEvent { txid },
                 );
             }
@@ -64,7 +64,7 @@ impl StateMachine for TxSubmissionStateMachine {
                 picomint_eventlog::log_event(
                     dbtx,
                     ctx.federation_id,
-                    self.operation_id,
+                    self.operation,
                     TxRejectEvent { txid, error },
                 );
             }

@@ -70,7 +70,7 @@ fn ln_event_stream(
 fn try_parse_ln_event(
     entry: &EventLogEntry,
 ) -> Option<(picomint_core::core::OperationId, LnEvent)> {
-    let op = entry.operation_id;
+    let op = entry.operation;
     if let Some(e) = entry.to_event() {
         return Some((op, LnEvent::Send(e)));
     }
@@ -171,11 +171,11 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
         2
     );
 
-    // Join key sanity — `operation_id` must match across event tables
+    // Join key sanity — `operation` must match across event tables
     assert_eq!(
         count(
             "SELECT COUNT(*) FROM send s \
-             INNER JOIN send_success ss USING (operation_id)"
+             INNER JOIN send_success ss USING (operation)"
         )?,
         1
     );
@@ -653,7 +653,7 @@ const INVOICE_SECRET: [u8; 32] = [2; 32];
 // Scenario selectors: embedded in the invoice's `payment_secret` to pick a
 // branch in `mock_send_payment`; the preimage defines the invoice's
 // `payment_hash` (so the federation's preimage check succeeds server-side
-// and each test's operation_id — derived from the payment hash — is unique).
+// and each test's operation — derived from the payment hash — is unique).
 const PAYABLE_PREIMAGE: [u8; 32] = [10; 32];
 const UNPAYABLE_PREIMAGE: [u8; 32] = [11; 32];
 
@@ -680,7 +680,7 @@ fn unpayable_invoice() -> Bolt11Invoice {
 }
 
 /// Invoice that triggers the mock's crash branch (HTTP 500, gateway never
-/// resolves). Each caller supplies its own preimage so its operation_id
+/// resolves). Each caller supplies its own preimage so its operation
 /// (derived from the payment hash) is distinct.
 fn crash_invoice(preimage: [u8; 32]) -> Bolt11Invoice {
     mock_invoice(preimage, CRASH_PAYMENT_SECRET, Currency::Regtest)

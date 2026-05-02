@@ -29,19 +29,17 @@ impl Server {
         &self,
         dbtx: &WriteTxRef<'_>,
         item: &wire::ModuleConsensusItem,
-        peer_id: PeerId,
+        peer: PeerId,
     ) -> anyhow::Result<()> {
         match item {
             wire::ModuleConsensusItem::Mint(ci) => match *ci {},
             wire::ModuleConsensusItem::Wallet(ci) => {
                 self.wallet
-                    .process_consensus_item(dbtx, ci.clone(), peer_id)
+                    .process_consensus_item(dbtx, ci.clone(), peer)
                     .await
             }
             wire::ModuleConsensusItem::Ln(ci) => {
-                self.ln
-                    .process_consensus_item(dbtx, ci.clone(), peer_id)
-                    .await
+                self.ln.process_consensus_item(dbtx, ci.clone(), peer).await
             }
         }
     }

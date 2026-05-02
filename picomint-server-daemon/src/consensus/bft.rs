@@ -69,14 +69,14 @@ impl INetwork<BftMessage<ConsensusItem>> for Network {
 
     async fn receive(&self) -> Option<(PeerId, BftMessage<ConsensusItem>)> {
         loop {
-            let (peer_id, message) = self.connections.receive().await?;
+            let (peer, message) = self.connections.receive().await?;
 
             match message {
                 P2PMessage::Bft(msg) => {
-                    return Some((peer_id, msg));
+                    return Some((peer, msg));
                 }
                 P2PMessage::SessionSignature(signature) => {
-                    self.signatures_tx.try_send((peer_id, signature)).ok();
+                    self.signatures_tx.try_send((peer, signature)).ok();
                 }
                 P2PMessage::SessionIndex(their_session) => {
                     if let Some(outcome) = self
@@ -85,16 +85,16 @@ impl INetwork<BftMessage<ConsensusItem>> for Network {
                         .get(&SIGNED_SESSION_OUTCOME, &their_session)
                     {
                         self.connections.send(
-                            P2PRecipient::Peer(peer_id),
+                            P2PRecipient::Peer(peer),
                             P2PMessage::SignedSessionOutcome(outcome),
                         );
                     }
                 }
                 P2PMessage::SignedSessionOutcome(outcome) => {
-                    self.signed_outcomes_tx.try_send((peer_id, outcome)).ok();
+                    self.signed_outcomes_tx.try_send((peer, outcome)).ok();
                 }
                 message => error!(
-                    %peer_id,
+                    %peer,
                     ?message,
                     "Received unexpected p2p message variant"
                 ),

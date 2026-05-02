@@ -9,7 +9,7 @@ use super::events::{SendConfirmEvent, SendFailureEvent};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
-    pub operation_id: OperationId,
+    pub operation: OperationId,
     pub outpoint: OutPoint,
     pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
@@ -33,7 +33,7 @@ impl StateMachine for SendStateMachine {
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
         if let Err(error) = ctx
             .client_ctx
-            .await_tx_accepted(self.operation_id, self.outpoint.txid)
+            .await_tx_accepted(self.operation, self.outpoint.txid)
             .await
         {
             return AwaitFundingResult::Aborted(error);
@@ -54,12 +54,12 @@ impl StateMachine for SendStateMachine {
         match outcome {
             AwaitFundingResult::Success(txid) => {
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation_id, SendConfirmEvent { txid });
+                    .log_event(dbtx, self.operation, SendConfirmEvent { txid });
             }
             AwaitFundingResult::Aborted(_) => {}
             AwaitFundingResult::Failure => {
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation_id, SendFailureEvent);
+                    .log_event(dbtx, self.operation, SendFailureEvent);
             }
         }
 

@@ -233,7 +233,7 @@ impl Client {
 
     /// Seed the mint recovery state in `dbtx`. Caller commits this in
     /// the same tx that persists the federation config so "join + start
-    /// recovery" is atomic. Returns the op-id every recovery event will
+    /// recovery" is atomic. Returns the operation id every recovery event will
     /// be logged under. The driver is picked up by the next
     /// [`Client::new`] / [`Client::new_gateway`] on the persisted db.
     /// Panics if a recovery is already in progress.
@@ -289,7 +289,7 @@ impl Client {
         self.get_peer_node_ids()
             .await
             .into_iter()
-            .find_map(|(peer_id, node_id)| (peer == peer_id).then_some(node_id))
+            .find_map(|(p, node_id)| (peer == p).then_some(node_id))
             .map(|node_id| InviteCode::new(node_id, self.federation_id()))
     }
 
@@ -318,22 +318,22 @@ impl Client {
         picomint_eventlog::event_notify(&self.db)
     }
 
-    /// One-shot snapshot of every event currently logged for `operation_id`,
+    /// One-shot snapshot of every event currently logged for `operation`,
     /// in insertion order.
-    pub fn read_operation_events(&self, operation_id: OperationId) -> Vec<EventLogEntry> {
-        picomint_eventlog::read_operation_events(&self.db, operation_id)
+    pub fn read_operation_events(&self, operation: OperationId) -> Vec<EventLogEntry> {
+        picomint_eventlog::read_operation_events(&self.db, operation)
     }
 
-    /// Stream every event belonging to `operation_id`, starting from the
+    /// Stream every event belonging to `operation`, starting from the
     /// beginning of the log (existing events first, then live ones).
     pub fn subscribe_operation_events(
         &self,
-        operation_id: OperationId,
+        operation: OperationId,
     ) -> BoxStream<'static, EventLogEntry> {
         Box::pin(picomint_eventlog::subscribe_operation_events(
             self.db.clone(),
             self.event_notify(),
-            operation_id,
+            operation,
         ))
     }
 }

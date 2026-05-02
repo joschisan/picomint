@@ -3,8 +3,8 @@
 //! Event log
 //!
 //! Single, ordered, append-only log of all important events on a host.
-//! Events that carry an `operation_id` are additionally duplicated into a
-//! secondary table keyed by `(operation_id, event_log_id)` so a subscriber
+//! Events that carry an `operation` are additionally duplicated into a
+//! secondary table keyed by `(operation, event_log_id)` so a subscriber
 //! can tail events for a specific operation cheaply via a stream API.
 //!
 //! The log lives at the un-isolated root of the redb database regardless
@@ -13,7 +13,7 @@
 //! [`picomint_redb::WriteTxRef::un_prefixed`], so a caller holding an
 //! isolated handle (e.g. a gateway federation client) still hits the
 //! shared root tables. This makes the log a daemon-wide stream — a
-//! single op-id can carry events from multiple isolated clients (e.g.
+//! single operation id can carry events from multiple isolated clients (e.g.
 //! both halves of a gateway-internal direct swap).
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -128,12 +128,12 @@ pub struct EventLogEntry {
     /// — there are no global events. For events that span two clients in
     /// the same daemon (e.g. a gateway-internal direct swap), each side
     /// emits its own entry tagged with its own federation_id; the shared
-    /// `operation_id` lets a subscriber stitch them together.
+    /// `operation` lets a subscriber stitch them together.
     pub federation_id: FederationId,
 
     /// Operation this event belongs to. Used to index the event into
     /// [`EVENT_LOG_BY_OPERATION`] for op-scoped tailing.
-    pub operation_id: OperationId,
+    pub operation: OperationId,
 
     /// Timestamp in milliseconds after unix epoch.
     pub timestamp: u64,
@@ -173,14 +173,14 @@ pub fn log_event_raw(
     kind: EventKind,
     source: EventSource,
     federation_id: FederationId,
-    operation_id: OperationId,
+    operation: OperationId,
     payload: Vec<u8>,
 ) {
     tracing::info!(
         kind = %kind,
         source = ?source,
         %federation_id,
-        operation_id = %operation_id,
+        operation = %operation,
         payload = %String::from_utf8_lossy(&payload),
         "event",
     );
@@ -199,7 +199,7 @@ pub fn log_event_raw(
         kind,
         source,
         federation_id,
-        operation_id,
+        operation,
         timestamp,
         payload,
     };
@@ -210,7 +210,7 @@ pub fn log_event_raw(
     );
 
     assert!(
-        dbtx.insert(&EVENT_LOG_BY_OPERATION, &(operation_id, id), &entry)
+        dbtx.insert(&EVENT_LOG_BY_OPERATION, &(operation, id), &entry)
             .is_none(),
         "Must never overwrite existing event"
     );
@@ -220,7 +220,7 @@ pub fn log_event_raw(
 pub fn log_event<E: Event>(
     dbtx: &WriteTxRef<'_>,
     federation_id: FederationId,
-    operation_id: OperationId,
+    operation: OperationId,
     event: E,
 ) {
     log_event_raw(
@@ -228,7 +228,7 @@ pub fn log_event<E: Event>(
         E::KIND,
         E::SOURCE,
         federation_id,
-        operation_id,
+        operation,
         serde_json::to_vec(&event).expect("Serialization can't fail"),
     );
 }
@@ -262,18 +262,18 @@ pub fn get_event_log(
         .range(&EVENT_LOG, pos..end, |it| it.collect())
 }
 
-/// One-shot snapshot of every event currently logged for `operation_id`, in
+/// One-shot snapshot of every event currently logged for `operation`, in
 /// insertion order. See [`subscribe_operation_events`] for the streaming
 /// variant that also yields events arriving after the call.
-pub fn read_operation_events(db: &Database, operation_id: OperationId) -> Vec<EventLogEntry> {
+pub fn read_operation_events(db: &Database, operation: OperationId) -> Vec<EventLogEntry> {
     db.un_prefixed().begin_read().range(
         &EVENT_LOG_BY_OPERATION,
-        (operation_id, EventLogId::LOG_START)..(operation_id, EventLogId::LOG_END),
+        (operation, EventLogId::LOG_START)..(operation, EventLogId::LOG_END),
         |it| it.map(|(_, v)| v).collect(),
     )
 }
 
-/// Stream every event belonging to `operation_id`, in insertion order.
+/// Stream every event belonging to `operation`, in insertion order.
 ///
 /// Yields existing events first, then live ones. The cursor is kept internally
 /// — callers never manage an `EventLogId`. The stream runs forever; callers
@@ -281,7 +281,7 @@ pub fn read_operation_events(db: &Database, operation_id: OperationId) -> Vec<Ev
 pub fn subscribe_operation_events(
     db: Database,
     event_notify: Arc<Notify>,
-    operation_id: OperationId,
+    operation: OperationId,
 ) -> impl Stream<Item = EventLogEntry> {
     let db = db.un_prefixed();
     async_stream::stream! {
@@ -290,7 +290,7 @@ pub fn subscribe_operation_events(
             let notified = event_notify.notified();
             let batch: Vec<(EventLogId, EventLogEntry)> = db.begin_read().range(
                 &EVENT_LOG_BY_OPERATION,
-                (operation_id, next_id)..(operation_id, EventLogId::LOG_END),
+                (operation, next_id)..(operation, EventLogId::LOG_END),
                 |it| it.map(|((_, id), entry)| (id, entry)).collect(),
             );
             for (id, entry) in batch {
@@ -307,10 +307,10 @@ pub fn subscribe_operation_events(
 pub fn subscribe_operation_events_typed<E: Event + 'static>(
     db: Database,
     event_notify: Arc<Notify>,
-    operation_id: OperationId,
+    operation: OperationId,
 ) -> impl Stream<Item = E> {
     use futures::StreamExt as _;
-    subscribe_operation_events(db, event_notify, operation_id)
+    subscribe_operation_events(db, event_notify, operation)
         .filter_map(|entry| async move { entry.to_event::<E>() })
 }
 

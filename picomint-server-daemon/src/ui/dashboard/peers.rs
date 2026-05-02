@@ -21,9 +21,9 @@ pub fn render(p2p_connection_status: &BTreeMap<PeerId, Option<P2PConnectionStatu
                             }
                         }
                         tbody {
-                            @for (peer_id, status) in p2p_connection_status {
+                            @for (peer, status) in p2p_connection_status {
                                 tr {
-                                    td { (peer_id.to_string()) }
+                                    td { (peer.to_string()) }
                                     td {
                                         @match status {
                                             Some(_) => {
