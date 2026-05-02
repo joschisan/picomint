@@ -14,9 +14,12 @@ use crate::unit::{Round, Unit, UnitData, UnitHash};
 /// One slot in the DAG: the unit at `(round, creator)` and the
 /// co-signatures collected so far.
 ///
-/// `insert_unit` is strict on parents — every parent must already be
-/// confirmed locally at insert time — so confirmation reduces to
-/// `sigs.len() >= threshold` and there's nothing to cache.
+/// Insert is *lax* on parents — a unit's body and accumulated sigs land
+/// in the graph regardless of whether its ancestors are present yet.
+/// "Confirmed" therefore only means `sigs.len() >= threshold`; whether
+/// the slot's full ancestor closure is also locally ready is tracked
+/// separately on `Graph` and gates promotion into the extender (and
+/// own-unit construction).
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct Entry<D: UnitData> {
     unit: Unit<D>,
@@ -45,9 +48,10 @@ impl<D: UnitData> Entry<D> {
     }
 
     /// Whether this entry has crossed the co-signature threshold.
-    /// Monotonic: once true, stays true. Strict insert guarantees the
-    /// parents were confirmed before this entry entered the graph, so
-    /// no per-parent re-check is needed.
+    /// Monotonic: once true, stays true. Confirmation here is the
+    /// purely-local "enough sigs" predicate — it does *not* imply the
+    /// slot's ancestors are present and ready. Use [`Graph::is_fed`]
+    /// for the stronger ancestrally-ready predicate.
     pub fn is_confirmed(&self, threshold: usize) -> bool {
         self.sigs.len() >= threshold
     }
@@ -68,9 +72,22 @@ impl<D: UnitData> Entry<D> {
 /// Round-0 units are created and disseminated like every other round
 /// except that they carry empty parent sets.
 ///
+/// Insert is split into two gates:
+///
+/// - **Graph admission** (`insert_unit`) is lax. A well-formed signed
+///   unit lands in `units` regardless of whether its ancestors are
+///   present yet, so out-of-order delivery accumulates sigs and
+///   gossips immediately rather than being dropped and refetched.
+/// - **Promotion** (`fed`) is strict. A slot is promoted into the
+///   extender — and made eligible as a parent for our own future
+///   units via [`Self::parents_for`] — only once it has crossed the
+///   sig threshold *and* every parent slot is itself promoted. Promotion
+///   cascades: when a slot becomes promotable, descendants whose last
+///   missing parent was this slot are checked too.
+///
 /// The graph also owns its `Backup` and `Extender`: every mutation
 /// that changes an entry persists it through `backup`, and every
-/// confirmation transition feeds the unit through `extender` so its
+/// promotion transition feeds the unit through `extender` so its
 /// causal closure can be ordered. Engine code never touches backup or
 /// extender directly.
 ///
@@ -82,47 +99,57 @@ pub struct Graph<D: UnitData> {
     session: u64,
     n: NumPeers,
     units: BTreeMap<(Round, PeerId), Entry<D>>,
+    /// Slots that have been promoted into the extender. Inductive
+    /// invariant: a slot is in `fed` iff it's confirmed locally and
+    /// every parent slot is also in `fed`. So membership in `fed` is
+    /// also the predicate gating own-unit parent selection — we only
+    /// build new units atop slots whose full ancestry we hold ready.
+    fed: BTreeSet<(Round, PeerId)>,
     backup: DynBackup<D>,
     extender: Extender<D>,
 }
 
 impl<D: UnitData> Graph<D> {
     /// Build a graph for `session`, restoring any persisted state from
-    /// `backup` and feeding the recovered confirmed units into a fresh
-    /// internal extender that emits ordered datums on `ordered_tx`.
-    /// Round-0 units are created and disseminated like every other round.
+    /// `backup` and feeding the recovered fully-ancestored confirmed
+    /// units into a fresh internal extender that emits ordered datums
+    /// on `ordered_tx`. Round-0 units are created and disseminated like
+    /// every other round.
     pub fn new(
         n: NumPeers,
         session: u64,
         backup: DynBackup<D>,
         ordered_tx: Sender<(Round, PeerId, D)>,
     ) -> Self {
-        // Restore persisted entries in (round, peer) lex order — same
-        // order the BTreeMap would iterate them after insert, so parents
-        // restore before children. Confirmed entries are also fed into
-        // the extender so post-restart ordering resumes from the right
-        // place.
-        let mut extender = Extender::new(n, ordered_tx);
-        let mut units = BTreeMap::new();
+        let extender = Extender::new(n, ordered_tx);
 
-        for entry in backup.load() {
+        let mut graph = Self {
+            session,
+            n,
+            units: BTreeMap::new(),
+            fed: BTreeSet::new(),
+            backup,
+            extender,
+        };
+
+        // `Backup::load` returns entries in `(round, peer)` lex order
+        // — a valid topological order over the parent relation — so
+        // inserting and immediately promoting in the same pass works:
+        // by the time we promote `(R, c)`, every `(R-1, *)` slot that
+        // could be a parent has already been processed and is either
+        // in `fed` or never will be.
+        for entry in graph.backup.load() {
             assert_eq!(
                 entry.unit.session, session,
                 "backup session does not match graph session",
             );
-            if entry.is_confirmed(n.threshold()) {
-                extender.add_unit(entry.unit.clone());
-            }
-            units.insert((entry.unit.round, entry.unit.creator), entry);
+            let r = entry.unit.round;
+            let c = entry.unit.creator;
+            graph.units.insert((r, c), entry);
+            graph.try_promote(r, c);
         }
 
-        Self {
-            session,
-            n,
-            units,
-            backup,
-            extender,
-        }
+        graph
     }
 
     /// The session this graph is scoped to. Every unit it holds carries
@@ -152,12 +179,21 @@ impl<D: UnitData> Graph<D> {
     }
 
     /// Whether the slot at `(round, creator)` exists and is confirmed
-    /// (sigs threshold met). Strict insert guarantees parents were
-    /// confirmed when the entry entered the graph.
+    /// (sigs threshold met). This is the local-only predicate; the slot
+    /// may still be missing ancestors. Use [`Self::is_fed`] for the
+    /// stronger ancestrally-ready predicate.
     pub fn is_confirmed(&self, round: Round, creator: PeerId) -> bool {
         self.units
             .get(&(round, creator))
             .is_some_and(|e| e.is_confirmed(self.threshold()))
+    }
+
+    /// Whether the slot at `(round, creator)` has been promoted: it is
+    /// confirmed locally *and* every parent slot is also fed. Equivalent
+    /// to "this slot has been handed to the extender, and its full
+    /// causal closure is locally present and confirmed".
+    pub fn is_fed(&self, round: Round, creator: PeerId) -> bool {
+        self.fed.contains(&(round, creator))
     }
 
     /// Iterate the slots at `round` in `creator`-order.
@@ -216,10 +252,17 @@ impl<D: UnitData> Graph<D> {
     /// safe: an honest peer never co-signs two distinct units at the
     /// same slot, so a forker can't reach threshold on either side).
     ///
-    /// Insert is *strict* on parents: every parent of a fresh unit must
-    /// already be present and confirmed locally; otherwise the unit is
-    /// dropped (the periodic anti-entropy will refill the prerequisites
-    /// and the unit will be re-delivered on a later cycle).
+    /// Insert is *lax* on ancestry: a fresh unit lands as soon as it's
+    /// well-formed (correct cardinality of parent creators, all drawn
+    /// from the federation) and within the lookahead bound. Whether its
+    /// parents are locally confirmed is *not* checked here — that gate
+    /// has moved to [`Self::try_promote`], which feeds the extender and
+    /// permits the slot to be used as a parent for our own future units.
+    ///
+    /// Lookahead bound: a fresh unit at round R is accepted only when
+    /// `R <= max(existing rounds) + 1`. Caps memory growth from a peer
+    /// gossiping speculative far-future units; honest peers stay within
+    /// one round of each other thanks to anti-entropy.
     ///
     /// On both fresh and duplicate paths every carried sig is verified
     /// individually via `record_sig`; bad sigs are silently discarded.
@@ -236,6 +279,27 @@ impl<D: UnitData> Graph<D> {
             return None;
         }
 
+        if self.units.contains_key(&(unit.round, unit.creator)) {
+            for (signer, sig) in &sigs {
+                self.record_sig(unit.round, unit.creator, *signer, *sig, keychain);
+            }
+
+            self.try_promote(unit.round, unit.creator);
+
+            return None;
+        }
+
+        // Lookahead bound: at most one round above the highest slot we
+        // currently hold. Empty graph admits round 0 only.
+        let next_allowed = self
+            .units
+            .keys()
+            .next_back()
+            .map_or(0, |(r, _)| r.saturating_add(1));
+        if unit.round > next_allowed {
+            return None;
+        }
+
         // Re-encode the payload and reject anything past the byte cap.
         // `D` is generic, so the bound has to be checked here rather
         // than at decode time — a malicious creator that bundles too
@@ -245,52 +309,31 @@ impl<D: UnitData> Graph<D> {
             return None;
         }
 
-        if self.units.contains_key(&(unit.round, unit.creator)) {
-            for (signer, sig) in &sigs {
-                self.record_sig(unit.round, unit.creator, *signer, *sig, keychain);
-            }
+        self.check_parents(&unit).ok()?;
 
-            None
-        } else {
-            self.check_parents(&unit).ok()?;
+        let entry = Entry::new(unit.clone(), sigs.clone());
 
-            let entry = Entry::new(unit.clone(), sigs.clone());
+        self.backup.save(&entry);
 
-            self.backup.save(&entry);
+        self.units.insert((unit.round, unit.creator), entry.clone());
 
-            self.units.insert((unit.round, unit.creator), entry.clone());
+        self.try_promote(unit.round, unit.creator);
 
-            if entry.sigs.len() == self.n.threshold() {
-                // This sig pushed the slot across the threshold. Hand the
-                // unit to the extender — strict insert means every parent
-                // is already confirmed, so this is the only confirmation
-                // event for the slot and there's no cascade upward.
-                self.extender.add_unit(entry.unit.clone());
-            }
-
-            Some(entry)
-        }
+        Some(entry)
     }
 
-    /// Record a co-signature on the unit at `(round, creator)`. The signature
-    /// is verified against the hash of the unit *we currently hold* at that
-    /// slot — this is the consistent-broadcast safety check, since a forker
-    /// trying to split co-signers across two distinct units will find that
-    /// each peer's collected sigs only verify against their local unit.
-    ///
-    /// Strict insert guarantees the slot's parents are already confirmed,
-    /// so when this sig brings the count to threshold the slot flips
-    /// directly with no parent re-check and no cascade upward.
     /// Record a co-signature on the unit at `(round, creator)`. The
     /// signature is verified against the hash of the unit *we currently
     /// hold* at that slot — the consistent-broadcast safety check, since
     /// a forker trying to split co-signers across two distinct units
     /// will find that each peer's collected sigs only verify against
     /// their local unit. Stale sigs (verify failure, dupe signer,
-    /// already-confirmed slot) are silently discarded. Strict insert
-    /// guarantees the slot's parents are already confirmed, so when
-    /// this sig brings the count to threshold the slot flips directly
-    /// — no parent re-check, no cascade upward.
+    /// already-confirmed slot) are silently discarded.
+    ///
+    /// Crossing the threshold here only flips the entry's `is_confirmed`
+    /// predicate; promotion into the extender is the caller's
+    /// responsibility via [`Self::try_promote`], which also enforces
+    /// the ancestor-readiness invariant.
     fn record_sig(
         &mut self,
         round: Round,
@@ -320,14 +363,80 @@ impl<D: UnitData> Graph<D> {
         entry.sigs.insert(signer, signature);
 
         self.backup.save(entry);
+    }
 
-        if entry.sigs.len() == t {
-            // This sig pushed the slot across the threshold. Hand the
-            // unit to the extender — strict insert means every parent
-            // is already confirmed, so this is the only confirmation
-            // event for the slot and there's no cascade upward.
-            self.extender.add_unit(entry.unit.clone());
+    /// Try to promote the slot at `(round, creator)` into the extender;
+    /// if it does promote, sweep ascending rounds promoting whatever
+    /// became newly eligible, stopping when a full round produces zero
+    /// promotions.
+    ///
+    /// Promotion conditions for one slot:
+    /// 1. Not already in `fed`.
+    /// 2. Confirmed (sigs ≥ threshold).
+    /// 3. Round 0, or every parent slot is already in `fed`.
+    ///
+    /// Termination: a round can only gain newly-promotable slots if the
+    /// previous round did. Once a sweep promotes nothing, no higher
+    /// round can promote anything either, so we stop.
+    fn try_promote(&mut self, round: Round, creator: PeerId) {
+        if !self.maybe_promote(round, creator) {
+            return;
         }
+
+        let mut next_round = round.saturating_add(1);
+
+        loop {
+            let candidates: Vec<PeerId> = self
+                .round_units(next_round)
+                .map(|e| e.unit.creator)
+                .collect();
+
+            let mut any_promoted = false;
+            for c in candidates {
+                if self.maybe_promote(next_round, c) {
+                    any_promoted = true;
+                }
+            }
+
+            if !any_promoted {
+                return;
+            }
+
+            next_round = next_round.saturating_add(1);
+        }
+    }
+
+    /// Attempt to promote one slot. Returns `true` iff the slot
+    /// transitioned from unfed to fed in this call.
+    fn maybe_promote(&mut self, round: Round, creator: PeerId) -> bool {
+        if self.fed.contains(&(round, creator)) {
+            return false;
+        }
+
+        let Some(entry) = self.units.get(&(round, creator)) else {
+            return false;
+        };
+
+        if !entry.is_confirmed(self.threshold()) {
+            return false;
+        }
+
+        if let Some(parent_round) = round.checked_sub(1) {
+            let parents_fed = entry
+                .unit
+                .parents
+                .iter()
+                .all(|p| self.fed.contains(&(parent_round, *p)));
+            if !parents_fed {
+                return false;
+            }
+        }
+
+        let unit = entry.unit.clone();
+        self.fed.insert((round, creator));
+        self.extender.add_unit(unit);
+
+        true
     }
 
     /// Build a candidate parent set for a unit at `round`.
@@ -336,17 +445,22 @@ impl<D: UnitData> Graph<D> {
     /// round-0 units are the DAG's roots.
     ///
     /// For `round > 0`, returns the lowest-`PeerId`-keyed `threshold`
-    /// confirmed creators at `round - 1`, or `None` if fewer than
-    /// `threshold` slots at that round are confirmed. Parent hashes
-    /// aren't tracked: at most one unit per slot can confirm, so the
-    /// creator suffices.
+    /// *fed* slots at `round - 1`, or `None` if fewer than `threshold`
+    /// slots at that round have been promoted yet. Parent hashes aren't
+    /// tracked: at most one unit per slot can confirm, so the creator
+    /// suffices.
+    ///
+    /// Parents must be `fed` (ancestrally ready) rather than just
+    /// confirmed: building a unit atop a parent whose own ancestors
+    /// aren't ready would mean the new unit would also fail to promote
+    /// — wasted work and lost rebroadcast opportunity.
     ///
     /// No chain rule: a creator's own previous-round unit is *not*
     /// forced into the parent set. Recovery is independent of the
-    /// chain — the periodic anti-entropy push (`broadcast_peer_units`)
-    /// refills sig deficits at slots receivers already hold, and the
-    /// per-creator pull (`Message::Request` for the lowest unconfirmed
-    /// round) pulls in missing units one round at a time.
+    /// chain — the periodic anti-entropy push refills sig deficits at
+    /// slots receivers already hold, and the per-creator pull
+    /// (`Message::Request` for the lowest unconfirmed round) pulls in
+    /// missing units one round at a time.
     pub fn parents_for(&self, round: Round) -> Option<BTreeSet<PeerId>> {
         let Some(parent_round) = round.checked_sub(1) else {
             return Some(BTreeSet::new());
@@ -356,7 +470,7 @@ impl<D: UnitData> Graph<D> {
 
         let parents: BTreeSet<PeerId> = self
             .round_units(parent_round)
-            .filter(|e| e.is_confirmed(t))
+            .filter(|e| self.fed.contains(&(parent_round, e.unit.creator)))
             .take(t)
             .map(|e| e.unit.creator)
             .collect();
@@ -364,13 +478,17 @@ impl<D: UnitData> Graph<D> {
         (parents.len() == t).then_some(parents)
     }
 
-    /// Strict parent check used by `insert_unit`. Returns `Err(())` when
-    /// the parent set is malformed (wrong size) or missing/unconfirmed
-    /// locally; `Ok(())` when it's good to go.
+    /// Structural parent check used by `insert_unit`. Returns `Err(())`
+    /// when the parent set is malformed (wrong cardinality, or names a
+    /// creator outside the federation); `Ok(())` otherwise.
     ///
     /// - Round 0 must have an empty parent set.
     /// - Round R>0 must carry exactly `threshold` parent creators.
-    /// - Every parent slot must already be in our graph and confirmed.
+    /// - Every parent creator must be a member of the federation.
+    ///
+    /// Local presence/confirmation of the parent slots is *not* checked
+    /// here — that's the promotion gate, enforced by `try_promote` and
+    /// `parents_for`.
     fn check_parents(&self, unit: &Unit<D>) -> Result<(), ()> {
         let t = self.threshold();
 
@@ -387,9 +505,7 @@ impl<D: UnitData> Graph<D> {
         }
 
         for p_creator in &unit.parents {
-            let parent = self.units.get(&(unit.round - 1, *p_creator)).ok_or(())?;
-
-            if !parent.is_confirmed(t) {
+            if !self.n.peer_ids().any(|p| p == *p_creator) {
                 return Err(());
             }
         }
