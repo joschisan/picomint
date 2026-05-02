@@ -25,7 +25,7 @@ use rand::Rng;
 /// Per-recipient probability of silently dropping a message in the mock
 /// network. Each unicast send and each fan-out leg of a broadcast rolls
 /// independently.
-const DROP_RATE: f64 = 0.05;
+const DROP_RATE: f64 = 0.10;
 
 /// Base one-way latency applied to every delivered message in the mock
 /// network. Each send adds `BASE_LATENCY` plus a uniform jitter in
