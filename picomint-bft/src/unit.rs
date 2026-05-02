@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 
-use bitcoin::hashes::sha256;
 use picomint_core::PeerId;
 use picomint_encoding::{Decodable, Encodable};
 
@@ -9,10 +8,6 @@ use picomint_encoding::{Decodable, Encodable};
 /// its units carry empty parent sets and are otherwise created and
 /// disseminated like every other unit.
 pub type Round = u16;
-
-/// 32-byte digest identifying a unit; the consensus hash of its `Encodable`
-/// form.
-pub type UnitHash = sha256::Hash;
 
 /// Bound bundle for unit payloads. `D` rides through `Unit`, `Graph`,
 /// `Extender`, and `Message` purely as data — the protocol never inspects
@@ -55,11 +50,4 @@ pub struct Unit<D: UnitData> {
     pub parents: BTreeSet<PeerId>,
     /// Creator's payload for this slot.
     pub data: Vec<D>,
-}
-
-impl<D: UnitData> Unit<D> {
-    /// SHA-256 of this unit's consensus encoding.
-    pub fn hash(&self) -> UnitHash {
-        self.consensus_hash_sha256()
-    }
 }

@@ -9,7 +9,7 @@ use picomint_encoding::{Decodable, Encodable};
 use crate::backup::DynBackup;
 use crate::extender::Extender;
 use crate::keychain::Keychain;
-use crate::unit::{Round, Unit, UnitData, UnitHash};
+use crate::unit::{Round, Unit, UnitData};
 
 /// One slot in the DAG: the unit at `(round, creator)` and the
 /// co-signatures collected so far.
@@ -54,11 +54,6 @@ impl<D: UnitData> Entry<D> {
     /// for the stronger ancestrally-ready predicate.
     pub fn is_confirmed(&self, threshold: usize) -> bool {
         self.sigs.len() >= threshold
-    }
-
-    /// SHA-256 of the unit's consensus encoding.
-    pub fn hash(&self) -> UnitHash {
-        self.unit.hash()
     }
 }
 
@@ -163,11 +158,6 @@ impl<D: UnitData> Graph<D> {
         self.n.threshold()
     }
 
-    /// Total number of peers in the federation.
-    pub fn num_peers(&self) -> NumPeers {
-        self.n
-    }
-
     /// Iterate every peer id in the federation in `PeerId` order.
     pub fn peer_ids(&self) -> impl Iterator<Item = PeerId> {
         self.n.peer_ids()
@@ -197,19 +187,11 @@ impl<D: UnitData> Graph<D> {
     }
 
     /// Iterate the slots at `round` in `creator`-order.
-    pub fn round_units(&self, round: Round) -> impl Iterator<Item = &Entry<D>> {
+    fn round_units(&self, round: Round) -> impl Iterator<Item = &Entry<D>> {
         self.units
             .range((round, PeerId::from(0u8))..)
             .take_while(move |((r, _), _)| *r == round)
             .map(|(_, e)| e)
-    }
-
-    /// Number of confirmed units at `round`.
-    pub fn confirmed_count(&self, round: Round) -> usize {
-        let t = self.threshold();
-        self.round_units(round)
-            .filter(|e| e.is_confirmed(t))
-            .count()
     }
 
     /// Highest-round entry we hold for `creator`, if any. Used by the

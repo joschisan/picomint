@@ -52,10 +52,6 @@ pub async fn run<D: UnitData, P: DataProvider<D>>(
     data_provider: P,
     unit_delay: Box<dyn Fn(Round) -> Duration + Send + 'static>,
 ) {
-    let next_round = graph
-        .highest_entry(own_id)
-        .map_or(0, |e| e.unit().round + 1);
-
     Engine {
         own_id,
         graph,
@@ -63,7 +59,6 @@ pub async fn run<D: UnitData, P: DataProvider<D>>(
         network,
         data_provider,
         unit_delay,
-        next_round,
     }
     .run()
     .await;
@@ -78,11 +73,6 @@ struct Engine<D: UnitData, P: DataProvider<D>> {
     network: DynNetwork<Message<D>>,
     data_provider: P,
     unit_delay: Box<dyn Fn(Round) -> Duration + Send + 'static>,
-    /// The next round we'll attempt to create a unit at. Starts at 0
-    /// (no genesis pre-population — round 0 is created and disseminated
-    /// like any other round) or one past our highest restored own-slot.
-    /// Bumped past every round we either skip or successfully build.
-    next_round: Round,
 }
 
 impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
@@ -102,7 +92,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
                     self.try_create_unit().await;
 
                     next_create_at = Instant::now()
-                        + (self.unit_delay)(self.next_round);
+                        + (self.unit_delay)(self.next_create_round());
                 }
 
                 _ = sleep_until(next_anti_entropy_at) => {
@@ -226,21 +216,24 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         }
     }
 
-    async fn try_create_unit(&mut self) {
-        // After a wipe-and-restore, peers can fill our slot via
-        // anti-entropy before we've reached the create-timer arm. Adopt
-        // those slots — building a *different* unit at the same
-        // `(round, own_id)` would fork against peers that already
-        // endorsed the old one.
-        while self.graph.entry(self.next_round, self.own_id).is_some() {
-            self.next_round += 1;
-        }
+    /// Round we're about to attempt to create at, derived from the
+    /// highest own-slot we currently hold. After a wipe-and-restore,
+    /// peers can fill our slot via anti-entropy before this fires —
+    /// `highest_entry` already accounts for that, so we naturally
+    /// resume at `highest + 1` rather than risking a fork by rebuilding
+    /// a slot peers have already endorsed.
+    fn next_create_round(&self) -> Round {
+        self.graph
+            .highest_entry(self.own_id)
+            .map_or(0, |e| e.unit().round + 1)
+    }
 
-        let Some(parents) = self.graph.parents_for(self.next_round) else {
+    async fn try_create_unit(&mut self) {
+        let round = self.next_create_round();
+
+        let Some(parents) = self.graph.parents_for(round) else {
             return;
         };
-
-        let round = self.next_round;
 
         let unit = Unit {
             session: self.graph.session(),
@@ -263,8 +256,6 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             .unwrap_or_else(|| panic!("newly built round-{round} unit must insert"));
 
         self.send_entry(Recipient::Everyone, &entry);
-
-        self.next_round += 1;
     }
 
     /// Single helper for shipping an entry on the wire — used by the
