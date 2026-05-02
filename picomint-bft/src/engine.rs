@@ -263,7 +263,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         sig: schnorr::Signature,
         cosigs: BTreeMap<PeerId, schnorr::Signature>,
     ) {
-        let unit_round = unit.round;
+        let parent_round = unit.round.checked_sub(1);
         let parents: Vec<PeerId> = unit.parents.iter().copied().collect();
 
         if !self
@@ -273,7 +273,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             return;
         }
 
-        if let Some(parent_round) = unit_round.checked_sub(1) {
+        if let Some(parent_round) = parent_round {
             for parent_creator in parents {
                 if !self.graph.is_fed(parent_round, parent_creator) {
                     self.network.send(

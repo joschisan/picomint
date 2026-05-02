@@ -330,12 +330,10 @@ impl<D: UnitData> Graph<D> {
             return false;
         }
 
-        let t = self.threshold();
-
-        // Take exactly `2f = t - 1` valid non-creator cosigs. BTreeMap
-        // iterates in PeerId order so this is deterministic across
-        // peers; with `take(t - 1)` the iterator short-circuits, so
-        // any extra cosigs in the bundle are never verified (saves CPU).
+        // Take exactly `2f = threshold - 1` valid non-creator cosigs.
+        // BTreeMap iterates in PeerId order so this is deterministic
+        // across peers; the iterator short-circuits, so any extra
+        // cosigs in the bundle are never verified (saves CPU).
         // Structural parent validity (cardinality + federation
         // membership) doesn't need a separate check here — at least
         // f+1 of the verified sigs come from honest peers, who ran
@@ -344,10 +342,10 @@ impl<D: UnitData> Graph<D> {
         let valid_cosigs: BTreeMap<PeerId, schnorr::Signature> = cosigs
             .into_iter()
             .filter(|(signer, c)| *signer != unit.creator && keychain.verify(&unit, c, *signer))
-            .take(t - 1)
+            .take(self.threshold() - 1)
             .collect();
 
-        if 1 + valid_cosigs.len() != t {
+        if 1 + valid_cosigs.len() != self.threshold() {
             return false;
         }
 
