@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -12,22 +11,20 @@ use crate::unit::{Round, Unit, UnitData};
 /// network layer; it is never carried in the payload.
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
 pub enum Message<D: UnitData> {
-    /// Body dissemination. Two paths produce a `Unit` message:
-    /// 1. The creator's own broadcast at unit-creation time (sigs
-    ///    contains just the creator's sig).
-    /// 2. A `Request` response, where the responder sends its current
-    ///    view of the slot (body plus all sigs it holds).
-    /// Receivers union the carried sigs with what they already hold;
-    /// duplicate body and duplicate sigs are no-ops. The bundle must
-    /// contain a sig from the unit's creator — binds the body to its
-    /// claimed author so a Byzantine peer can't fabricate a body at
-    /// someone else's slot.
+    /// Body dissemination. Carries the body plus *only* the creator's
+    /// sig — cosigs never ride on `Unit`. Three paths emit one:
+    /// 1. The creator's own broadcast at unit-creation time.
+    /// 2. The creator's own anti-entropy push of its highest own slot.
+    /// 3. A `Request` response (paired with one `Sig` per held cosig).
+    /// Binding the body to its claimed creator via `creator_sig` is
+    /// what blocks a Byzantine peer from fabricating a body at someone
+    /// else's slot. Cosig propagation is the `Sig` message's job.
     Unit {
         /// The unit being disseminated.
         unit: Unit<D>,
-        /// Co-signatures over `unit`, keyed by signer. Always includes
-        /// the creator's sig.
-        sigs: BTreeMap<PeerId, schnorr::Signature>,
+        /// The creator's schnorr signature over `unit`'s consensus
+        /// encoding. Verified against `unit.creator`'s public key.
+        creator_sig: schnorr::Signature,
     },
     /// Cosign-only fan-out. When a peer first cosigns a unit body it
     /// has received, it broadcasts a `Sig` so every other peer can
@@ -44,9 +41,11 @@ pub enum Message<D: UnitData> {
         /// Schnorr signature over the unit's consensus encoding.
         sig: schnorr::Signature,
     },
-    /// Targeted backfill request. The recipient replies with a `Unit`
-    /// carrying its view of the slot (body plus all sigs it currently
-    /// holds) if it has the entry.
+    /// Targeted backfill request. If the recipient holds the entry,
+    /// it replies with a `Unit` carrying body + creator sig, plus one
+    /// `Sig` per non-creator cosig it currently holds — so a single
+    /// `Request` recovers both the body and all known cosigs in one
+    /// round-trip.
     Request {
         /// Round of the slot the requester wants filled.
         round: Round,
