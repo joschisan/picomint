@@ -66,7 +66,6 @@ bitcoin_hashes = "0.14.0"
 bitcoincore-rpc = "0.19.0"
 bls12_381 = "0.8.0"
 clap = { version = "4.5.60", features = ["derive", "env"] }
-criterion = "0.5.1"
 derive_more = { version = "2.1.1", features = ["display", "from_str"] }
 esplora-client = { version = "0.12.3", default-features = false, features = [
     "async-https-rustls",
