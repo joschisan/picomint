@@ -39,4 +39,3 @@ tpe = { workspace = true }
 
 [dev-dependencies]
 test-log = { workspace = true }
-tokio-test = { workspace = true }

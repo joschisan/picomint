@@ -78,7 +78,6 @@ hex = "0.4.3"
 hyper = "1.6"
 iroh = { version = "=0.98.0", default-features = false, features = ["tls-ring", "address-lookup-mdns"] }
 iroh-base = { version = "=0.98.0", default-features = false }
-itertools = "0.14.0"
 ldk-node = "0.7.0"
 lightning = "0.2.0"
 lightning-invoice = { version = "0.34.0", features = ["serde", "std"] }
@@ -126,11 +125,9 @@ tbs = { package = "picomint-tbs", path = "./crypto/picomint-tbs", version = "=0.
 tempfile = "3.20.0"
 test-log = { version = "0.2", features = ["trace"], default-features = false }
 thiserror = "2.0.18"
-threshold_crypto = { version = "0.2.1", package = "fedimint-threshold-crypto" }
 tokio = "1.48.0"
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12", "logging"] }
 tokio-stream = "0.1.18"
-tokio-test = "0.4.5"
 tokio-util = "0.7.18"
 tower-http = { version = "0.6.8", features = ["cors"] }
 tpe = { package = "picomint-tpe", path = "./crypto/picomint-tpe", version = "=0.1.0" }

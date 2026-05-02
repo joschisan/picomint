@@ -46,7 +46,6 @@ secp256k1 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tbs = { workspace = true }
-threshold_crypto = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
 tpe = { workspace = true }

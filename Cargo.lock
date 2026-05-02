@@ -610,7 +610,6 @@ dependencies = [
  "pairing",
  "rand_core 0.6.4",
  "subtle",
- "zeroize",
 ]
 
 [[package]]
@@ -907,12 +906,6 @@ name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
-
-[[package]]
-name = "crunchy"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43da5946c66ffcc7745f48db692ffbb10a83bfe0afd96235c5c2a4fb23994929"
 
 [[package]]
 name = "crypto-common"
@@ -1366,28 +1359,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
-name = "fedimint-threshold-crypto"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e5f0913eb5fb65f83e6b503794f2eba124b542b9bdbb5cf941bc12bc7b0ea67"
-dependencies = [
- "bls12_381",
- "byteorder",
- "ff",
- "group",
- "hex_fmt",
- "log",
- "pairing",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "serde",
- "subtle",
- "thiserror 1.0.69",
- "tiny-keccak",
- "zeroize",
-]
-
-[[package]]
 name = "ff"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1785,12 +1756,6 @@ checksum = "fda06d18ac606267c40c04e41b9947729bf8b9efe74bd4e82b61a5f26a510b9f"
 dependencies = [
  "arrayvec",
 ]
-
-[[package]]
-name = "hex_fmt"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b07f60793ff0a4d9cef0f18e63b5357e06209987153a64648c972c1e5aff336f"
 
 [[package]]
 name = "hex_lit"
@@ -2400,15 +2365,6 @@ name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
 dependencies = [
  "either",
 ]
@@ -3505,7 +3461,6 @@ dependencies = [
  "subtle",
  "test-log",
  "thiserror 2.0.18",
- "tokio-test",
 ]
 
 [[package]]
@@ -3595,14 +3550,12 @@ name = "picomint-gateway-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "assert_matches",
  "axum",
  "bitcoin",
  "clap",
  "futures",
  "hex",
  "iroh",
- "itertools 0.14.0",
  "ldk-node",
  "lightning",
  "lightning-invoice",
@@ -3614,7 +3567,6 @@ dependencies = [
  "picomint-gateway-cli-core",
  "picomint-lnurl",
  "picomint-redb",
- "picomint-tpe",
  "rand 0.8.5",
  "reqwest 0.12.22",
  "rusqlite",
@@ -3741,7 +3693,6 @@ dependencies = [
  "bitcoin",
  "bls12_381",
  "clap",
- "fedimint-threshold-crypto",
  "futures",
  "group",
  "iroh",
@@ -4013,7 +3964,7 @@ checksum = "119533552c9a7ffacc21e099c24a0ac8bb19c2a2a3f363de84cd9b844feab270"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.10.5",
+ "itertools",
  "lazy_static",
  "log",
  "multimap",
@@ -4034,7 +3985,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5d2d8d10f3c6ded6da8b05b5fb3b8a5082514344d56c9f871412d29b4e075b4"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -5193,15 +5144,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tiny-keccak"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c9d3793400a45f954c52e73d068316d76b6f4e36977e3fcebb13a2721e80237"
-dependencies = [
- "crunchy",
-]
-
-[[package]]
 name = "tinystr"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5273,17 +5215,6 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tokio-util",
-]
-
-[[package]]
-name = "tokio-test"
-version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f6d24790a10a7af737693a3e8f1d03faef7e6ca0cc99aae5066f533766de545"
-dependencies = [
- "futures-core",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]
