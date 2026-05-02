@@ -9,10 +9,6 @@ readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }
 
-[package.metadata.cargo-udeps.ignore]
-# cargo udeps can't detect that one
-normal = ["aquamarine"]
-
 [package.metadata.docs.rs]
 rustc-args = ["--cfg", "tokio_unstable"]
 
@@ -46,13 +42,9 @@ tbs = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time", "macros", "rt"] }
 tokio-stream = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
 tpe = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-assert_matches = { workspace = true }
 serde_json = { workspace = true }
-tracing-test = { workspace = true }
-
-[lints]
-workspace = true

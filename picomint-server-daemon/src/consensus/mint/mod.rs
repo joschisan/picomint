@@ -4,6 +4,7 @@ mod rpc;
 use std::collections::BTreeMap;
 
 use anyhow::ensure;
+use group::Curve;
 use picomint_core::mint::config::{
     MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
 };
@@ -17,7 +18,6 @@ use picomint_core::{Amount, InPoint, OutPoint, PeerId};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
-use threshold_crypto::group::Curve;
 
 use crate::config::dkg::DkgHandle;
 use crate::config::poly::eval_poly_g2;

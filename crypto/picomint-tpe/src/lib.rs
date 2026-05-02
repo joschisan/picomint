@@ -40,7 +40,6 @@ pub struct EphemeralSignature(#[serde(with = "bls_serde::g2")] pub G2Affine);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable, Serialize, Deserialize)]
 pub struct CipherText {
-    #[serde(with = "serde_big_array::BigArray")]
     pub encrypted_preimage: [u8; 32],
     pub pk: EphemeralPublicKey,
     pub signature: EphemeralSignature,

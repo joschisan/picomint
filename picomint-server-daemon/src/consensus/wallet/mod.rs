@@ -20,7 +20,6 @@ use miniscript::descriptor::Wsh;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::module::{ApiError, InputMeta, TransactionItemAmounts};
-use picomint_core::task::TaskGroup;
 use picomint_core::wallet as common;
 use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
@@ -490,16 +489,10 @@ impl Wallet {
     pub fn new(
         cfg: WalletConfig,
         db: Database,
-        task_group: &TaskGroup,
         btc_rpc: BitcoinRpcMonitor,
         network: Network,
     ) -> Wallet {
-        Self::spawn_broadcast_unconfirmed_txs_task(
-            btc_rpc.clone(),
-            db.clone(),
-            task_group,
-            network,
-        );
+        Self::spawn_broadcast_unconfirmed_txs_task(btc_rpc.clone(), db.clone(), network);
 
         Wallet {
             cfg,
@@ -512,10 +505,9 @@ impl Wallet {
     fn spawn_broadcast_unconfirmed_txs_task(
         btc_rpc: BitcoinRpcMonitor,
         db: Database,
-        task_group: &TaskGroup,
         network: Network,
     ) {
-        task_group.spawn_cancellable("broadcast_unconfirmed_transactions", async move {
+        tokio::spawn(async move {
             loop {
                 let unconfirmed_txs: Vec<FederationTx> = db
                     .begin_read()

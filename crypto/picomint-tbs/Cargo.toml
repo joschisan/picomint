@@ -26,14 +26,3 @@ rand = { workspace = true }
 rand_chacha = { workspace = true }
 serde = { workspace = true }
 serdect = { workspace = true }
-
-[dev-dependencies]
-criterion = { workspace = true }
-
-[[bench]]
-harness = false
-name = "tbs"
-path = "benches/tbs.rs"
-
-[lints]
-workspace = true

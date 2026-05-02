@@ -12,7 +12,6 @@ use picomint_core::transaction::{ConsensusItem, Transaction, TransactionError};
 use crate::consensus::rpc;
 use crate::{handler, handler_async};
 use picomint_core::PeerId;
-use picomint_core::task::TaskGroup;
 use picomint_redb::Database;
 use tokio::sync::watch::{Receiver, Sender};
 use tracing::warn;
@@ -38,7 +37,6 @@ pub struct ConsensusApi {
     pub p2p_status_receivers: P2PStatusReceivers,
     pub ci_status_receivers: BTreeMap<PeerId, Receiver<Option<u64>>>,
     pub bitcoin_rpc_connection: BitcoinRpcMonitor,
-    pub task_group: TaskGroup,
 }
 
 impl ConsensusApi {

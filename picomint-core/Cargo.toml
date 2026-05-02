@@ -8,14 +8,9 @@ readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }
 
-[package.metadata.cargo-udeps.ignore]
-development = ["tokio-test"]
-
 [lib]
 name = "picomint_core"
 path = "src/lib.rs"
-
-[features]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -40,14 +35,7 @@ serde = { workspace = true }
 subtle = { workspace = true }
 tbs = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["full", "tracing"] }
-tokio-util = { workspace = true, features = ["rt"] }
 tpe = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 test-log = { workspace = true }
-tokio-test = { workspace = true }
-
-[lints]
-workspace = true

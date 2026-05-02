@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
+use crate::task::TaskGroup;
 use crate::transaction::{Input, Output, TransactionBuilder};
 use bitcoin::secp256k1;
 use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
@@ -25,7 +26,6 @@ use picomint_core::ln::{
     Bolt11InvoiceDescription, LightningInput, LightningInvoice, LightningOutput,
     MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
 };
-use picomint_core::task::TaskGroup;
 use picomint_core::wire;
 
 pub use self::secret::LnSecret;
@@ -82,7 +82,7 @@ impl LightningClientModule {
         client_ctx: ClientContext,
         mint: Arc<crate::mint::MintClientModule>,
         secret: LnSecret,
-        task_group: &TaskGroup,
+        tg: &TaskGroup,
     ) -> anyhow::Result<Self> {
         let sm_context = LightningClientContext {
             federation_id,
@@ -91,7 +91,7 @@ impl LightningClientModule {
             input_fee: cfg.input_fee,
         };
         let send_executor =
-            ModuleExecutor::new(client_ctx.db().clone(), sm_context, task_group.clone()).await;
+            ModuleExecutor::new(client_ctx.db().clone(), sm_context, tg.clone()).await;
 
         let module = Self {
             federation_id,
@@ -102,17 +102,17 @@ impl LightningClientModule {
             send_executor,
         };
 
-        module.spawn_receive_scan_task(task_group);
+        module.spawn_receive_scan_task(tg);
 
-        module.spawn_gateway_map_update_task(task_group);
+        module.spawn_gateway_map_update_task(tg);
 
         Ok(module)
     }
 
-    fn spawn_gateway_map_update_task(&self, task_group: &TaskGroup) {
+    fn spawn_gateway_map_update_task(&self, tg: &TaskGroup) {
         let module = self.clone();
 
-        task_group.spawn_cancellable("gateway_map_update_task", async move {
+        tg.spawn(async move {
             module.update_gateway_map().await;
         });
     }
@@ -556,10 +556,10 @@ impl LightningClientModule {
         )))
     }
 
-    fn spawn_receive_scan_task(&self, task_group: &TaskGroup) {
+    fn spawn_receive_scan_task(&self, tg: &TaskGroup) {
         let module = self.clone();
 
-        task_group.spawn_cancellable("receive_scan_task", async move {
+        tg.spawn(async move {
             loop {
                 module.receive_scan().await;
             }

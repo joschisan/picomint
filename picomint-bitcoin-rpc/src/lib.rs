@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use picomint_core::bitcoin::{Block, BlockHash, Network, Transaction};
-use picomint_core::task::TaskGroup;
 use tokio::sync::watch;
 use tracing::{debug, warn};
 
@@ -103,11 +102,7 @@ pub struct BitcoinRpcMonitor {
 }
 
 impl BitcoinRpcMonitor {
-    pub fn new(
-        rpc: Arc<BitcoinBackend>,
-        update_interval: Duration,
-        task_group: &TaskGroup,
-    ) -> Self {
+    pub fn new(rpc: Arc<BitcoinBackend>, update_interval: Duration) -> Self {
         let (status_sender, status_receiver) = watch::channel(None);
 
         let rpc_clone = rpc.clone();
@@ -116,7 +111,7 @@ impl BitcoinRpcMonitor {
             "Starting bitcoin rpc monitor"
         );
 
-        task_group.spawn_cancellable("bitcoin-status-update", async move {
+        tokio::spawn(async move {
             let mut interval = tokio::time::interval(update_interval);
             loop {
                 interval.tick().await;

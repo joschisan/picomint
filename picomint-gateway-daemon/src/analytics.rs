@@ -21,7 +21,6 @@ use picomint_client::gw::events::{
     ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent, SendCancelEvent,
     SendEvent, SendSuccessEvent,
 };
-use picomint_core::task::TaskGroup;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use rusqlite::Connection;
 use tokio::sync::Mutex;
@@ -188,14 +187,10 @@ LEFT JOIN receive_refund  refund
        ON refund.federation_id = r.federation_id AND refund.operation_id = r.operation_id;
 "#;
 
-/// Spawn the daemon-wide trailer: drain the global event log forward in
-/// chunks and mirror each gw event into the SQLite analytics DB. Blocks on
-/// the global `event_notify` only when caught up with the head.
-pub fn spawn_trailer(task_group: &TaskGroup, state: AppState) {
-    task_group.spawn_cancellable("gw-analytics-trailer", trailer(state));
-}
-
-async fn trailer(state: AppState) {
+/// Drain the global event log forward in chunks and mirror each gw event
+/// into the SQLite analytics DB. Blocks on the global `event_notify` only
+/// when caught up with the head. Spawned daemon-wide at startup.
+pub async fn trailer(state: AppState) {
     let mut cursor = EventLogId::default();
     let notify = picomint_eventlog::event_notify(&state.gateway_db);
 

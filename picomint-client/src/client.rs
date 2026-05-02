@@ -7,6 +7,7 @@ use crate::gw::GatewayClientModule;
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
 use crate::secret::{ClientSecret, Mnemonic};
+use crate::task::TaskGroup;
 use crate::wallet::WalletClientModule;
 use futures::Stream;
 use picomint_core::Amount;
@@ -15,7 +16,6 @@ use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
-use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxStream;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_redb::Database;
@@ -54,7 +54,7 @@ pub struct Client {
     pub(crate) wallet: Arc<WalletClientModule>,
     pub(crate) ln: LnFlavor,
     pub(crate) api: FederationApi,
-    task_group: TaskGroup,
+    tg: TaskGroup,
 }
 
 impl Client {
@@ -103,7 +103,7 @@ impl Client {
             .collect();
         let api: FederationApi = FederationApi::new(endpoint.clone(), peer_node_ids);
 
-        let task_group = TaskGroup::new();
+        let tg = TaskGroup::new();
 
         let mint_context =
             crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
@@ -113,7 +113,7 @@ impl Client {
                 config.mint.clone(),
                 mint_context,
                 client_secret.mint_secret(),
-                &task_group,
+                &tg,
             )
             .await?,
         );
@@ -126,7 +126,7 @@ impl Client {
                 wallet_context,
                 mint.clone(),
                 client_secret.wallet_secret(),
-                &task_group,
+                &tg,
             )
             .await?,
         );
@@ -142,7 +142,7 @@ impl Client {
                         ln_context,
                         mint.clone(),
                         client_secret.ln_secret(),
-                        &task_group,
+                        &tg,
                     )
                     .await?,
                 ))
@@ -157,7 +157,7 @@ impl Client {
                         gw_context,
                         mint.clone(),
                         client_secret.gw_secret(),
-                        &task_group,
+                        &tg,
                     )
                     .await?,
                 ))
@@ -172,7 +172,7 @@ impl Client {
             wallet,
             ln,
             api,
-            task_group,
+            tg,
         }))
     }
 
@@ -180,7 +180,7 @@ impl Client {
     /// blocks until every state machine driver and background task has
     /// observed cancellation and exited cleanly.
     pub async fn shutdown(&self) {
-        let _ = self.task_group.clone().shutdown_join_all(None).await;
+        self.tg.shutdown().await;
     }
 
     pub fn api(&self) -> &FederationApi {
@@ -343,6 +343,6 @@ impl Client {
 /// complete should `client.shutdown().await` first.
 impl Drop for Client {
     fn drop(&mut self) {
-        self.task_group.shutdown();
+        self.tg.cancel();
     }
 }

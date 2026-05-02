@@ -22,7 +22,6 @@ use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use picomint_client::gw::events::{ReceiveRefundEvent, ReceiveSuccessEvent};
 use picomint_core::core::OperationId;
 use picomint_core::ln::contracts::PaymentImage;
-use picomint_core::task::TaskGroup;
 use picomint_eventlog::EventLogEntry;
 use picomint_redb::WriteTxRef;
 
@@ -31,11 +30,7 @@ use crate::db::{EVENT_CURSOR, INCOMING_CONTRACT, OUTGOING_CONTRACT};
 
 const CHUNK_SIZE: u64 = 1_000;
 
-pub fn spawn_trailer(task_group: &TaskGroup, state: AppState) {
-    task_group.spawn_cancellable("gw-trailer", run(state));
-}
-
-async fn run(state: AppState) {
+pub async fn run(state: AppState) {
     let mut cursor = state
         .gateway_db
         .begin_read()

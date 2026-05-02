@@ -19,7 +19,6 @@ use picomint_bft::Message as BftMessage;
 use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
 use picomint_core::module::PICOMINT_ALPN;
 use picomint_core::session_outcome::SignedSessionOutcome;
-use picomint_core::task::TaskGroup;
 use picomint_core::transaction::ConsensusItem;
 use picomint_core::{PeerId, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
@@ -247,7 +246,6 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
     pub fn new(
         identity: PeerId,
         connector: P2PConnector,
-        task_group: &TaskGroup,
         status_senders: P2PStatusSenders,
         foreign_conn_tx: Sender<Connection>,
     ) -> Self {
@@ -268,14 +266,13 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
                     .get(&peer_id)
                     .expect("No p2p status sender for peer")
                     .clone(),
-                task_group,
             );
 
             connection_senders.insert(peer_id, connection_sender);
             connections.insert(peer_id, connection);
         }
 
-        task_group.spawn_cancellable("handle-incoming-p2p-connections", async move {
+        tokio::spawn(async move {
             info!("Starting listening task for p2p connections");
 
             loop {
@@ -296,9 +293,7 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
                         // api-layer consumer isn't running yet during DKG and
                         // a pre-bootstrap client has no business connecting.
                         if foreign_conn_tx.try_send(connection).is_err() {
-                            debug!(
-                                "Dropping foreign connection: api channel full or closed"
-                            );
+                            debug!("Dropping foreign connection: api channel full or closed");
                         }
                     }
                     Err(err) => {
@@ -367,7 +362,6 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
         connector: P2PConnector,
         incoming_connections: Receiver<P2PConnection>,
         status_sender: watch::Sender<Option<P2PConnectionStatus>>,
-        task_group: &TaskGroup,
     ) -> Self {
         // Per-peer message queues. Sized for the BFT engine's anti-entropy
         // bursts (push + reactive pull at unit-creation cadence) plus
@@ -377,8 +371,7 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
         let (outgoing_sender, outgoing_receiver) = bounded(1000);
         let (incoming_sender, incoming_receiver) = bounded(1000);
 
-        task_group.spawn_cancellable(
-            format!("io-state-machine-{peer_id}"),
+        tokio::spawn(
             async move {
                 info!("Starting peer connection state machine");
 
