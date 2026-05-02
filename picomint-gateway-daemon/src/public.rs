@@ -11,7 +11,6 @@ use picomint_core::ln::routes::{
 };
 use picomint_core::task::TaskHandle;
 use picomint_lnurl::LnurlResponse;
-use picomint_logging::LOG_GATEWAY;
 use reqwest::StatusCode;
 use serde_json::json;
 use tokio::net::TcpListener;
@@ -79,7 +78,7 @@ fn router() -> Router<AppState> {
         .route("/verify/{payment_hash}", get(verify_bolt11_preimage_get))
 }
 
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn gateway_info(
     State(state): State<AppState>,
     Json(federation_id): Json<FederationId>,
@@ -88,7 +87,7 @@ async fn gateway_info(
     Ok(Json(json!(gateway_info)))
 }
 
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn pay_bolt11_invoice(
     State(state): State<AppState>,
     Json(payload): Json<SendPaymentPayload>,
@@ -97,7 +96,7 @@ async fn pay_bolt11_invoice(
     Ok(Json(json!(payment_result)))
 }
 
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn create_bolt11_invoice(
     State(state): State<AppState>,
     Json(payload): Json<CreateBolt11InvoicePayload>,

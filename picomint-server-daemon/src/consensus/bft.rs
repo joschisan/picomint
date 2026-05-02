@@ -15,7 +15,6 @@ use picomint_core::secp256k1::schnorr;
 use picomint_core::session_outcome::SignedSessionOutcome;
 use picomint_core::transaction::ConsensusItem;
 use picomint_encoding::Encodable;
-use picomint_logging::LOG_CONSENSUS;
 use picomint_redb::Database;
 use tracing::{error, warn};
 
@@ -97,7 +96,6 @@ impl INetwork<BftMessage<ConsensusItem>> for Network {
                         .ok();
                 }
                 message => error!(
-                    target: LOG_CONSENSUS,
                     %peer_id,
                     ?message,
                     "Received unexpected p2p message variant"
@@ -152,11 +150,7 @@ impl BftDataProvider<ConsensusItem> for DataProvider {
                 // Larger than an entire unit's worth of payload —
                 // dropping is the only option; it would never fit no
                 // matter how many calls we deferred it across.
-                warn!(
-                    target: LOG_CONSENSUS,
-                    ?item,
-                    "Consensus item exceeds BFT_UNIT_BYTE_LIMIT; dropped"
-                );
+                warn!(?item, "Consensus item exceeds BFT_UNIT_BYTE_LIMIT; dropped");
             }
         }
 

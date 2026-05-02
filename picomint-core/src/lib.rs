@@ -5,16 +5,6 @@
 //!
 //! Things that are server-side only typically live in `picomint-server`, and
 //! client-side only in `picomint-client`.
-//!
-//! ### Wasm support
-//!
-//! All code in `picomint-core` needs to compile on Wasm, and `picomint-core`
-//! includes helpers and wrappers around non-wasm-safe utitlies.
-//!
-//! In particular:
-//!
-//! * [`picomint_core::task`] for task spawning and control
-//! * [`picomint_core::time`] for time-related operations
 
 extern crate self as picomint_core;
 
@@ -53,9 +43,9 @@ mod peer;
 pub mod secret;
 
 pub mod session_outcome;
-/// Task handling, including wasm safe logic
+/// Task handling and graceful shutdown.
 pub mod task;
-/// Time handling, wasm safe functionality
+/// Time helpers.
 pub mod time;
 /// Wire-level Transaction and ConsensusItem types.
 pub mod transaction;

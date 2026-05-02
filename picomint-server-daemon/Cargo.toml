@@ -39,7 +39,6 @@ picomint-base32 = { workspace = true }
 picomint-bitcoin-rpc = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
-picomint-logging = { workspace = true }
 picomint-redb = { workspace = true }
 picomint-server-cli-core = { workspace = true }
 qrcode = { workspace = true }
@@ -53,6 +52,7 @@ tokio = { workspace = true }
 tokio-rustls = { workspace = true }
 tpe = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 url = { workspace = true }
 
 [dev-dependencies]

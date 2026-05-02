@@ -4,7 +4,6 @@ use anyhow::Context;
 use bitcoin::{BlockHash, Transaction};
 
 use crate::Feerate;
-use picomint_logging::{LOG_BITCOIND_ESPLORA, LOG_SERVER};
 use tracing::info;
 
 #[derive(Debug)]
@@ -16,7 +15,6 @@ pub struct EsploraClient {
 impl EsploraClient {
     pub fn new(url: &str) -> anyhow::Result<Self> {
         info!(
-            target: LOG_SERVER,
             %url,
             "Initializing bitcoin esplora backend"
         );
@@ -67,7 +65,7 @@ impl EsploraClient {
 
     pub async fn submit_transaction(&self, transaction: Transaction) {
         let _ = self.client.broadcast(&transaction).await.map_err(|err| {
-            info!(target: LOG_BITCOIND_ESPLORA, err = %err, "Error broadcasting transaction");
+            info!(err = %err, "Error broadcasting transaction");
         });
     }
 

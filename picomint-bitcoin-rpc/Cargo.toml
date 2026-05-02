@@ -18,7 +18,6 @@ bitcoin = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 esplora-client = { workspace = true }
 picomint-core = { workspace = true }
-picomint-logging = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 

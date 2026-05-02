@@ -19,7 +19,6 @@ use picomint_core::methods::{
 use picomint_core::module::{ApiError, Method, PICOMINT_ALPN};
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_logging::LOG_CLIENT_NET_API;
 use thiserror::Error;
 use tokio::sync::watch;
 use tokio::time::sleep;
@@ -85,10 +84,10 @@ impl ServerError {
     pub fn report_if_unusual(&self, peer_id: PeerId, context: &str) {
         let unusual = self.is_unusual();
 
-        trace!(target: LOG_CLIENT_NET_API, error = %self, %context, "ServerError");
+        trace!(error = %self, %context, "ServerError");
 
         if unusual {
-            warn!(target: LOG_CLIENT_NET_API, error = %self, %context, %peer_id, "Unusual ServerError");
+            warn!(error = %self, %context, %peer_id, "Unusual ServerError");
         }
     }
 }
@@ -163,12 +162,11 @@ impl FederationApi {
     }
 
     #[instrument(
-        target = LOG_CLIENT_NET_API,
         skip_all,
         fields(peer_id = %peer_id, method = ?method),
     )]
     pub async fn request_raw(&self, peer_id: PeerId, method: Method) -> ServerResult<Vec<u8>> {
-        trace!(target: LOG_CLIENT_NET_API, %peer_id, ?method, "Api request");
+        trace!(%peer_id, ?method, "Api request");
 
         let mut rx = self
             .states
@@ -189,7 +187,7 @@ impl FederationApi {
 
         let res = request_over_connection(&conn, method.clone()).await;
 
-        trace!(target: LOG_CLIENT_NET_API, ?method, res_ok = res.is_ok(), "Api response");
+        trace!(?method, res_ok = res.is_ok(), "Api response");
 
         res
     }
@@ -223,7 +221,7 @@ impl FederationApi {
 
     /// Make an aggregate request to federation, using `strategy` to logically
     /// merge the responses.
-    #[instrument(target = LOG_CLIENT_NET_API, skip_all, fields(method = ?method))]
+    #[instrument(skip_all, fields(method = ?method))]
     pub async fn request_with_strategy<PR: Decodable, FR: Debug>(
         &self,
         mut strategy: impl QueryStrategy<PR, FR> + Send,
@@ -233,8 +231,6 @@ impl FederationApi {
         // completed results from it and we don't do any `await`s when
         // processing them, it should be totally OK.
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
-        #[cfg(target_family = "wasm")]
-        let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _>>>>::new();
 
         for peer in self.all_peers() {
             futures.push(Box::pin({
@@ -289,15 +285,13 @@ impl FederationApi {
         }
     }
 
-    #[instrument(target = LOG_CLIENT_NET_API, level = "debug", skip(self, strategy))]
+    #[instrument(level = "debug", skip(self, strategy))]
     pub async fn request_with_strategy_retry<PR: Decodable + Send, FR: Debug>(
         &self,
         mut strategy: impl QueryStrategy<PR, FR> + Send,
         method: Method,
     ) -> FR {
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
-        #[cfg(target_family = "wasm")]
-        let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _>>>>::new();
 
         for peer in self.all_peers() {
             futures.push(Box::pin({
@@ -337,7 +331,7 @@ impl FederationApi {
                                         .await
                                         .inspect_err(|err| {
                                             if err.is_unusual() {
-                                                debug!(target: LOG_CLIENT_NET_API, err = %err, "Unusual peer error");
+                                                debug!(err = %err, "Unusual peer error");
                                             }
                                         })
                                         .map_err(|e| anyhow!(e.to_string()))
@@ -353,7 +347,7 @@ impl FederationApi {
                 }
                 QueryStep::Success(response) => return response,
                 QueryStep::Failure(e) => {
-                    warn!(target: LOG_CLIENT_NET_API, "Query strategy returned non-retryable failure for peer {peer}: {e}");
+                    warn!("Query strategy returned non-retryable failure for peer {peer}: {e}");
                 }
                 QueryStep::Continue => {}
             }

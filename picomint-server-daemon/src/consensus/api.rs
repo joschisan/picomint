@@ -13,7 +13,6 @@ use crate::consensus::rpc;
 use crate::{handler, handler_async};
 use picomint_core::PeerId;
 use picomint_core::task::TaskGroup;
-use picomint_logging::LOG_NET_API;
 use picomint_redb::Database;
 use tokio::sync::watch::{Receiver, Sender};
 use tracing::warn;
@@ -74,7 +73,7 @@ impl ConsensusApi {
             .await
             .is_err()
         {
-            warn!(target: LOG_NET_API, "Unable to submit the tx into consensus");
+            warn!("Unable to submit the tx into consensus");
         }
 
         loop {
@@ -102,7 +101,7 @@ impl ConsensusApi {
                         .await
                         .is_err()
                     {
-                        warn!(target: LOG_NET_API, "Unable to submit the tx into consensus");
+                        warn!("Unable to submit the tx into consensus");
                     }
 
                     notified_session = Box::pin(notify_session.notified());

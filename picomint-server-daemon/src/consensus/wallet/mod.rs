@@ -24,7 +24,6 @@ use picomint_core::task::TaskGroup;
 use picomint_core::wallet as common;
 use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_logging::LOG_MODULE_WALLET;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use tokio::time::sleep;
 
@@ -554,7 +553,6 @@ impl Wallet {
 
         if new_consensus_block_count != old_consensus_block_count {
             info!(
-                target: LOG_MODULE_WALLET,
                 %peer,
                 block_count_vote,
                 old_consensus_block_count,
@@ -682,7 +680,7 @@ impl Wallet {
                 break;
             }
 
-            info!(target: LOG_MODULE_WALLET, "Waiting for local bitcoin backend to sync to block count {block_count}");
+            info!("Waiting for local bitcoin backend to sync to block count {block_count}");
 
             sleep(common::sleep_duration(self.network)).await;
         }

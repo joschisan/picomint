@@ -18,7 +18,6 @@ use picomint_core::invite::InviteCode;
 use picomint_core::task::TaskGroup;
 use picomint_core::util::BoxStream;
 use picomint_eventlog::{EventLogEntry, EventLogId};
-use picomint_logging::LOG_CLIENT;
 use picomint_redb::Database;
 use tracing::debug;
 
@@ -91,7 +90,6 @@ impl Client {
         ln_choice: LnChoice,
     ) -> anyhow::Result<Arc<Self>> {
         debug!(
-            target: LOG_CLIENT,
             version = %env!("CARGO_PKG_VERSION"),
             "Building picomint client",
         );

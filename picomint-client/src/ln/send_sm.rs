@@ -11,7 +11,6 @@ use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::wire;
 use picomint_core::{OutPoint, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_logging::LOG_CLIENT_MODULE_LN;
 use picomint_redb::WriteTxRef;
 use secp256k1::Keypair;
 use secp256k1::schnorr::Signature;
@@ -122,7 +121,7 @@ impl StateMachine for SendStateMachine {
     }
 }
 
-#[instrument(target = LOG_CLIENT_MODULE_LN, skip(refund_keypair))]
+#[instrument(skip(refund_keypair))]
 async fn gateway_send_payment_sm(
     gateway_api: String,
     federation_id: FederationId,
@@ -195,7 +194,7 @@ fn transition_gateway_send_payment_sm(
     }
 }
 
-#[instrument(target = LOG_CLIENT_MODULE_LN, skip(ctx))]
+#[instrument(skip(ctx))]
 async fn await_preimage_sm(
     outpoint: OutPoint,
     contract: OutgoingContract,
@@ -211,7 +210,7 @@ async fn await_preimage_sm(
         return Some(preimage);
     }
 
-    error!(target: LOG_CLIENT_MODULE_LN, "Federation returned invalid preimage {:?}", preimage);
+    error!("Federation returned invalid preimage {:?}", preimage);
 
     pending().await
 }

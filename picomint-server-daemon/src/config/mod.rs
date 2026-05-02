@@ -13,7 +13,6 @@ use picomint_core::mint::config::{MintConfig, MintConfigPrivate};
 use picomint_core::module::ApiAuth;
 use picomint_core::wallet::config::{WalletConfig, WalletConfigPrivate};
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
-use picomint_logging::LOG_NET_PEER_DKG;
 use rand::rngs::OsRng;
 use secp256k1::{Secp256k1, SecretKey, XOnlyPublicKey};
 use serde::{Deserialize, Serialize};
@@ -225,10 +224,7 @@ impl ServerConfig {
         connections: ReconnectP2PConnections<P2PMessage>,
         p2p_status_receivers: P2PStatusReceivers,
     ) -> anyhow::Result<Self> {
-        info!(
-            target: LOG_NET_PEER_DKG,
-            "Waiting for all p2p connections to open..."
-        );
+        info!("Waiting for all p2p connections to open...");
 
         loop {
             let disconnected_peers: BTreeSet<PeerId> = p2p_status_receivers
@@ -241,7 +237,6 @@ impl ServerConfig {
             }
 
             info!(
-                target: LOG_NET_PEER_DKG,
                 pending = ?disconnected_peers,
                 "Waiting for all p2p connections to open..."
             );
@@ -251,10 +246,7 @@ impl ServerConfig {
 
         let checksum = params.peers.consensus_hash_sha256();
 
-        info!(
-            target: LOG_NET_PEER_DKG,
-            "Comparing connection codes checksum {checksum}..."
-        );
+        info!("Comparing connection codes checksum {checksum}...");
 
         connections.send(Recipient::Everyone, P2PMessage::Checksum(checksum));
 
@@ -270,7 +262,6 @@ impl ServerConfig {
 
             if peer_message != P2PMessage::Checksum(checksum) {
                 error!(
-                    target: LOG_NET_PEER_DKG,
                     expected = ?P2PMessage::Checksum(checksum),
                     received = ?peer_message,
                     "Peer {peer} has sent invalid connection code checksum message"
@@ -279,16 +270,10 @@ impl ServerConfig {
                 bail!("Peer {peer} has sent invalid connection code checksum message");
             }
 
-            info!(
-                target: LOG_NET_PEER_DKG,
-                "Peer {peer} has sent valid connection code checksum message"
-            );
+            info!("Peer {peer} has sent valid connection code checksum message");
         }
 
-        info!(
-            target: LOG_NET_PEER_DKG,
-            "Running config generation..."
-        );
+        info!("Running config generation...");
 
         let handle = DkgHandle::new(params.peers.to_num_peers(), params.identity, &connections);
 
@@ -297,24 +282,15 @@ impl ServerConfig {
 
         let broadcast_public_keys = handle.exchange_encodable(broadcast_pk).await?;
 
-        info!(
-            target: LOG_NET_PEER_DKG,
-            "Running config generation for module of kind mint..."
-        );
+        info!("Running config generation for module of kind mint...");
 
         let mint = crate::consensus::mint::distributed_gen(&handle).await?;
 
-        info!(
-            target: LOG_NET_PEER_DKG,
-            "Running config generation for module of kind ln..."
-        );
+        info!("Running config generation for module of kind ln...");
 
         let ln = crate::consensus::ln::distributed_gen(&handle).await?;
 
-        info!(
-            target: LOG_NET_PEER_DKG,
-            "Running config generation for module of kind wallet..."
-        );
+        info!("Running config generation for module of kind wallet...");
 
         let wallet = crate::consensus::wallet::distributed_gen(&handle).await?;
 
@@ -330,10 +306,7 @@ impl ServerConfig {
 
         let checksum = cfg.consensus.consensus_hash_sha256();
 
-        info!(
-            target: LOG_NET_PEER_DKG,
-            "Comparing consensus config checksum {checksum}..."
-        );
+        info!("Comparing consensus config checksum {checksum}...");
 
         connections.send(Recipient::Everyone, P2PMessage::Checksum(checksum));
 
@@ -349,7 +322,6 @@ impl ServerConfig {
 
             if peer_message != P2PMessage::Checksum(checksum) {
                 warn!(
-                    target: LOG_NET_PEER_DKG,
                     expected = ?P2PMessage::Checksum(checksum),
                     received = ?peer_message,
                     config = ?cfg.consensus,
@@ -359,16 +331,10 @@ impl ServerConfig {
                 bail!("Peer {peer} has sent invalid consensus config checksum message");
             }
 
-            info!(
-                target: LOG_NET_PEER_DKG,
-                "Peer {peer} has sent valid consensus config checksum message"
-            );
+            info!("Peer {peer} has sent valid consensus config checksum message");
         }
 
-        info!(
-            target: LOG_NET_PEER_DKG,
-            "Config generation has completed successfully!"
-        );
+        info!("Config generation has completed successfully!");
 
         Ok(cfg)
     }

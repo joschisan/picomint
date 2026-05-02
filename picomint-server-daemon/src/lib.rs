@@ -22,7 +22,6 @@ use anyhow::Context;
 use config::ServerConfig;
 use picomint_bitcoin_rpc::BitcoinBackend;
 use picomint_core::task::TaskGroup;
-use picomint_logging::LOG_CONSENSUS;
 use picomint_redb::Database;
 use tokio::net::TcpListener;
 use tracing::info;
@@ -116,7 +115,7 @@ pub async fn run_server(
         }
     };
 
-    info!(target: LOG_CONSENSUS, "Starting consensus...");
+    info!("Starting consensus...");
 
     Box::pin(consensus::run(
         connections,
@@ -131,7 +130,7 @@ pub async fn run_server(
     ))
     .await?;
 
-    info!(target: LOG_CONSENSUS, "Shutting down tasks...");
+    info!("Shutting down tasks...");
 
     task_group.shutdown();
 
@@ -149,7 +148,7 @@ pub async fn run_config_gen(
     ReconnectP2PConnections<P2PMessage>,
     P2PStatusReceivers,
 )> {
-    info!(target: LOG_CONSENSUS, "Starting config gen");
+    info!("Starting config gen");
 
     let (setup_sender, mut setup_receiver) = tokio::sync::mpsc::channel(1);
 
@@ -168,9 +167,9 @@ pub async fn run_config_gen(
                 .await
                 .expect("Failed to serve setup UI");
         });
-        info!(target: LOG_CONSENSUS, "Setup UI running at http://{ui_addr} 🚀");
+        info!("Setup UI running at http://{ui_addr} 🚀");
     } else {
-        info!(target: LOG_CONSENSUS, "UI disabled (UI_ADDR unset); driving setup via CLI only");
+        info!("UI disabled (UI_ADDR unset); driving setup via CLI only");
     }
 
     let cli_task_group = TaskGroup::new();

@@ -20,7 +20,6 @@ use picomint_core::ln::{Bolt11InvoiceDescription, MINIMUM_INCOMING_CONTRACT_AMOU
 use picomint_core::time::duration_since_epoch;
 use picomint_encoding::Encodable;
 use picomint_lnurl::{InvoiceResponse, LnurlResponse, PayResponse, pay_request_tag};
-use picomint_logging::TracingSetup;
 use reqwest::Method;
 use serde::Deserialize;
 use serde::Serialize;
@@ -30,6 +29,10 @@ use tower_http::cors;
 use tower_http::cors::CorsLayer;
 use tpe::AggregatePublicKey;
 use tracing::info;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 const MAX_SENDABLE_MSAT: u64 = 100_000_000_000;
 const MIN_SENDABLE_MSAT: u64 = 100_000;
@@ -44,7 +47,13 @@ struct CliOpts {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    TracingSetup::default().init()?;
+    let filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy();
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .try_init()?;
 
     let cli_opts = CliOpts::parse();
 

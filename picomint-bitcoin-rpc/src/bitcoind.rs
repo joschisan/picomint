@@ -6,7 +6,6 @@ use bitcoincore_rpc::{Auth, Client, RpcApi};
 use tokio::task::block_in_place;
 
 use crate::Feerate;
-use picomint_logging::{LOG_BITCOIND_CORE, LOG_SERVER};
 use tracing::info;
 
 #[derive(Debug)]
@@ -20,7 +19,6 @@ impl BitcoindClient {
         let auth = Auth::UserPass(username, password);
 
         info!(
-            target: LOG_SERVER,
             %url,
             "Initializing bitcoin bitcoind backend"
         );
@@ -70,7 +68,7 @@ impl BitcoindClient {
             // https://github.com/bitcoin/bitcoin/blob/daa56f7f665183bcce3df146f143be37f33c123e/src/rpc/protocol.h#L48
             Err(JsonRpc(Rpc(e))) if e.code == -27 => (),
             Err(e) => {
-                info!(target: LOG_BITCOIND_CORE, e = %e, "Error broadcasting transaction")
+                info!(e = %e, "Error broadcasting transaction")
             }
             Ok(_) => (),
         }

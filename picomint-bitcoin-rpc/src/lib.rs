@@ -7,7 +7,6 @@ use std::time::Duration;
 use anyhow::{Result, ensure};
 use picomint_core::bitcoin::{Block, BlockHash, Network, Transaction};
 use picomint_core::task::TaskGroup;
-use picomint_logging::LOG_SERVER;
 use tokio::sync::watch;
 use tracing::{debug, warn};
 
@@ -113,7 +112,6 @@ impl BitcoinRpcMonitor {
 
         let rpc_clone = rpc.clone();
         debug!(
-            target: LOG_SERVER,
             interval_ms  = %update_interval.as_millis(),
             "Starting bitcoin rpc monitor"
         );
@@ -128,7 +126,6 @@ impl BitcoinRpcMonitor {
                     }
                     Err(err) => {
                         warn!(
-                            target: LOG_SERVER,
                             err = %format_args!("{err:#}"),
                             "Bitcoin status update failed"
                         );

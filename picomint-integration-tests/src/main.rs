@@ -8,9 +8,19 @@ mod wallet;
 use std::sync::Arc;
 
 use tracing::info;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 fn main() -> anyhow::Result<()> {
-    picomint_logging::TracingSetup::default().init()?;
+    let filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy();
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .try_init()?;
 
     let runtime = Arc::new(tokio::runtime::Runtime::new()?);
 
