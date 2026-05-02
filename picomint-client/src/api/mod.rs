@@ -231,8 +231,6 @@ impl FederationApi {
         // completed results from it and we don't do any `await`s when
         // processing them, it should be totally OK.
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
-        #[cfg(target_family = "wasm")]
-        let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _>>>>::new();
 
         for peer in self.all_peers() {
             futures.push(Box::pin({
@@ -294,8 +292,6 @@ impl FederationApi {
         method: Method,
     ) -> FR {
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
-        #[cfg(target_family = "wasm")]
-        let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _>>>>::new();
 
         for peer in self.all_peers() {
             futures.push(Box::pin({
