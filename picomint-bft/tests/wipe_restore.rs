@@ -84,13 +84,20 @@ async fn engine_skips_pre_filled_own_slot_after_wipe_restore() {
     let mut graph = Graph::<u64>::new(n, session, backup, tx);
 
     let verifier = keychains.get(&own_id).expect("built").clone();
-    let sigs: BTreeMap<_, _> = n
+    let creator_sig = keychains.get(&own_id).expect("built").sign(&unit);
+    // Threshold sigs total = creator + (threshold - 1) cosigs.
+    let cosigs: BTreeMap<_, _> = n
         .peer_ids()
-        .take(n.threshold())
+        .filter(|p| *p != own_id)
+        .take(n.threshold() - 1)
         .map(|signer| (signer, keychains.get(&signer).expect("built").sign(&unit)))
         .collect();
 
-    assert!(graph.insert_unit(unit.clone(), sigs, &verifier).is_some());
+    assert!(
+        graph
+            .insert_unit(unit.clone(), creator_sig, cosigs, &verifier)
+            .is_some()
+    );
     assert!(graph.is_confirmed(0, own_id));
 
     let own_keychain = keychains.remove(&own_id).expect("built");

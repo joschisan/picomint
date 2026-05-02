@@ -35,7 +35,7 @@ const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
 /// - **Anti-entropy** every `ANTI_ENTROPY_INTERVAL`: push our own
 ///   highest entry to everyone. Other peers' columns flow only on
 ///   explicit `Request` (issued reactively from `handle_unit` and
-///   `handle_sig`).
+///   `handle_cosig`).
 /// - **Unit creation** is rate-limited by `unit_delay`, a closure
 ///   `Round → Duration` invoked with the round we're *about* to attempt
 ///   to create. The first deadline fires immediately at startup, so
@@ -108,13 +108,13 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
 
     fn handle_message(&mut self, sender: PeerId, msg: Message<D>) {
         match msg {
-            Message::Unit { unit, creator_sig } => self.handle_unit(sender, unit, creator_sig),
-            Message::Sig {
+            Message::Unit { unit, sig } => self.handle_unit(sender, unit, sig),
+            Message::Cosig {
                 round,
                 creator,
                 signer,
                 sig,
-            } => self.handle_sig(sender, round, creator, signer, sig),
+            } => self.handle_cosig(sender, round, creator, signer, sig),
             Message::Request { round, creator } => {
                 self.handle_request(sender, round, creator);
             }
@@ -137,33 +137,25 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
     }
 
     /// Respond to a `Request` by unicasting back the body (with creator
-    /// sig) and one `Sig` message per non-creator cosig we currently
-    /// hold. The requester reassembles body + cosigs in their inbox.
+    /// sig) and one `Cosig` message per cosig we currently hold. The
+    /// requester reassembles body + cosigs in their inbox.
     fn handle_request(&self, requester: PeerId, round: Round, creator: PeerId) {
         let Some(entry) = self.graph.entry(round, creator) else {
             return;
         };
 
-        let creator_sig = *entry
-            .sigs()
-            .get(&creator)
-            .expect("entry always carries the creator's sig");
-
         self.network.send(
             Recipient::Peer(requester),
             Message::Unit {
                 unit: entry.unit().clone(),
-                creator_sig,
+                sig: *entry.sig(),
             },
         );
 
-        for (signer, sig) in entry.sigs() {
-            if *signer == creator {
-                continue;
-            }
+        for (signer, sig) in entry.cosigs() {
             self.network.send(
                 Recipient::Peer(requester),
-                Message::Sig {
+                Message::Cosig {
                     round,
                     creator,
                     signer: *signer,
@@ -174,60 +166,58 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
     }
 
     /// Apply one inbound `Unit` message: verify the creator's sig,
-    /// add the body to the graph (lax), splice in our own cosig if
-    /// this is the first time we sign this slot, demand-pull any
-    /// parents we don't yet hold *fed* from the immediate sender, and
-    /// — only when our own cosig was newly added — broadcast a `Sig`
-    /// so every other peer learns of our cosignature.
+    /// add the body to the graph (lax), record our own cosig if this
+    /// is the first time we sign this slot, demand-pull any parents
+    /// we don't yet hold *fed* from the immediate sender, and — only
+    /// when our own cosig was newly added — broadcast a `Cosig` so
+    /// every other peer learns of our cosignature.
     ///
-    /// `Unit` carries only the creator's sig now; cosigs flow on the
-    /// lighter `Sig` channel (or piggyback on `Request` responses).
+    /// `Unit` carries only the creator's sig; cosigs flow on the
+    /// lighter `Cosig` channel (or piggyback on `Request` responses).
     ///
     /// Parent pulls run on every receive (fresh or duplicate). Re-issuing
     /// on duplicates makes the mechanism self-healing against dropped
     /// `Request` messages.
-    fn handle_unit(&mut self, sender: PeerId, unit: Unit<D>, creator_sig: schnorr::Signature) {
+    fn handle_unit(&mut self, sender: PeerId, unit: Unit<D>, sig: schnorr::Signature) {
         // Verify the body is signed by its claimed creator. Without
         // this, a Byzantine peer could fabricate a body at someone
         // else's slot, blocking the legitimate creator from inserting.
-        if !self.keychain.verify(&unit, &creator_sig, unit.creator) {
+        if !self.keychain.verify(&unit, &sig, unit.creator) {
             return;
         }
 
-        // First-time-cosign detection: have we already signed this slot
-        // locally? Skip if we're the creator (creator_sig is already
-        // our sig — no separate cosig is meaningful).
-        let already_signed_locally = self
-            .graph
-            .entry(unit.round, unit.creator)
-            .is_some_and(|e| e.sigs().contains_key(&self.own_id));
-
-        let mut sigs = BTreeMap::from([(unit.creator, creator_sig)]);
-
-        let new_own_sig = if !already_signed_locally && unit.creator != self.own_id {
-            let our_sig = self.keychain.sign(&unit);
-            sigs.insert(self.own_id, our_sig);
-            Some(our_sig)
-        } else {
-            None
-        };
-
-        // Snapshot before consuming `unit` for the parent-pull and
-        // (potentially) the Sig fan-out below.
         let unit_round = unit.round;
         let unit_creator = unit.creator;
         let parents: Vec<PeerId> = unit.parents.iter().copied().collect();
 
-        let _ = self.graph.insert_unit(unit, sigs, &self.keychain);
+        // First-time-cosign detection. Skip if we're the creator (our
+        // sig is already in the entry's `sig` field — no separate cosig
+        // is meaningful).
+        let already_signed_locally = self
+            .graph
+            .entry(unit_round, unit_creator)
+            .is_some_and(|e| e.cosigs().contains_key(&self.own_id));
 
-        if let Some(sig) = new_own_sig {
+        let new_own_cosig = if !already_signed_locally && unit_creator != self.own_id {
+            Some(self.keychain.sign(&unit))
+        } else {
+            None
+        };
+
+        let _ = self
+            .graph
+            .insert_unit(unit, sig, BTreeMap::new(), &self.keychain);
+
+        if let Some(cosig) = new_own_cosig {
+            self.graph
+                .record_cosig(unit_round, unit_creator, self.own_id, cosig, &self.keychain);
             self.network.send(
                 Recipient::Everyone,
-                Message::Sig {
+                Message::Cosig {
                     round: unit_round,
                     creator: unit_creator,
                     signer: self.own_id,
-                    sig,
+                    sig: cosig,
                 },
             );
         }
@@ -254,14 +244,14 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         }
     }
 
-    /// Apply one inbound `Sig` message. If we already hold the slot's
-    /// body, verify and union the sig directly. If we don't, treat the
-    /// `Sig` as a forward reference: drop it on the floor and unicast
-    /// a `Request` to the signer, who definitely has the body — the
-    /// response will arrive as a `Unit` carrying their full sig set
-    /// (which includes `sig`), so we recover both body and sig in one
-    /// roundtrip.
-    fn handle_sig(
+    /// Apply one inbound `Cosig` message. If we already hold the slot's
+    /// body, verify and union the cosig directly. If we don't, treat
+    /// the `Cosig` as a forward reference: drop the cosig and unicast
+    /// a `Request` to the signer (who must hold the body since they
+    /// signed it). The response arrives as a `Unit` plus a `Cosig` per
+    /// non-creator cosig the responder holds, so we recover both body
+    /// and the dropped cosig in one round-trip.
+    fn handle_cosig(
         &mut self,
         sender: PeerId,
         round: Round,
@@ -305,7 +295,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             data: self.data_provider.get_data().await,
         };
 
-        let sigs = BTreeMap::from([(self.own_id, self.keychain.sign(&unit))]);
+        let sig = self.keychain.sign(&unit);
 
         // Crash barrier: persist the unit + our self-sig before
         // broadcasting. On restart we'd otherwise be free to build a
@@ -314,7 +304,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         // us a forker.
         let entry = self
             .graph
-            .insert_unit(unit, sigs, &self.keychain)
+            .insert_unit(unit, sig, BTreeMap::new(), &self.keychain)
             .unwrap_or_else(|| panic!("newly built round-{round} unit must insert"));
 
         self.send_unit(Recipient::Everyone, &entry);
@@ -322,19 +312,15 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
 
     /// Ship an entry's body (with creator sig only) — used by the
     /// creator's broadcast on creation and the anti-entropy push.
-    /// Cosig fan-out is the `Sig` channel's job, and the request-response
-    /// path emits its own `Unit` + per-cosig `Sig` directly.
+    /// Cosig fan-out is the `Cosig` channel's job, and the
+    /// request-response path emits its own `Unit` + per-cosig `Cosig`
+    /// directly.
     fn send_unit(&self, recipient: Recipient, entry: &Entry<D>) {
-        let creator = entry.unit().creator;
-        let creator_sig = *entry
-            .sigs()
-            .get(&creator)
-            .expect("entry always carries the creator's sig");
         self.network.send(
             recipient,
             Message::Unit {
                 unit: entry.unit().clone(),
-                creator_sig,
+                sig: *entry.sig(),
             },
         );
     }

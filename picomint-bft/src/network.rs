@@ -24,21 +24,22 @@ pub enum Message<D: UnitData> {
         unit: Unit<D>,
         /// The creator's schnorr signature over `unit`'s consensus
         /// encoding. Verified against `unit.creator`'s public key.
-        creator_sig: schnorr::Signature,
+        sig: schnorr::Signature,
     },
     /// Cosign-only fan-out. When a peer first cosigns a unit body it
-    /// has received, it broadcasts a `Sig` so every other peer can
+    /// has received, it broadcasts a `Cosig` so every other peer can
     /// union it into their copy of the slot. The body is *not* carried
-    /// — receivers either already hold it (then `record_sig` against
+    /// — receivers either already hold it (then `record_cosig` against
     /// the local body), or pull it from the signer via `Request`.
-    Sig {
+    Cosig {
         /// Round of the slot being cosigned.
         round: Round,
         /// Creator of the slot being cosigned.
         creator: PeerId,
-        /// The peer whose cosig this is.
+        /// The peer whose cosig this is. Always non-creator: the
+        /// creator's signature lives in `Unit.sig`.
         signer: PeerId,
-        /// Schnorr signature over the unit's consensus encoding.
+        /// Schnorr cosignature over the unit's consensus encoding.
         sig: schnorr::Signature,
     },
     /// Targeted backfill request. If the recipient holds the entry,

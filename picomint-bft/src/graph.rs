@@ -11,19 +11,26 @@ use crate::extender::Extender;
 use crate::keychain::Keychain;
 use crate::unit::{Round, Unit, UnitData};
 
-/// One slot in the DAG: the unit at `(round, creator)` and the
-/// co-signatures collected so far.
+/// One slot in the DAG: the unit at `(round, creator)`, the creator's
+/// signature over its body, and the co-signatures collected so far.
+///
+/// The creator's sig lives in its own field — it's structurally
+/// distinct from cosigs (it's what binds the body to its claimed author
+/// and is part of the on-the-wire `Unit` message), and separating the
+/// two avoids a "is this entry in the map yet" check on every cosig
+/// recording.
 ///
 /// Insert is *lax* on parents — a unit's body and accumulated sigs land
 /// in the graph regardless of whether its ancestors are present yet.
-/// "Confirmed" therefore only means `sigs.len() >= threshold`; whether
-/// the slot's full ancestor closure is also locally ready is tracked
-/// separately on `Graph` and gates promotion into the extender (and
-/// own-unit construction).
+/// "Confirmed" therefore only means `1 + cosigs.len() >= threshold`
+/// (creator's sig plus enough cosigs); whether the slot's full ancestor
+/// closure is also locally ready is tracked separately on `Graph` and
+/// gates promotion into the extender (and own-unit construction).
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct Entry<D: UnitData> {
     unit: Unit<D>,
-    sigs: BTreeMap<PeerId, schnorr::Signature>,
+    sig: schnorr::Signature,
+    cosigs: BTreeMap<PeerId, schnorr::Signature>,
 }
 
 // `redb::Value` for `Entry<D>` over consensus encoding. Lives here
@@ -33,8 +40,12 @@ pub struct Entry<D: UnitData> {
 picomint_redb::consensus_value!([D: UnitData] Entry<D>);
 
 impl<D: UnitData> Entry<D> {
-    fn new(unit: Unit<D>, sigs: BTreeMap<PeerId, schnorr::Signature>) -> Self {
-        Self { unit, sigs }
+    fn new(
+        unit: Unit<D>,
+        sig: schnorr::Signature,
+        cosigs: BTreeMap<PeerId, schnorr::Signature>,
+    ) -> Self {
+        Self { unit, sig, cosigs }
     }
 
     /// The unit at this slot.
@@ -42,18 +53,25 @@ impl<D: UnitData> Entry<D> {
         &self.unit
     }
 
-    /// Co-signatures collected at this slot, keyed by signer.
-    pub fn sigs(&self) -> &BTreeMap<PeerId, schnorr::Signature> {
-        &self.sigs
+    /// The creator's schnorr signature over the unit's consensus
+    /// encoding. Always present — every entry that exists carries it.
+    pub fn sig(&self) -> &schnorr::Signature {
+        &self.sig
     }
 
-    /// Whether this entry has crossed the co-signature threshold.
-    /// Monotonic: once true, stays true. Confirmation here is the
-    /// purely-local "enough sigs" predicate — it does *not* imply the
-    /// slot's ancestors are present and ready. Use [`Graph::is_fed`]
-    /// for the stronger ancestrally-ready predicate.
+    /// Co-signatures collected from non-creator peers, keyed by signer.
+    pub fn cosigs(&self) -> &BTreeMap<PeerId, schnorr::Signature> {
+        &self.cosigs
+    }
+
+    /// Whether this entry has crossed the threshold of total signers
+    /// (creator + cosigners). Monotonic: once true, stays true.
+    /// Confirmation here is the purely-local "enough sigs" predicate —
+    /// it does *not* imply the slot's ancestors are present and ready.
+    /// Use [`Graph::is_fed`] for the stronger ancestrally-ready
+    /// predicate.
     pub fn is_confirmed(&self, threshold: usize) -> bool {
-        self.sigs.len() >= threshold
+        1 + self.cosigs.len() >= threshold
     }
 }
 
@@ -225,15 +243,19 @@ impl<D: UnitData> Graph<D> {
     /// catch up by receiving a head-of-DAG push and then walking back
     /// via demand-pull on missing parents.
     ///
-    /// On both fresh and duplicate paths every carried sig is verified
-    /// individually via `record_sig`; bad sigs are silently discarded.
-    /// Returns `Some(entry)` only on a fresh insert — that's the
-    /// caller's signal to rebroadcast — `None` on duplicates and on
-    /// any of the rejection paths above.
+    /// On the fresh path the caller's `sig` is trusted (engine
+    /// pre-verifies it against `unit.creator`); each entry in `cosigs`
+    /// is re-verified here against the body and silently dropped on
+    /// failure. Duplicate path drops the new body (first-seen wins) but
+    /// merges any carried `cosigs` via `record_cosig`. Returns
+    /// `Some(entry)` only on a fresh insert — that's the caller's
+    /// signal to rebroadcast — `None` on duplicates and on any of the
+    /// rejection paths above.
     pub fn insert_unit(
         &mut self,
         unit: Unit<D>,
-        sigs: BTreeMap<PeerId, schnorr::Signature>,
+        sig: schnorr::Signature,
+        cosigs: BTreeMap<PeerId, schnorr::Signature>,
         keychain: &Keychain,
     ) -> Option<Entry<D>> {
         if unit.session != self.session {
@@ -241,12 +263,9 @@ impl<D: UnitData> Graph<D> {
         }
 
         if self.units.contains_key(&(unit.round, unit.creator)) {
-            for (signer, sig) in &sigs {
-                self.record_sig(unit.round, unit.creator, *signer, *sig, keychain);
+            for (signer, cosig) in cosigs {
+                self.record_cosig(unit.round, unit.creator, signer, cosig, keychain);
             }
-
-            self.try_promote(unit.round, unit.creator);
-
             return None;
         }
 
@@ -261,7 +280,15 @@ impl<D: UnitData> Graph<D> {
 
         self.check_parents(&unit).ok()?;
 
-        let entry = Entry::new(unit.clone(), sigs.clone());
+        // Filter cosigs that don't verify or come from the creator.
+        // The creator's signature lives in the dedicated `sig` field;
+        // a self-cosig from the creator would be redundant.
+        let valid_cosigs: BTreeMap<PeerId, schnorr::Signature> = cosigs
+            .into_iter()
+            .filter(|(signer, c)| *signer != unit.creator && keychain.verify(&unit, c, *signer))
+            .collect();
+
+        let entry = Entry::new(unit.clone(), sig, valid_cosigs);
 
         self.backup.save(&entry);
 
@@ -272,67 +299,59 @@ impl<D: UnitData> Graph<D> {
         Some(entry)
     }
 
-    /// Record a co-signature on the unit at `(round, creator)`. The
-    /// signature is verified against the hash of the unit *we currently
-    /// hold* at that slot — the consistent-broadcast safety check, since
-    /// a forker trying to split co-signers across two distinct units
-    /// will find that each peer's collected sigs only verify against
-    /// their local unit. Stale sigs (verify failure, dupe signer,
-    /// already-confirmed slot) are silently discarded.
+    /// Record a co-signature on the unit at `(round, creator)`.
     ///
-    /// Crossing the threshold here only flips the entry's `is_confirmed`
-    /// predicate; promotion into the extender is the caller's
-    /// responsibility via [`Self::try_promote`], which also enforces
-    /// the ancestor-readiness invariant.
-    fn record_sig(
-        &mut self,
-        round: Round,
-        creator: PeerId,
-        signer: PeerId,
-        signature: schnorr::Signature,
-        keychain: &Keychain,
-    ) {
-        let t = self.threshold();
-
-        let Some(entry) = self.units.get_mut(&(round, creator)) else {
-            return;
-        };
-
-        if entry.sigs.len() >= t {
-            return;
-        }
-
-        if entry.sigs.contains_key(&signer) {
-            return;
-        }
-
-        if !keychain.verify(&entry.unit, &signature, signer) {
-            return;
-        }
-
-        entry.sigs.insert(signer, signature);
-
-        self.backup.save(entry);
-    }
-
-    /// Apply a sig-only message to the slot at `(round, creator)`.
-    /// Returns `true` iff we held the body and the sig was consumed
-    /// (regardless of whether it was new or a no-op duplicate).
-    /// Returns `false` if we don't yet hold the body — the caller is
-    /// expected to demand-pull the body from the signer in that case.
+    /// The signature is verified against the body *we currently hold*
+    /// at that slot — the consistent-broadcast safety check, since a
+    /// forker trying to split co-signers across two distinct bodies
+    /// will find that each peer's collected cosigs only verify against
+    /// their local body. Stale cosigs (verify failure, dupe signer,
+    /// already-confirmed slot, signer == creator) are silently
+    /// discarded.
+    ///
+    /// Returns `true` iff we hold the body locally (regardless of
+    /// whether the cosig was new). Returns `false` if we don't hold
+    /// the body — the caller is expected to demand-pull from the
+    /// signer in that case.
     pub fn record_cosig(
         &mut self,
         round: Round,
         creator: PeerId,
         signer: PeerId,
-        signature: schnorr::Signature,
+        sig: schnorr::Signature,
         keychain: &Keychain,
     ) -> bool {
-        if !self.units.contains_key(&(round, creator)) {
+        let t = self.threshold();
+
+        let Some(entry) = self.units.get_mut(&(round, creator)) else {
             return false;
+        };
+
+        // Creator's sig already lives in `entry.sig`; a "cosig" from
+        // the creator is meaningless. Treat as no-op success — we
+        // *do* hold the body.
+        if signer == creator {
+            return true;
         }
-        self.record_sig(round, creator, signer, signature, keychain);
+
+        if entry.is_confirmed(t) {
+            return true;
+        }
+
+        if entry.cosigs.contains_key(&signer) {
+            return true;
+        }
+
+        if !keychain.verify(&entry.unit, &sig, signer) {
+            return true;
+        }
+
+        entry.cosigs.insert(signer, sig);
+
+        self.backup.save(entry);
+
         self.try_promote(round, creator);
+
         true
     }
 

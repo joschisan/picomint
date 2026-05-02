@@ -71,17 +71,21 @@ fn grow_dag_across_rounds() {
             // (including creator) inserts it into their local graph.
             let creator_sig = keychains[creator_idx].sign(&unit);
             for (verifier_idx, graph) in graphs.iter_mut().enumerate() {
-                let sigs = BTreeMap::from([(creator, creator_sig)]);
                 assert!(
                     graph
-                        .insert_unit(unit.clone(), sigs, &keychains[verifier_idx])
+                        .insert_unit(
+                            unit.clone(),
+                            creator_sig,
+                            BTreeMap::new(),
+                            &keychains[verifier_idx],
+                        )
                         .is_some(),
                     "round {round} creator {creator_idx}: insert failed at verifier {verifier_idx}",
                 );
             }
 
-            // Every other peer co-signs the unit and the sig is
-            // gossiped to everyone via insert_unit's sig-merge path.
+            // Every other peer cosigns the unit and the cosig is
+            // gossiped to everyone via record_cosig.
             for signer_idx in 0..N_PEERS {
                 if signer_idx == creator_idx {
                     continue;
@@ -89,8 +93,8 @@ fn grow_dag_across_rounds() {
                 let signer = PeerId::from(signer_idx as u8);
                 let sig = keychains[signer_idx].sign(&unit);
                 for (verifier_idx, graph) in graphs.iter_mut().enumerate() {
-                    let sigs = BTreeMap::from([(signer, sig)]);
-                    let _ = graph.insert_unit(unit.clone(), sigs, &keychains[verifier_idx]);
+                    let _ =
+                        graph.record_cosig(round, creator, signer, sig, &keychains[verifier_idx]);
                 }
             }
 
