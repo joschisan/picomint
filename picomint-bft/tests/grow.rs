@@ -60,37 +60,40 @@ fn grow_dag_across_rounds() {
                 .expect("parents available");
 
             let unit = Unit {
-                session: SESSION,
                 round,
                 creator,
                 parents,
-                data: Vec::new(),
+                data: Vec::<u64>::new(),
             };
 
             // Creator broadcasts the unit with its own sig; every peer
             // (including creator) inserts it into their local graph.
-            let creator_sig = keychains[creator_idx].sign(&unit);
+            let creator_sig = keychains[creator_idx].sign(SESSION, &unit);
             for (verifier_idx, graph) in graphs.iter_mut().enumerate() {
-                let sigs = BTreeMap::from([(creator, creator_sig)]);
                 assert!(
                     graph
-                        .insert_unit(unit.clone(), sigs, &keychains[verifier_idx])
+                        .insert_unit(
+                            unit.clone(),
+                            creator_sig,
+                            BTreeMap::new(),
+                            &keychains[verifier_idx],
+                        )
                         .is_some(),
                     "round {round} creator {creator_idx}: insert failed at verifier {verifier_idx}",
                 );
             }
 
-            // Every other peer co-signs the unit and the sig is
-            // gossiped to everyone via insert_unit's sig-merge path.
+            // Every other peer cosigns the unit and the cosig is
+            // gossiped to everyone via record_cosig.
             for signer_idx in 0..N_PEERS {
                 if signer_idx == creator_idx {
                     continue;
                 }
                 let signer = PeerId::from(signer_idx as u8);
-                let sig = keychains[signer_idx].sign(&unit);
+                let sig = keychains[signer_idx].sign(SESSION, &unit);
                 for (verifier_idx, graph) in graphs.iter_mut().enumerate() {
-                    let sigs = BTreeMap::from([(signer, sig)]);
-                    let _ = graph.insert_unit(unit.clone(), sigs, &keychains[verifier_idx]);
+                    let _ =
+                        graph.record_cosig(round, creator, signer, sig, &keychains[verifier_idx]);
                 }
             }
 
@@ -103,27 +106,24 @@ fn grow_dag_across_rounds() {
                 );
             }
         }
-
-        // Every peer must now have all N units at this round confirmed.
-        for (idx, graph) in graphs.iter().enumerate() {
-            assert_eq!(
-                graph.confirmed_count(round),
-                N_PEERS,
-                "peer {idx}: confirmed count at round {round} mismatch"
-            );
-        }
     }
 
-    // Sanity: every peer's view of every confirmed slot agrees on hashes.
+    // Sanity: every peer's view of every confirmed slot agrees on the
+    // unit body (sigs may differ in collection order across peers).
     for round in 0..=ROUNDS {
         for creator_idx in 0..N_PEERS {
             let creator = PeerId::from(creator_idx as u8);
-            let hashes: Vec<_> = graphs
+            let units: Vec<_> = graphs
                 .iter()
-                .map(|g| g.entry(round, creator).expect("entry exists").hash())
+                .map(|g| {
+                    g.entry(round, creator)
+                        .expect("entry exists")
+                        .unit()
+                        .clone()
+                })
                 .collect();
             assert!(
-                hashes.windows(2).all(|w| w[0] == w[1]),
+                units.windows(2).all(|w| w[0] == w[1]),
                 "peers diverge on (r={round}, c={creator_idx})"
             );
         }

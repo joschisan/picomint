@@ -24,4 +24,4 @@ pub use engine::run;
 pub use graph::{Entry, Graph};
 pub use keychain::Keychain;
 pub use network::{DynNetwork, INetwork, Message, Recipient};
-pub use unit::{Round, Unit, UnitData, UnitHash};
+pub use unit::{Round, Unit, UnitData};

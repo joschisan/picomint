@@ -8,7 +8,7 @@
 //! pre-filled slot rather than try to build a duplicate unit at the
 //! same `(round, creator)`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -72,10 +72,9 @@ async fn engine_skips_pre_filled_own_slot_after_wipe_restore() {
     let own_id = PeerId::from(0u8);
 
     let unit = Unit::<u64> {
-        session,
         round: 0,
         creator: own_id,
-        parents: BTreeMap::new(),
+        parents: BTreeSet::new(),
         data: vec![],
     };
 
@@ -84,13 +83,25 @@ async fn engine_skips_pre_filled_own_slot_after_wipe_restore() {
     let mut graph = Graph::<u64>::new(n, session, backup, tx);
 
     let verifier = keychains.get(&own_id).expect("built").clone();
-    let sigs: BTreeMap<_, _> = n
+    let creator_sig = keychains.get(&own_id).expect("built").sign(session, &unit);
+    // Threshold sigs total = creator + (threshold - 1) cosigs.
+    let cosigs: BTreeMap<_, _> = n
         .peer_ids()
-        .take(n.threshold())
-        .map(|signer| (signer, keychains.get(&signer).expect("built").sign(&unit)))
+        .filter(|p| *p != own_id)
+        .take(n.threshold() - 1)
+        .map(|signer| {
+            (
+                signer,
+                keychains.get(&signer).expect("built").sign(session, &unit),
+            )
+        })
         .collect();
 
-    assert!(graph.insert_unit(unit.clone(), sigs, &verifier).is_some());
+    assert!(
+        graph
+            .insert_unit(unit.clone(), creator_sig, cosigs, &verifier)
+            .is_some()
+    );
     assert!(graph.is_confirmed(0, own_id));
 
     let own_keychain = keychains.remove(&own_id).expect("built");

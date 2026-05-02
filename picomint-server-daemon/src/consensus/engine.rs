@@ -320,7 +320,7 @@ impl ConsensusEngine {
 
         let keychain = build_keychain(&self.cfg);
 
-        let our_signature = keychain.sign(&header);
+        let our_signature = keychain.sign(session_index, &header);
 
         let mut signatures = BTreeMap::from_iter([(self.identity(), our_signature)]);
 
@@ -334,7 +334,7 @@ impl ConsensusEngine {
                 result = signatures_receiver.recv() => {
                     let (peer_id, signature) = result.ok()?;
 
-                    if keychain.verify(&header, &signature, peer_id) {
+                    if keychain.verify(session_index, &header, &signature, peer_id) {
                         signatures.insert(peer_id, signature);
 
                         info!(
@@ -430,7 +430,7 @@ impl ConsensusEngine {
         outcome
             .signatures
             .iter()
-            .all(|(signer_id, sig)| keychain.verify(&header, sig, *signer_id))
+            .all(|(signer_id, sig)| keychain.verify(session_index, &header, sig, *signer_id))
     }
 
     pub async fn pending_accepted_items(&self) -> Vec<AcceptedItem> {

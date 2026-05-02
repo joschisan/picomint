@@ -1,7 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt::Debug;
 
-use bitcoin::hashes::sha256;
 use picomint_core::PeerId;
 use picomint_encoding::{Decodable, Encodable};
 
@@ -9,10 +8,6 @@ use picomint_encoding::{Decodable, Encodable};
 /// its units carry empty parent sets and are otherwise created and
 /// disseminated like every other unit.
 pub type Round = u16;
-
-/// 32-byte digest identifying a unit; the consensus hash of its `Encodable`
-/// form.
-pub type UnitHash = sha256::Hash;
 
 /// Bound bundle for unit payloads. `D` rides through `Unit`, `Graph`,
 /// `Extender`, and `Message` purely as data — the protocol never inspects
@@ -26,37 +21,31 @@ impl<T: Debug + Clone + Encodable + Decodable + Send + Sync + 'static> UnitData 
 
 /// One node in the consensus DAG.
 ///
-/// A unit is uniquely identified by its `(session, round, creator)`
-/// coordinate; at most one unit per coordinate can ever be confirmed.
-/// `session` rides through the hash so that two units at the same
-/// `(round, creator)` slot in distinct sessions are cryptographically
-/// distinct — a stale Propose/Confirmed/Ack from session N arriving at a
-/// peer in session N+1 fails to match the local slot and is discarded.
-/// `parents` maps each parent's creator to its hash; for `round > 0` the
-/// parent set must contain *exactly* `threshold` distinct creators all
-/// at `round - 1`. Round-0 units carry an empty parent set. `data` is
-/// the creator's payload at this slot, generic over the element type
-/// `D`; once the total order is extracted, each unit's `data` items are
-/// emitted in order keyed by the unit's creator.
+/// A unit is uniquely identified by its `(round, creator)` coordinate
+/// within a session; at most one body per slot can ever be confirmed.
+/// The session is *not* carried in the unit body — instead, signatures
+/// are produced over the tuple `(session, unit)`, so a stale unit from
+/// a previous session arriving at a peer in the current session fails
+/// signature verification and is discarded. This saves 8 bytes per
+/// unit on the wire vs. embedding the session in the body.
+///
+/// `parents` is the set of parent creators; for `round > 0` it must
+/// contain *exactly* `threshold` distinct creators, each referring to
+/// the (unique, locally-confirmed) unit at `(round - 1, creator)`.
+/// Round-0 units carry an empty parent set. Parent hashes are not
+/// carried — at most one unit per slot can ever confirm, so the creator
+/// is sufficient to identify the parent. `data` is the creator's
+/// payload at this slot, generic over the element type `D`; once the
+/// total order is extracted, each unit's `data` items are emitted in
+/// order keyed by the unit's creator.
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
 pub struct Unit<D: UnitData> {
-    /// The session this unit belongs to. Part of the unit's identity so
-    /// that stale traffic from a previous session cannot land in the
-    /// current session's graph.
-    pub session: u64,
     /// The round this unit belongs to.
     pub round: Round,
     /// `PeerId` of this unit's creator.
     pub creator: PeerId,
-    /// Hashes of this unit's parents, keyed by their creator.
-    pub parents: BTreeMap<PeerId, UnitHash>,
+    /// Creators of this unit's parents at `round - 1`.
+    pub parents: BTreeSet<PeerId>,
     /// Creator's payload for this slot.
     pub data: Vec<D>,
-}
-
-impl<D: UnitData> Unit<D> {
-    /// SHA-256 of this unit's consensus encoding.
-    pub fn hash(&self) -> UnitHash {
-        self.consensus_hash_sha256()
-    }
 }

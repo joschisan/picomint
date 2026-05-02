@@ -5,8 +5,8 @@
 //! are walked in a deterministic random order seeded by the round
 //! number. For each candidate `c`:
 //!
-//! - A round-`R+1` unit votes **yes** iff `c`'s hash appears in its
-//!   parent set, otherwise **no**.
+//! - A round-`R+1` unit votes **yes** iff `c` appears in its parent
+//!   set, otherwise **no**.
 //! - A round-`K` unit (K > R+1) votes **yes** iff the strict majority
 //!   of its `2f+1` parents voted yes, otherwise **no**.
 //! - If some round above R has `≥ 2f+1` yes-voters, `c` is **elected**
@@ -24,14 +24,14 @@
 //! On commit, the head's not-yet-emitted causal ancestors are
 //! extracted BFS-style and emitted as the round's batch.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 use async_channel::Sender;
 use bitcoin::hashes::sha256;
 use picomint_core::{NumPeers, PeerId};
 use picomint_encoding::Encodable;
 
-use crate::unit::{Round, Unit, UnitData, UnitHash};
+use crate::unit::{Round, Unit, UnitData};
 
 /// Drives leader-vote ordering over a stream of confirmed units.
 ///
@@ -67,8 +67,8 @@ impl<D: UnitData> Extender<D> {
         self.units.add(unit);
 
         while let Some(decision) = self.try_decide(self.next_round_to_decide) {
-            if let Decision::Commit(head) = decision {
-                for u in self.units.remove_batch(&head) {
+            if let Decision::Commit(round, creator) = decision {
+                for u in self.units.remove_batch(round, creator) {
                     for d in &u.data {
                         self.ordered_tx
                             .try_send((u.round, u.creator, d.clone()))
@@ -102,10 +102,10 @@ impl<D: UnitData> Extender<D> {
     /// confirm.
     fn try_decide(&self, leader_round: Round) -> Option<Decision> {
         for candidate_peer in self.candidate_order(leader_round) {
-            let candidate_hash = self.units.hash_at(leader_round, candidate_peer);
-
-            match self.decide_candidate(leader_round, candidate_hash) {
-                Some(CandidateOutcome::Yes(head)) => return Some(Decision::Commit(head)),
+            match self.decide_candidate(leader_round, candidate_peer) {
+                Some(CandidateOutcome::Yes) => {
+                    return Some(Decision::Commit(leader_round, candidate_peer));
+                }
                 Some(CandidateOutcome::No) => continue,
                 None => return None,
             }
@@ -121,10 +121,12 @@ impl<D: UnitData> Extender<D> {
     fn decide_candidate(
         &self,
         leader_round: Round,
-        candidate_hash: Option<UnitHash>,
+        candidate_peer: PeerId,
     ) -> Option<CandidateOutcome> {
         // Vote table built incrementally over rounds R+1, R+2, ….
-        let mut votes: HashMap<UnitHash, bool> = HashMap::new();
+        // Keyed by (round, creator) since at most one confirmed unit
+        // per slot exists — slot uniquely identifies the voter.
+        let mut votes: BTreeMap<(Round, PeerId), bool> = BTreeMap::new();
 
         for k in (leader_round..self.units.highest_round()).map(|k| k + 1) {
             let mut yes = 0;
@@ -132,13 +134,16 @@ impl<D: UnitData> Extender<D> {
 
             for unit in self.units.in_round(k) {
                 let vote = if k == leader_round + 1 {
-                    candidate_hash.is_some_and(|lh| unit.parents.values().any(|h| *h == lh))
+                    unit.parents.contains(&candidate_peer)
                 } else {
                     let mut yes_parents = 0;
                     let mut no_parents = 0;
 
-                    for ph in unit.parents.values() {
-                        if *votes.get(ph).expect("computed in the previous round") {
+                    for parent_creator in &unit.parents {
+                        if *votes
+                            .get(&(k - 1, *parent_creator))
+                            .expect("computed in the previous round")
+                        {
                             yes_parents += 1;
                         } else {
                             no_parents += 1;
@@ -152,7 +157,7 @@ impl<D: UnitData> Extender<D> {
                     yes_parents > no_parents
                 };
 
-                votes.insert(unit.hash(), vote);
+                votes.insert((unit.round, unit.creator), vote);
 
                 if vote {
                     yes += 1;
@@ -162,9 +167,7 @@ impl<D: UnitData> Extender<D> {
             }
 
             if yes >= self.num_peers.threshold() {
-                return Some(CandidateOutcome::Yes(candidate_hash.expect(
-                    "yes-quorum at R+1 requires candidate's hash in voters' parents",
-                )));
+                return Some(CandidateOutcome::Yes);
             }
 
             if no >= self.num_peers.threshold() {
@@ -177,29 +180,27 @@ impl<D: UnitData> Extender<D> {
 }
 
 enum CandidateOutcome {
-    Yes(UnitHash),
+    Yes,
     No,
 }
 
 enum Decision {
-    Commit(UnitHash),
+    Commit(Round, PeerId),
     Skip,
 }
 
-/// In-memory store of confirmed units, indexed for O(1) slot lookup
-/// and round iteration.
+/// In-memory store of confirmed units, keyed by `(round, creator)`.
+/// Slot-keying is enough because consistent broadcast guarantees at most
+/// one confirmed unit per slot, and `BTreeMap`'s `range` gives us
+/// round-restricted iteration without a separate by-round index.
 struct Units<D: UnitData> {
-    by_hash: BTreeMap<UnitHash, Unit<D>>,
-    by_round: BTreeMap<Round, Vec<UnitHash>>,
-    by_slot: BTreeMap<(Round, PeerId), UnitHash>,
+    by_slot: BTreeMap<(Round, PeerId), Unit<D>>,
     highest_round: Round,
 }
 
 impl<D: UnitData> Units<D> {
     fn new() -> Self {
         Self {
-            by_hash: BTreeMap::new(),
-            by_round: BTreeMap::new(),
             by_slot: BTreeMap::new(),
             highest_round: 0,
         }
@@ -208,51 +209,37 @@ impl<D: UnitData> Units<D> {
     fn add(&mut self, unit: Unit<D>) {
         self.highest_round = self.highest_round.max(unit.round);
 
-        self.by_round
-            .entry(unit.round)
-            .or_default()
-            .push(unit.hash());
-
-        self.by_slot.insert((unit.round, unit.creator), unit.hash());
-
-        self.by_hash.insert(unit.hash(), unit);
-    }
-
-    fn hash_at(&self, round: Round, creator: PeerId) -> Option<UnitHash> {
-        self.by_slot.get(&(round, creator)).copied()
+        self.by_slot.insert((unit.round, unit.creator), unit);
     }
 
     fn in_round(&self, round: Round) -> impl Iterator<Item = &Unit<D>> {
-        self.by_round
-            .get(&round)
-            .into_iter()
-            .flatten()
-            .filter_map(|h| self.by_hash.get(h))
+        self.by_slot
+            .range((round, PeerId::from(0u8))..)
+            .take_while(move |((r, _), _)| *r == round)
+            .map(|(_, u)| u)
     }
 
     fn highest_round(&self) -> Round {
         self.highest_round
     }
 
-    /// BFS over `head`'s ancestors, removing each from the store as we
-    /// visit it. Already-emitted ancestors (removed by an earlier
-    /// batch) are skipped — that's how successive batches partition the
-    /// DAG. Returns oldest-first.
-    fn remove_batch(&mut self, head: &UnitHash) -> Vec<Unit<D>> {
+    /// BFS over the `(round, creator)` head's ancestors, removing each
+    /// from the store as we visit it. Already-emitted ancestors (removed
+    /// by an earlier batch) are skipped — that's how successive batches
+    /// partition the DAG. Returns oldest-first.
+    fn remove_batch(&mut self, round: Round, creator: PeerId) -> Vec<Unit<D>> {
         let mut batch = Vec::new();
         let mut queue = VecDeque::new();
 
-        let head_unit = self.by_hash.remove(head).expect("head exists");
+        let head = self.by_slot.remove(&(round, creator)).expect("head exists");
 
-        self.by_slot.remove(&(head_unit.round, head_unit.creator));
-
-        queue.push_back(head_unit);
+        queue.push_back(head);
 
         while let Some(unit) = queue.pop_front() {
-            for parent_hash in unit.parents.values() {
-                if let Some(parent) = self.by_hash.remove(parent_hash) {
-                    self.by_slot.remove(&(parent.round, parent.creator));
+            for parent_creator in &unit.parents {
+                let parent_round = unit.round - 1;
 
+                if let Some(parent) = self.by_slot.remove(&(parent_round, *parent_creator)) {
                     queue.push_back(parent);
                 }
             }
