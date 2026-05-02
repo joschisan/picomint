@@ -24,8 +24,12 @@ pub async fn render(lightning: &crate::consensus::ln::Lightning) -> Markup {
     let gateways = lightning.gateways_ui();
     let consensus_block_count = lightning.consensus_block_count_ui();
     let consensus_unix_time = lightning.consensus_unix_time_ui();
-    let formatted_unix_time = chrono::DateTime::from_timestamp(consensus_unix_time as i64, 0)
-        .map_or("Invalid time".to_string(), |dt| dt.to_rfc2822());
+    let wallclock = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let drift = consensus_unix_time as i64 - wallclock as i64;
+    let formatted_unix_time = format!("{consensus_unix_time} ({drift:+}s vs wallclock)");
 
     html! {
         div class="card h-100" {
