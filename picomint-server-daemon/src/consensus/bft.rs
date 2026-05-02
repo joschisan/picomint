@@ -172,7 +172,7 @@ impl BftDataProvider<ConsensusItem> for DataProvider {
 /// `BFT_UNITS` table keyed by `(round, creator)`. Overwrites in place
 /// on every save; loading iterates the table in natural key order, which
 /// is `(round, peer)` lex order — i.e. the order the engine expects for
-/// restore (parents before children).
+/// recover (parents before children).
 pub struct RedbBackup {
     db: Database,
 }

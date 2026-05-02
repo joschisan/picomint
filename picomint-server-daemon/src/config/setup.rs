@@ -78,7 +78,7 @@ pub struct SetupApi {
     settings: ConfigGenSettings,
     /// In-memory state machine
     state: Arc<Mutex<SetupState>>,
-    /// Signals the setup loop with either DKG params or a restored config
+    /// Signals the setup loop with either DKG params or a recovered config
     sender: Sender<SetupResult>,
 }
 
@@ -293,14 +293,14 @@ impl SetupApi {
         Ok(())
     }
 
-    pub async fn restore_config(&self, cfg: ServerConfig) -> anyhow::Result<()> {
+    pub async fn recover_config(&self, cfg: ServerConfig) -> anyhow::Result<()> {
         cfg.validate_config(&cfg.private.identity)
-            .context("Restored config failed validation")?;
+            .context("Recovered config failed validation")?;
 
         self.sender
-            .send(SetupResult::Restored(Box::new(cfg)))
+            .send(SetupResult::Recovered(Box::new(cfg)))
             .await
-            .context("Failed to send restored config")?;
+            .context("Failed to send recovered config")?;
 
         Ok(())
     }

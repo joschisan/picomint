@@ -212,7 +212,7 @@ pub async fn run_config_gen(
 
             Ok((cfg, connections, p2p_status_receivers))
         }
-        SetupResult::Restored(cfg) => {
+        SetupResult::Recovered(cfg) => {
             let cfg = *cfg;
 
             let connector = P2PConnector::new(

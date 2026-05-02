@@ -17,7 +17,7 @@ use super::{MintSmContext, NoteIssuanceRequest, SpendableNote};
 pub struct IssuanceStateMachine {
     pub operation: OperationId,
     /// Notes this tx consumed on its input side that originated from our own
-    /// wallet db. Restored to `NOTE` on tx rejection.
+    /// wallet db. Recovered to `NOTE` on tx rejection.
     pub spendable_notes: Vec<SpendableNote>,
     /// `Some(txid)` for normal operation. `None` for recovery-bootstrapped
     /// state machines, which fetch shares via the recovery endpoint instead.

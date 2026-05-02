@@ -44,18 +44,18 @@ pub async fn run_test(env: &TestEnv) -> Result<()> {
     .await?;
 
     info!("uploading saved config");
-    cli::server_setup_restore(&data_dir, &backup_path)?;
+    cli::server_setup_recover(&data_dir, &backup_path)?;
 
     info!("waiting for guardian-{peer_idx} to rejoin consensus");
     retry_non_zero_session_count(env, peer_idx).await?;
 
-    info!("verifying restored config matches original");
-    let restored_cfg = cli::server_config(&data_dir)?;
+    info!("verifying recovered config matches original");
+    let recovered_cfg = cli::server_config(&data_dir)?;
     ensure!(
-        restored_cfg == original_cfg,
-        "restored config does not match original"
+        recovered_cfg == original_cfg,
+        "recovered config does not match original"
     );
 
-    info!("restore test OK");
+    info!("recover test OK");
     Ok(())
 }

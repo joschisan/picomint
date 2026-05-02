@@ -7,7 +7,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::post;
 use picomint_server_cli_core::{
-    CLI_SOCKET_FILENAME, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_RESTORE, ROUTE_SETUP_SET_LOCAL_PARAMS,
+    CLI_SOCKET_FILENAME, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_RECOVER, ROUTE_SETUP_SET_LOCAL_PARAMS,
     ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddPeerRequest, SetupAddPeerResponse,
     SetupSetLocalParamsRequest, SetupSetLocalParamsResponse, SetupStatus,
 };
@@ -71,7 +71,7 @@ pub async fn run_cli(data_dir: &Path, state: CliState) {
         .route(ROUTE_SETUP_SET_LOCAL_PARAMS, post(setup_set_local_params))
         .route(ROUTE_SETUP_ADD_PEER, post(setup_add_peer))
         .route(ROUTE_SETUP_START_DKG, post(setup_start_dkg))
-        .route(ROUTE_SETUP_RESTORE, post(setup_restore))
+        .route(ROUTE_SETUP_RECOVER, post(setup_recover))
         .with_state(state)
         .into_make_service();
 
@@ -266,13 +266,13 @@ async fn setup_start_dkg(State(state): State<CliState>) -> Result<Json<()>, CliE
     Ok(Json(()))
 }
 
-async fn setup_restore(
+async fn setup_recover(
     State(state): State<CliState>,
     Json(cfg): Json<ServerConfig>,
 ) -> Result<Json<()>, CliError> {
     state
         .setup_api
-        .restore_config(cfg)
+        .recover_config(cfg)
         .await
         .map_err(CliError::internal)?;
 

@@ -154,8 +154,8 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // Snapshot the receive client's accumulated balance now — *before* the
     // double-spend phase. The rejected receive runs `balance()`, which
     // opportunistically pulls excess notes (>2×TARGET_PER_DENOMINATION) into
-    // the IssuanceSM's `spendable_notes` and only restores them once the SM
-    // transitions on Err. Capturing here avoids racing that restoration.
+    // the IssuanceSM's `spendable_notes` and only recovers them once the SM
+    // transitions on Err. Capturing here avoids racing that recovery.
     let expected = client_receive.get_balance().await?;
 
     ensure!(

@@ -25,7 +25,7 @@ table!(
 // One row per `(round, creator)` slot holding the `Entry` for that slot.
 // Overwritten in place as the entry's signature set grows; iterating in
 // natural key order yields `(round, peer)` lex order — the order the
-// engine expects for restore.
+// engine expects for recover.
 table!(
     BFT_UNITS,
     (Round, PeerId) => Entry<ConsensusItem>,
