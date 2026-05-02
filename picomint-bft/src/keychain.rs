@@ -22,22 +22,28 @@ impl Keychain {
         Self { keypair, pubkeys }
     }
 
-    /// Sign the consensus-hash of `value` with our schnorr key.
-    pub fn sign<E: Encodable>(&self, value: &E) -> schnorr::Signature {
+    /// Sign the consensus-hash of `(session, value)` with our schnorr
+    /// key. The `session` prefix binds every signature to the consensus
+    /// session it was produced under: a stale signature from session N
+    /// arriving at a peer in session N+1 will hash under a different
+    /// tuple at the verifier and fail to match, so it's discarded.
+    pub fn sign<E: Encodable>(&self, session: u64, value: &E) -> schnorr::Signature {
         self.keypair.sign_schnorr(Message::from_digest(
-            value.consensus_hash_sha256().to_byte_array(),
+            (session, value).consensus_hash_sha256().to_byte_array(),
         ))
     }
 
     /// Verify `signature` is `peer`'s schnorr signature over the
-    /// consensus-hash of `value`.
+    /// consensus-hash of `(session, value)`.
     pub fn verify<E: Encodable>(
         &self,
+        session: u64,
         value: &E,
         signature: &schnorr::Signature,
         peer: PeerId,
     ) -> bool {
-        let message = Message::from_digest(value.consensus_hash_sha256().to_byte_array());
+        let message =
+            Message::from_digest((session, value).consensus_hash_sha256().to_byte_array());
 
         let pk = self
             .pubkeys

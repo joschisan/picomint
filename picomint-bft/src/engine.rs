@@ -193,7 +193,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         // unit)` tuple and fail to verify.
         if !self
             .keychain
-            .verify(&(self.graph.session(), &unit), &sig, unit.creator)
+            .verify(self.graph.session(), &unit, &sig, unit.creator)
         {
             return;
         }
@@ -211,7 +211,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             .is_some_and(|e| e.cosigs().contains_key(&self.own_id));
 
         let new_own_cosig = if !already_signed_locally && unit_creator != self.own_id {
-            Some(self.keychain.sign(&(self.graph.session(), &unit)))
+            Some(self.keychain.sign(self.graph.session(), &unit))
         } else {
             None
         };
@@ -344,7 +344,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             data: self.data_provider.get_data().await,
         };
 
-        let sig = self.keychain.sign(&(self.graph.session(), &unit));
+        let sig = self.keychain.sign(self.graph.session(), &unit);
 
         // Crash barrier: persist the unit + our self-sig before
         // broadcasting. On restart we'd otherwise be free to build a

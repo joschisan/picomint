@@ -68,7 +68,7 @@ fn grow_dag_across_rounds() {
 
             // Creator broadcasts the unit with its own sig; every peer
             // (including creator) inserts it into their local graph.
-            let creator_sig = keychains[creator_idx].sign(&(SESSION, &unit));
+            let creator_sig = keychains[creator_idx].sign(SESSION, &unit);
             for (verifier_idx, graph) in graphs.iter_mut().enumerate() {
                 assert!(
                     graph
@@ -90,7 +90,7 @@ fn grow_dag_across_rounds() {
                     continue;
                 }
                 let signer = PeerId::from(signer_idx as u8);
-                let sig = keychains[signer_idx].sign(&(SESSION, &unit));
+                let sig = keychains[signer_idx].sign(SESSION, &unit);
                 for (verifier_idx, graph) in graphs.iter_mut().enumerate() {
                     let _ =
                         graph.record_cosig(round, creator, signer, sig, &keychains[verifier_idx]);

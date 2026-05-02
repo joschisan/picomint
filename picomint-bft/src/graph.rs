@@ -279,7 +279,7 @@ impl<D: UnitData> Graph<D> {
         let valid_cosigs: BTreeMap<PeerId, schnorr::Signature> = cosigs
             .into_iter()
             .filter(|(signer, c)| {
-                *signer != unit.creator && keychain.verify(&(session, &unit), c, *signer)
+                *signer != unit.creator && keychain.verify(session, &unit, c, *signer)
             })
             .collect();
 
@@ -319,7 +319,7 @@ impl<D: UnitData> Graph<D> {
 
         let session = self.session;
 
-        if !keychain.verify(&(session, &unit), &sig, unit.creator) {
+        if !keychain.verify(session, &unit, &sig, unit.creator) {
             return false;
         }
 
@@ -335,7 +335,7 @@ impl<D: UnitData> Graph<D> {
         let valid_cosigs: BTreeMap<PeerId, schnorr::Signature> = cosigs
             .into_iter()
             .filter(|(signer, c)| {
-                *signer != unit.creator && keychain.verify(&(session, &unit), c, *signer)
+                *signer != unit.creator && keychain.verify(session, &unit, c, *signer)
             })
             .take(self.threshold() - 1)
             .collect();
@@ -402,7 +402,7 @@ impl<D: UnitData> Graph<D> {
             return true;
         }
 
-        if !keychain.verify(&(self.session, &entry.unit), &sig, signer) {
+        if !keychain.verify(self.session, &entry.unit, &sig, signer) {
             return true;
         }
 
