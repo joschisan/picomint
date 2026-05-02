@@ -193,11 +193,7 @@ fn main() -> anyhow::Result<()> {
 
     info!("Successfully started LDK Node");
 
-    // 5. Create task group for graceful shutdown (owned by AppState so
-    //    per-federation tail tasks spawned at join-time share its lifetime).
-    let task_group = picomint_core::task::TaskGroup::new();
-
-    // 6. Construct AppState
+    // 5. Construct AppState
     let state = AppState {
         clients: Arc::new(RwLock::new(BTreeMap::new())),
         node: node.clone(),
@@ -219,37 +215,26 @@ fn main() -> anyhow::Result<()> {
             ppm: opts.ln_fee_ppm,
         },
         analytics: picomint_gateway_daemon::analytics::Analytics::wipe_and_init(&opts.data_dir)?,
-        task_group: task_group.clone(),
     };
 
-    // 7. Load federation clients + spawn their analytics tails and trailers
+    // 6. Load federation clients, then fire-and-forget every long-running
+    //    task. All work is persisted incrementally and idempotent on retry,
+    //    so the runtime drop on process exit aborts cleanly.
     runtime.block_on(state.load_clients())?;
-    runtime.block_on(state.spawn_analytics_trailer());
-    runtime.block_on(state.spawn_trailer());
 
-    // 8. Spawn tasks
-    let public_task = runtime.spawn(public::run_public(state.clone(), task_group.make_handle()));
-    let cli_task = runtime.spawn(cli::run_cli(state.clone(), task_group.make_handle()));
-    let events_task = runtime.spawn(process_ldk_events(state.clone(), task_group.make_handle()));
+    runtime.spawn(public::run_public(state.clone()));
 
-    // 11. Wait for shutdown signal
+    runtime.spawn(cli::run_cli(state.clone()));
+
+    runtime.spawn(process_ldk_events(state.clone()));
+
+    runtime.spawn(picomint_gateway_daemon::analytics::trailer(state.clone()));
+
+    runtime.spawn(picomint_gateway_daemon::trailer::run(state));
+
+    // 7. Block main on SIGTERM so the runtime stays alive; on signal,
+    //    return Ok and let the runtime drop abort all tasks.
     runtime.block_on(shutdown_signal());
-
-    info!("Gatewayd shutting down...");
-
-    runtime.block_on(task_group.shutdown_join_all(None))?;
-
-    if let Err(e) = runtime.block_on(public_task) {
-        warn!(err = %e, "Failed to join public webserver task");
-    }
-
-    if let Err(e) = runtime.block_on(cli_task) {
-        warn!(err = %e, "Failed to join CLI webserver task");
-    }
-
-    if let Err(e) = runtime.block_on(events_task) {
-        warn!(err = %e, "Failed to join LDK events task");
-    }
 
     info!("Gatewayd exiting...");
 
@@ -267,12 +252,9 @@ async fn shutdown_signal() {
 // LDK event loop
 // ---------------------------------------------------------------------------
 
-async fn process_ldk_events(state: AppState, handle: picomint_core::task::TaskHandle) {
+async fn process_ldk_events(state: AppState) {
     loop {
-        let event = tokio::select! {
-            event = state.node.next_event_async() => event,
-            () = handle.make_shutdown_rx() => break,
-        };
+        let event = state.node.next_event_async().await;
 
         process_ldk_event(&state, event);
 

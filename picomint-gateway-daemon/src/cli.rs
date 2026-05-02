@@ -16,7 +16,6 @@ use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription,
 use picomint_client::wallet::events::{SendConfirmEvent, SendFailureEvent};
 use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
-use picomint_core::task::TaskHandle;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, ChannelInfo, FederationBalanceRequest, FederationBalanceResponse,
     FederationConfigRequest, FederationConfigResponse, FederationInviteRequest,
@@ -90,7 +89,7 @@ impl From<anyhow::Error> for CliError {
     }
 }
 
-pub async fn run_cli(state: AppState, handle: TaskHandle) {
+pub async fn run_cli(state: AppState) {
     let socket_path = state.data_dir.join(CLI_SOCKET_FILENAME);
     std::fs::remove_file(&socket_path).ok();
 
@@ -102,7 +101,6 @@ pub async fn run_cli(state: AppState, handle: TaskHandle) {
         .into_make_service();
 
     axum::serve(listener, router)
-        .with_graceful_shutdown(handle.make_shutdown_rx())
         .await
         .expect("CLI webserver failed");
 }

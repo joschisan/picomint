@@ -64,7 +64,6 @@ pub struct AppState {
     pub receive_fee: PaymentFee,
     pub ln_fee: PaymentFee,
     pub analytics: analytics::Analytics,
-    pub task_group: picomint_core::task::TaskGroup,
 }
 
 impl AppState {
@@ -76,12 +75,6 @@ impl AppState {
             .expect("clients RwLock poisoned")
             .get(&federation_id)
             .cloned()
-    }
-
-    /// Spawn the daemon-wide analytics trailer that mirrors every event in
-    /// the global event log into the SQLite analytics DB.
-    pub async fn spawn_analytics_trailer(&self) {
-        analytics::spawn_trailer(&self.task_group, self.clone());
     }
 
     /// Load all persisted federation clients on startup.
@@ -111,13 +104,6 @@ impl AppState {
         }
 
         Ok(())
-    }
-
-    /// Spawn the daemon-wide trailer that drives external side effects
-    /// (LDK claim/refund, direct-swap finalize_send) off receive-side
-    /// terminal events on the global event log.
-    pub async fn spawn_trailer(&self) {
-        trailer::spawn_trailer(&self.task_group, self.clone());
     }
 
     /// Get the name of a federation from its client config.

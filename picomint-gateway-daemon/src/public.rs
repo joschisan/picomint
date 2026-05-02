@@ -9,7 +9,6 @@ use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, SendPaymentPayl
 use picomint_core::ln::routes::{
     ROUTE_CREATE_BOLT11_INVOICE, ROUTE_GATEWAY_INFO, ROUTE_SEND_PAYMENT,
 };
-use picomint_core::task::TaskHandle;
 use picomint_lnurl::LnurlResponse;
 use reqwest::StatusCode;
 use serde_json::json;
@@ -54,7 +53,7 @@ impl IntoResponse for LnurlError {
     }
 }
 
-pub async fn run_public(state: AppState, handle: TaskHandle) {
+pub async fn run_public(state: AppState) {
     let listener = TcpListener::bind(state.api_addr)
         .await
         .expect("Failed to bind public API server");
@@ -65,7 +64,6 @@ pub async fn run_public(state: AppState, handle: TaskHandle) {
         .into_make_service();
 
     axum::serve(listener, router)
-        .with_graceful_shutdown(handle.make_shutdown_rx())
         .await
         .expect("Public webserver failed");
 }
