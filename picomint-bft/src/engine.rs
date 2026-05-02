@@ -11,19 +11,16 @@ use crate::keychain::Keychain;
 use crate::network::{DynNetwork, Message, Recipient};
 use crate::unit::{Round, Unit, UnitData};
 
-/// How often each peer fires the periodic anti-entropy:
+/// How often each peer fires the periodic anti-entropy push:
+/// for every peer in the federation, send our highest known entry
+/// (with the sigs we hold) to everyone. Refills sig deficits at slots
+/// receivers already hold and seeds higher rounds at laggards.
 ///
-/// - **push**: for every peer in the federation, send our highest known
-///   entry (with the sigs we hold) to everyone. Refills sig deficits at
-///   slots receivers already hold and seeds higher rounds at laggards.
-/// - **pull**: for every peer, send a `Request` for the lowest round
-///   where we don't yet have that peer's slot confirmed locally.
-///
-/// Set to 1s — the steady-state pull is reactive: every fresh insert
-/// in `handle_unit` immediately fires a `Request` for the creator's
-/// *next* round, so most catch-up happens at insert time. This periodic
-/// loop is the safety net for cases the reactive trigger missed (slot
-/// we never had any unit for, or a dropped reactive request).
+/// Pull is demand-driven, not periodic: on every received unit, we
+/// unicast a `Request` to the sender for any of that unit's parents
+/// we don't yet hold locally. Re-issued on every receive (fresh or
+/// duplicate), so a dropped `Request` is retried the next time the
+/// pushing peer ships us the same child.
 const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Drive a single peer's growth indefinitely.
@@ -119,38 +116,26 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
 
     fn handle_message(&mut self, sender: PeerId, msg: Message<D>) {
         match msg {
-            Message::Unit { unit, sigs } => self.handle_unit(unit, sigs),
+            Message::Unit { unit, sigs } => self.handle_unit(sender, unit, sigs),
             Message::Request { round, creator } => {
                 self.handle_request(sender, round, creator);
             }
         }
     }
 
-    /// Per-cycle anti-entropy. Two legs, both bounded at one message per
-    /// peer in the federation:
-    ///
-    /// - **Push**: for every peer, send our highest known entry for that
-    ///   peer (with the sigs we currently hold) to everyone. Receivers
-    ///   union sigs into their own view; if their copy was below
-    ///   threshold it may now confirm. New entries at higher rounds are
-    ///   accepted by strict insert iff their parents are already
-    ///   confirmed locally; otherwise dropped, to be re-delivered after
-    ///   pull has caught the receiver up.
-    ///
-    /// - **Pull**: for every peer, send a `Request` for the lowest round
-    ///   where we don't yet hold that peer's slot confirmed. Recipients
-    ///   that hold the slot reply with their entry. Idempotent — the
-    ///   same round is re-requested next cycle until it confirms.
+    /// Push-only anti-entropy: for every peer, send our highest known
+    /// entry for that peer (with the sigs we currently hold) to
+    /// everyone. Receivers union sigs into their own view, and any
+    /// parents the receiver doesn't hold trigger demand-pull `Request`
+    /// messages back to us via `handle_unit`. So a single push from a
+    /// peer at the head of the DAG bootstraps a recipient that's
+    /// arbitrarily far behind — the pull walks back round-by-round
+    /// until it lands on a parent the recipient already holds.
     fn broadcast_anti_entropy(&self) {
         for creator in self.graph.peer_ids() {
             if let Some(entry) = self.graph.highest_entry(creator) {
                 self.send_entry(Recipient::Everyone, entry);
             }
-
-            let round = self.graph.lowest_unconfirmed_round(creator);
-
-            self.network
-                .send(Recipient::Everyone, Message::Request { round, creator });
         }
     }
 
@@ -164,11 +149,20 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
     }
 
     /// Apply one inbound `Unit` message: validate the bundle, splice in
-    /// our own co-sig, and hand the whole thing to the graph. Graph
-    /// internally persists every mutation and feeds confirmed units
-    /// into its extender. On a fresh insert we rebroadcast so peers
-    /// union our contribution.
-    fn handle_unit(&mut self, unit: Unit<D>, mut sigs: BTreeMap<PeerId, schnorr::Signature>) {
+    /// our own co-sig, hand the whole thing to the graph, and
+    /// demand-pull any of the unit's parents we don't yet hold locally
+    /// from the immediate sender.
+    ///
+    /// Parent pulls run on every receive (fresh or duplicate). Re-issuing
+    /// on duplicates makes the mechanism self-healing against dropped
+    /// `Request` messages: the next time the pushing peer ships us the
+    /// same child, we re-ask for the still-missing parents.
+    fn handle_unit(
+        &mut self,
+        sender: PeerId,
+        unit: Unit<D>,
+        mut sigs: BTreeMap<PeerId, schnorr::Signature>,
+    ) {
         // Creator's sig must be in the bundle: it binds the body to its
         // claimed author. Without this check, a Byzantine peer could
         // send a fabricated body at someone else's slot signed only with
@@ -200,19 +194,35 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             sigs.insert(self.own_id, self.keychain.sign(&unit));
         }
 
+        // Snapshot the parent coords before consuming `unit`, so we can
+        // demand-pull missing parents whether the insert lands fresh or
+        // is dropped as a duplicate.
+        let unit_round = unit.round;
+        let parents: Vec<PeerId> = unit.parents.iter().copied().collect();
+
         if let Some(entry) = self.graph.insert_unit(unit, sigs, &self.keychain) {
             self.send_entry(Recipient::Everyone, &entry);
+        }
 
-            // Eagerly pull the next slot for this creator. The
-            // periodic anti-entropy at 1s is just the safety net;
-            // most catch-up flows through this reactive request.
-            self.network.send(
-                Recipient::Everyone,
-                Message::Request {
-                    round: entry.unit().round + 1,
-                    creator: entry.unit().creator,
-                },
-            );
+        // Demand-pull every parent slot we don't yet hold *fed*. Covers
+        // three cases at once: (a) parent body missing, (b) parent
+        // present but below sig threshold (the sender's response unions
+        // any sigs we're missing), (c) parent confirmed but ancestrally
+        // unfed (re-receiving the body re-fires this same parent-pull
+        // logic recursively, retrying the deeper walk-back). Once the
+        // parent is fed, the request stops firing.
+        if let Some(parent_round) = unit_round.checked_sub(1) {
+            for parent_creator in parents {
+                if !self.graph.is_fed(parent_round, parent_creator) {
+                    self.network.send(
+                        Recipient::Peer(sender),
+                        Message::Request {
+                            round: parent_round,
+                            creator: parent_creator,
+                        },
+                    );
+                }
+            }
         }
     }
 

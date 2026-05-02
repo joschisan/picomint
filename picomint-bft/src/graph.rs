@@ -224,25 +224,6 @@ impl<D: UnitData> Graph<D> {
             .find_map(|((_, c), e)| (*c == creator).then_some(e))
     }
 
-    /// Lowest round where `(round, creator)` is either absent from our
-    /// graph or present-but-unconfirmed. Used by the periodic anti-entropy
-    /// pull: for each peer in the federation we issue one
-    /// `Message::Request { round, creator }` per cycle to refill the
-    /// next gap along that peer's column. Idempotent and drop-tolerant —
-    /// the same round is requested again on the next cycle until it
-    /// confirms.
-    pub fn lowest_unconfirmed_round(&self, creator: PeerId) -> Round {
-        let t = self.threshold();
-        let mut round: Round = 0;
-        while let Some(entry) = self.units.get(&(round, creator)) {
-            if !entry.is_confirmed(t) {
-                return round;
-            }
-            round += 1;
-        }
-        round
-    }
-
     /// Insert a freshly-received unit (with the carried co-signatures)
     /// into the graph and return the inserted entry on a *fresh* insert.
     ///
@@ -254,15 +235,13 @@ impl<D: UnitData> Graph<D> {
     ///
     /// Insert is *lax* on ancestry: a fresh unit lands as soon as it's
     /// well-formed (correct cardinality of parent creators, all drawn
-    /// from the federation) and within the lookahead bound. Whether its
-    /// parents are locally confirmed is *not* checked here — that gate
-    /// has moved to [`Self::try_promote`], which feeds the extender and
-    /// permits the slot to be used as a parent for our own future units.
-    ///
-    /// Lookahead bound: a fresh unit at round R is accepted only when
-    /// `R <= max(existing rounds) + 1`. Caps memory growth from a peer
-    /// gossiping speculative far-future units; honest peers stay within
-    /// one round of each other thanks to anti-entropy.
+    /// from the federation). Whether its parents are locally confirmed
+    /// is *not* checked here — that gate has moved to
+    /// [`Self::try_promote`], which feeds the extender and permits the
+    /// slot to be used as a parent for our own future units. Accepting
+    /// at any round is what lets a node restarting from empty state
+    /// catch up by receiving a head-of-DAG push and then walking back
+    /// via demand-pull on missing parents.
     ///
     /// On both fresh and duplicate paths every carried sig is verified
     /// individually via `record_sig`; bad sigs are silently discarded.
@@ -286,17 +265,6 @@ impl<D: UnitData> Graph<D> {
 
             self.try_promote(unit.round, unit.creator);
 
-            return None;
-        }
-
-        // Lookahead bound: at most one round above the highest slot we
-        // currently hold. Empty graph admits round 0 only.
-        let next_allowed = self
-            .units
-            .keys()
-            .next_back()
-            .map_or(0, |(r, _)| r.saturating_add(1));
-        if unit.round > next_allowed {
             return None;
         }
 
