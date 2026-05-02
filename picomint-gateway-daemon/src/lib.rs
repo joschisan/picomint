@@ -36,7 +36,6 @@ use picomint_core::time::duration_since_epoch;
 use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_lnurl::VerifyResponse;
-use picomint_logging::LOG_GATEWAY;
 use picomint_redb::Database;
 use std::sync::RwLock;
 use tracing::warn;
@@ -97,10 +96,10 @@ impl AppState {
                     loaded.push((client.federation_id(), client));
                 }
                 Ok(None) => {
-                    warn!(target: LOG_GATEWAY, %federation_id, "Client DB not initialized, skipping");
+                    warn!(%federation_id, "Client DB not initialized, skipping");
                 }
                 Err(err) => {
-                    warn!(target: LOG_GATEWAY, %federation_id, %err, "Failed to load client");
+                    warn!(%federation_id, %err, "Failed to load client");
                 }
             }
         }

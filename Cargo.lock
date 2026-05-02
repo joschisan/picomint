@@ -3536,7 +3536,6 @@ dependencies = [
  "bitcoincore-rpc",
  "esplora-client",
  "picomint-core",
- "picomint-logging",
  "tokio",
  "tracing",
 ]
@@ -3561,7 +3560,6 @@ dependencies = [
  "picomint-encoding",
  "picomint-eventlog",
  "picomint-lnurl",
- "picomint-logging",
  "picomint-redb",
  "picomint-tbs",
  "picomint-tpe",
@@ -3600,7 +3598,6 @@ dependencies = [
  "miniscript",
  "picomint-base32",
  "picomint-encoding",
- "picomint-logging",
  "picomint-redb",
  "picomint-tbs",
  "picomint-tpe",
@@ -3723,7 +3720,6 @@ dependencies = [
  "picomint-eventlog",
  "picomint-gateway-cli-core",
  "picomint-lnurl",
- "picomint-logging",
  "picomint-redb",
  "picomint-tpe",
  "rand 0.8.5",
@@ -3734,6 +3730,7 @@ dependencies = [
  "tokio-rustls",
  "tower-http",
  "tracing",
+ "tracing-subscriber",
  "url",
 ]
 
@@ -3757,7 +3754,6 @@ dependencies = [
  "picomint-eventlog",
  "picomint-gateway-cli-core",
  "picomint-lnurl",
- "picomint-logging",
  "picomint-redb",
  "picomint-server-cli-core",
  "rusqlite",
@@ -3766,6 +3762,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3781,14 +3778,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-logging"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "picomint-recurring-daemon"
 version = "0.1.0"
 dependencies = [
@@ -3801,7 +3790,6 @@ dependencies = [
  "picomint-core",
  "picomint-encoding",
  "picomint-lnurl",
- "picomint-logging",
  "picomint-tpe",
  "rand 0.8.5",
  "reqwest 0.12.22",
@@ -3809,6 +3797,7 @@ dependencies = [
  "tokio",
  "tower-http",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3872,7 +3861,6 @@ dependencies = [
  "picomint-bitcoin-rpc",
  "picomint-core",
  "picomint-encoding",
- "picomint-logging",
  "picomint-redb",
  "picomint-server-cli-core",
  "picomint-tbs",
@@ -3886,6 +3874,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tracing",
+ "tracing-subscriber",
  "url",
 ]
 

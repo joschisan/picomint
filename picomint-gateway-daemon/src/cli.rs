@@ -40,7 +40,6 @@ use picomint_gateway_cli_core::{
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_MNEMONIC,
 };
-use picomint_logging::LOG_GATEWAY;
 use reqwest::StatusCode;
 use tokio::net::UnixListener;
 use tower_http::cors::CorsLayer;
@@ -163,7 +162,7 @@ fn router() -> Router<AppState> {
 // ---------------------------------------------------------------------------
 
 /// Display high-level information about the Gateway
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, CliError> {
     let node_status = state.node.status();
 
@@ -181,7 +180,7 @@ async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, CliEr
 }
 
 /// Returns the gateway's mnemonic words
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse>, CliError> {
     let words = state
         .client_factory
@@ -198,7 +197,7 @@ async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse
 // ---------------------------------------------------------------------------
 
 /// Returns the onchain and lightning channel capacity balances
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn ldk_balances(
     State(state): State<AppState>,
 ) -> Result<Json<LdkBalancesResponse>, CliError> {
@@ -224,7 +223,7 @@ async fn ldk_balances(
 }
 
 /// Opens a Lightning channel to a peer
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn ldk_channel_open(
     State(state): State<AppState>,
     Json(payload): Json<LdkChannelOpenRequest>,
@@ -247,12 +246,12 @@ async fn ldk_channel_open(
         )
         .map_err(|e| CliError::internal(format!("Failed to open channel: {e}")))?;
 
-    info!(target: LOG_GATEWAY, pubkey = %payload.pubkey, "Initiated channel open");
+    info!(pubkey = %payload.pubkey, "Initiated channel open");
     Ok(Json(()))
 }
 
 /// Closes all channels with a peer
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn ldk_channel_close(
     State(state): State<AppState>,
     Json(payload): Json<LdkChannelCloseRequest>,
@@ -296,7 +295,7 @@ async fn ldk_channel_close(
         }
     }
 
-    info!(target: LOG_GATEWAY, pubkey = %payload.pubkey, "Initiated channel closure");
+    info!(pubkey = %payload.pubkey, "Initiated channel closure");
     let response = LdkChannelCloseResponse {
         num_channels_closed,
     };
@@ -304,7 +303,7 @@ async fn ldk_channel_close(
 }
 
 /// Lists all Lightning channels
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn ldk_channel_list(
     State(state): State<AppState>,
 ) -> Result<Json<LdkChannelListResponse>, CliError> {
@@ -350,7 +349,7 @@ async fn ldk_channel_list(
 }
 
 /// Generates an onchain address to fund the gateway's lightning node
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn ldk_onchain_receive(
     State(state): State<AppState>,
 ) -> Result<Json<LdkOnchainReceiveResponse>, CliError> {
@@ -366,7 +365,7 @@ async fn ldk_onchain_receive(
 }
 
 /// Send funds from the gateway's lightning node on-chain wallet
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn ldk_onchain_send(
     State(state): State<AppState>,
     Json(payload): Json<LdkOnchainSendRequest>,
@@ -380,12 +379,12 @@ async fn ldk_onchain_send(
             FeeRate::from_sat_per_vb(payload.sats_per_vbyte),
         )
         .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?;
-    info!(target: LOG_GATEWAY, txid = %txid, "Sent onchain transaction");
+    info!(txid = %txid, "Sent onchain transaction");
     Ok(Json(LdkOnchainSendResponse { txid }))
 }
 
 /// Creates an invoice directly payable to the gateway's lightning node
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn ldk_invoice_create(
     State(state): State<AppState>,
     Json(payload): Json<LdkInvoiceCreateRequest>,
@@ -411,7 +410,7 @@ async fn ldk_invoice_create(
 }
 
 /// Pays an outgoing LN invoice using the gateway's own funds
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn ldk_invoice_pay(
     State(state): State<AppState>,
     Json(payload): Json<LdkInvoicePayRequest>,
@@ -449,7 +448,7 @@ async fn ldk_invoice_pay(
 }
 
 /// Connects to a Lightning peer
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn ldk_peer_connect(
     State(state): State<AppState>,
     Json(payload): Json<LdkPeerConnectRequest>,
@@ -464,12 +463,12 @@ async fn ldk_peer_connect(
         .connect(payload.pubkey, address, true)
         .map_err(|e| CliError::internal(format!("Failed to connect to peer: {e}")))?;
 
-    info!(target: LOG_GATEWAY, pubkey = %payload.pubkey, "Connected to peer");
+    info!(pubkey = %payload.pubkey, "Connected to peer");
     Ok(Json(()))
 }
 
 /// Disconnects from a Lightning peer
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn ldk_peer_disconnect(
     State(state): State<AppState>,
     Json(payload): Json<LdkPeerDisconnectRequest>,
@@ -479,12 +478,12 @@ async fn ldk_peer_disconnect(
         .disconnect(payload.pubkey)
         .map_err(|e| CliError::internal(format!("Failed to disconnect from peer: {e}")))?;
 
-    info!(target: LOG_GATEWAY, pubkey = %payload.pubkey, "Disconnected from peer");
+    info!(pubkey = %payload.pubkey, "Disconnected from peer");
     Ok(Json(()))
 }
 
 /// Lists all Lightning peers
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn ldk_peer_list(
     State(state): State<AppState>,
 ) -> Result<Json<LdkPeerListResponse>, CliError> {
@@ -507,7 +506,7 @@ async fn ldk_peer_list(
 // ---------------------------------------------------------------------------
 
 /// Join a new federation
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn federation_join(
     State(state): State<AppState>,
     Json(payload): Json<FederationJoinRequest>,
@@ -539,13 +538,13 @@ async fn federation_join(
     // Trailers are daemon-wide singletons spawned at startup; new
     // federations' events flow through the existing global event log.
 
-    debug!(target: LOG_GATEWAY, federation_id = %invite_code.federation_id, "Federation connected");
+    debug!(federation_id = %invite_code.federation_id, "Federation connected");
 
     Ok(Json(()))
 }
 
 /// List connected federations
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn federation_list(
     State(state): State<AppState>,
 ) -> Result<Json<FederationListResponse>, CliError> {
@@ -554,7 +553,7 @@ async fn federation_list(
 }
 
 /// Display federation config
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn federation_config(
     State(state): State<AppState>,
     Json(payload): Json<FederationConfigRequest>,
@@ -570,7 +569,7 @@ async fn federation_config(
 }
 
 /// Get a federation's ecash balance
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn federation_balance(
     State(state): State<AppState>,
     Json(payload): Json<FederationBalanceRequest>,
@@ -587,7 +586,7 @@ async fn federation_balance(
 
 /// Generate an invite code that points new clients at one specific guardian
 /// of one specific connected federation.
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn federation_invite(
     State(state): State<AppState>,
     Json(payload): Json<FederationInviteRequest>,
@@ -635,7 +634,7 @@ async fn resolve_client(
 }
 
 /// Count held ecash notes by denomination
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn federation_module_mint_count(
     State(state): State<AppState>,
     Json(payload): Json<FederationMintCountRequest>,
@@ -646,7 +645,7 @@ async fn federation_module_mint_count(
 }
 
 /// Spend ecash from a federation
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn federation_module_mint_send(
     State(state): State<AppState>,
     Json(payload): Json<FederationMintSendRequest>,
@@ -667,7 +666,7 @@ async fn federation_module_mint_send(
 /// Receive ecash into the gateway. The ecash string itself carries the target
 /// federation id, so no `--id` is needed. Blocks until issuance either
 /// completes or fails federation-side.
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn federation_module_mint_receive(
     State(state): State<AppState>,
     Json(payload): Json<FederationMintReceiveRequest>,
@@ -702,7 +701,7 @@ async fn federation_module_mint_receive(
 }
 
 /// Fetch the current onchain send-fee for a federation
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn federation_module_wallet_send_fee(
     State(state): State<AppState>,
     Json(payload): Json<FederationWalletSendFeeRequest>,
@@ -719,7 +718,7 @@ async fn federation_module_wallet_send_fee(
 /// Withdraw onchain from a federation. Blocks until the send reaches a
 /// terminal state: confirmed broadcast, federation rejected the input tx, or
 /// the federation accepted but never produced a bitcoin txid.
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn federation_module_wallet_send(
     State(state): State<AppState>,
     Json(payload): Json<FederationWalletSendRequest>,
@@ -752,7 +751,7 @@ async fn federation_module_wallet_send(
 }
 
 /// Generate deposit address for a federation
-#[instrument(target = LOG_GATEWAY, skip_all, err)]
+#[instrument(skip_all, err)]
 async fn federation_module_wallet_receive(
     State(state): State<AppState>,
     Json(payload): Json<FederationWalletReceiveRequest>,

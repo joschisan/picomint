@@ -50,7 +50,6 @@ use picomint_core::config::ConsensusConfig;
 use picomint_core::invite::InviteCode;
 use picomint_core::methods::{ConfigRequest, ConfigResponse, CoreMethod};
 use picomint_core::module::Method;
-use picomint_logging::LOG_CLIENT_NET;
 use tracing::debug;
 
 pub use client::Client;
@@ -90,7 +89,6 @@ pub struct GetInviteCodeRequest {
 /// code, then re-verifies it with the full peer set from the config itself.
 pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<ConsensusConfig> {
     debug!(
-        target: LOG_CLIENT_NET,
         invite = %picomint_base32::encode(invite),
         node_id = %invite.node_id,
         "Downloading client config via invite code"
@@ -117,7 +115,7 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
         .map(|(peer, ep)| (*peer, ep.iroh_pk))
         .collect();
 
-    debug!(target: LOG_CLIENT_NET, "Verifying client config with all peers");
+    debug!("Verifying client config with all peers");
 
     let api_full = FederationApi::new(endpoint.clone(), api_endpoints);
     let client_config = api_full

@@ -10,7 +10,6 @@ use picomint_core::secp256k1::Keypair;
 use picomint_core::wire;
 use picomint_core::{OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_logging::LOG_CLIENT_MODULE_GW;
 use picomint_redb::WriteTxRef;
 use tpe::{DecryptionKeyShare, aggregate_dk_shares};
 use tracing::warn;
@@ -109,10 +108,7 @@ impl StateMachine for ReceiveStateMachine {
             .contract
             .verify_agg_decryption_key(&ctx.tpe_agg_pk, &agg_decryption_key)
         {
-            warn!(
-                target: LOG_CLIENT_MODULE_GW,
-                "Aggregate decryption key invalid — TPE config inconsistent"
-            );
+            warn!("Aggregate decryption key invalid — TPE config inconsistent");
             ctx.client_ctx
                 .log_event(dbtx, self.operation_id, ReceiveFailureEvent);
             return None;

@@ -217,7 +217,6 @@ async fn trailer(state: AppState) {
                 .expect("spawn_blocking join")
             {
                 tracing::error!(
-                    target: picomint_logging::LOG_GATEWAY,
                     error = %e,
                     "analytics insert failed"
                 );

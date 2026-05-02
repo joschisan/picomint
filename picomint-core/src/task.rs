@@ -5,7 +5,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use picomint_logging::LOG_TASK;
 use thiserror::Error;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
@@ -105,10 +104,7 @@ impl TaskGroup {
                 () = terminate => {},
             }
 
-            info!(
-                target: LOG_TASK,
-                "signal received, starting graceful shutdown"
-            );
+            info!("signal received, starting graceful shutdown");
             token.cancel();
         });
     }

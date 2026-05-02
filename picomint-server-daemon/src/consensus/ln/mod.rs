@@ -17,7 +17,6 @@ use picomint_core::ln::{
 use picomint_core::module::{ApiError, InputMeta, TransactionItemAmounts};
 use picomint_core::time::duration_since_epoch;
 use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
-use picomint_logging::LOG_MODULE_LN;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use tpe::{PublicKeyShare, SecretKeyShare};
 use tracing::trace;
@@ -100,7 +99,7 @@ impl Lightning {
         )];
 
         if let Ok(block_count) = self.get_block_count() {
-            trace!(target: LOG_MODULE_LN, ?block_count, "Proposing block count");
+            trace!(?block_count, "Proposing block count");
             items.push(LightningConsensusItem::BlockCountVote(block_count));
         }
 
@@ -113,7 +112,7 @@ impl Lightning {
         consensus_item: LightningConsensusItem,
         peer: PeerId,
     ) -> anyhow::Result<()> {
-        trace!(target: LOG_MODULE_LN, ?consensus_item, "Processing consensus item proposal");
+        trace!(?consensus_item, "Processing consensus item proposal");
 
         match consensus_item {
             LightningConsensusItem::BlockCountVote(vote) => {

@@ -25,7 +25,6 @@ use picomint_core::task::TaskGroup;
 use picomint_core::transaction::ConsensusItem;
 use picomint_core::wire;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_logging::{LOG_CONSENSUS, LOG_CORE, LOG_NET_API};
 use picomint_redb::Database;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
@@ -75,13 +74,13 @@ pub async fn run(
     // read its status during startup (the wallet module broadcast loop).
     let _num_peers = NumPeers::from(cfg.consensus.peers.len());
 
-    info!(target: LOG_CORE, "Initialise module mint...");
+    info!("Initialise module mint...");
     let mint = Arc::new(crate::consensus::mint::Mint::new(
         cfg.mint_config(),
         db.clone(),
     ));
 
-    info!(target: LOG_CORE, "Initialise module wallet...");
+    info!("Initialise module wallet...");
     let wallet = Arc::new(crate::consensus::wallet::Wallet::new(
         cfg.wallet_config(),
         db.clone(),
@@ -90,7 +89,7 @@ pub async fn run(
         cfg.consensus.network,
     ));
 
-    info!(target: LOG_CORE, "Initialise module ln...");
+    info!("Initialise module ln...");
     let ln = Arc::new(crate::consensus::ln::Lightning::new(
         cfg.ln_config(),
         db.clone(),
@@ -125,14 +124,14 @@ pub async fn run(
         task_group: task_group.clone(),
     });
 
-    info!(target: LOG_CONSENSUS, "Starting Consensus Api...");
+    info!("Starting Consensus Api...");
 
     task_group.spawn_cancellable(
         "iroh-api",
         run_iroh_api(consensus_api.clone(), foreign_conn_rx, task_group.clone()),
     );
 
-    info!(target: LOG_CONSENSUS, "Starting Submission of Module CI proposals...");
+    info!("Starting Submission of Module CI proposals...");
 
     task_group.spawn("citem_proposals", {
         let server = consensus_api.server.clone();
@@ -179,9 +178,9 @@ pub async fn run(
                 .await
                 .expect("Failed to serve dashboard UI");
         });
-        info!(target: LOG_CONSENSUS, "Dashboard UI running at http://{ui_addr} 🚀");
+        info!("Dashboard UI running at http://{ui_addr} 🚀");
     } else {
-        info!(target: LOG_CONSENSUS, "UI disabled (UI_ADDR unset); dashboard available via CLI only");
+        info!("UI disabled (UI_ADDR unset); dashboard available via CLI only");
     }
 
     {
@@ -207,20 +206,20 @@ pub async fn run(
                         break;
                     }
 
-                    info!(target: LOG_CONSENSUS, "Waiting for bitcoin backend to sync... {progress:.1}%");
+                    info!("Waiting for bitcoin backend to sync... {progress:.1}%");
                 } else {
                     break;
                 }
             }
             None => {
-                info!(target: LOG_CONSENSUS, "Waiting to connect to bitcoin backend...");
+                info!("Waiting to connect to bitcoin backend...");
             }
         }
 
         sleep(Duration::from_secs(1)).await;
     }
 
-    info!(target: LOG_CONSENSUS, "Starting Consensus Engine...");
+    info!("Starting Consensus Engine...");
 
     ConsensusEngine {
         db,
@@ -248,7 +247,6 @@ async fn run_iroh_api(
     while let Ok(connection) = foreign_conn_rx.recv().await {
         if parallel_connections_limit.available_permits() == 0 {
             warn!(
-                target: LOG_NET_API,
                 limit = MAX_CONNECTIONS,
                 "Iroh API connection limit reached, blocking new connections"
             );
@@ -260,12 +258,17 @@ async fn run_iroh_api(
             .expect("semaphore should not be closed");
         task_group.spawn_cancellable_silent(
             "handle-iroh-connection",
-            handle_incoming(consensus_api.clone(), task_group.clone(), connection, permit)
-                .then(|result| async {
-                    if let Err(err) = result {
-                        warn!(target: LOG_NET_API, err = %format_args!("{err:#}"), "Failed to handle iroh connection");
-                    }
-                }),
+            handle_incoming(
+                consensus_api.clone(),
+                task_group.clone(),
+                connection,
+                permit,
+            )
+            .then(|result| async {
+                if let Err(err) = result {
+                    warn!(err = %format_args!("{err:#}"), "Failed to handle iroh connection");
+                }
+            }),
         );
     }
 }
@@ -283,7 +286,6 @@ async fn handle_incoming(
 
         if parallel_requests_limit.available_permits() == 0 {
             warn!(
-                target: LOG_NET_API,
                 limit = MAX_REQUESTS_PER_CONNECTION,
                 "Iroh API request limit reached for connection, blocking new requests"
             );
@@ -298,7 +300,7 @@ async fn handle_incoming(
             handle_request(consensus_api.clone(), send_stream, recv_stream, permit).then(
                 |result| async {
                     if let Err(err) = result {
-                        warn!(target: LOG_NET_API, err = %format_args!("{err:#}"), "Failed to handle iroh request");
+                        warn!(err = %format_args!("{err:#}"), "Failed to handle iroh request");
                     }
                 },
             ),

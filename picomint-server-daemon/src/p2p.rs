@@ -23,7 +23,6 @@ use picomint_core::task::TaskGroup;
 use picomint_core::transaction::ConsensusItem;
 use picomint_core::{PeerId, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_logging::{LOG_CONSENSUS, LOG_NET_PEER};
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio::time::sleep;
@@ -277,7 +276,7 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
         }
 
         task_group.spawn_cancellable("handle-incoming-p2p-connections", async move {
-            info!(target: LOG_NET_PEER, "Starting listening task for p2p connections");
+            info!("Starting listening task for p2p connections");
 
             loop {
                 match connector.accept().await {
@@ -298,18 +297,17 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
                         // a pre-bootstrap client has no business connecting.
                         if foreign_conn_tx.try_send(connection).is_err() {
                             debug!(
-                                target: LOG_NET_PEER,
                                 "Dropping foreign connection: api channel full or closed"
                             );
                         }
                     }
                     Err(err) => {
-                        warn!(target: LOG_NET_PEER, our_id = %identity, err = %format_args!("{err:#}"), "Error while opening incoming connection");
+                        warn!(our_id = %identity, err = %format_args!("{err:#}"), "Error while opening incoming connection");
                     }
                 }
             }
 
-            info!(target: LOG_NET_PEER, "Shutting down listening task for p2p connections");
+            info!("Shutting down listening task for p2p connections");
         });
 
         ReconnectP2PConnections { connections }
@@ -329,7 +327,7 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
                     connection.try_send(message);
                 }
                 _ => {
-                    warn!(target: LOG_NET_PEER, "No connection for peer {peer}");
+                    warn!("No connection for peer {peer}");
                 }
             },
         }
@@ -382,7 +380,7 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
         task_group.spawn_cancellable(
             format!("io-state-machine-{peer_id}"),
             async move {
-                info!(target: LOG_NET_PEER, "Starting peer connection state machine");
+                info!("Starting peer connection state machine");
 
                 let mut state_machine = P2PConnectionStateMachine {
                     common: P2PConnectionSMCommon {
@@ -401,7 +399,7 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
                     state_machine = sm;
                 }
 
-                info!(target: LOG_NET_PEER, "Shutting down peer connection state machine");
+                info!("Shutting down peer connection state machine");
             }
             .instrument(info_span!("io-state-machine", ?peer_id)),
         );
@@ -414,7 +412,7 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
 
     fn try_send(&self, message: M) {
         if self.outgoing_sender.try_send(message).is_err() {
-            debug!(target: LOG_NET_PEER, "Outgoing message channel is full");
+            debug!("Outgoing message channel is full");
         }
     }
 
@@ -478,7 +476,7 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
                 Some(self.send_message(connection, message.ok()?).await)
             },
             connection = self.incoming_connections.recv() => {
-                info!(target: LOG_NET_PEER, "Connected to peer");
+                info!("Connected to peer");
 
                 Some(P2PConnectionSMState::Connected(connection.ok()?))
             },
@@ -491,7 +489,7 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
                 match P2PConnection::read_frame::<M>(&mut stream).await {
                     Ok(message) => {
                         if self.incoming_sender.try_send(message).is_err() {
-                            debug!(target: LOG_NET_PEER, "Incoming message channel is full");
+                            debug!("Incoming message channel is full");
                         }
 
                         Some(P2PConnectionSMState::Connected(connection))
@@ -503,7 +501,7 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
     }
 
     fn disconnect(&self, error: anyhow::Error) -> P2PConnectionSMState {
-        info!(target: LOG_NET_PEER, "Disconnected from peer: {}", error);
+        info!("Disconnected from peer: {}", error);
 
         P2PConnectionSMState::Disconnected(networking_backoff().build())
     }
@@ -526,22 +524,22 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
     ) -> Option<P2PConnectionSMState> {
         tokio::select! {
             connection = self.incoming_connections.recv() => {
-                info!(target: LOG_NET_PEER, "Connected to peer");
+                info!("Connected to peer");
 
                 Some(P2PConnectionSMState::Connected(connection.ok()?))
             },
             // To prevent reconnection ping-pongs, only the side with lower
             // PeerId reconnects.
             () = sleep(backoff.next().expect("Unlimited retries")), if self.our_id < self.peer_id => {
-                info!(target: LOG_NET_PEER, "Attempting to reconnect to peer");
+                info!("Attempting to reconnect to peer");
 
                 match self.connector.connect(self.peer_id).await {
                     Ok(connection) => {
-                        info!(target: LOG_NET_PEER, "Connected to peer");
+                        info!("Connected to peer");
 
                         return Some(P2PConnectionSMState::Connected(connection));
                     }
-                    Err(e) => warn!(target: LOG_CONSENSUS, "Failed to connect to peer: {e}"),
+                    Err(e) => warn!("Failed to connect to peer: {e}"),
                 }
 
                 Some(P2PConnectionSMState::Disconnected(backoff))

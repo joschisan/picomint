@@ -29,7 +29,6 @@ use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_encoding::Encodable;
 
 pub use self::secret::WalletSecret;
-use picomint_logging::LOG_CLIENT_MODULE_WALLET;
 use secp256k1::Keypair;
 use send_sm::SendStateMachine;
 use thiserror::Error;
@@ -317,7 +316,7 @@ impl WalletClientModule {
                         }
                     }
                     Err(e) => {
-                        warn!(target: LOG_CLIENT_MODULE_WALLET, "Failed to fetch outputs: {e}");
+                        warn!("Failed to fetch outputs: {e}");
                     }
                 }
 

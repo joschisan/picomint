@@ -23,10 +23,13 @@ use picomint_core::ln::gateway_api::PaymentFee;
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::db::{INCOMING_CONTRACT, OUTGOING_CONTRACT, PROCESSED_LDK_EVENT};
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
-use picomint_logging::{LOG_GATEWAY, LOG_LIGHTNING, TracingSetup};
 use picomint_redb::WriteTxRef;
 use rand::rngs::OsRng;
 use tracing::{info, warn};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use url::Url;
 
 /// Command line parameters for starting the gateway.
@@ -111,7 +114,13 @@ pub struct GatewayOpts {
 }
 
 fn main() -> anyhow::Result<()> {
-    TracingSetup::default().init()?;
+    let filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy();
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .try_init()?;
 
     // 1. Parse CLI args
     let opts = GatewayOpts::parse();
@@ -176,7 +185,7 @@ fn main() -> anyhow::Result<()> {
         _ => unreachable!("ArgGroup enforces at least one chain source"),
     }
 
-    info!(target: LOG_LIGHTNING, "Starting LDK Node...");
+    info!("Starting LDK Node...");
 
     let node = Arc::new(node_builder.build()?);
 
@@ -226,23 +235,23 @@ fn main() -> anyhow::Result<()> {
     // 11. Wait for shutdown signal
     runtime.block_on(shutdown_signal());
 
-    info!(target: LOG_GATEWAY, "Gatewayd shutting down...");
+    info!("Gatewayd shutting down...");
 
     runtime.block_on(task_group.shutdown_join_all(None))?;
 
     if let Err(e) = runtime.block_on(public_task) {
-        warn!(target: LOG_GATEWAY, err = %e, "Failed to join public webserver task");
+        warn!(err = %e, "Failed to join public webserver task");
     }
 
     if let Err(e) = runtime.block_on(cli_task) {
-        warn!(target: LOG_GATEWAY, err = %e, "Failed to join CLI webserver task");
+        warn!(err = %e, "Failed to join CLI webserver task");
     }
 
     if let Err(e) = runtime.block_on(events_task) {
-        warn!(target: LOG_GATEWAY, err = %e, "Failed to join LDK events task");
+        warn!(err = %e, "Failed to join LDK events task");
     }
 
-    info!(target: LOG_GATEWAY, "Gatewayd exiting...");
+    info!("Gatewayd exiting...");
 
     Ok(())
 }
@@ -333,7 +342,6 @@ fn handle_payment_claimable(
 
     if row.amount.msats != amount_msat {
         warn!(
-            target: LOG_GATEWAY,
             expected = row.amount.msats,
             got = amount_msat,
             "Incoming HTLC amount mismatch",
@@ -361,10 +369,7 @@ fn handle_payment_claimable(
             )
             .is_err()
         {
-            tracing::error!(
-                target: LOG_GATEWAY,
-                "start_receive failed; failing HTLC",
-            );
+            tracing::error!("start_receive failed; failing HTLC",);
 
             state
                 .node

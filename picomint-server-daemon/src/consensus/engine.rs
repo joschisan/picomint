@@ -18,7 +18,6 @@ use tokio::sync::watch;
 use tokio::time::sleep;
 use tracing::{debug, info, instrument, trace};
 
-use crate::LOG_CONSENSUS;
 use crate::config::ServerConfig;
 use crate::consensus::bft::{DataProvider, Network, RedbBackup};
 use crate::consensus::db::{
@@ -48,7 +47,7 @@ impl ConsensusEngine {
         self.cfg.private.identity
     }
 
-    #[instrument(target = LOG_CONSENSUS, name = "run", skip_all, fields(id=%self.cfg.private.identity))]
+    #[instrument(name = "run", skip_all, fields(id=%self.cfg.private.identity))]
     pub async fn run(self) -> anyhow::Result<()> {
         self.run_consensus(self.task_group.make_handle()).await
     }
@@ -60,11 +59,7 @@ impl ConsensusEngine {
         while !task_handle.is_shutting_down() {
             let session_index = self.get_finished_session_count().await;
 
-            info!(
-                target: LOG_CONSENSUS,
-                session_index,
-                "Starting consensus session"
-            );
+            info!(session_index, "Starting consensus session");
 
             if self
                 .run_session(self.connections.clone(), session_index)
@@ -74,10 +69,10 @@ impl ConsensusEngine {
                 return Ok(());
             }
 
-            info!(target: LOG_CONSENSUS, ?session_index, "Completed consensus session");
+            info!(?session_index, "Completed consensus session");
 
             if Some(session_index) == self.shutdown_receiver.borrow().to_owned() {
-                info!(target: LOG_CONSENSUS, "Initiating shutdown, waiting for peers to complete the session...");
+                info!("Initiating shutdown, waiting for peers to complete the session...");
 
                 sleep(Duration::from_mins(1)).await;
 
@@ -85,7 +80,7 @@ impl ConsensusEngine {
             }
         }
 
-        info!(target: LOG_CONSENSUS, "Consensus task shut down");
+        info!("Consensus task shut down");
 
         Ok(())
     }
@@ -170,7 +165,7 @@ impl ConsensusEngine {
             "Our created signed session outcome fails validation"
         );
 
-        info!(target: LOG_CONSENSUS, ?session_index, "Terminating BFT session");
+        info!(?session_index, "Terminating BFT session");
 
         // The engine has no internal stopping condition; abort it now that
         // we hold the signed outcome — peers that still need it will fetch
@@ -215,7 +210,6 @@ impl ConsensusEngine {
 
                     if round >= self.cfg.consensus.bft_rounds_per_session {
                         info!(
-                            target: LOG_CONSENSUS,
                             session_index,
                             "Reached BFT round limit, stopping item collection"
                         );
@@ -235,7 +229,6 @@ impl ConsensusEngine {
                     // Validate signatures
                     if self.validate_signed_session_outcome(&p2p_outcome, session_index) {
                         info!(
-                            target: LOG_CONSENSUS,
                             session_index,
                             peer_id = %peer_id,
                             "Received SignedSessionOutcome via P2P while collection signatures"
@@ -250,7 +243,6 @@ impl ConsensusEngine {
                             .split_at(pending_accepted_items.len());
 
                         info!(
-                            target: LOG_CONSENSUS,
                             ?session_index,
                             processed = %processed.len(),
                             unprocessed = %unprocessed.len(),
@@ -278,7 +270,6 @@ impl ConsensusEngine {
                         }
 
                         info!(
-                            target: LOG_CONSENSUS,
                             ?session_index,
                             peer_id = %peer_id,
                             "Successfully recovered session via P2P"
@@ -288,7 +279,6 @@ impl ConsensusEngine {
                     }
 
                     debug!(
-                        target: LOG_CONSENSUS,
                         %peer_id,
                         "Invalid P2P SignedSessionOutcome"
                     );
@@ -306,17 +296,17 @@ impl ConsensusEngine {
 
         assert_eq!(item_index, items.len() as u64);
 
-        info!(target: LOG_CONSENSUS, ?session_index, ?item_index, "Processed all items for session");
+        info!(
+            ?session_index,
+            ?item_index,
+            "Processed all items for session"
+        );
 
         let session_outcome = SessionOutcome { items };
 
         let header = session_outcome.header(session_index);
 
-        info!(
-            target: LOG_CONSENSUS,
-            ?session_index,
-            "Signing session header..."
-        );
+        info!(?session_index, "Signing session header...");
 
         let keychain = build_keychain(&self.cfg);
 
@@ -338,7 +328,6 @@ impl ConsensusEngine {
                         signatures.insert(peer_id, signature);
 
                         info!(
-                            target: LOG_CONSENSUS,
                             session_index,
                             peer_id = %peer_id,
                             "Collected signature from peer via P2P"
@@ -346,7 +335,6 @@ impl ConsensusEngine {
                     }
 
                     debug!(
-                        target: LOG_CONSENSUS,
                         session_index,
                         peer_id = %peer_id,
                         "Invalid P2P signature from peer"
@@ -363,7 +351,6 @@ impl ConsensusEngine {
                         );
 
                         info!(
-                            target: LOG_CONSENSUS,
                             session_index,
                             %peer_id,
                             "Recovered session via P2P while collecting signatures"
@@ -373,7 +360,6 @@ impl ConsensusEngine {
                     }
 
                     debug!(
-                        target: LOG_CONSENSUS,
                         %peer_id,
                         "Invalid P2P SignedSessionOutcome"
                     );
@@ -394,7 +380,6 @@ impl ConsensusEngine {
         }
 
         info!(
-            target: LOG_CONSENSUS,
             session_index,
             "Successfully collected threshold of signatures"
         );
@@ -462,7 +447,7 @@ impl ConsensusEngine {
         tx.commit();
     }
 
-    #[instrument(target = LOG_CONSENSUS, skip(self, item), level = "info")]
+    #[instrument(skip(self, item), level = "info")]
     pub async fn process_consensus_item(
         &self,
         session_index: u64,
@@ -471,7 +456,6 @@ impl ConsensusEngine {
         peer: PeerId,
     ) -> anyhow::Result<()> {
         trace!(
-            target: LOG_CONSENSUS,
             %peer,
             item = ?item,
             "Processing consensus item"
@@ -503,7 +487,6 @@ impl ConsensusEngine {
             .inspect_err(|err| {
                 // Rejected items are very common, so only trace level
                 trace!(
-                    target: LOG_CONSENSUS,
                     %peer,
                     item = ?item,
                     err = %format_args!("{err:#}"),
@@ -521,7 +504,6 @@ impl ConsensusEngine {
         );
 
         debug!(
-            target: LOG_CONSENSUS,
             %peer,
             item = ?item,
             "Processed consensus item"
@@ -548,7 +530,6 @@ impl ConsensusEngine {
                 let txid = transaction.tx_hash();
                 if tx.get(&ACCEPTED_TRANSACTION, &txid).is_some() {
                     debug!(
-                        target: LOG_CONSENSUS,
                         %txid,
                         "Transaction already accepted"
                     );
@@ -559,7 +540,7 @@ impl ConsensusEngine {
                     .await
                     .map_err(|error| anyhow!(error.to_string()))?;
 
-                debug!(target: LOG_CONSENSUS, %txid,  "Transaction accepted");
+                debug!(%txid,  "Transaction accepted");
                 tx.insert(&ACCEPTED_TRANSACTION, &txid, &());
 
                 let audit = self.server.audit(tx).await;

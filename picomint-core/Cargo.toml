@@ -32,7 +32,6 @@ lightning-invoice = { workspace = true }
 miniscript = { workspace = true, features = ["serde"] }
 picomint-base32 = { workspace = true }
 picomint-encoding = { workspace = true }
-picomint-logging = { workspace = true }
 picomint-redb = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }

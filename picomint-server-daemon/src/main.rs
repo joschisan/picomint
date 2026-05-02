@@ -14,10 +14,13 @@ use clap::{ArgGroup, Parser};
 use futures::FutureExt as _;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoindClient, EsploraClient};
 use picomint_core::task::TaskGroup;
-use picomint_logging::{LOG_CORE, TracingSetup};
 use picomint_server_daemon::config::ConfigGenSettings;
 use picomint_server_daemon::{DB_FILE, run_server};
 use tracing::{debug, error, info};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use url::Url;
 
 /// Time we will wait before forcefully shutting down tasks on exit.
@@ -85,7 +88,14 @@ async fn main() -> anyhow::Result<Infallible> {
 
     let server_opts = ServerOpts::parse();
 
-    TracingSetup::default().init().unwrap();
+    let filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy();
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .try_init()
+        .unwrap();
 
     info!("Starting picomint-server-daemon (version: {picomint_version})");
 
@@ -157,18 +167,18 @@ async fn main() -> anyhow::Result<Infallible> {
         .make_handle()
         .make_shutdown_rx()
         .then(|()| async {
-            info!(target: LOG_CORE, "Shutdown called");
+            info!("Shutdown called");
         });
 
     shutdown_future.await;
 
-    debug!(target: LOG_CORE, "Terminating main task");
+    debug!("Terminating main task");
 
     if let Err(err) = root_task_group.join_all(Some(SHUTDOWN_TIMEOUT)).await {
-        error!(target: LOG_CORE, err = %format_args!("{err:#}"), "Error while shutting down task group");
+        error!(err = %format_args!("{err:#}"), "Error while shutting down task group");
     }
 
-    debug!(target: LOG_CORE, "Shutdown complete");
+    debug!("Shutdown complete");
 
     std::process::exit(-1);
 }
