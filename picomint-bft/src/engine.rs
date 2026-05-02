@@ -19,7 +19,7 @@ use crate::unit::{Round, Unit, UnitData};
 ///
 /// Pull is demand-driven, not periodic: on every received unit, we
 /// unicast a `Request` to the sender for any of that unit's parents
-/// we don't yet hold *fed* locally. Re-issued on every receive (fresh
+/// we don't yet hold *extended* locally. Re-issued on every receive (fresh
 /// or duplicate), so a dropped `Request` is retried the next time the
 /// pushing peer ships us the same child.
 const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
@@ -174,7 +174,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
     /// Apply one inbound `Unit` message: verify the creator's sig,
     /// add the body to the graph (lax), record our own cosig if this
     /// is the first time we sign this slot, demand-pull any parents
-    /// we don't yet hold *fed* from the immediate sender, and — only
+    /// we don't yet hold *extended* from the immediate sender, and — only
     /// when our own cosig was newly added — broadcast a `Cosig` so
     /// every other peer learns of our cosignature.
     ///
@@ -234,16 +234,16 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             );
         }
 
-        // Demand-pull every parent slot we don't yet hold *fed*. Covers
+        // Demand-pull every parent slot we don't yet hold *extended*. Covers
         // three cases at once: (a) parent body missing, (b) parent
         // present but below sig threshold (the sender's response unions
         // any sigs we're missing), (c) parent confirmed but ancestrally
-        // unfed (re-receiving the body re-fires this same parent-pull
-        // logic recursively, retrying the deeper walk-back). Once the
-        // parent is fed, the request stops firing.
+        // not extended (re-receiving the body re-fires this same
+        // parent-pull logic recursively, retrying the deeper walk-back).
+        // Once the parent is extended, the request stops firing.
         if let Some(parent_round) = unit_round.checked_sub(1) {
             for parent_creator in parents {
-                if !self.graph.is_fed(parent_round, parent_creator) {
+                if !self.graph.is_extended(parent_round, parent_creator) {
                     self.network.send(
                         Recipient::Peer(sender),
                         Message::Request {
@@ -259,7 +259,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
     /// Apply one inbound `SignedUnit` message — the threshold-proven
     /// body + cosig bundle. The graph atomically installs (or
     /// overwrites) the slot, then we demand-pull any of the unit's
-    /// parents we don't yet hold *fed* from the immediate sender. No
+    /// parents we don't yet hold *extended* from the immediate sender. No
     /// rebroadcast, no Cosig fan-out — receiving a SignedUnit is a
     /// pull-driven event, not a fresh consensus contribution.
     fn handle_signed_unit(
@@ -281,7 +281,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
 
         if let Some(parent_round) = parent_round {
             for parent_creator in parents {
-                if !self.graph.is_fed(parent_round, parent_creator) {
+                if !self.graph.is_extended(parent_round, parent_creator) {
                     self.network.send(
                         Recipient::Peer(sender),
                         Message::Request {

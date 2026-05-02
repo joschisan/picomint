@@ -25,7 +25,7 @@ use crate::unit::{Round, Unit, UnitData};
 /// "Confirmed" therefore only means `1 + cosigs.len() >= threshold`
 /// (creator's sig plus enough cosigs); whether the slot's full ancestor
 /// closure is also locally ready is tracked separately on `Graph` and
-/// gates promotion into the extender (and own-unit construction).
+/// gates extension into the extender (and own-unit construction).
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct Entry<D: UnitData> {
     unit: Unit<D>,
@@ -68,7 +68,7 @@ impl<D: UnitData> Entry<D> {
     /// (creator + cosigners). Monotonic: once true, stays true.
     /// Confirmation here is the purely-local "enough sigs" predicate —
     /// it does *not* imply the slot's ancestors are present and ready.
-    /// Use [`Graph::is_fed`] for the stronger ancestrally-ready
+    /// Use [`Graph::is_extended`] for the stronger ancestrally-ready
     /// predicate.
     pub fn is_confirmed(&self, threshold: usize) -> bool {
         1 + self.cosigs.len() >= threshold
@@ -91,16 +91,16 @@ impl<D: UnitData> Entry<D> {
 ///   unit lands in `units` regardless of whether its ancestors are
 ///   present yet, so out-of-order delivery accumulates sigs and
 ///   gossips immediately rather than being dropped and refetched.
-/// - **Promotion** (`fed`) is strict. A slot is promoted into the
-///   extender — and made eligible as a parent for our own future
+/// - **Extension** (`extended`) is strict. A slot is extended into
+///   the extender — and made eligible as a parent for our own future
 ///   units via [`Self::parents_for`] — only once it has crossed the
-///   sig threshold *and* every parent slot is itself promoted. Promotion
-///   cascades: when a slot becomes promotable, descendants whose last
-///   missing parent was this slot are checked too.
+///   sig threshold *and* every parent slot is itself extended.
+///   Extension cascades: when a slot becomes extendable, descendants
+///   whose last missing parent was this slot are checked too.
 ///
 /// The graph also owns its `Backup` and `Extender`: every mutation
 /// that changes an entry persists it through `backup`, and every
-/// promotion transition feeds the unit through `extender` so its
+/// extension transition feeds the unit through `extender` so its
 /// causal closure can be ordered. Engine code never touches backup or
 /// extender directly.
 ///
@@ -112,12 +112,13 @@ pub struct Graph<D: UnitData> {
     session: u64,
     n: NumPeers,
     units: BTreeMap<(Round, PeerId), Entry<D>>,
-    /// Slots that have been promoted into the extender. Inductive
-    /// invariant: a slot is in `fed` iff it's confirmed locally and
-    /// every parent slot is also in `fed`. So membership in `fed` is
-    /// also the predicate gating own-unit parent selection — we only
-    /// build new units atop slots whose full ancestry we hold ready.
-    fed: BTreeSet<(Round, PeerId)>,
+    /// Slots that have been extended into the extender. Inductive
+    /// invariant: a slot is in `extended` iff it's confirmed locally
+    /// and every parent slot is also in `extended`. So membership in
+    /// `extended` is also the predicate gating own-unit parent
+    /// selection — we only build new units atop slots whose full
+    /// ancestry we hold ready.
+    extended: BTreeSet<(Round, PeerId)>,
     backup: DynBackup<D>,
     extender: Extender<D>,
 }
@@ -140,7 +141,7 @@ impl<D: UnitData> Graph<D> {
             session,
             n,
             units: BTreeMap::new(),
-            fed: BTreeSet::new(),
+            extended: BTreeSet::new(),
             backup,
             extender,
         };
@@ -148,14 +149,14 @@ impl<D: UnitData> Graph<D> {
         // `Backup::load` returns entries in `(round, peer)` lex order
         // — a valid topological order over the parent relation — so
         // inserting and immediately promoting in the same pass works:
-        // by the time we promote `(R, c)`, every `(R-1, *)` slot that
+        // by the time we extend `(R, c)`, every `(R-1, *)` slot that
         // could be a parent has already been processed and is either
-        // in `fed` or never will be.
+        // in `extended` or never will be.
         for entry in graph.backup.load() {
             let r = entry.unit.round;
             let c = entry.unit.creator;
             graph.units.insert((r, c), entry);
-            graph.try_promote(r, c);
+            graph.try_extend(r, c);
         }
 
         graph
@@ -184,7 +185,7 @@ impl<D: UnitData> Graph<D> {
 
     /// Whether the slot at `(round, creator)` exists and is confirmed
     /// (sigs threshold met). This is the local-only predicate; the slot
-    /// may still be missing ancestors. Use [`Self::is_fed`] for the
+    /// may still be missing ancestors. Use [`Self::is_extended`] for the
     /// stronger ancestrally-ready predicate.
     pub fn is_confirmed(&self, round: Round, creator: PeerId) -> bool {
         self.units
@@ -192,12 +193,12 @@ impl<D: UnitData> Graph<D> {
             .is_some_and(|e| e.is_confirmed(self.threshold()))
     }
 
-    /// Whether the slot at `(round, creator)` has been promoted: it is
-    /// confirmed locally *and* every parent slot is also fed. Equivalent
-    /// to "this slot has been handed to the extender, and its full
-    /// causal closure is locally present and confirmed".
-    pub fn is_fed(&self, round: Round, creator: PeerId) -> bool {
-        self.fed.contains(&(round, creator))
+    /// Whether the slot at `(round, creator)` has been extended: it
+    /// is confirmed locally *and* every parent slot is also extended.
+    /// Equivalent to "this slot has been handed to the extender, and
+    /// its full causal closure is locally present and confirmed".
+    pub fn is_extended(&self, round: Round, creator: PeerId) -> bool {
+        self.extended.contains(&(round, creator))
     }
 
     /// Iterate the slots at `round` in `creator`-order.
@@ -233,7 +234,7 @@ impl<D: UnitData> Graph<D> {
     /// well-formed (correct cardinality of parent creators, all drawn
     /// from the federation). Whether its parents are locally confirmed
     /// is *not* checked here — that gate has moved to
-    /// [`Self::try_promote`], which feeds the extender and permits the
+    /// [`Self::try_extend`], which feeds the extender and permits the
     /// slot to be used as a parent for our own future units. Accepting
     /// at any round is what lets a node restarting from empty state
     /// catch up by receiving a head-of-DAG push and then walking back
@@ -289,7 +290,7 @@ impl<D: UnitData> Graph<D> {
 
         self.units.insert((unit.round, unit.creator), entry.clone());
 
-        self.try_promote(unit.round, unit.creator);
+        self.try_extend(unit.round, unit.creator);
 
         Some(entry)
     }
@@ -348,13 +349,13 @@ impl<D: UnitData> Graph<D> {
 
         self.backup.save(&entry);
 
-        // Atomic install/overwrite. A previously-promoted slot can
+        // Atomic install/overwrite. A previously-extended slot can
         // only be re-installed with the same body (quorum math forbids
         // two distinct bodies reaching threshold), so this never
-        // invalidates an extender promotion.
+        // invalidates an extender extension.
         self.units.insert((unit.round, unit.creator), entry);
 
-        self.try_promote(unit.round, unit.creator);
+        self.try_extend(unit.round, unit.creator);
 
         true
     }
@@ -410,26 +411,26 @@ impl<D: UnitData> Graph<D> {
 
         self.backup.save(entry);
 
-        self.try_promote(round, creator);
+        self.try_extend(round, creator);
 
         true
     }
 
-    /// Try to promote the slot at `(round, creator)` into the extender;
-    /// if it does promote, sweep ascending rounds promoting whatever
+    /// Try to extend the extender with the slot at `(round, creator)`;
+    /// if it does extend, sweep ascending rounds extending whatever
     /// became newly eligible, stopping when a full round produces zero
-    /// promotions.
+    /// extensions.
     ///
-    /// Promotion conditions for one slot:
-    /// 1. Not already in `fed`.
+    /// Extension conditions for one slot:
+    /// 1. Not already in `extended`.
     /// 2. Confirmed (sigs ≥ threshold).
-    /// 3. Round 0, or every parent slot is already in `fed`.
+    /// 3. Round 0, or every parent slot is already in `extended`.
     ///
-    /// Termination: a round can only gain newly-promotable slots if the
-    /// previous round did. Once a sweep promotes nothing, no higher
-    /// round can promote anything either, so we stop.
-    fn try_promote(&mut self, round: Round, creator: PeerId) {
-        if !self.maybe_promote(round, creator) {
+    /// Termination: a round can only gain newly-extendable slots if
+    /// the previous round did. Once a sweep extends nothing, no higher
+    /// round can extend anything either, so we stop.
+    fn try_extend(&mut self, round: Round, creator: PeerId) {
+        if !self.maybe_extend(round, creator) {
             return;
         }
 
@@ -441,14 +442,14 @@ impl<D: UnitData> Graph<D> {
                 .map(|e| e.unit.creator)
                 .collect();
 
-            let mut any_promoted = false;
+            let mut any_extended = false;
             for c in candidates {
-                if self.maybe_promote(next_round, c) {
-                    any_promoted = true;
+                if self.maybe_extend(next_round, c) {
+                    any_extended = true;
                 }
             }
 
-            if !any_promoted {
+            if !any_extended {
                 return;
             }
 
@@ -456,10 +457,10 @@ impl<D: UnitData> Graph<D> {
         }
     }
 
-    /// Attempt to promote one slot. Returns `true` iff the slot
-    /// transitioned from unfed to fed in this call.
-    fn maybe_promote(&mut self, round: Round, creator: PeerId) -> bool {
-        if self.fed.contains(&(round, creator)) {
+    /// Attempt to extend one slot. Returns `true` iff the slot
+    /// transitioned from not-extended to extended in this call.
+    fn maybe_extend(&mut self, round: Round, creator: PeerId) -> bool {
+        if self.extended.contains(&(round, creator)) {
             return false;
         }
 
@@ -476,14 +477,14 @@ impl<D: UnitData> Graph<D> {
                 .unit
                 .parents
                 .iter()
-                .all(|p| self.fed.contains(&(parent_round, *p)));
+                .all(|p| self.extended.contains(&(parent_round, *p)));
             if !parents_fed {
                 return false;
             }
         }
 
         let unit = entry.unit.clone();
-        self.fed.insert((round, creator));
+        self.extended.insert((round, creator));
         self.extender.add_unit(unit);
 
         true
@@ -495,15 +496,15 @@ impl<D: UnitData> Graph<D> {
     /// round-0 units are the DAG's roots.
     ///
     /// For `round > 0`, returns the lowest-`PeerId`-keyed `threshold`
-    /// *fed* slots at `round - 1`, or `None` if fewer than `threshold`
-    /// slots at that round have been promoted yet. Parent hashes aren't
-    /// tracked: at most one unit per slot can confirm, so the creator
-    /// suffices.
+    /// *extended* slots at `round - 1`, or `None` if fewer than
+    /// `threshold` slots at that round have been extended yet. Parent
+    /// hashes aren't tracked: at most one unit per slot can confirm,
+    /// so the creator suffices.
     ///
-    /// Parents must be `fed` (ancestrally ready) rather than just
-    /// confirmed: building a unit atop a parent whose own ancestors
-    /// aren't ready would mean the new unit would also fail to promote
-    /// — wasted work and lost rebroadcast opportunity.
+    /// Parents must be `extended` (ancestrally ready) rather than
+    /// just confirmed: building a unit atop a parent whose own
+    /// ancestors aren't ready would mean the new unit would also fail
+    /// to extend — wasted work and lost rebroadcast opportunity.
     ///
     /// No chain rule: a creator's own previous-round unit is *not*
     /// forced into the parent set. Recovery is independent of the
@@ -520,7 +521,7 @@ impl<D: UnitData> Graph<D> {
 
         let parents: BTreeSet<PeerId> = self
             .round_units(parent_round)
-            .filter(|e| self.fed.contains(&(parent_round, e.unit.creator)))
+            .filter(|e| self.extended.contains(&(parent_round, e.unit.creator)))
             .take(t)
             .map(|e| e.unit.creator)
             .collect();
@@ -537,7 +538,7 @@ impl<D: UnitData> Graph<D> {
     /// - Every parent creator must be a member of the federation.
     ///
     /// Local presence/confirmation of the parent slots is *not* checked
-    /// here — that's the promotion gate, enforced by `try_promote` and
+    /// here — that's the extension gate, enforced by `try_extend` and
     /// `parents_for`.
     fn check_parents(&self, unit: &Unit<D>) -> Result<(), ()> {
         let t = self.threshold();
