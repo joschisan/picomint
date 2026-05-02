@@ -1,8 +1,8 @@
 //! Freestanding API handlers for [`crate::consensus::api::ConsensusApi`].
 
 use picomint_core::methods::{
-    ConfigRequest, ConfigResponse, LivenessRequest, LivenessResponse, SubmitTransactionRequest,
-    SubmitTransactionResponse,
+    ConfigRequest, ConfigResponse, LivenessRequest, LivenessResponse, SubmitTxRequest,
+    SubmitTxResponse,
 };
 use picomint_core::module::ApiError;
 
@@ -10,10 +10,10 @@ use crate::consensus::api::ConsensusApi;
 
 pub async fn submit_tx(
     api: &ConsensusApi,
-    req: SubmitTransactionRequest,
-) -> Result<SubmitTransactionResponse, ApiError> {
-    Ok(SubmitTransactionResponse {
-        outcome: api.submit_tx(req.transaction).await,
+    req: SubmitTxRequest,
+) -> Result<SubmitTxResponse, ApiError> {
+    Ok(SubmitTxResponse {
+        outcome: api.submit_tx(req.tx).await,
     })
 }
 

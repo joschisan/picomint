@@ -1,5 +1,5 @@
 use crate::executor::StateMachine;
-use crate::transaction::{Input, TransactionBuilder};
+use crate::transaction::{Input, TxBuilder};
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use futures::future::pending;
@@ -170,7 +170,7 @@ fn transition_gateway_send_payment_sm(
             );
         }
         Err(signature) => {
-            let tx_builder = TransactionBuilder::from_input(Input {
+            let tx_builder = TxBuilder::from_input(Input {
                 input: wire::Input::Ln(LightningInput::Outgoing(
                     old_state.common.outpoint,
                     OutgoingWitness::Cancel(signature),
@@ -231,7 +231,7 @@ fn transition_preimage_sm(
         return;
     }
 
-    let tx_builder = TransactionBuilder::from_input(Input {
+    let tx_builder = TxBuilder::from_input(Input {
         input: wire::Input::Ln(LightningInput::Outgoing(
             old_state.common.outpoint,
             OutgoingWitness::Refund,

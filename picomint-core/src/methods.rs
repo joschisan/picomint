@@ -7,7 +7,7 @@
 use picomint_encoding::{Decodable, Encodable};
 
 use crate::config::ConsensusConfig;
-use crate::transaction::{Transaction, TransactionError};
+use crate::transaction::{Transaction, TxError};
 
 // ── config ──────────────────────────────────────────────────────────────────
 
@@ -22,13 +22,13 @@ pub struct ConfigResponse {
 // ── submit-transaction ──────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SubmitTransactionRequest {
-    pub transaction: Transaction,
+pub struct SubmitTxRequest {
+    pub tx: Transaction,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct SubmitTransactionResponse {
-    pub outcome: Result<(), TransactionError>,
+pub struct SubmitTxResponse {
+    pub outcome: Result<(), TxError>,
 }
 
 // ── liveness ────────────────────────────────────────────────────────────────
@@ -44,6 +44,6 @@ pub struct LivenessResponse;
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum CoreMethod {
     Config(ConfigRequest),
-    SubmitTransaction(SubmitTransactionRequest),
+    SubmitTx(SubmitTxRequest),
     Liveness(LivenessRequest),
 }

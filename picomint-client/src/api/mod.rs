@@ -13,9 +13,7 @@ use iroh::endpoint::Connection;
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{BackoffBuilder, Retryable, networking_backoff};
 use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
-use picomint_core::methods::{
-    CoreMethod, LivenessRequest, SubmitTransactionRequest, SubmitTransactionResponse,
-};
+use picomint_core::methods::{CoreMethod, LivenessRequest, SubmitTxRequest, SubmitTxResponse};
 use picomint_core::module::{ApiError, Method, PICOMINT_ALPN};
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_encoding::{Decodable, Encodable};
@@ -26,7 +24,7 @@ use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, instrument, trace, warn};
 
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
-use crate::transaction::{Transaction, TransactionError};
+use crate::transaction::{Transaction, TxError};
 
 // ── Error types ─────────────────────────────────────────────────────────────
 
@@ -372,9 +370,9 @@ impl FederationApi {
 
     /// Submit a transaction and await the final outcome. The server long-
     /// polls until the tx is either accepted or becomes invalid.
-    pub async fn submit_tx(&self, tx: Transaction) -> Result<(), TransactionError> {
-        self.request_current_consensus_retry::<SubmitTransactionResponse>(Method::Core(
-            CoreMethod::SubmitTransaction(SubmitTransactionRequest { transaction: tx }),
+    pub async fn submit_tx(&self, tx: Transaction) -> Result<(), TxError> {
+        self.request_current_consensus_retry::<SubmitTxResponse>(Method::Core(
+            CoreMethod::SubmitTx(SubmitTxRequest { tx }),
         ))
         .await
         .outcome

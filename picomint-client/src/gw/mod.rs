@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::task::TaskGroup;
-use crate::transaction::{Input, Output, TransactionBuilder};
+use crate::transaction::{Input, Output, TxBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -140,7 +140,7 @@ impl GatewayClientModule {
         contract: IncomingContract,
         fee: Amount,
     ) -> anyhow::Result<()> {
-        let tx_builder = TransactionBuilder::from_output(Output {
+        let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Ln(Box::new(LightningOutput::Incoming(contract.clone()))),
             amount: contract.commitment.amount,
             fee: self.cfg.output_fee,
@@ -207,7 +207,7 @@ impl GatewayClientModule {
     ) {
         match preimage {
             Some(preimage) => {
-                let tx_builder = TransactionBuilder::from_input(Input {
+                let tx_builder = TxBuilder::from_input(Input {
                     input: wire::Input::Ln(LightningInput::Outgoing(
                         outpoint,
                         OutgoingWitness::Claim(preimage),

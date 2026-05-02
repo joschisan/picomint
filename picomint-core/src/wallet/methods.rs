@@ -61,12 +61,12 @@ pub struct ReceiveFeeResponse {
 // ── transaction-id ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct TransactionIdRequest {
+pub struct TxIdRequest {
     pub outpoint: OutPoint,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct TransactionIdResponse {
+pub struct TxIdResponse {
     pub txid: Option<bitcoin::Txid>,
 }
 
@@ -86,20 +86,20 @@ pub struct OutputInfoSliceResponse {
 // ── pending-transaction-chain ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct PendingTransactionChainRequest;
+pub struct PendingTxChainRequest;
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct PendingTransactionChainResponse {
+pub struct PendingTxChainResponse {
     pub txs: Vec<TxInfo>,
 }
 
 // ── transaction-chain ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct TransactionChainRequest;
+pub struct TxChainRequest;
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct TransactionChainResponse {
+pub struct TxChainResponse {
     pub txs: Vec<TxInfo>,
 }
 
@@ -112,8 +112,8 @@ pub enum WalletMethod {
     FederationWallet(FederationWalletRequest),
     SendFee(SendFeeRequest),
     ReceiveFee(ReceiveFeeRequest),
-    TransactionId(TransactionIdRequest),
+    TxId(TxIdRequest),
     OutputInfoSlice(OutputInfoSliceRequest),
-    PendingTransactionChain(PendingTransactionChainRequest),
-    TransactionChain(TransactionChainRequest),
+    PendingTxChain(PendingTxChainRequest),
+    TxChain(TxChainRequest),
 }

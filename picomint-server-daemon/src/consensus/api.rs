@@ -7,7 +7,7 @@ use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::methods::CoreMethod;
 use picomint_core::module::ApiError;
 use picomint_core::module::audit::AuditSummary;
-use picomint_core::transaction::{ConsensusItem, Transaction, TransactionError};
+use picomint_core::transaction::{ConsensusItem, Transaction, TxError};
 
 use crate::consensus::rpc;
 use crate::{handler, handler_async};
@@ -42,7 +42,7 @@ pub struct ConsensusApi {
 impl ConsensusApi {
     /// Submit a transaction and long-poll until it is either accepted by
     /// consensus or becomes invalid.
-    pub async fn submit_tx(&self, tx: Transaction) -> Result<(), TransactionError> {
+    pub async fn submit_tx(&self, tx: Transaction) -> Result<(), TxError> {
         let notify_item = self.db.notify_for_table(&ACCEPTED_ITEM);
         let notify_session = self.db.notify_for_table(&SIGNED_SESSION_OUTCOME);
 
@@ -61,7 +61,7 @@ impl ConsensusApi {
 
         if self
             .submission_tx
-            .send(ConsensusItem::Transaction(tx.clone()))
+            .send(ConsensusItem::Tx(tx.clone()))
             .await
             .is_err()
         {
@@ -86,7 +86,7 @@ impl ConsensusApi {
                 _ = &mut notified_session => {
                     if self
                         .submission_tx
-                        .send(ConsensusItem::Transaction(tx.clone()))
+                        .send(ConsensusItem::Tx(tx.clone()))
                         .await
                         .is_err()
                     {
@@ -114,7 +114,7 @@ impl ConsensusApi {
 impl ConsensusApi {
     pub async fn handle_api(&self, method: CoreMethod) -> Result<Vec<u8>, ApiError> {
         match method {
-            CoreMethod::SubmitTransaction(req) => handler_async!(submit_tx, self, req).await,
+            CoreMethod::SubmitTx(req) => handler_async!(submit_tx, self, req).await,
             CoreMethod::Config(req) => handler!(config, self, req).await,
             CoreMethod::Liveness(req) => handler!(liveness, self, req).await,
         }

@@ -16,7 +16,7 @@ use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::task::TaskGroup;
-use crate::transaction::{Input, Output, TransactionBuilder};
+use crate::transaction::{Input, Output, TxBuilder};
 use crate::transaction::{Transaction, TxSubmissionSmContext, TxSubmissionStateMachine};
 use anyhow::{Context as _, bail};
 use bitcoin_hashes::sha256;
@@ -388,7 +388,7 @@ impl MintClientModule {
         &self,
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
-        mut builder: TransactionBuilder,
+        mut builder: TxBuilder,
     ) -> anyhow::Result<TransactionId> {
         let (spendable_notes, issuance_requests) = self.balance(dbtx, &mut builder)?;
 
@@ -414,7 +414,7 @@ impl MintClientModule {
     fn balance(
         &self,
         dbtx: &WriteTxRef<'_>,
-        builder: &mut TransactionBuilder,
+        builder: &mut TxBuilder,
     ) -> anyhow::Result<(Vec<SpendableNote>, Vec<NoteIssuanceRequest>)> {
         let mut spendable_notes = self
             .select_funding_input(dbtx, builder.deficit())
@@ -472,7 +472,7 @@ impl MintClientModule {
         &self,
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
-        builder: TransactionBuilder,
+        builder: TxBuilder,
     ) -> anyhow::Result<TransactionId> {
         let tx = builder.build();
 
@@ -668,7 +668,7 @@ impl MintClientModule {
             issuance_requests.push(NoteIssuanceRequest::new(d, tweak, &self.secret));
         }
 
-        let mut builder = TransactionBuilder::new();
+        let mut builder = TxBuilder::new();
         for request in &issuance_requests {
             builder.add_output(Output {
                 output: wire::Output::Mint(request.output()),
@@ -772,7 +772,7 @@ impl MintClientModule {
             return Err(ReceiveECashError::UneconomicalDenomination);
         }
 
-        let mut tx_builder = TransactionBuilder::new();
+        let mut tx_builder = TxBuilder::new();
         for note in &ecash.notes {
             tx_builder.add_input(Input {
                 input: wire::Input::Mint(MintInput { note: note.note() }),

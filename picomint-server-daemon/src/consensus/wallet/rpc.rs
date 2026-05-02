@@ -4,10 +4,9 @@ use picomint_core::module::ApiError;
 use picomint_core::wallet::methods::{
     ConsensusBlockCountRequest, ConsensusBlockCountResponse, ConsensusFeerateRequest,
     ConsensusFeerateResponse, FederationWalletRequest, FederationWalletResponse,
-    OutputInfoSliceRequest, OutputInfoSliceResponse, PendingTransactionChainRequest,
-    PendingTransactionChainResponse, ReceiveFeeRequest, ReceiveFeeResponse, SendFeeRequest,
-    SendFeeResponse, TransactionChainRequest, TransactionChainResponse, TransactionIdRequest,
-    TransactionIdResponse,
+    OutputInfoSliceRequest, OutputInfoSliceResponse, PendingTxChainRequest, PendingTxChainResponse,
+    ReceiveFeeRequest, ReceiveFeeResponse, SendFeeRequest, SendFeeResponse, TxChainRequest,
+    TxChainResponse, TxIdRequest, TxIdResponse,
 };
 
 use super::Wallet;
@@ -54,11 +53,8 @@ pub fn receive_fee(wallet: &Wallet, _: ReceiveFeeRequest) -> Result<ReceiveFeeRe
     })
 }
 
-pub fn tx_id(
-    wallet: &Wallet,
-    req: TransactionIdRequest,
-) -> Result<TransactionIdResponse, ApiError> {
-    Ok(TransactionIdResponse {
+pub fn tx_id(wallet: &Wallet, req: TxIdRequest) -> Result<TxIdResponse, ApiError> {
+    Ok(TxIdResponse {
         txid: Wallet::tx_id(&wallet.db.begin_read(), req.outpoint),
     })
 }
@@ -74,18 +70,15 @@ pub fn output_info_slice(
 
 pub fn pending_tx_chain(
     wallet: &Wallet,
-    _: PendingTransactionChainRequest,
-) -> Result<PendingTransactionChainResponse, ApiError> {
-    Ok(PendingTransactionChainResponse {
+    _: PendingTxChainRequest,
+) -> Result<PendingTxChainResponse, ApiError> {
+    Ok(PendingTxChainResponse {
         txs: Wallet::pending_tx_chain(&wallet.db.begin_read()),
     })
 }
 
-pub fn tx_chain(
-    wallet: &Wallet,
-    _: TransactionChainRequest,
-) -> Result<TransactionChainResponse, ApiError> {
-    Ok(TransactionChainResponse {
+pub fn tx_chain(wallet: &Wallet, _: TxChainRequest) -> Result<TxChainResponse, ApiError> {
+    Ok(TxChainResponse {
         txs: Wallet::tx_chain(&wallet.db.begin_read()),
     })
 }

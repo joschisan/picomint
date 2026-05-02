@@ -13,7 +13,7 @@ use crate::api::FederationResult;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::task::TaskGroup;
-use crate::transaction::{Input, Output, TransactionBuilder};
+use crate::transaction::{Input, Output, TxBuilder};
 use anyhow::anyhow;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
@@ -156,7 +156,7 @@ impl WalletClientModule {
         let destination = StandardScript::from_address(&address.clone().assume_checked())
             .ok_or(SendError::UnsupportedAddress)?;
 
-        let tx_builder = TransactionBuilder::from_output(Output {
+        let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Wallet(WalletOutput {
                 destination,
                 value,
@@ -254,7 +254,7 @@ impl WalletClientModule {
     ) -> (OperationId, TransactionId) {
         let operation_id = OperationId::new_random();
 
-        let tx_builder = TransactionBuilder::from_input(Input {
+        let tx_builder = TxBuilder::from_input(Input {
             input: wire::Input::Wallet(WalletInput {
                 output_index,
                 fee,

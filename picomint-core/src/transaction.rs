@@ -41,11 +41,11 @@ impl Transaction {
     pub fn validate_signatures(
         &self,
         pub_keys: &[crate::secp256k1::XOnlyPublicKey],
-    ) -> Result<(), TransactionError> {
+    ) -> Result<(), TxError> {
         use crate::secp256k1;
 
         if pub_keys.len() != self.signatures.len() {
-            return Err(TransactionError::InvalidWitnessLength);
+            return Err(TxError::InvalidWitnessLength);
         }
 
         let txid = self.compute_txid();
@@ -56,7 +56,7 @@ impl Transaction {
                 .verify_schnorr(signature, &msg, pk)
                 .is_err()
             {
-                return Err(TransactionError::InvalidSignature);
+                return Err(TxError::InvalidSignature);
             }
         }
 
@@ -65,7 +65,7 @@ impl Transaction {
 }
 
 #[derive(Debug, Error, Encodable, Decodable, Clone, Eq, PartialEq)]
-pub enum TransactionError {
+pub enum TxError {
     #[error("The transaction has no inputs")]
     EmptyInputs,
     #[error("The transaction has no outputs")]
@@ -88,7 +88,7 @@ pub enum TransactionError {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum ConsensusItem {
     /// Threshold sign the epoch history for verification via the API
-    Transaction(Transaction),
+    Tx(Transaction),
     /// Any data that modules require consensus on
     Module(wire::ModuleConsensusItem),
 }

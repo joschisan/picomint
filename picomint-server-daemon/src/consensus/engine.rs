@@ -518,7 +518,7 @@ impl ConsensusEngine {
                     .process_consensus_item(&dbtx.as_ref(), &module_item, peer_id)
                     .await
             }
-            ConsensusItem::Transaction(tx) => {
+            ConsensusItem::Tx(tx) => {
                 let txid = tx.compute_txid();
                 if dbtx.get(&ACCEPTED_TX, &txid).is_some() {
                     debug!(

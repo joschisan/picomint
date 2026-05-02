@@ -13,7 +13,7 @@ use picomint_core::mint::{
     Denomination, MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError,
     RecoveryItem, verify_note,
 };
-use picomint_core::module::{ApiError, InputMeta, TransactionItemAmounts};
+use picomint_core::module::{ApiError, InputMeta, TxItemAmounts};
 use picomint_core::{Amount, InPoint, OutPoint, PeerId};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
@@ -152,7 +152,7 @@ impl Mint {
         let amount = input.note.amount();
 
         Ok(InputMeta {
-            amount: TransactionItemAmounts {
+            amount: TxItemAmounts {
                 amount,
                 fee: self.cfg.consensus.input_fee,
             },
@@ -165,7 +165,7 @@ impl Mint {
         dbtx: &WriteTxRef<'_>,
         output: &MintOutput,
         outpoint: OutPoint,
-    ) -> Result<TransactionItemAmounts, MintOutputError> {
+    ) -> Result<TxItemAmounts, MintOutputError> {
         let signature = self
             .cfg
             .private
@@ -200,7 +200,7 @@ impl Mint {
 
         let amount = output.amount();
 
-        Ok(TransactionItemAmounts {
+        Ok(TxItemAmounts {
             amount,
             fee: self.cfg.consensus.output_fee,
         })

@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::task::TaskGroup;
-use crate::transaction::{Input, Output, TransactionBuilder};
+use crate::transaction::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
 use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
 use lightning_invoice::{Bolt11Invoice, Currency};
@@ -301,7 +301,7 @@ impl LightningClientModule {
             tweak,
         };
 
-        let tx_builder = TransactionBuilder::from_output(Output {
+        let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Ln(Box::new(LightningOutput::Outgoing(contract.clone()))),
             amount,
             fee: self.cfg.output_fee,
@@ -474,7 +474,7 @@ impl LightningClientModule {
             return;
         };
 
-        let tx_builder = TransactionBuilder::from_input(Input {
+        let tx_builder = TxBuilder::from_input(Input {
             input: wire::Input::Ln(LightningInput::Incoming(outpoint, agg_dk)),
             keypair: claim_keypair,
             amount: contract.commitment.amount,

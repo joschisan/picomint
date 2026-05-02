@@ -12,7 +12,7 @@ use picomint_encoding::{Decodable, Encodable};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InputMeta {
-    pub amount: TransactionItemAmounts,
+    pub amount: TxItemAmounts,
     pub pub_key: secp256k1::XOnlyPublicKey,
 }
 
@@ -22,7 +22,7 @@ pub struct InputMeta {
 ///   consuming funding
 /// * For **outputs** the amount and the fee consume funding
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct TransactionItemAmounts {
+pub struct TxItemAmounts {
     pub amount: Amount,
     pub fee: Amount,
 }

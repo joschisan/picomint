@@ -16,7 +16,7 @@ use futures::StreamExt;
 use lightning_invoice::{Bolt11Invoice, Currency, InvoiceBuilder, PaymentSecret};
 use picomint_client::ln::SendPaymentError;
 use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
-use picomint_client::transaction::{Input, TransactionBuilder};
+use picomint_client::transaction::{Input, TxBuilder};
 use picomint_client::{Client, OperationId};
 use picomint_core::config::FederationId;
 use picomint_core::ln::gateway_api::{GatewayInfo, PaymentFee, SendPaymentPayload};
@@ -495,7 +495,7 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
 
     // `SendEvent.amount` is already `send_fee.add_to(invoice_amount)` —
     // i.e. the on-chain contract amount. No further fee addition here.
-    let tx_builder = TransactionBuilder::from_input(Input {
+    let tx_builder = TxBuilder::from_input(Input {
         input: wire::Input::Ln(LightningInput::Outgoing(
             outpoint,
             OutgoingWitness::Claim(preimage),

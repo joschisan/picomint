@@ -19,7 +19,7 @@ use super::events::{ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent
 use crate::api::ServerError;
 use crate::executor::StateMachine;
 use crate::query::FilterMapThreshold;
-use crate::transaction::{Input, TransactionBuilder};
+use crate::transaction::{Input, TxBuilder};
 
 /// Single-state state machine covering the federation side of the receive
 /// flow. `trigger` waits for tx acceptance and gathers TPE decryption shares;
@@ -120,7 +120,7 @@ impl StateMachine for ReceiveStateMachine {
             return None;
         }
 
-        let tx_builder = TransactionBuilder::from_input(Input {
+        let tx_builder = TxBuilder::from_input(Input {
             input: wire::Input::Ln(LightningInput::Incoming(self.outpoint, agg_decryption_key)),
             keypair: self.refund_keypair,
             amount: self.contract.commitment.amount,

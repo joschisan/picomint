@@ -21,12 +21,12 @@ pub struct Output {
 }
 
 #[derive(Default, Clone, Debug)]
-pub struct TransactionBuilder {
+pub struct TxBuilder {
     inputs: Vec<Input>,
     outputs: Vec<Output>,
 }
 
-impl TransactionBuilder {
+impl TxBuilder {
     pub fn new() -> Self {
         Self::default()
     }

@@ -16,7 +16,7 @@ use picomint_core::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
     LightningOutputError, OutgoingWitness,
 };
-use picomint_core::module::{ApiError, InputMeta, TransactionItemAmounts};
+use picomint_core::module::{ApiError, InputMeta, TxItemAmounts};
 use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use tpe::{PublicKeyShare, SecretKeyShare};
@@ -206,7 +206,7 @@ impl Lightning {
         };
 
         Ok(InputMeta {
-            amount: TransactionItemAmounts {
+            amount: TxItemAmounts {
                 amount,
                 fee: self.cfg.consensus.input_fee,
             },
@@ -219,7 +219,7 @@ impl Lightning {
         dbtx: &WriteTxRef<'_>,
         output: &LightningOutput,
         outpoint: OutPoint,
-    ) -> Result<TransactionItemAmounts, LightningOutputError> {
+    ) -> Result<TxItemAmounts, LightningOutputError> {
         let amount = match output {
             LightningOutput::Outgoing(contract) => {
                 dbtx.insert(&OUTGOING_CONTRACT, &outpoint, contract);
@@ -257,7 +257,7 @@ impl Lightning {
             }
         };
 
-        Ok(TransactionItemAmounts {
+        Ok(TxItemAmounts {
             amount,
             fee: self.cfg.consensus.output_fee,
         })

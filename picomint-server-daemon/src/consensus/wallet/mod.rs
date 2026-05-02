@@ -20,7 +20,7 @@ use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletOutput};
 use miniscript::descriptor::Wsh;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::backoff::{Retryable, networking_backoff};
-use picomint_core::module::{ApiError, InputMeta, TransactionItemAmounts};
+use picomint_core::module::{ApiError, InputMeta, TxItemAmounts};
 use picomint_core::wallet as common;
 use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
@@ -325,7 +325,7 @@ impl Wallet {
             .ok_or(WalletInputError::ArithmeticOverflow)?;
 
         Ok(InputMeta {
-            amount: TransactionItemAmounts {
+            amount: TxItemAmounts {
                 amount,
                 fee: self.cfg.consensus.input_fee,
             },
@@ -338,7 +338,7 @@ impl Wallet {
         dbtx: &WriteTxRef<'_>,
         output: &WalletOutput,
         outpoint: OutPoint,
-    ) -> Result<TransactionItemAmounts, WalletOutputError> {
+    ) -> Result<TxItemAmounts, WalletOutputError> {
         if output.value < self.cfg.consensus.dust_limit {
             return Err(WalletOutputError::UnderDustLimit);
         }
@@ -449,7 +449,7 @@ impl Wallet {
             .map(picomint_core::Amount::from_msats)
             .ok_or(WalletOutputError::ArithmeticOverflow)?;
 
-        Ok(TransactionItemAmounts {
+        Ok(TxItemAmounts {
             amount,
             fee: self.cfg.consensus.output_fee,
         })
@@ -469,12 +469,10 @@ impl Wallet {
             WalletMethod::FederationWallet(req) => handler!(federation_wallet, self, req).await,
             WalletMethod::SendFee(req) => handler!(send_fee, self, req).await,
             WalletMethod::ReceiveFee(req) => handler!(receive_fee, self, req).await,
-            WalletMethod::TransactionId(req) => handler!(tx_id, self, req).await,
+            WalletMethod::TxId(req) => handler!(tx_id, self, req).await,
             WalletMethod::OutputInfoSlice(req) => handler!(output_info_slice, self, req).await,
-            WalletMethod::PendingTransactionChain(req) => {
-                handler!(pending_tx_chain, self, req).await
-            }
-            WalletMethod::TransactionChain(req) => handler!(tx_chain, self, req).await,
+            WalletMethod::PendingTxChain(req) => handler!(pending_tx_chain, self, req).await,
+            WalletMethod::TxChain(req) => handler!(tx_chain, self, req).await,
         }
     }
 }

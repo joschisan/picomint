@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use picomint_core::module::InputMeta;
 use picomint_core::module::audit::AuditSummary;
-use picomint_core::transaction::{Transaction, TransactionError};
+use picomint_core::transaction::{Transaction, TxError};
 use picomint_core::wire;
 use picomint_core::{InPoint, OutPoint, PeerId};
 use picomint_redb::{WriteTx, WriteTxRef};
@@ -76,7 +76,7 @@ impl Server {
         dbtx: &WriteTxRef<'_>,
         output: &wire::Output,
         out_point: OutPoint,
-    ) -> Result<picomint_core::module::TransactionItemAmounts, wire::OutputError> {
+    ) -> Result<picomint_core::module::TxItemAmounts, wire::OutputError> {
         match output {
             wire::Output::Mint(o) => self
                 .mint
@@ -110,13 +110,13 @@ pub async fn process_tx_with_server(
     server: &Server,
     dbtx: &WriteTx,
     tx: &Transaction,
-) -> Result<(), TransactionError> {
+) -> Result<(), TxError> {
     if tx.inputs.is_empty() {
-        return Err(TransactionError::EmptyInputs);
+        return Err(TxError::EmptyInputs);
     }
 
     if tx.outputs.is_empty() {
-        return Err(TransactionError::EmptyOutputs);
+        return Err(TxError::EmptyOutputs);
     }
 
     let mut funding_verifier = FundingVerifier::default();
@@ -128,7 +128,7 @@ pub async fn process_tx_with_server(
         let meta = server
             .process_input(&dbtx.as_ref(), input, InPoint { txid, in_idx })
             .await
-            .map_err(TransactionError::Input)?;
+            .map_err(TxError::Input)?;
 
         funding_verifier.add_input(meta.amount)?;
         public_keys.push(meta.pub_key);
@@ -140,7 +140,7 @@ pub async fn process_tx_with_server(
         let amount = server
             .process_output(&dbtx.as_ref(), output, OutPoint { txid, out_idx })
             .await
-            .map_err(TransactionError::Output)?;
+            .map_err(TxError::Output)?;
 
         funding_verifier.add_output(amount)?;
     }
