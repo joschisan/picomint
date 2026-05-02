@@ -150,31 +150,23 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
     /// trusting the threshold proof in the bundle, so we must never
     /// ship a sub-threshold bundle.
     fn handle_request(&self, requester: PeerId, round: Round, creator: PeerId) {
-        let t = self.graph.threshold();
-
         let Some(entry) = self.graph.entry(round, creator) else {
             return;
         };
 
-        if !entry.is_confirmed(t) {
+        if !entry.is_confirmed(self.graph.threshold()) {
             return;
         }
 
-        // Trim to exactly `2f = threshold - 1` cosigs. More would only
-        // add bytes without strengthening the threshold proof.
-        let cosigs: BTreeMap<PeerId, schnorr::Signature> = entry
-            .cosigs()
-            .iter()
-            .take(t - 1)
-            .map(|(k, v)| (*k, *v))
-            .collect();
-
+        // `record_cosig` stops accepting cosigs at threshold, so
+        // `entry.cosigs` already holds exactly `2f` cosigs by
+        // invariant — no trim needed.
         self.network.send(
             Recipient::Peer(requester),
             Message::SignedUnit {
                 unit: entry.unit().clone(),
                 sig: *entry.sig(),
-                cosigs,
+                cosigs: entry.cosigs().clone(),
             },
         );
     }
