@@ -8,79 +8,42 @@ use picomint_encoding::{Decodable, Encodable};
 
 use crate::unit::{Round, Unit, UnitData};
 
-/// Wire messages between peers. The sender's `PeerId` is attached by the
-/// network layer; it is never carried in the payload.
+/// Wire messages between peers. See `README.md` for the protocol;
+/// the sender's `PeerId` is attached by the network layer.
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
 pub enum Message<D: UnitData> {
-    /// Body dissemination. Carries the body plus *only* the creator's
-    /// sig — cosigs never ride on `Unit`. Three paths emit one:
-    /// 1. The creator's own broadcast at unit-creation time.
-    /// 2. The creator's own anti-entropy push of its highest own slot.
-    /// 3. A `Request` response (paired with one `Sig` per held cosig).
-    ///
-    /// Binding the body to its claimed creator via `creator_sig` is
-    /// what blocks a Byzantine peer from fabricating a body at someone
-    /// else's slot. Cosig propagation is the `Sig` message's job.
+    /// Body + creator sig. Emitted by the creator on creation, by the
+    /// creator's anti-entropy push of its own column, and never as a
+    /// `Request` response.
     Unit {
-        /// The unit being disseminated.
         unit: Unit<D>,
-        /// The creator's schnorr signature over `unit`'s consensus
-        /// encoding. Verified against `unit.creator`'s public key.
         sig: schnorr::Signature,
     },
-    /// Cosign-only fan-out. When a peer first cosigns a unit body it
-    /// has received, it broadcasts a `Cosig` so every other peer can
-    /// union it into their copy of the slot. The body is *not* carried
-    /// — receivers either already hold it (then `record_cosig` against
-    /// the local body), or pull it from the signer via `Request`.
+    /// One cosignature, broadcast by the signer the first time they
+    /// cosign the slot. Receivers without the body demand-pull it from
+    /// the signer.
     Cosig {
-        /// Round of the slot being cosigned.
         round: Round,
-        /// Creator of the slot being cosigned.
         creator: PeerId,
-        /// The peer whose cosig this is. Always non-creator: the
-        /// creator's signature lives in `Unit.sig`.
         signer: PeerId,
-        /// Schnorr cosignature over the unit's consensus encoding.
         sig: schnorr::Signature,
     },
-    /// Atomically-confirmed slot view. Carries the body, the creator
-    /// sig, and exactly `2f` cosigs — the minimal threshold proof.
-    /// Emitted only as a response to `Request`, and only when the
-    /// responder holds the slot at or above threshold locally. The
-    /// receiver verifies the bundle and atomically installs (or
-    /// overwrites) the slot's entry.
-    ///
-    /// Overwrite is safe by quorum math: at most one body per slot can
-    /// ever assemble `1 + 2f` valid sigs, since honest peers cosign at
-    /// most one body. So receiving a valid `SignedUnit` is proof that
-    /// this is the canonical body — even if we previously latched onto
-    /// a different body that came from a forker and stayed stuck below
-    /// threshold.
+    /// Threshold-proven slot view: body + creator sig + exactly `2f`
+    /// cosigs. Sole `Request` response, and only emitted when the
+    /// responder holds the slot at threshold locally. Receivers
+    /// atomically install or overwrite their entry — quorum math
+    /// forbids two distinct bodies reaching threshold, so a valid
+    /// `SignedUnit` proves canonical body.
     SignedUnit {
-        /// The unit being disseminated.
         unit: Unit<D>,
-        /// The creator's schnorr signature over `unit`'s consensus
-        /// encoding.
         sig: schnorr::Signature,
-        /// Exactly `2f` cosignatures from non-creator peers, keyed by
-        /// signer. Together with `sig` this gives the receiver a
-        /// `2f+1` threshold proof.
         cosigs: BTreeMap<PeerId, schnorr::Signature>,
     },
-    /// Targeted backfill request. If the recipient holds the slot at
-    /// threshold confirmation, it replies with a `SignedUnit`. If not
-    /// (slot missing, or below threshold), no response is sent — the
-    /// requester retries on the next cycle.
-    Request {
-        /// Round of the slot the requester wants filled.
-        round: Round,
-        /// Creator of the slot the requester wants filled.
-        creator: PeerId,
-    },
+    /// Targeted backfill. The recipient replies with `SignedUnit` if
+    /// the slot is locally confirmed; otherwise no reply.
+    Request { round: Round, creator: PeerId },
 }
 
-/// Intended recipient of an [`INetwork::send`] call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Recipient {
     /// Fan out to every peer except self.
@@ -89,35 +52,24 @@ pub enum Recipient {
     Peer(PeerId),
 }
 
-/// `Arc`-erased [`INetwork`]. The engine consumes this so callers can swap
-/// in any concrete implementation — a mock for tests, the daemon's
-/// `ReconnectP2PConnections` for production.
 pub type DynNetwork<M> = Arc<dyn INetwork<M>>;
 
-/// Network layer the engine drives. Mirrors the upstream
-/// `fedimint_core::net::peers::IP2PConnections<M>` shape so the same
-/// implementation can later be reused by a DKG that wants per-peer
-/// round-robin reads.
+/// Engine's network surface. Shape mirrors fedimint's
+/// `IP2PConnections<M>` so it can be reused by a future DKG that wants
+/// per-peer round-robin reads.
 #[async_trait]
 pub trait INetwork<M>: Send + Sync + 'static {
-    /// Send `msg`. With [`Recipient::Everyone`] this fans out to every
-    /// peer except self. The send is fire-and-forget — drops on full
-    /// outbound queues, disconnected peers, or simulated packet loss are
-    /// silently swallowed. The consensus layer is expected to retransmit.
+    /// Fire-and-forget. Drops are silently swallowed; the consensus
+    /// layer retransmits.
     fn send(&self, recipient: Recipient, msg: M);
 
-    /// Await the next inbound message from any peer. Returns `None` only
-    /// after every sender has been dropped (i.e. the network is shutting
-    /// down).
+    /// `None` once every sender has been dropped.
     async fn receive(&self) -> Option<(PeerId, M)>;
 
-    /// Await the next inbound message from a specific peer. Used by the
-    /// round-robin DKG step, not by the consensus engine. Implementations
-    /// that don't have a DKG (e.g. the mock used in tests) may leave this
-    /// as `unimplemented!()`.
+    /// Per-peer read for round-robin DKG. Mocks may leave this as
+    /// `unimplemented!()`.
     async fn receive_from_peer(&self, peer: PeerId) -> Option<M>;
 
-    /// Wrap `self` into a [`DynNetwork`] for type erasure.
     fn into_dyn(self) -> DynNetwork<M>
     where
         Self: Sized,

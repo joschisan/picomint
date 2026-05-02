@@ -11,21 +11,8 @@ use crate::extender::Extender;
 use crate::keychain::Keychain;
 use crate::unit::{Round, Unit, UnitData};
 
-/// One slot in the DAG: the unit at `(round, creator)`, the creator's
-/// signature over its body, and the co-signatures collected so far.
-///
-/// The creator's sig lives in its own field — it's structurally
-/// distinct from cosigs (it's what binds the body to its claimed author
-/// and is part of the on-the-wire `Unit` message), and separating the
-/// two avoids a "is this entry in the map yet" check on every cosig
-/// recording.
-///
-/// Insert is *lax* on parents — a unit's body and accumulated sigs land
-/// in the graph regardless of whether its ancestors are present yet.
-/// "Confirmed" therefore only means `1 + cosigs.len() >= threshold`
-/// (creator's sig plus enough cosigs); whether the slot's full ancestor
-/// closure is also locally ready is tracked separately on `Graph` and
-/// gates extension into the extender (and own-unit construction).
+/// One slot in the DAG: the unit body, the creator's signature, and
+/// the co-signatures collected so far.
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct Entry<D: UnitData> {
     unit: Unit<D>,
@@ -33,10 +20,8 @@ pub struct Entry<D: UnitData> {
     cosigs: BTreeMap<PeerId, schnorr::Signature>,
 }
 
-// `redb::Value` for `Entry<D>` over consensus encoding. Lives here
-// rather than at the daemon's storage layer so callers can use
-// `Entry<D>` directly as a typed redb value — the orphan rule blocks an
-// `impl Value for Entry<D>` from being written downstream.
+// `Entry<D>` is a redb value here so callers can use it directly —
+// the orphan rule blocks downstream `impl Value` blocks.
 picomint_redb::consensus_value!([D: UnitData] Entry<D>);
 
 impl<D: UnitData> Entry<D> {
@@ -48,87 +33,43 @@ impl<D: UnitData> Entry<D> {
         Self { unit, sig, cosigs }
     }
 
-    /// The unit at this slot.
     pub fn unit(&self) -> &Unit<D> {
         &self.unit
     }
 
-    /// The creator's schnorr signature over the unit's consensus
-    /// encoding. Always present — every entry that exists carries it.
     pub fn sig(&self) -> &schnorr::Signature {
         &self.sig
     }
 
-    /// Co-signatures collected from non-creator peers, keyed by signer.
     pub fn cosigs(&self) -> &BTreeMap<PeerId, schnorr::Signature> {
         &self.cosigs
     }
 
-    /// Whether this entry has crossed the threshold of total signers
-    /// (creator + cosigners). Monotonic: once true, stays true.
-    /// Confirmation here is the purely-local "enough sigs" predicate —
-    /// it does *not* imply the slot's ancestors are present and ready.
-    /// Use [`Graph::is_extended`] for the stronger ancestrally-ready
-    /// predicate.
+    /// Local sig threshold met. Does *not* imply ancestors are ready —
+    /// see [`Graph::is_extended`].
     pub fn is_confirmed(&self, threshold: usize) -> bool {
         1 + self.cosigs.len() >= threshold
     }
 }
 
-/// Per-peer view of the consensus DAG plus the persistence and
-/// ordering machinery downstream of it.
+/// Per-peer view of the consensus DAG plus its persistence and
+/// ordering machinery. See `README.md` for the algorithm; the two
+/// load-bearing invariants are:
 ///
-/// The DAG is keyed by `(round, creator)` because that's the
-/// load-bearing uniqueness invariant of the protocol — at most one
-/// unit per slot can ever confirm. `BTreeMap` ordering lets us
-/// iterate-and-count confirmed units at a given round via `range`.
-/// Round-0 units are created and disseminated like every other round
-/// except that they carry empty parent sets.
-///
-/// Insert is split into two gates:
-///
-/// - **Graph admission** (`insert_unit`) is lax. A well-formed signed
-///   unit lands in `units` regardless of whether its ancestors are
-///   present yet, so out-of-order delivery accumulates sigs and
-///   gossips immediately rather than being dropped and refetched.
-/// - **Extension** (`extended`) is strict. A slot is extended into
-///   the extender — and made eligible as a parent for our own future
-///   units via [`Self::parents_for`] — only once it has crossed the
-///   sig threshold *and* every parent slot is itself extended.
-///   Extension cascades: when a slot becomes extendable, descendants
-///   whose last missing parent was this slot are checked too.
-///
-/// The graph also owns its `Backup` and `Extender`: every mutation
-/// that changes an entry persists it through `backup`, and every
-/// extension transition feeds the unit through `extender` so its
-/// causal closure can be ordered. Engine code never touches backup or
-/// extender directly.
-///
-/// Session-scoped: every unit holds the same `session`, and
-/// `insert_unit` rejects mismatches. A stale unit from a previous
-/// session can't enter the graph and so cannot block the current
-/// session's `(round, creator)` slot.
+/// - At most one body per `(round, creator)` slot can ever reach
+///   threshold (consistent broadcast).
+/// - A slot is in `extended` iff it's confirmed locally and every
+///   parent slot is also in `extended`.
 pub struct Graph<D: UnitData> {
     session: u64,
     n: NumPeers,
     units: BTreeMap<(Round, PeerId), Entry<D>>,
-    /// Slots that have been extended into the extender. Inductive
-    /// invariant: a slot is in `extended` iff it's confirmed locally
-    /// and every parent slot is also in `extended`. So membership in
-    /// `extended` is also the predicate gating own-unit parent
-    /// selection — we only build new units atop slots whose full
-    /// ancestry we hold ready.
     extended: BTreeSet<(Round, PeerId)>,
     backup: DynBackup<D>,
     extender: Extender<D>,
 }
 
 impl<D: UnitData> Graph<D> {
-    /// Build a graph for `session`, restoring any persisted state from
-    /// `backup` and feeding the recovered fully-ancestored confirmed
-    /// units into a fresh internal extender that emits ordered datums
-    /// on `ordered_tx`. Round-0 units are created and disseminated like
-    /// every other round.
     pub fn new(
         n: NumPeers,
         session: u64,
@@ -146,12 +87,9 @@ impl<D: UnitData> Graph<D> {
             extender,
         };
 
-        // `Backup::load` returns entries in `(round, peer)` lex order
-        // — a valid topological order over the parent relation — so
-        // inserting and immediately promoting in the same pass works:
-        // by the time we extend `(R, c)`, every `(R-1, *)` slot that
-        // could be a parent has already been processed and is either
-        // in `extended` or never will be.
+        // `Backup::load`'s (round, peer) lex order is a valid
+        // topological order, so inserting and extending in one pass
+        // works — every parent of (R, c) has already been processed.
         for entry in graph.backup.load() {
             let r = entry.unit.round;
             let c = entry.unit.creator;
@@ -162,46 +100,34 @@ impl<D: UnitData> Graph<D> {
         graph
     }
 
-    /// The session this graph is scoped to. Every unit it holds carries
-    /// this `session`.
     pub fn session(&self) -> u64 {
         self.session
     }
 
-    /// Number of co-signatures required for a non-genesis unit to confirm.
     pub fn threshold(&self) -> usize {
         self.n.threshold()
     }
 
-    /// Iterate every peer id in the federation in `PeerId` order.
     pub fn peer_ids(&self) -> impl Iterator<Item = PeerId> {
         self.n.peer_ids()
     }
 
-    /// Get the entry at `(round, creator)`, if any.
     pub fn entry(&self, round: Round, creator: PeerId) -> Option<&Entry<D>> {
         self.units.get(&(round, creator))
     }
 
-    /// Whether the slot at `(round, creator)` exists and is confirmed
-    /// (sigs threshold met). This is the local-only predicate; the slot
-    /// may still be missing ancestors. Use [`Self::is_extended`] for the
-    /// stronger ancestrally-ready predicate.
+    /// Local sigs threshold met. Does *not* imply ancestors are ready.
     pub fn is_confirmed(&self, round: Round, creator: PeerId) -> bool {
         self.units
             .get(&(round, creator))
             .is_some_and(|e| e.is_confirmed(self.threshold()))
     }
 
-    /// Whether the slot at `(round, creator)` has been extended: it
-    /// is confirmed locally *and* every parent slot is also extended.
-    /// Equivalent to "this slot has been handed to the extender, and
-    /// its full causal closure is locally present and confirmed".
+    /// Confirmed *and* every parent slot is extended.
     pub fn is_extended(&self, round: Round, creator: PeerId) -> bool {
         self.extended.contains(&(round, creator))
     }
 
-    /// Iterate the slots at `round` in `creator`-order.
     fn round_units(&self, round: Round) -> impl Iterator<Item = &Entry<D>> {
         self.units
             .range((round, PeerId::from(0u8))..)
@@ -209,11 +135,6 @@ impl<D: UnitData> Graph<D> {
             .map(|(_, e)| e)
     }
 
-    /// Highest-round entry we hold for `creator`, if any. Used by the
-    /// periodic anti-entropy push: each peer sends its highest known
-    /// unit per other peer (with the sigs it holds) to everyone, which
-    /// both refills sig deficits at slots receivers already hold and
-    /// seeds higher rounds at laggards.
     pub fn highest_entry(&self, creator: PeerId) -> Option<&Entry<D>> {
         self.units
             .iter()
@@ -221,33 +142,11 @@ impl<D: UnitData> Graph<D> {
             .find_map(|((_, c), e)| (*c == creator).then_some(e))
     }
 
-    /// Insert a freshly-received unit (with the carried co-signatures)
-    /// into the graph and return the inserted entry on a *fresh* insert.
-    ///
-    /// First-seen wins per slot — if we already hold a unit at
-    /// `(unit.round, unit.creator)` the body is dropped, but the carried
-    /// sigs are still merged into the existing slot (drop + merge is
-    /// safe: an honest peer never co-signs two distinct units at the
-    /// same slot, so a forker can't reach threshold on either side).
-    ///
-    /// Insert is *lax* on ancestry: a fresh unit lands as soon as it's
-    /// well-formed (correct cardinality of parent creators, all drawn
-    /// from the federation). Whether its parents are locally confirmed
-    /// is *not* checked here — that gate has moved to
-    /// [`Self::try_extend`], which feeds the extender and permits the
-    /// slot to be used as a parent for our own future units. Accepting
-    /// at any round is what lets a node restarting from empty state
-    /// catch up by receiving a head-of-DAG push and then walking back
-    /// via demand-pull on missing parents.
-    ///
-    /// On the fresh path the caller's `sig` is trusted (engine
-    /// pre-verifies it against `unit.creator`); each entry in `cosigs`
-    /// is re-verified here against the body and silently dropped on
-    /// failure. Duplicate path drops the new body (first-seen wins) but
-    /// merges any carried `cosigs` via `record_cosig`. Returns
-    /// `Some(entry)` only on a fresh insert — that's the caller's
-    /// signal to rebroadcast — `None` on duplicates and on any of the
-    /// rejection paths above.
+    /// Lax body insert. Caller pre-verifies `sig`; each entry in
+    /// `cosigs` is re-verified against the body, invalid ones dropped.
+    /// Duplicate slot: first-seen body wins, carried cosigs merge via
+    /// `record_cosig`. Returns `Some(entry)` only on fresh insert (the
+    /// caller's signal to rebroadcast).
     pub fn insert_unit(
         &mut self,
         unit: Unit<D>,
@@ -262,20 +161,14 @@ impl<D: UnitData> Graph<D> {
             return None;
         }
 
-        // Re-encode the payload and reject anything past the byte cap.
-        // `D` is generic, so the bound has to be checked here rather
-        // than at decode time — a malicious creator that bundles too
-        // many items into one unit gets dropped before we keep the
-        // entry around.
+        // `D` is generic, so the byte cap has to be enforced here at
+        // re-encode time rather than at decode time.
         if unit.data.consensus_encode_to_vec().len() > BFT_UNIT_BYTE_LIMIT {
             return None;
         }
 
         self.check_parents(&unit).ok()?;
 
-        // Filter cosigs that don't verify or come from the creator.
-        // The creator's signature lives in the dedicated `sig` field;
-        // a self-cosig from the creator would be redundant.
         let session = self.session;
         let valid_cosigs: BTreeMap<PeerId, schnorr::Signature> = cosigs
             .into_iter()
@@ -295,18 +188,10 @@ impl<D: UnitData> Graph<D> {
         Some(entry)
     }
 
-    /// Install (or overwrite) a slot's entry from a `SignedUnit`-shaped
-    /// bundle. The bundle must carry threshold-many valid signatures
-    /// (`1 + cosigs.len() >= threshold`); if so, this is *cryptographic
-    /// proof* that this body is the canonical one for the slot, and
-    /// any previously-stored body at this slot was either the same
-    /// body or a forker's stuck-below-threshold artifact that we can
-    /// safely discard.
-    ///
-    /// Returns `true` iff the bundle verified and was installed.
-    /// Returns `false` for: session mismatch, oversize payload,
-    /// malformed parents, invalid creator sig, or insufficient valid
-    /// cosigs after filtering.
+    /// Install (or overwrite) a slot from a threshold-proven bundle.
+    /// Returns `true` iff the bundle verified and was installed. A
+    /// valid `SignedUnit` proves canonical body — quorum math forbids
+    /// two distinct bodies reaching threshold — so overwrite is safe.
     pub fn insert_signed_unit(
         &mut self,
         unit: Unit<D>,
@@ -324,15 +209,10 @@ impl<D: UnitData> Graph<D> {
             return false;
         }
 
-        // Take exactly `2f = threshold - 1` valid non-creator cosigs.
-        // BTreeMap iterates in PeerId order so this is deterministic
-        // across peers; the iterator short-circuits, so any extra
-        // cosigs in the bundle are never verified (saves CPU).
-        // Structural parent validity (cardinality + federation
-        // membership) doesn't need a separate check here — at least
-        // f+1 of the verified sigs come from honest peers, who ran
-        // `check_parents` before signing, so the threshold proof
-        // implies the parent set is well-formed.
+        // BTreeMap's PeerId-order iteration + `take(t-1)` short-circuit
+        // means extras past 2f are never verified. Structural parent
+        // validity is implied by the threshold proof (≥ f+1 honest
+        // signers ran `check_parents` before signing).
         let valid_cosigs: BTreeMap<PeerId, schnorr::Signature> = cosigs
             .into_iter()
             .filter(|(signer, c)| {
@@ -349,10 +229,6 @@ impl<D: UnitData> Graph<D> {
 
         self.backup.save(&entry);
 
-        // Atomic install/overwrite. A previously-extended slot can
-        // only be re-installed with the same body (quorum math forbids
-        // two distinct bodies reaching threshold), so this never
-        // invalidates an extender extension.
         self.units.insert((unit.round, unit.creator), entry);
 
         self.try_extend(unit.round, unit.creator);
@@ -360,20 +236,14 @@ impl<D: UnitData> Graph<D> {
         true
     }
 
-    /// Record a co-signature on the unit at `(round, creator)`.
+    /// Verify a cosig against the body we hold and merge it. Returns
+    /// `false` iff we don't hold the body — caller demand-pulls from
+    /// the signer in that case. Stale cosigs (verify failure, dupe,
+    /// already-confirmed, signer == creator) silently no-op.
     ///
-    /// The signature is verified against the body *we currently hold*
-    /// at that slot — the consistent-broadcast safety check, since a
-    /// forker trying to split co-signers across two distinct bodies
-    /// will find that each peer's collected cosigs only verify against
-    /// their local body. Stale cosigs (verify failure, dupe signer,
-    /// already-confirmed slot, signer == creator) are silently
-    /// discarded.
-    ///
-    /// Returns `true` iff we hold the body locally (regardless of
-    /// whether the cosig was new). Returns `false` if we don't hold
-    /// the body — the caller is expected to demand-pull from the
-    /// signer in that case.
+    /// Verifying against the *locally-held* body is the consistent-
+    /// broadcast check: a forker's cosigs over a different body don't
+    /// verify against ours, so neither side reaches threshold.
     pub fn record_cosig(
         &mut self,
         round: Round,
@@ -388,9 +258,6 @@ impl<D: UnitData> Graph<D> {
             return false;
         };
 
-        // Creator's sig already lives in `entry.sig`; a "cosig" from
-        // the creator is meaningless. Treat as no-op success — we
-        // *do* hold the body.
         if signer == creator {
             return true;
         }
@@ -416,19 +283,10 @@ impl<D: UnitData> Graph<D> {
         true
     }
 
-    /// Try to extend the extender with the slot at `(round, creator)`;
-    /// if it does extend, sweep ascending rounds extending whatever
-    /// became newly eligible, stopping when a full round produces zero
-    /// extensions.
-    ///
-    /// Extension conditions for one slot:
-    /// 1. Not already in `extended`.
-    /// 2. Confirmed (sigs ≥ threshold).
-    /// 3. Round 0, or every parent slot is already in `extended`.
-    ///
-    /// Termination: a round can only gain newly-extendable slots if
-    /// the previous round did. Once a sweep extends nothing, no higher
-    /// round can extend anything either, so we stop.
+    /// Extend `(round, creator)` if eligible, then sweep ascending
+    /// rounds while each sweep produces at least one new extension.
+    /// Termination is by induction — a round can only gain extensions
+    /// when the previous one did.
     fn try_extend(&mut self, round: Round, creator: PeerId) {
         if !self.maybe_extend(round, creator) {
             return;
@@ -457,8 +315,7 @@ impl<D: UnitData> Graph<D> {
         }
     }
 
-    /// Attempt to extend one slot. Returns `true` iff the slot
-    /// transitioned from not-extended to extended in this call.
+    /// Returns `true` iff this call transitioned the slot to extended.
     fn maybe_extend(&mut self, round: Round, creator: PeerId) -> bool {
         if self.extended.contains(&(round, creator)) {
             return false;
@@ -490,28 +347,10 @@ impl<D: UnitData> Graph<D> {
         true
     }
 
-    /// Build a candidate parent set for a unit at `round`.
-    ///
-    /// For `round == 0`, returns an empty parent set unconditionally —
-    /// round-0 units are the DAG's roots.
-    ///
-    /// For `round > 0`, returns the lowest-`PeerId`-keyed `threshold`
-    /// *extended* slots at `round - 1`, or `None` if fewer than
-    /// `threshold` slots at that round have been extended yet. Parent
-    /// hashes aren't tracked: at most one unit per slot can confirm,
-    /// so the creator suffices.
-    ///
-    /// Parents must be `extended` (ancestrally ready) rather than
-    /// just confirmed: building a unit atop a parent whose own
-    /// ancestors aren't ready would mean the new unit would also fail
-    /// to extend — wasted work and lost rebroadcast opportunity.
-    ///
-    /// No chain rule: a creator's own previous-round unit is *not*
-    /// forced into the parent set. Recovery is independent of the
-    /// chain — the periodic anti-entropy push refills sig deficits at
-    /// slots receivers already hold, and the per-creator pull
-    /// (`Message::Request` for the lowest unconfirmed round) pulls in
-    /// missing units one round at a time.
+    /// Lowest-`PeerId`-keyed `threshold` extended slots at `round-1`,
+    /// or `None` if fewer than `threshold` slots there are extended.
+    /// Empty set for round 0. Filtering by `extended` (not `confirmed`)
+    /// guarantees any unit we author is itself extendable on receivers.
     pub fn parents_for(&self, round: Round) -> Option<BTreeSet<PeerId>> {
         let Some(parent_round) = round.checked_sub(1) else {
             return Some(BTreeSet::new());
@@ -529,17 +368,9 @@ impl<D: UnitData> Graph<D> {
         (parents.len() == t).then_some(parents)
     }
 
-    /// Structural parent check used by `insert_unit`. Returns `Err(())`
-    /// when the parent set is malformed (wrong cardinality, or names a
-    /// creator outside the federation); `Ok(())` otherwise.
-    ///
-    /// - Round 0 must have an empty parent set.
-    /// - Round R>0 must carry exactly `threshold` parent creators.
-    /// - Every parent creator must be a member of the federation.
-    ///
-    /// Local presence/confirmation of the parent slots is *not* checked
-    /// here — that's the extension gate, enforced by `try_extend` and
-    /// `parents_for`.
+    /// Structural-only parent check: round 0 has empty parents; round
+    /// R>0 has exactly `threshold` parent creators all in the federation.
+    /// Local presence of the parent slots is the extension gate's job.
     fn check_parents(&self, unit: &Unit<D>) -> Result<(), ()> {
         let t = self.threshold();
 

@@ -11,41 +11,14 @@ use crate::keychain::Keychain;
 use crate::network::{DynNetwork, Message, Recipient};
 use crate::unit::{Round, Unit, UnitData};
 
-/// How often each peer fires the periodic anti-entropy push: send our
-/// own highest entry (with the sigs we currently hold) to everyone.
-/// Each peer is canonical for its own column — pushing only the own
-/// slot gives laggards a reentry point from which they walk back via
-/// demand-pull on missing parents.
-///
-/// Pull is demand-driven, not periodic: on every received unit, we
-/// unicast a `Request` to the sender for any of that unit's parents
-/// we don't yet hold *extended* locally. Re-issued on every receive (fresh
-/// or duplicate), so a dropped `Request` is retried the next time the
-/// pushing peer ships us the same child.
+/// Periodic own-slot push interval. Pull is demand-driven, not periodic.
 const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Drive a single peer's growth indefinitely.
-///
-/// Three concurrent arms drive the loop:
-///
-/// - **Inbound messages** are verified and folded into the local
-///   `Graph`. The graph internally persists every mutation through
-///   `backup` and feeds confirmed units into its extender, which emits
-///   ordered `(round, creator, datum)` triples on `ordered_tx`.
-/// - **Anti-entropy** every `ANTI_ENTROPY_INTERVAL`: push our own
-///   highest entry to everyone. Other peers' columns flow only on
-///   explicit `Request` (issued reactively from `handle_unit` and
-///   `handle_cosig`).
-/// - **Unit creation** is rate-limited by `unit_delay`, a closure
-///   `Round → Duration` invoked with the round we're *about* to attempt
-///   to create. The first deadline fires immediately at startup, so
-///   `unit_delay(0)` typically returns 0; the daemon's caller threads
-///   in an exponential-slowdown formula so a session that fails to
-///   terminate (e.g. under attack) can't grow rounds without bound.
-///
-/// The engine has no internal stopping condition — it runs until the
-/// caller drops the task (or until every other peer has done so, which
-/// closes the network).
+/// Drive a single peer's growth indefinitely. Runs until the caller
+/// drops the task or the network closes. `unit_delay(round)` rate-
+/// limits creation — typically `0` per round in steady state, with
+/// exponential slowdown past `rounds_per_session` so an unterminating
+/// session can't grow rounds unboundedly.
 pub async fn run<D: UnitData, P: DataProvider<D>>(
     own_id: PeerId,
     graph: Graph<D>,
@@ -66,8 +39,6 @@ pub async fn run<D: UnitData, P: DataProvider<D>>(
     .await;
 }
 
-/// All long-lived state for one peer's engine. Kept private — `pub
-/// async fn run` is the only way in.
 struct Engine<D: UnitData, P: DataProvider<D>> {
     own_id: PeerId,
     graph: Graph<D>,
@@ -124,31 +95,15 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         }
     }
 
-    /// Push-only anti-entropy, narrowed to *own* slot only. Each peer
-    /// is canonical for its own column of the DAG: it owns the body and
-    /// accumulates sigs locally as they arrive (via `Sig` broadcasts
-    /// and `Request` responses). Pushing only the own highest slot
-    /// (with whatever sigs we hold) gives laggards a reentry point —
-    /// from any push they walk back via demand-pull on missing parents.
-    /// Other peers' slots flow only on explicit `Request`, so no peer
-    /// has to maintain a redundant view of the federation's whole DAG
-    /// in steady-state push traffic.
     fn broadcast_anti_entropy(&self) {
         if let Some(entry) = self.graph.highest_entry(self.own_id) {
             self.send_unit(Recipient::Everyone, entry);
         }
     }
 
-    /// Respond to a `Request` by unicasting back a `SignedUnit` —
-    /// body + creator sig + exactly `2f` cosigs — but *only* if the
-    /// slot is locally confirmed (≥ threshold sigs). If the slot is
-    /// missing or below threshold we send nothing; the requester will
-    /// retry on its next anti-entropy cycle.
-    ///
-    /// Limiting responses to confirmed slots is what makes `SignedUnit`
-    /// load-bearing: a receiver that overwrites its local entry is
-    /// trusting the threshold proof in the bundle, so we must never
-    /// ship a sub-threshold bundle.
+    /// Reply with `SignedUnit` only when the slot is locally confirmed.
+    /// A sub-threshold bundle would be unsafe — the receiver overwrites
+    /// its entry on the strength of the threshold proof.
     fn handle_request(&self, requester: PeerId, round: Round, creator: PeerId) {
         let Some(entry) = self.graph.entry(round, creator) else {
             return;
@@ -158,9 +113,8 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             return;
         }
 
-        // `record_cosig` stops accepting cosigs at threshold, so
-        // `entry.cosigs` already holds exactly `2f` cosigs by
-        // invariant — no trim needed.
+        // `record_cosig` caps at threshold, so `entry.cosigs` already
+        // holds exactly `2f` cosigs — no trim needed.
         self.network.send(
             Recipient::Peer(requester),
             Message::SignedUnit {
@@ -171,26 +125,9 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         );
     }
 
-    /// Apply one inbound `Unit` message: verify the creator's sig,
-    /// add the body to the graph (lax), record our own cosig if this
-    /// is the first time we sign this slot, demand-pull any parents
-    /// we don't yet hold *extended* from the immediate sender, and — only
-    /// when our own cosig was newly added — broadcast a `Cosig` so
-    /// every other peer learns of our cosignature.
-    ///
-    /// `Unit` carries only the creator's sig; cosigs flow on the
-    /// lighter `Cosig` channel (or piggyback on `Request` responses).
-    ///
-    /// Parent pulls run on every receive (fresh or duplicate). Re-issuing
-    /// on duplicates makes the mechanism self-healing against dropped
-    /// `Request` messages.
+    /// Verify, lax-insert, cosign-on-first-sight (own broadcast), then
+    /// demand-pull any not-yet-extended parents from the sender.
     fn handle_unit(&mut self, sender: PeerId, unit: Unit<D>, sig: schnorr::Signature) {
-        // Verify the body is signed by its claimed creator under the
-        // current session. Without this, a Byzantine peer could
-        // fabricate a body at someone else's slot, blocking the
-        // legitimate creator from inserting; and a stale unit from an
-        // earlier session would be hashed under a different `(session,
-        // unit)` tuple and fail to verify.
         if !self
             .keychain
             .verify(self.graph.session(), &unit, &sig, unit.creator)
@@ -202,9 +139,7 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         let unit_creator = unit.creator;
         let parents: Vec<PeerId> = unit.parents.iter().copied().collect();
 
-        // First-time-cosign detection. Skip if we're the creator (our
-        // sig is already in the entry's `sig` field — no separate cosig
-        // is meaningful).
+        // We don't cosign our own slot (the creator sig is already ours).
         let already_signed_locally = self
             .graph
             .entry(unit_round, unit_creator)
@@ -234,13 +169,8 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
             );
         }
 
-        // Demand-pull every parent slot we don't yet hold *extended*. Covers
-        // three cases at once: (a) parent body missing, (b) parent
-        // present but below sig threshold (the sender's response unions
-        // any sigs we're missing), (c) parent confirmed but ancestrally
-        // not extended (re-receiving the body re-fires this same
-        // parent-pull logic recursively, retrying the deeper walk-back).
-        // Once the parent is extended, the request stops firing.
+        // Re-issuing on every receive (fresh or duplicate) is the
+        // retry mechanism for dropped `Request` messages.
         if let Some(parent_round) = unit_round.checked_sub(1) {
             for parent_creator in parents {
                 if !self.graph.is_extended(parent_round, parent_creator) {
@@ -256,12 +186,9 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         }
     }
 
-    /// Apply one inbound `SignedUnit` message — the threshold-proven
-    /// body + cosig bundle. The graph atomically installs (or
-    /// overwrites) the slot, then we demand-pull any of the unit's
-    /// parents we don't yet hold *extended* from the immediate sender. No
-    /// rebroadcast, no Cosig fan-out — receiving a SignedUnit is a
-    /// pull-driven event, not a fresh consensus contribution.
+    /// Atomically install/overwrite from the threshold proof, then
+    /// demand-pull any not-yet-extended parents from the sender. No
+    /// rebroadcast, no cosig fan-out — this is a pull-driven event.
     fn handle_signed_unit(
         &mut self,
         sender: PeerId,
@@ -294,13 +221,9 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         }
     }
 
-    /// Apply one inbound `Cosig` message. If we already hold the slot's
-    /// body, verify and union the cosig directly. If we don't, treat
-    /// the `Cosig` as a forward reference: drop the cosig and unicast
-    /// a `Request` to the signer (who must hold the body since they
-    /// signed it). The response arrives as a `SignedUnit` if the
-    /// signer has accumulated threshold cosigs locally, recovering
-    /// both body and the dropped cosig in one round-trip.
+    /// Verify and merge if we hold the body; otherwise demand-pull
+    /// the body from the signer and drop the cosig (the response
+    /// will carry it back inside the SignedUnit).
     fn handle_cosig(
         &mut self,
         sender: PeerId,
@@ -318,12 +241,10 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         }
     }
 
-    /// Round we're about to attempt to create at, derived from the
-    /// highest own-slot we currently hold. After a wipe-and-restore,
-    /// peers can fill our slot via anti-entropy before this fires —
-    /// `highest_entry` already accounts for that, so we naturally
-    /// resume at `highest + 1` rather than risking a fork by rebuilding
-    /// a slot peers have already endorsed.
+    /// Derive the next round to attempt creation at from our highest
+    /// own-slot. After wipe-and-restore, peers may have refilled our
+    /// slot via anti-entropy; `highest_entry` accounts for that, so
+    /// we resume at `highest + 1` rather than re-forking it.
     fn next_create_round(&self) -> Round {
         self.graph
             .highest_entry(self.own_id)
@@ -346,11 +267,10 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
 
         let sig = self.keychain.sign(self.graph.session(), &unit);
 
-        // Crash barrier: persist the unit + our self-sig before
-        // broadcasting. On restart we'd otherwise be free to build a
-        // *different* unit at this slot from a fresh data_provider
-        // draw, and peers who saw the original message would consider
-        // us a forker.
+        // Crash barrier: persist before broadcasting, otherwise a
+        // restart would let us build a *different* unit at this slot
+        // from a fresh data_provider draw — peers that saw the
+        // original would consider us a forker.
         let entry = self
             .graph
             .insert_unit(unit, sig, BTreeMap::new(), &self.keychain)
@@ -359,11 +279,6 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         self.send_unit(Recipient::Everyone, &entry);
     }
 
-    /// Ship an entry's body (with creator sig only) — used by the
-    /// creator's broadcast on creation and the anti-entropy push.
-    /// Cosig fan-out is the `Cosig` channel's job, and the
-    /// request-response path emits its own `Unit` + per-cosig `Cosig`
-    /// directly.
     fn send_unit(&self, recipient: Recipient, entry: &Entry<D>) {
         self.network.send(
             recipient,
