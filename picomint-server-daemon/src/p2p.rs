@@ -368,8 +368,8 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
         // headroom — drops are silent and the consensus layer expects to
         // resend, but a queue too small causes confirmation propagation
         // to stall under brief network or drainer slowdowns.
-        let (outgoing_tx, outgoing_rx) = bounded(1000);
-        let (incoming_tx, incoming_rx) = bounded(1000);
+        let (outgoing_tx, outgoing_rx) = bounded(100);
+        let (incoming_tx, incoming_rx) = bounded(100);
 
         tokio::spawn(
             async move {
