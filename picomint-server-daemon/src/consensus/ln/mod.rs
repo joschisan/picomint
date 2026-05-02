@@ -3,6 +3,8 @@ pub use picomint_core::ln as common;
 mod db;
 mod rpc;
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use anyhow::{Context, ensure};
 use group::Curve;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
@@ -15,7 +17,6 @@ use picomint_core::ln::{
     LightningOutputError, OutgoingWitness,
 };
 use picomint_core::module::{ApiError, InputMeta, TransactionItemAmounts};
-use picomint_core::time::duration_since_epoch;
 use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use tpe::{PublicKeyShare, SecretKeyShare};
@@ -94,9 +95,11 @@ impl Lightning {
     pub async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<LightningConsensusItem> {
         // We reduce the time granularity to deduplicate votes more often and not save
         // one consensus item every second.
-        let mut items = vec![LightningConsensusItem::UnixTimeVote(
-            60 * (duration_since_epoch().as_secs() / 60),
-        )];
+        let unix_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before Unix epoch")
+            .as_secs();
+        let mut items = vec![LightningConsensusItem::UnixTimeVote(60 * (unix_secs / 60))];
 
         if let Ok(block_count) = self.get_block_count() {
             trace!(?block_count, "Proposing block count");

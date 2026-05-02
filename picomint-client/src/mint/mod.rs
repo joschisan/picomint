@@ -10,7 +10,7 @@ mod secret;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
@@ -877,10 +877,10 @@ async fn download_slice_with_hash(
 
     loop {
         let peer = peer_selector.choose_peer();
-        let start_time = picomint_core::time::now();
+        let start_time = SystemTime::now();
 
         if let Ok(data) = module_api.recovery_slice(peer, TIMEOUT, start, end).await {
-            let elapsed = picomint_core::time::now()
+            let elapsed = SystemTime::now()
                 .duration_since(start_time)
                 .unwrap_or_default();
 

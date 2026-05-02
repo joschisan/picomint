@@ -8,6 +8,7 @@ pub mod trailer;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, anyhow, bail, ensure};
 use bitcoin::Network;
@@ -32,7 +33,6 @@ use picomint_core::ln::gateway_api::{
 };
 use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
 use picomint_core::secp256k1::schnorr::Signature;
-use picomint_core::time::duration_since_epoch;
 use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_lnurl::VerifyResponse;
@@ -346,7 +346,12 @@ impl AppState {
             bail!("The contract amount does not pay the correct amount of fees");
         }
 
-        if payload.contract.commitment.expiration <= duration_since_epoch().as_secs() {
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before Unix epoch")
+            .as_secs();
+
+        if payload.contract.commitment.expiration <= now_secs {
             bail!("The contract has already expired");
         }
 

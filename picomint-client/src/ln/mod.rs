@@ -8,6 +8,7 @@ mod secret;
 mod send_sm;
 
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
@@ -29,7 +30,6 @@ use picomint_core::ln::{
 use picomint_core::wire;
 
 pub use self::secret::LnSecret;
-use picomint_core::time::duration_since_epoch;
 use picomint_core::{Amount, OutPoint, PeerId};
 use picomint_encoding::Encodable;
 use picomint_redb::WriteTxRef;
@@ -415,7 +415,9 @@ impl LightningClientModule {
             return Err(ReceiveError::AmountTooSmall);
         }
 
-        let expiration = duration_since_epoch()
+        let expiration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before Unix epoch")
             .as_secs()
             .saturating_add(u64::from(expiry_secs));
 

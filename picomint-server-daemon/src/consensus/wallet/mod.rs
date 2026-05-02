@@ -2,6 +2,7 @@ pub mod db;
 mod rpc;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Duration;
 
 use self::db::{
     BLOCK_COUNT_VOTE, FEDERATION_WALLET, FEE_RATE_VOTE, OUTPUT, Output, SIGNATURES, SPENT_OUTPUT,
@@ -517,7 +518,12 @@ impl Wallet {
                     btc_rpc.submit_transaction(unconfirmed_tx.tx).await;
                 }
 
-                sleep(common::sleep_duration(network)).await;
+                sleep(Duration::from_secs(if network == Network::Regtest {
+                    1
+                } else {
+                    60
+                }))
+                .await;
             }
         });
     }
@@ -674,7 +680,12 @@ impl Wallet {
 
             info!("Waiting for local bitcoin backend to sync to block count {block_count}");
 
-            sleep(common::sleep_duration(self.network)).await;
+            sleep(Duration::from_secs(if self.network == Network::Regtest {
+                1
+            } else {
+                60
+            }))
+            .await;
         }
     }
 

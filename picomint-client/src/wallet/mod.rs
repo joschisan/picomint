@@ -319,8 +319,12 @@ impl WalletClientModule {
                     }
                 }
 
-                sleep(picomint_core::wallet::sleep_duration(
-                    module.client_ctx.network(),
+                sleep(Duration::from_secs(
+                    if module.client_ctx.network() == bitcoin::Network::Regtest {
+                        1
+                    } else {
+                        60
+                    },
                 ))
                 .await;
             }

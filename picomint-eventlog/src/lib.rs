@@ -17,12 +17,12 @@
 //! both halves of a gateway-internal direct swap).
 use std::borrow::Cow;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use derive_more::{Display, FromStr};
 use futures::Stream;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::time::duration_since_epoch;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, WriteTxRef};
 use picomint_redb::{consensus_key, consensus_value, table};
@@ -135,8 +135,8 @@ pub struct EventLogEntry {
     /// [`EVENT_LOG_BY_OPERATION`] for op-scoped tailing.
     pub operation_id: OperationId,
 
-    /// Timestamp in microseconds after unix epoch.
-    pub ts_usecs: u64,
+    /// Timestamp in milliseconds after unix epoch.
+    pub timestamp: u64,
 
     /// Event-kind specific payload, typically json-encoded.
     pub payload: Vec<u8>,
@@ -191,13 +191,16 @@ pub fn log_event_raw(
     // the events still land in the shared root tables.
     let dbtx = dbtx.un_prefixed();
     let id = next_event_log_id(&dbtx);
-    let ts_usecs = u64::try_from(duration_since_epoch().as_micros()).unwrap_or(u64::MAX);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("System time before Unix epoch")
+        .as_millis() as u64;
     let entry = EventLogEntry {
         kind,
         source,
         federation_id,
         operation_id,
-        ts_usecs,
+        timestamp,
         payload,
     };
 

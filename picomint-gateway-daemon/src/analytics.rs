@@ -79,7 +79,7 @@ impl Analytics {
 const SCHEMA_SQL: &str = r#"
 CREATE TABLE send (
     operation_id  TEXT NOT NULL,
-    ts            INTEGER NOT NULL,   -- usecs since unix epoch
+    ts            INTEGER NOT NULL,   -- msecs since unix epoch
     federation_id TEXT NOT NULL,
     outpoint      TEXT NOT NULL,
     amount_msat   INTEGER NOT NULL,
@@ -232,7 +232,7 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
     let tx = guard.transaction()?;
     for entry in entries {
         let op_id = entry.operation_id.to_string();
-        let ts = entry.ts_usecs as i64;
+        let ts = entry.timestamp as i64;
         let fed_id = entry.federation_id.to_string();
         if let Some(e) = entry.to_event::<SendEvent>() {
             tx.execute(

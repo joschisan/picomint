@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use crate::api::FederationApi;
 use futures::StreamExt as _;
+use futures::stream::BoxStream;
 use picomint_core::TransactionId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::util::BoxStream;
 use picomint_eventlog::{Event, EventLogEntry, EventLogId};
 use picomint_redb::{Database, WriteTxRef};
 use tokio::sync::Notify;

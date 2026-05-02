@@ -43,12 +43,8 @@ mod peer;
 pub mod secret;
 
 pub mod session_outcome;
-/// Time helpers.
-pub mod time;
 /// Wire-level Transaction and ConsensusItem types.
 pub mod transaction;
-/// General purpose utilities
-pub mod util;
 /// Wallet module wire types / helpers (shared between client and server).
 pub mod wallet;
 /// Static wire enums over the fixed module set.
