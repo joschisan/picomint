@@ -152,10 +152,6 @@ impl<D: UnitData> Graph<D> {
         // could be a parent has already been processed and is either
         // in `fed` or never will be.
         for entry in graph.backup.load() {
-            assert_eq!(
-                entry.unit.session, session,
-                "backup session does not match graph session",
-            );
             let r = entry.unit.round;
             let c = entry.unit.creator;
             graph.units.insert((r, c), entry);
@@ -258,10 +254,6 @@ impl<D: UnitData> Graph<D> {
         cosigs: BTreeMap<PeerId, schnorr::Signature>,
         keychain: &Keychain,
     ) -> Option<Entry<D>> {
-        if unit.session != self.session {
-            return None;
-        }
-
         if self.units.contains_key(&(unit.round, unit.creator)) {
             for (signer, cosig) in cosigs {
                 self.record_cosig(unit.round, unit.creator, signer, cosig, keychain);
@@ -283,9 +275,12 @@ impl<D: UnitData> Graph<D> {
         // Filter cosigs that don't verify or come from the creator.
         // The creator's signature lives in the dedicated `sig` field;
         // a self-cosig from the creator would be redundant.
+        let session = self.session;
         let valid_cosigs: BTreeMap<PeerId, schnorr::Signature> = cosigs
             .into_iter()
-            .filter(|(signer, c)| *signer != unit.creator && keychain.verify(&unit, c, *signer))
+            .filter(|(signer, c)| {
+                *signer != unit.creator && keychain.verify(&(session, &unit), c, *signer)
+            })
             .collect();
 
         let entry = Entry::new(unit.clone(), sig, valid_cosigs);
@@ -318,15 +313,13 @@ impl<D: UnitData> Graph<D> {
         cosigs: BTreeMap<PeerId, schnorr::Signature>,
         keychain: &Keychain,
     ) -> bool {
-        if unit.session != self.session {
-            return false;
-        }
-
         if unit.data.consensus_encode_to_vec().len() > BFT_UNIT_BYTE_LIMIT {
             return false;
         }
 
-        if !keychain.verify(&unit, &sig, unit.creator) {
+        let session = self.session;
+
+        if !keychain.verify(&(session, &unit), &sig, unit.creator) {
             return false;
         }
 
@@ -341,7 +334,9 @@ impl<D: UnitData> Graph<D> {
         // implies the parent set is well-formed.
         let valid_cosigs: BTreeMap<PeerId, schnorr::Signature> = cosigs
             .into_iter()
-            .filter(|(signer, c)| *signer != unit.creator && keychain.verify(&unit, c, *signer))
+            .filter(|(signer, c)| {
+                *signer != unit.creator && keychain.verify(&(session, &unit), c, *signer)
+            })
             .take(self.threshold() - 1)
             .collect();
 
@@ -407,7 +402,7 @@ impl<D: UnitData> Graph<D> {
             return true;
         }
 
-        if !keychain.verify(&entry.unit, &sig, signer) {
+        if !keychain.verify(&(self.session, &entry.unit), &sig, signer) {
             return true;
         }
 

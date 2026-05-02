@@ -72,7 +72,6 @@ async fn engine_skips_pre_filled_own_slot_after_wipe_restore() {
     let own_id = PeerId::from(0u8);
 
     let unit = Unit::<u64> {
-        session,
         round: 0,
         creator: own_id,
         parents: BTreeSet::new(),
@@ -84,13 +83,24 @@ async fn engine_skips_pre_filled_own_slot_after_wipe_restore() {
     let mut graph = Graph::<u64>::new(n, session, backup, tx);
 
     let verifier = keychains.get(&own_id).expect("built").clone();
-    let creator_sig = keychains.get(&own_id).expect("built").sign(&unit);
+    let creator_sig = keychains
+        .get(&own_id)
+        .expect("built")
+        .sign(&(session, &unit));
     // Threshold sigs total = creator + (threshold - 1) cosigs.
     let cosigs: BTreeMap<_, _> = n
         .peer_ids()
         .filter(|p| *p != own_id)
         .take(n.threshold() - 1)
-        .map(|signer| (signer, keychains.get(&signer).expect("built").sign(&unit)))
+        .map(|signer| {
+            (
+                signer,
+                keychains
+                    .get(&signer)
+                    .expect("built")
+                    .sign(&(session, &unit)),
+            )
+        })
         .collect();
 
     assert!(
