@@ -16,7 +16,7 @@ use futures::StreamExt;
 use lightning_invoice::{Bolt11Invoice, Currency, InvoiceBuilder, PaymentSecret};
 use picomint_client::ln::SendPaymentError;
 use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
-use picomint_client::transaction::{Input, TxBuilder};
+use picomint_client::tx::{Input, TxBuilder};
 use picomint_client::{Client, OperationId};
 use picomint_core::config::FederationId;
 use picomint_core::ln::gateway_api::{GatewayInfo, PaymentFee, SendPaymentPayload};

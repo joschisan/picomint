@@ -7,7 +7,7 @@ use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::methods::CoreMethod;
 use picomint_core::module::ApiError;
 use picomint_core::module::audit::AuditSummary;
-use picomint_core::transaction::{ConsensusItem, Transaction, TxError};
+use picomint_core::tx::{ConsensusItem, Transaction, TxError};
 
 use crate::consensus::rpc;
 use crate::{handler, handler_async};

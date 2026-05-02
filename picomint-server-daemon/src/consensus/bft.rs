@@ -13,7 +13,7 @@ use picomint_core::PeerId;
 use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
 use picomint_core::secp256k1::schnorr;
 use picomint_core::session_outcome::SignedSessionOutcome;
-use picomint_core::transaction::ConsensusItem;
+use picomint_core::tx::ConsensusItem;
 use picomint_encoding::Encodable;
 use picomint_redb::Database;
 use tracing::{error, warn};

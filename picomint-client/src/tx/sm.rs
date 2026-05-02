@@ -3,7 +3,7 @@
 use crate::api::FederationApi;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::transaction::Transaction;
+use picomint_core::tx::Transaction;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTxRef;
 

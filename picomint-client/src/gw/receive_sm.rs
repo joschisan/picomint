@@ -19,7 +19,7 @@ use super::events::{ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent
 use crate::api::ServerError;
 use crate::executor::StateMachine;
 use crate::query::FilterMapThreshold;
-use crate::transaction::{Input, TxBuilder};
+use crate::tx::{Input, TxBuilder};
 
 /// Single-state state machine covering the federation side of the receive
 /// flow. `trigger` waits for tx acceptance and gathers TPE decryption shares;

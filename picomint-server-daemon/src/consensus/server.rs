@@ -7,14 +7,14 @@ use std::sync::Arc;
 
 use picomint_core::module::InputMeta;
 use picomint_core::module::audit::AuditSummary;
-use picomint_core::transaction::{Transaction, TxError};
+use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
 use picomint_core::{InPoint, OutPoint, PeerId};
 use picomint_redb::{WriteTx, WriteTxRef};
 
 use crate::consensus::ln::Lightning;
 use crate::consensus::mint::Mint;
-use crate::consensus::transaction::FundingVerifier;
+use crate::consensus::tx::FundingVerifier;
 use crate::consensus::wallet::Wallet;
 
 #[derive(Clone)]

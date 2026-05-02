@@ -9,7 +9,7 @@ use picomint_bft::{
 };
 use picomint_core::secp256k1::{SECP256K1, schnorr};
 use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
-use picomint_core::transaction::ConsensusItem;
+use picomint_core::tx::ConsensusItem;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_redb::{Database, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;

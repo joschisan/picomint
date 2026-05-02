@@ -7,7 +7,7 @@
 use picomint_encoding::{Decodable, Encodable};
 
 use crate::config::ConsensusConfig;
-use crate::transaction::{Transaction, TxError};
+use crate::tx::{Transaction, TxError};
 
 // ── config ──────────────────────────────────────────────────────────────────
 

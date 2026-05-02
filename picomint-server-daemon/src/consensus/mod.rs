@@ -6,7 +6,7 @@ pub mod ln;
 pub mod mint;
 mod rpc;
 pub mod server;
-pub mod transaction;
+pub mod tx;
 pub mod wallet;
 
 use std::collections::BTreeMap;
@@ -21,7 +21,7 @@ use iroh::endpoint::{RecvStream, SendStream};
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
 use picomint_core::module::{ApiAuth, ApiError, Method};
-use picomint_core::transaction::ConsensusItem;
+use picomint_core::tx::ConsensusItem;
 use picomint_core::wire;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::Database;

@@ -24,7 +24,7 @@ use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, instrument, trace, warn};
 
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
-use crate::transaction::{Transaction, TxError};
+use crate::tx::{Transaction, TxError};
 
 // ── Error types ─────────────────────────────────────────────────────────────
 

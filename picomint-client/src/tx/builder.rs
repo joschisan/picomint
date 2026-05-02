@@ -2,7 +2,7 @@ use bitcoin::key::Keypair;
 use bitcoin::secp256k1::{self, Secp256k1};
 use bitcoin_hashes::Hash;
 use picomint_core::Amount;
-use picomint_core::transaction::Transaction;
+use picomint_core::tx::Transaction;
 use picomint_core::wire;
 
 #[derive(Clone, Debug)]

@@ -19,7 +19,7 @@ use picomint_bft::Message as BftMessage;
 use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
 use picomint_core::module::PICOMINT_ALPN;
 use picomint_core::session_outcome::SignedSessionOutcome;
-use picomint_core::transaction::ConsensusItem;
+use picomint_core::tx::ConsensusItem;
 use picomint_core::{PeerId, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};

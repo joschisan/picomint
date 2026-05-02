@@ -1,6 +1,6 @@
 use picomint_core::Amount;
 use picomint_core::module::TxItemAmounts;
-use picomint_core::transaction::TxError;
+use picomint_core::tx::TxError;
 
 #[derive(Clone, Debug, Default)]
 pub struct FundingVerifier {

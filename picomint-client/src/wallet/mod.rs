@@ -13,7 +13,7 @@ use crate::api::FederationResult;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::task::TaskGroup;
-use crate::transaction::{Input, Output, TxBuilder};
+use crate::tx::{Input, Output, TxBuilder};
 use anyhow::anyhow;
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};

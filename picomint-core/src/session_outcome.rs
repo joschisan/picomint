@@ -1,7 +1,7 @@
 use bitcoin::hashes::sha256;
 use picomint_encoding::{Decodable, Encodable};
 
-use crate::transaction::ConsensusItem;
+use crate::tx::ConsensusItem;
 use crate::{PeerId, secp256k1};
 
 /// A consensus item accepted in the consensus

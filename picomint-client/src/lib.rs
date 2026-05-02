@@ -10,10 +10,10 @@
 //! [`mod@gw`]. Each module owns its own state machines and exposes a
 //! `*Module::new` constructor used by the [`Client`] entry points.
 //! Submission ownership lives entirely in [`crate::mint::MintClientModule`]
-//! — non-mint modules build a [`crate::transaction::TxBuilder`]
+//! — non-mint modules build a [`crate::tx::TxBuilder`]
 //! and call `MintClientModule::finalize_and_submit_tx`, which
 //! balances against the wallet and submits via its own
-//! [`crate::transaction::TxSubmissionStateMachine`].
+//! [`crate::tx::TxSubmissionStateMachine`].
 
 /// Federation API transport
 pub mod api;
@@ -38,7 +38,7 @@ pub mod secret;
 /// Local `(TaskTracker, CancellationToken)` wrapper for client background tasks.
 mod task;
 /// Structs and interfaces to construct Picomint transactions
-pub mod transaction;
+pub mod tx;
 /// Wallet module client.
 pub mod wallet;
 

@@ -1,5 +1,5 @@
 use crate::executor::StateMachine;
-use crate::transaction::{Input, TxBuilder};
+use crate::tx::{Input, TxBuilder};
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use futures::future::pending;
