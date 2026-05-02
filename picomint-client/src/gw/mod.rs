@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
+use crate::task::TaskGroup;
 use crate::transaction::{Input, Output, TransactionBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
 use picomint_core::config::FederationId;
@@ -16,7 +17,6 @@ use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::ln::{LightningInput, LightningOutput, OutgoingWitness};
 use picomint_core::secp256k1::Keypair;
-use picomint_core::task::TaskGroup;
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
 use picomint_redb::WriteTxRef;
@@ -37,7 +37,7 @@ impl GatewayClientModule {
         context: ClientContext,
         mint: Arc<crate::mint::MintClientModule>,
         gw_secret: GwSecret,
-        task_group: &TaskGroup,
+        tg: &TaskGroup,
     ) -> anyhow::Result<GatewayClientModule> {
         let keypair = gw_secret.contract_keypair();
 
@@ -51,7 +51,7 @@ impl GatewayClientModule {
         };
 
         let receive_executor =
-            ModuleExecutor::new(context.db().clone(), sm_context, task_group.clone()).await;
+            ModuleExecutor::new(context.db().clone(), sm_context, tg.clone()).await;
 
         Ok(GatewayClientModule {
             federation_id,

@@ -110,7 +110,6 @@ maud = "0.27.0"
 miniscript = "12.3.4"
 n0-future = "0.1.3"
 picomint-base32 = { path = "./picomint-base32", version = "=0.1.0" }
-
 picomint-bft = { path = "./picomint-bft", version = "=0.1.0" }
 picomint-bitcoin-rpc = { path = "./picomint-bitcoin-rpc", version = "=0.1.0" }
 picomint-client = { path = "./picomint-client", version = "=0.1.0" }

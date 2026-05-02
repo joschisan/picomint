@@ -16,7 +16,7 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::sync::Arc;
 
-use picomint_core::task::TaskGroup;
+use crate::task::TaskGroup;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, WriteTxRef, redb};
 
@@ -95,18 +95,14 @@ pub struct ModuleExecutor<S: StateMachine> {
 struct Inner<S: StateMachine> {
     db: Database,
     context: S::Context,
-    task_group: TaskGroup,
+    tg: TaskGroup,
 }
 
 impl<S: StateMachine> ModuleExecutor<S> {
     /// Create the executor and spawn driver tasks for any state machines
     /// persisted from a previous run.
-    pub async fn new(db: Database, context: S::Context, task_group: TaskGroup) -> Self {
-        let inner = Arc::new(Inner {
-            db,
-            context,
-            task_group,
-        });
+    pub async fn new(db: Database, context: S::Context, tg: TaskGroup) -> Self {
+        let inner = Arc::new(Inner { db, context, tg });
 
         for (id, state) in inner.get_active_states() {
             inner.clone().spawn_drive(id, state);
@@ -145,8 +141,8 @@ impl<S: StateMachine> Inner<S> {
     }
 
     fn spawn_drive(self: Arc<Self>, id: SmId, state: S) {
-        let tg = self.task_group.clone();
-        tg.spawn_cancellable("sm-drive", async move { self.drive(id, state).await });
+        let tg = self.tg.clone();
+        tg.spawn(async move { self.drive(id, state).await });
     }
 
     /// Drive one state machine until `transition` returns `None`. Each

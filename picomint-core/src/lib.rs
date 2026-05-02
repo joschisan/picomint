@@ -43,8 +43,6 @@ mod peer;
 pub mod secret;
 
 pub mod session_outcome;
-/// Task handling and graceful shutdown.
-pub mod task;
 /// Time helpers.
 pub mod time;
 /// Wire-level Transaction and ConsensusItem types.

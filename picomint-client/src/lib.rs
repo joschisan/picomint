@@ -35,6 +35,8 @@ pub mod module;
 pub mod query;
 /// Secret handling & derivation
 pub mod secret;
+/// Local `(TaskTracker, CancellationToken)` wrapper for client background tasks.
+mod task;
 /// Structs and interfaces to construct Picomint transactions
 pub mod transaction;
 /// Wallet module client.

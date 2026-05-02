@@ -15,6 +15,7 @@ use std::time::Duration;
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
+use crate::task::TaskGroup;
 use crate::transaction::{Input, Output, TransactionBuilder};
 use crate::transaction::{Transaction, TxSubmissionSmContext, TxSubmissionStateMachine};
 use anyhow::{Context as _, bail};
@@ -28,7 +29,6 @@ use picomint_core::mint::config::{MintConfigConsensus, client_denominations};
 use picomint_core::mint::{Denomination, MintInput, Note, RecoveryItem};
 use picomint_core::secp256k1::rand::{Rng, thread_rng};
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
-use picomint_core::task::TaskGroup;
 use picomint_core::{Amount, PeerId, TransactionId, wire};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTxRef;
@@ -286,7 +286,7 @@ impl MintClientModule {
         cfg: MintConfigConsensus,
         context: ClientContext,
         secret: MintSecret,
-        task_group: &TaskGroup,
+        tg: &TaskGroup,
     ) -> anyhow::Result<MintClientModule> {
         let (tweak_sender, tweak_receiver) = async_channel::bounded(50);
 
@@ -312,8 +312,7 @@ impl MintClientModule {
             tbs_pks: cfg.tbs_pks.clone(),
         };
 
-        let executor =
-            ModuleExecutor::new(context.db().clone(), sm_context, task_group.clone()).await;
+        let executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone()).await;
 
         let tx_submission_executor = ModuleExecutor::new(
             context.db().clone(),
@@ -321,7 +320,7 @@ impl MintClientModule {
                 api: context.api(),
                 federation_id,
             },
-            task_group.clone(),
+            tg.clone(),
         )
         .await;
 
@@ -330,17 +329,14 @@ impl MintClientModule {
         // background. The driver wipes the row when done, so a clean
         // shutdown mid-recovery just resumes on the next boot.
         if let Some(state) = context.db().begin_read().get(&RECOVERY, &()) {
-            task_group.spawn_cancellable(
-                "mint-recovery",
-                recovery_driver(
-                    context.api(),
-                    context.api(),
-                    secret,
-                    context.clone(),
-                    executor.clone(),
-                    state,
-                ),
-            );
+            tg.spawn(recovery_driver(
+                context.api(),
+                context.api(),
+                secret,
+                context.clone(),
+                executor.clone(),
+                state,
+            ));
         }
 
         Ok(MintClientModule {

@@ -40,10 +40,7 @@ serde = { workspace = true }
 subtle = { workspace = true }
 tbs = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["full", "tracing"] }
-tokio-util = { workspace = true, features = ["rt"] }
 tpe = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 test-log = { workspace = true }

@@ -12,6 +12,7 @@ use std::time::Duration;
 use crate::api::FederationResult;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
+use crate::task::TaskGroup;
 use crate::transaction::{Input, Output, TransactionBuilder};
 use anyhow::anyhow;
 use bitcoin::address::NetworkUnchecked;
@@ -19,7 +20,6 @@ use bitcoin::{Address, ScriptBuf};
 use db::{NEXT_OUTPUT_INDEX, VALID_ADDRESS_INDEX};
 use events::{ReceiveEvent, SendEvent};
 use picomint_core::core::OperationId;
-use picomint_core::task::TaskGroup;
 use picomint_core::wallet::config::WalletConfigConsensus;
 use picomint_core::wallet::{
     StandardScript, WalletInput, WalletOutput, descriptor, is_potential_receive,
@@ -69,13 +69,12 @@ impl WalletClientModule {
         context: ClientContext,
         mint: std::sync::Arc<crate::mint::MintClientModule>,
         secret: WalletSecret,
-        task_group: &TaskGroup,
+        tg: &TaskGroup,
     ) -> anyhow::Result<WalletClientModule> {
         let sm_context = WalletClientContext {
             client_ctx: context.clone(),
         };
-        let send_executor =
-            ModuleExecutor::new(context.db().clone(), sm_context, task_group.clone()).await;
+        let send_executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone()).await;
 
         let module = WalletClientModule {
             secret,
@@ -85,7 +84,7 @@ impl WalletClientModule {
             send_executor,
         };
 
-        module.spawn_output_scanner(task_group);
+        module.spawn_output_scanner(tg);
 
         Ok(module)
     }
@@ -288,10 +287,10 @@ impl WalletClientModule {
         (operation_id, txid)
     }
 
-    fn spawn_output_scanner(&self, task_group: &TaskGroup) {
+    fn spawn_output_scanner(&self, tg: &TaskGroup) {
         let module = self.clone();
 
-        task_group.spawn_cancellable("output-scanner", async move {
+        tg.spawn(async move {
             let has_seed = module
                 .client_ctx
                 .db()
