@@ -21,9 +21,9 @@ pub fn consensus_block_count(
     ln: &Lightning,
     _: ConsensusBlockCountRequest,
 ) -> Result<ConsensusBlockCountResponse, ApiError> {
-    let tx = ln.db.begin_read();
+    let dbtx = ln.db.begin_read();
     Ok(ConsensusBlockCountResponse {
-        count: ln.consensus_block_count(&tx),
+        count: ln.consensus_block_count(&dbtx),
     })
 }
 
@@ -34,23 +34,23 @@ pub async fn await_preimage(
     loop {
         let wait = ln
             .db
-            .wait_table_check(&PREIMAGE, |tx| tx.get(&PREIMAGE, &req.outpoint));
+            .wait_table_check(&PREIMAGE, |dbtx| dbtx.get(&PREIMAGE, &req.outpoint));
 
-        if let Ok((preimage, _tx)) = timeout(Duration::from_secs(10), wait).await {
+        if let Ok((preimage, _dbtx)) = timeout(Duration::from_secs(10), wait).await {
             return Ok(AwaitPreimageResponse {
                 preimage: Some(preimage),
             });
         }
 
-        let tx = ln.db.begin_read();
+        let dbtx = ln.db.begin_read();
 
-        if let Some(preimage) = tx.get(&PREIMAGE, &req.outpoint) {
+        if let Some(preimage) = dbtx.get(&PREIMAGE, &req.outpoint) {
             return Ok(AwaitPreimageResponse {
                 preimage: Some(preimage),
             });
         }
 
-        if req.expiration <= ln.consensus_block_count(&tx) {
+        if req.expiration <= ln.consensus_block_count(&dbtx) {
             return Ok(AwaitPreimageResponse { preimage: None });
         }
     }
@@ -71,15 +71,15 @@ pub fn outgoing_contract_expiration(
     ln: &Lightning,
     req: OutgoingContractExpirationRequest,
 ) -> Result<OutgoingContractExpirationResponse, ApiError> {
-    let tx = ln.db.begin_read();
+    let dbtx = ln.db.begin_read();
 
-    let Some(contract) = tx.get(&OUTGOING_CONTRACT, &req.outpoint) else {
+    let Some(contract) = dbtx.get(&OUTGOING_CONTRACT, &req.outpoint) else {
         return Ok(OutgoingContractExpirationResponse { contract: None });
     };
 
     let expiration = contract
         .expiration
-        .saturating_sub(ln.consensus_block_count(&tx));
+        .saturating_sub(ln.consensus_block_count(&dbtx));
 
     Ok(OutgoingContractExpirationResponse {
         contract: Some((contract.contract_id(), expiration)),
@@ -96,15 +96,15 @@ pub async fn await_incoming_contracts(
         ));
     }
 
-    let (mut next_index, tx) = ln
+    let (mut next_index, dbtx) = ln
         .db
-        .wait_table_check(&INCOMING_CONTRACT_STREAM_INDEX, |tx| {
-            tx.get(&INCOMING_CONTRACT_STREAM_INDEX, &())
+        .wait_table_check(&INCOMING_CONTRACT_STREAM_INDEX, |dbtx| {
+            dbtx.get(&INCOMING_CONTRACT_STREAM_INDEX, &())
                 .filter(|i| *i > req.start)
         })
         .await;
 
-    let entries = tx.range(&INCOMING_CONTRACT_STREAM, req.start..u64::MAX, |r| {
+    let entries = dbtx.range(&INCOMING_CONTRACT_STREAM, req.start..u64::MAX, |r| {
         r.take(req.batch as usize).collect::<Vec<_>>()
     });
 

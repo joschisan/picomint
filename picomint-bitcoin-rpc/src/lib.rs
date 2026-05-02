@@ -80,10 +80,10 @@ impl BitcoinBackend {
         }
     }
 
-    pub async fn submit_transaction(&self, transaction: Transaction) {
+    pub async fn submit_tx(&self, tx: Transaction) {
         match self {
-            BitcoinBackend::Bitcoind(c) => c.submit_transaction(transaction).await,
-            BitcoinBackend::Esplora(c) => c.submit_transaction(transaction).await,
+            BitcoinBackend::Bitcoind(c) => c.submit_tx(tx).await,
+            BitcoinBackend::Esplora(c) => c.submit_tx(tx).await,
         }
     }
 
@@ -130,10 +130,7 @@ impl BitcoinRpcMonitor {
             }
         });
 
-        Self {
-            rpc,
-            status_rx,
-        }
+        Self { rpc, status_rx }
     }
 
     async fn fetch_status(rpc: &BitcoinBackend) -> Result<BitcoinRpcStatus> {
@@ -188,9 +185,9 @@ impl BitcoinRpcMonitor {
         self.rpc.get_block_hash(height).await
     }
 
-    pub async fn submit_transaction(&self, tx: Transaction) {
+    pub async fn submit_tx(&self, tx: Transaction) {
         if self.status_rx.borrow().is_some() {
-            self.rpc.submit_transaction(tx).await;
+            self.rpc.submit_tx(tx).await;
         }
     }
 }

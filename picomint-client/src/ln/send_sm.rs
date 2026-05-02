@@ -182,7 +182,7 @@ fn transition_gateway_send_payment_sm(
 
             let txid = ctx
                 .mint
-                .finalize_and_submit_transaction(dbtx, old_state.common.operation_id, tx_builder)
+                .finalize_and_submit_tx(dbtx, old_state.common.operation_id, tx_builder)
                 .expect("Cannot claim input, additional funding needed");
 
             ctx.client_ctx.log_event(
@@ -243,7 +243,7 @@ fn transition_preimage_sm(
 
     let txid = ctx
         .mint
-        .finalize_and_submit_transaction(dbtx, old_state.common.operation_id, tx_builder)
+        .finalize_and_submit_tx(dbtx, old_state.common.operation_id, tx_builder)
         .expect("Cannot claim input, additional funding needed");
 
     ctx.client_ctx.log_event(

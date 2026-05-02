@@ -17,9 +17,9 @@ use tokio::sync::watch::{Receiver, Sender};
 use tracing::warn;
 
 use crate::config::ServerConfig;
-use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TRANSACTION, SIGNED_SESSION_OUTCOME};
+use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TX, SIGNED_SESSION_OUTCOME};
 use crate::consensus::engine::get_finished_session_count_static;
-use crate::consensus::server::{Server, process_transaction_with_server};
+use crate::consensus::server::{Server, process_tx_with_server};
 use crate::p2p::P2PStatusReceivers;
 
 #[derive(Clone)]
@@ -42,32 +42,26 @@ pub struct ConsensusApi {
 impl ConsensusApi {
     /// Submit a transaction and long-poll until it is either accepted by
     /// consensus or becomes invalid.
-    pub async fn submit_transaction(
-        &self,
-        transaction: Transaction,
-    ) -> Result<(), TransactionError> {
+    pub async fn submit_tx(&self, tx: Transaction) -> Result<(), TransactionError> {
         let notify_item = self.db.notify_for_table(&ACCEPTED_ITEM);
         let notify_session = self.db.notify_for_table(&SIGNED_SESSION_OUTCOME);
 
         let mut notified_item = Box::pin(notify_item.notified());
         let mut notified_session = Box::pin(notify_session.notified());
 
-        let tx = self.db.begin_write();
+        let dbtx = self.db.begin_write();
 
-        if tx
-            .get(&ACCEPTED_TRANSACTION, &transaction.tx_hash())
-            .is_some()
-        {
+        if dbtx.get(&ACCEPTED_TX, &tx.compute_txid()).is_some() {
             return Ok(());
         }
 
-        process_transaction_with_server(&self.server, &tx, &transaction).await?;
+        process_tx_with_server(&self.server, &dbtx, &tx).await?;
 
-        drop(tx);
+        drop(dbtx);
 
         if self
             .submission_tx
-            .send(ConsensusItem::Transaction(transaction.clone()))
+            .send(ConsensusItem::Transaction(tx.clone()))
             .await
             .is_err()
         {
@@ -77,25 +71,22 @@ impl ConsensusApi {
         loop {
             tokio::select! {
                 _ = &mut notified_item => {
-                    let tx = self.db.begin_write();
+                    let dbtx = self.db.begin_write();
 
-                    if tx
-                        .get(&ACCEPTED_TRANSACTION, &transaction.tx_hash())
-                        .is_some()
-                    {
+                    if dbtx.get(&ACCEPTED_TX, &tx.compute_txid()).is_some() {
                         return Ok(());
                     }
 
-                    process_transaction_with_server(&self.server, &tx, &transaction).await?;
+                    process_tx_with_server(&self.server, &dbtx, &tx).await?;
 
-                    drop(tx);
+                    drop(dbtx);
 
                     notified_item = Box::pin(notify_item.notified());
                 }
                 _ = &mut notified_session => {
                     if self
                         .submission_tx
-                        .send(ConsensusItem::Transaction(transaction.clone()))
+                        .send(ConsensusItem::Transaction(tx.clone()))
                         .await
                         .is_err()
                     {
@@ -115,17 +106,15 @@ impl ConsensusApi {
     pub async fn federation_audit(&self) -> AuditSummary {
         // Modules read their own tables during `audit`; we open a write tx and
         // drop it without commit after building the audit view.
-        let tx = self.db.begin_write();
-        self.server.audit(&tx).await
+        let dbtx = self.db.begin_write();
+        self.server.audit(&dbtx).await
     }
 }
 
 impl ConsensusApi {
     pub async fn handle_api(&self, method: CoreMethod) -> Result<Vec<u8>, ApiError> {
         match method {
-            CoreMethod::SubmitTransaction(req) => {
-                handler_async!(submit_transaction, self, req).await
-            }
+            CoreMethod::SubmitTransaction(req) => handler_async!(submit_tx, self, req).await,
             CoreMethod::Config(req) => handler!(config, self, req).await,
             CoreMethod::Liveness(req) => handler!(liveness, self, req).await,
         }

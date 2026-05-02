@@ -37,7 +37,7 @@ use crate::consensus::server::Server;
 use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
 
 /// How many txs can be stored in memory before blocking the API
-const TRANSACTION_BUFFER: usize = 1000;
+const TX_BUFFER: usize = 1000;
 
 /// Maximum number of concurrent iroh connections on the public API.
 const MAX_CONNECTIONS: usize = 1000;
@@ -94,7 +94,7 @@ pub async fn run(
 
     let server = Server { mint, wallet, ln };
 
-    let (submission_tx, submission_rx) = async_channel::bounded(TRANSACTION_BUFFER);
+    let (submission_tx, submission_rx) = async_channel::bounded(TX_BUFFER);
     let (shutdown_tx, shutdown_rx) = watch::channel(None);
 
     let mut ci_status_senders = BTreeMap::new();
@@ -132,14 +132,14 @@ pub async fn run(
         async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             loop {
-                let tx = db.begin_read();
-                for item in server.mint.consensus_proposal(&tx.as_ref()).await {
+                let dbtx = db.begin_read();
+                for item in server.mint.consensus_proposal(&dbtx.as_ref()).await {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Mint(item)))
                         .await
                         .ok();
                 }
-                for item in server.wallet.consensus_proposal(&tx.as_ref()).await {
+                for item in server.wallet.consensus_proposal(&dbtx.as_ref()).await {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
                             item,
@@ -147,7 +147,7 @@ pub async fn run(
                         .await
                         .ok();
                 }
-                for item in server.ln.consensus_proposal(&tx.as_ref()).await {
+                for item in server.ln.consensus_proposal(&dbtx.as_ref()).await {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
                         .await

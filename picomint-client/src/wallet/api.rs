@@ -56,7 +56,7 @@ impl FederationApi {
             WalletMethod::PendingTransactionChain(PendingTransactionChainRequest),
         ))
         .await
-        .map(|resp| resp.transactions)
+        .map(|resp| resp.txs)
     }
 
     pub async fn wallet_output_info_slice(

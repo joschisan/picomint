@@ -515,7 +515,7 @@ impl Wallet {
                     .iter(&UNCONFIRMED_TX, |r| r.map(|(_, v)| v).collect());
 
                 for unconfirmed_tx in unconfirmed_txs {
-                    btc_rpc.submit_transaction(unconfirmed_tx.tx).await;
+                    btc_rpc.submit_tx(unconfirmed_tx.tx).await;
                 }
 
                 sleep(Duration::from_secs(if network == Network::Regtest {
@@ -662,7 +662,7 @@ impl Wallet {
 
             dbtx.insert(&UNCONFIRMED_TX, &TxidKey(txid), &unsigned);
 
-            self.btc_rpc.submit_transaction(unsigned.tx).await;
+            self.btc_rpc.submit_tx(unsigned.tx).await;
         }
 
         Ok(())

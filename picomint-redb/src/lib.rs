@@ -11,8 +11,8 @@
 //!   lexicographic order because our encoding is fixed-width big-endian for
 //!   integers and raw bytes for hashes.
 //!
-//! The concrete tx and database types (`Database`, `ReadTransaction`,
-//! `WriteTransaction`, `ReadTxRef`, `WriteTxRef`) expose `insert`/`get`/
+//! The concrete tx and database types (`Database`, `ReadTx`,
+//! `WriteTx`, `ReadTxRef`, `WriteTxRef`) expose `insert`/`get`/
 //! `remove`/`iter`/`range`/`delete_table` as inherent methods over
 //! `NativeTableDef`.
 
@@ -253,14 +253,14 @@ impl Database {
         }
     }
 
-    pub fn begin_write(&self) -> WriteTransaction {
+    pub fn begin_write(&self) -> WriteTx {
         let tx = self
             .inner
             .env
             .begin_write()
             .expect("redb begin_write failed");
 
-        WriteTransaction {
+        WriteTx {
             tx,
             db: self.inner.clone(),
             prefix: self.prefix.clone(),
@@ -269,10 +269,10 @@ impl Database {
         }
     }
 
-    pub fn begin_read(&self) -> ReadTransaction {
+    pub fn begin_read(&self) -> ReadTx {
         let tx = self.inner.env.begin_read().expect("redb begin_read failed");
 
-        ReadTransaction {
+        ReadTx {
             tx,
             prefix: self.prefix.clone(),
         }
@@ -303,14 +303,14 @@ impl Database {
         self.inner.notify_for(&def.resolved_name(&self.prefix))
     }
 
-    /// Wait until `check` returns `Some(T)`, then return `(T, ReadTransaction)`.
+    /// Wait until `check` returns `Some(T)`, then return `(T, ReadTx)`.
     /// The returned tx is the one that observed the matched state. `check` is
     /// called once on entry and again after every commit that touches `table`.
     pub async fn wait_table_check<WK, WV, T>(
         &self,
         def: &NativeTableDef<WK, WV>,
-        mut check: impl FnMut(&ReadTransaction) -> Option<T>,
-    ) -> (T, ReadTransaction)
+        mut check: impl FnMut(&ReadTx) -> Option<T>,
+    ) -> (T, ReadTx)
     where
         WK: redb::Key + 'static,
         WV: redb::Value + 'static,
@@ -320,13 +320,13 @@ impl Database {
         loop {
             let notified = notify.notified();
 
-            let tx = self.begin_read();
+            let dbtx = self.begin_read();
 
-            if let Some(t) = check(&tx) {
-                return (t, tx);
+            if let Some(t) = check(&dbtx) {
+                return (t, dbtx);
             }
 
-            drop(tx);
+            drop(dbtx);
 
             notified.await;
         }
@@ -335,12 +335,12 @@ impl Database {
 
 // ─── Transactions ────────────────────────────────────────────────────────
 
-pub struct ReadTransaction {
+pub struct ReadTx {
     tx: redb::ReadTransaction,
     prefix: Option<String>,
 }
 
-impl ReadTransaction {
+impl ReadTx {
     /// Borrow a view at this tx's root prefix.
     pub fn as_ref(&self) -> ReadTxRef<'_> {
         ReadTxRef {
@@ -350,13 +350,13 @@ impl ReadTransaction {
     }
 }
 
-/// Borrowed view of a [`ReadTransaction`] carrying its prefix.
+/// Borrowed view of a [`ReadTx`] carrying its prefix.
 pub struct ReadTxRef<'tx> {
     tx: &'tx redb::ReadTransaction,
     prefix: Option<String>,
 }
 
-pub struct WriteTransaction {
+pub struct WriteTx {
     tx: redb::WriteTransaction,
     db: Arc<DatabaseInner>,
     prefix: Option<String>,
@@ -367,7 +367,7 @@ pub struct WriteTransaction {
     on_commit: Mutex<Vec<Box<dyn FnOnce() + Send + 'static>>>,
 }
 
-impl WriteTransaction {
+impl WriteTx {
     /// Borrow a view at this tx's root prefix.
     pub fn as_ref(&self) -> WriteTxRef<'_> {
         WriteTxRef {
@@ -406,10 +406,10 @@ impl WriteTransaction {
     }
 }
 
-/// Borrowed view of a [`WriteTransaction`] carrying its prefix. This is what
+/// Borrowed view of a [`WriteTx`] carrying its prefix. This is what
 /// server modules receive from the consensus engine; they cannot commit, but
 /// they can read, write, and register post-commit callbacks that the owning
-/// [`WriteTransaction::commit`] will fire.
+/// [`WriteTx::commit`] will fire.
 pub struct WriteTxRef<'tx> {
     tx: &'tx redb::WriteTransaction,
     prefix: Option<String>,
@@ -887,10 +887,10 @@ macro_rules! impl_db_write_via_inherent {
 // ─── Owned-tx delegation ─────────────────────────────────────────────────
 //
 // Users commonly call `.insert/.get/...` directly on the owned
-// `WriteTransaction`/`ReadTransaction` (not just on the borrowed
+// `WriteTx`/`ReadTx` (not just on the borrowed
 // `WriteTxRef`/`ReadTxRef`). These inherent impls delegate via `.as_ref()`.
 
-impl ReadTransaction {
+impl ReadTx {
     pub fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
     where
         WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
@@ -934,7 +934,7 @@ impl ReadTransaction {
     }
 }
 
-impl WriteTransaction {
+impl WriteTx {
     pub fn insert<WK, K, WV, V>(
         &self,
         def: &NativeTableDef<WK, WV>,
@@ -1013,10 +1013,10 @@ impl WriteTransaction {
 
 impl_db_read_via_inherent!(ReadTxRef<'_>);
 impl_db_read_via_inherent!(WriteTxRef<'_>);
-impl_db_read_via_inherent!(ReadTransaction);
-impl_db_read_via_inherent!(WriteTransaction);
+impl_db_read_via_inherent!(ReadTx);
+impl_db_read_via_inherent!(WriteTx);
 impl_db_write_via_inherent!(WriteTxRef<'_>);
-impl_db_write_via_inherent!(WriteTransaction);
+impl_db_write_via_inherent!(WriteTx);
 
 // ─── Playground tests ────────────────────────────────────────────────────
 

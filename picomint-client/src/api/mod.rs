@@ -372,7 +372,7 @@ impl FederationApi {
 
     /// Submit a transaction and await the final outcome. The server long-
     /// polls until the tx is either accepted or becomes invalid.
-    pub async fn submit_transaction(&self, tx: Transaction) -> Result<(), TransactionError> {
+    pub async fn submit_tx(&self, tx: Transaction) -> Result<(), TransactionError> {
         self.request_current_consensus_retry::<SubmitTransactionResponse>(Method::Core(
             CoreMethod::SubmitTransaction(SubmitTransactionRequest { transaction: tx }),
         ))

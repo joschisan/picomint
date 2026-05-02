@@ -234,9 +234,9 @@ impl AppState {
 
         // --- Insert outgoing_contract row + log SendEvent on F1 (one tx) ---
 
-        let tx = self.gateway_db.begin_write();
+        let dbtx = self.gateway_db.begin_write();
 
-        tx.as_ref().insert(
+        dbtx.as_ref().insert(
             &OUTGOING_CONTRACT,
             &operation_id,
             &OutgoingContractRow {
@@ -248,7 +248,7 @@ impl AppState {
         );
 
         f1_client.gw().log_send_started(
-            &tx.as_ref().isolate(payload.federation_id),
+            &dbtx.as_ref().isolate(payload.federation_id),
             operation_id,
             payload.outpoint,
             Amount::from_msats(amount),
@@ -256,7 +256,7 @@ impl AppState {
             fee,
         );
 
-        tx.commit();
+        dbtx.commit();
 
         // --- Direct-swap vs external LN -------------------------------------
         if is_direct_swap {
@@ -280,17 +280,17 @@ impl AppState {
 
             let incoming_fee = incoming_row.amount - incoming_row.contract.commitment.amount;
 
-            let tx = self.gateway_db.begin_write();
+            let dbtx = self.gateway_db.begin_write();
             f2_client
                 .gw()
                 .start_receive(
-                    &tx.as_ref().isolate(incoming_row.federation_id),
+                    &dbtx.as_ref().isolate(incoming_row.federation_id),
                     operation_id,
                     incoming_row.contract,
                     incoming_fee,
                 )
                 .map_err(|e| anyhow!("Failed to start direct-swap receive: {e}"))?;
-            tx.commit();
+            dbtx.commit();
         } else {
             // External LN send: `ln_fee` becomes LDK's hard cap on route cost.
             let max_delay = expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM);
@@ -398,9 +398,9 @@ impl AppState {
             )
             .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))?;
 
-        let tx = self.gateway_db.begin_write();
+        let dbtx = self.gateway_db.begin_write();
 
-        tx.as_ref().insert(
+        dbtx.as_ref().insert(
             &INCOMING_CONTRACT,
             &operation_id,
             &IncomingContractRow {
@@ -411,7 +411,7 @@ impl AppState {
             },
         );
 
-        tx.commit();
+        dbtx.commit();
 
         Ok(invoice)
     }

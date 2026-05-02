@@ -10,7 +10,7 @@ use picomint_core::module::audit::AuditSummary;
 use picomint_core::transaction::{Transaction, TransactionError};
 use picomint_core::wire;
 use picomint_core::{InPoint, OutPoint, PeerId};
-use picomint_redb::{WriteTransaction, WriteTxRef};
+use picomint_redb::{WriteTx, WriteTxRef};
 
 use crate::consensus::ln::Lightning;
 use crate::consensus::mint::Mint;
@@ -96,7 +96,7 @@ impl Server {
         }
     }
 
-    pub async fn audit(&self, dbtx: &WriteTransaction) -> AuditSummary {
+    pub async fn audit(&self, dbtx: &WriteTx) -> AuditSummary {
         let dbtx = dbtx.as_ref();
         let mint = self.mint.audit(&dbtx).await;
         let wallet = self.wallet.audit(&dbtx).await;
@@ -106,27 +106,27 @@ impl Server {
 }
 
 /// Dispatch the inputs and outputs of a transaction to the relevant modules.
-pub async fn process_transaction_with_server(
+pub async fn process_tx_with_server(
     server: &Server,
-    tx: &WriteTransaction,
-    transaction: &Transaction,
+    dbtx: &WriteTx,
+    tx: &Transaction,
 ) -> Result<(), TransactionError> {
-    if transaction.inputs.is_empty() {
+    if tx.inputs.is_empty() {
         return Err(TransactionError::EmptyInputs);
     }
 
-    if transaction.outputs.is_empty() {
+    if tx.outputs.is_empty() {
         return Err(TransactionError::EmptyOutputs);
     }
 
     let mut funding_verifier = FundingVerifier::default();
     let mut public_keys = Vec::new();
 
-    let txid = transaction.tx_hash();
+    let txid = tx.compute_txid();
 
-    for (input, in_idx) in transaction.inputs.iter().zip(0u64..) {
+    for (input, in_idx) in tx.inputs.iter().zip(0u64..) {
         let meta = server
-            .process_input(&tx.as_ref(), input, InPoint { txid, in_idx })
+            .process_input(&dbtx.as_ref(), input, InPoint { txid, in_idx })
             .await
             .map_err(TransactionError::Input)?;
 
@@ -134,11 +134,11 @@ pub async fn process_transaction_with_server(
         public_keys.push(meta.pub_key);
     }
 
-    transaction.validate_signatures(&public_keys)?;
+    tx.validate_signatures(&public_keys)?;
 
-    for (output, out_idx) in transaction.outputs.iter().zip(0u64..) {
+    for (output, out_idx) in tx.outputs.iter().zip(0u64..) {
         let amount = server
-            .process_output(&tx.as_ref(), output, OutPoint { txid, out_idx })
+            .process_output(&dbtx.as_ref(), output, OutPoint { txid, out_idx })
             .await
             .map_err(TransactionError::Output)?;
 

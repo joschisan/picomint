@@ -11,7 +11,7 @@
 //! `*Module::new` constructor used by the [`Client`] entry points.
 //! Submission ownership lives entirely in [`crate::mint::MintClientModule`]
 //! — non-mint modules build a [`crate::transaction::TransactionBuilder`]
-//! and call `MintClientModule::finalize_and_submit_transaction`, which
+//! and call `MintClientModule::finalize_and_submit_tx`, which
 //! balances against the wallet and submits via its own
 //! [`crate::transaction::TxSubmissionStateMachine`].
 

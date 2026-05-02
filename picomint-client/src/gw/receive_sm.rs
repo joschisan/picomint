@@ -129,7 +129,7 @@ impl StateMachine for ReceiveStateMachine {
 
         let txid = ctx
             .mint
-            .finalize_and_submit_transaction(dbtx, self.operation_id, tx_builder)
+            .finalize_and_submit_tx(dbtx, self.operation_id, tx_builder)
             .expect("Cannot claim input, additional funding needed");
 
         ctx.client_ctx

@@ -11,13 +11,13 @@ use crate::executor::StateMachine;
 use crate::{TxAcceptEvent, TxRejectEvent};
 
 /// State machine that submits a transaction and waits for the final outcome.
-/// The server long-polls on `submit_transaction`, returning either `Ok(())`
-/// once the tx has been accepted or `Err(..)` once it has been definitively
+/// The server long-polls on `submit_tx`, returning either `Ok(())` once the
+/// tx has been accepted or `Err(..)` once it has been definitively
 /// invalidated.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct TxSubmissionStateMachine {
     pub operation_id: OperationId,
-    pub transaction: Transaction,
+    pub tx: Transaction,
 }
 
 picomint_redb::consensus_value!(TxSubmissionStateMachine);
@@ -38,7 +38,7 @@ impl StateMachine for TxSubmissionStateMachine {
 
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
         ctx.api
-            .submit_transaction(self.transaction.clone())
+            .submit_tx(self.tx.clone())
             .await
             .map_err(|e| e.to_string())
     }
@@ -49,7 +49,7 @@ impl StateMachine for TxSubmissionStateMachine {
         dbtx: &WriteTxRef<'_>,
         outcome: Self::Outcome,
     ) -> Option<Self> {
-        let txid = self.transaction.tx_hash();
+        let txid = self.tx.compute_txid();
 
         match outcome {
             Ok(()) => {

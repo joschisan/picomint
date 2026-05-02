@@ -16,12 +16,12 @@ pub async fn load_server_config(db: &Database) -> Option<ServerConfig> {
 }
 
 pub async fn store_server_config(db: &Database, cfg: &ServerConfig) {
-    let tx = db.begin_write();
+    let dbtx = db.begin_write();
 
     assert!(
-        tx.insert(&SERVER_CONFIG, &(), cfg).is_none(),
+        dbtx.insert(&SERVER_CONFIG, &(), cfg).is_none(),
         "Server config already present in database"
     );
 
-    tx.commit();
+    dbtx.commit();
 }

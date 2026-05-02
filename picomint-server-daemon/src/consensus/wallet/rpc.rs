@@ -17,9 +17,9 @@ pub fn consensus_block_count(
     wallet: &Wallet,
     _: ConsensusBlockCountRequest,
 ) -> Result<ConsensusBlockCountResponse, ApiError> {
-    let tx = wallet.db.begin_read();
+    let dbtx = wallet.db.begin_read();
     Ok(ConsensusBlockCountResponse {
-        count: wallet.consensus_block_count(&tx),
+        count: wallet.consensus_block_count(&dbtx),
     })
 }
 
@@ -27,9 +27,9 @@ pub fn consensus_feerate(
     wallet: &Wallet,
     _: ConsensusFeerateRequest,
 ) -> Result<ConsensusFeerateResponse, ApiError> {
-    let tx = wallet.db.begin_read();
+    let dbtx = wallet.db.begin_read();
     Ok(ConsensusFeerateResponse {
-        feerate: wallet.consensus_feerate(&tx),
+        feerate: wallet.consensus_feerate(&dbtx),
     })
 }
 
@@ -77,7 +77,7 @@ pub fn pending_tx_chain(
     _: PendingTransactionChainRequest,
 ) -> Result<PendingTransactionChainResponse, ApiError> {
     Ok(PendingTransactionChainResponse {
-        transactions: Wallet::pending_tx_chain(&wallet.db.begin_read()),
+        txs: Wallet::pending_tx_chain(&wallet.db.begin_read()),
     })
 }
 
@@ -86,6 +86,6 @@ pub fn tx_chain(
     _: TransactionChainRequest,
 ) -> Result<TransactionChainResponse, ApiError> {
     Ok(TransactionChainResponse {
-        transactions: Wallet::tx_chain(&wallet.db.begin_read()),
+        txs: Wallet::tx_chain(&wallet.db.begin_read()),
     })
 }

@@ -91,9 +91,7 @@ impl INetwork<BftMessage<ConsensusItem>> for Network {
                     }
                 }
                 P2PMessage::SignedSessionOutcome(outcome) => {
-                    self.signed_outcomes_tx
-                        .try_send((peer_id, outcome))
-                        .ok();
+                    self.signed_outcomes_tx.try_send((peer_id, outcome)).ok();
                 }
                 message => error!(
                     %peer_id,
@@ -189,9 +187,9 @@ impl BftBackup<ConsensusItem> for RedbBackup {
     fn save(&self, entry: &BftEntry<ConsensusItem>) {
         let key = (entry.unit().round, entry.unit().creator);
 
-        let tx = self.db.begin_write();
-        tx.insert(&BFT_UNITS, &key, entry);
-        tx.commit();
+        let dbtx = self.db.begin_write();
+        dbtx.insert(&BFT_UNITS, &key, entry);
+        dbtx.commit();
     }
 
     fn load(&self) -> Vec<BftEntry<ConsensusItem>> {

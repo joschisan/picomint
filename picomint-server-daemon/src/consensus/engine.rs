@@ -11,7 +11,7 @@ use picomint_core::secp256k1::{SECP256K1, schnorr};
 use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use picomint_core::transaction::ConsensusItem;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
-use picomint_redb::{Database, ReadTransaction, WriteTransaction};
+use picomint_redb::{Database, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
 use tokio::sync::watch;
 use tokio::time::sleep;
@@ -19,10 +19,8 @@ use tracing::{debug, info, instrument, trace};
 
 use crate::config::ServerConfig;
 use crate::consensus::bft::{DataProvider, Network, RedbBackup};
-use crate::consensus::db::{
-    ACCEPTED_ITEM, ACCEPTED_TRANSACTION, BFT_UNITS, SIGNED_SESSION_OUTCOME,
-};
-use crate::consensus::server::process_transaction_with_server;
+use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TX, BFT_UNITS, SIGNED_SESSION_OUTCOME};
+use crate::consensus::server::process_tx_with_server;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
 /// Runs the main server consensus loop
@@ -423,13 +421,13 @@ impl ConsensusEngine {
         session_index: u64,
         signed_session_outcome: SignedSessionOutcome,
     ) {
-        let tx = self.db.begin_write();
+        let dbtx = self.db.begin_write();
 
-        tx.as_ref().delete_table(&ACCEPTED_ITEM);
-        tx.as_ref().delete_table(&BFT_UNITS);
+        dbtx.as_ref().delete_table(&ACCEPTED_ITEM);
+        dbtx.as_ref().delete_table(&BFT_UNITS);
 
         assert!(
-            tx.insert(
+            dbtx.insert(
                 &SIGNED_SESSION_OUTCOME,
                 &session_index,
                 &signed_session_outcome,
@@ -438,7 +436,7 @@ impl ConsensusEngine {
             "We tried to overwrite a signed session outcome"
         );
 
-        tx.commit();
+        dbtx.commit();
     }
 
     #[instrument(skip(self, item), level = "info")]
@@ -460,12 +458,12 @@ impl ConsensusEngine {
             .expect("No ci status sender for peer")
             .send_replace(Some(session_index));
 
-        let tx = self.db.begin_write();
+        let dbtx = self.db.begin_write();
 
         // When we recover from a mid-session crash bft will replay the units that
         // were already processed before the crash. We therefore skip all consensus
         // items until we have seen every previously accepted items again.
-        if let Some(existing_item) = tx.get(&ACCEPTED_ITEM, &item_index) {
+        if let Some(existing_item) = dbtx.get(&ACCEPTED_ITEM, &item_index) {
             if existing_item.item == item && existing_item.peer == peer {
                 return Ok(());
             }
@@ -476,7 +474,7 @@ impl ConsensusEngine {
             );
         }
 
-        self.process_consensus_item_with_db_transaction(&tx, item.clone(), peer)
+        self.process_consensus_item_with_dbtx(&dbtx, item.clone(), peer)
             .await
             .inspect_err(|err| {
                 // Rejected items are very common, so only trace level
@@ -488,7 +486,7 @@ impl ConsensusEngine {
                 );
             })?;
 
-        tx.insert(
+        dbtx.insert(
             &ACCEPTED_ITEM,
             &item_index,
             &AcceptedItem {
@@ -503,26 +501,26 @@ impl ConsensusEngine {
             "Processed consensus item"
         );
 
-        tx.commit();
+        dbtx.commit();
 
         Ok(())
     }
 
-    async fn process_consensus_item_with_db_transaction(
+    async fn process_consensus_item_with_dbtx(
         &self,
-        tx: &WriteTransaction,
+        dbtx: &WriteTx,
         consensus_item: ConsensusItem,
         peer_id: PeerId,
     ) -> anyhow::Result<()> {
         match consensus_item {
             ConsensusItem::Module(module_item) => {
                 self.server
-                    .process_consensus_item(&tx.as_ref(), &module_item, peer_id)
+                    .process_consensus_item(&dbtx.as_ref(), &module_item, peer_id)
                     .await
             }
-            ConsensusItem::Transaction(transaction) => {
-                let txid = transaction.tx_hash();
-                if tx.get(&ACCEPTED_TRANSACTION, &txid).is_some() {
+            ConsensusItem::Transaction(tx) => {
+                let txid = tx.compute_txid();
+                if dbtx.get(&ACCEPTED_TX, &txid).is_some() {
                     debug!(
                         %txid,
                         "Transaction already accepted"
@@ -530,14 +528,14 @@ impl ConsensusEngine {
                     bail!("Transaction is already accepted");
                 }
 
-                process_transaction_with_server(&self.server, tx, &transaction)
+                process_tx_with_server(&self.server, dbtx, &tx)
                     .await
                     .map_err(|error| anyhow!(error.to_string()))?;
 
                 debug!(%txid,  "Transaction accepted");
-                tx.insert(&ACCEPTED_TRANSACTION, &txid, &());
+                dbtx.insert(&ACCEPTED_TX, &txid, &());
 
-                let audit = self.server.audit(tx).await;
+                let audit = self.server.audit(dbtx).await;
 
                 assert!(
                     audit.total >= 0,
@@ -556,8 +554,8 @@ impl ConsensusEngine {
     }
 }
 
-pub async fn get_finished_session_count_static(tx: &ReadTransaction) -> u64 {
-    tx.iter(&SIGNED_SESSION_OUTCOME, |r| {
+pub async fn get_finished_session_count_static(dbtx: &ReadTx) -> u64 {
+    dbtx.iter(&SIGNED_SESSION_OUTCOME, |r| {
         r.next_back().map_or(0, |(k, _)| k + 1)
     })
 }

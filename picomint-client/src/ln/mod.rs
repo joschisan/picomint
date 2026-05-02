@@ -135,11 +135,9 @@ impl LightningClientModule {
             }
 
             let dbtx = self.client_ctx.db().begin_write();
-            {
-                let tx = dbtx.as_ref();
-                for (key, gateway) in entries {
-                    tx.insert(&GATEWAY, &GatewayKey(key), &gateway);
-                }
+
+            for (key, gateway) in entries {
+                dbtx.as_ref().insert(&GATEWAY, &GatewayKey(key), &gateway);
             }
 
             dbtx.commit();
@@ -321,7 +319,7 @@ impl LightningClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
+            .finalize_and_submit_tx(&dbtx.as_ref(), operation_id, tx_builder)
             .map_err(|e| SendPaymentError::FailedToFundPayment(e.to_string()))?;
 
         let sm = SendStateMachine {
@@ -487,7 +485,7 @@ impl LightningClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_transaction(dbtx, operation_id, tx_builder)
+            .finalize_and_submit_tx(dbtx, operation_id, tx_builder)
             .expect("Cannot claim input, additional funding needed");
 
         let event = ReceiveEvent {

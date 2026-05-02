@@ -90,7 +90,7 @@ pub struct PendingTransactionChainRequest;
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct PendingTransactionChainResponse {
-    pub transactions: Vec<TxInfo>,
+    pub txs: Vec<TxInfo>,
 }
 
 // ── transaction-chain ───────────────────────────────────────────────────────
@@ -100,7 +100,7 @@ pub struct TransactionChainRequest;
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct TransactionChainResponse {
-    pub transactions: Vec<TxInfo>,
+    pub txs: Vec<TxInfo>,
 }
 
 // ── dispatch enum ───────────────────────────────────────────────────────────

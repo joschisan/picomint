@@ -348,17 +348,17 @@ impl Lightning {
 
     pub async fn add_gateway_ui(&self, gateway: String) -> bool {
         let gateway = gateway.trim_end_matches('/').to_string();
-        let tx = self.db.begin_write();
-        let is_new_entry = tx.insert(&GATEWAY, &gateway, &()).is_none();
-        tx.commit();
+        let dbtx = self.db.begin_write();
+        let is_new_entry = dbtx.insert(&GATEWAY, &gateway, &()).is_none();
+        dbtx.commit();
         is_new_entry
     }
 
     pub async fn remove_gateway_ui(&self, gateway: String) -> bool {
         let gateway = gateway.trim_end_matches('/').to_string();
-        let tx = self.db.begin_write();
-        let entry_existed = tx.remove(&GATEWAY, &gateway).is_some();
-        tx.commit();
+        let dbtx = self.db.begin_write();
+        let entry_existed = dbtx.remove(&GATEWAY, &gateway).is_some();
+        dbtx.commit();
         entry_existed
     }
 

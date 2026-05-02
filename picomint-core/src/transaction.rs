@@ -27,11 +27,14 @@ pub struct Transaction {
 impl Transaction {
     pub const MAX_TX_SIZE: usize = crate::config::BFT_UNIT_BYTE_LIMIT - 32;
 
-    pub fn tx_hash(&self) -> TransactionId {
-        Self::tx_hash_from_parts(&self.inputs, &self.outputs)
+    pub fn compute_txid(&self) -> TransactionId {
+        Self::compute_txid_from_parts(&self.inputs, &self.outputs)
     }
 
-    pub fn tx_hash_from_parts(inputs: &[wire::Input], outputs: &[wire::Output]) -> TransactionId {
+    pub fn compute_txid_from_parts(
+        inputs: &[wire::Input],
+        outputs: &[wire::Output],
+    ) -> TransactionId {
         TransactionId((inputs, outputs).consensus_hash_sha256())
     }
 
@@ -45,7 +48,7 @@ impl Transaction {
             return Err(TransactionError::InvalidWitnessLength);
         }
 
-        let txid = self.tx_hash();
+        let txid = self.compute_txid();
         let msg = secp256k1::Message::from_digest(*txid.0.as_byte_array());
 
         for (pk, signature) in pub_keys.iter().zip(&self.signatures) {

@@ -93,7 +93,7 @@ impl TransactionBuilder {
         let inputs: Vec<wire::Input> = self.inputs.iter().map(|i| i.input.clone()).collect();
         let outputs: Vec<wire::Output> = self.outputs.iter().map(|o| o.output.clone()).collect();
 
-        let txid = Transaction::tx_hash_from_parts(&inputs, &outputs);
+        let txid = Transaction::compute_txid_from_parts(&inputs, &outputs);
 
         let message = secp256k1::Message::from_digest(txid.0.to_byte_array());
 

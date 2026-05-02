@@ -11,9 +11,9 @@ table!(
 );
 
 table!(
-    ACCEPTED_TRANSACTION,
+    ACCEPTED_TX,
     TransactionId => (),
-    "accepted-transaction",
+    "accepted-tx",
 );
 
 table!(

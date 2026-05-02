@@ -63,8 +63,8 @@ impl EsploraClient {
         }))
     }
 
-    pub async fn submit_transaction(&self, transaction: Transaction) {
-        let _ = self.client.broadcast(&transaction).await.map_err(|err| {
+    pub async fn submit_tx(&self, tx: Transaction) {
+        let _ = self.client.broadcast(&tx).await.map_err(|err| {
             info!(err = %err, "Error broadcasting transaction");
         });
     }

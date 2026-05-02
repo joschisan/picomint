@@ -146,12 +146,12 @@ impl GatewayClientModule {
             fee: self.cfg.output_fee,
         });
 
-        // Idempotency: finalize_and_submit_transaction fails if a tx was
+        // Idempotency: finalize_and_submit_tx fails if a tx was
         // already submitted for this op_id. In that case the existing SM is
         // already driving the flow — nothing more to do.
         let txid = match self
             .mint
-            .finalize_and_submit_transaction(dbtx, operation_id, tx_builder)
+            .finalize_and_submit_tx(dbtx, operation_id, tx_builder)
         {
             Ok(txid) => txid,
             Err(_) => return Ok(()),
@@ -219,7 +219,7 @@ impl GatewayClientModule {
 
                 let txid = self
                     .mint
-                    .finalize_and_submit_transaction(dbtx, operation_id, tx_builder)
+                    .finalize_and_submit_tx(dbtx, operation_id, tx_builder)
                     .expect("Cannot claim outgoing contract — additional funding needed");
 
                 self.client_ctx.log_event(

@@ -8,12 +8,12 @@ use picomint_core::module::ApiError;
 
 use crate::consensus::api::ConsensusApi;
 
-pub async fn submit_transaction(
+pub async fn submit_tx(
     api: &ConsensusApi,
     req: SubmitTransactionRequest,
 ) -> Result<SubmitTransactionResponse, ApiError> {
     Ok(SubmitTransactionResponse {
-        outcome: api.submit_transaction(req.transaction).await,
+        outcome: api.submit_tx(req.transaction).await,
     })
 }
 

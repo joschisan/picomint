@@ -152,17 +152,17 @@ impl<S: StateMachine> Inner<S> {
         loop {
             let outcome = state.trigger(&self.context).await;
 
-            let tx = self.db.begin_write();
+            let dbtx = self.db.begin_write();
 
-            match state.transition(&self.context, &tx.as_ref(), outcome) {
+            match state.transition(&self.context, &dbtx.as_ref(), outcome) {
                 Some(new_state) => {
-                    tx.insert(&table::<S>(), &id, &new_state);
-                    tx.commit();
+                    dbtx.insert(&table::<S>(), &id, &new_state);
+                    dbtx.commit();
                     state = new_state;
                 }
                 None => {
-                    tx.remove(&table::<S>(), &id);
-                    tx.commit();
+                    dbtx.remove(&table::<S>(), &id);
+                    dbtx.commit();
                     return;
                 }
             }

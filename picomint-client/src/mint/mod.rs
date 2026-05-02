@@ -384,7 +384,7 @@ impl MintClientModule {
     /// submit the resulting transaction, and spawn the
     /// `IssuanceStateMachine` that tracks the balance-side notes/requests
     /// (if any).
-    pub fn finalize_and_submit_transaction(
+    pub fn finalize_and_submit_tx(
         &self,
         dbtx: &WriteTxRef<'_>,
         operation_id: OperationId,
@@ -474,18 +474,15 @@ impl MintClientModule {
         operation_id: OperationId,
         builder: TransactionBuilder,
     ) -> anyhow::Result<TransactionId> {
-        let transaction = builder.build();
+        let tx = builder.build();
 
-        if transaction.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
+        if tx.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
             bail!("The generated transaction is too large.");
         }
 
-        let txid = transaction.tx_hash();
+        let txid = tx.compute_txid();
 
-        let sm = TxSubmissionStateMachine {
-            operation_id,
-            transaction,
-        };
+        let sm = TxSubmissionStateMachine { operation_id, tx };
 
         self.tx_submission_executor.add_state_machine_dbtx(dbtx, sm);
 
@@ -681,14 +678,13 @@ impl MintClientModule {
         }
 
         let dbtx = self.client_ctx.db().begin_write();
-        let tx = dbtx.as_ref();
 
         let (funding_notes, change_requests) = self
-            .balance(&tx, &mut builder)
+            .balance(&dbtx.as_ref(), &mut builder)
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
         let txid = self
-            .submit(&tx, operation_id, builder)
+            .submit(&dbtx.as_ref(), operation_id, builder)
             .map_err(|_| SendECashError::Failure)?;
 
         issuance_requests.extend(change_requests);
@@ -700,10 +696,10 @@ impl MintClientModule {
             issuance_requests,
         };
 
-        self.executor.add_state_machine_dbtx(&tx, sm);
+        self.executor.add_state_machine_dbtx(&dbtx.as_ref(), sm);
 
         self.client_ctx
-            .log_event(&tx, operation_id, ReissueEvent { txid });
+            .log_event(&dbtx.as_ref(), operation_id, ReissueEvent { txid });
 
         dbtx.commit();
 
@@ -797,7 +793,7 @@ impl MintClientModule {
         }
 
         let txid = self
-            .finalize_and_submit_transaction(&dbtx.as_ref(), operation_id, tx_builder)
+            .finalize_and_submit_tx(&dbtx.as_ref(), operation_id, tx_builder)
             .map_err(|_| ReceiveECashError::InsufficientFunds)?;
 
         let event = ReceiveEvent {
