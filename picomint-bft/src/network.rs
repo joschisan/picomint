@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -42,11 +43,34 @@ pub enum Message<D: UnitData> {
         /// Schnorr cosignature over the unit's consensus encoding.
         sig: schnorr::Signature,
     },
-    /// Targeted backfill request. If the recipient holds the entry,
-    /// it replies with a `Unit` carrying body + creator sig, plus one
-    /// `Sig` per non-creator cosig it currently holds — so a single
-    /// `Request` recovers both the body and all known cosigs in one
-    /// round-trip.
+    /// Atomically-confirmed slot view. Carries the body + creator sig
+    /// + exactly `2f` cosigs — the minimal threshold proof. Emitted
+    /// *only* as a response to `Request`, and *only* when the
+    /// responder holds the slot at or above threshold locally. The
+    /// receiver verifies the bundle and atomically installs (or
+    /// *overwrites*) the slot's entry.
+    ///
+    /// Overwrite is safe by quorum math: at most one body per slot can
+    /// ever assemble `1 + 2f` valid sigs, since honest peers cosign at
+    /// most one body. So receiving a valid `SignedUnit` is proof that
+    /// this is the canonical body — even if we previously latched onto
+    /// a different body that came from a forker and stayed stuck below
+    /// threshold.
+    SignedUnit {
+        /// The unit being disseminated.
+        unit: Unit<D>,
+        /// The creator's schnorr signature over `unit`'s consensus
+        /// encoding.
+        sig: schnorr::Signature,
+        /// Exactly `2f` cosignatures from non-creator peers, keyed by
+        /// signer. Together with `sig` this gives the receiver a
+        /// `2f+1` threshold proof.
+        cosigs: BTreeMap<PeerId, schnorr::Signature>,
+    },
+    /// Targeted backfill request. If the recipient holds the slot at
+    /// threshold confirmation, it replies with a `SignedUnit`. If not
+    /// (slot missing, or below threshold), no response is sent — the
+    /// requester retries on the next cycle.
     Request {
         /// Round of the slot the requester wants filled.
         round: Round,

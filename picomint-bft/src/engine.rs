@@ -115,6 +115,9 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
                 signer,
                 sig,
             } => self.handle_cosig(sender, round, creator, signer, sig),
+            Message::SignedUnit { unit, sig, cosigs } => {
+                self.handle_signed_unit(sender, unit, sig, cosigs);
+            }
             Message::Request { round, creator } => {
                 self.handle_request(sender, round, creator);
             }
@@ -136,33 +139,44 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         }
     }
 
-    /// Respond to a `Request` by unicasting back the body (with creator
-    /// sig) and one `Cosig` message per cosig we currently hold. The
-    /// requester reassembles body + cosigs in their inbox.
+    /// Respond to a `Request` by unicasting back a `SignedUnit` —
+    /// body + creator sig + exactly `2f` cosigs — but *only* if the
+    /// slot is locally confirmed (≥ threshold sigs). If the slot is
+    /// missing or below threshold we send nothing; the requester will
+    /// retry on its next anti-entropy cycle.
+    ///
+    /// Limiting responses to confirmed slots is what makes `SignedUnit`
+    /// load-bearing: a receiver that overwrites its local entry is
+    /// trusting the threshold proof in the bundle, so we must never
+    /// ship a sub-threshold bundle.
     fn handle_request(&self, requester: PeerId, round: Round, creator: PeerId) {
+        let t = self.graph.threshold();
+
         let Some(entry) = self.graph.entry(round, creator) else {
             return;
         };
 
+        if !entry.is_confirmed(t) {
+            return;
+        }
+
+        // Trim to exactly `2f = threshold - 1` cosigs. More would only
+        // add bytes without strengthening the threshold proof.
+        let cosigs: BTreeMap<PeerId, schnorr::Signature> = entry
+            .cosigs()
+            .iter()
+            .take(t - 1)
+            .map(|(k, v)| (*k, *v))
+            .collect();
+
         self.network.send(
             Recipient::Peer(requester),
-            Message::Unit {
+            Message::SignedUnit {
                 unit: entry.unit().clone(),
                 sig: *entry.sig(),
+                cosigs,
             },
         );
-
-        for (signer, sig) in entry.cosigs() {
-            self.network.send(
-                Recipient::Peer(requester),
-                Message::Cosig {
-                    round,
-                    creator,
-                    signer: *signer,
-                    sig: *sig,
-                },
-            );
-        }
     }
 
     /// Apply one inbound `Unit` message: verify the creator's sig,
@@ -244,13 +258,51 @@ impl<D: UnitData, P: DataProvider<D>> Engine<D, P> {
         }
     }
 
+    /// Apply one inbound `SignedUnit` message — the threshold-proven
+    /// body + cosig bundle. The graph atomically installs (or
+    /// overwrites) the slot, then we demand-pull any of the unit's
+    /// parents we don't yet hold *fed* from the immediate sender. No
+    /// rebroadcast, no Cosig fan-out — receiving a SignedUnit is a
+    /// pull-driven event, not a fresh consensus contribution.
+    fn handle_signed_unit(
+        &mut self,
+        sender: PeerId,
+        unit: Unit<D>,
+        sig: schnorr::Signature,
+        cosigs: BTreeMap<PeerId, schnorr::Signature>,
+    ) {
+        let unit_round = unit.round;
+        let parents: Vec<PeerId> = unit.parents.iter().copied().collect();
+
+        if !self
+            .graph
+            .insert_signed_unit(unit, sig, cosigs, &self.keychain)
+        {
+            return;
+        }
+
+        if let Some(parent_round) = unit_round.checked_sub(1) {
+            for parent_creator in parents {
+                if !self.graph.is_fed(parent_round, parent_creator) {
+                    self.network.send(
+                        Recipient::Peer(sender),
+                        Message::Request {
+                            round: parent_round,
+                            creator: parent_creator,
+                        },
+                    );
+                }
+            }
+        }
+    }
+
     /// Apply one inbound `Cosig` message. If we already hold the slot's
     /// body, verify and union the cosig directly. If we don't, treat
     /// the `Cosig` as a forward reference: drop the cosig and unicast
     /// a `Request` to the signer (who must hold the body since they
-    /// signed it). The response arrives as a `Unit` plus a `Cosig` per
-    /// non-creator cosig the responder holds, so we recover both body
-    /// and the dropped cosig in one round-trip.
+    /// signed it). The response arrives as a `SignedUnit` if the
+    /// signer has accumulated threshold cosigs locally, recovering
+    /// both body and the dropped cosig in one round-trip.
     fn handle_cosig(
         &mut self,
         sender: PeerId,

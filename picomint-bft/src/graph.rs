@@ -299,6 +299,65 @@ impl<D: UnitData> Graph<D> {
         Some(entry)
     }
 
+    /// Install (or overwrite) a slot's entry from a `SignedUnit`-shaped
+    /// bundle. The bundle must carry threshold-many valid signatures
+    /// (`1 + cosigs.len() >= threshold`); if so, this is *cryptographic
+    /// proof* that this body is the canonical one for the slot, and
+    /// any previously-stored body at this slot was either the same
+    /// body or a forker's stuck-below-threshold artifact that we can
+    /// safely discard.
+    ///
+    /// Returns `true` iff the bundle verified and was installed.
+    /// Returns `false` for: session mismatch, oversize payload,
+    /// malformed parents, invalid creator sig, or insufficient valid
+    /// cosigs after filtering.
+    pub fn insert_signed_unit(
+        &mut self,
+        unit: Unit<D>,
+        sig: schnorr::Signature,
+        cosigs: BTreeMap<PeerId, schnorr::Signature>,
+        keychain: &Keychain,
+    ) -> bool {
+        if unit.session != self.session {
+            return false;
+        }
+
+        if unit.data.consensus_encode_to_vec().len() > BFT_UNIT_BYTE_LIMIT {
+            return false;
+        }
+
+        if self.check_parents(&unit).is_err() {
+            return false;
+        }
+
+        if !keychain.verify(&unit, &sig, unit.creator) {
+            return false;
+        }
+
+        let valid_cosigs: BTreeMap<PeerId, schnorr::Signature> = cosigs
+            .into_iter()
+            .filter(|(signer, c)| *signer != unit.creator && keychain.verify(&unit, c, *signer))
+            .collect();
+
+        if 1 + valid_cosigs.len() < self.threshold() {
+            return false;
+        }
+
+        let entry = Entry::new(unit.clone(), sig, valid_cosigs);
+
+        self.backup.save(&entry);
+
+        // Atomic install/overwrite. A previously-promoted slot can
+        // only be re-installed with the same body (quorum math forbids
+        // two distinct bodies reaching threshold), so this never
+        // invalidates an extender promotion.
+        self.units.insert((unit.round, unit.creator), entry);
+
+        self.try_promote(unit.round, unit.creator);
+
+        true
+    }
+
     /// Record a co-signature on the unit at `(round, creator)`.
     ///
     /// The signature is verified against the body *we currently hold*
