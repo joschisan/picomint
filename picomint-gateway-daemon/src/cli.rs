@@ -13,7 +13,7 @@ use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
-use picomint_client::wallet::events::{SendConfirmEvent, SendFailureEvent};
+use picomint_client::wallet::events::{SendFailureEvent, SendSuccessEvent};
 use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
 use picomint_gateway_cli_core::{
@@ -730,7 +730,7 @@ async fn federation_module_wallet_send(
 
     let mut events = client.subscribe_operation_events(operation);
     while let Some(entry) = events.next().await {
-        if let Some(e) = entry.to_event::<SendConfirmEvent>() {
+        if let Some(e) = entry.to_event::<SendSuccessEvent>() {
             return Ok(Json(FederationWalletSendResponse { txid: e.txid }));
         }
         if let Some(e) = entry.to_event::<TxRejectEvent>() {

@@ -20,13 +20,13 @@ impl Event for SendEvent {
 
 /// Emitted when the pegout is observed on bitcoin with a confirmed txid.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct SendConfirmEvent {
+pub struct SendSuccessEvent {
     pub txid: Txid,
 }
 
-impl Event for SendConfirmEvent {
+impl Event for SendSuccessEvent {
     const SOURCE: EventSource = EventSource::Wallet;
-    const KIND: EventKind = EventKind::from_static("send-confirm");
+    const KIND: EventKind = EventKind::from_static("send-success");
 }
 
 /// Emitted when the pegout fails to reach onchain confirmation.

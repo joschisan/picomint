@@ -704,7 +704,7 @@ impl MintClientModule {
         dbtx.commit();
 
         self.client_ctx
-            .subscribe_operation_events_typed::<events::IssuanceComplete>(operation)
+            .subscribe_operation_events_typed::<events::MintSuccessEvent>(operation)
             .next()
             .await;
 

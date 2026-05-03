@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::ensure;
 use async_stream::stream;
 use futures::StreamExt;
-use picomint_client::mint::{IssuanceComplete, ReceiveEvent, RecoveryEvent, SendEvent};
+use picomint_client::mint::{MintSuccessEvent, ReceiveEvent, RecoveryEvent, SendEvent};
 use picomint_client::{Client, Mnemonic, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
@@ -83,15 +83,15 @@ fn recovery_event_stream(client: &Arc<Client>) -> impl futures::Stream<Item = Re
 }
 
 /// Wait until a receive operation is fully settled. Returns:
-/// - `Ok` once both `TxAcceptEvent` AND `IssuanceComplete` have been
+/// - `Ok` once both `TxAcceptEvent` AND `MintSuccessEvent` have been
 ///   observed — at that point the spendable notes have been written
 ///   to the local NOTE table and the balance reflects the receive.
 /// - `Err` on `TxRejectEvent` (federation rejected the tx).
 ///
-/// Callers must wait for `IssuanceComplete`, not just `TxAcceptEvent`,
+/// Callers must wait for `MintSuccessEvent`, not just `TxAcceptEvent`,
 /// because the issuance state machine still has to fetch threshold
 /// signatures after the tx is accepted before the notes land. Reading
-/// `get_balance()` between TxAccept and IssuanceComplete returns a
+/// `get_balance()` between TxAccept and MintSuccessEvent returns a
 /// stale (lower) figure.
 async fn await_tx_outcome(client: &Arc<Client>, operation: OperationId) -> Result<(), String> {
     let mut stream = client.subscribe_operation_events(operation);
@@ -107,7 +107,7 @@ async fn await_tx_outcome(client: &Arc<Client>, operation: OperationId) -> Resul
             return Err(ev.error);
         }
 
-        if tx_accepted && entry.to_event::<IssuanceComplete>().is_some() {
+        if tx_accepted && entry.to_event::<MintSuccessEvent>().is_some() {
             return Ok(());
         }
     }

@@ -10,7 +10,7 @@ use picomint_redb::WriteTxRef;
 use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use super::client_db::NOTE;
-use super::events::{IssuanceComplete, OutputFailureEvent};
+use super::events::{MintFailureEvent, MintSuccessEvent};
 use super::{MintSmContext, NoteIssuanceRequest, SpendableNote};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
@@ -91,7 +91,7 @@ impl StateMachine for IssuanceStateMachine {
 
             if !verify_note(spendable_note.note(), pk) {
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation, OutputFailureEvent);
+                    .log_event(dbtx, self.operation, MintFailureEvent);
 
                 return None;
             }
@@ -101,7 +101,7 @@ impl StateMachine for IssuanceStateMachine {
 
         if let Some(txid) = self.txid {
             ctx.client_ctx
-                .log_event(dbtx, self.operation, IssuanceComplete { txid });
+                .log_event(dbtx, self.operation, MintSuccessEvent { txid });
         }
 
         None

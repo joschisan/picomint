@@ -5,7 +5,7 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTxRef;
 
 use super::WalletClientContext;
-use super::events::{SendConfirmEvent, SendFailureEvent};
+use super::events::{SendFailureEvent, SendSuccessEvent};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
@@ -54,7 +54,7 @@ impl StateMachine for SendStateMachine {
         match outcome {
             AwaitFundingResult::Success(txid) => {
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation, SendConfirmEvent { txid });
+                    .log_event(dbtx, self.operation, SendSuccessEvent { txid });
             }
             AwaitFundingResult::Aborted(_) => {}
             AwaitFundingResult::Failure => {
