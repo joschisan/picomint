@@ -144,39 +144,6 @@ pub fn aggregate_signature_shares(
     )
 }
 
-// TODO: aggregating public key shares is hacky since we can obtain the
-// aggregated public by evaluating the dkg polynomial at zero - this function
-// should be removed, however it is currently needed in the mint module to
-// until we add the aggregated public key to the mint config.
-pub fn aggregate_public_key_shares(shares: &BTreeMap<u64, PublicKeyShare>) -> AggregatePublicKey {
-    // this is a special case for one-of-one federations
-    if shares.len() == 1 {
-        return AggregatePublicKey(
-            shares
-                .values()
-                .next()
-                .expect("We have at least one value")
-                .0,
-        );
-    }
-
-    AggregatePublicKey(
-        lagrange_multipliers(
-            shares
-                .keys()
-                .cloned()
-                .map(|peer| Scalar::from(peer + 1))
-                .collect(),
-        )
-        .into_iter()
-        .zip(shares.values())
-        .map(|(lagrange_multiplier, share)| lagrange_multiplier * share.0)
-        .reduce(|a, b| a + b)
-        .expect("We have at least one share")
-        .to_affine(),
-    )
-}
-
 fn lagrange_multipliers(scalars: Vec<Scalar>) -> Vec<Scalar> {
     scalars
         .iter()
