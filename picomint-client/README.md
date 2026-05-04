@@ -182,20 +182,20 @@ A drop-in `(source, kind) → card` mapping for clients that want a uniform stat
 | `Core` · `tx-reject`                    | Transaction Rejected | — |
 | `Mint` · `receive`                      | Receiving eCash      | `{amount} sats` |
 | `Mint` · `send`                         | Sending eCash        | `{amount} sats` |
-| `Mint` · `remint`                       | Reminting eCash      | preparing exact denominations |
-| `Mint` · `success`                      | Success              | — |
-| `Mint` · `failure`                      | Failure              | threshold signature invalid |
+| `Mint` · `remint`                       | Reminting eCash      | `{amount} sats` |
+| `Mint` · `success`                      | Mint Success         | — |
+| `Mint` · `failure`                      | Mint Failure         | threshold signature invalid |
 | `Mint` · `recovery`                     | Recovering eCash     | `{percent}%` (0% while `total` is `None`) |
 | `Wallet` · `receive`                    | Receiving Onchain    | `{value} sats at {address}` |
 | `Wallet` · `send`                       | Sending Onchain      | `{value} sats to {address}` |
-| `Wallet` · `send-success`               | Success              | `bitcoin tx {txid}` |
-| `Wallet` · `send-failure`               | Failure              | missing txid |
+| `Wallet` · `send-success`               | Send Success         | `bitcoin tx {txid}` |
+| `Wallet` · `send-failure`               | Send Failure         | missing txid |
 | `Ln` · `receive`                        | Receiving Lightning  | `{amount} sats` |
 | `Ln` · `send`                           | Sending Lightning    | `{amount} sats · fee {ln_fee + fee}` |
-| `Ln` · `send-success`                   | Success              | preimage received |
+| `Ln` · `send-success`                   | Send Success         | preimage received |
 | `Ln` · `send-refund` (`expired: true`)  | Refunding            | contract expired |
 | `Ln` · `send-refund` (`expired: false`) | Refunding            | gateway cancelled |
-| `Ln` · `send-failure`                   | Failure              | missing preimage |
+| `Ln` · `send-failure`                   | Send Failure         | missing preimage |
 
 Conventions:
 
