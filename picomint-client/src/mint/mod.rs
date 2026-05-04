@@ -33,7 +33,7 @@ use picomint_core::{Amount, PeerId, TransactionId, wire};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTxRef;
 use rand::seq::IteratorRandom;
-use tbs::AggregatePublicKey;
+use tbs::{AggregatePublicKey, aggregate_signature_shares};
 use thiserror::Error;
 
 pub use self::ecash::ECash;
@@ -117,149 +117,133 @@ pub fn init_recovery(dbtx: &WriteTxRef<'_>, federation_id: FederationId) -> Oper
     operation
 }
 
-/// Drive recovery to completion: fill in `total_items` if missing,
-/// download slices, checkpoint on each batch, and on the final batch
-/// add the bootstrapped issuance state machine + delete `RECOVERY`
-/// + emit the terminal event in one atomic tx.
-async fn recovery_driver(
-    api: FederationApi,
-    module_api: FederationApi,
-    secret: MintSecret,
-    client_ctx: ClientContext,
-    executor: ModuleExecutor<IssuanceStateMachine>,
-    mut state: Recovery,
-) -> anyhow::Result<()> {
-    let db = client_ctx.db().clone();
+impl MintClientModule {
+    /// Drive recovery to completion: fill in `total_items` if missing,
+    /// download slices, checkpoint on each batch, and on the final
+    /// batch hand off to `finalize_recovery`, which submits a
+    /// reissuance tx that re-mints the recovered notes under fresh
+    /// blinded outputs. From `TxAcceptEvent` on, the op rides the
+    /// standard mint state machines.
+    async fn run_recovery(self, mut state: Recovery) -> anyhow::Result<()> {
+        let module_api = self.client_ctx.api();
+        let db = self.client_ctx.db().clone();
+        let federation_id = self.client_ctx.federation_id();
 
-    let federation_id = client_ctx.federation_id();
+        // First awakening of a freshly-init'd recovery: fetch the count from
+        // the federation, persist, and emit the first progress event with
+        // the total now filled in.
+        let total_items = match state.total_items {
+            Some(t) => t,
+            None => {
+                let total = module_api.recovery_count().await?;
 
-    // First awakening of a freshly-init'd recovery: fetch the count from
-    // the federation, persist, and emit the first progress event with
-    // the total now filled in.
-    let total_items = match state.total_items {
-        Some(t) => t,
-        None => {
-            let total = module_api.recovery_count().await?;
+                state.total_items = Some(total);
 
-            state.total_items = Some(total);
+                let dbtx = db.begin_write();
+
+                dbtx.insert(&RECOVERY, &(), &state);
+
+                picomint_eventlog::log_event(
+                    &dbtx.as_ref(),
+                    federation_id,
+                    state.operation,
+                    events::RecoveryEvent {
+                        index: state.next_index,
+                        total: Some(total),
+                    },
+                );
+
+                dbtx.commit();
+
+                total
+            }
+        };
+
+        // Re-entry case: scan was already complete on disk, jump to
+        // finalisation directly.
+        if state.next_index == total_items {
+            return self.finalize_recovery(state).await;
+        }
+
+        let peer_selector = PeerSelector::new(module_api.all_peers().clone());
+
+        let mut recovery_stream =
+            futures::stream::iter((state.next_index..total_items).step_by(SLICE_SIZE as usize))
+                .map(|start| {
+                    let api = module_api.clone();
+                    let end = std::cmp::min(start + SLICE_SIZE, total_items);
+
+                    async move { (start, end, api.recovery_slice_hash(start, end).await) }
+                })
+                .buffered(PARALLEL_HASH_REQUESTS)
+                .map(|(start, end, hash)| {
+                    download_slice_with_hash(
+                        module_api.clone(),
+                        peer_selector.clone(),
+                        start,
+                        end,
+                        hash,
+                    )
+                })
+                .buffered(PARALLEL_SLICE_REQUESTS);
+
+        let tweak_filter = self.secret.tweak_filter();
+
+        loop {
+            let items = recovery_stream
+                .next()
+                .await
+                .context("Recovery stream finished before recovery is complete")?;
+
+            for item in &items {
+                match item {
+                    RecoveryItem::Output {
+                        denomination,
+                        nonce_hash,
+                        tweak,
+                    } => {
+                        if !issuance::check_tweak(tweak_filter, *tweak) {
+                            continue;
+                        }
+
+                        let output_secret =
+                            issuance::output_secret(*denomination, *tweak, &self.secret);
+
+                        if !issuance::check_nonce(&output_secret, *nonce_hash) {
+                            continue;
+                        }
+
+                        let computed_nonce_hash = issuance::nonce(&output_secret).consensus_hash();
+
+                        // Ignore possible duplicate nonces
+                        if !state.nonces.insert(computed_nonce_hash) {
+                            continue;
+                        }
+
+                        state.requests.insert(
+                            computed_nonce_hash,
+                            NoteIssuanceRequest::new(*denomination, *tweak, &self.secret),
+                        );
+                    }
+                    RecoveryItem::Input { nonce_hash } => {
+                        state.requests.remove(nonce_hash);
+                        state.nonces.remove(nonce_hash);
+                    }
+                }
+            }
+
+            state.next_index += items.len() as u64;
+
+            // Final batch: skip the per-batch checkpoint and let
+            // `finalize_recovery` commit the terminal event in the
+            // same atomic dbtx as the reissuance-tx submission.
+            if state.next_index == total_items {
+                return self.finalize_recovery(state).await;
+            }
 
             let dbtx = db.begin_write();
 
             dbtx.insert(&RECOVERY, &(), &state);
-
-            picomint_eventlog::log_event(
-                &dbtx.as_ref(),
-                federation_id,
-                state.operation,
-                events::RecoveryEvent {
-                    index: state.next_index,
-                    total: Some(total),
-                },
-            );
-
-            dbtx.commit();
-
-            total
-        }
-    };
-
-    let peer_selector = PeerSelector::new(api.all_peers().clone());
-
-    let mut recovery_stream =
-        futures::stream::iter((state.next_index..total_items).step_by(SLICE_SIZE as usize))
-            .map(|start| {
-                let api = module_api.clone();
-                let end = std::cmp::min(start + SLICE_SIZE, total_items);
-
-                async move { (start, end, api.recovery_slice_hash(start, end).await) }
-            })
-            .buffered(PARALLEL_HASH_REQUESTS)
-            .map(|(start, end, hash)| {
-                download_slice_with_hash(
-                    module_api.clone(),
-                    peer_selector.clone(),
-                    start,
-                    end,
-                    hash,
-                )
-            })
-            .buffered(PARALLEL_SLICE_REQUESTS);
-
-    let tweak_filter = secret.tweak_filter();
-
-    loop {
-        let items = recovery_stream
-            .next()
-            .await
-            .context("Recovery stream finished before recovery is complete")?;
-
-        for item in &items {
-            match item {
-                RecoveryItem::Output {
-                    denomination,
-                    nonce_hash,
-                    tweak,
-                } => {
-                    if !issuance::check_tweak(tweak_filter, *tweak) {
-                        continue;
-                    }
-
-                    let output_secret = issuance::output_secret(*denomination, *tweak, &secret);
-
-                    if !issuance::check_nonce(&output_secret, *nonce_hash) {
-                        continue;
-                    }
-
-                    let computed_nonce_hash = issuance::nonce(&output_secret).consensus_hash();
-
-                    // Ignore possible duplicate nonces
-                    if !state.nonces.insert(computed_nonce_hash) {
-                        continue;
-                    }
-
-                    state.requests.insert(
-                        computed_nonce_hash,
-                        NoteIssuanceRequest::new(*denomination, *tweak, &secret),
-                    );
-                }
-                RecoveryItem::Input { nonce_hash } => {
-                    state.requests.remove(nonce_hash);
-                    state.nonces.remove(nonce_hash);
-                }
-            }
-        }
-
-        state.next_index += items.len() as u64;
-
-        let dbtx = db.begin_write();
-
-        dbtx.insert(&RECOVERY, &(), &state);
-
-        picomint_eventlog::log_event(
-            &dbtx.as_ref(),
-            federation_id,
-            state.operation,
-            events::RecoveryEvent {
-                index: state.next_index,
-                total: Some(total_items),
-            },
-        );
-
-        if state.next_index == total_items {
-            // Final batch: hand the recovered requests to the issuance
-            // executor, wipe the recovery row, and emit the terminal
-            // event — all in one tx so a subscriber sees
-            // `index == total` and the SM lands together.
-            let sm = IssuanceStateMachine {
-                operation: state.operation,
-                spendable_notes: vec![],
-                txid: None,
-                issuance_requests: std::mem::take(&mut state.requests).into_values().collect(),
-            };
-
-            executor.add_state_machine_dbtx(&dbtx.as_ref(), sm);
-
-            dbtx.remove(&RECOVERY, &());
 
             picomint_eventlog::log_event(
                 &dbtx.as_ref(),
@@ -272,11 +256,74 @@ async fn recovery_driver(
             );
 
             dbtx.commit();
+        }
+    }
 
-            return Ok(());
+    /// Final phase of recovery: fetch shares for the recovered nonces,
+    /// materialise `SpendableNote`s, and submit a single reissuance tx
+    /// — atomically with deletion of the `RECOVERY` row and emission
+    /// of the terminal `RecoveryEvent`.
+    async fn finalize_recovery(self, state: Recovery) -> anyhow::Result<()> {
+        let module_api = self.client_ctx.api();
+        let db = self.client_ctx.db().clone();
+        let federation_id = self.client_ctx.federation_id();
+
+        let total_items = state
+            .total_items
+            .expect("total_items resolved by run_recovery");
+
+        let issuance_requests: Vec<NoteIssuanceRequest> = state.requests.into_values().collect();
+
+        let mut spendable_notes = Vec::with_capacity(issuance_requests.len());
+
+        if !issuance_requests.is_empty() {
+            let shares = module_api
+                .signature_shares_recovery(issuance_requests.clone(), self.cfg.tbs_pks.clone())
+                .await;
+
+            for (i, request) in issuance_requests.iter().enumerate() {
+                let shares = shares
+                    .iter()
+                    .map(|(peer, peer_shares)| (peer.to_usize() as u64, peer_shares[i]))
+                    .collect();
+
+                let note = request.finalize(aggregate_signature_shares(&shares));
+
+                spendable_notes.push(note);
+            }
         }
 
+        let dbtx = db.begin_write();
+
+        if !spendable_notes.is_empty() {
+            let mut builder = TxBuilder::new();
+            for note in &spendable_notes {
+                builder.add_input(Input {
+                    input: wire::Input::Mint(MintInput { note: note.note() }),
+                    keypair: note.keypair,
+                    amount: note.amount(),
+                    fee: self.cfg.input_fee,
+                });
+            }
+
+            self.finalize_and_submit_tx(&dbtx.as_ref(), state.operation, builder)?;
+        }
+
+        dbtx.remove(&RECOVERY, &());
+
+        picomint_eventlog::log_event(
+            &dbtx.as_ref(),
+            federation_id,
+            state.operation,
+            events::RecoveryEvent {
+                index: total_items,
+                total: Some(total_items),
+            },
+        );
+
         dbtx.commit();
+
+        Ok(())
     }
 }
 
@@ -324,22 +371,7 @@ impl MintClientModule {
         )
         .await;
 
-        // If a recovery row was seeded (by `Client::init_recovery`) and
-        // hasn't been cleaned up yet, drive it to completion in the
-        // background. The driver wipes the row when done, so a clean
-        // shutdown mid-recovery just resumes on the next boot.
-        if let Some(state) = context.db().begin_read().get(&RECOVERY, &()) {
-            tg.spawn(recovery_driver(
-                context.api(),
-                context.api(),
-                secret,
-                context.clone(),
-                executor.clone(),
-                state,
-            ));
-        }
-
-        Ok(MintClientModule {
+        let module = MintClientModule {
             federation_id,
             cfg,
             secret,
@@ -347,10 +379,22 @@ impl MintClientModule {
             tweak_rx,
             tx_submission_executor,
             executor,
-        })
+        };
+
+        // If a recovery row was seeded (by `Client::init_recovery`) and
+        // hasn't been cleaned up yet, drive it to completion in the
+        // background. The driver wipes the row when done, so a clean
+        // shutdown mid-recovery just resumes on the next boot.
+        if let Some(state) = module.client_ctx.db().begin_read().get(&RECOVERY, &()) {
+            let module = module.clone();
+            tg.spawn(module.run_recovery(state));
+        }
+
+        Ok(module)
     }
 }
 
+#[derive(Clone)]
 pub struct MintClientModule {
     federation_id: FederationId,
     cfg: MintConfigConsensus,
@@ -398,7 +442,7 @@ impl MintClientModule {
             let sm = IssuanceStateMachine {
                 operation,
                 spendable_notes,
-                txid: Some(txid),
+                txid,
                 issuance_requests,
             };
             self.executor.add_state_machine_dbtx(dbtx, sm);
@@ -692,7 +736,7 @@ impl MintClientModule {
         let sm = IssuanceStateMachine {
             operation,
             spendable_notes: funding_notes,
-            txid: Some(txid),
+            txid,
             issuance_requests,
         };
 

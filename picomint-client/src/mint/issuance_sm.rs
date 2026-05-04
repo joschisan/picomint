@@ -16,12 +16,13 @@ use super::{MintSmContext, NoteIssuanceRequest, SpendableNote};
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct IssuanceStateMachine {
     pub operation: OperationId,
-    /// Notes this tx consumed on its input side that originated from our own
-    /// wallet db. Recovered to `NOTE` on tx rejection.
+    /// Notes consumed on the input side that originated from our own
+    /// wallet db (or, for recovery, were materialised from recovered
+    /// nonces). Re-inserted into `NOTE` on tx rejection.
     pub spendable_notes: Vec<SpendableNote>,
-    /// `Some(txid)` for normal operation. `None` for recovery-bootstrapped
-    /// state machines, which fetch shares via the recovery endpoint instead.
-    pub txid: Option<TransactionId>,
+    /// Tx the SM is tied to. Recovery now submits a real reissuance
+    /// tx, so this is always set.
+    pub txid: TransactionId,
     /// Blinded outputs this tx issues. Finalized into `SpendableNote`s and
     /// inserted into `NOTE` once the federation's blind-signature shares are
     /// aggregated.
@@ -37,27 +38,17 @@ impl StateMachine for IssuanceStateMachine {
     type Outcome = Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String>;
 
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
-        if let Some(txid) = self.txid {
-            ctx.client_ctx
-                .await_tx_accepted(self.operation, txid)
-                .await?;
+        ctx.client_ctx
+            .await_tx_accepted(self.operation, self.txid)
+            .await?;
 
-            let shares = ctx
-                .client_ctx
-                .api()
-                .signature_shares(txid, self.issuance_requests.clone(), ctx.tbs_pks.clone())
-                .await;
+        let shares = ctx
+            .client_ctx
+            .api()
+            .signature_shares(self.txid, self.issuance_requests.clone(), ctx.tbs_pks.clone())
+            .await;
 
-            Ok(shares)
-        } else {
-            let shares = ctx
-                .client_ctx
-                .api()
-                .signature_shares_recovery(self.issuance_requests.clone(), ctx.tbs_pks.clone())
-                .await;
-
-            Ok(shares)
-        }
+        Ok(shares)
     }
 
     fn transition(
@@ -99,10 +90,8 @@ impl StateMachine for IssuanceStateMachine {
             assert!(dbtx.insert(&NOTE, &spendable_note, &()).is_none());
         }
 
-        if let Some(txid) = self.txid {
-            ctx.client_ctx
-                .log_event(dbtx, self.operation, MintSuccessEvent { txid });
-        }
+        ctx.client_ctx
+            .log_event(dbtx, self.operation, MintSuccessEvent { txid: self.txid });
 
         None
     }

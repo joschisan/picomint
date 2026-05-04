@@ -153,13 +153,14 @@ RecoveryEvent { index: k, total: Some(N) }
     ▼
 RecoveryEvent { index: N, total: Some(N) }            ← terminal; submits reissuance tx
     │
-    ├── TxAcceptEvent ──┬── MintSuccessEvent          (recovered notes re-minted fresh)
+    ├── TxAcceptEvent ──┬── MintSuccessEvent          (reissued outputs landed)
     │                   │
-    │                   └── MintFailureEvent          (TBS verify fails)
+    │                   └── MintFailureEvent          (TBS verify fails on a reissued output)
     │
-    └── TxRejectEvent
+    └── TxRejectEvent                                 (federation refused reissuance,
+                                                       e.g. an invalid recovered input)
 ```
 
-Progress is reported as a monotonically increasing `index` over an eventually-known `total`. The terminal `RecoveryEvent` (`index == total`) is emitted in the same dbtx that deletes the recovery state and submits the reissuance tx, so observing it guarantees the tx is in flight. From there the operation follows the standard mint flow — `TxAcceptEvent` + `MintSuccessEvent` on success, `MintFailureEvent` on the rare verification failure, `TxRejectEvent` if the federation refuses the reissuance.
+Progress is reported as a monotonically increasing `index` over an eventually-known `total`. The terminal `RecoveryEvent` (`index == total`) is emitted in the same dbtx that deletes the recovery state and submits the reissuance tx, so observing it guarantees the tx is in flight. From there the operation follows the standard mint flow — `TxAcceptEvent` + `MintSuccessEvent` on success, `MintFailureEvent` only on the rare verification failure of a *reissued output*, and `TxRejectEvent` if the federation refuses the reissuance (which is also how a bad *recovered input* surfaces — the federation rejects the tx rather than client-side verification kicking in).
 
 Re-minting every recovered note keeps the recovery path uniform with the rest of the client: there is no special txid-less success case, and the recovered balance is provably spendable the moment `MintSuccessEvent` lands. An integrator restoring a wallet can wait for `MintSuccessEvent` under the recovery `OperationId` and treat that as full restore-complete.

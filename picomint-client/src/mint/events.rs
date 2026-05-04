@@ -61,9 +61,12 @@ impl Event for MintFailureEvent {
 
 /// Emitted on every recovery-state checkpoint: once at `init_recovery`
 /// (`index = 0`, `total = None`), once after the first driver wake-up
-/// fills in the total, then once per processed slice, ending with the
-/// terminal emission at `index == total` in the same tx that deletes
-/// `RECOVERY_STATE` and adds the bootstrapped issuance state machine.
+/// fills in the total, and once per processed slice, ending with the
+/// terminal emission at `index == total`. The terminal event commits
+/// in the same dbtx as the reissuance-tx submission, so the rest of
+/// the operation is observable through `TxAcceptEvent` and
+/// `MintSuccessEvent` (or `MintFailureEvent` / `TxRejectEvent`) under
+/// the same op id.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryEvent {
     pub index: u64,
