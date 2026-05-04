@@ -30,6 +30,13 @@ federation, and registers the gateway URL with the federation. It prints
 the invite code, the gateway URL, the recurring daemon URL, and the per-
 guardian UI URLs at the end.
 
+The gateway URL registered with the federation must be reachable from
+external clients, so `setup.sh` auto-detects the host's public IPv4 via
+`api.ipify.org` and uses `http://<public_ip>:8090`. Override with
+`GATEWAY_URL=http://...:8090 ./setup.sh` if auto-detection isn't right
+(e.g. behind NAT, or for purely local dev where you want
+`http://localhost:8090`).
+
 ## Endpoints
 
 | Service       | Host port                                   | Notes                                |

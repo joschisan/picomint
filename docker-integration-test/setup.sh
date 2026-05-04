@@ -79,8 +79,11 @@ echo "==> Joining gateway to federation..."
 $DC exec -T gateway picomint-gateway-cli federation join "$INVITE"
 
 echo "==> Registering gateway with federation..."
-GATEWAY_URL="http://gateway:8080"
-$DC exec -T "guardian-$LEADER" picomint-server-cli module ln gateway add "$GATEWAY_URL"
+GATEWAY_URL="${GATEWAY_URL:-http://$(curl -fsS --max-time 5 https://api.ipify.org):8090}"
+echo "    gateway URL: $GATEWAY_URL"
+for i in "${GUARDIANS[@]}"; do
+    $DC exec -T "guardian-$i" picomint-server-cli module ln gateway add "$GATEWAY_URL"
+done
 
 echo "==> Funding the gateway via federation peg-in..."
 GW_DEPOSIT=$($DC exec -T gateway picomint-gateway-cli federation module wallet receive | jq -r .address)
@@ -112,7 +115,7 @@ cat <<EOF
 Setup complete.
 
   Federation invite : $INVITE
-  Gateway URL       : http://localhost:8090   (host)  /  $GATEWAY_URL  (compose net)
+  Gateway URL       : $GATEWAY_URL   (registered with federation)
   Recurring daemon  : http://localhost:8091
   Guardian UIs      : http://localhost:3000..3003   (password: picomint)
   Bitcoind RPC      : http://localhost:18443        (user: bitcoin / pass: bitcoin)
