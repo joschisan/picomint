@@ -3,6 +3,7 @@ use crate::tx::{Input, TxBuilder};
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use futures::future::pending;
+use picomint_core::TransactionId;
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -16,7 +17,7 @@ use secp256k1::Keypair;
 use secp256k1::schnorr::Signature;
 use tracing::{error, instrument};
 
-use super::events::{SendRefundEvent, SendSuccessEvent};
+use super::events::{SendFailureEvent, SendRefundEvent, SendSuccessEvent};
 use super::{LightningClientContext, LightningInvoice};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
@@ -50,17 +51,23 @@ pub struct SendSMCommon {
 pub enum SendSMState {
     Funding,
     Funded,
+    Refunding(TransactionId),
 }
 
 /// Outcome produced by [`SendStateMachine::trigger`]. Which variant is
 /// yielded depends on the current [`SendSMState`]:
-/// - `Funding`  → [`SendOutcome::FundingResult`]
-/// - `Funded`   → [`SendOutcome::GatewayResponse`] or [`SendOutcome::Preimage`],
-///   whichever of the two races finishes first.
+/// - `Funding`     → [`SendOutcome::FundingResult`]
+/// - `Funded`      → [`SendOutcome::GatewayResponse`] / [`SendOutcome::Preimage`]
+///   / [`SendOutcome::Expired`]
+/// - `Refunding{}` → [`SendOutcome::Refunded`] / [`SendOutcome::Preimage`]
+///   / [`SendOutcome::Failure`]
 pub enum SendOutcome {
     FundingResult(Result<(), String>),
     GatewayResponse(Result<[u8; 32], Signature>),
-    Preimage(Option<[u8; 32]>),
+    Preimage([u8; 32]),
+    Expired,
+    Refunded,
+    Failure,
 }
 
 /// State machine that requests the lightning gateway to pay an invoice on
@@ -94,7 +101,38 @@ impl StateMachine for SendStateMachine {
                         self.common.outpoint,
                         self.common.contract.clone(),
                         ctx.clone(),
-                    ) => SendOutcome::Preimage(preimage),
+                    ) => match preimage {
+                        Some(p) => SendOutcome::Preimage(p),
+                        None => SendOutcome::Expired,
+                    },
+                }
+            }
+            SendSMState::Refunding(refund_txid) => {
+                match ctx
+                    .client_ctx
+                    .await_tx_accepted(self.common.operation, *refund_txid)
+                    .await
+                {
+                    Ok(()) => SendOutcome::Refunded,
+                    Err(_) => {
+                        // Refund tx was rejected, which means the contract input
+                        // is gone — the gateway must have claimed it. Re-poll the
+                        // federation for the preimage one more time before giving
+                        // up.
+                        let p = ctx
+                            .client_ctx
+                            .api()
+                            .ln_await_preimage(
+                                self.common.outpoint,
+                                self.common.contract.expiration,
+                            )
+                            .await
+                            .filter(|p| self.common.contract.verify_preimage(p));
+                        match p {
+                            Some(p) => SendOutcome::Preimage(p),
+                            None => SendOutcome::Failure,
+                        }
+                    }
                 }
             }
         }
@@ -109,16 +147,76 @@ impl StateMachine for SendStateMachine {
         match outcome {
             SendOutcome::FundingResult(Ok(())) => Some(self.update(SendSMState::Funded)),
             SendOutcome::FundingResult(Err(_)) => None,
-            SendOutcome::GatewayResponse(response) => {
-                transition_gateway_send_payment_sm(ctx, dbtx, self, response);
+            SendOutcome::Preimage(preimage) => {
+                ctx.client_ctx.log_event(
+                    dbtx,
+                    self.common.operation,
+                    SendSuccessEvent { preimage },
+                );
                 None
             }
-            SendOutcome::Preimage(preimage) => {
-                transition_preimage_sm(ctx, dbtx, self, preimage);
+            SendOutcome::GatewayResponse(Ok(preimage)) => {
+                ctx.client_ctx.log_event(
+                    dbtx,
+                    self.common.operation,
+                    SendSuccessEvent { preimage },
+                );
+                None
+            }
+            SendOutcome::GatewayResponse(Err(signature)) => {
+                Some(self.update(SendSMState::Refunding(submit_refund(
+                    ctx,
+                    dbtx,
+                    self,
+                    OutgoingWitness::Cancel(signature),
+                    false,
+                ))))
+            }
+            SendOutcome::Expired => Some(self.update(SendSMState::Refunding(submit_refund(
+                ctx,
+                dbtx,
+                self,
+                OutgoingWitness::Refund,
+                true,
+            )))),
+            SendOutcome::Refunded => None,
+            SendOutcome::Failure => {
+                ctx.client_ctx
+                    .log_event(dbtx, self.common.operation, SendFailureEvent);
                 None
             }
         }
     }
+}
+
+/// Build and submit the refund-claim tx, log `SendRefundEvent`, return its
+/// txid for the SM to advance into the `Refunding` state with.
+fn submit_refund(
+    ctx: &LightningClientContext,
+    dbtx: &WriteTxRef<'_>,
+    old_state: &SendStateMachine,
+    witness: OutgoingWitness,
+    expired: bool,
+) -> TransactionId {
+    let tx_builder = TxBuilder::from_input(Input {
+        input: wire::Input::Ln(LightningInput::Outgoing(old_state.common.outpoint, witness)),
+        keypair: old_state.common.refund_keypair,
+        amount: old_state.common.contract.amount,
+        fee: ctx.input_fee,
+    });
+
+    let txid = ctx
+        .mint
+        .finalize_and_submit_tx(dbtx, old_state.common.operation, tx_builder)
+        .expect("Cannot claim input, additional funding needed");
+
+    ctx.client_ctx.log_event(
+        dbtx,
+        old_state.common.operation,
+        SendRefundEvent { txid, expired },
+    );
+
+    txid
 }
 
 #[instrument(skip(refund_keypair))]
@@ -155,42 +253,6 @@ async fn gateway_send_payment_sm(
     .expect("networking_backoff retries forever")
 }
 
-fn transition_gateway_send_payment_sm(
-    ctx: &LightningClientContext,
-    dbtx: &WriteTxRef<'_>,
-    old_state: &SendStateMachine,
-    gateway_response: Result<[u8; 32], Signature>,
-) {
-    match gateway_response {
-        Ok(preimage) => {
-            ctx.client_ctx.log_event(
-                dbtx,
-                old_state.common.operation,
-                SendSuccessEvent { preimage },
-            );
-        }
-        Err(signature) => {
-            let tx_builder = TxBuilder::from_input(Input {
-                input: wire::Input::Ln(LightningInput::Outgoing(
-                    old_state.common.outpoint,
-                    OutgoingWitness::Cancel(signature),
-                )),
-                keypair: old_state.common.refund_keypair,
-                amount: old_state.common.contract.amount,
-                fee: ctx.input_fee,
-            });
-
-            let txid = ctx
-                .mint
-                .finalize_and_submit_tx(dbtx, old_state.common.operation, tx_builder)
-                .expect("Cannot claim input, additional funding needed");
-
-            ctx.client_ctx
-                .log_event(dbtx, old_state.common.operation, SendRefundEvent { txid });
-        }
-    }
-}
-
 #[instrument(skip(ctx))]
 async fn await_preimage_sm(
     outpoint: OutPoint,
@@ -210,39 +272,4 @@ async fn await_preimage_sm(
     error!("Federation returned invalid preimage {:?}", preimage);
 
     pending().await
-}
-
-fn transition_preimage_sm(
-    ctx: &LightningClientContext,
-    dbtx: &WriteTxRef<'_>,
-    old_state: &SendStateMachine,
-    preimage: Option<[u8; 32]>,
-) {
-    if let Some(preimage) = preimage {
-        ctx.client_ctx.log_event(
-            dbtx,
-            old_state.common.operation,
-            SendSuccessEvent { preimage },
-        );
-
-        return;
-    }
-
-    let tx_builder = TxBuilder::from_input(Input {
-        input: wire::Input::Ln(LightningInput::Outgoing(
-            old_state.common.outpoint,
-            OutgoingWitness::Refund,
-        )),
-        keypair: old_state.common.refund_keypair,
-        amount: old_state.common.contract.amount,
-        fee: ctx.input_fee,
-    });
-
-    let txid = ctx
-        .mint
-        .finalize_and_submit_tx(dbtx, old_state.common.operation, tx_builder)
-        .expect("Cannot claim input, additional funding needed");
-
-    ctx.client_ctx
-        .log_event(dbtx, old_state.common.operation, SendRefundEvent { txid });
 }

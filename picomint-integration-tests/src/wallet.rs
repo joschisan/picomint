@@ -5,7 +5,7 @@ use anyhow::{Context, ensure};
 use async_stream::stream;
 use bitcoincore_rpc::RpcApi;
 use futures::StreamExt;
-use picomint_client::wallet::events::{ReceiveEvent, SendConfirmEvent, SendEvent};
+use picomint_client::wallet::events::{ReceiveEvent, SendEvent, SendSuccessEvent};
 use picomint_client::{Client, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_eventlog::{EventLogEntry, EventLogId};
@@ -18,7 +18,7 @@ use crate::env::{TestEnv, retry};
 #[allow(dead_code)]
 enum WalletEvent {
     Send(SendEvent),
-    SendConfirm(SendConfirmEvent),
+    SendSuccess(SendSuccessEvent),
     Receive(ReceiveEvent),
     TxReject(TxRejectEvent),
 }
@@ -56,7 +56,7 @@ fn try_parse_wallet_event(
         return Some((op, WalletEvent::Send(e)));
     }
     if let Some(e) = entry.to_event() {
-        return Some((op, WalletEvent::SendConfirm(e)));
+        return Some((op, WalletEvent::SendSuccess(e)));
     }
     if let Some(e) = entry.to_event() {
         return Some((op, WalletEvent::Receive(e)));
@@ -121,8 +121,8 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     };
     assert_eq!(op, operation);
 
-    let Some((op, WalletEvent::SendConfirm(ev))) = send_events.next().await else {
-        panic!("Expected SendConfirm event");
+    let Some((op, WalletEvent::SendSuccess(ev))) = send_events.next().await else {
+        panic!("Expected SendSuccess event");
     };
     assert_eq!(op, operation);
     let txid = ev.txid;
