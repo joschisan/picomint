@@ -195,7 +195,7 @@ A drop-in `(source, kind) → card` mapping for clients that want a uniform stat
 | `Ln` · `send-success`                   | Success              | preimage received |
 | `Ln` · `send-refund` (`expired: true`)  | Refunding            | contract expired |
 | `Ln` · `send-refund` (`expired: false`) | Refunding            | gateway cancelled |
-| `Ln` · `send-failure`                   | Failure              | payment indeterminate |
+| `Ln` · `send-failure`                   | Failure              | missing preimage |
 
 Conventions:
 
