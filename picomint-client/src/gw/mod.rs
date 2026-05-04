@@ -212,7 +212,7 @@ impl GatewayClientModule {
                         OutgoingWitness::Claim(preimage),
                     )),
                     keypair: self.keypair,
-                    amount: contract.amount,
+                    amount: contract.amount + contract.fee,
                     fee: self.cfg.input_fee,
                 });
 
