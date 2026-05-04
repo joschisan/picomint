@@ -29,9 +29,13 @@ impl Event for SendSuccessEvent {
 }
 
 /// Emitted when the payment fails and funds are refunded via a new claim tx.
+/// `expired` is `true` when the contract expired without the federation
+/// observing a preimage, `false` when the gateway returned a signed cancel
+/// (payment definitively did not happen).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendRefundEvent {
     pub txid: TransactionId,
+    pub expired: bool,
 }
 
 impl Event for SendRefundEvent {
