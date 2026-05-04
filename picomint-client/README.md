@@ -174,24 +174,24 @@ Re-minting every recovered note keeps the recovery path uniform with the rest of
 
 ## Suggested UI mapping
 
-A drop-in `(source, kind) → card` mapping for clients that want a uniform status surface across all operations. Triggers and ongoing-state events use a present-continuous header; terminal and milestone events use a bare past/static label. The operation title (e.g. "Send Lightning · 5 000 sats") is set once from the trigger event and stays put; subsequent cards only update the header/subheader beneath it.
+A drop-in `(source, kind) → card` mapping for clients that want a uniform status surface across all operations. Triggers and ongoing-state events use a present-continuous header; terminal and milestone events use a bare past/static label. The operation title (e.g. "Send Lightning · 5 000 sat") is set once from the trigger event and stays put; subsequent cards only update the header/subheader beneath it.
 
 | Source · Kind | Header | Subheader |
 |---|---|---|
 | `Core` · `tx-accept`                    | Transaction Accepted | — |
 | `Core` · `tx-reject`                    | Transaction Rejected | — |
-| `Mint` · `receive`                      | Receiving eCash      | `{amount} sats` |
-| `Mint` · `send`                         | Sending eCash        | `{amount} sats` |
-| `Mint` · `remint`                       | Reminting eCash      | `{amount} sats` |
+| `Mint` · `receive`                      | Receiving eCash      | `{amount} sat` |
+| `Mint` · `send`                         | Sending eCash        | `{amount} sat` |
+| `Mint` · `remint`                       | Reminting eCash      | `{amount} sat` |
 | `Mint` · `success`                      | Minting Success      | — |
 | `Mint` · `failure`                      | Minting Failure      | threshold signature invalid |
 | `Mint` · `recovery`                     | Recovering eCash     | `{percent}%` (0% while `total` is `None`) |
-| `Wallet` · `receive`                    | Receiving Onchain    | `{value} sats at {address}` |
-| `Wallet` · `send`                       | Sending Onchain      | `{value} sats to {address}` |
+| `Wallet` · `receive`                    | Receiving Onchain    | `{value} sat at {address}` |
+| `Wallet` · `send`                       | Sending Onchain      | `{value} sat to {address}` |
 | `Wallet` · `send-success`               | Sending Success      | `bitcoin tx {txid}` |
 | `Wallet` · `send-failure`               | Sending Failure      | missing txid |
-| `Ln` · `receive`                        | Receiving Lightning  | `{amount} sats` |
-| `Ln` · `send`                           | Sending Lightning    | `{amount} sats · fee {ln_fee + fee}` |
+| `Ln` · `receive`                        | Receiving Lightning  | `{amount} sat` |
+| `Ln` · `send`                           | Sending Lightning    | `{amount} sat · fee {ln_fee + fee}` |
 | `Ln` · `send-success`                   | Sending Success      | preimage received |
 | `Ln` · `send-refund` (`expired: true`)  | Refunding            | contract expired |
 | `Ln` · `send-refund` (`expired: false`) | Refunding            | gateway cancelled |
