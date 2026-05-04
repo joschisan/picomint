@@ -45,7 +45,11 @@ impl StateMachine for IssuanceStateMachine {
         let shares = ctx
             .client_ctx
             .api()
-            .signature_shares(self.txid, self.issuance_requests.clone(), ctx.tbs_pks.clone())
+            .signature_shares(
+                self.txid,
+                self.issuance_requests.clone(),
+                ctx.tbs_pks.clone(),
+            )
             .await;
 
         Ok(shares)
