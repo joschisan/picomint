@@ -16,7 +16,7 @@ use picomint_core::{PeerId, TransactionId};
 use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 
 use super::NoteIssuanceRequest;
-use super::issuance_sm::verify_blind_shares;
+use super::mint_sm::verify_blind_shares;
 
 impl FederationApi {
     pub async fn signature_shares(

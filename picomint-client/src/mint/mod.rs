@@ -5,7 +5,7 @@ mod client_db;
 mod ecash;
 mod events;
 mod issuance;
-mod issuance_sm;
+mod mint_sm;
 mod secret;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,7 +38,7 @@ use thiserror::Error;
 
 pub use self::ecash::ECash;
 use self::issuance::NoteIssuanceRequest;
-use self::issuance_sm::IssuanceStateMachine;
+use self::mint_sm::MintStateMachine;
 pub use self::secret::MintSecret;
 
 const TARGET_PER_DENOMINATION: usize = 3;
@@ -402,7 +402,7 @@ pub struct MintClientModule {
     client_ctx: ClientContext,
     tweak_rx: async_channel::Receiver<[u8; 16]>,
     tx_submission_executor: ModuleExecutor<TxSubmissionStateMachine>,
-    executor: ModuleExecutor<IssuanceStateMachine>,
+    executor: ModuleExecutor<MintStateMachine>,
 }
 
 /// Context handed to per-SM executors. Keeps the `ClientContext` handle
@@ -426,7 +426,7 @@ impl MintClientModule {
     /// Balance the builder against mint's wallet (pulling funding notes when
     /// underfunded, generating change outputs when overfunded), sign and
     /// submit the resulting transaction, and spawn the
-    /// `IssuanceStateMachine` that tracks the balance-side notes/requests
+    /// `MintStateMachine` that tracks the balance-side notes/requests
     /// (if any).
     pub fn finalize_and_submit_tx(
         &self,
@@ -439,7 +439,7 @@ impl MintClientModule {
         let txid = self.submit(dbtx, operation, builder)?;
 
         if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
-            let sm = IssuanceStateMachine {
+            let sm = MintStateMachine {
                 operation,
                 spendable_notes,
                 txid,
@@ -702,7 +702,7 @@ impl MintClientModule {
         // builder first; the balance loop then pulls funding from the wallet
         // and appends change outputs. We extend `issuance_requests` with the
         // change requests after balance so the order matches the transaction's
-        // outputs and a single `IssuanceStateMachine` can process both.
+        // outputs and a single `MintStateMachine` can process both.
         let mut issuance_requests: Vec<NoteIssuanceRequest> = Vec::new();
         for d in target_denominations {
             let tweak = self
@@ -733,7 +733,7 @@ impl MintClientModule {
 
         issuance_requests.extend(change_requests);
 
-        let sm = IssuanceStateMachine {
+        let sm = MintStateMachine {
             operation,
             spendable_notes: funding_notes,
             txid,
