@@ -52,7 +52,7 @@ send(amount)
     │
     ├── SendEvent                                          (fast path: notes already match)
     │
-    └── ReissueEvent                                       (slow path)
+    └── RemintEvent                                        (slow path)
           │
           ├── TxAcceptEvent ──┬── MintSuccessEvent ── SendEvent
           │                   │

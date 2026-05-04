@@ -15,16 +15,16 @@ impl Event for SendEvent {
     const KIND: EventKind = EventKind::from_static("send");
 }
 
-/// Emitted when a send operation requires reissuing notes before the sender
+/// Emitted when a send operation requires re-minting notes before the sender
 /// has enough of the right denominations to send.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ReissueEvent {
+pub struct RemintEvent {
     pub txid: TransactionId,
 }
 
-impl Event for ReissueEvent {
+impl Event for RemintEvent {
     const SOURCE: EventSource = EventSource::Mint;
-    const KIND: EventKind = EventKind::from_static("reissue");
+    const KIND: EventKind = EventKind::from_static("remint");
 }
 
 /// Emitted when a receive (reissuance) operation is initiated.

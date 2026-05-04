@@ -743,7 +743,7 @@ impl MintClientModule {
         self.executor.add_state_machine_dbtx(&dbtx.as_ref(), sm);
 
         self.client_ctx
-            .log_event(&dbtx.as_ref(), operation, ReissueEvent { txid });
+            .log_event(&dbtx.as_ref(), operation, RemintEvent { txid });
 
         dbtx.commit();
 
