@@ -51,7 +51,7 @@ pub struct SendSMCommon {
 pub enum SendSMState {
     Funding,
     Funded,
-    Refunding { refund_txid: TransactionId },
+    Refunding(TransactionId),
 }
 
 /// Outcome produced by [`SendStateMachine::trigger`]. Which variant is
@@ -107,7 +107,7 @@ impl StateMachine for SendStateMachine {
                     },
                 }
             }
-            SendSMState::Refunding { refund_txid } => {
+            SendSMState::Refunding(refund_txid) => {
                 match ctx
                     .client_ctx
                     .await_tx_accepted(self.common.operation, *refund_txid)
@@ -166,19 +166,21 @@ impl StateMachine for SendStateMachine {
                 None
             }
             SendOutcome::GatewayResponse(Err(signature)) => {
-                Some(self.update(SendSMState::Refunding {
-                    refund_txid: submit_refund(
-                        ctx,
-                        dbtx,
-                        self,
-                        OutgoingWitness::Cancel(signature),
-                        false,
-                    ),
-                }))
+                Some(self.update(SendSMState::Refunding(submit_refund(
+                    ctx,
+                    dbtx,
+                    self,
+                    OutgoingWitness::Cancel(signature),
+                    false,
+                ))))
             }
-            SendOutcome::Expired => Some(self.update(SendSMState::Refunding {
-                refund_txid: submit_refund(ctx, dbtx, self, OutgoingWitness::Refund, true),
-            })),
+            SendOutcome::Expired => Some(self.update(SendSMState::Refunding(submit_refund(
+                ctx,
+                dbtx,
+                self,
+                OutgoingWitness::Refund,
+                true,
+            )))),
 
             SendOutcome::Refunded => None,
             SendOutcome::Failure => {
