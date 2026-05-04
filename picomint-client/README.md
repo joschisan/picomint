@@ -183,7 +183,7 @@ A drop-in `(source, kind) → card` mapping for clients that want a uniform stat
 | `Mint` · `receive`                      | Receiving eCash      | `{amount} sat` |
 | `Mint` · `send`                         | Sending eCash        | `{amount} sat` |
 | `Mint` · `remint`                       | Reminting eCash      | `{amount} sat` |
-| `Mint` · `success`                      | Minting Success      | — |
+| `Mint` · `success`                      | Minting Success      | `{amount} sat` |
 | `Mint` · `failure`                      | Minting Failure      | threshold signature invalid |
 | `Mint` · `recovery`                     | Recovering eCash     | `{percent}%` (0% while `total` is `None`) |
 | `Wallet` · `receive`                    | Receiving Onchain    | `{value} sat at {address}` |

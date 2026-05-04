@@ -43,6 +43,9 @@ impl Event for ReceiveEvent {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct MintSuccessEvent {
     pub txid: TransactionId,
+    /// Total amount of notes finalized into the local note table by this
+    /// state machine (sum of all issuance-request denominations).
+    pub amount: Amount,
 }
 
 impl Event for MintSuccessEvent {
