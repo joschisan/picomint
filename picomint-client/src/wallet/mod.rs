@@ -129,19 +129,19 @@ impl WalletClientModule {
     pub async fn send(
         &self,
         address: Address<NetworkUnchecked>,
-        value: bitcoin::Amount,
+        amount: bitcoin::Amount,
         fee: Option<bitcoin::Amount>,
     ) -> Result<OperationId, SendError> {
         if !address.is_valid_for_network(self.client_ctx.network()) {
             return Err(SendError::WrongNetwork);
         }
 
-        if value < self.cfg.dust_limit {
+        if amount < self.cfg.dust_limit {
             return Err(SendError::DustValue);
         }
 
         let fee = match fee {
-            Some(value) => value,
+            Some(fee) => fee,
             None => self
                 .client_ctx
                 .api()
@@ -159,10 +159,10 @@ impl WalletClientModule {
         let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Wallet(WalletOutput {
                 destination,
-                value,
+                value: amount,
                 fee,
             }),
-            amount: Amount::from_sats((value + fee).to_sat()),
+            amount: Amount::from_sats((amount + fee).to_sat()),
             fee: self.cfg.output_fee,
         });
 
@@ -176,7 +176,7 @@ impl WalletClientModule {
         let sm = SendStateMachine {
             operation,
             outpoint: OutPoint { txid, out_idx: 0 },
-            amount: value,
+            amount,
             fee,
         };
 
@@ -186,7 +186,7 @@ impl WalletClientModule {
         let event = SendEvent {
             txid,
             address,
-            amount: value,
+            amount,
             fee,
         };
 
@@ -247,7 +247,7 @@ impl WalletClientModule {
     fn receive_output(
         &self,
         output_index: u64,
-        value: bitcoin::Amount,
+        amount: bitcoin::Amount,
         address_index: u64,
         fee: bitcoin::Amount,
     ) -> (OperationId, TransactionId) {
@@ -260,7 +260,7 @@ impl WalletClientModule {
                 tweak: self.derive_tweak(address_index).x_only_public_key().0,
             }),
             keypair: self.derive_tweak(address_index),
-            amount: Amount::from_sats((value - fee).to_sat()),
+            amount: Amount::from_sats((amount - fee).to_sat()),
             fee: self.cfg.input_fee,
         });
 
@@ -274,7 +274,7 @@ impl WalletClientModule {
         let event = ReceiveEvent {
             txid,
             address: self.derive_address(address_index).as_unchecked().clone(),
-            amount: value,
+            amount,
             fee,
         };
 
