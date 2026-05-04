@@ -138,11 +138,10 @@ impl GatewayClientModule {
         dbtx: &WriteTxRef<'_>,
         operation: OperationId,
         contract: IncomingContract,
-        fee: Amount,
     ) -> anyhow::Result<()> {
         let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Ln(Box::new(LightningOutput::Incoming(contract.clone()))),
-            amount: contract.commitment.amount,
+            amount: contract.commitment.amount - contract.commitment.fee,
             fee: self.cfg.output_fee,
         });
 
@@ -175,7 +174,7 @@ impl GatewayClientModule {
             ReceiveEvent {
                 txid: outpoint.txid,
                 amount: contract.commitment.amount,
-                fee,
+                fee: contract.commitment.fee,
             },
         );
         Ok(())

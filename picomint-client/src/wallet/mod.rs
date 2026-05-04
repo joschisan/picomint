@@ -176,7 +176,7 @@ impl WalletClientModule {
         let sm = SendStateMachine {
             operation,
             outpoint: OutPoint { txid, out_idx: 0 },
-            value,
+            amount: value,
             fee,
         };
 
@@ -186,7 +186,7 @@ impl WalletClientModule {
         let event = SendEvent {
             txid,
             address,
-            value,
+            amount: value,
             fee,
         };
 
@@ -274,7 +274,7 @@ impl WalletClientModule {
         let event = ReceiveEvent {
             txid,
             address: self.derive_address(address_index).as_unchecked().clone(),
-            value,
+            amount: value,
             fee,
         };
 

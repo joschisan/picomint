@@ -322,9 +322,9 @@ fn handle_payment_claimable(
         .get(&INCOMING_CONTRACT, &operation)
         .expect("PaymentClaimable for an unregistered payment_hash");
 
-    if row.amount.msats != amount_msat {
+    if row.contract.commitment.amount.msats != amount_msat {
         warn!(
-            expected = row.amount.msats,
+            expected = row.contract.commitment.amount.msats,
             got = amount_msat,
             "Incoming HTLC amount mismatch",
         );
@@ -339,16 +339,9 @@ fn handle_payment_claimable(
             .select_client(row.federation_id)
             .expect("source federation for incoming contract is connected");
 
-        let fee = row.amount - row.contract.commitment.amount;
-
         if client
             .gw()
-            .start_receive(
-                &dbtx.isolate(row.federation_id),
-                operation,
-                row.contract,
-                fee,
-            )
+            .start_receive(&dbtx.isolate(row.federation_id), operation, row.contract)
             .is_err()
         {
             tracing::error!("start_receive failed; failing HTLC",);

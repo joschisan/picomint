@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct SendEvent {
     pub txid: TransactionId,
     pub address: Address<NetworkUnchecked>,
-    pub value: bitcoin::Amount,
+    pub amount: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
 
@@ -43,7 +43,7 @@ impl Event for SendFailureEvent {
 pub struct ReceiveEvent {
     pub txid: TransactionId,
     pub address: Address<NetworkUnchecked>,
-    pub value: bitcoin::Amount,
+    pub amount: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
 

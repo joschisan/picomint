@@ -177,7 +177,12 @@ impl Lightning {
                     }
                 };
 
-                (pub_key, contract.amount)
+                let amount = contract
+                    .amount
+                    .checked_add(contract.fee)
+                    .ok_or(LightningInputError::ArithmeticOverflow)?;
+
+                (pub_key, amount)
             }
             LightningInput::Incoming(outpoint, agg_decryption_key) => {
                 let contract = dbtx
@@ -201,7 +206,13 @@ impl Lightning {
                     None => contract.commitment.refund_pk,
                 };
 
-                (pub_key, contract.commitment.amount)
+                let amount = contract
+                    .commitment
+                    .amount
+                    .checked_sub(contract.commitment.fee)
+                    .ok_or(LightningInputError::ArithmeticOverflow)?;
+
+                (pub_key, amount)
             }
         };
 
@@ -222,9 +233,14 @@ impl Lightning {
     ) -> Result<TxItemAmounts, LightningOutputError> {
         let amount = match output {
             LightningOutput::Outgoing(contract) => {
+                let amount = contract
+                    .amount
+                    .checked_add(contract.fee)
+                    .ok_or(LightningOutputError::ArithmeticOverflow)?;
+
                 dbtx.insert(&OUTGOING_CONTRACT, &outpoint, contract);
 
-                contract.amount
+                amount
             }
             LightningOutput::Incoming(contract) => {
                 if !contract.verify() {
@@ -253,7 +269,11 @@ impl Lightning {
 
                 dbtx.insert(&DECRYPTION_KEY_SHARE, &outpoint, &dk_share);
 
-                contract.commitment.amount
+                contract
+                    .commitment
+                    .amount
+                    .checked_sub(contract.commitment.fee)
+                    .ok_or(LightningOutputError::ArithmeticOverflow)?
             }
         };
 
