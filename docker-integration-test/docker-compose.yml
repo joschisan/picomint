@@ -1,0 +1,114 @@
+services:
+  bitcoind:
+    image: ruimarinho/bitcoin-core:latest
+    container_name: pm-bitcoind
+    command:
+      - -regtest=1
+      - -rpcuser=bitcoin
+      - -rpcpassword=bitcoin
+      - -rpcallowip=0.0.0.0/0
+      - -rpcbind=0.0.0.0
+      - -rpcport=18443
+      - -fallbackfee=0.0004
+      - -txindex=1
+      - -server=1
+    ports:
+      - "18443:18443"
+    volumes:
+      - bitcoind_data:/home/bitcoin/.bitcoin
+
+  miner:
+    image: ruimarinho/bitcoin-core:latest
+    container_name: pm-miner
+    depends_on:
+      - bitcoind
+    entrypoint: ["/bin/sh", "/miner.sh"]
+    volumes:
+      - ./miner.sh:/miner.sh:ro
+
+  guardian-0: &guardian
+    image: ghcr.io/joschisan/picomint-server:main
+    container_name: pm-guardian-0
+    depends_on:
+      - bitcoind
+    environment: &guardian_env
+      DATA_DIR: /data
+      BITCOIN_NETWORK: regtest
+      BITCOIND_URL: http://bitcoind:18443
+      BITCOIND_USERNAME: bitcoin
+      BITCOIND_PASSWORD: bitcoin
+      P2P_ADDR: 0.0.0.0:8080
+      UI_ADDR: 0.0.0.0:3000
+      UI_PASSWORD: picomint
+      RUST_LOG: info
+    ports:
+      - "3000:3000"
+    volumes:
+      - guardian_0_data:/data
+
+  guardian-1:
+    <<: *guardian
+    container_name: pm-guardian-1
+    environment:
+      <<: *guardian_env
+    ports:
+      - "3001:3000"
+    volumes:
+      - guardian_1_data:/data
+
+  guardian-2:
+    <<: *guardian
+    container_name: pm-guardian-2
+    environment:
+      <<: *guardian_env
+    ports:
+      - "3002:3000"
+    volumes:
+      - guardian_2_data:/data
+
+  guardian-3:
+    <<: *guardian
+    container_name: pm-guardian-3
+    environment:
+      <<: *guardian_env
+    ports:
+      - "3003:3000"
+    volumes:
+      - guardian_3_data:/data
+
+  gateway:
+    image: ghcr.io/joschisan/picomint-gateway:main
+    container_name: pm-gateway
+    depends_on:
+      - bitcoind
+    environment:
+      DATA_DIR: /data
+      BITCOIN_NETWORK: regtest
+      BITCOIND_URL: http://bitcoind:18443
+      BITCOIND_USERNAME: bitcoin
+      BITCOIND_PASSWORD: bitcoin
+      API_ADDR: 0.0.0.0:8080
+      LDK_ADDR: 0.0.0.0:9735
+      RUST_LOG: info
+    ports:
+      - "8090:8080"
+      - "9735:9735"
+    volumes:
+      - gateway_data:/data
+
+  recurringd:
+    image: ghcr.io/joschisan/picomint-recurring:main
+    container_name: pm-recurringd
+    environment:
+      API_ADDR: 0.0.0.0:8080
+      RUST_LOG: info
+    ports:
+      - "8091:8080"
+
+volumes:
+  bitcoind_data:
+  guardian_0_data:
+  guardian_1_data:
+  guardian_2_data:
+  guardian_3_data:
+  gateway_data:
