@@ -201,7 +201,7 @@ fn submit_refund(
     let tx_builder = TxBuilder::from_input(Input {
         input: wire::Input::Ln(LightningInput::Outgoing(old_state.common.outpoint, witness)),
         keypair: old_state.common.refund_keypair,
-        amount: old_state.common.contract.amount,
+        amount: old_state.common.contract.amount + old_state.common.contract.fee,
         fee: ctx.input_fee,
     });
 

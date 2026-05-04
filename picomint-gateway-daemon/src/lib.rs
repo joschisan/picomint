@@ -215,8 +215,13 @@ impl AppState {
         };
 
         ensure!(
-            payload.contract.amount == Amount::from_msats(amount + fee.msats + ln_fee.msats),
-            "Contract amount does not match invoice amount + send fee + ln fee"
+            payload.contract.amount == Amount::from_msats(amount),
+            "Contract amount does not match invoice amount"
+        );
+
+        ensure!(
+            payload.contract.fee == fee + ln_fee,
+            "Contract fee does not match send fee + ln fee"
         );
 
         // --- Idempotency: if outgoing_contract row already exists, subscribe
@@ -270,15 +275,13 @@ impl AppState {
                 })?;
 
             ensure!(
-                incoming_row.amount.msats == amount,
+                incoming_row.contract.commitment.amount.msats == amount,
                 "Direct-swap amount mismatch"
             );
 
             let f2_client = self
                 .select_client(incoming_row.federation_id)
                 .ok_or_else(|| anyhow!("Direct-swap target federation not connected"))?;
-
-            let incoming_fee = incoming_row.amount - incoming_row.contract.commitment.amount;
 
             let dbtx = self.gateway_db.begin_write();
             f2_client
@@ -287,7 +290,6 @@ impl AppState {
                     &dbtx.as_ref().isolate(incoming_row.federation_id),
                     operation,
                     incoming_row.contract,
-                    incoming_fee,
                 )
                 .map_err(|e| anyhow!("Failed to start direct-swap receive: {e}"))?;
             dbtx.commit();
@@ -336,14 +338,23 @@ impl AppState {
             bail!("The incoming contract is keyed to another gateway");
         }
 
-        let contract_amount = gateway_info.receive_fee.subtract_from(payload.amount.msats);
+        let receive_fee = gateway_info.receive_fee.fee(payload.amount.msats);
 
-        if contract_amount == Amount::ZERO {
+        if payload
+            .amount
+            .checked_sub(receive_fee)
+            .unwrap_or(Amount::ZERO)
+            == Amount::ZERO
+        {
             bail!("Zero amount incoming contracts are not supported");
         }
 
-        if contract_amount != payload.contract.commitment.amount {
-            bail!("The contract amount does not pay the correct amount of fees");
+        if payload.contract.commitment.amount != payload.amount {
+            bail!("Contract amount does not match the invoice amount");
+        }
+
+        if payload.contract.commitment.fee != receive_fee {
+            bail!("Contract fee does not match the gateway receive fee");
         }
 
         let now_secs = SystemTime::now()

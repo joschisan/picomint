@@ -58,13 +58,18 @@ pub use client::Client;
 pub use picomint_core::core::OperationId;
 pub use secret::{Mnemonic, random as random_mnemonic};
 
-use picomint_core::TransactionId;
+use picomint_core::{Amount, TransactionId};
 use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TxAcceptEvent {
     pub txid: TransactionId,
+    /// Sum of input amounts the federation credited to this transaction.
+    pub input: Amount,
+    /// Sum of output amounts the federation debited from this transaction.
+    /// Federation fee paid by the caller is `input - output`.
+    pub output: Amount,
 }
 
 impl Event for TxAcceptEvent {

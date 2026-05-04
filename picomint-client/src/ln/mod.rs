@@ -279,9 +279,9 @@ impl LightningClientModule {
             gateway_info.ln_fee.fee(amount)
         };
 
-        let fee = gateway_info.send_fee.fee(amount);
-
-        let amount = Amount::from_msats(amount + ln_fee.msats + fee.msats);
+        let send_fee = gateway_info.send_fee.fee(amount);
+        let amount = Amount::from_msats(amount);
+        let fee = ln_fee + send_fee;
 
         let consensus_block_count = self
             .client_ctx
@@ -293,6 +293,7 @@ impl LightningClientModule {
         let contract = OutgoingContract {
             payment_image: PaymentImage::Hash(*invoice.payment_hash()),
             amount,
+            fee,
             expiration: consensus_block_count
                 + gateway_info.expiration_delta
                 + CONTRACT_CONFIRMATION_BUFFER,
@@ -303,7 +304,7 @@ impl LightningClientModule {
 
         let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Ln(Box::new(LightningOutput::Outgoing(contract.clone()))),
-            amount,
+            amount: amount + fee,
             fee: self.cfg.output_fee,
         });
 
@@ -337,12 +338,7 @@ impl LightningClientModule {
         self.send_executor
             .add_state_machine_dbtx(&dbtx.as_ref(), sm);
 
-        let event = SendEvent {
-            txid,
-            amount,
-            ln_fee,
-            fee,
-        };
+        let event = SendEvent { txid, amount, fee };
 
         self.client_ctx.log_event(&dbtx.as_ref(), operation, event);
 
@@ -406,9 +402,12 @@ impl LightningClientModule {
             return Err(ReceiveError::GatewayFeeExceedsLimit);
         }
 
-        let contract_amount = routing_info.receive_fee.subtract_from(amount.msats);
+        let fee = routing_info.receive_fee.fee(amount.msats);
 
-        if contract_amount < MINIMUM_INCOMING_CONTRACT_AMOUNT {
+        if amount
+            .checked_sub(fee)
+            .is_none_or(|net| net < MINIMUM_INCOMING_CONTRACT_AMOUNT)
+        {
             return Err(ReceiveError::AmountTooSmall);
         }
 
@@ -429,7 +428,8 @@ impl LightningClientModule {
             encryption_seed,
             preimage,
             PaymentImage::Hash(preimage.consensus_hash()),
-            contract_amount,
+            amount,
+            fee,
             expiration,
             claim_pk,
             routing_info.module_public_key,
@@ -476,7 +476,7 @@ impl LightningClientModule {
         let tx_builder = TxBuilder::from_input(Input {
             input: wire::Input::Ln(LightningInput::Incoming(outpoint, agg_dk)),
             keypair: claim_keypair,
-            amount: contract.commitment.amount,
+            amount: contract.commitment.amount - contract.commitment.fee,
             fee: self.cfg.input_fee,
         });
 
@@ -490,6 +490,7 @@ impl LightningClientModule {
         let event = ReceiveEvent {
             txid,
             amount: contract.commitment.amount,
+            fee: contract.commitment.fee,
         };
 
         self.client_ctx.log_event(dbtx, operation, event);

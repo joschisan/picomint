@@ -32,7 +32,11 @@ picomint_redb::consensus_value!(IncomingContract);
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct Commitment {
     pub payment_image: PaymentImage,
+    /// Invoice amount: what the LN payer paid the gateway.
     pub amount: Amount,
+    /// Gateway's combined cut (LN routing + tx fee). The federation will
+    /// credit the recipient `amount - fee` ecash on claim.
+    pub fee: Amount,
     pub expiration: u64,
     pub claim_pk: XOnlyPublicKey,
     pub refund_pk: XOnlyPublicKey,
@@ -47,6 +51,7 @@ impl IncomingContract {
         preimage: [u8; 32],
         payment_image: PaymentImage,
         amount: Amount,
+        fee: Amount,
         expiration: u64,
         claim_pk: XOnlyPublicKey,
         refund_pk: XOnlyPublicKey,
@@ -55,6 +60,7 @@ impl IncomingContract {
         let commitment = Commitment {
             payment_image,
             amount,
+            fee,
             expiration,
             claim_pk,
             refund_pk,
@@ -133,7 +139,11 @@ impl IncomingContract {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct OutgoingContract {
     pub payment_image: PaymentImage,
+    /// Invoice amount: what the gateway will pay over LN.
     pub amount: Amount,
+    /// Gateway's combined cut (LN routing + tx fee). The client funds
+    /// `amount + fee` so the gateway claims that on preimage delivery.
+    pub fee: Amount,
     pub expiration: u64,
     pub claim_pk: XOnlyPublicKey,
     pub refund_pk: XOnlyPublicKey,

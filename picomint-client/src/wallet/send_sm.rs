@@ -11,7 +11,7 @@ use super::events::{SendFailureEvent, SendSuccessEvent};
 pub struct SendStateMachine {
     pub operation: OperationId,
     pub outpoint: OutPoint,
-    pub value: bitcoin::Amount,
+    pub amount: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
 

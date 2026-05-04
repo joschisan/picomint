@@ -121,7 +121,7 @@ impl StateMachine for ReceiveStateMachine {
         let tx_builder = TxBuilder::from_input(Input {
             input: wire::Input::Ln(LightningInput::Incoming(self.outpoint, agg_decryption_key)),
             keypair: self.refund_keypair,
-            amount: self.contract.commitment.amount,
+            amount: self.contract.commitment.amount - self.contract.commitment.fee,
             fee: ctx.input_fee,
         });
 

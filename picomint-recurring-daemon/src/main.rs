@@ -191,10 +191,12 @@ async fn create_contract_and_fetch_invoice(
         "Payment fee exceeds limit"
     );
 
-    let contract_amount = gateway_info.receive_fee.subtract_from(amount);
+    let fee = gateway_info.receive_fee.fee(amount);
 
     ensure!(
-        contract_amount >= MINIMUM_INCOMING_CONTRACT_AMOUNT,
+        amount
+            .checked_sub(fee.msats)
+            .is_some_and(|net| Amount::from_msats(net) >= MINIMUM_INCOMING_CONTRACT_AMOUNT),
         "Amount too small"
     );
 
@@ -209,7 +211,8 @@ async fn create_contract_and_fetch_invoice(
         encryption_seed,
         preimage,
         PaymentImage::Hash(preimage.consensus_hash()),
-        contract_amount,
+        Amount::from_msats(amount),
+        fee,
         expiration,
         claim_pk,
         gateway_info.module_public_key,

@@ -76,6 +76,8 @@ pub enum LightningInputError {
     InvalidDecryptionKey,
     #[error("The forfeit signature is invalid")]
     InvalidForfeitSignature,
+    #[error("Amount arithmetic overflowed u64 msats")]
+    ArithmeticOverflow,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
@@ -84,6 +86,8 @@ pub enum LightningOutputError {
     InvalidContract,
     #[error("The contract is expired")]
     ContractExpired,
+    #[error("Amount arithmetic overflowed u64 msats")]
+    ArithmeticOverflow,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]

@@ -3,12 +3,13 @@ use picomint_core::TransactionId;
 use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
-/// Emitted when a send operation is created.
+/// Emitted when a send operation is created. `amount` is the invoice
+/// amount; `fee` is the gateway's combined cut (LN routing + tx fee).
+/// The client funded the underlying contract with `amount + fee`.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendEvent {
     pub txid: TransactionId,
     pub amount: Amount,
-    pub ln_fee: Amount,
     pub fee: Amount,
 }
 
@@ -54,11 +55,14 @@ impl Event for SendFailureEvent {
     const KIND: EventKind = EventKind::from_static("send-failure");
 }
 
-/// Emitted when a receive operation successfully claims the incoming contract.
+/// Emitted when a receive operation successfully claims the incoming
+/// contract. `amount` is the invoice amount; `fee` is the gateway's
+/// combined cut. The client received `amount - fee` ecash.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReceiveEvent {
     pub txid: TransactionId,
     pub amount: Amount,
+    pub fee: Amount,
 }
 
 impl Event for ReceiveEvent {

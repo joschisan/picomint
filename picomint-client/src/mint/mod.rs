@@ -518,6 +518,8 @@ impl MintClientModule {
         operation: OperationId,
         builder: TxBuilder,
     ) -> anyhow::Result<TransactionId> {
+        let input = builder.input_amount();
+        let output = builder.output_amount();
         let tx = builder.build();
 
         if tx.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
@@ -526,7 +528,12 @@ impl MintClientModule {
 
         let txid = tx.compute_txid();
 
-        let sm = TxSubmissionStateMachine { operation, tx };
+        let sm = TxSubmissionStateMachine {
+            operation,
+            tx,
+            input,
+            output,
+        };
 
         self.tx_submission_executor.add_state_machine_dbtx(dbtx, sm);
 

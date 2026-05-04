@@ -94,8 +94,16 @@ impl StateMachine for MintStateMachine {
             assert!(dbtx.insert(&NOTE, &spendable_note, &()).is_none());
         }
 
-        ctx.client_ctx
-            .log_event(dbtx, self.operation, MintSuccessEvent { txid: self.txid });
+        let event = MintSuccessEvent {
+            txid: self.txid,
+            amount: self
+                .issuance_requests
+                .iter()
+                .map(|r| r.denomination.amount())
+                .sum(),
+        };
+
+        ctx.client_ctx.log_event(dbtx, self.operation, event);
 
         None
     }
