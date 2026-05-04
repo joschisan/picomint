@@ -147,7 +147,6 @@ impl StateMachine for SendStateMachine {
         match outcome {
             SendOutcome::FundingResult(Ok(())) => Some(self.update(SendSMState::Funded)),
             SendOutcome::FundingResult(Err(_)) => None,
-
             SendOutcome::Preimage(preimage) => {
                 ctx.client_ctx.log_event(
                     dbtx,
@@ -156,7 +155,6 @@ impl StateMachine for SendStateMachine {
                 );
                 None
             }
-
             SendOutcome::GatewayResponse(Ok(preimage)) => {
                 ctx.client_ctx.log_event(
                     dbtx,
@@ -181,7 +179,6 @@ impl StateMachine for SendStateMachine {
                 OutgoingWitness::Refund,
                 true,
             )))),
-
             SendOutcome::Refunded => None,
             SendOutcome::Failure => {
                 ctx.client_ctx
