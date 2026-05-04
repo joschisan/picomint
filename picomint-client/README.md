@@ -188,7 +188,7 @@ A drop-in `(source, kind) → card` mapping for clients that want a uniform stat
 | `Mint` · `recovery`                     | Recovering eCash     | `{percent}%` (0% while `total` is `None`) |
 | `Wallet` · `receive`                    | Receiving Onchain    | `{value} sat · fee {fee} sat` |
 | `Wallet` · `send`                       | Sending Onchain      | `{value} sat · fee {fee} sat` |
-| `Wallet` · `send-success`               | Sending Success      | `bitcoin tx {txid}` |
+| `Wallet` · `send-success`               | Sending Success      | — |
 | `Wallet` · `send-failure`               | Sending Failure      | missing txid |
 | `Ln` · `receive`                        | Receiving Lightning  | `{amount} sat` |
 | `Ln` · `send`                           | Sending Lightning    | `{amount} sat · fee {ln_fee + fee}` |
