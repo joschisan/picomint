@@ -186,8 +186,8 @@ A drop-in `(source, kind) → card` mapping for clients that want a uniform stat
 | `Mint` · `success`                      | Minting Success      | `{amount} sat` |
 | `Mint` · `failure`                      | Minting Failure      | threshold signature invalid |
 | `Mint` · `recovery`                     | Recovering eCash     | `{percent}%` (0% while `total` is `None`) |
-| `Wallet` · `receive`                    | Receiving Onchain    | `{value} sat at {address}` |
-| `Wallet` · `send`                       | Sending Onchain      | `{value} sat to {address}` |
+| `Wallet` · `receive`                    | Receiving Onchain    | `{value} sat · fee {fee} sat` |
+| `Wallet` · `send`                       | Sending Onchain      | `{value} sat · fee {fee} sat` |
 | `Wallet` · `send-success`               | Sending Success      | `bitcoin tx {txid}` |
 | `Wallet` · `send-failure`               | Sending Failure      | missing txid |
 | `Ln` · `receive`                        | Receiving Lightning  | `{amount} sat` |
