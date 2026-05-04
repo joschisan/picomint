@@ -178,7 +178,7 @@ A drop-in `(source, kind) → card` mapping for clients that want a uniform stat
 
 | Source · Kind | Header | Subheader |
 |---|---|---|
-| `Core` · `tx-accept`                    | Transaction Accepted | — |
+| `Core` · `tx-accept`                    | Transaction Accepted | `fee {input - output} sat` |
 | `Core` · `tx-reject`                    | Transaction Rejected | — |
 | `Mint` · `receive`                      | Receiving eCash      | `{amount} sat` |
 | `Mint` · `send`                         | Sending eCash        | `{amount} sat` |
