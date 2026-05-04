@@ -183,22 +183,22 @@ A drop-in `(source, kind) → card` mapping for clients that want a uniform stat
 | `Mint` · `receive`                      | Receiving eCash      | `{amount} sats` |
 | `Mint` · `send`                         | Sending eCash        | `{amount} sats` |
 | `Mint` · `remint`                       | Reminting eCash      | `{amount} sats` |
-| `Mint` · `success`                      | Mint Success         | — |
-| `Mint` · `failure`                      | Mint Failure         | threshold signature invalid |
+| `Mint` · `success`                      | Minting Success      | — |
+| `Mint` · `failure`                      | Minting Failure      | threshold signature invalid |
 | `Mint` · `recovery`                     | Recovering eCash     | `{percent}%` (0% while `total` is `None`) |
 | `Wallet` · `receive`                    | Receiving Onchain    | `{value} sats at {address}` |
 | `Wallet` · `send`                       | Sending Onchain      | `{value} sats to {address}` |
-| `Wallet` · `send-success`               | Send Success         | `bitcoin tx {txid}` |
-| `Wallet` · `send-failure`               | Send Failure         | missing txid |
+| `Wallet` · `send-success`               | Sending Success      | `bitcoin tx {txid}` |
+| `Wallet` · `send-failure`               | Sending Failure      | missing txid |
 | `Ln` · `receive`                        | Receiving Lightning  | `{amount} sats` |
 | `Ln` · `send`                           | Sending Lightning    | `{amount} sats · fee {ln_fee + fee}` |
-| `Ln` · `send-success`                   | Send Success         | preimage received |
+| `Ln` · `send-success`                   | Sending Success      | preimage received |
 | `Ln` · `send-refund` (`expired: true`)  | Refunding            | contract expired |
 | `Ln` · `send-refund` (`expired: false`) | Refunding            | gateway cancelled |
-| `Ln` · `send-failure`                   | Send Failure         | missing preimage |
+| `Ln` · `send-failure`                   | Sending Failure      | missing preimage |
 
 Conventions:
 
 - **Kind never repeats source.** The `Source` discriminator already tags the module, so mint terminals are bare `success` / `failure`. Kinds prefix with the operation only when scoped to one (`send-success`, `send-refund`).
 - **Color/icon keys off kind**, not the mapping: `tx-reject`, `*-failure` → red; `*-success`, mint `success` → green; `send-refund` → amber; in-progress events → spinner.
-- **Multiple terminals per operation are possible** because some flows fan out to parallel state machines (e.g. wallet send emits both `SendSuccessEvent` *and* `MintSuccessEvent` for change, an LN refund tail emits a `SendRefundEvent` followed by its own mint terminal). Rather than try to pick one "primary" terminal and hide the rest, render every event — the qualified headers (`Mint Success` vs `Send Success`) make it obvious which state machine each row belongs to, and the verbosity matches what actually happened on the wire.
+- **Multiple terminals per operation are possible** because some flows fan out to parallel state machines (e.g. wallet send emits both `SendSuccessEvent` *and* `MintSuccessEvent` for change, an LN refund tail emits a `SendRefundEvent` followed by its own mint terminal). Rather than try to pick one "primary" terminal and hide the rest, render every event — the qualified headers (`Minting Success` vs `Sending Success`) make it obvious which state machine each row belongs to, and the verbosity matches what actually happened on the wire.
