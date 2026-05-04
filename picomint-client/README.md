@@ -164,3 +164,33 @@ RecoveryEvent { index: N, total: Some(N) }            ← terminal; submits reis
 Progress is reported as a monotonically increasing `index` over an eventually-known `total`. The terminal `RecoveryEvent` (`index == total`) is emitted in the same dbtx that deletes the recovery state and submits the reissuance tx, so observing it guarantees the tx is in flight. From there the operation follows the standard mint flow — `TxAcceptEvent` + `MintSuccessEvent` on success, `MintFailureEvent` only on the rare verification failure of a *reissued output*, and `TxRejectEvent` if the federation refuses the reissuance (which is also how a bad *recovered input* surfaces — the federation rejects the tx rather than client-side verification kicking in).
 
 Re-minting every recovered note keeps the recovery path uniform with the rest of the client: there is no special txid-less success case, and the recovered balance is provably spendable the moment `MintSuccessEvent` lands. An integrator restoring a wallet can wait for `MintSuccessEvent` under the recovery `OperationId` and treat that as full restore-complete.
+
+## Suggested UI mapping
+
+A drop-in `(source, kind) → card` mapping for clients that want a uniform status surface across all operations. Triggers and ongoing-state events use a present-continuous header; terminal and milestone events use a bare past/static label. The operation title (e.g. "Send Lightning · 5 000 sats") is set once from the trigger event and stays put; subsequent cards only update the header/subheader beneath it.
+
+| Source · Kind | Header | Subheader |
+|---|---|---|
+| `Core` · `tx-accept`                    | Transaction Accepted | — |
+| `Core` · `tx-reject`                    | Transaction Rejected | — |
+| `Mint` · `receive`                      | Receiving eCash      | `{amount} sats` |
+| `Mint` · `send`                         | Sending eCash        | `{amount} sats` |
+| `Mint` · `remint`                       | Reminting eCash      | preparing exact denominations |
+| `Mint` · `success`                      | Success              | — |
+| `Mint` · `failure`                      | Failure              | threshold signature invalid |
+| `Mint` · `recovery`                     | Recovering eCash     | `{percent}%` (0% while `total` is `None`) |
+| `Wallet` · `receive`                    | Receiving Onchain    | `{value} sats at {address}` |
+| `Wallet` · `send`                       | Sending Onchain      | `{value} sats to {address}` |
+| `Wallet` · `send-success`               | Success              | `bitcoin tx {txid}` |
+| `Wallet` · `send-failure`               | Failure              | missing txid |
+| `Ln` · `receive`                        | Receiving Lightning  | `{amount} sats` |
+| `Ln` · `send`                           | Sending Lightning    | `{amount} sats · fee {ln_fee + fee}` |
+| `Ln` · `send-success`                   | Success              | preimage received |
+| `Ln` · `send-refund` (`expired: true`)  | Refunding            | contract expired |
+| `Ln` · `send-refund` (`expired: false`) | Refunding            | gateway cancelled |
+
+Conventions:
+
+- **Kind never repeats source.** The `Source` discriminator already tags the module, so mint terminals are bare `success` / `failure`. Kinds prefix with the operation only when scoped to one (`send-success`, `send-refund`).
+- **Color/icon keys off kind**, not the mapping: `tx-reject`, `*-failure` → red; `*-success`, mint `success` → green; `send-refund` → amber; in-progress events → spinner.
+- **Multiple terminals per operation are possible** because some flows fan out to parallel state machines (e.g. wallet send emits both `SendSuccessEvent` *and* `MintSuccessEvent` for change). The renderer should pick a single primary terminal per operation — typically the module-specific one — and silently consume the rest.
