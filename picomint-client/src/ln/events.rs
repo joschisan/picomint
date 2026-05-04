@@ -43,6 +43,17 @@ impl Event for SendRefundEvent {
     const KIND: EventKind = EventKind::from_static("send-refund");
 }
 
+/// Emitted when a send is in an unrecoverable indeterminate state: the
+/// refund tx was rejected (so the contract was claimed by the gateway),
+/// but the federation hasn't surfaced a preimage we can verify either.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SendFailureEvent;
+
+impl Event for SendFailureEvent {
+    const SOURCE: EventSource = EventSource::Ln;
+    const KIND: EventKind = EventKind::from_static("send-failure");
+}
+
 /// Emitted when a receive operation successfully claims the incoming contract.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReceiveEvent {

@@ -128,12 +128,19 @@ SendEvent                                       ← funding tx submitted
     │                   └── SendRefundEvent ──┬── TxAcceptEvent ──┬── MintSuccessEvent
     │                       (refund claim tx) │                   └── MintFailureEvent
     │                                         │
-    │                                         └── TxRejectEvent
+    │                                         └── TxRejectEvent ──┬── SendSuccessEvent
+    │                                                             └── SendFailureEvent
     │
     └── TxRejectEvent
 ```
 
-Every successful send terminates with `SendSuccessEvent { preimage }`. A clean refund terminates with `SendRefundEvent` followed by `TxAcceptEvent` and `MintSuccessEvent` for the recovered notes. `TxRejectEvent` on the refund leg means the contract was already claimed by the gateway; recovery handling for that case lives outside the state machine today.
+Every send terminates in exactly one of:
+
+- `SendSuccessEvent { preimage }` — gateway paid (either reported back during `Funded`, or the preimage was recovered after a refund-tx rejection).
+- `MintSuccessEvent` (clean refund tail) — refund tx was accepted and the recovered notes minted.
+- `SendFailureEvent` — refund tx was rejected and the federation still doesn't have a preimage we can verify.
+
+The refund-rejection branch fires because the contract input has already been spent — and the only thing that can spend it is the gateway claiming with a preimage. The state machine re-polls the federation once more after refund rejection: if the preimage is now visible, the original send actually succeeded (`SendSuccessEvent`); if not, the operation is genuinely stuck (`SendFailureEvent`).
 
 ## Recovery
 
@@ -188,6 +195,7 @@ A drop-in `(source, kind) → card` mapping for clients that want a uniform stat
 | `Ln` · `send-success`                   | Success              | preimage received |
 | `Ln` · `send-refund` (`expired: true`)  | Refunding            | contract expired |
 | `Ln` · `send-refund` (`expired: false`) | Refunding            | gateway cancelled |
+| `Ln` · `send-failure`                   | Failure              | payment indeterminate |
 
 Conventions:
 
