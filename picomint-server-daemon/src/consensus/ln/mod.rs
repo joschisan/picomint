@@ -284,15 +284,24 @@ impl Lightning {
     }
 
     /// Both incoming and outgoing contracts represent liabilities to the
-    /// federation since they are obligations to issue notes.
+    /// federation since they are obligations to issue notes. The amount
+    /// the federation has actually locked per contract has to match the
+    /// arithmetic in [`Self::process_input`] / [`Self::process_output`]:
+    /// outgoing locks `amount + fee` (the gateway claims that on payout,
+    /// or the sender does on refund); incoming locks `amount - fee` (the
+    /// recipient claims that on success, with `fee` accruing to the
+    /// federation as implicit revenue).
     pub async fn audit(&self, dbtx: &WriteTxRef<'_>) -> i64 {
         let outgoing: i64 = dbtx.iter(&OUTGOING_CONTRACT, |r| {
-            r.map(|(_, contract)| -(contract.amount.msats as i64)).sum()
+            r.map(|(_, contract)| -((contract.amount.msats + contract.fee.msats) as i64))
+                .sum()
         });
 
         let incoming: i64 = dbtx.iter(&INCOMING_CONTRACT, |r| {
-            r.map(|(_, contract)| -(contract.commitment.amount.msats as i64))
-                .sum()
+            r.map(|(_, contract)| {
+                -((contract.commitment.amount.msats - contract.commitment.fee.msats) as i64)
+            })
+            .sum()
         });
 
         outgoing + incoming
