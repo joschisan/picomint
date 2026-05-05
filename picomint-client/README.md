@@ -20,7 +20,7 @@ These come from the transaction-submission and mint state machines and appear ac
 
 | Event | Source | Meaning |
 |---|---|---|
-| `TxCreateEvent { txid, input, output }` | Core | Tx submitted to the federation. `input - output` is the federation fee paid. |
+| `TxCreateEvent { txid, change, fee }` | Core | Tx submitted to the federation. `fee` is the federation fee paid; `change` is the over-pull beyond the deficit that the mint reissues back as change notes once the tx is accepted. |
 | `TxAcceptEvent { txid }` | Core | Federation accepted the tx into consensus. |
 | `TxRejectEvent { txid, error }` | Core | Federation definitively rejected the tx (double-spend, invalid input, fee too low, …). |
 | `MintSuccessEvent { txid }` | Mint | Threshold blind-sig shares aggregated and the resulting `SpendableNote`s written to the local note table. |
@@ -180,7 +180,7 @@ A drop-in `(source, kind) → card` mapping for clients that want a uniform stat
 
 | Source · Kind | Header | Subheader |
 |---|---|---|
-| `Core` · `tx-create`                    | Transaction Created  | `fee {input - output} sat` |
+| `Core` · `tx-create`                    | Transaction Created  | `fee {fee} sat · change {change} sat` |
 | `Core` · `tx-accept`                    | Transaction Accepted | — |
 | `Core` · `tx-reject`                    | Transaction Rejected | — |
 | `Mint` · `receive`                      | Receiving eCash      | `{amount} sat` |

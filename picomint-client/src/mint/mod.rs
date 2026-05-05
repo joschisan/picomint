@@ -449,7 +449,12 @@ impl MintClientModule {
     ) -> anyhow::Result<TransactionId> {
         let (spendable_notes, issuance_requests) = self.balance(dbtx, &mut builder)?;
 
-        let txid = self.submit(dbtx, operation, builder, event)?;
+        let change = issuance_requests
+            .iter()
+            .map(|r| r.denomination.amount())
+            .sum();
+
+        let txid = self.submit(dbtx, operation, builder, change, event)?;
 
         if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
             let sm = MintStateMachine {
@@ -531,10 +536,10 @@ impl MintClientModule {
         dbtx: &WriteTxRef<'_>,
         operation: OperationId,
         builder: TxBuilder,
+        change: Amount,
         event: impl FnOnce(TransactionId) -> E,
     ) -> anyhow::Result<TransactionId> {
-        let input = builder.input_amount();
-        let output = builder.output_amount();
+        let fee = builder.total_fee();
         let tx = builder.build();
 
         if tx.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
@@ -549,15 +554,8 @@ impl MintClientModule {
 
         self.client_ctx.log_event(dbtx, operation, event(txid));
 
-        self.client_ctx.log_event(
-            dbtx,
-            operation,
-            crate::TxCreateEvent {
-                txid,
-                input,
-                output,
-            },
-        );
+        self.client_ctx
+            .log_event(dbtx, operation, crate::TxCreateEvent { txid, change, fee });
 
         Ok(txid)
     }
@@ -756,9 +754,14 @@ impl MintClientModule {
             .balance(&dbtx.as_ref(), &mut builder)
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
+        let change = change_requests
+            .iter()
+            .map(|r| r.denomination.amount())
+            .sum();
+
         let txid = self
-            .submit(&dbtx.as_ref(), operation, builder, |txid| RemintEvent {
-                txid,
+            .submit(&dbtx.as_ref(), operation, builder, change, |txid| {
+                RemintEvent { txid }
             })
             .map_err(|_| SendECashError::Failure)?;
 
