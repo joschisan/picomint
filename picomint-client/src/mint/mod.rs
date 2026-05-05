@@ -447,12 +447,13 @@ impl MintClientModule {
         mut builder: TxBuilder,
         event: impl FnOnce(TransactionId) -> E,
     ) -> anyhow::Result<TransactionId> {
+        let deficit = builder.deficit();
+
         let (spendable_notes, issuance_requests) = self.balance(dbtx, &mut builder)?;
 
-        let change = issuance_requests
-            .iter()
-            .map(|r| r.denomination.amount())
-            .sum();
+        let funding: Amount = spendable_notes.iter().map(|n| n.amount()).sum();
+
+        let change = funding.saturating_sub(deficit);
 
         let txid = self.submit(dbtx, operation, builder, change, event)?;
 
@@ -750,14 +751,15 @@ impl MintClientModule {
 
         let dbtx = self.client_ctx.db().begin_write();
 
+        let deficit = builder.deficit();
+
         let (funding_notes, change_requests) = self
             .balance(&dbtx.as_ref(), &mut builder)
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
-        let change = change_requests
-            .iter()
-            .map(|r| r.denomination.amount())
-            .sum();
+        let funding: Amount = funding_notes.iter().map(|n| n.amount()).sum();
+
+        let change = funding.saturating_sub(deficit);
 
         let txid = self
             .submit(&dbtx.as_ref(), operation, builder, change, |txid| {

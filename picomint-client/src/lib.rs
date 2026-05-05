@@ -65,9 +65,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TxCreateEvent {
     pub txid: TransactionId,
-    /// Sum of change-output amounts the mint added when balancing the
-    /// caller's builder — i.e. the over-pull beyond the deficit, returned
-    /// to the wallet as freshly reissued notes once the tx is accepted.
+    /// Amount the mint over-funded by when balancing the caller's
+    /// builder: `sum(funding_notes) - deficit`. Returned to the wallet
+    /// (minus federation fees on the change outputs) as freshly reissued
+    /// notes once the tx is accepted.
     pub change: Amount,
     /// Federation fee paid by this transaction (sum of per-input and
     /// per-output fees the federation deducts).
