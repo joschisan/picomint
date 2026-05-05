@@ -125,13 +125,12 @@ impl StateMachine for ReceiveStateMachine {
             fee: ctx.input_fee,
         });
 
-        let txid = ctx
-            .mint
-            .finalize_and_submit_tx(dbtx, self.operation, tx_builder)
+        ctx.mint
+            .finalize_and_submit_tx(dbtx, self.operation, tx_builder, |txid| {
+                ReceiveRefundEvent { txid }
+            })
             .expect("Cannot claim input, additional funding needed");
 
-        ctx.client_ctx
-            .log_event(dbtx, self.operation, ReceiveRefundEvent { txid });
         None
     }
 }

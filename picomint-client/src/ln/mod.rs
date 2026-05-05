@@ -320,7 +320,11 @@ impl LightningClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder)
+            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder, |txid| SendEvent {
+                txid,
+                amount,
+                fee,
+            })
             .map_err(|e| SendPaymentError::FailedToFundPayment(e.to_string()))?;
 
         let sm = SendStateMachine {
@@ -337,10 +341,6 @@ impl LightningClientModule {
 
         self.send_executor
             .add_state_machine_dbtx(&dbtx.as_ref(), sm);
-
-        let event = SendEvent { txid, amount, fee };
-
-        self.client_ctx.log_event(&dbtx.as_ref(), operation, event);
 
         dbtx.commit();
 
@@ -482,18 +482,16 @@ impl LightningClientModule {
 
         let operation = OperationId::from_encodable(&outpoint);
 
-        let txid = self
-            .mint
-            .finalize_and_submit_tx(dbtx, operation, tx_builder)
+        let amount = contract.commitment.amount;
+        let fee = contract.commitment.fee;
+
+        self.mint
+            .finalize_and_submit_tx(dbtx, operation, tx_builder, |txid| ReceiveEvent {
+                txid,
+                amount,
+                fee,
+            })
             .expect("Cannot claim input, additional funding needed");
-
-        let event = ReceiveEvent {
-            txid,
-            amount: contract.commitment.amount,
-            fee: contract.commitment.fee,
-        };
-
-        self.client_ctx.log_event(dbtx, operation, event);
     }
 
     fn recover_contract_keys(

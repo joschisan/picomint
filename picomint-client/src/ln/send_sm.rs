@@ -205,18 +205,14 @@ fn submit_refund(
         fee: ctx.input_fee,
     });
 
-    let txid = ctx
-        .mint
-        .finalize_and_submit_tx(dbtx, old_state.common.operation, tx_builder)
-        .expect("Cannot claim input, additional funding needed");
+    let operation = old_state.common.operation;
 
-    ctx.client_ctx.log_event(
-        dbtx,
-        old_state.common.operation,
-        SendRefundEvent { txid, expired },
-    );
-
-    txid
+    ctx.mint
+        .finalize_and_submit_tx(dbtx, operation, tx_builder, |txid| SendRefundEvent {
+            txid,
+            expired,
+        })
+        .expect("Cannot claim input, additional funding needed")
 }
 
 #[instrument(skip(refund_keypair))]

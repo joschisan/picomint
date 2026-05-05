@@ -1,7 +1,6 @@
 //! State machine for submitting transactions
 
 use crate::api::FederationApi;
-use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::tx::Transaction;
@@ -19,10 +18,6 @@ use crate::{TxAcceptEvent, TxRejectEvent};
 pub struct TxSubmissionStateMachine {
     pub operation: OperationId,
     pub tx: Transaction,
-    /// Captured at builder time so `TxAcceptEvent` can surface what the
-    /// federation actually credited and debited (fee = input - output).
-    pub input: Amount,
-    pub output: Amount,
 }
 
 picomint_redb::consensus_value!(TxSubmissionStateMachine);
@@ -62,11 +57,7 @@ impl StateMachine for TxSubmissionStateMachine {
                     dbtx,
                     ctx.federation_id,
                     self.operation,
-                    TxAcceptEvent {
-                        txid,
-                        input: self.input,
-                        output: self.output,
-                    },
+                    TxAcceptEvent { txid },
                 );
             }
             Err(error) => {

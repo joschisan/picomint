@@ -63,13 +63,26 @@ use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TxCreateEvent {
+    pub txid: TransactionId,
+    /// Amount the mint over-funded by when balancing the caller's
+    /// builder: `sum(funding_notes) - deficit`. Returned to the wallet
+    /// (minus federation fees on the change outputs) as freshly reissued
+    /// notes once the tx is accepted.
+    pub change: Amount,
+    /// Federation fee paid by this transaction (sum of per-input and
+    /// per-output fees the federation deducts).
+    pub fee: Amount,
+}
+
+impl Event for TxCreateEvent {
+    const SOURCE: EventSource = EventSource::Core;
+    const KIND: EventKind = EventKind::from_static("tx-create");
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TxAcceptEvent {
     pub txid: TransactionId,
-    /// Sum of input amounts the federation credited to this transaction.
-    pub input: Amount,
-    /// Sum of output amounts the federation debited from this transaction.
-    /// Federation fee paid by the caller is `input - output`.
-    pub output: Amount,
 }
 
 impl Event for TxAcceptEvent {

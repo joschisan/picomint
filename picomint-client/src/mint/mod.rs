@@ -295,6 +295,10 @@ impl MintClientModule {
 
         let dbtx = db.begin_write();
 
+        let operation = state.operation;
+
+        dbtx.remove(&RECOVERY, &());
+
         if !spendable_notes.is_empty() {
             let mut builder = TxBuilder::new();
             for note in &spendable_notes {
@@ -306,20 +310,23 @@ impl MintClientModule {
                 });
             }
 
-            self.finalize_and_submit_tx(&dbtx.as_ref(), state.operation, builder)?;
+            self.finalize_and_submit_tx(&dbtx.as_ref(), operation, builder, |_txid| {
+                events::RecoveryEvent {
+                    index: total_items,
+                    total: Some(total_items),
+                }
+            })?;
+        } else {
+            picomint_eventlog::log_event(
+                &dbtx.as_ref(),
+                federation_id,
+                operation,
+                events::RecoveryEvent {
+                    index: total_items,
+                    total: Some(total_items),
+                },
+            );
         }
-
-        dbtx.remove(&RECOVERY, &());
-
-        picomint_eventlog::log_event(
-            &dbtx.as_ref(),
-            federation_id,
-            state.operation,
-            events::RecoveryEvent {
-                index: total_items,
-                total: Some(total_items),
-            },
-        );
 
         dbtx.commit();
 
@@ -428,15 +435,27 @@ impl MintClientModule {
     /// submit the resulting transaction, and spawn the
     /// `MintStateMachine` that tracks the balance-side notes/requests
     /// (if any).
-    pub fn finalize_and_submit_tx(
+    ///
+    /// `event` builds the module's initiating event (e.g. `SendEvent`)
+    /// from the txid; this method logs it before the bookkeeping
+    /// `TxCreateEvent` so the operation's event log opens with the
+    /// module event.
+    pub fn finalize_and_submit_tx<E: picomint_eventlog::Event + Send>(
         &self,
         dbtx: &WriteTxRef<'_>,
         operation: OperationId,
         mut builder: TxBuilder,
+        event: impl FnOnce(TransactionId) -> E,
     ) -> anyhow::Result<TransactionId> {
+        let deficit = builder.deficit();
+
         let (spendable_notes, issuance_requests) = self.balance(dbtx, &mut builder)?;
 
-        let txid = self.submit(dbtx, operation, builder)?;
+        let funding: Amount = spendable_notes.iter().map(|n| n.amount()).sum();
+
+        let change = funding.saturating_sub(deficit);
+
+        let txid = self.submit(dbtx, operation, builder, change, event)?;
 
         if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
             let sm = MintStateMachine {
@@ -510,16 +529,18 @@ impl MintClientModule {
         Ok((spendable_notes, issuance_requests))
     }
 
-    /// Sign the builder, size-check the encoded transaction, and spawn the
-    /// `TxSubmissionStateMachine`.
-    fn submit(
+    /// Sign the builder, size-check the encoded transaction, spawn the
+    /// `TxSubmissionStateMachine`, log the caller's `event` followed by
+    /// `TxCreateEvent`.
+    fn submit<E: picomint_eventlog::Event + Send>(
         &self,
         dbtx: &WriteTxRef<'_>,
         operation: OperationId,
         builder: TxBuilder,
+        change: Amount,
+        event: impl FnOnce(TransactionId) -> E,
     ) -> anyhow::Result<TransactionId> {
-        let input = builder.input_amount();
-        let output = builder.output_amount();
+        let fee = builder.total_fee();
         let tx = builder.build();
 
         if tx.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
@@ -528,14 +549,14 @@ impl MintClientModule {
 
         let txid = tx.compute_txid();
 
-        let sm = TxSubmissionStateMachine {
-            operation,
-            tx,
-            input,
-            output,
-        };
+        let sm = TxSubmissionStateMachine { operation, tx };
 
         self.tx_submission_executor.add_state_machine_dbtx(dbtx, sm);
+
+        self.client_ctx.log_event(dbtx, operation, event(txid));
+
+        self.client_ctx
+            .log_event(dbtx, operation, crate::TxCreateEvent { txid, change, fee });
 
         Ok(txid)
     }
@@ -730,12 +751,20 @@ impl MintClientModule {
 
         let dbtx = self.client_ctx.db().begin_write();
 
+        let deficit = builder.deficit();
+
         let (funding_notes, change_requests) = self
             .balance(&dbtx.as_ref(), &mut builder)
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
+        let funding: Amount = funding_notes.iter().map(|n| n.amount()).sum();
+
+        let change = funding.saturating_sub(deficit);
+
         let txid = self
-            .submit(&dbtx.as_ref(), operation, builder)
+            .submit(&dbtx.as_ref(), operation, builder, change, |txid| {
+                RemintEvent { txid }
+            })
             .map_err(|_| SendECashError::Failure)?;
 
         issuance_requests.extend(change_requests);
@@ -748,9 +777,6 @@ impl MintClientModule {
         };
 
         self.executor.add_state_machine_dbtx(&dbtx.as_ref(), sm);
-
-        self.client_ctx
-            .log_event(&dbtx.as_ref(), operation, RemintEvent { txid });
 
         dbtx.commit();
 
@@ -843,16 +869,13 @@ impl MintClientModule {
             return Ok(operation);
         }
 
-        let txid = self
-            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder)
-            .map_err(|_| ReceiveECashError::InsufficientFunds)?;
+        let amount = ecash.amount();
 
-        let event = ReceiveEvent {
+        self.finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder, |txid| ReceiveEvent {
             txid,
-            amount: ecash.amount(),
-        };
-
-        self.client_ctx.log_event(&dbtx.as_ref(), operation, event);
+            amount,
+        })
+        .map_err(|_| ReceiveECashError::InsufficientFunds)?;
 
         dbtx.commit();
 
