@@ -24,22 +24,23 @@ LEADER=0
 
 declare -a INVITES
 
-# Drive DKG for one federation. Leaves the federation live and returns
-# the invite code via stdout (caller captures it).
+# Drive DKG for one federation. Leaves the federation live and prints
+# the invite code on stdout (caller captures it). All progress noise
+# goes to stderr so the captured value is just the invite.
 setup_federation() {
     local fed_name="$1"
     local prefix="$2"
 
-    echo "==> [$fed_name] Waiting for guardians to enter AwaitingLocalParams..."
+    echo "==> [$fed_name] Waiting for guardians to enter AwaitingLocalParams..." >&2
     for i in "${GUARDIANS[@]}"; do
         until $DC exec -T "${prefix}-guardian-$i" picomint-server-cli setup status 2>/dev/null \
             | grep -q AwaitingLocalParams; do
             sleep 1
         done
-        echo "    ${prefix}-guardian-$i ready"
+        echo "    ${prefix}-guardian-$i ready" >&2
     done
 
-    echo "==> [$fed_name] Setting local params..."
+    echo "==> [$fed_name] Setting local params..." >&2
     declare -a CODES
     for i in "${GUARDIANS[@]}"; do
         if [ "$i" -eq "$LEADER" ]; then
@@ -55,7 +56,7 @@ setup_federation() {
         fi
     done
 
-    echo "==> [$fed_name] Exchanging peer codes..."
+    echo "==> [$fed_name] Exchanging peer codes..." >&2
     for i in "${GUARDIANS[@]}"; do
         for j in "${GUARDIANS[@]}"; do
             if [ "$i" != "$j" ]; then
@@ -64,12 +65,12 @@ setup_federation() {
         done
     done
 
-    echo "==> [$fed_name] Starting DKG..."
+    echo "==> [$fed_name] Starting DKG..." >&2
     for i in "${GUARDIANS[@]}"; do
         $DC exec -T "${prefix}-guardian-$i" picomint-server-cli setup start-dkg >/dev/null
     done
 
-    echo "==> [$fed_name] Waiting for DKG completion (invite endpoint becomes reachable)..."
+    echo "==> [$fed_name] Waiting for DKG completion (invite endpoint becomes reachable)..." >&2
     local invite=""
     for _ in $(seq 1 120); do
         if invite=$($DC exec -T "${prefix}-guardian-$LEADER" picomint-server-cli invite 2>/dev/null \
@@ -85,7 +86,7 @@ setup_federation() {
         exit 1
     fi
 
-    echo "    invite: $invite"
+    echo "    invite: $invite" >&2
     printf '%s' "$invite"
 }
 
