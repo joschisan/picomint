@@ -183,6 +183,26 @@ impl Client {
         self.tg.shutdown().await;
     }
 
+    /// Drop every redb table this client owns under its DB prefix.
+    /// Intended for shared-database deployments (e.g. the gateway daemon's
+    /// per-federation isolated client DBs) where a "leave federation"
+    /// operation needs to wipe just one client's data.
+    ///
+    /// `dbtx` is supplied by the caller so the wipe commits atomically
+    /// with whatever else the caller is doing — typically removing
+    /// root-level rows scoped to this client by some other key (the
+    /// gateway's `CLIENT_CONFIG[fed_id]`, per-federation event-log
+    /// entries, …) and dropping the live `Arc<Client>` from any cache.
+    /// The caller is responsible for [`Client::shutdown`] before calling
+    /// this so no task is mid-write.
+    pub fn wipe(&self, dbtx: &picomint_redb::WriteTxRef<'_>) {
+        crate::mint::wipe_tables(dbtx);
+        crate::wallet::wipe_tables(dbtx);
+        crate::ln::wipe_tables(dbtx);
+        crate::gw::wipe_tables(dbtx);
+        crate::tx::wipe_tables(dbtx);
+    }
+
     pub fn api(&self) -> &FederationApi {
         &self.api
     }

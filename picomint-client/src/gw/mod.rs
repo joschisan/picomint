@@ -258,3 +258,9 @@ impl GatewayClientModule {
         unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 }
+
+/// Drop every redb table this module owns under the caller's prefix.
+/// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
+pub(crate) fn wipe_tables(dbtx: &WriteTxRef<'_>) {
+    dbtx.delete_table(&crate::executor::table::<ReceiveStateMachine>());
+}

@@ -865,6 +865,15 @@ impl MintClientModule {
     }
 }
 
+/// Drop every redb table this module owns under the caller's prefix.
+/// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
+pub(crate) fn wipe_tables(dbtx: &WriteTxRef<'_>) {
+    dbtx.delete_table(&NOTE);
+    dbtx.delete_table(&RECEIVE_OPERATION);
+    dbtx.delete_table(&RECOVERY);
+    dbtx.delete_table(&crate::executor::table::<MintStateMachine>());
+}
+
 #[derive(Clone)]
 struct PeerSelector {
     latency: Arc<RwLock<BTreeMap<PeerId, Duration>>>,

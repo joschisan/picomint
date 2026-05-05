@@ -664,3 +664,12 @@ pub enum GatewayInfoError {
     #[error("Failed to request gateway info")]
     FailedToRequestGatewayInfo,
 }
+
+/// Drop every redb table this module owns under the caller's prefix.
+/// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
+pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>) {
+    dbtx.delete_table(&GATEWAY);
+    dbtx.delete_table(&INCOMING_CONTRACT_STREAM_INDEX);
+    dbtx.delete_table(&SEND_OPERATION);
+    dbtx.delete_table(&crate::executor::table::<SendStateMachine>());
+}
