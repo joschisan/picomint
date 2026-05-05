@@ -62,18 +62,21 @@ impl Event for MintFailureEvent {
     const KIND: EventKind = EventKind::from_static("failure");
 }
 
-/// Emitted on every recovery-state checkpoint: once at `init_recovery`
-/// (`index = 0`, `total = None`), once after the first driver wake-up
-/// fills in the total, and once per processed slice, ending with the
-/// terminal emission at `index == total`. The terminal event commits
-/// in the same dbtx as the reissuance-tx submission, so the rest of
-/// the operation is observable through `TxAcceptEvent` and
-/// `MintSuccessEvent` (or `MintFailureEvent` / `TxRejectEvent`) under
-/// the same op id.
+/// Emitted exactly once per recovery operation, in the same dbtx as
+/// the reissuance-tx submission. Presence under an op id signals
+/// "scan complete, reissuance in flight"; the rest of the op rides
+/// the standard `TxCreateEvent` / `TxAcceptEvent` / `MintSuccessEvent`
+/// path. `txid` is `None` only when the scan recovered no notes —
+/// nothing to reissue, the federation isn't asked anything.
+/// `amount` is the gross recovered note value (before the federation's
+/// reissuance fees).
+///
+/// Live progress is exposed separately as a stream via
+/// [`crate::mint::MintClientModule::subscribe_recovery_progress`].
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryEvent {
-    pub index: u64,
-    pub total: Option<u64>,
+    pub amount: picomint_core::Amount,
+    pub txid: Option<picomint_core::TransactionId>,
 }
 
 impl Event for RecoveryEvent {

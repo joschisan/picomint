@@ -207,26 +207,20 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // constructor's presence check picks it up and spawns the driver.
     let recovered = env.new_client(Some(receive_mnemonic), true).await?;
 
-    // Verify the event stream: first `RecoveryEvent` has
-    // `total = None` (init_recovery couldn't know it without hitting
-    // the network), and we eventually see a terminal one with
-    // `index == total` once the driver finishes. We tail the global
-    // event log here rather than `subscribe_operation_events` because
-    // we don't carry the operation id back from `init_recovery`.
+    // Wait for the single terminal `RecoveryEvent` — fired in the same
+    // dbtx as the reissuance-tx submission. We tail the global event
+    // log rather than `subscribe_operation_events` because we don't
+    // carry the operation id back from `init_recovery`. Live progress
+    // is observable via `subscribe_recovery_progress`, but we only
+    // need terminal-completion here to gate the balance check.
     let mut events = pin!(recovery_event_stream(&recovered));
 
-    let first = events.next().await.expect("first recovery event");
+    let terminal = events.next().await.expect("terminal recovery event");
 
-    assert_eq!(first.index, 0);
-    assert_eq!(first.total, None);
-
-    loop {
-        let ev = events.next().await.expect("client running");
-
-        if ev.total.is_some_and(|total| ev.index == total) {
-            break;
-        }
-    }
+    assert!(
+        terminal.txid.is_some(),
+        "recovery should have produced a reissuance tx"
+    );
 
     // The terminal recovery event commits in the same dbtx as the
     // reissuance-tx submission. The tx still has to round-trip through
