@@ -507,9 +507,12 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
 
     let dbtx = client.db().begin_write();
 
-    client
-        .mint()
-        .finalize_and_submit_tx(&dbtx.as_ref(), OperationId::new_random(), tx_builder)?;
+    client.mint().finalize_and_submit_tx(
+        &dbtx.as_ref(),
+        OperationId::new_random(),
+        tx_builder,
+        |_| SendSuccessEvent { preimage },
+    )?;
 
     dbtx.commit();
 

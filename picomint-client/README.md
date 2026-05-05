@@ -20,6 +20,7 @@ These come from the transaction-submission and mint state machines and appear ac
 
 | Event | Source | Meaning |
 |---|---|---|
+| `TxCreateEvent { txid, input, output }` | Core | Tx submitted to the federation. `input - output` is the federation fee paid. |
 | `TxAcceptEvent { txid }` | Core | Federation accepted the tx into consensus. |
 | `TxRejectEvent { txid, error }` | Core | Federation definitively rejected the tx (double-spend, invalid input, fee too low, …). |
 | `MintSuccessEvent { txid }` | Mint | Threshold blind-sig shares aggregated and the resulting `SpendableNote`s written to the local note table. |
@@ -32,7 +33,7 @@ Any operation that mints notes (every send/receive in this library, since they a
 ### `mint().receive(ecash)` — claim out-of-band ecash
 
 ```
-ReceiveEvent
+ReceiveEvent ── TxCreateEvent
     │
     ├── TxAcceptEvent ──┬── MintSuccessEvent    (notes landed in NOTE table)
     │                   │
@@ -52,7 +53,7 @@ send(amount)
     │
     ├── SendEvent                                          (fast path: notes already match)
     │
-    └── RemintEvent                                        (slow path)
+    └── RemintEvent ── TxCreateEvent                       (slow path)
           │
           ├── TxAcceptEvent ──┬── MintSuccessEvent ── SendEvent
           │                   │
@@ -70,7 +71,7 @@ In the slow path, `send()` blocks until `MintSuccessEvent` lands, then recurses 
 `receive()` returns a deposit address and emits no events. A background scanner polls the federation for outputs at the wallet's derived addresses; once it sees a deposit it submits a reissuance tx and emits the events:
 
 ```
-ReceiveEvent                                   ← scanner saw deposit, submitted reissuance tx
+ReceiveEvent ── TxCreateEvent                  ← scanner saw deposit, submitted reissuance tx
     │
     ├── TxAcceptEvent ──┬── MintSuccessEvent   (notes landed)
     │                   │
@@ -84,7 +85,7 @@ ReceiveEvent                                   ← scanner saw deposit, submitte
 Submits a tx with a `WalletOutput`, then a wallet-specific `SendStateMachine` tracks the bitcoin-side outcome while the mint state machine handles any change notes in parallel.
 
 ```
-SendEvent
+SendEvent ── TxCreateEvent
     │
     ├── TxAcceptEvent ──┬── SendSuccessEvent     (pegout txid observed on bitcoin)
     │                   ├── SendFailureEvent     (federation could not produce a bitcoin tx)
@@ -103,7 +104,7 @@ SendEvent
 Returns a BOLT11 invoice and emits no events. A background scanner polls `ln_await_incoming_contracts`; when an incoming contract decrypts to the recipient's key it submits the claim tx:
 
 ```
-ReceiveEvent                                   ← scanner saw paid contract, submitted claim tx
+ReceiveEvent ── TxCreateEvent                  ← scanner saw paid contract, submitted claim tx
     │
     ├── TxAcceptEvent ──┬── MintSuccessEvent   (notes landed)
     │                   │
@@ -117,7 +118,7 @@ ReceiveEvent                                   ← scanner saw paid contract, su
 Submits a funding tx that locks an `OutgoingContract`, then a `SendStateMachine` advances `Funding → Funded`. In `Funded` it races the gateway HTTP payment against the federation's preimage stream; whichever finishes first decides between success and refund. If a refund is taken, a second tx is submitted under the same operation id to claim the contract back.
 
 ```
-SendEvent                                       ← funding tx submitted
+SendEvent ── TxCreateEvent                      ← funding tx submitted
     │
     ├── TxAcceptEvent ──┬── MintSuccessEvent    (change notes — parallel)
     │                   ├── MintFailureEvent
@@ -125,11 +126,11 @@ SendEvent                                       ← funding tx submitted
     │                   ├── SendSuccessEvent    (gateway returned preimage
     │                   │                        or fed revealed it)
     │                   │
-    │                   └── SendRefundEvent ──┬── TxAcceptEvent ──┬── MintSuccessEvent
-    │                       (refund claim tx) │                   └── MintFailureEvent
-    │                                         │
-    │                                         └── TxRejectEvent ──┬── SendSuccessEvent
-    │                                                             └── SendFailureEvent
+    │                   └── SendRefundEvent ── TxCreateEvent ──┬── TxAcceptEvent ──┬── MintSuccessEvent
+    │                       (refund claim tx)                  │                   └── MintFailureEvent
+    │                                                          │
+    │                                                          └── TxRejectEvent ──┬── SendSuccessEvent
+    │                                                                              └── SendFailureEvent
     │
     └── TxRejectEvent
 ```
@@ -158,7 +159,8 @@ RecoveryEvent { index: 0, total: Some(N) }
 RecoveryEvent { index: k, total: Some(N) }
     │
     ▼
-RecoveryEvent { index: N, total: Some(N) }            ← terminal; submits reissuance tx
+RecoveryEvent { index: N, total: Some(N) } ── TxCreateEvent
+    │                                                  ← terminal; submits reissuance tx
     │
     ├── TxAcceptEvent ──┬── MintSuccessEvent          (reissued outputs landed)
     │                   │
@@ -178,7 +180,8 @@ A drop-in `(source, kind) → card` mapping for clients that want a uniform stat
 
 | Source · Kind | Header | Subheader |
 |---|---|---|
-| `Core` · `tx-accept`                    | Transaction Accepted | `fee {input - output} sat` |
+| `Core` · `tx-create`                    | Transaction Created  | `fee {input - output} sat` |
+| `Core` · `tx-accept`                    | Transaction Accepted | — |
 | `Core` · `tx-reject`                    | Transaction Rejected | — |
 | `Mint` · `receive`                      | Receiving eCash      | `{amount} sat` |
 | `Mint` · `send`                         | Sending eCash        | `{amount} sat` |

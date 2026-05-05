@@ -170,7 +170,12 @@ impl WalletClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder)
+            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder, |txid| SendEvent {
+                txid,
+                address,
+                amount,
+                fee,
+            })
             .map_err(|_| SendError::InsufficientFunds)?;
 
         let sm = SendStateMachine {
@@ -182,15 +187,6 @@ impl WalletClientModule {
 
         self.send_executor
             .add_state_machine_dbtx(&dbtx.as_ref(), sm);
-
-        let event = SendEvent {
-            txid,
-            address,
-            amount,
-            fee,
-        };
-
-        self.client_ctx.log_event(&dbtx.as_ref(), operation, event);
 
         dbtx.commit();
 
@@ -266,19 +262,17 @@ impl WalletClientModule {
 
         let dbtx = self.client_ctx.db().begin_write();
 
+        let address = self.derive_address(address_index).as_unchecked().clone();
+
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder)
+            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder, |txid| ReceiveEvent {
+                txid,
+                address,
+                amount,
+                fee,
+            })
             .expect("Input amount is sufficient to finalize transaction");
-
-        let event = ReceiveEvent {
-            txid,
-            address: self.derive_address(address_index).as_unchecked().clone(),
-            amount,
-            fee,
-        };
-
-        self.client_ctx.log_event(&dbtx.as_ref(), operation, event);
 
         dbtx.commit();
 

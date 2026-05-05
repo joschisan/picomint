@@ -63,13 +63,23 @@ use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TxAcceptEvent {
+pub struct TxCreateEvent {
     pub txid: TransactionId,
-    /// Sum of input amounts the federation credited to this transaction.
+    /// Sum of input amounts on the transaction.
     pub input: Amount,
-    /// Sum of output amounts the federation debited from this transaction.
+    /// Sum of output amounts on the transaction.
     /// Federation fee paid by the caller is `input - output`.
     pub output: Amount,
+}
+
+impl Event for TxCreateEvent {
+    const SOURCE: EventSource = EventSource::Core;
+    const KIND: EventKind = EventKind::from_static("tx-create");
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TxAcceptEvent {
+    pub txid: TransactionId,
 }
 
 impl Event for TxAcceptEvent {
