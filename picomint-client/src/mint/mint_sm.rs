@@ -32,7 +32,7 @@ pub struct MintStateMachine {
 picomint_redb::consensus_value!(MintStateMachine);
 
 impl StateMachine for MintStateMachine {
-    const TABLE_NAME: &'static str = "mint-sm";
+    const TABLE_NAME: &'static str = "mint-mint-sm";
 
     type Context = MintSmContext;
     type Outcome = Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String>;
