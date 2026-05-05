@@ -26,9 +26,9 @@ services:
     volumes:
       - ./miner.sh:/miner.sh:ro
 
-  guardian-0: &guardian
+  fed1-guardian-0: &guardian
     image: ghcr.io/joschisan/picomint-server:main
-    container_name: pm-guardian-0
+    container_name: pm-fed1-guardian-0
     depends_on:
       - bitcoind
     environment: &guardian_env
@@ -44,37 +44,77 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - guardian_0_data:/data
+      - fed1_guardian_0_data:/data
 
-  guardian-1:
+  fed1-guardian-1:
     <<: *guardian
-    container_name: pm-guardian-1
+    container_name: pm-fed1-guardian-1
     environment:
       <<: *guardian_env
     ports:
       - "3001:3000"
     volumes:
-      - guardian_1_data:/data
+      - fed1_guardian_1_data:/data
 
-  guardian-2:
+  fed1-guardian-2:
     <<: *guardian
-    container_name: pm-guardian-2
+    container_name: pm-fed1-guardian-2
     environment:
       <<: *guardian_env
     ports:
       - "3002:3000"
     volumes:
-      - guardian_2_data:/data
+      - fed1_guardian_2_data:/data
 
-  guardian-3:
+  fed1-guardian-3:
     <<: *guardian
-    container_name: pm-guardian-3
+    container_name: pm-fed1-guardian-3
     environment:
       <<: *guardian_env
     ports:
       - "3003:3000"
     volumes:
-      - guardian_3_data:/data
+      - fed1_guardian_3_data:/data
+
+  fed2-guardian-0:
+    <<: *guardian
+    container_name: pm-fed2-guardian-0
+    environment:
+      <<: *guardian_env
+    ports:
+      - "3010:3000"
+    volumes:
+      - fed2_guardian_0_data:/data
+
+  fed2-guardian-1:
+    <<: *guardian
+    container_name: pm-fed2-guardian-1
+    environment:
+      <<: *guardian_env
+    ports:
+      - "3011:3000"
+    volumes:
+      - fed2_guardian_1_data:/data
+
+  fed2-guardian-2:
+    <<: *guardian
+    container_name: pm-fed2-guardian-2
+    environment:
+      <<: *guardian_env
+    ports:
+      - "3012:3000"
+    volumes:
+      - fed2_guardian_2_data:/data
+
+  fed2-guardian-3:
+    <<: *guardian
+    container_name: pm-fed2-guardian-3
+    environment:
+      <<: *guardian_env
+    ports:
+      - "3013:3000"
+    volumes:
+      - fed2_guardian_3_data:/data
 
   gateway:
     image: ghcr.io/joschisan/picomint-gateway:main
@@ -107,8 +147,12 @@ services:
 
 volumes:
   bitcoind_data:
-  guardian_0_data:
-  guardian_1_data:
-  guardian_2_data:
-  guardian_3_data:
+  fed1_guardian_0_data:
+  fed1_guardian_1_data:
+  fed1_guardian_2_data:
+  fed1_guardian_3_data:
+  fed2_guardian_0_data:
+  fed2_guardian_1_data:
+  fed2_guardian_2_data:
+  fed2_guardian_3_data:
   gateway_data:
