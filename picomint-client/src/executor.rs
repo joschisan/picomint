@@ -79,7 +79,10 @@ pub trait StateMachine:
     ) -> Option<Self>;
 }
 
-fn table<S: StateMachine>() -> picomint_redb::NativeTableDef<SmId, S> {
+/// Typed `(SmId, S)` table definition for `S`'s persisted active states.
+/// Public so callers (e.g. `Client::wipe`) can name SM tables alongside
+/// module tables when issuing per-table operations.
+pub fn table<S: StateMachine>() -> picomint_redb::NativeTableDef<SmId, S> {
     picomint_redb::NativeTableDef::new(S::TABLE_NAME)
 }
 

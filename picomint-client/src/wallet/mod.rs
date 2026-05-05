@@ -423,6 +423,14 @@ impl WalletClientModule {
     }
 }
 
+/// Drop every redb table this module owns under the caller's prefix.
+/// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
+pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>) {
+    dbtx.delete_table(&NEXT_OUTPUT_INDEX);
+    dbtx.delete_table(&VALID_ADDRESS_INDEX);
+    dbtx.delete_table(&crate::executor::table::<SendStateMachine>());
+}
+
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
 pub enum SendError {
     #[error("Address is from a different network than the federation.")]
