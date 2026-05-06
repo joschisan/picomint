@@ -147,20 +147,13 @@ The refund-rejection branch fires because the contract input has already been sp
 
 `Client::init_recovery` seeds a recovery row in the same dbtx that opens the database, so "join + start recovery" commits atomically. The recovery driver then walks the federation's history of issued notes and identifies every spendable note that derives from the wallet's mnemonic. When the scan completes, it submits a single reissuance transaction that consumes all recovered notes as inputs and re-mints them under fresh blinded outputs, all under the operation id returned by `init_recovery`.
 
+Live progress isn't streamed through the event log; subscribe to `client.mint().subscribe_recovery_progress()` for a stream of `f64` percentages (0.0..=100.0) updated on every checkpoint. The stream ends as soon as the row is removed (i.e. `finalize_recovery` has fired the terminal event below). If no recovery is in progress at subscribe time the stream ends immediately.
+
 ```
-RecoveryEvent { index: 0, total: None    }            ← seeded by init_recovery
-    │
-    │  (driver wakes, calls recovery_count to fill in total)
-    ▼
-RecoveryEvent { index: 0, total: Some(N) }
-    │
-    │  (one event per processed slice)
-    ▼
-RecoveryEvent { index: k, total: Some(N) }
+[caller subscribes to subscribe_recovery_progress for live %]
     │
     ▼
-RecoveryEvent { index: N, total: Some(N) } ── TxCreateEvent
-    │                                                  ← terminal; submits reissuance tx
+RecoveryEvent { amount, txid } ── TxCreateEvent       ← terminal; submits reissuance tx
     │
     ├── TxAcceptEvent ──┬── MintSuccessEvent          (reissued outputs landed)
     │                   │
@@ -170,7 +163,7 @@ RecoveryEvent { index: N, total: Some(N) } ── TxCreateEvent
                                                        e.g. an invalid recovered input)
 ```
 
-Progress is reported as a monotonically increasing `index` over an eventually-known `total`. The terminal `RecoveryEvent` (`index == total`) is emitted in the same dbtx that deletes the recovery state and submits the reissuance tx, so observing it guarantees the tx is in flight. From there the operation follows the standard mint flow — `TxAcceptEvent` + `MintSuccessEvent` on success, `MintFailureEvent` only on the rare verification failure of a *reissued output*, and `TxRejectEvent` if the federation refuses the reissuance (which is also how a bad *recovered input* surfaces — the federation rejects the tx rather than client-side verification kicking in).
+`amount` is the gross recovered note value (before the federation's reissuance fees). `txid` is `None` only when the scan recovered no notes — there's nothing to reissue and the federation isn't asked anything. The terminal `RecoveryEvent` is emitted in the same dbtx that deletes the recovery state and (when there are notes) submits the reissuance tx, so observing it guarantees the tx is in flight. From there the operation follows the standard mint flow — `TxAcceptEvent` + `MintSuccessEvent` on success, `MintFailureEvent` only on the rare verification failure of a *reissued output*, and `TxRejectEvent` if the federation refuses the reissuance (which is also how a bad *recovered input* surfaces — the federation rejects the tx rather than client-side verification kicking in).
 
 Re-minting every recovered note keeps the recovery path uniform with the rest of the client: there is no special txid-less success case, and the recovered balance is provably spendable the moment `MintSuccessEvent` lands. An integrator restoring a wallet can wait for `MintSuccessEvent` under the recovery `OperationId` and treat that as full restore-complete.
 
@@ -188,7 +181,7 @@ A drop-in `(source, kind) → card` mapping for clients that want a uniform stat
 | `Mint` · `remint`                       | Reminting eCash      | `{amount} sat` |
 | `Mint` · `success`                      | Minting Success      | `{amount} sat` |
 | `Mint` · `failure`                      | Minting Failure      | threshold signature invalid |
-| `Mint` · `recovery`                     | Recovering eCash     | `{percent}%` (0% while `total` is `None`) |
+| `Mint` · `recovery`                     | Recovery Complete    | `{amount} sat` |
 | `Wallet` · `receive`                    | Receiving Onchain    | `{amount} sat · fee {fee} sat` |
 | `Wallet` · `send`                       | Sending Onchain      | `{amount} sat · fee {fee} sat` |
 | `Wallet` · `send-success`               | Sending Success      | — |

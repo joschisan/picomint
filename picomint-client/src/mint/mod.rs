@@ -78,17 +78,20 @@ impl SpendableNote {
 /// Seed the mint recovery state. Caller writes this in the same tx that
 /// persists their `CLIENT_CONFIG` row, so "join + start recovery" is one
 /// atomic commit. The driver picks the row up the next time
-/// [`MintClientModule::new`] runs and emits `RecoveryEvent`s under the
-/// returned operation id (also persisted in the row, so a restart's driver
-/// keeps emitting under the same operation id).
+/// [`MintClientModule::new`] runs and finally emits a single terminal
+/// `RecoveryEvent` under the returned operation id (also persisted in
+/// the row, so a restart's driver completes under the same op id).
 ///
 /// `total_items` is left as `None` — the driver fills it in via
 /// `module_api.recovery_count()` on its first awakening, so this entry
-/// point doesn't have to hit the network. The first event is logged
-/// here with `index = 0, total = None`.
+/// point doesn't have to hit the network.
+///
+/// Live progress is observable via
+/// [`crate::Client::subscribe_recovery_progress`] (no events are
+/// emitted on each batch).
 ///
 /// Panics if a recovery is already in progress.
-pub fn init_recovery(dbtx: &WriteTxRef<'_>, federation_id: FederationId) -> OperationId {
+pub fn init_recovery(dbtx: &WriteTxRef<'_>) -> OperationId {
     let operation = OperationId::new_random();
 
     let state = Recovery {
@@ -104,16 +107,6 @@ pub fn init_recovery(dbtx: &WriteTxRef<'_>, federation_id: FederationId) -> Oper
         "init_recovery called when a recovery is already in progress"
     );
 
-    picomint_eventlog::log_event(
-        dbtx,
-        federation_id,
-        operation,
-        events::RecoveryEvent {
-            index: 0,
-            total: None,
-        },
-    );
-
     operation
 }
 
@@ -127,11 +120,10 @@ impl MintClientModule {
     async fn run_recovery(self, mut state: Recovery) -> anyhow::Result<()> {
         let module_api = self.client_ctx.api();
         let db = self.client_ctx.db().clone();
-        let federation_id = self.client_ctx.federation_id();
 
-        // First awakening of a freshly-init'd recovery: fetch the count from
-        // the federation, persist, and emit the first progress event with
-        // the total now filled in.
+        // First awakening of a freshly-init'd recovery: fetch the count
+        // from the federation and persist it. The RECOVERY-table commit
+        // wakes any subscribers of `subscribe_recovery_progress`.
         let total_items = match state.total_items {
             Some(t) => t,
             None => {
@@ -142,16 +134,6 @@ impl MintClientModule {
                 let dbtx = db.begin_write();
 
                 dbtx.insert(&RECOVERY, &(), &state);
-
-                picomint_eventlog::log_event(
-                    &dbtx.as_ref(),
-                    federation_id,
-                    state.operation,
-                    events::RecoveryEvent {
-                        index: state.next_index,
-                        total: Some(total),
-                    },
-                );
 
                 dbtx.commit();
 
@@ -235,8 +217,8 @@ impl MintClientModule {
             state.next_index += items.len() as u64;
 
             // Final batch: skip the per-batch checkpoint and let
-            // `finalize_recovery` commit the terminal event in the
-            // same atomic dbtx as the reissuance-tx submission.
+            // `finalize_recovery` commit the reissuance-tx submission
+            // and the terminal `RecoveryEvent` in one atomic dbtx.
             if state.next_index == total_items {
                 return self.finalize_recovery(state).await;
             }
@@ -244,16 +226,6 @@ impl MintClientModule {
             let dbtx = db.begin_write();
 
             dbtx.insert(&RECOVERY, &(), &state);
-
-            picomint_eventlog::log_event(
-                &dbtx.as_ref(),
-                federation_id,
-                state.operation,
-                events::RecoveryEvent {
-                    index: state.next_index,
-                    total: Some(total_items),
-                },
-            );
 
             dbtx.commit();
         }
@@ -267,10 +239,6 @@ impl MintClientModule {
         let module_api = self.client_ctx.api();
         let db = self.client_ctx.db().clone();
         let federation_id = self.client_ctx.federation_id();
-
-        let total_items = state
-            .total_items
-            .expect("total_items resolved by run_recovery");
 
         let issuance_requests: Vec<NoteIssuanceRequest> = state.requests.into_values().collect();
 
@@ -293,6 +261,8 @@ impl MintClientModule {
             }
         }
 
+        let amount: Amount = spendable_notes.iter().map(|n| n.amount()).sum();
+
         let dbtx = db.begin_write();
 
         let operation = state.operation;
@@ -310,10 +280,10 @@ impl MintClientModule {
                 });
             }
 
-            self.finalize_and_submit_tx(&dbtx.as_ref(), operation, builder, |_txid| {
+            self.finalize_and_submit_tx(&dbtx.as_ref(), operation, builder, |txid| {
                 events::RecoveryEvent {
-                    index: total_items,
-                    total: Some(total_items),
+                    amount,
+                    txid: Some(txid),
                 }
             })?;
         } else {
@@ -321,10 +291,7 @@ impl MintClientModule {
                 &dbtx.as_ref(),
                 federation_id,
                 operation,
-                events::RecoveryEvent {
-                    index: total_items,
-                    total: Some(total_items),
-                },
+                events::RecoveryEvent { amount, txid: None },
             );
         }
 
@@ -570,6 +537,35 @@ impl MintClientModule {
 
     pub fn balance_notify(&self) -> Arc<tokio::sync::Notify> {
         self.client_ctx.db().notify_for_table(&NOTE)
+    }
+
+    /// Yields the in-flight recovery's progress as a percentage
+    /// (0.0..=100.0) on every commit touching the `RECOVERY` row.
+    /// Returns immediately if no recovery is active at subscribe time;
+    /// ends when `finalize_recovery` removes the row. Mirrors the shape
+    /// of [`crate::Client::subscribe_balance_changes`] — UIs typically
+    /// pair the live percentage with the terminal `RecoveryEvent` on
+    /// the same operation id.
+    pub fn subscribe_recovery_progress(&self) -> futures::stream::BoxStream<'static, f64> {
+        let notify = self.client_ctx.db().notify_for_table(&RECOVERY);
+        let db = self.client_ctx.db().clone();
+
+        Box::pin(async_stream::stream! {
+            loop {
+                let notified = notify.notified();
+                match db.begin_read().as_ref().get(&RECOVERY, &()) {
+                    Some(state) => {
+                        let percent = state
+                            .total_items
+                            .map(|total| (state.next_index as f64 / total as f64) * 100.0)
+                            .unwrap_or(0.0);
+                        yield percent;
+                    }
+                    None => return,
+                }
+                notified.await;
+            }
+        })
     }
 
     fn select_funding_input(
