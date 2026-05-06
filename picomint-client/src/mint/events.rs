@@ -3,16 +3,49 @@ use picomint_core::TransactionId;
 use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
-/// Emitted when ecash is sent out-of-band.
+use super::ECash;
+
+/// Emitted immediately when a send operation is initiated, before the
+/// wallet has assembled the actual ecash. On the fast path
+/// `SendSuccessEvent` lands atomically in the same dbtx; on the slow
+/// path it lands later, after the reissuance tx runs through consensus
+/// and the mint state machine finalises notes. Slow-path observers can
+/// recover the reissuance txid from the immediately-following
+/// `RemintEvent` / `TxCreateEvent` under the same operation id.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendEvent {
     pub amount: Amount,
-    pub ecash: String,
 }
 
 impl Event for SendEvent {
     const SOURCE: EventSource = EventSource::Mint;
     const KIND: EventKind = EventKind::from_static("send");
+}
+
+/// Terminal success event for [`crate::mint::MintClientModule::send`].
+/// `ecash` is the assembled bundle the caller can hand off out-of-band;
+/// in the event log it serialises as the `picomint`-prefixed base32
+/// string (see `ECash`'s serde impl).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SendSuccessEvent {
+    pub ecash: ECash,
+}
+
+impl Event for SendSuccessEvent {
+    const SOURCE: EventSource = EventSource::Mint;
+    const KIND: EventKind = EventKind::from_static("send-success");
+}
+
+/// Terminal failure event for [`crate::mint::MintClientModule::send`].
+/// Fires when reissuance failed (`TxRejectEvent`/`MintFailureEvent`)
+/// or — defensively — when the post-reissuance NOTE table no longer
+/// has the exact denominations the send needs.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SendFailureEvent;
+
+impl Event for SendFailureEvent {
+    const SOURCE: EventSource = EventSource::Mint;
+    const KIND: EventKind = EventKind::from_static("send-failure");
 }
 
 /// Emitted when a send operation requires re-minting notes before the sender

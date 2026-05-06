@@ -7,6 +7,7 @@ mod events;
 mod issuance;
 mod mint_sm;
 mod secret;
+mod send_sm;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
@@ -40,6 +41,7 @@ pub use self::ecash::ECash;
 use self::issuance::NoteIssuanceRequest;
 use self::mint_sm::MintStateMachine;
 pub use self::secret::MintSecret;
+use self::send_sm::SendStateMachine;
 
 const TARGET_PER_DENOMINATION: usize = 3;
 const SLICE_SIZE: u64 = 10000;
@@ -329,11 +331,15 @@ impl MintClientModule {
 
         let sm_context = MintSmContext {
             client_ctx: context.clone(),
+            federation_id,
             tbs_agg_pks: cfg.tbs_agg_pks.clone(),
             tbs_pks: cfg.tbs_pks.clone(),
         };
 
-        let executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone()).await;
+        let mint_executor =
+            ModuleExecutor::new(context.db().clone(), sm_context.clone(), tg.clone()).await;
+
+        let send_executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone()).await;
 
         let tx_submission_executor = ModuleExecutor::new(
             context.db().clone(),
@@ -352,7 +358,8 @@ impl MintClientModule {
             client_ctx: context,
             tweak_rx,
             tx_submission_executor,
-            executor,
+            mint_executor,
+            send_executor,
         };
 
         // If a recovery row was seeded (by `Client::init_recovery`) and
@@ -376,7 +383,8 @@ pub struct MintClientModule {
     client_ctx: ClientContext,
     tweak_rx: async_channel::Receiver<[u8; 16]>,
     tx_submission_executor: ModuleExecutor<TxSubmissionStateMachine>,
-    executor: ModuleExecutor<MintStateMachine>,
+    mint_executor: ModuleExecutor<MintStateMachine>,
+    send_executor: ModuleExecutor<SendStateMachine>,
 }
 
 /// Context handed to per-SM executors. Keeps the `ClientContext` handle
@@ -384,6 +392,7 @@ pub struct MintClientModule {
 #[derive(Clone)]
 pub struct MintSmContext {
     pub client_ctx: ClientContext,
+    pub federation_id: FederationId,
     pub tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,
     pub tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, tbs::PublicKeyShare>>,
 }
@@ -431,7 +440,7 @@ impl MintClientModule {
                 txid,
                 issuance_requests,
             };
-            self.executor.add_state_machine_dbtx(dbtx, sm);
+            self.mint_executor.add_state_machine_dbtx(dbtx, sm);
         }
 
         Ok(txid)
@@ -703,15 +712,30 @@ impl MintClientModule {
     pub async fn send(&self, amount: Amount) -> Result<ECash, SendECashError> {
         let amount = round_to_multiple(amount, client_denominations().next().unwrap().amount());
 
+        let operation = OperationId::new_random();
+
+        // Fast path: the wallet already has notes that sum exactly to
+        // `amount`. Pull them out and emit `SendEvent` + `SendSuccessEvent`
+        // atomically in one dbtx — no tx, no SM.
         let dbtx = self.client_ctx.db().begin_write();
 
-        let ecash = self.send_ecash_dbtx(&dbtx.as_ref(), amount);
-
-        dbtx.commit();
-
-        if let Some(ecash) = ecash {
+        if let Some(ecash) = send_ecash_dbtx(&dbtx.as_ref(), self.federation_id, amount) {
+            self.client_ctx
+                .log_event(&dbtx.as_ref(), operation, SendEvent { amount });
+            self.client_ctx.log_event(
+                &dbtx.as_ref(),
+                operation,
+                SendSuccessEvent {
+                    ecash: ecash.clone(),
+                },
+            );
+            dbtx.commit();
             return Ok(ecash);
         }
+
+        // Slow path: send_ecash_dbtx is read-only when it returns None,
+        // so dropping this dbtx without committing is harmless.
+        drop(dbtx);
 
         self.client_ctx
             .api()
@@ -719,7 +743,6 @@ impl MintClientModule {
             .await
             .map_err(|_| SendECashError::Offline)?;
 
-        let operation = OperationId::new_random();
         let target_denominations = represent_amount(amount);
 
         // Build target issuance requests up-front. Their outputs go into the
@@ -757,75 +780,65 @@ impl MintClientModule {
 
         let remint = funding.saturating_sub(deficit);
 
-        let txid = self
-            .submit(&dbtx.as_ref(), operation, builder, remint, |txid| {
-                RemintEvent { txid }
-            })
-            .map_err(|_| SendECashError::Failure)?;
+        let fee = builder.total_fee();
+        let tx = builder.build();
+
+        if tx.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
+            return Err(SendECashError::Failure);
+        }
+
+        let txid = tx.compute_txid();
+
+        // Everything past this point lands in the same dbtx that submits
+        // the reissuance: SendEvent → RemintEvent → TxCreateEvent →
+        // MintSM + SendSM. A crash before the commit leaves no half-state
+        // behind; on restart the operation simply doesn't exist.
+        self.tx_submission_executor
+            .add_state_machine_dbtx(&dbtx.as_ref(), TxSubmissionStateMachine { operation, tx });
+
+        self.client_ctx
+            .log_event(&dbtx.as_ref(), operation, SendEvent { amount });
+
+        self.client_ctx
+            .log_event(&dbtx.as_ref(), operation, RemintEvent { txid });
+
+        self.client_ctx.log_event(
+            &dbtx.as_ref(),
+            operation,
+            crate::TxCreateEvent { txid, remint, fee },
+        );
 
         issuance_requests.extend(change_requests);
 
-        let sm = MintStateMachine {
+        let mint_sm = MintStateMachine {
             operation,
             spendable_notes: funding_notes,
             txid,
             issuance_requests,
         };
 
-        self.executor.add_state_machine_dbtx(&dbtx.as_ref(), sm);
+        self.mint_executor
+            .add_state_machine_dbtx(&dbtx.as_ref(), mint_sm);
+
+        let send_sm = SendStateMachine { operation, amount };
+
+        self.send_executor
+            .add_state_machine_dbtx(&dbtx.as_ref(), send_sm);
 
         dbtx.commit();
 
-        self.client_ctx
-            .subscribe_operation_events_typed::<events::MintSuccessEvent>(operation)
-            .next()
-            .await;
-
-        Box::pin(self.send(amount)).await
-    }
-
-    fn send_ecash_dbtx(
-        &self,
-        dbtx: &WriteTxRef<'_>,
-        mut remaining_amount: Amount,
-    ) -> Option<ECash> {
-        let mut sorted: Vec<SpendableNote> =
-            dbtx.iter(&NOTE, |r| r.map(|(note, ())| note).collect());
-        sorted.sort_by_key(|n| std::cmp::Reverse(n.denomination));
-
-        let mut notes = vec![];
-
-        for spendable_note in sorted {
-            remaining_amount = match remaining_amount.checked_sub(spendable_note.amount()) {
-                Some(amount) => amount,
-                None => continue,
-            };
-
-            notes.push(spendable_note);
+        // Wait for the SendStateMachine to fire its terminal event on
+        // the operation's event log.
+        let mut stream = self.client_ctx.subscribe_operation_events(operation);
+        while let Some(entry) = stream.next().await {
+            if let Some(ev) = entry.to_event::<SendSuccessEvent>() {
+                return Ok(ev.ecash);
+            }
+            if entry.to_event::<SendFailureEvent>().is_some() {
+                return Err(SendECashError::Failure);
+            }
         }
-
-        if remaining_amount != Amount::ZERO {
-            return None;
-        }
-
-        for spendable_note in &notes {
-            Self::remove_spendable_note(dbtx, spendable_note);
-        }
-
-        let ecash = ECash::new(self.federation_id, notes);
-        let amount = ecash.amount();
-        let operation = OperationId::new_random();
-
-        self.client_ctx.log_event(
-            dbtx,
-            operation,
-            SendEvent {
-                amount,
-                ecash: picomint_base32::encode(&ecash),
-            },
-        );
-
-        Some(ecash)
+        unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 
     /// Receive the `ECash` by reissuing the notes. This method is idempotent
@@ -884,6 +897,42 @@ impl MintClientModule {
     }
 }
 
+/// Pull a set of `SpendableNote`s out of `NOTE` whose denominations sum
+/// exactly to `remaining_amount`, remove them, and return the resulting
+/// `ECash`. Returns `None` if no exact-match combination exists. No
+/// events are logged — callers do that.
+fn send_ecash_dbtx(
+    dbtx: &WriteTxRef<'_>,
+    federation_id: FederationId,
+    mut remaining_amount: Amount,
+) -> Option<ECash> {
+    let mut sorted: Vec<SpendableNote> = dbtx.iter(&NOTE, |r| r.map(|(note, ())| note).collect());
+
+    sorted.sort_by_key(|n| std::cmp::Reverse(n.denomination));
+
+    let mut notes = vec![];
+
+    for spendable_note in sorted {
+        remaining_amount = match remaining_amount.checked_sub(spendable_note.amount()) {
+            Some(amount) => amount,
+            None => continue,
+        };
+
+        notes.push(spendable_note);
+    }
+
+    if remaining_amount != Amount::ZERO {
+        return None;
+    }
+
+    for spendable_note in &notes {
+        dbtx.remove(&NOTE, spendable_note)
+            .expect("Must delete existing spendable note");
+    }
+
+    Some(ECash::new(federation_id, notes))
+}
+
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTxRef<'_>) {
@@ -891,6 +940,7 @@ pub(crate) fn wipe_tables(dbtx: &WriteTxRef<'_>) {
     dbtx.delete_table(&RECEIVE_OPERATION);
     dbtx.delete_table(&RECOVERY);
     dbtx.delete_table(&crate::executor::table::<MintStateMachine>());
+    dbtx.delete_table(&crate::executor::table::<SendStateMachine>());
 }
 
 #[derive(Clone)]

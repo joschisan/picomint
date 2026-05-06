@@ -656,12 +656,10 @@ async fn federation_module_mint_send(
         .await
         .map_err(CliError::internal)?;
 
-    Ok(Json(FederationMintSendResponse {
-        notes: picomint_base32::encode(&ecash),
-    }))
+    Ok(Json(FederationMintSendResponse { ecash }))
 }
 
-/// Receive ecash into the gateway. The ecash string itself carries the target
+/// Receive ecash into the gateway. The ecash bundle itself carries the target
 /// federation id, so no `--id` is needed. Blocks until issuance either
 /// completes or fails federation-side.
 #[instrument(skip_all, err)]
@@ -669,18 +667,15 @@ async fn federation_module_mint_receive(
     State(state): State<AppState>,
     Json(payload): Json<FederationMintReceiveRequest>,
 ) -> Result<Json<FederationMintReceiveResponse>, CliError> {
-    let ecash: picomint_client::mint::ECash = picomint_base32::decode(&payload.notes)
-        .map_err(|e| CliError::bad_request(format!("Invalid ECash: {e}")))?;
-
     let client = state
-        .select_client(ecash.mint)
+        .select_client(payload.ecash.mint)
         .ok_or(CliError::bad_request("Federation not connected"))?;
 
-    let amount = ecash.amount();
+    let amount = payload.ecash.amount();
 
     let operation = client
         .mint()
-        .receive(&ecash)
+        .receive(&payload.ecash)
         .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
 
     let mut events = client.subscribe_operation_events(operation);

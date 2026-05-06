@@ -46,23 +46,25 @@ Idempotent: `OperationId` is derived deterministically from the ecash bytes, so 
 
 ### `mint().send(amount)` — produce out-of-band ecash
 
-Two paths. The fast path triggers when the wallet already holds notes whose denominations sum exactly to `amount`; otherwise the slow path reissues notes through the federation first.
+Returns an `ECash` bundle directly (or `SendECashError` on failure); `ECash`'s serde representation is the `picomint`-prefixed base32 string callers hand off out-of-band, and the same encoding lands in the event log. Internally `send` awaits the operation's terminal `SendSuccessEvent` / `SendFailureEvent`, so observers see the same shape regardless of fast/slow path. `SendEvent` fires immediately so a UI can render an in-flight card right away. On the slow path the immediately-following `RemintEvent` / `TxCreateEvent` carry the reissuance txid.
+
+Two paths. The fast path triggers when the wallet already holds notes whose denominations sum exactly to `amount` — `SendEvent` and `SendSuccessEvent` land atomically in one dbtx, no tx, no SM. Otherwise the slow path reissues notes through the federation first, and a `mint::SendStateMachine` watches the reissuance terminate and emits the terminal `SendSuccessEvent` (assembling the ecash from the freshly minted notes) or `SendFailureEvent`.
 
 ```
 send(amount)
     │
-    ├── SendEvent                                          (fast path: notes already match)
+    ├── SendEvent ── SendSuccessEvent                          (fast path, atomic)
     │
-    └── RemintEvent ── TxCreateEvent                       (slow path)
-          │
-          ├── TxAcceptEvent ──┬── MintSuccessEvent ── SendEvent
-          │                   │
-          │                   └── MintFailureEvent
-          │
-          └── TxRejectEvent
+    └── SendEvent ── RemintEvent ── TxCreateEvent
+                                          │
+                                          ├── TxAcceptEvent ──┬── MintSuccessEvent ──┬── SendSuccessEvent
+                                          │                   │                      └── SendFailureEvent  (assembly failed — defensive)
+                                          │                   └── MintFailureEvent ── SendFailureEvent
+                                          │
+                                          └── TxRejectEvent ── SendFailureEvent
 ```
 
-In the slow path, `send()` blocks until `MintSuccessEvent` lands, then recurses into the fast path to produce the `SendEvent`.
+Every send terminates in exactly one of `SendSuccessEvent` or `SendFailureEvent`. The defensive `SendFailureEvent` after `MintSuccessEvent` only triggers if a concurrent op consumed the freshly minted notes between the mint terminal and the SM's transition — it should never happen under normal use, but the SM declines to retry rather than livelock.
 
 ## Wallet
 
@@ -167,34 +169,34 @@ RecoveryEvent { amount, txid } ── TxCreateEvent       ← terminal; submits 
 
 Re-minting every recovered note keeps the recovery path uniform with the rest of the client: there is no special txid-less success case, and the recovered balance is provably spendable the moment `MintSuccessEvent` lands. An integrator restoring a wallet can wait for `MintSuccessEvent` under the recovery `OperationId` and treat that as full restore-complete.
 
-## Suggested UI mapping
+## Event kinds
 
-A drop-in `(source, kind) → card` mapping for clients that want a uniform status surface across all operations. Triggers and ongoing-state events use a present-continuous header; terminal and milestone events use a bare past/static label. The operation title (e.g. "Send Lightning · 5 000 sat") is set once from the trigger event and stays put; subsequent cards only update the header/subheader beneath it.
+The complete `(source, kind)` set the client emits, for integrators wiring up an event-router or filtering subscriptions. Headers/subheaders are intentionally not prescribed — that's a UI decision per integrator.
 
-| Source · Kind | Header | Subheader |
-|---|---|---|
-| `Core` · `tx-create`                    | Transaction Created  | `fee {fee} sat · remint {remint} sat` |
-| `Core` · `tx-accept`                    | Transaction Accepted | — |
-| `Core` · `tx-reject`                    | Transaction Rejected | — |
-| `Mint` · `receive`                      | Receiving eCash      | `{amount} sat` |
-| `Mint` · `send`                         | Sending eCash        | `{amount} sat` |
-| `Mint` · `remint`                       | Reminting eCash      | `{amount} sat` |
-| `Mint` · `success`                      | Minting Success      | `{amount} sat` |
-| `Mint` · `failure`                      | Minting Failure      | threshold signature invalid |
-| `Mint` · `recovery`                     | Recovery Complete    | `{amount} sat` |
-| `Wallet` · `receive`                    | Receiving Onchain    | `{amount} sat · fee {fee} sat` |
-| `Wallet` · `send`                       | Sending Onchain      | `{amount} sat · fee {fee} sat` |
-| `Wallet` · `send-success`               | Sending Success      | — |
-| `Wallet` · `send-failure`               | Sending Failure      | missing txid |
-| `Ln` · `receive`                        | Receiving Lightning  | `{amount} sat · fee {fee} sat` |
-| `Ln` · `send`                           | Sending Lightning    | `{amount} sat · fee {fee} sat` |
-| `Ln` · `send-success`                   | Sending Success      | preimage received |
-| `Ln` · `send-refund` (`expired: true`)  | Refunding            | contract expired |
-| `Ln` · `send-refund` (`expired: false`) | Refunding            | gateway cancelled |
-| `Ln` · `send-failure`                   | Sending Failure      | missing preimage |
+| Source · Kind |
+|---|
+| `Core` · `tx-create` |
+| `Core` · `tx-accept` |
+| `Core` · `tx-reject` |
+| `Mint` · `receive` |
+| `Mint` · `send` |
+| `Mint` · `send-success` |
+| `Mint` · `send-failure` |
+| `Mint` · `remint` |
+| `Mint` · `success` |
+| `Mint` · `failure` |
+| `Mint` · `recovery` |
+| `Wallet` · `receive` |
+| `Wallet` · `send` |
+| `Wallet` · `send-success` |
+| `Wallet` · `send-failure` |
+| `Ln` · `receive` |
+| `Ln` · `send` |
+| `Ln` · `send-success` |
+| `Ln` · `send-refund` |
+| `Ln` · `send-failure` |
 
 Conventions:
 
 - **Kind never repeats source.** The `Source` discriminator already tags the module, so mint terminals are bare `success` / `failure`. Kinds prefix with the operation only when scoped to one (`send-success`, `send-refund`).
-- **Color/icon keys off kind**, not the mapping: `tx-reject`, `*-failure` → red; `*-success`, mint `success` → green; `send-refund` → amber; in-progress events → spinner.
-- **Multiple terminals per operation are possible** because some flows fan out to parallel state machines (e.g. wallet send emits both `SendSuccessEvent` *and* `MintSuccessEvent` for change, an LN refund tail emits a `SendRefundEvent` followed by its own mint terminal). Rather than try to pick one "primary" terminal and hide the rest, render every event — the qualified headers (`Minting Success` vs `Sending Success`) make it obvious which state machine each row belongs to, and the verbosity matches what actually happened on the wire.
+- **Multiple terminals per operation are possible** because some flows fan out to parallel state machines (e.g. wallet send emits both `SendSuccessEvent` *and* `MintSuccessEvent` for change, an LN refund tail emits a `SendRefundEvent` followed by its own mint terminal). Rather than try to pick one "primary" terminal and hide the rest, render every event — observing all of them keeps the UI faithful to what actually happened on the wire.
