@@ -101,7 +101,9 @@ SendEvent ── TxCreateEvent
 
 ## Lightning
 
-### `ln().receive(amount, expiry, description)` — receive over Lightning
+Both `ln().send` and `ln().receive` take a caller-selected gateway as their first two arguments: a `gateway_api: String` (the HTTP endpoint) and a `gateway_info: GatewayInfo` (its routing info, including all fees and the outgoing-contract expiration delta). Callers pick a gateway via `ln().select_gateway(invoice_for_direct_swap_match)` — or, for full manual control, `ln().list_gateways()` + `ln().gateway_info(api)`. The library does not enforce fee or expiration limits; previewing `gateway_info` and rejecting unacceptable values is the caller's responsibility.
+
+### `ln().receive(gateway_api, gateway_info, amount, expiry, description)` — receive over Lightning
 
 Returns a BOLT11 invoice and emits no events. A background scanner polls `ln_await_incoming_contracts`; when an incoming contract decrypts to the recipient's key it submits the claim tx:
 
@@ -115,7 +117,7 @@ ReceiveEvent ── TxCreateEvent                  ← scanner saw paid contract
     └── TxRejectEvent
 ```
 
-### `ln().send(invoice)` — pay a BOLT11 invoice
+### `ln().send(gateway_api, gateway_info, invoice)` — pay a BOLT11 invoice
 
 Submits a funding tx that locks an `OutgoingContract`, then a `SendStateMachine` advances `Funding → Funded`. In `Funded` it races the gateway HTTP payment against the federation's preimage stream; whichever finishes first decides between success and refund. If a refund is taken, a second tx is submitted under the same operation id to claim the contract back.
 

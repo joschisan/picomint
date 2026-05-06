@@ -21,7 +21,7 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentImage};
-use picomint_core::ln::gateway_api::{GatewayInfo, PaymentFee};
+use picomint_core::ln::gateway_api::GatewayInfo;
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_core::ln::{
     Bolt11InvoiceDescription, LightningInput, LightningInvoice, LightningOutput,
@@ -39,10 +39,6 @@ use tpe::{AggregateDecryptionKey, derive_agg_dk};
 
 use self::events::{ReceiveEvent, SendEvent};
 use self::send_sm::{SendSMCommon, SendSMState, SendStateMachine};
-
-/// Number of blocks until outgoing lightning contracts times out and user
-/// client can refund it unilaterally
-const EXPIRATION_DELTA_LIMIT: u64 = 1440;
 
 /// A two hour buffer in case either the client or gateway go offline
 const CONTRACT_CONFIRMATION_BUFFER: u64 = 12;
@@ -216,23 +212,21 @@ impl LightningClientModule {
             .map_err(|_| GatewayInfoError::FailedToRequestGatewayInfo)
     }
 
-    /// Pay an invoice. A gateway is selected automatically: if the invoice was
-    /// created by a gateway connected to our federation, the same gateway is
-    /// selected to allow for a direct ecash swap. Otherwise we select a random
-    /// online gateway.
+    /// Pay an invoice through a caller-selected gateway.
     ///
-    /// The fee for this payment may depend on the selected gateway but
-    /// will be limited to one and a half percent plus one hundred satoshis.
-    /// This fee accounts for the fee charged by the gateway as well as
-    /// the additional fee required to reliably route this payment over
-    /// lightning if necessary. Since the gateway has been vetted by at least
-    /// one guardian we trust it to set a reasonable fee and only enforce a
-    /// rather high limit.
-    ///
-    /// The absolute fee for a payment can be calculated from the operation meta
-    /// to be shown to the user in the transaction history.
-    #[allow(clippy::too_many_lines)]
-    pub async fn send(&self, invoice: Bolt11Invoice) -> Result<OperationId, SendPaymentError> {
+    /// The caller obtains `(gateway_api, gateway_info)` via
+    /// [`Self::select_gateway`] (or [`Self::list_gateways`] +
+    /// [`Self::gateway_info`] for full manual control), inspects
+    /// `gateway_info.send_fee` / `ln_fee` / `expiration_delta` to preview the
+    /// cost, and then passes both back here. This keeps gateway selection,
+    /// fee preview, and policy decisions entirely in the caller's hands —
+    /// the client library does not enforce fee or expiration limits.
+    pub async fn send(
+        &self,
+        gateway_api: String,
+        gateway_info: GatewayInfo,
+        invoice: Bolt11Invoice,
+    ) -> Result<OperationId, SendPaymentError> {
         let amount = invoice
             .amount_milli_satoshis()
             .ok_or(SendPaymentError::InvoiceMissingAmount)?;
@@ -254,24 +248,7 @@ impl LightningClientModule {
 
         let refund_keypair = self.secret.refund_keypair(&tweak);
 
-        let (gateway_api, gateway_info) = self
-            .select_gateway(Some(invoice.clone()))
-            .await
-            .map_err(SendPaymentError::SelectGateway)?;
-
         let is_direct_swap = invoice.recover_payee_pub_key() == gateway_info.lightning_public_key;
-
-        if !gateway_info.send_fee.le(&PaymentFee::SEND_FEE_LIMIT) {
-            return Err(SendPaymentError::GatewayFeeExceedsLimit);
-        }
-
-        if !is_direct_swap && !gateway_info.ln_fee.le(&PaymentFee::LN_FEE_LIMIT) {
-            return Err(SendPaymentError::GatewayFeeExceedsLimit);
-        }
-
-        if EXPIRATION_DELTA_LIMIT < gateway_info.expiration_delta {
-            return Err(SendPaymentError::GatewayExpirationExceedsLimit);
-        }
 
         let ln_fee = if is_direct_swap {
             Amount::ZERO
@@ -347,17 +324,17 @@ impl LightningClientModule {
         Ok(operation)
     }
 
-    /// Request an invoice. A random online gateway is selected automatically.
+    /// Request an invoice from a caller-selected gateway.
     ///
-    /// The total fee for this payment may depend on the chosen gateway but
-    /// will be limited to half of one percent plus fifty satoshis. Since the
-    /// selected gateway has been vetted by at least one guardian we trust it to
-    /// set a reasonable fee and only enforce a rather high limit.
-    ///
-    /// The absolute fee for a payment can be calculated from the operation meta
-    /// to be shown to the user in the transaction history.
+    /// The caller obtains `(gateway_api, gateway_info)` via
+    /// [`Self::select_gateway`] (or [`Self::list_gateways`] +
+    /// [`Self::gateway_info`] for full manual control), inspects
+    /// `gateway_info.receive_fee` to preview the cost, and then passes both
+    /// back here. The client library does not enforce a fee limit.
     pub async fn receive(
         &self,
+        gateway_api: String,
+        gateway_info: GatewayInfo,
         amount: Amount,
         expiry_secs: u32,
         description: Bolt11InvoiceDescription,
@@ -365,6 +342,8 @@ impl LightningClientModule {
         let receive_keypair = self.secret.receive_keypair();
 
         self.create_contract_and_fetch_invoice(
+            gateway_api,
+            gateway_info,
             receive_keypair.public_key(),
             amount,
             expiry_secs,
@@ -378,6 +357,8 @@ impl LightningClientModule {
     /// invoice.
     async fn create_contract_and_fetch_invoice(
         &self,
+        gateway_api: String,
+        gateway_info: GatewayInfo,
         recipient_pk: PublicKey,
         amount: Amount,
         expiry_secs: u32,
@@ -393,16 +374,7 @@ impl LightningClientModule {
         let preimage = contract_secret.preimage();
         let claim_tweak = contract_secret.claim_tweak();
 
-        let (gateway, routing_info) = self
-            .select_gateway(None)
-            .await
-            .map_err(ReceiveError::SelectGateway)?;
-
-        if !routing_info.receive_fee.le(&PaymentFee::RECEIVE_FEE_LIMIT) {
-            return Err(ReceiveError::GatewayFeeExceedsLimit);
-        }
-
-        let fee = routing_info.receive_fee.fee(amount.msats);
+        let fee = gateway_info.receive_fee.fee(amount.msats);
 
         if amount
             .checked_sub(fee)
@@ -432,12 +404,12 @@ impl LightningClientModule {
             fee,
             expiration,
             claim_pk,
-            routing_info.module_public_key,
+            gateway_info.module_public_key,
             ephemeral_kp.public_key(),
         );
 
         let invoice = gateway_http::bolt11_invoice(
-            &gateway,
+            &gateway_api,
             self.federation_id,
             contract.clone(),
             amount,
@@ -610,12 +582,6 @@ pub enum SendPaymentError {
     InvoiceExpired,
     #[error("A payment for this invoice has already been attempted")]
     InvoiceAlreadyAttempted(OperationId),
-    #[error(transparent)]
-    SelectGateway(SelectGatewayError),
-    #[error("Gateway fee exceeds the allowed limit")]
-    GatewayFeeExceedsLimit,
-    #[error("Gateway expiration time exceeds the allowed limit")]
-    GatewayExpirationExceedsLimit,
     #[error("Failed to request block count")]
     FailedToRequestBlockCount,
     #[error("Failed to fund the payment")]
@@ -629,12 +595,8 @@ pub enum SendPaymentError {
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
 pub enum ReceiveError {
-    #[error(transparent)]
-    SelectGateway(SelectGatewayError),
     #[error("Failed to connect to gateway")]
     FailedToConnectToGateway(String),
-    #[error("Gateway fee exceeds the allowed limit")]
-    GatewayFeeExceedsLimit,
     #[error("Amount is too small to cover fees")]
     AmountTooSmall,
     #[error("Gateway returned an invalid invoice")]
