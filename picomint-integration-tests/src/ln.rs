@@ -250,7 +250,8 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
             3600,
         )?;
 
-        let send_op = ln.send(invoice).await?;
+        let (gateway_api, gateway_info) = ln.select_gateway(Some(invoice.clone())).await?;
+        let send_op = ln.send(gateway_api, gateway_info, invoice).await?;
 
         let Some((op, LnEvent::Send(_))) = events.next().await else {
             panic!("Expected Send event");
@@ -279,8 +280,11 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     info!("Testing payment from LDK node to client (half of first send)...");
 
     {
+        let (gateway_api, gateway_info) = ln.select_gateway(None).await?;
         let invoice = ln
             .receive(
+                gateway_api,
+                gateway_info,
                 Amount::from_msats(500_000),
                 300,
                 Bolt11InvoiceDescription::Direct(String::new()),
@@ -323,7 +327,8 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
             payment_hash,
         )?;
 
-        let send_op = ln.send(invoice).await?;
+        let (gateway_api, gateway_info) = ln.select_gateway(Some(invoice.clone())).await?;
+        let send_op = ln.send(gateway_api, gateway_info, invoice).await?;
 
         let Some((op, LnEvent::Send(_))) = events.next().await else {
             panic!("Expected Send event");
@@ -412,7 +417,10 @@ async fn test_mock_send_exactly_once(client: &Arc<Client>) -> anyhow::Result<()>
 
     let mut events = pin!(ln_event_stream(client));
 
-    let send_op = ln.send(invoice.clone()).await?;
+    let (gateway_api, gateway_info) = ln.select_gateway(Some(invoice.clone())).await?;
+    let send_op = ln
+        .send(gateway_api.clone(), gateway_info.clone(), invoice.clone())
+        .await?;
 
     wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
     wait_ln_event(&mut events, send_op, |e| {
@@ -420,7 +428,7 @@ async fn test_mock_send_exactly_once(client: &Arc<Client>) -> anyhow::Result<()>
     })
     .await;
 
-    match ln.send(invoice).await {
+    match ln.send(gateway_api, gateway_info, invoice).await {
         Err(SendPaymentError::InvoiceAlreadyAttempted(op)) => assert_eq!(op, send_op),
         other => panic!("Expected InvoiceAlreadyAttempted, got {other:?}"),
     }
@@ -435,7 +443,9 @@ async fn test_mock_send_refund_forfeit(client: &Arc<Client>) -> anyhow::Result<(
 
     let mut events = pin!(ln_event_stream(client));
 
-    let send_op = client.ln().send(unpayable_invoice()).await?;
+    let invoice = unpayable_invoice();
+    let (gateway_api, gateway_info) = client.ln().select_gateway(Some(invoice.clone())).await?;
+    let send_op = client.ln().send(gateway_api, gateway_info, invoice).await?;
 
     wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
     wait_ln_event(&mut events, send_op, |e| {
@@ -451,7 +461,10 @@ async fn test_mock_send_refund_forfeit(client: &Arc<Client>) -> anyhow::Result<(
 async fn test_mock_wrong_network(client: &Arc<Client>) -> anyhow::Result<()> {
     info!("ln: test_mock_wrong_network");
 
-    match client.ln().send(signet_invoice()).await {
+    let invoice = signet_invoice();
+    let (gateway_api, gateway_info) = client.ln().select_gateway(Some(invoice.clone())).await?;
+
+    match client.ln().send(gateway_api, gateway_info, invoice).await {
         Err(SendPaymentError::WrongCurrency {
             invoice_currency: Currency::Signet,
             federation_currency: Currency::Regtest,
@@ -476,7 +489,9 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
     // manually before the client ever sees a gateway response.
     let preimage = [12u8; 32];
 
-    let send_op = ln.send(crash_invoice(preimage)).await?;
+    let invoice = crash_invoice(preimage);
+    let (gateway_api, gateway_info) = ln.select_gateway(Some(invoice.clone())).await?;
+    let send_op = ln.send(gateway_api, gateway_info, invoice).await?;
 
     let send_event =
         match wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await {
@@ -534,7 +549,9 @@ async fn test_unilateral_refund(env: &TestEnv, client: &Arc<Client>) -> anyhow::
     // Same crash scenario — the mock never settles, and without any on-chain
     // preimage reveal the contract must eventually expire so the client can
     // pull its funds back via `OutgoingWitness::Refund`.
-    let send_op = client.ln().send(crash_invoice([13; 32])).await?;
+    let invoice = crash_invoice([13; 32]);
+    let (gateway_api, gateway_info) = client.ln().select_gateway(Some(invoice.clone())).await?;
+    let send_op = client.ln().send(gateway_api, gateway_info, invoice).await?;
 
     wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
 
