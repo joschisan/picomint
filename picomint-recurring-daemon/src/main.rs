@@ -12,12 +12,12 @@ use clap::Parser;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
+use picomint_core::ln::MINIMUM_INCOMING_CONTRACT_AMOUNT;
 use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
 use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, GatewayInfo, PaymentFee};
 use picomint_core::ln::lnurl::LnurlRequest;
 use picomint_core::ln::routes::{ROUTE_CREATE_BOLT11_INVOICE, ROUTE_GATEWAY_INFO};
 use picomint_core::ln::secret::IncomingContractSecret;
-use picomint_core::ln::{Bolt11InvoiceDescription, MINIMUM_INCOMING_CONTRACT_AMOUNT};
 use picomint_encoding::Encodable;
 use picomint_lnurl::{InvoiceResponse, LnurlResponse, PayResponse, pay_request_tag};
 use reqwest::Method;
@@ -226,7 +226,6 @@ async fn create_contract_and_fetch_invoice(
             federation_id,
             contract: contract.clone(),
             amount: Amount::from_msats(amount),
-            description: Bolt11InvoiceDescription::Direct("LNURL Payment".to_string()),
             expiry_secs,
         },
     )

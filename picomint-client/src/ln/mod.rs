@@ -15,8 +15,8 @@ use crate::module::ClientContext;
 use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
-use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
-use lightning_invoice::{Bolt11Invoice, Currency};
+use db::{INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
+use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescriptionRef, Currency};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::config::LightningConfigConsensus;
@@ -24,8 +24,7 @@ use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentIm
 use picomint_core::ln::gateway_api::{GatewayInfo, PaymentFee};
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_core::ln::{
-    Bolt11InvoiceDescription, LightningInput, LightningInvoice, LightningOutput,
-    MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
+    LightningInput, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
 };
 use picomint_core::wire;
 
@@ -104,50 +103,16 @@ impl LightningClientModule {
 
         module.spawn_receive_scan_task(tg);
 
-        module.spawn_gateway_map_update_task(tg);
-
         Ok(module)
     }
 
-    fn spawn_gateway_map_update_task(&self, tg: &TaskGroup) {
-        let module = self.clone();
-
-        tg.spawn(async move {
-            module.update_gateway_map().await;
-        });
-    }
-
-    async fn update_gateway_map(&self) {
-        // Update the mapping from lightning node public keys to gateway api
-        // endpoints maintained in the module database. When paying an invoice this
-        // enables the client to select the gateway that has created the invoice,
-        // if possible, such that the payment does not go over lightning, reducing
-        // fees and latency.
-
-        if let Ok(gateways) = self.client_ctx.api().ln_gateways().await {
-            let mut entries = Vec::new();
-            for gateway in gateways {
-                if let Ok(Some(gateway_info)) =
-                    gateway_http::gateway_info(&gateway, &self.federation_id).await
-                {
-                    entries.push((gateway_info.lightning_public_key, gateway));
-                }
-            }
-
-            let dbtx = self.client_ctx.db().begin_write();
-
-            for (key, gateway) in entries {
-                dbtx.as_ref().insert(&GATEWAY, &GatewayKey(key), &gateway);
-            }
-
-            dbtx.commit();
-        }
-    }
-
-    /// Selects an available gateway by querying the federation's registered
-    /// gateways, checking if one of them match the invoice's payee public
-    /// key, then queries the gateway for `RoutingInfo` to determine if it is
-    /// online.
+    /// Selects an available, federation-registered gateway and fetches its
+    /// `GatewayInfo`. When `invoice` is `Some`, the invoice's BOLT11
+    /// description is parsed as a URL — picomint gateways set the
+    /// description to their own public-facing URL when issuing invoices —
+    /// and if that URL is in the federation's gateway list it's preferred
+    /// for a direct ecash swap. Otherwise the first responsive registered
+    /// gateway wins.
     pub async fn select_gateway(
         &self,
         invoice: Option<Bolt11Invoice>,
@@ -164,12 +129,8 @@ impl LightningClientModule {
         }
 
         if let Some(invoice) = invoice
-            && let Some(gateway) = self
-                .client_ctx
-                .db()
-                .begin_read()
-                .get(&GATEWAY, &GatewayKey(invoice.recover_payee_pub_key()))
-                .filter(|gateway| gateways.contains(gateway))
+            && let Some(gateway) = invoice_gateway_hint(&invoice)
+            && gateways.contains(&gateway)
             && let Ok(Some(gateway_info)) = self.gateway_info(&gateway).await
         {
             return Ok((gateway, gateway_info));
@@ -356,7 +317,6 @@ impl LightningClientModule {
         gateway_info: GatewayInfo,
         amount: Amount,
         expiry_secs: u32,
-        description: Bolt11InvoiceDescription,
     ) -> Result<Bolt11Invoice, ReceiveError> {
         let receive_keypair = self.secret.receive_keypair();
 
@@ -366,7 +326,6 @@ impl LightningClientModule {
             receive_keypair.public_key(),
             amount,
             expiry_secs,
-            description,
         )
         .await
     }
@@ -381,7 +340,6 @@ impl LightningClientModule {
         recipient_pk: PublicKey,
         amount: Amount,
         expiry_secs: u32,
-        description: Bolt11InvoiceDescription,
     ) -> Result<Bolt11Invoice, ReceiveError> {
         let ephemeral_kp = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
@@ -436,7 +394,6 @@ impl LightningClientModule {
             self.federation_id,
             contract.clone(),
             amount,
-            description,
             expiry_secs,
         )
         .await
@@ -657,8 +614,22 @@ pub enum GatewayInfoError {
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
 pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>) {
-    dbtx.delete_table(&GATEWAY);
     dbtx.delete_table(&INCOMING_CONTRACT_STREAM_INDEX);
     dbtx.delete_table(&SEND_OPERATION);
     dbtx.delete_table(&crate::executor::table::<SendStateMachine>());
+}
+
+/// Extract the gateway URL a picomint gateway embeds in the BOLT11
+/// `description` field when issuing an invoice. Returns `None` for any
+/// invoice whose description is hashed (`h` field) or doesn't parse as a
+/// plain URL — i.e. any non-picomint invoice — so the caller falls back to
+/// generic gateway selection.
+fn invoice_gateway_hint(invoice: &Bolt11Invoice) -> Option<String> {
+    let Bolt11InvoiceDescriptionRef::Direct(desc) = invoice.description() else {
+        return None;
+    };
+
+    let url = desc.as_inner().0.as_str();
+
+    (url.starts_with("http://") || url.starts_with("https://")).then(|| url.to_string())
 }

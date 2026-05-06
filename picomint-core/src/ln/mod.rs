@@ -22,12 +22,6 @@ use tpe::AggregateDecryptionKey;
 use crate::ln::contracts::{IncomingContract, OutgoingContract};
 use crate::{Amount, OutPoint};
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum Bolt11InvoiceDescription {
-    Direct(String),
-    Hash(sha256::Hash),
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Decodable, Encodable)]
 pub enum LightningInvoice {
     Bolt11(Bolt11Invoice),

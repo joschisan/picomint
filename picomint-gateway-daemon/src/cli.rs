@@ -12,7 +12,7 @@ use hex::ToHex;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
-use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
+use lightning_invoice::{Bolt11InvoiceDescription, Description};
 use picomint_client::wallet::events::{SendFailureEvent, SendSuccessEvent};
 use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
@@ -389,11 +389,11 @@ async fn ldk_invoice_create(
 ) -> Result<Json<LdkInvoiceCreateResponse>, CliError> {
     let expiry_secs = payload.expiry_secs.unwrap_or(3600);
     let description = match payload.description {
-        Some(desc) => LdkBolt11InvoiceDescription::Direct(
+        Some(desc) => Bolt11InvoiceDescription::Direct(
             Description::new(desc)
                 .map_err(|_| CliError::internal("Invalid invoice description"))?,
         ),
-        None => LdkBolt11InvoiceDescription::Direct(Description::empty()),
+        None => Bolt11InvoiceDescription::Direct(Description::empty()),
     };
 
     let invoice = state

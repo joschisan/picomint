@@ -12,15 +12,14 @@ use serde::{Deserialize, Serialize};
 use crate::Amount;
 use crate::OutPoint;
 use crate::config::FederationId;
+use crate::ln::LightningInvoice;
 use crate::ln::contracts::{IncomingContract, OutgoingContract};
-use crate::ln::{Bolt11InvoiceDescription, LightningInvoice};
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CreateBolt11InvoicePayload {
     pub federation_id: FederationId,
     pub contract: IncomingContract,
     pub amount: Amount,
-    pub description: Bolt11InvoiceDescription,
     pub expiry_secs: u32,
 }
 

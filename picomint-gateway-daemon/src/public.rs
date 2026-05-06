@@ -1,6 +1,7 @@
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Json, Path, Query, State};
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use bitcoin::hashes::sha256;
@@ -97,10 +98,33 @@ async fn pay_bolt11_invoice(
 #[instrument(skip_all, err)]
 async fn create_bolt11_invoice(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<CreateBolt11InvoicePayload>,
 ) -> Result<Json<serde_json::Value>, CliError> {
-    let invoice = state.create_bolt11_invoice(payload).await?;
+    let invoice = state
+        .create_bolt11_invoice(payload, &base_url(&headers))
+        .await?;
     Ok(Json(json!(invoice)))
+}
+
+/// Reconstruct the public URL the caller used to reach this gateway from
+/// the request headers, so it can be embedded in the BOLT11 invoice the
+/// caller is about to receive. Mirrors `picomint-recurring-daemon`'s
+/// `base_url`: prefer `x-forwarded-*` (set by reverse proxies) over the
+/// raw `Host` header.
+fn base_url(headers: &HeaderMap) -> String {
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("localhost");
+
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("http");
+
+    format!("{scheme}://{host}")
 }
 
 async fn verify_bolt11_preimage_get(
