@@ -420,9 +420,9 @@ impl MintClientModule {
 
         let funding: Amount = spendable_notes.iter().map(|n| n.amount()).sum();
 
-        let change = funding.saturating_sub(deficit);
+        let remint = funding.saturating_sub(deficit);
 
-        let txid = self.submit(dbtx, operation, builder, change, event)?;
+        let txid = self.submit(dbtx, operation, builder, remint, event)?;
 
         if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
             let sm = MintStateMachine {
@@ -504,7 +504,7 @@ impl MintClientModule {
         dbtx: &WriteTxRef<'_>,
         operation: OperationId,
         builder: TxBuilder,
-        change: Amount,
+        remint: Amount,
         event: impl FnOnce(TransactionId) -> E,
     ) -> anyhow::Result<TransactionId> {
         let fee = builder.total_fee();
@@ -523,7 +523,7 @@ impl MintClientModule {
         self.client_ctx.log_event(dbtx, operation, event(txid));
 
         self.client_ctx
-            .log_event(dbtx, operation, crate::TxCreateEvent { txid, change, fee });
+            .log_event(dbtx, operation, crate::TxCreateEvent { txid, remint, fee });
 
         Ok(txid)
     }
@@ -755,10 +755,10 @@ impl MintClientModule {
 
         let funding: Amount = funding_notes.iter().map(|n| n.amount()).sum();
 
-        let change = funding.saturating_sub(deficit);
+        let remint = funding.saturating_sub(deficit);
 
         let txid = self
-            .submit(&dbtx.as_ref(), operation, builder, change, |txid| {
+            .submit(&dbtx.as_ref(), operation, builder, remint, |txid| {
                 RemintEvent { txid }
             })
             .map_err(|_| SendECashError::Failure)?;
