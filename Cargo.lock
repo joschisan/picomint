@@ -3531,6 +3531,7 @@ dependencies = [
  "bitcoin",
  "clap",
  "lightning-invoice",
+ "picomint-client",
  "picomint-core",
  "serde",
  "serde_json",

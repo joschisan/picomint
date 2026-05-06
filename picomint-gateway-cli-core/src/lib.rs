@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use bitcoin::address::NetworkUnchecked;
 use clap::Args;
 use lightning_invoice::Bolt11Invoice;
+use picomint_client::mint::ECash;
 use picomint_core::config::FederationId;
 use picomint_core::mint::Denomination;
 use picomint_core::{Amount, PeerId, secp256k1};
@@ -288,14 +289,14 @@ pub struct FederationMintSendRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FederationMintSendResponse {
-    pub notes: String,
+    pub ecash: ECash,
 }
 
 // --- /federation/module/mint/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationMintReceiveRequest {
-    pub notes: String,
+    pub ecash: ECash,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
