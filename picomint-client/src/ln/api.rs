@@ -1,4 +1,4 @@
-use crate::api::{FederationApi, FederationResult};
+use crate::api::FederationApi;
 use picomint_core::OutPoint;
 use picomint_core::ln::contracts::IncomingContract;
 use picomint_core::ln::methods::{
@@ -9,7 +9,7 @@ use picomint_core::ln::methods::{
 use picomint_core::module::Method;
 
 impl FederationApi {
-    pub async fn ln_consensus_block_count(&self) -> FederationResult<u64> {
+    pub async fn ln_consensus_block_count(&self) -> anyhow::Result<u64> {
         self.request_current_consensus::<ConsensusBlockCountResponse>(Method::Ln(
             LnMethod::ConsensusBlockCount(ConsensusBlockCountRequest),
         ))
@@ -45,7 +45,7 @@ impl FederationApi {
     /// guardians. Each guardian maintains their own vetted-gateway list
     /// via the admin CLI; the response is byte-canonical (sorted via redb
     /// iteration) so threshold equality is deterministic.
-    pub async fn ln_gateways(&self) -> FederationResult<Vec<String>> {
+    pub async fn ln_gateways(&self) -> anyhow::Result<Vec<String>> {
         self.request_current_consensus::<GatewaysResponse>(Method::Ln(LnMethod::Gateways(
             GatewaysRequest,
         )))

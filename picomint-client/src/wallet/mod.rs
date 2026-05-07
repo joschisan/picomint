@@ -9,12 +9,11 @@ mod send_sm;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use crate::api::FederationResult;
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
 use db::{NEXT_OUTPUT_INDEX, VALID_ADDRESS_INDEX};
@@ -97,7 +96,7 @@ impl WalletClientModule {
     }
 
     /// Fetch the total value of bitcoin controlled by the federation.
-    pub async fn total_value(&self) -> FederationResult<bitcoin::Amount> {
+    pub async fn total_value(&self) -> anyhow::Result<bitcoin::Amount> {
         self.client_ctx
             .api()
             .wallet_federation_wallet()
@@ -106,12 +105,12 @@ impl WalletClientModule {
     }
 
     /// Fetch the consensus block count of the federation.
-    pub async fn block_count(&self) -> FederationResult<u64> {
+    pub async fn block_count(&self) -> anyhow::Result<u64> {
         self.client_ctx.api().wallet_consensus_block_count().await
     }
 
     /// Fetch the current consensus feerate.
-    pub async fn feerate(&self) -> FederationResult<Option<u64>> {
+    pub async fn feerate(&self) -> anyhow::Result<Option<u64>> {
         self.client_ctx.api().wallet_consensus_feerate().await
     }
 
@@ -381,7 +380,7 @@ impl WalletClientModule {
                         .wallet_receive_fee()
                         .await
                         .map_err(|_| anyhow!("Failed to request wallet receive fee"))?
-                        .ok_or(anyhow!("No consensus feerate is available"))?;
+                        .context("No consensus feerate is available")?;
 
                     if output.value > receive_fee {
                         let (operation, txid) = self.receive_output(

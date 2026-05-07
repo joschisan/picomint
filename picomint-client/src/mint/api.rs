@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use crate::api::{FederationApi, ServerError};
+use crate::api::FederationApi;
 use crate::query::FilterMapThreshold;
 use bitcoin_hashes::sha256;
 use picomint_core::mint::methods::{
@@ -29,7 +29,6 @@ impl FederationApi {
             FilterMapThreshold::new(
                 move |peer, resp: SignatureSharesResponse| {
                     verify_blind_shares(peer, resp.shares, &issuance_requests, &tbs_pks)
-                        .map_err(ServerError::InvalidResponse)
                 },
                 self.num_peers(),
             ),
@@ -52,7 +51,6 @@ impl FederationApi {
             FilterMapThreshold::new(
                 move |peer, resp: SignatureSharesRecoveryResponse| {
                     verify_blind_shares(peer, resp.shares, &issuance_requests, &tbs_pks)
-                        .map_err(ServerError::InvalidResponse)
                 },
                 self.num_peers(),
             ),
