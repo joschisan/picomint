@@ -40,3 +40,11 @@ impl<'de> Deserialize<'de> for InviteCode {
             .map_err(serde::de::Error::custom)
     }
 }
+
+impl std::str::FromStr for InviteCode {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        picomint_base32::decode(s)
+    }
+}

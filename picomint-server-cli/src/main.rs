@@ -12,7 +12,8 @@ use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_server_cli_core::{
-    CLI_SOCKET_FILENAME, LnGatewayRequest, ROUTE_AUDIT, ROUTE_CONFIG, ROUTE_INVITE,
+    CLI_SOCKET_FILENAME, ExpirationSetRequest, LnGatewayRequest, ROUTE_AUDIT, ROUTE_CONFIG,
+    ROUTE_EXPIRATION_CLEAR, ROUTE_EXPIRATION_SET, ROUTE_EXPIRATION_STATUS, ROUTE_INVITE,
     ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
     ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
     ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
@@ -51,9 +52,22 @@ enum Commands {
     Config,
     /// Number of consensus sessions this guardian has finalized
     SessionCount,
+    /// Federation expiration announcement
+    #[command(subcommand)]
+    Expiration(ExpirationCommands),
     /// Module admin commands
     #[command(subcommand)]
     Module(ModuleCommands),
+}
+
+#[derive(Subcommand)]
+enum ExpirationCommands {
+    /// Announce a federation expiration
+    Set(ExpirationSetRequest),
+    /// Clear the announced expiration
+    Clear,
+    /// Show the announced expiration (this guardian's local view)
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -191,6 +205,12 @@ async fn main() -> Result<()> {
         Commands::Audit => request(d, ROUTE_AUDIT, ()).await?,
         Commands::Config => request(d, ROUTE_CONFIG, ()).await?,
         Commands::SessionCount => request(d, ROUTE_SESSION_COUNT, ()).await?,
+
+        Commands::Expiration(cmd) => match cmd {
+            ExpirationCommands::Set(req) => request(d, ROUTE_EXPIRATION_SET, req).await?,
+            ExpirationCommands::Clear => request(d, ROUTE_EXPIRATION_CLEAR, ()).await?,
+            ExpirationCommands::Status => request(d, ROUTE_EXPIRATION_STATUS, ()).await?,
+        },
 
         Commands::Setup(cmd) => match cmd {
             SetupCommands::Status => request(d, ROUTE_SETUP_STATUS, ()).await?,

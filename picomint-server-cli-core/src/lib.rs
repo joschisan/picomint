@@ -1,4 +1,5 @@
 use clap::Args;
+use picomint_core::invite::InviteCode;
 use picomint_core::module::audit::AuditSummary;
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +28,9 @@ pub const ROUTE_INVITE: &str = "/invite";
 pub const ROUTE_AUDIT: &str = "/audit";
 pub const ROUTE_CONFIG: &str = "/config";
 pub const ROUTE_SESSION_COUNT: &str = "/session-count";
+pub const ROUTE_EXPIRATION_SET: &str = "/expiration/set";
+pub const ROUTE_EXPIRATION_CLEAR: &str = "/expiration/clear";
+pub const ROUTE_EXPIRATION_STATUS: &str = "/expiration/status";
 
 // Module routes
 pub const ROUTE_MODULE_WALLET_TOTAL_VALUE: &str = "/module/wallet/total-value";
@@ -117,4 +121,16 @@ pub struct WalletFeerateResponse {
 pub struct LnGatewayRequest {
     /// Gateway URL
     pub url: String,
+}
+
+// --- /expiration/set ---
+
+#[derive(Clone, Debug, Serialize, Deserialize, Args)]
+pub struct ExpirationSetRequest {
+    /// Expiration date as a unix timestamp in seconds (midnight UTC).
+    #[arg(long)]
+    pub timestamp: u64,
+    /// Optional successor-federation invite code (base32-encoded).
+    #[arg(long)]
+    pub successor: Option<InviteCode>,
 }

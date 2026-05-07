@@ -12,8 +12,8 @@ use crate::invite::InviteCode;
 /// optional successor federation invite code for users to migrate to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ExpirationStatus {
-    /// Expiration date as a unix timestamp (midnight UTC).
-    pub date: u64,
+    /// Expiration date as a unix timestamp in seconds (midnight UTC).
+    pub timestamp: u64,
     /// Optional invite code for the successor federation.
     pub successor: Option<InviteCode>,
 }

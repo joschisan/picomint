@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+use picomint_core::expiration::ExpirationStatus;
+use picomint_core::invite::InviteCode;
 use picomint_gateway_cli_core::{
     FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkInvoiceCreateResponse,
     LdkOnchainReceiveResponse,
@@ -212,4 +214,34 @@ pub fn server_ln_gateway_remove(data_dir: &Path, gateway: &str) -> Result<bool> 
         .arg("remove")
         .arg(gateway)
         .run_cli::<bool>()
+}
+
+pub fn server_expiration_set(
+    data_dir: &Path,
+    timestamp: u64,
+    successor: Option<&InviteCode>,
+) -> Result<Value> {
+    let mut cmd = server_cmd(data_dir);
+    cmd.arg("expiration")
+        .arg("set")
+        .arg("--timestamp")
+        .arg(timestamp.to_string());
+    if let Some(invite) = successor {
+        cmd.arg("--successor").arg(picomint_base32::encode(invite));
+    }
+    cmd.run_cli::<Value>()
+}
+
+pub fn server_expiration_clear(data_dir: &Path) -> Result<Value> {
+    server_cmd(data_dir)
+        .arg("expiration")
+        .arg("clear")
+        .run_cli::<Value>()
+}
+
+pub fn server_expiration_status(data_dir: &Path) -> Result<Option<ExpirationStatus>> {
+    server_cmd(data_dir)
+        .arg("expiration")
+        .arg("status")
+        .run_cli::<Option<ExpirationStatus>>()
 }
