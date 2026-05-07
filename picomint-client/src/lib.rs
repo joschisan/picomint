@@ -23,6 +23,8 @@ mod client;
 pub mod envs;
 /// Per-module typed state machine executor
 pub mod executor;
+/// Federation expiration-status cache + refresh.
+pub mod expiration;
 /// Gateway lightning module (mounted by the gateway daemon).
 pub mod gw;
 /// Lightning module client.

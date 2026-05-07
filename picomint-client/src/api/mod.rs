@@ -13,7 +13,11 @@ use iroh::endpoint::Connection;
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{BackoffBuilder, Retryable, networking_backoff};
 use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
-use picomint_core::methods::{CoreMethod, LivenessRequest, SubmitTxRequest, SubmitTxResponse};
+use picomint_core::expiration::ExpirationStatus;
+use picomint_core::methods::{
+    CoreMethod, ExpirationStatusRequest, ExpirationStatusResponse, LivenessRequest,
+    SubmitTxRequest, SubmitTxResponse,
+};
 use picomint_core::module::{ApiError, Method, PICOMINT_ALPN};
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_encoding::{Decodable, Encodable};
@@ -384,6 +388,18 @@ impl FederationApi {
         self.request_current_consensus(Method::Core(CoreMethod::Liveness(LivenessRequest)))
             .await
             .map(|_: picomint_core::methods::LivenessResponse| ())
+    }
+
+    /// Fetch the federation's announced expiration status, threshold-
+    /// consensus verified. Returns `Some(_)` only if a threshold of
+    /// guardians return the byte-equal value, `None` if all guardians
+    /// agree no expiration has been announced.
+    pub async fn expiration_status(&self) -> FederationResult<Option<ExpirationStatus>> {
+        self.request_current_consensus::<ExpirationStatusResponse>(Method::Core(
+            CoreMethod::ExpirationStatus(ExpirationStatusRequest),
+        ))
+        .await
+        .map(|r| r.status)
     }
 }
 

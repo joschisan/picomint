@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
+use picomint_core::expiration::ExpirationStatus;
 use picomint_core::methods::CoreMethod;
 use picomint_core::module::ApiError;
 use picomint_core::module::audit::AuditSummary;
@@ -17,7 +18,7 @@ use tokio::sync::watch::{Receiver, Sender};
 use tracing::warn;
 
 use crate::config::ServerConfig;
-use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TX, SIGNED_SESSION_OUTCOME};
+use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TX, EXPIRATION_STATUS, SIGNED_SESSION_OUTCOME};
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::server::{Server, process_tx_with_server};
 use crate::p2p::P2PStatusReceivers;
@@ -109,6 +110,30 @@ impl ConsensusApi {
         let dbtx = self.db.begin_write();
         self.server.audit(&dbtx).await
     }
+
+    /// Read this guardian's announced expiration status from the local
+    /// `EXPIRATION_STATUS` table. Returned over the wire by the
+    /// `ExpirationStatus` RPC and surfaced on the dashboard.
+    #[must_use]
+    pub fn expiration_status_ui(&self) -> Option<ExpirationStatus> {
+        self.db.begin_read().get(&EXPIRATION_STATUS, &())
+    }
+
+    /// Set or clear this guardian's announced expiration status. All
+    /// guardians must announce byte-equal values for clients to accept the
+    /// announcement (threshold-consensus read).
+    pub fn set_expiration_status_ui(&self, status: Option<ExpirationStatus>) {
+        let dbtx = self.db.begin_write();
+        match status {
+            Some(s) => {
+                dbtx.insert(&EXPIRATION_STATUS, &(), &s);
+            }
+            None => {
+                dbtx.remove(&EXPIRATION_STATUS, &());
+            }
+        }
+        dbtx.commit();
+    }
 }
 
 impl ConsensusApi {
@@ -117,6 +142,7 @@ impl ConsensusApi {
             CoreMethod::SubmitTx(req) => handler_async!(submit_tx, self, req).await,
             CoreMethod::Config(req) => handler!(config, self, req).await,
             CoreMethod::Liveness(req) => handler!(liveness, self, req).await,
+            CoreMethod::ExpirationStatus(req) => handler!(expiration_status, self, req).await,
         }
     }
 }

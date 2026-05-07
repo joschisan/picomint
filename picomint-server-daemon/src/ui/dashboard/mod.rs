@@ -1,6 +1,7 @@
 pub mod audit;
 pub mod bitcoin;
 pub mod config;
+pub mod expiration;
 pub mod general;
 pub mod invite;
 pub mod modules;
@@ -26,6 +27,8 @@ use crate::ui::{
 };
 
 pub const BACKUP_CONFIG_ROUTE: &str = "/backup-config";
+pub const SET_EXPIRATION_ROUTE: &str = "/expiration/set";
+pub const CLEAR_EXPIRATION_ROUTE: &str = "/expiration/clear";
 
 async fn login_form_handler() -> impl IntoResponse {
     Html(single_card_layout("Enter Password", login_form(None)).into_string())
@@ -87,29 +90,36 @@ async fn dashboard_view(
     let audit_summary = api.federation_audit().await;
     let bitcoin_rpc_url = api.bitcoin_rpc_connection.url();
     let bitcoin_rpc_status = api.bitcoin_rpc_connection.status();
+    let expiration_status = api.expiration_status_ui();
 
     let content = html! {
         div class="row gy-4" {
-            div class="col-lg-4" {
+            div class="col-lg-6" {
                 (general::render(&federation_name, session_count, &guardian_names))
             }
 
-            div class="col-lg-4" {
+            div class="col-lg-6" {
                 (invite::render(&invite_code, session_count))
-            }
-
-            div class="col-lg-4" {
-                (config::render())
             }
         }
 
         div class="row gy-4 mt-2" {
             div class="col-lg-6" {
-                (audit::render(&audit_summary))
+                (config::render())
             }
 
             div class="col-lg-6" {
+                (audit::render(&audit_summary))
+            }
+        }
+
+        div class="row gy-4 mt-2" {
+            div class="col-lg-6" {
                 (peers::render(&p2p_connection_status))
+            }
+
+            div class="col-lg-6" {
+                (expiration::render(expiration_status.as_ref()))
             }
         }
 
@@ -142,6 +152,8 @@ pub fn router(api: Arc<ConsensusApi>, auth: ApiAuth) -> Router {
         .route(ROOT_ROUTE, get(dashboard_view))
         .route(LOGIN_ROUTE, get(login_form_handler).post(login_submit))
         .route(BACKUP_CONFIG_ROUTE, get(backup_config))
+        .route(SET_EXPIRATION_ROUTE, post(expiration::post_set))
+        .route(CLEAR_EXPIRATION_ROUTE, post(expiration::post_clear))
         .route(ln::LN_ADD_ROUTE, post(ln::post_add))
         .route(ln::LN_REMOVE_ROUTE, post(ln::post_remove))
         .with_static_routes()

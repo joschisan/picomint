@@ -26,6 +26,7 @@ axum = { workspace = true, features = ["macros", "multipart"] }
 axum-extra = { workspace = true, features = ["cookie", "form"] }
 bitcoin = { workspace = true }
 bls12_381 = { workspace = true }
+chrono = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
 group = { workspace = true }

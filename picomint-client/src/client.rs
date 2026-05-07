@@ -164,7 +164,7 @@ impl Client {
             }
         };
 
-        Ok(Arc::new(Client {
+        let client = Arc::new(Client {
             config: tokio::sync::RwLock::new(config),
             db,
             federation_id,
@@ -173,7 +173,15 @@ impl Client {
             ln,
             api,
             tg,
-        }))
+        });
+
+        let c = client.clone();
+
+        client
+            .tg
+            .spawn(async move { c.refresh_expiration_status().await.ok() });
+
+        Ok(client)
     }
 
     /// Cancel all spawned tasks and wait for them to finish. No timeout —
@@ -201,6 +209,7 @@ impl Client {
         crate::ln::wipe_tables(dbtx);
         crate::gw::wipe_tables(dbtx);
         crate::tx::wipe_tables(dbtx);
+        crate::expiration::wipe_tables(dbtx);
     }
 
     pub fn api(&self) -> &FederationApi {
