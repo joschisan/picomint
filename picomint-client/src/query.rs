@@ -4,8 +4,6 @@ use std::mem;
 
 use picomint_core::{NumPeers, PeerId};
 
-use crate::api::{ServerError, ServerResult};
-
 /// Picomint query strategy
 ///
 /// Due to federated security model each Picomint client API call to the
@@ -30,20 +28,20 @@ pub enum QueryStep<R> {
     /// Return the successful result
     Success(R),
     /// A non-retryable failure has occurred
-    Failure(ServerError),
+    Failure(anyhow::Error),
 }
 
 /// Returns when we obtain a threshold of valid responses. RPC call errors or
 /// invalid responses are not retried.
 pub struct FilterMapThreshold<R, T> {
-    filter_map: Box<dyn Fn(PeerId, R) -> ServerResult<T> + Send + Sync>,
+    filter_map: Box<dyn Fn(PeerId, R) -> anyhow::Result<T> + Send + Sync>,
     filtered_responses: BTreeMap<PeerId, T>,
     threshold: usize,
 }
 
 impl<R, T> FilterMapThreshold<R, T> {
     pub fn new(
-        verifier: impl Fn(PeerId, R) -> ServerResult<T> + Send + Sync + 'static,
+        verifier: impl Fn(PeerId, R) -> anyhow::Result<T> + Send + Sync + 'static,
         num_peers: NumPeers,
     ) -> Self {
         Self {

@@ -41,7 +41,6 @@ serde_json = { workspace = true }
 tbs = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time", "macros", "rt"] }
-tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
 tpe = { workspace = true }
 tracing = { workspace = true }

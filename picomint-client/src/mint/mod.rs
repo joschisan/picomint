@@ -149,7 +149,7 @@ impl MintClientModule {
             return self.finalize_recovery(state).await;
         }
 
-        let peer_selector = PeerSelector::new(module_api.all_peers().clone());
+        let peer_selector = PeerSelector::new(module_api.all_peers());
 
         let mut recovery_stream =
             futures::stream::iter((state.next_index..total_items).step_by(SLICE_SIZE as usize))

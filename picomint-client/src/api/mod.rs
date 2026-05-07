@@ -1,17 +1,13 @@
-mod error;
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::future::pending;
 use std::pin::Pin;
 
-use anyhow::anyhow;
-pub use error::FederationError;
-use futures::stream::{BoxStream, FuturesUnordered};
-use futures::{Future, StreamExt};
-use iroh::endpoint::Connection;
+use anyhow::{Context, anyhow};
+use futures::stream::FuturesUnordered;
+use futures::{Future, FutureExt, StreamExt};
 use iroh::{Endpoint, PublicKey};
-use picomint_core::backoff::{BackoffBuilder, Retryable, networking_backoff};
+use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
 use picomint_core::expiration::ExpirationStatus;
 use picomint_core::methods::{
@@ -21,224 +17,86 @@ use picomint_core::methods::{
 use picomint_core::module::{ApiError, Method, PICOMINT_ALPN};
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_encoding::{Decodable, Encodable};
-use thiserror::Error;
-use tokio::sync::watch;
-use tokio::time::sleep;
-use tokio_stream::wrappers::WatchStream;
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, instrument};
 
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 use crate::tx::{Transaction, TxError};
 
-// ── Error types ─────────────────────────────────────────────────────────────
-
-/// An API request error when calling a single federation peer
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum ServerError {
-    #[error("Response deserialization error: {0}")]
-    ResponseDeserialization(anyhow::Error),
-
-    #[error("Invalid peer id: {peer}")]
-    InvalidPeerId { peer: PeerId },
-
-    #[error("Connection failed: {0}")]
-    Connection(anyhow::Error),
-
-    #[error("Transport error: {0}")]
-    Transport(anyhow::Error),
-
-    #[error("Invalid rpc id")]
-    InvalidRpcId(anyhow::Error),
-
-    #[error("Invalid request")]
-    InvalidRequest(anyhow::Error),
-
-    #[error("Invalid response: {0}")]
-    InvalidResponse(anyhow::Error),
-
-    #[error("Unspecified server error: {0}")]
-    ServerError(anyhow::Error),
-
-    #[error("Unspecified condition error: {0}")]
-    ConditionFailed(anyhow::Error),
-
-    #[error("Unspecified internal client error: {0}")]
-    InternalClientError(anyhow::Error),
-}
-
-impl ServerError {
-    pub fn is_unusual(&self) -> bool {
-        match self {
-            ServerError::ResponseDeserialization(_)
-            | ServerError::InvalidPeerId { .. }
-            | ServerError::InvalidResponse(_)
-            | ServerError::InvalidRpcId(_)
-            | ServerError::InvalidRequest(_)
-            | ServerError::InternalClientError(_)
-            | ServerError::ServerError(_) => true,
-            ServerError::Connection(_)
-            | ServerError::Transport(_)
-            | ServerError::ConditionFailed(_) => false,
-        }
-    }
-
-    pub fn report_if_unusual(&self, peer: PeerId, context: &str) {
-        let unusual = self.is_unusual();
-
-        trace!(error = %self, %context, "ServerError");
-
-        if unusual {
-            warn!(error = %self, %context, %peer, "Unusual ServerError");
-        }
-    }
-}
-
-pub type ServerResult<T> = Result<T, ServerError>;
-
-#[derive(Debug, Clone)]
-enum PeerState {
-    Connected(Connection),
-    Disconnected,
-}
-
-pub type FederationResult<T> = Result<T, FederationError>;
-
 /// Federation API client.
 ///
-/// Spawns a background task per peer at construction time that eagerly
-/// connects and reconnects over iroh. Each task publishes its current
-/// [`PeerState`] on a watch channel; requests wait for the first transition
-/// out of `None` and read the live connection (or fail) from the current
-/// value.
+/// Stateless: each request opens a fresh iroh [`Connection`] to the target
+/// peer, sends one bi stream, then drops the connection. iroh's [`Endpoint`]
+/// caches per-remote address + path state across calls (60s idle timeout),
+/// so warm reconnects skip discovery and pay only the QUIC handshake.
 #[derive(Clone, Debug)]
 pub struct FederationApi {
-    peers: BTreeSet<PeerId>,
-    states: BTreeMap<PeerId, watch::Receiver<Option<PeerState>>>,
+    peer_node_ids: BTreeMap<PeerId, PublicKey>,
+    endpoint: Endpoint,
 }
 
 impl FederationApi {
-    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, PublicKey>) -> Self {
-        let mut states = BTreeMap::new();
-
-        for (peer, node_id) in &peers {
-            let (tx, rx) = watch::channel(None);
-            tokio::spawn(connection_task(*node_id, endpoint.clone(), tx));
-            states.insert(*peer, rx);
-        }
-
+    pub fn new(endpoint: Endpoint, peer_node_ids: BTreeMap<PeerId, PublicKey>) -> Self {
         Self {
-            peers: peers.keys().copied().collect(),
-            states,
+            peer_node_ids,
+            endpoint,
         }
     }
 
-    /// List of all federation peers.
-    pub fn all_peers(&self) -> &BTreeSet<PeerId> {
-        &self.peers
+    /// All federation peers.
+    pub fn all_peers(&self) -> BTreeSet<PeerId> {
+        self.peer_node_ids.keys().copied().collect()
     }
 
-    /// Federation size, derived from the per-peer connection state map.
+    /// Federation size, derived from the peer set.
     pub fn num_peers(&self) -> NumPeers {
-        self.states.to_num_peers()
-    }
-
-    /// Stream of live connection status for each peer.
-    pub fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>> {
-        let streams = self.states.iter().map(|(&peer, rx)| {
-            WatchStream::new(rx.clone())
-                .map(move |s| (peer, matches!(s, Some(PeerState::Connected(_)))))
-        });
-
-        let mut current = BTreeMap::new();
-        futures::stream::select_all(streams)
-            .map(move |(peer, connected)| {
-                current.insert(peer, connected);
-                current.clone()
-            })
-            .boxed()
+        self.peer_node_ids.to_num_peers()
     }
 
     #[instrument(
         skip_all,
         fields(peer = %peer, method = ?method),
     )]
-    pub async fn request_raw(&self, peer: PeerId, method: Method) -> ServerResult<Vec<u8>> {
-        trace!(%peer, ?method, "Api request");
+    pub async fn request_single_peer<R>(&self, method: Method, peer: PeerId) -> anyhow::Result<R>
+    where
+        R: Decodable,
+    {
+        let node_id = *self.peer_node_ids.get(&peer).context("Invalid peer id")?;
 
-        let mut rx = self
-            .states
-            .get(&peer)
-            .ok_or(ServerError::InvalidPeerId { peer })?
-            .clone();
-
-        let state = rx
-            .wait_for(Option::is_some)
-            .await
-            .expect("connection task dropped")
-            .clone()
-            .expect("wait_for guarantees Some");
-
-        let PeerState::Connected(conn) = state else {
-            return Err(ServerError::Connection(anyhow!("peer not connected")));
-        };
-
-        let res = request_over_connection(&conn, method.clone()).await;
-
-        trace!(?method, res_ok = res.is_ok(), "Api response");
-
-        res
+        request_single_node(&self.endpoint, node_id, method).await
     }
 
-    pub async fn request_single_peer<Ret>(&self, method: Method, peer: PeerId) -> ServerResult<Ret>
-    where
-        Ret: Decodable,
-    {
-        self.request_raw(peer, method).await.and_then(|bytes| {
-            Ret::consensus_decode(&bytes)
-                .map_err(|e| ServerError::ResponseDeserialization(e.into()))
+    /// As [`Self::request_single_peer`] but retries forever on transport /
+    /// decode errors using `networking_backoff`. Used by the strategy-retry
+    /// fan-out where every peer call must eventually yield a response.
+    async fn request_single_peer_retry<R: Decodable>(&self, method: Method, peer: PeerId) -> R {
+        (|| async {
+            self.request_single_peer(method.clone(), peer)
+                .await
+                .inspect_err(|e| debug!(error = %e, "Peer request failed"))
         })
-    }
-
-    pub async fn request_single_peer_federation<FedRet>(
-        &self,
-        method: Method,
-        peer: PeerId,
-    ) -> FederationResult<FedRet>
-    where
-        FedRet: Decodable + Eq + Debug + Clone + Send,
-    {
-        self.request_raw(peer, method.clone())
-            .await
-            .and_then(|bytes| {
-                FedRet::consensus_decode(&bytes)
-                    .map_err(|e| ServerError::ResponseDeserialization(e.into()))
-            })
-            .map_err(|e| error::FederationError::new_one_peer(peer, method, e))
+        .retry(networking_backoff())
+        .await
+        .expect("networking_backoff retries forever")
     }
 
     /// Make an aggregate request to federation, using `strategy` to logically
     /// merge the responses.
     #[instrument(skip_all, fields(method = ?method))]
-    pub async fn request_with_strategy<PR: Decodable, FR: Debug>(
+    pub async fn request_with_strategy<P: Decodable, F: Debug>(
         &self,
-        mut strategy: impl QueryStrategy<PR, FR> + Send,
+        mut strategy: impl QueryStrategy<P, F> + Send,
         method: Method,
-    ) -> FederationResult<FR> {
+    ) -> anyhow::Result<F> {
         // NOTE: `FuturesUnorderded` is a footgun, but all we do here is polling
         // completed results from it and we don't do any `await`s when
         // processing them, it should be totally OK.
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
 
         for peer in self.all_peers() {
-            futures.push(Box::pin({
-                let method = &method;
-                async move {
-                    let result = self.request_single_peer(method.clone(), *peer).await;
-
-                    (*peer, result)
-                }
-            }));
+            futures.push(Box::pin(
+                self.request_single_peer(method.clone(), peer)
+                    .map(move |result| (peer, result)),
+            ));
         }
 
         let mut peer_errors = BTreeMap::new();
@@ -254,15 +112,10 @@ impl FederationApi {
                 Ok(response) => match strategy.process(peer, response) {
                     QueryStep::Retry(peers) => {
                         for peer in peers {
-                            futures.push(Box::pin({
-                                let method = &method;
-                                async move {
-                                    let result =
-                                        self.request_single_peer(method.clone(), peer).await;
-
-                                    (peer, result)
-                                }
-                            }));
+                            futures.push(Box::pin(
+                                self.request_single_peer(method.clone(), peer)
+                                    .map(move |result| (peer, result)),
+                            ));
                         }
                     }
                     QueryStep::Success(response) => return Ok(response),
@@ -272,44 +125,32 @@ impl FederationApi {
                     QueryStep::Continue => {}
                 },
                 Err(e) => {
-                    e.report_if_unusual(peer, "RequestWithStrategy");
+                    debug!(error = %e, "Peer request failed");
                     peer_errors.insert(peer, e);
                 }
             }
 
             if peer_errors.len() == peer_error_threshold {
-                return Err(FederationError::peer_errors(method.clone(), peer_errors));
+                return Err(anyhow!(
+                    "Federation request {method:?} failed: {peer_errors:?}"
+                ));
             }
         }
     }
 
     #[instrument(level = "debug", skip(self, strategy))]
-    pub async fn request_with_strategy_retry<PR: Decodable + Send, FR: Debug>(
+    pub async fn request_with_strategy_retry<P: Decodable + Send, F: Debug>(
         &self,
-        mut strategy: impl QueryStrategy<PR, FR> + Send,
+        mut strategy: impl QueryStrategy<P, F> + Send,
         method: Method,
-    ) -> FR {
+    ) -> F {
         let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
 
         for peer in self.all_peers() {
-            futures.push(Box::pin({
-                let method = &method;
-                async move {
-                    let response = (|| async {
-                        self.request_single_peer(method.clone(), *peer)
-                            .await
-                            .inspect_err(|e| {
-                                e.report_if_unusual(*peer, "QueryWithStrategyRetry");
-                            })
-                            .map_err(|e| anyhow!(e.to_string()))
-                    })
-                    .retry(networking_backoff())
-                    .await
-                    .expect("networking_backoff retries forever");
-
-                    (*peer, response)
-                }
-            }));
+            futures.push(Box::pin(
+                self.request_single_peer_retry(method.clone(), peer)
+                    .map(move |response| (peer, response)),
+            ));
         }
 
         loop {
@@ -321,48 +162,32 @@ impl FederationApi {
             match strategy.process(peer, response) {
                 QueryStep::Retry(peers) => {
                     for peer in peers {
-                        futures.push(Box::pin({
-                            let method = &method;
-                            async move {
-                                let response = (|| async {
-                                    self.request_single_peer(method.clone(), peer)
-                                        .await
-                                        .inspect_err(|err| {
-                                            if err.is_unusual() {
-                                                debug!(err = %err, "Unusual peer error");
-                                            }
-                                        })
-                                        .map_err(|e| anyhow!(e.to_string()))
-                                })
-                                .retry(networking_backoff())
-                                .await
-                                .expect("networking_backoff retries forever");
-
-                                (peer, response)
-                            }
-                        }));
+                        futures.push(Box::pin(
+                            self.request_single_peer_retry(method.clone(), peer)
+                                .map(move |response| (peer, response)),
+                        ));
                     }
                 }
                 QueryStep::Success(response) => return response,
                 QueryStep::Failure(e) => {
-                    warn!("Query strategy returned non-retryable failure for peer {peer}: {e}");
+                    debug!(error = %e, "Query strategy returned non-retryable failure");
                 }
                 QueryStep::Continue => {}
             }
         }
     }
 
-    pub async fn request_current_consensus<Ret>(&self, method: Method) -> FederationResult<Ret>
+    pub async fn request_current_consensus<R>(&self, method: Method) -> anyhow::Result<R>
     where
-        Ret: Decodable + Eq + Debug + Clone + Send,
+        R: Decodable + Eq + Debug + Clone + Send,
     {
         self.request_with_strategy(ThresholdConsensus::new(self.num_peers()), method)
             .await
     }
 
-    pub async fn request_current_consensus_retry<Ret>(&self, method: Method) -> Ret
+    pub async fn request_current_consensus_retry<R>(&self, method: Method) -> R
     where
-        Ret: Decodable + Eq + Debug + Clone + Send,
+        R: Decodable + Eq + Debug + Clone + Send,
     {
         self.request_with_strategy_retry(ThresholdConsensus::new(self.num_peers()), method)
             .await
@@ -380,7 +205,7 @@ impl FederationApi {
 
     /// Lightweight liveness check — returns `Ok(())` if the federation is
     /// reachable.
-    pub async fn liveness(&self) -> FederationResult<()> {
+    pub async fn liveness(&self) -> anyhow::Result<()> {
         self.request_current_consensus(Method::Core(CoreMethod::Liveness(LivenessRequest)))
             .await
             .map(|_: picomint_core::methods::LivenessResponse| ())
@@ -390,7 +215,7 @@ impl FederationApi {
     /// consensus verified. Returns `Some(_)` only if a threshold of
     /// guardians return the byte-equal value, `None` if all guardians
     /// agree no expiration has been announced.
-    pub async fn expiration_status(&self) -> FederationResult<Option<ExpirationStatus>> {
+    pub async fn expiration_status(&self) -> anyhow::Result<Option<ExpirationStatus>> {
         self.request_current_consensus::<ExpirationStatusResponse>(Method::Core(
             CoreMethod::ExpirationStatus(ExpirationStatusRequest),
         ))
@@ -399,74 +224,48 @@ impl FederationApi {
     }
 }
 
-async fn connection_task(
-    node_id: PublicKey,
-    endpoint: Endpoint,
-    state: watch::Sender<Option<PeerState>>,
-) {
-    let mut backoff = networking_backoff().build();
-
-    loop {
-        match endpoint.connect(node_id, PICOMINT_ALPN).await {
-            Ok(conn) => {
-                backoff = networking_backoff().build();
-
-                state.send_replace(Some(PeerState::Connected(conn.clone())));
-
-                conn.closed().await;
-
-                state.send_replace(Some(PeerState::Disconnected));
-            }
-            Err(_) => {
-                sleep(backoff.next().expect("Keeps retrying")).await;
-            }
-        }
-    }
-}
-
 const IROH_MAX_RESPONSE_BYTES: usize = BFT_UNIT_BYTE_LIMIT * 3600 * 4 * 2;
 
-/// One-shot request to a specific iroh node without going through a
-/// [`FederationApi`]. Used at bootstrap time to fetch the federation
-/// config from an invite code's lone peer before the full peer set is
-/// known.
-pub async fn request_single_node<Ret: Decodable>(
+/// One-shot iroh RPC: connect to `node_id`, send `method`, read the
+/// response, close. The receiver-side close mirrors iroh's recommended
+/// graceful-shutdown pattern (see `iroh/examples/echo-no-router.rs`):
+/// the server is awaiting `closed()` and tears down once this
+/// CONNECTION_CLOSE frame arrives.
+///
+/// Used at bootstrap time to fetch the federation config from an invite
+/// code's lone peer before the full peer set is known, and internally by
+/// [`FederationApi::request_single_peer`].
+pub async fn request_single_node<R: Decodable>(
     endpoint: &Endpoint,
     node_id: PublicKey,
     method: Method,
-) -> ServerResult<Ret> {
-    let conn = endpoint
+) -> anyhow::Result<R> {
+    let connection = endpoint
         .connect(node_id, PICOMINT_ALPN)
         .await
-        .map_err(|e| ServerError::Transport(e.into()))?;
+        .context("Connection failed")?;
 
-    let bytes = request_over_connection(&conn, method).await?;
-
-    Ret::consensus_decode(&bytes).map_err(|e| ServerError::ResponseDeserialization(e.into()))
-}
-
-async fn request_over_connection(connection: &Connection, method: Method) -> ServerResult<Vec<u8>> {
     let request_bytes = method.consensus_encode_to_vec();
 
-    let (mut sink, mut stream) = connection
-        .open_bi()
-        .await
-        .map_err(|e| ServerError::Transport(e.into()))?;
+    let (mut sink, mut stream) = connection.open_bi().await.context("Failed to open bi")?;
 
     sink.write_all(&request_bytes)
         .await
-        .map_err(|e| ServerError::Transport(e.into()))?;
+        .context("Failed to write request")?;
 
-    sink.finish()
-        .map_err(|e| ServerError::Transport(e.into()))?;
+    sink.finish().context("Failed to finish send stream")?;
 
     let response = stream
         .read_to_end(IROH_MAX_RESPONSE_BYTES)
         .await
-        .map_err(|e| ServerError::Transport(e.into()))?;
+        .context("Failed to read response")?;
+
+    connection.close(0u32.into(), b"");
 
     let response = <Result<Vec<u8>, ApiError>>::consensus_decode(&response)
-        .map_err(|e| ServerError::InvalidResponse(e.into()))?;
+        .context("Failed to decode response envelope")?;
 
-    response.map_err(|e| ServerError::InvalidResponse(anyhow::anyhow!("Api Error: {:?}", e)))
+    let bytes = response.map_err(|e| anyhow!("Api Error: {e:?}"))?;
+
+    R::consensus_decode(&bytes).context("Failed to decode response payload")
 }

@@ -9,7 +9,6 @@ use crate::mint::MintClientModule;
 use crate::secret::{ClientSecret, Mnemonic};
 use crate::task::TaskGroup;
 use crate::wallet::WalletClientModule;
-use futures::Stream;
 use futures::stream::BoxStream;
 use picomint_core::Amount;
 use picomint_core::PeerId;
@@ -212,12 +211,6 @@ impl Client {
 
     pub fn api(&self) -> &FederationApi {
         &self.api
-    }
-
-    /// Returns a stream that emits the current connection status of all peers
-    /// whenever any peer's status changes. Emits initial state immediately.
-    pub fn connection_status_stream(&self) -> impl Stream<Item = BTreeMap<PeerId, bool>> {
-        self.api.connection_status_stream()
     }
 
     pub fn federation_id(&self) -> FederationId {

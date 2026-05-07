@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInput;
 use picomint_core::ln::contracts::IncomingContract;
@@ -16,7 +16,6 @@ use tracing::warn;
 
 use super::GwSmContext;
 use super::events::{ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent};
-use crate::api::ServerError;
 use crate::executor::StateMachine;
 use crate::query::FilterMapThreshold;
 use crate::tx::{Input, TxBuilder};
@@ -51,32 +50,28 @@ impl StateMachine for ReceiveStateMachine {
 
         let tpe_pks = ctx.tpe_pks.clone();
         let contract = self.contract.clone();
-        let shares =
-            ctx.client_ctx
-                .api()
-                .request_with_strategy_retry(
-                    FilterMapThreshold::new(
-                        move |peer, resp: DecryptionKeyShareResponse| {
-                            let share = resp.share;
-                            if !contract.verify_decryption_share(
-                                tpe_pks.get(&peer).ok_or(ServerError::InternalClientError(
-                                    anyhow!("Missing TPE PK for peer {peer}?!"),
-                                ))?,
-                                &share,
-                            ) {
-                                return Err(ServerError::InvalidResponse(anyhow!(
-                                    "Invalid decryption share"
-                                )));
-                            }
-                            Ok(share)
-                        },
-                        ctx.client_ctx.api().num_peers(),
-                    ),
-                    Method::Ln(LnMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
-                        outpoint: self.outpoint,
-                    })),
-                )
-                .await;
+        let shares = ctx
+            .client_ctx
+            .api()
+            .request_with_strategy_retry(
+                FilterMapThreshold::new(
+                    move |peer, resp: DecryptionKeyShareResponse| {
+                        let share = resp.share;
+                        if !contract.verify_decryption_share(
+                            tpe_pks.get(&peer).context("Missing TPE PK for peer")?,
+                            &share,
+                        ) {
+                            return Err(anyhow!("Invalid decryption share"));
+                        }
+                        Ok(share)
+                    },
+                    ctx.client_ctx.api().num_peers(),
+                ),
+                Method::Ln(LnMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
+                    outpoint: self.outpoint,
+                })),
+            )
+            .await;
 
         Ok(shares)
     }
