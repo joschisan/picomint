@@ -14,8 +14,8 @@ use bitcoin::secp256k1::schnorr::Signature;
 use bitcoin::secp256k1::{Keypair, SECP256K1, SecretKey};
 use futures::StreamExt;
 use lightning_invoice::{Bolt11Invoice, Currency, InvoiceBuilder, PaymentSecret};
-use picomint_client::ln::SendPaymentError;
 use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
+use picomint_client::ln::{LightningClientModule, SendPaymentError};
 use picomint_client::tx::{Input, TxBuilder};
 use picomint_client::{Client, OperationId};
 use picomint_core::config::FederationId;
@@ -88,7 +88,7 @@ fn try_parse_ln_event(
 
 pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
     register_gateway(env, &env.gw_public)?;
-    client_send.ln().refresh_gateways().await?;
+    LightningClientModule::refresh_gateways(client_send.ln().clone()).await?;
     test_payments(env, client_send).await?;
     test_lnurl_recurringd_roundtrip(env).await?;
     deregister_gateway(env, &env.gw_public)?;
@@ -96,7 +96,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     let mock_gw = spawn_mock_gateway().await?;
 
     register_gateway(env, &mock_gw)?;
-    client_send.ln().refresh_gateways().await?;
+    LightningClientModule::refresh_gateways(client_send.ln().clone()).await?;
     test_mock_send_exactly_once(client_send).await?;
     test_mock_send_refund_forfeit(client_send).await?;
     test_mock_wrong_network(client_send).await?;

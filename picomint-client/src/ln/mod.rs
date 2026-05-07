@@ -65,7 +65,7 @@ pub struct LightningClientModule {
     client_ctx: ClientContext,
     mint: Arc<crate::mint::MintClientModule>,
     secret: LnSecret,
-    send_executor: ModuleExecutor<SendStateMachine>,
+    executor: ModuleExecutor<SendStateMachine>,
 }
 
 impl LightningClientModule {
@@ -91,8 +91,8 @@ impl LightningClientModule {
             mint: mint.clone(),
             input_fee: cfg.input_fee,
         };
-        let send_executor =
-            ModuleExecutor::new(client_ctx.db().clone(), sm_context, tg.clone()).await;
+
+        let executor = ModuleExecutor::new(client_ctx.db().clone(), sm_context, tg.clone()).await;
 
         let module = Self {
             federation_id,
@@ -100,14 +100,12 @@ impl LightningClientModule {
             client_ctx,
             mint,
             secret,
-            send_executor,
+            executor,
         };
 
-        module.spawn_receive_scan_task(tg);
+        tg.spawn(Self::receive_scan(module.clone()));
 
-        let module_for_refresh = module.clone();
-
-        tg.spawn(async move { module_for_refresh.refresh_gateways().await.ok() });
+        tg.spawn(Self::refresh_gateways(module.clone()));
 
         Ok(module)
     }
@@ -123,15 +121,17 @@ impl LightningClientModule {
     ///
     /// Called once at module startup; exposed publicly so integration tests
     /// can force a refresh after registering gateways with the guardians.
-    pub async fn refresh_gateways(&self) -> Result<(), RefreshGatewaysError> {
-        let list = self
+    pub async fn refresh_gateways(
+        module: LightningClientModule,
+    ) -> Result<(), RefreshGatewaysError> {
+        let list = module
             .client_ctx
             .api()
             .ln_gateways()
             .await
             .map_err(|_| RefreshGatewaysError::FailedToRequestGateways)?;
 
-        let dbtx = self.client_ctx.db().begin_write();
+        let dbtx = module.client_ctx.db().begin_write();
 
         let cached: Vec<String> = dbtx.iter(&GATEWAY_INFO, |r| r.map(|(url, _)| url).collect());
 
@@ -146,7 +146,7 @@ impl LightningClientModule {
         let handles: Vec<_> = list
             .into_iter()
             .map(|url| {
-                let module = self.clone();
+                let module = module.clone();
                 tokio::spawn(async move {
                     let info = gateway_http::gateway_info(&url, &module.federation_id).await;
 
@@ -321,8 +321,7 @@ impl LightningClientModule {
             state: SendSMState::Funding,
         };
 
-        self.send_executor
-            .add_state_machine_dbtx(&dbtx.as_ref(), sm);
+        self.executor.add_state_machine_dbtx(&dbtx.as_ref(), sm);
 
         dbtx.commit();
 
@@ -535,41 +534,33 @@ impl LightningClientModule {
         )))
     }
 
-    fn spawn_receive_scan_task(&self, tg: &TaskGroup) {
-        let module = self.clone();
+    async fn receive_scan(module: LightningClientModule) {
+        loop {
+            let stream_index = module
+                .client_ctx
+                .db()
+                .begin_read()
+                .get(&INCOMING_CONTRACT_STREAM_INDEX, &())
+                .unwrap_or(0);
 
-        tg.spawn(async move {
-            loop {
-                module.receive_scan().await;
+            let (entries, next_index) = module
+                .client_ctx
+                .api()
+                .ln_await_incoming_contracts(stream_index, 128)
+                .await;
+
+            let sk = module.secret.receive_keypair().secret_key();
+
+            let dbtx = module.client_ctx.db().begin_write();
+
+            for (outpoint, contract) in &entries {
+                module.receive_incoming_contract(&dbtx.as_ref(), sk, *outpoint, contract);
             }
-        });
-    }
 
-    async fn receive_scan(&self) {
-        let stream_index = self
-            .client_ctx
-            .db()
-            .begin_read()
-            .get(&INCOMING_CONTRACT_STREAM_INDEX, &())
-            .unwrap_or(0);
+            dbtx.insert(&INCOMING_CONTRACT_STREAM_INDEX, &(), &next_index);
 
-        let (entries, next_index) = self
-            .client_ctx
-            .api()
-            .ln_await_incoming_contracts(stream_index, 128)
-            .await;
-
-        let sk = self.secret.receive_keypair().secret_key();
-
-        let dbtx = self.client_ctx.db().begin_write();
-
-        for (outpoint, contract) in &entries {
-            self.receive_incoming_contract(&dbtx.as_ref(), sk, *outpoint, contract);
+            dbtx.commit();
         }
-
-        dbtx.insert(&INCOMING_CONTRACT_STREAM_INDEX, &(), &next_index);
-
-        dbtx.commit();
     }
 }
 

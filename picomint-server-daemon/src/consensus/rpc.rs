@@ -1,8 +1,8 @@
 //! Freestanding API handlers for [`crate::consensus::api::ConsensusApi`].
 
 use picomint_core::methods::{
-    ConfigRequest, ConfigResponse, LivenessRequest, LivenessResponse, SubmitTxRequest,
-    SubmitTxResponse,
+    ConfigRequest, ConfigResponse, ExpirationStatusRequest, ExpirationStatusResponse,
+    LivenessRequest, LivenessResponse, SubmitTxRequest, SubmitTxResponse,
 };
 use picomint_core::module::ApiError;
 
@@ -25,4 +25,13 @@ pub fn config(api: &ConsensusApi, _: ConfigRequest) -> Result<ConfigResponse, Ap
 
 pub fn liveness(_: &ConsensusApi, _: LivenessRequest) -> Result<LivenessResponse, ApiError> {
     Ok(LivenessResponse)
+}
+
+pub fn expiration_status(
+    api: &ConsensusApi,
+    _: ExpirationStatusRequest,
+) -> Result<ExpirationStatusResponse, ApiError> {
+    Ok(ExpirationStatusResponse {
+        status: api.expiration_status_ui(),
+    })
 }

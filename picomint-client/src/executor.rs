@@ -145,7 +145,7 @@ impl<S: StateMachine> Inner<S> {
 
     fn spawn_drive(self: Arc<Self>, id: SmId, state: S) {
         let tg = self.tg.clone();
-        tg.spawn(async move { self.drive(id, state).await });
+        tg.spawn(self.drive(id, state));
     }
 
     /// Drive one state machine until `transition` returns `None`. Each

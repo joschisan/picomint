@@ -1,4 +1,5 @@
 use picomint_bft::{Entry, Round};
+use picomint_core::expiration::ExpirationStatus;
 use picomint_core::session_outcome::{AcceptedItem, SignedSessionOutcome};
 use picomint_core::tx::ConsensusItem;
 use picomint_core::{PeerId, TransactionId};
@@ -30,4 +31,14 @@ table!(
     BFT_UNITS,
     (Round, PeerId) => Entry<ConsensusItem>,
     "bft-units",
+);
+
+// This guardian's locally-announced expiration status. Mutated by the admin
+// dashboard; read by [`crate::consensus::rpc::expiration_status`] and
+// returned over the wire so a threshold of guardians must agree on the
+// byte-equal value before clients trust it.
+table!(
+    EXPIRATION_STATUS,
+    () => ExpirationStatus,
+    "expiration-status",
 );

@@ -516,12 +516,11 @@ impl Wallet {
                     btc_rpc.submit_tx(unconfirmed_tx.tx).await;
                 }
 
-                sleep(Duration::from_secs(if network == Network::Regtest {
-                    1
+                if network == Network::Regtest {
+                    sleep(Duration::from_secs(1)).await;
                 } else {
-                    60
-                }))
-                .await;
+                    sleep(Duration::from_secs(60)).await;
+                }
             }
         });
     }
@@ -678,12 +677,11 @@ impl Wallet {
 
             info!("Waiting for local bitcoin backend to sync to block count {block_count}");
 
-            sleep(Duration::from_secs(if self.network == Network::Regtest {
-                1
+            if self.network == Network::Regtest {
+                sleep(Duration::from_secs(1)).await;
             } else {
-                60
-            }))
-            .await;
+                sleep(Duration::from_secs(60)).await;
+            }
         }
     }
 

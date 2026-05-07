@@ -84,7 +84,7 @@ impl WalletClientModule {
             send_executor,
         };
 
-        module.spawn_output_scanner(tg);
+        tg.spawn(Self::output_scanner(module.clone()));
 
         Ok(module)
     }
@@ -279,48 +279,41 @@ impl WalletClientModule {
         (operation, txid)
     }
 
-    fn spawn_output_scanner(&self, tg: &TaskGroup) {
-        let module = self.clone();
+    async fn output_scanner(module: WalletClientModule) {
+        let has_seed = module
+            .client_ctx
+            .db()
+            .begin_read()
+            .iter(&VALID_ADDRESS_INDEX, |r| r.next().is_some());
 
-        tg.spawn(async move {
-            let has_seed = module
-                .client_ctx
-                .db()
-                .begin_read()
-                .iter(&VALID_ADDRESS_INDEX, |r| r.next().is_some());
+        if !has_seed {
+            let index = module.next_valid_index(0);
+            let dbtx = module.client_ctx.db().begin_write();
+            assert!(
+                dbtx.insert(&VALID_ADDRESS_INDEX, &index, &()).is_none(),
+                "seed address index already present"
+            );
+            dbtx.commit();
+        }
 
-            if !has_seed {
-                let index = module.next_valid_index(0);
-                let dbtx = module.client_ctx.db().begin_write();
-                assert!(
-                    dbtx.insert(&VALID_ADDRESS_INDEX, &index, &()).is_none(),
-                    "seed address index already present"
-                );
-                dbtx.commit();
-            }
-
-            loop {
-                match module.check_outputs().await {
-                    Ok(skip_wait) => {
-                        if skip_wait {
-                            continue;
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Failed to fetch outputs: {e}");
+        loop {
+            match module.check_outputs().await {
+                Ok(skip_wait) => {
+                    if skip_wait {
+                        continue;
                     }
                 }
-
-                sleep(Duration::from_secs(
-                    if module.client_ctx.network() == bitcoin::Network::Regtest {
-                        1
-                    } else {
-                        60
-                    },
-                ))
-                .await;
+                Err(e) => {
+                    warn!("Failed to fetch outputs: {e}");
+                }
             }
-        });
+
+            if module.client_ctx.network() == bitcoin::Network::Regtest {
+                sleep(Duration::from_secs(1)).await;
+            } else {
+                sleep(Duration::from_secs(60)).await;
+            }
+        }
     }
 
     async fn check_outputs(&self) -> anyhow::Result<bool> {
