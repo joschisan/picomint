@@ -21,6 +21,7 @@ clap = { workspace = true }
 hex = { workspace = true }
 picomint-eventlog = { workspace = true }
 iroh = { workspace = true, default-features = false }
+iroh-mdns-address-lookup = { workspace = true }
 ldk-node = { workspace = true }
 lightning = { workspace = true }
 lightning-invoice = { workspace = true }

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use bitcoin::Network;
 use iroh::Endpoint;
-use iroh::address_lookup::MdnsAddressLookup;
 use iroh::endpoint::presets::N0;
+use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
