@@ -1,17 +1,15 @@
 use picomint_core::core::OperationId;
-use picomint_core::secp256k1::PublicKey;
-use picomint_encoding::{Decodable, Encodable};
+use picomint_core::ln::gateway_api::GatewayInfo;
 use picomint_redb::table;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
-pub struct GatewayKey(pub PublicKey);
-
-picomint_redb::consensus_key!(GatewayKey);
-
+// Local cache of `GatewayInfo` for every gateway in the federation's
+// announced list. Refreshed by `refresh_gateways` at startup (and on demand
+// from tests). Read synchronously from `select_gateway` — no live HTTP in
+// the hot path.
 table!(
-    GATEWAY,
-    GatewayKey => String,
-    "ln-gateway",
+    GATEWAY_INFO,
+    String => GatewayInfo,
+    "ln-gateway-info",
 );
 
 table!(
