@@ -13,12 +13,12 @@ use crate::ui::auth::UserAuth;
 use crate::ui::dashboard::{CLEAR_EXPIRATION_ROUTE, SET_EXPIRATION_ROUTE};
 use crate::ui::{ROOT_ROUTE, UiState, dashboard_layout};
 
-/// Form payload for [`post_set`]. The date is a unix timestamp generated
-/// server-side by [`render`]; the successor is an optional invite-code
-/// string that we parse via [`picomint_base32`].
+/// Form payload for [`post_set`]. The timestamp is a unix-seconds value
+/// generated server-side by [`render`]; the successor is an optional
+/// invite-code string that we parse via [`picomint_base32`].
 #[derive(Debug, Deserialize)]
 pub struct ExpirationForm {
-    pub expiration_date: String,
+    pub expiration_timestamp: String,
     pub successor_invite_code: Option<String>,
 }
 
@@ -30,7 +30,7 @@ pub fn render(status: Option<&ExpirationStatus>) -> Markup {
                 @if let Some(status) = status {
                     div class="alert alert-info" {
                         strong { "Expiration Announced" }
-                        @if let Some(date) = chrono::DateTime::from_timestamp(status.date as i64, 0) {
+                        @if let Some(date) = chrono::DateTime::from_timestamp(status.timestamp as i64, 0) {
                             strong { " - " (date.format("%B %-d, %Y")) }
                         }
                         @if let Some(ref successor) = status.successor {
@@ -50,7 +50,7 @@ pub fn render(status: Option<&ExpirationStatus>) -> Markup {
                     }
                     form method="post" action=(SET_EXPIRATION_ROUTE) {
                         div class="form-group mb-3" {
-                            select class="form-select" id="expiration_date" name="expiration_date" required {
+                            select class="form-select" id="expiration_timestamp" name="expiration_timestamp" required {
                                 option value="" selected disabled { "Select Expiration Date" }
                                 @let now = Utc::now();
                                 @for i in 1..=12u32 {
@@ -93,10 +93,10 @@ pub async fn post_set(
     _auth: UserAuth,
     Form(form): Form<ExpirationForm>,
 ) -> impl IntoResponse {
-    let date = form
-        .expiration_date
+    let timestamp = form
+        .expiration_timestamp
         .parse::<u64>()
-        .expect("date values are generated server-side");
+        .expect("timestamp values are generated server-side");
 
     let invite_input = form.successor_invite_code.filter(|s| !s.trim().is_empty());
 
@@ -117,9 +117,10 @@ pub async fn post_set(
         None => None,
     };
 
-    state
-        .api
-        .set_expiration_status_ui(Some(ExpirationStatus { date, successor }));
+    state.api.set_expiration_status_ui(Some(ExpirationStatus {
+        timestamp,
+        successor,
+    }));
 
     Redirect::to(ROOT_ROUTE).into_response()
 }

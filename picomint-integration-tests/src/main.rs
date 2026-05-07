@@ -1,5 +1,6 @@
 mod cli;
 mod env;
+mod expiration;
 mod ln;
 mod mint;
 mod recover;
@@ -43,6 +44,9 @@ fn main() -> anyhow::Result<()> {
             mint::run_tests(&env, &client_send),
         )
     })?;
+
+    info!("Running expiration test...");
+    runtime.block_on(expiration::run_test(&env))?;
 
     info!("Shutting down the primary test client!");
 
