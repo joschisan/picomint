@@ -33,7 +33,7 @@ pub struct SendPaymentPayload {
     pub auth: Signature,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct GatewayInfo {
     /// The public key of the gateway's lightning node. Signs the gateway's
     /// invoices so the sender can detect direct swaps by comparing against
@@ -59,6 +59,8 @@ pub struct GatewayInfo {
     /// direct swaps as well.
     pub expiration_delta: u64,
 }
+
+picomint_redb::consensus_value!(GatewayInfo);
 
 #[derive(
     Debug,

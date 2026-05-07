@@ -15,7 +15,7 @@ use crate::module::ClientContext;
 use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
-use db::{GATEWAY, GatewayKey, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
+use db::{GATEWAY_INFO, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
 use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -30,9 +30,10 @@ use picomint_core::ln::{
 use picomint_core::wire;
 
 pub use self::secret::LnSecret;
-use picomint_core::{Amount, OutPoint, PeerId};
+use picomint_core::{Amount, OutPoint};
 use picomint_encoding::Encodable;
 use picomint_redb::WriteTxRef;
+use rand::seq::IteratorRandom;
 use secp256k1::{Keypair, PublicKey, SecretKey, ecdh};
 use thiserror::Error;
 use tpe::{AggregateDecryptionKey, derive_agg_dk};
@@ -104,127 +105,114 @@ impl LightningClientModule {
 
         module.spawn_receive_scan_task(tg);
 
-        module.spawn_gateway_map_update_task(tg);
+        let module_for_refresh = module.clone();
+
+        tg.spawn(async move { module_for_refresh.refresh_gateways().await.ok() });
 
         Ok(module)
     }
 
-    fn spawn_gateway_map_update_task(&self, tg: &TaskGroup) {
-        let module = self.clone();
-
-        tg.spawn(async move {
-            module.update_gateway_map().await;
-        });
-    }
-
-    async fn update_gateway_map(&self) {
-        // Update the mapping from lightning node public keys to gateway api
-        // endpoints maintained in the module database. When paying an invoice this
-        // enables the client to select the gateway that has created the invoice,
-        // if possible, such that the payment does not go over lightning, reducing
-        // fees and latency.
-
-        if let Ok(gateways) = self.client_ctx.api().ln_gateways().await {
-            let mut entries = Vec::new();
-            for gateway in gateways {
-                if let Ok(Some(gateway_info)) =
-                    gateway_http::gateway_info(&gateway, &self.federation_id).await
-                {
-                    entries.push((gateway_info.lightning_public_key, gateway));
-                }
-            }
-
-            let dbtx = self.client_ctx.db().begin_write();
-
-            for (key, gateway) in entries {
-                dbtx.as_ref().insert(&GATEWAY, &GatewayKey(key), &gateway);
-            }
-
-            dbtx.commit();
-        }
-    }
-
-    /// Selects an available gateway by querying the federation's registered
-    /// gateways, checking if one of them match the invoice's payee public
-    /// key, then queries the gateway for `RoutingInfo` to determine if it is
-    /// online.
-    pub async fn select_gateway(
-        &self,
-        invoice: Option<Bolt11Invoice>,
-    ) -> Result<(String, GatewayInfo), SelectGatewayError> {
-        let gateways = self
+    /// Reconcile the local `GATEWAY_INFO` cache with the federation's
+    /// announced gateway list:
+    ///
+    /// 1. Fetch the announced list via threshold consensus.
+    /// 2. Prune cache entries whose URL is no longer in the list.
+    /// 3. Fetch fresh `GatewayInfo` from every URL in the list, in parallel.
+    /// 4. For each URL: insert on success, remove on failure — no stale info
+    ///    survives a refresh.
+    ///
+    /// Called once at module startup; exposed publicly so integration tests
+    /// can force a refresh after registering gateways with the guardians.
+    pub async fn refresh_gateways(&self) -> Result<(), RefreshGatewaysError> {
+        let list = self
             .client_ctx
             .api()
             .ln_gateways()
             .await
-            .map_err(|_| SelectGatewayError::FailedToRequestGateways)?;
+            .map_err(|_| RefreshGatewaysError::FailedToRequestGateways)?;
 
-        if gateways.is_empty() {
-            return Err(SelectGatewayError::NoGatewaysAvailable);
-        }
+        let dbtx = self.client_ctx.db().begin_write();
 
-        if let Some(invoice) = invoice
-            && let Some(gateway) = self
-                .client_ctx
-                .db()
-                .begin_read()
-                .get(&GATEWAY, &GatewayKey(invoice.recover_payee_pub_key()))
-                .filter(|gateway| gateways.contains(gateway))
-            && let Ok(Some(gateway_info)) = self.gateway_info(&gateway).await
-        {
-            return Ok((gateway, gateway_info));
-        }
+        let cached: Vec<String> = dbtx.iter(&GATEWAY_INFO, |r| r.map(|(url, _)| url).collect());
 
-        for gateway in gateways {
-            if let Ok(Some(gateway_info)) = self.gateway_info(&gateway).await {
-                return Ok((gateway, gateway_info));
+        for url in cached {
+            if !list.contains(&url) {
+                dbtx.remove(&GATEWAY_INFO, &url);
             }
         }
 
-        Err(SelectGatewayError::GatewaysUnresponsive)
+        dbtx.commit();
+
+        let handles: Vec<_> = list
+            .into_iter()
+            .map(|url| {
+                let module = self.clone();
+                tokio::spawn(async move {
+                    let info = gateway_http::gateway_info(&url, &module.federation_id).await;
+
+                    let dbtx = module.client_ctx.db().begin_write();
+
+                    match info {
+                        Ok(Some(info)) => {
+                            dbtx.insert(&GATEWAY_INFO, &url, &info);
+                        }
+                        _ => {
+                            dbtx.remove(&GATEWAY_INFO, &url);
+                        }
+                    }
+
+                    dbtx.commit();
+                })
+            })
+            .collect();
+
+        futures::future::join_all(handles).await;
+
+        Ok(())
     }
 
-    /// Sends a request to each peer for their registered gateway list and
-    /// returns a `Vec<String` of all registered gateways to the client.
-    pub async fn list_gateways(
+    /// Pick a gateway from the local cache. With `invoice = Some(_)`,
+    /// prefer a gateway whose lightning public key matches the invoice's
+    /// recovered payee — that's a direct ecash swap, no LN routing.
+    /// Otherwise return any cached gateway, picked at random for load
+    /// distribution. Synchronous: hits redb only.
+    pub fn select_gateway(
         &self,
-        peer: Option<PeerId>,
-    ) -> Result<Vec<String>, ListGatewaysError> {
-        if let Some(peer) = peer {
-            self.client_ctx
-                .api()
-                .ln_gateways_from_peer(peer)
-                .await
-                .map_err(|_| ListGatewaysError::FailedToListGateways)
-        } else {
-            self.client_ctx
-                .api()
-                .ln_gateways()
-                .await
-                .map_err(|_| ListGatewaysError::FailedToListGateways)
+        invoice: Option<&Bolt11Invoice>,
+    ) -> Result<(String, GatewayInfo), SelectGatewayError> {
+        let entries: Vec<(String, GatewayInfo)> = self
+            .client_ctx
+            .db()
+            .begin_read()
+            .iter(&GATEWAY_INFO, |r| r.collect());
+
+        if entries.is_empty() {
+            return Err(SelectGatewayError::NoGatewaysAvailable);
         }
-    }
 
-    /// Requests the `GatewayInfo`, including fee information, from the gateway
-    /// available at the `String`.
-    pub async fn gateway_info(
-        &self,
-        gateway: &str,
-    ) -> Result<Option<GatewayInfo>, GatewayInfoError> {
-        gateway_http::gateway_info(gateway, &self.federation_id)
-            .await
-            .map_err(|_| GatewayInfoError::FailedToRequestGatewayInfo)
+        if let Some(invoice) = invoice {
+            for (url, info) in &entries {
+                if info.lightning_public_key == invoice.recover_payee_pub_key() {
+                    return Ok((url.clone(), info.clone()));
+                }
+            }
+        }
+
+        entries
+            .into_iter()
+            .choose(&mut rand::thread_rng())
+            .map(Ok)
+            .expect("entries is non-empty")
     }
 
     /// Pay an invoice through a caller-selected gateway.
     ///
     /// The caller obtains `(gateway_api, gateway_info)` via
-    /// [`Self::select_gateway`] (or [`Self::list_gateways`] +
-    /// [`Self::gateway_info`] for full manual control) and inspects
-    /// `gateway_info` to preview the cost before passing both back here.
-    /// The library still enforces `PaymentFee::SEND_FEE_LIMIT` /
-    /// `LN_FEE_LIMIT` and `EXPIRATION_DELTA_LIMIT` on the supplied
-    /// `gateway_info` as a backstop against an abusive gateway.
+    /// [`Self::select_gateway`] and inspects `gateway_info` to preview the
+    /// cost before passing both back here. The library still enforces
+    /// `PaymentFee::SEND_FEE_LIMIT` / `LN_FEE_LIMIT` and
+    /// `EXPIRATION_DELTA_LIMIT` on the supplied `gateway_info` as a
+    /// backstop against an abusive gateway.
     #[allow(clippy::too_many_lines)]
     pub async fn send(
         &self,
@@ -344,12 +332,10 @@ impl LightningClientModule {
     /// Request an invoice from a caller-selected gateway.
     ///
     /// The caller obtains `(gateway_api, gateway_info)` via
-    /// [`Self::select_gateway`] (or [`Self::list_gateways`] +
-    /// [`Self::gateway_info`] for full manual control) and inspects
-    /// `gateway_info.receive_fee` to preview the cost before passing both
-    /// back here. The library still enforces
-    /// `PaymentFee::RECEIVE_FEE_LIMIT` on the supplied `gateway_info` as a
-    /// backstop against an abusive gateway.
+    /// [`Self::select_gateway`] and inspects `gateway_info.receive_fee` to
+    /// preview the cost before passing both back here. The library still
+    /// enforces `PaymentFee::RECEIVE_FEE_LIMIT` on the supplied
+    /// `gateway_info` as a backstop against an abusive gateway.
     pub async fn receive(
         &self,
         gateway_api: String,
@@ -589,12 +575,8 @@ impl LightningClientModule {
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
 pub enum SelectGatewayError {
-    #[error("Failed to request gateways")]
-    FailedToRequestGateways,
     #[error("No gateways are available")]
     NoGatewaysAvailable,
-    #[error("All gateways failed to respond")]
-    GatewaysUnresponsive,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
@@ -643,21 +625,15 @@ pub enum GenerateLnurlError {
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
-pub enum ListGatewaysError {
+pub enum RefreshGatewaysError {
     #[error("Failed to request gateways")]
-    FailedToListGateways,
-}
-
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
-pub enum GatewayInfoError {
-    #[error("Failed to request gateway info")]
-    FailedToRequestGatewayInfo,
+    FailedToRequestGateways,
 }
 
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
 pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>) {
-    dbtx.delete_table(&GATEWAY);
+    dbtx.delete_table(&GATEWAY_INFO);
     dbtx.delete_table(&INCOMING_CONTRACT_STREAM_INDEX);
     dbtx.delete_table(&SEND_OPERATION);
     dbtx.delete_table(&crate::executor::table::<SendStateMachine>());

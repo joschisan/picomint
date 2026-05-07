@@ -1,7 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet};
-
-use crate::api::{FederationApi, FederationResult, ServerResult};
-use crate::query::FilterMapThreshold;
+use crate::api::{FederationApi, FederationResult};
+use picomint_core::OutPoint;
 use picomint_core::ln::contracts::IncomingContract;
 use picomint_core::ln::methods::{
     AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitPreimageRequest,
@@ -9,8 +7,6 @@ use picomint_core::ln::methods::{
     GatewaysRequest, GatewaysResponse, LnMethod,
 };
 use picomint_core::module::Method;
-use picomint_core::{OutPoint, PeerId};
-use rand::seq::SliceRandom;
 
 impl FederationApi {
     pub async fn ln_consensus_block_count(&self) -> FederationResult<u64> {
@@ -45,47 +41,15 @@ impl FederationApi {
         (resp.contracts, resp.next_index)
     }
 
+    /// The federation's announced gateway list, agreed by a threshold of
+    /// guardians. Each guardian maintains their own vetted-gateway list
+    /// via the admin CLI; the response is byte-canonical (sorted via redb
+    /// iteration) so threshold equality is deterministic.
     pub async fn ln_gateways(&self) -> FederationResult<Vec<String>> {
-        let gateways: BTreeMap<PeerId, Vec<String>> = self
-            .request_with_strategy(
-                FilterMapThreshold::new(
-                    |_, resp: GatewaysResponse| Ok(resp.gateways),
-                    self.num_peers(),
-                ),
-                Method::Ln(LnMethod::Gateways(GatewaysRequest)),
-            )
-            .await?;
-
-        let mut union = gateways
-            .values()
-            .flatten()
-            .cloned()
-            .collect::<BTreeSet<String>>()
-            .into_iter()
-            .collect::<Vec<String>>();
-
-        // Shuffling the gateways ensures that payments are distributed over the
-        // gateways evenly.
-        union.shuffle(&mut rand::thread_rng());
-
-        union.sort_by_cached_key(|r| {
-            gateways
-                .values()
-                .filter(|response| !response.contains(r))
-                .count()
-        });
-
-        Ok(union)
-    }
-
-    pub async fn ln_gateways_from_peer(&self, peer: PeerId) -> ServerResult<Vec<String>> {
-        let resp = self
-            .request_single_peer::<GatewaysResponse>(
-                Method::Ln(LnMethod::Gateways(GatewaysRequest)),
-                peer,
-            )
-            .await?;
-
-        Ok(resp.gateways)
+        self.request_current_consensus::<GatewaysResponse>(Method::Ln(LnMethod::Gateways(
+            GatewaysRequest,
+        )))
+        .await
+        .map(|resp| resp.gateways)
     }
 }
