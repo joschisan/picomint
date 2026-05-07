@@ -93,7 +93,7 @@ pub async fn render(lightning: &crate::consensus::ln::Lightning) -> Markup {
                             div class="d-flex flex-column align-items-center h-100" {
                                 form action=(LN_ADD_ROUTE) method="post" class="w-100" style="max-width: 400px;" {
                                     div class="alert alert-warning mb-3" {
-                                        "All guardians have to enter the exact same URL for it to be served to clients."
+                                        "All guardians have to enter the exact same set of Gateway URLs for it to be served to clients."
                                     }
                                     div class="mb-3" {
                                         input

@@ -175,11 +175,9 @@ impl Client {
             tg,
         });
 
-        let c = client.clone();
-
         client
             .tg
-            .spawn(async move { c.refresh_expiration_status().await.ok() });
+            .spawn(Self::refresh_expiration_status(client.clone()));
 
         Ok(client)
     }

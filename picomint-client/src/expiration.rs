@@ -7,6 +7,8 @@
 //! re-runs the federation query on demand (used by tests and by apps that
 //! want to force a re-sync).
 
+use std::sync::Arc;
+
 use picomint_core::expiration::ExpirationStatus;
 use picomint_redb::table;
 use thiserror::Error;
@@ -36,14 +38,16 @@ impl Client {
 
     /// Re-fetch the announced expiration via threshold consensus and
     /// reconcile the local cache. Inserts on `Some(_)`, removes on `None`.
-    pub async fn refresh_expiration_status(&self) -> Result<(), RefreshExpirationStatusError> {
-        let status = self
+    pub async fn refresh_expiration_status(
+        client: Arc<Self>,
+    ) -> Result<(), RefreshExpirationStatusError> {
+        let status = client
             .api()
             .expiration_status()
             .await
             .map_err(|_| RefreshExpirationStatusError::FailedToRequestExpirationStatus)?;
 
-        let dbtx = self.db().begin_write();
+        let dbtx = client.db().begin_write();
 
         match status {
             Some(s) => {

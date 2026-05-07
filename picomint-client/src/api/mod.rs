@@ -123,11 +123,7 @@ impl FederationApi {
 
         for (peer, node_id) in &peers {
             let (tx, rx) = watch::channel(None);
-            tokio::spawn({
-                let endpoint = endpoint.clone();
-                let node_id = *node_id;
-                async move { connection_task(node_id, endpoint, tx).await }
-            });
+            tokio::spawn(connection_task(*node_id, endpoint.clone(), tx));
             states.insert(*peer, rx);
         }
 
