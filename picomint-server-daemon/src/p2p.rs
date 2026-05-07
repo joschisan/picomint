@@ -11,10 +11,10 @@ use bitcoin::hashes::sha256;
 use bls12_381::{G1Projective, G2Projective, Scalar};
 use futures::FutureExt;
 use futures::future::select_all;
-use iroh::address_lookup::MdnsAddressLookup;
 use iroh::endpoint::presets::N0;
 use iroh::endpoint::{Connection, RecvStream};
-use iroh::{Endpoint, PublicKey, SecretKey, Watcher as _};
+use iroh::{Endpoint, PublicKey, SecretKey};
+use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_bft::Message as BftMessage;
 use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
 use picomint_core::module::PICOMINT_ALPN;
@@ -118,12 +118,11 @@ impl P2PConnection {
     }
 
     pub fn rtt(&self) -> Option<Duration> {
-        let paths = self.connection.paths();
-        paths
-            .peek()
+        self.connection
+            .paths()
             .iter()
             .find(|p| p.is_selected())
-            .and_then(iroh::endpoint::PathInfo::rtt)
+            .map(|p| p.rtt())
     }
 }
 

@@ -32,6 +32,7 @@ futures = { workspace = true }
 group = { workspace = true }
 iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false, features = ["key"] }
+iroh-mdns-address-lookup = { workspace = true }
 maud = { workspace = true }
 miniscript = { workspace = true }
 picomint-bft = { workspace = true }
