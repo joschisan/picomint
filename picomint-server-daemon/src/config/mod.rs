@@ -27,7 +27,6 @@ pub mod db;
 pub mod dkg;
 pub mod dkg_g1;
 pub mod dkg_g2;
-pub mod file;
 pub mod poly;
 pub mod setup;
 

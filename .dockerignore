@@ -1,9 +1,6 @@
 target/
 .git/
 .github/
-picomint-startos/node_modules/
-picomint-startos/javascript/
-picomint-startos/*.s9pk
 **/*.swp
 .vscode/
 .idea/
