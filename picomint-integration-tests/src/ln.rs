@@ -21,9 +21,7 @@ use picomint_client::{Client, OperationId};
 use picomint_core::config::FederationId;
 use picomint_core::ln::gateway_api::{GatewayInfo, PaymentFee, SendPaymentPayload};
 use picomint_core::ln::routes::{ROUTE_GATEWAY_INFO, ROUTE_SEND_PAYMENT};
-use picomint_core::ln::{
-    Bolt11InvoiceDescription, LightningInput, LightningInvoice, OutgoingWitness,
-};
+use picomint_core::ln::{LightningInput, LightningInvoice, OutgoingWitness};
 use picomint_core::{Amount, OutPoint, wire};
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_invoice};
@@ -284,13 +282,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     {
         let (gateway_api, gateway_info) = ln.select_gateway(None)?;
         let invoice = ln
-            .receive(
-                gateway_api,
-                gateway_info,
-                Amount::from_msats(500_000),
-                300,
-                Bolt11InvoiceDescription::Direct(String::new()),
-            )
+            .receive(gateway_api, gateway_info, Amount::from_msats(500_000), 300)
             .await?;
 
         env.ldk_node.bolt11_payment().send(&invoice, None)?;
