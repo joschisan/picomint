@@ -212,7 +212,10 @@ fn setup_form_content(error: Option<&str>) -> Markup {
 }
 
 // GET handler for the /setup route (display the setup form)
-async fn setup_form(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
+async fn setup_form(
+    State(state): State<UiState<Arc<SetupApi>>>,
+    _auth: UserAuth,
+) -> impl IntoResponse {
     if state.api.setup_code().await.is_some() {
         return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
     }
@@ -223,7 +226,10 @@ async fn setup_form(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoRes
 
 // GET handler for the /recover route (dedicated page for recovering from a
 // previously-saved server config).
-async fn recover_page(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
+async fn recover_page(
+    State(state): State<UiState<Arc<SetupApi>>>,
+    _auth: UserAuth,
+) -> impl IntoResponse {
     if state.api.setup_code().await.is_some() {
         return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
     }
@@ -235,6 +241,7 @@ async fn recover_page(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoR
 // POST handler for the /setup route (process the setup form)
 async fn setup_submit(
     State(state): State<UiState<Arc<SetupApi>>>,
+    _auth: UserAuth,
     Form(input): Form<SetupInput>,
 ) -> impl IntoResponse {
     // Only use these settings if is_lead is true
@@ -275,12 +282,10 @@ async fn setup_submit(
     }
 }
 
-// GET handler for the /login route (display the login form)
-async fn login_form_handler(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
-    if state.api.setup_code().await.is_none() {
-        return Redirect::to(ROOT_ROUTE).into_response();
-    }
-
+// GET handler for the /login route (display the login form). Always shown,
+// regardless of setup state — auth is the gate to /setup itself, so the login
+// form must be reachable before any local parameters exist.
+async fn login_form_handler(State(_state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
     Html(single_card_layout("Enter Password", login_form(None)).into_string()).into_response()
 }
 
@@ -305,11 +310,12 @@ async fn federation_setup(
     State(state): State<UiState<Arc<SetupApi>>>,
     _auth: UserAuth,
 ) -> impl IntoResponse {
-    let our_connection_info = state
-        .api
-        .setup_code()
-        .await
-        .expect("Successful authentication ensures that the local parameters have been set");
+    // Auth no longer implies that local parameters have been set, since the
+    // login form is now reachable before setup. If the user lands here too
+    // early, send them back to /setup to fill in their guardian params first.
+    let Some(our_connection_info) = state.api.setup_code().await else {
+        return Redirect::to(ROOT_ROUTE).into_response();
+    };
 
     let connected_peers = state.api.connected_peers().await;
     let federation_size = state.api.federation_size().await;
