@@ -1,3 +1,4 @@
+use anyhow::Context;
 use bitcoin::{BlockHash, Transaction};
 use bitcoincore_rpc::Error::JsonRpc;
 use bitcoincore_rpc::bitcoincore_rpc_json::EstimateMode;
@@ -5,6 +6,7 @@ use bitcoincore_rpc::jsonrpc::Error::Rpc;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use tokio::task::block_in_place;
 use tracing::info;
+use url::Url;
 
 use crate::Feerate;
 
@@ -12,8 +14,17 @@ use crate::Feerate;
 pub struct BitcoindClient(Client);
 
 impl BitcoindClient {
-    pub fn new(username: String, password: String, url: &str) -> anyhow::Result<Self> {
-        Ok(Self(Client::new(url, Auth::UserPass(username, password))?))
+    pub fn new(url: &Url) -> anyhow::Result<Self> {
+        let username = url.username().to_owned();
+        let password = url
+            .password()
+            .context("BITCOIND_URL must embed credentials: http://user:pass@host")?
+            .to_owned();
+
+        Ok(Self(Client::new(
+            url.as_str(),
+            Auth::UserPass(username, password),
+        )?))
     }
 
     pub async fn get_block_count(&self) -> anyhow::Result<u64> {

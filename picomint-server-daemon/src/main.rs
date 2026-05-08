@@ -7,7 +7,6 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::Context;
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoindClient, EsploraClient};
@@ -100,25 +99,14 @@ async fn main() -> anyhow::Result<()> {
     let db = picomint_redb::Database::open(server_opts.data_dir.join(DB_FILE))
         .expect("Failed to open picomint-server-daemon database");
 
-    let bitcoin_backend = Arc::new(
-        match (
-            server_opts.bitcoind_url.as_ref(),
-            server_opts.esplora_url.as_ref(),
-        ) {
-            (Some(url), None) => {
-                let username = url.username().to_owned();
-                let password = url
-                    .password()
-                    .context("BITCOIND_URL must embed credentials: http://user:pass@host")?
-                    .to_owned();
-                BitcoinBackend::Bitcoind(
-                    BitcoindClient::new(username, password, url.as_str()).unwrap(),
-                )
-            }
-            (None, Some(url)) => BitcoinBackend::Esplora(EsploraClient::new(url.as_str()).unwrap()),
-            _ => unreachable!("ArgGroup enforces exactly one of BITCOIND_URL or ESPLORA_URL"),
-        },
-    );
+    let bitcoin_backend = match (
+        server_opts.bitcoind_url.as_ref(),
+        server_opts.esplora_url.as_ref(),
+    ) {
+        (Some(url), None) => Arc::new(BitcoinBackend::Bitcoind(BitcoindClient::new(url)?)),
+        (None, Some(url)) => Arc::new(BitcoinBackend::Esplora(EsploraClient::new(url)?)),
+        _ => unreachable!("ArgGroup enforces exactly one of BITCOIND_URL or ESPLORA_URL"),
+    };
 
     tokio_rustls::rustls::crypto::ring::default_provider()
         .install_default()

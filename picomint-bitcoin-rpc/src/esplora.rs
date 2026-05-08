@@ -4,6 +4,7 @@ use anyhow::Context;
 use bitcoin::{BlockHash, Transaction};
 use esplora_client::{AsyncClient, Builder, convert_fee_rate};
 use tracing::info;
+use url::Url;
 
 use crate::Feerate;
 
@@ -11,8 +12,10 @@ use crate::Feerate;
 pub struct EsploraClient(AsyncClient);
 
 impl EsploraClient {
-    pub fn new(url: &str) -> anyhow::Result<Self> {
-        Ok(Self(Builder::new(url.trim_end_matches('/')).build_async()?))
+    pub fn new(url: &Url) -> anyhow::Result<Self> {
+        Ok(Self(
+            Builder::new(url.as_str().trim_end_matches('/')).build_async()?,
+        ))
     }
 
     pub async fn get_block_count(&self) -> anyhow::Result<u64> {
