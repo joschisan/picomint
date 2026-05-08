@@ -14,17 +14,11 @@ pub struct EsploraClient {
 
 impl EsploraClient {
     pub fn new(url: &str) -> anyhow::Result<Self> {
-        info!(
-            %url,
-            "Initializing bitcoin esplora backend"
-        );
         // URL needs to have any trailing path including '/' removed
         let without_trailing = url.trim_end_matches('/');
 
-        let builder = esplora_client::Builder::new(without_trailing);
-        let client = builder.build_async()?;
         Ok(Self {
-            client,
+            client: esplora_client::Builder::new(without_trailing).build_async()?,
             url: url.to_string(),
         })
     }

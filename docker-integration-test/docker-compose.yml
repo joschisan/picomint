@@ -34,9 +34,7 @@ services:
     environment: &guardian_env
       DATA_DIR: /data
       BITCOIN_NETWORK: regtest
-      BITCOIND_URL: http://bitcoind:18443
-      BITCOIND_USERNAME: bitcoin
-      BITCOIND_PASSWORD: bitcoin
+      BITCOIND_URL: http://bitcoin:bitcoin@bitcoind:18443
       P2P_ADDR: 0.0.0.0:8080
       UI_ADDR: 0.0.0.0:3000
       UI_PASSWORD: picomint
@@ -124,9 +122,7 @@ services:
     environment:
       DATA_DIR: /data
       BITCOIN_NETWORK: regtest
-      BITCOIND_URL: http://bitcoind:18443
-      BITCOIND_USERNAME: bitcoin
-      BITCOIND_PASSWORD: bitcoin
+      BITCOIND_URL: http://bitcoin:bitcoin@bitcoind:18443
       API_ADDR: 0.0.0.0:8080
       LDK_ADDR: 0.0.0.0:9735
       RUST_LOG: info

@@ -16,14 +16,8 @@ pub struct BitcoindClient {
 
 impl BitcoindClient {
     pub fn new(username: String, password: String, url: &str) -> anyhow::Result<Self> {
-        let auth = Auth::UserPass(username, password);
-
-        info!(
-            %url,
-            "Initializing bitcoin bitcoind backend"
-        );
         Ok(Self {
-            client: Client::new(url, auth)?,
+            client: Client::new(url, Auth::UserPass(username, password))?,
             url: url.to_string(),
         })
     }

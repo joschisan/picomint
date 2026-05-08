@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock;
 
+use anyhow::Context;
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
 use lightning::types::payment::PaymentHash;
@@ -37,17 +38,6 @@ use url::Url;
 #[command(version)]
 #[command(
     group(
-        ArgGroup::new("bitcoind_password_auth")
-           .args(["bitcoind_password"])
-           .multiple(false)
-    ),
-    group(
-        ArgGroup::new("bitcoind_auth")
-            .args(["bitcoind_url"])
-            .requires("bitcoind_password_auth")
-            .requires_all(["bitcoind_username", "bitcoind_url"])
-    ),
-    group(
         ArgGroup::new("bitcoin_rpc")
             .required(true)
             .multiple(true)
@@ -67,17 +57,10 @@ pub struct GatewayOpts {
     #[arg(long, env = "ESPLORA_URL")]
     pub esplora_url: Option<Url>,
 
-    /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
+    /// Bitcoind RPC URL with embedded credentials, e.g.
+    /// `http://user:pass@127.0.0.1:8332`.
     #[arg(long, env = "BITCOIND_URL")]
     pub bitcoind_url: Option<Url>,
-
-    /// The username to use when connecting to bitcoind
-    #[arg(long, env = "BITCOIND_USERNAME")]
-    pub bitcoind_username: Option<String>,
-
-    /// The password to use when connecting to bitcoind
-    #[arg(long, env = "BITCOIND_PASSWORD")]
-    pub bitcoind_password: Option<String>,
 
     /// Public API listen address
     #[arg(long = "api-addr", env = "API_ADDR", default_value = "0.0.0.0:8080")]
@@ -168,16 +151,21 @@ fn main() -> anyhow::Result<()> {
 
     match (opts.bitcoind_url.clone(), opts.esplora_url.clone()) {
         (Some(url), _) => {
-            node_builder.set_chain_source_bitcoind_rpc(
-                url.host_str().expect("Missing bitcoind host").to_string(),
-                url.port().expect("Missing bitcoind port"),
-                opts.bitcoind_username
-                    .clone()
-                    .expect("BITCOIND_USERNAME is required"),
-                opts.bitcoind_password
-                    .clone()
-                    .expect("BITCOIND_PASSWORD is required"),
-            );
+            let host = url
+                .host_str()
+                .context("BITCOIND_URL is missing a host")?
+                .to_string();
+
+            let port = url.port().context("BITCOIND_URL is missing a port")?;
+
+            let username = url.username().to_owned();
+
+            let password = url
+                .password()
+                .context("BITCOIND_URL must embed credentials: http://user:pass@host")?
+                .to_owned();
+
+            node_builder.set_chain_source_bitcoind_rpc(host, port, username, password);
         }
         (None, Some(url)) => {
             node_builder.set_chain_source_esplora(url.to_string(), None);

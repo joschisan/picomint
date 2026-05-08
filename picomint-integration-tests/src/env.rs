@@ -283,9 +283,10 @@ async fn start_server(base: &Path, peer_idx: usize) -> anyhow::Result<Child> {
     let child = Command::new("target/release/picomint-server-daemon")
         .env("DATA_DIR", data_dir.to_str().unwrap())
         .env("BITCOIN_NETWORK", "regtest")
-        .env("BITCOIND_URL", format!("http://127.0.0.1:{BTC_RPC_PORT}"))
-        .env("BITCOIND_USERNAME", BTC_RPC_USER)
-        .env("BITCOIND_PASSWORD", BTC_RPC_PASS)
+        .env(
+            "BITCOIND_URL",
+            format!("http://{BTC_RPC_USER}:{BTC_RPC_PASS}@127.0.0.1:{BTC_RPC_PORT}"),
+        )
         .env("P2P_ADDR", format!("127.0.0.1:{p2p_port}"))
         .env("UI_ADDR", format!("127.0.0.1:{ui_port}"))
         .env("UI_PASSWORD", "test")
@@ -323,9 +324,10 @@ async fn start_gateway(base: &Path, name: &str, gw_port: u16, ln_port: u16) -> a
         .env("API_ADDR", format!("0.0.0.0:{gw_port}"))
         .env("LDK_ADDR", format!("0.0.0.0:{ln_port}"))
         .env("BITCOIN_NETWORK", "regtest")
-        .env("BITCOIND_URL", format!("http://127.0.0.1:{BTC_RPC_PORT}"))
-        .env("BITCOIND_USERNAME", BTC_RPC_USER)
-        .env("BITCOIND_PASSWORD", BTC_RPC_PASS)
+        .env(
+            "BITCOIND_URL",
+            format!("http://{BTC_RPC_USER}:{BTC_RPC_PASS}@127.0.0.1:{BTC_RPC_PORT}"),
+        )
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
         .spawn()

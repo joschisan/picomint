@@ -106,9 +106,7 @@ picomint-server-cli …`.
 | `DATA_DIR`                   | yes      |                   | Directory for the redb database file       |
 | `BITCOIN_NETWORK`            | yes      | `regtest`         | `bitcoin`, `testnet`, `signet`, `regtest`  |
 | `ESPLORA_URL`                | one of   |                   | Esplora HTTP URL, e.g. `https://mempool.space/api` |
-| `BITCOIND_URL`               | one of   |                   | Bitcoin Core RPC URL                       |
-| `BITCOIND_USERNAME`          | if RPC   |                   | Bitcoin Core RPC user                      |
-| `BITCOIND_PASSWORD`          | if RPC   |                   | Bitcoin Core RPC password                  |
+| `BITCOIND_URL`               | one of   |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |
 | `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
 | `UI_ADDR`                    | no       |                   | Web UI listen address — unset disables UI  |
 | `UI_PASSWORD`                | if UI    |                   | Web UI password, required when `UI_ADDR` is set |
@@ -318,9 +316,7 @@ picomint-gateway-cli …`.
 | `DATA_DIR`                 | yes      |                   | Directory for redb + LDK node data          |
 | `BITCOIN_NETWORK`          | yes      |                   | Bitcoin network the gateway runs on         |
 | `ESPLORA_URL`              | one of   |                   | Esplora HTTP URL                            |
-| `BITCOIND_URL`             | one of   |                   | Bitcoin Core RPC URL                        |
-| `BITCOIND_USERNAME`        | if RPC   |                   | Bitcoin Core RPC user                       |
-| `BITCOIND_PASSWORD`        | if RPC   |                   | Bitcoin Core RPC password                   |
+| `BITCOIND_URL`             | one of   |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |
 | `API_ADDR`                 | no       | `0.0.0.0:8080`    | Public API listen address                   |
 | `LDK_ADDR`                 | no       | `0.0.0.0:9735`    | LDK Lightning P2P listen address (BOLT)     |
 | `ROUTING_FEE_BASE_MSAT`    | no       | `2000`            | Lightning base routing fee (msat)           |
