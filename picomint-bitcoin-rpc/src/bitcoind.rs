@@ -4,26 +4,20 @@ use bitcoincore_rpc::bitcoincore_rpc_json::EstimateMode;
 use bitcoincore_rpc::jsonrpc::Error::Rpc;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use tokio::task::block_in_place;
+use tracing::info;
 
 use crate::Feerate;
-use tracing::info;
 
 #[derive(Debug)]
 pub struct BitcoindClient {
     client: Client,
-    url: String,
 }
 
 impl BitcoindClient {
     pub fn new(username: String, password: String, url: &str) -> anyhow::Result<Self> {
         Ok(Self {
             client: Client::new(url, Auth::UserPass(username, password))?,
-            url: url.to_string(),
         })
-    }
-
-    pub fn url(&self) -> String {
-        self.url.clone()
     }
 
     pub async fn get_block_count(&self) -> anyhow::Result<u64> {

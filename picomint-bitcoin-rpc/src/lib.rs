@@ -45,13 +45,6 @@ pub enum BitcoinBackend {
 }
 
 impl BitcoinBackend {
-    pub fn url(&self) -> String {
-        match self {
-            BitcoinBackend::Bitcoind(c) => c.url(),
-            BitcoinBackend::Esplora(c) => c.url(),
-        }
-    }
-
     pub async fn get_block_count(&self) -> Result<u64> {
         match self {
             BitcoinBackend::Bitcoind(c) => c.get_block_count().await,
@@ -157,10 +150,6 @@ impl BitcoinRpcMonitor {
             fee_rate,
             sync_progress,
         })
-    }
-
-    pub fn url(&self) -> String {
-        self.rpc.url()
     }
 
     pub fn status(&self) -> Option<BitcoinRpcStatus> {

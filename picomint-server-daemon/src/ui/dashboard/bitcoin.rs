@@ -1,15 +1,11 @@
 use maud::{Markup, html};
 use picomint_bitcoin_rpc::BitcoinRpcStatus;
 
-pub fn render(url: String, status: &Option<BitcoinRpcStatus>) -> Markup {
+pub fn render(status: &Option<BitcoinRpcStatus>) -> Markup {
     html! {
         div class="card h-100" {
             div class="card-header dashboard-header" { "Bitcoin Rpc Connection" }
             div class="card-body" {
-                div class="alert alert-info mb-3" {
-                    (url)
-                }
-
                 @if let Some(status) = status {
                     table class="table table-sm mb-0" {
                         tbody {

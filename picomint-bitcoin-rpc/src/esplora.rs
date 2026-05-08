@@ -2,14 +2,13 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use bitcoin::{BlockHash, Transaction};
+use tracing::info;
 
 use crate::Feerate;
-use tracing::info;
 
 #[derive(Debug)]
 pub struct EsploraClient {
     client: esplora_client::AsyncClient,
-    url: String,
 }
 
 impl EsploraClient {
@@ -19,12 +18,7 @@ impl EsploraClient {
 
         Ok(Self {
             client: esplora_client::Builder::new(without_trailing).build_async()?,
-            url: url.to_string(),
         })
-    }
-
-    pub fn url(&self) -> String {
-        self.url.clone()
     }
 
     pub async fn get_block_count(&self) -> anyhow::Result<u64> {
