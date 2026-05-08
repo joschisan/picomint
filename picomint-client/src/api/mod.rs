@@ -12,7 +12,7 @@ use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
 use picomint_core::expiration::ExpirationStatus;
 use picomint_core::methods::{
     CoreMethod, ExpirationStatusRequest, ExpirationStatusResponse, LivenessRequest,
-    SubmitTxRequest, SubmitTxResponse,
+    LivenessResponse, SubmitTxRequest, SubmitTxResponse,
 };
 use picomint_core::module::{ApiError, Method, PICOMINT_ALPN};
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
@@ -203,12 +203,19 @@ impl FederationApi {
         .outcome
     }
 
-    /// Lightweight liveness check — returns `Ok(())` if the federation is
+    /// Lightweight liveness check — succeeds if a threshold of guardians is
     /// reachable.
-    pub async fn liveness(&self) -> anyhow::Result<()> {
+    pub async fn liveness(&self) -> anyhow::Result<LivenessResponse> {
         self.request_current_consensus(Method::Core(CoreMethod::Liveness(LivenessRequest)))
             .await
-            .map(|_: picomint_core::methods::LivenessResponse| ())
+    }
+
+    /// Single-peer liveness check — succeeds if `peer` answers. Useful for
+    /// surfacing per-peer connection status (e.g. dashboards) where the
+    /// threshold-consensus variant would mask which peer is offline.
+    pub async fn liveness_peer(&self, peer: PeerId) -> anyhow::Result<LivenessResponse> {
+        self.request_single_peer(Method::Core(CoreMethod::Liveness(LivenessRequest)), peer)
+            .await
     }
 
     /// Fetch the federation's announced expiration status, threshold-
