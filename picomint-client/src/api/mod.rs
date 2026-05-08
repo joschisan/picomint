@@ -1,11 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::future::pending;
-use std::pin::Pin;
 
 use anyhow::{Context, anyhow};
-use futures::stream::FuturesUnordered;
-use futures::{Future, FutureExt, StreamExt};
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
@@ -17,6 +14,7 @@ use picomint_core::methods::{
 use picomint_core::module::{ApiError, Method, PICOMINT_ALPN};
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_encoding::{Decodable, Encodable};
+use tokio::task::JoinSet;
 use tracing::{debug, instrument};
 
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
@@ -82,40 +80,42 @@ impl FederationApi {
     /// Make an aggregate request to federation, using `strategy` to logically
     /// merge the responses.
     #[instrument(skip_all, fields(method = ?method))]
-    pub async fn request_with_strategy<P: Decodable, F: Debug>(
+    pub async fn request_with_strategy<P: Decodable + Send + 'static, F: Debug>(
         &self,
         mut strategy: impl QueryStrategy<P, F> + Send,
         method: Method,
     ) -> anyhow::Result<F> {
-        // NOTE: `FuturesUnorderded` is a footgun, but all we do here is polling
-        // completed results from it and we don't do any `await`s when
-        // processing them, it should be totally OK.
-        let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
+        let mut tasks = JoinSet::new();
 
         for peer in self.all_peers() {
-            futures.push(Box::pin(
-                self.request_single_peer(method.clone(), peer)
-                    .map(move |result| (peer, result)),
-            ));
+            let api = self.clone();
+            let method = method.clone();
+            tasks.spawn(async move {
+                let result = api.request_single_peer(method, peer).await;
+                (peer, result)
+            });
         }
 
         let mut peer_errors = BTreeMap::new();
         let peer_error_threshold = self.num_peers().one_honest();
 
         loop {
-            let (peer, result) = futures
-                .next()
+            let (peer, result) = tasks
+                .join_next()
                 .await
-                .expect("Query strategy ran out of peers to query without returning a result");
+                .expect("Query strategy ran out of peers to query without returning a result")
+                .expect("Per-peer request task panicked");
 
             match result {
                 Ok(response) => match strategy.process(peer, response) {
                     QueryStep::Retry(peers) => {
                         for peer in peers {
-                            futures.push(Box::pin(
-                                self.request_single_peer(method.clone(), peer)
-                                    .map(move |result| (peer, result)),
-                            ));
+                            let api = self.clone();
+                            let method = method.clone();
+                            tasks.spawn(async move {
+                                let result = api.request_single_peer(method, peer).await;
+                                (peer, result)
+                            });
                         }
                     }
                     QueryStep::Success(response) => return Ok(response),
@@ -139,33 +139,37 @@ impl FederationApi {
     }
 
     #[instrument(level = "debug", skip(self, strategy))]
-    pub async fn request_with_strategy_retry<P: Decodable + Send, F: Debug>(
+    pub async fn request_with_strategy_retry<P: Decodable + Send + 'static, F: Debug>(
         &self,
         mut strategy: impl QueryStrategy<P, F> + Send,
         method: Method,
     ) -> F {
-        let mut futures = FuturesUnordered::<Pin<Box<dyn Future<Output = _> + Send>>>::new();
+        let mut tasks = JoinSet::new();
 
         for peer in self.all_peers() {
-            futures.push(Box::pin(
-                self.request_single_peer_retry(method.clone(), peer)
-                    .map(move |response| (peer, response)),
-            ));
+            let api = self.clone();
+            let method = method.clone();
+            tasks.spawn(async move {
+                let response = api.request_single_peer_retry(method, peer).await;
+                (peer, response)
+            });
         }
 
         loop {
-            let (peer, response) = match futures.next().await {
-                Some(t) => t,
+            let (peer, response) = match tasks.join_next().await {
+                Some(joined) => joined.expect("Per-peer request task panicked"),
                 None => pending().await,
             };
 
             match strategy.process(peer, response) {
                 QueryStep::Retry(peers) => {
                     for peer in peers {
-                        futures.push(Box::pin(
-                            self.request_single_peer_retry(method.clone(), peer)
-                                .map(move |response| (peer, response)),
-                        ));
+                        let api = self.clone();
+                        let method = method.clone();
+                        tasks.spawn(async move {
+                            let response = api.request_single_peer_retry(method, peer).await;
+                            (peer, response)
+                        });
                     }
                 }
                 QueryStep::Success(response) => return response,
@@ -179,7 +183,7 @@ impl FederationApi {
 
     pub async fn request_current_consensus<R>(&self, method: Method) -> anyhow::Result<R>
     where
-        R: Decodable + Eq + Debug + Clone + Send,
+        R: Decodable + Eq + Debug + Clone + Send + 'static,
     {
         self.request_with_strategy(ThresholdConsensus::new(self.num_peers()), method)
             .await
@@ -187,7 +191,7 @@ impl FederationApi {
 
     pub async fn request_current_consensus_retry<R>(&self, method: Method) -> R
     where
-        R: Decodable + Eq + Debug + Clone + Send,
+        R: Decodable + Eq + Debug + Clone + Send + 'static,
     {
         self.request_with_strategy_retry(ThresholdConsensus::new(self.num_peers()), method)
             .await
