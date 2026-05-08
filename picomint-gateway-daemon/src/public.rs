@@ -1,117 +1,50 @@
-use axum::Router;
-use axum::body::Body;
-use axum::extract::{Json, Path, Query, State};
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use bitcoin::hashes::sha256;
-use picomint_core::config::FederationId;
-use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, SendPaymentPayload};
-use picomint_core::ln::routes::{
-    ROUTE_CREATE_BOLT11_INVOICE, ROUTE_GATEWAY_INFO, ROUTE_SEND_PAYMENT,
+//! Iroh accept loop for the gateway's public API.
+//!
+//! Each accepted connection runs through the one-shot RPC lifecycle from
+//! [`picomint_rpc::handle_request`]: accept one bi stream, decode a
+//! [`GatewayMethod`], dispatch to the matching `AppState` method,
+//! consensus-encode the response, finish the stream, await the
+//! client-driven close.
+
+use iroh::Endpoint;
+use picomint_core::ln::gateway_api::{
+    CreateInvoiceResponse, GatewayMethod, InfoResponse, SendPaymentResponse,
 };
-use picomint_lnurl::LnurlResponse;
-use reqwest::StatusCode;
-use serde_json::json;
-use tokio::net::TcpListener;
-use tower_http::cors::CorsLayer;
-use tracing::instrument;
+use picomint_encoding::Encodable as _;
 
 use crate::AppState;
-use crate::cli::CliError;
 
-/// LNURL-compliant error response for verify endpoints.
-#[derive(Debug)]
-pub struct LnurlError {
-    code: StatusCode,
-    reason: anyhow::Error,
+/// Maximum number of concurrent in-flight gateway API requests, summed
+/// across every accepted connection.
+pub const MAX_CONCURRENT_REQUESTS: usize = 1000;
+
+pub async fn run_public(state: AppState, endpoint: Endpoint) {
+    picomint_rpc::run_accept_loop(endpoint, MAX_CONCURRENT_REQUESTS, move |method| {
+        dispatch(state.clone(), method)
+    })
+    .await;
 }
 
-impl std::fmt::Display for LnurlError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LNURL Error: {}", self.reason)
-    }
-}
-
-impl std::error::Error for LnurlError {}
-
-impl LnurlError {
-    pub fn internal(reason: anyhow::Error) -> Self {
-        Self {
-            code: StatusCode::INTERNAL_SERVER_ERROR,
-            reason,
+async fn dispatch(state: AppState, method: GatewayMethod) -> Result<Vec<u8>, String> {
+    match method {
+        GatewayMethod::Info(req) => Ok(InfoResponse {
+            info: state.gateway_info(&req.federation_id).await.ok(),
         }
+        .consensus_encode_to_vec()),
+        GatewayMethod::SendPayment(req) => state
+            .send_payment(req)
+            .await
+            .map(|result| SendPaymentResponse { result }.consensus_encode_to_vec())
+            .map_err(|e| e.to_string()),
+        GatewayMethod::CreateInvoice(req) => state
+            .create_bolt11_invoice(req)
+            .await
+            .map(|invoice| CreateInvoiceResponse { invoice }.consensus_encode_to_vec())
+            .map_err(|e| e.to_string()),
+        GatewayMethod::VerifyPreimage(req) => state
+            .verify_bolt11_preimage(req.payment_hash, req.wait)
+            .await
+            .map(|resp| resp.consensus_encode_to_vec())
+            .map_err(|e| e.to_string()),
     }
-}
-
-impl IntoResponse for LnurlError {
-    fn into_response(self) -> Response<Body> {
-        let json = Json(serde_json::json!({
-            "status": "ERROR",
-            "reason": self.reason.to_string(),
-        }));
-        (self.code, json).into_response()
-    }
-}
-
-pub async fn run_public(state: AppState) {
-    let listener = TcpListener::bind(state.api_addr)
-        .await
-        .expect("Failed to bind public API server");
-
-    let router = router()
-        .with_state(state)
-        .layer(CorsLayer::permissive())
-        .into_make_service();
-
-    axum::serve(listener, router)
-        .await
-        .expect("Public webserver failed");
-}
-
-fn router() -> Router<AppState> {
-    Router::new()
-        .route(ROUTE_GATEWAY_INFO, post(gateway_info))
-        .route(ROUTE_SEND_PAYMENT, post(pay_bolt11_invoice))
-        .route(ROUTE_CREATE_BOLT11_INVOICE, post(create_bolt11_invoice))
-        .route("/verify/{payment_hash}", get(verify_bolt11_preimage_get))
-}
-
-#[instrument(skip_all, err)]
-async fn gateway_info(
-    State(state): State<AppState>,
-    Json(federation_id): Json<FederationId>,
-) -> Result<Json<serde_json::Value>, CliError> {
-    let gateway_info = state.gateway_info(&federation_id).await?;
-    Ok(Json(json!(gateway_info)))
-}
-
-#[instrument(skip_all, err)]
-async fn pay_bolt11_invoice(
-    State(state): State<AppState>,
-    Json(payload): Json<SendPaymentPayload>,
-) -> Result<Json<serde_json::Value>, CliError> {
-    let payment_result = state.send_payment(payload).await?;
-    Ok(Json(json!(payment_result)))
-}
-
-#[instrument(skip_all, err)]
-async fn create_bolt11_invoice(
-    State(state): State<AppState>,
-    Json(payload): Json<CreateBolt11InvoicePayload>,
-) -> Result<Json<serde_json::Value>, CliError> {
-    let invoice = state.create_bolt11_invoice(payload).await?;
-    Ok(Json(json!(invoice)))
-}
-
-async fn verify_bolt11_preimage_get(
-    State(state): State<AppState>,
-    Path(payment_hash): Path<sha256::Hash>,
-    Query(query): Query<std::collections::HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, LnurlError> {
-    let response = state
-        .verify_bolt11_preimage(payment_hash, query.contains_key("wait"))
-        .await
-        .map_err(LnurlError::internal)?;
-
-    Ok(Json(json!(LnurlResponse::Ok(response))))
 }

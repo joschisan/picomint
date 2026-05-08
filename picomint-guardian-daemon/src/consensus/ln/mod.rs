@@ -11,12 +11,13 @@ use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::ln::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
+use picomint_core::ln::gateway_api::GatewayPk;
 use picomint_core::ln::methods::LnMethod;
 use picomint_core::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
     LightningOutputError, OutgoingWitness,
 };
-use picomint_core::module::{ApiError, InputMeta, TxItemAmounts};
+use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use tpe::{PublicKeyShare, SecretKeyShare};
@@ -307,7 +308,7 @@ impl Lightning {
         outgoing + incoming
     }
 
-    pub async fn handle_api(&self, method: LnMethod) -> Result<Vec<u8>, ApiError> {
+    pub async fn handle_api(&self, method: LnMethod) -> Result<Vec<u8>, String> {
         match method {
             LnMethod::ConsensusBlockCount(req) => handler!(consensus_block_count, self, req).await,
             LnMethod::AwaitPreimage(req) => handler_async!(await_preimage, self, req).await,
@@ -375,26 +376,24 @@ impl Lightning {
         self.consensus_unix_time(&self.db.begin_read())
     }
 
-    pub async fn add_gateway_ui(&self, gateway: String) -> bool {
-        let gateway = gateway.trim_end_matches('/').to_string();
+    pub async fn add_gateway_ui(&self, gateway_pk: GatewayPk) -> bool {
         let dbtx = self.db.begin_write();
-        let is_new_entry = dbtx.insert(&GATEWAY, &gateway, &()).is_none();
+        let is_new_entry = dbtx.insert(&GATEWAY, &gateway_pk, &()).is_none();
         dbtx.commit();
         is_new_entry
     }
 
-    pub async fn remove_gateway_ui(&self, gateway: String) -> bool {
-        let gateway = gateway.trim_end_matches('/').to_string();
+    pub async fn remove_gateway_ui(&self, gateway_pk: GatewayPk) -> bool {
         let dbtx = self.db.begin_write();
-        let entry_existed = dbtx.remove(&GATEWAY, &gateway).is_some();
+        let entry_existed = dbtx.remove(&GATEWAY, &gateway_pk).is_some();
         dbtx.commit();
         entry_existed
     }
 
     #[must_use]
-    pub fn gateways_ui(&self) -> Vec<String> {
+    pub fn gateways_ui(&self) -> Vec<GatewayPk> {
         self.db
             .begin_read()
-            .iter(&GATEWAY, |r| r.map(|(url, ())| url).collect())
+            .iter(&GATEWAY, |r| r.map(|(pk, ())| pk).collect())
     }
 }

@@ -165,7 +165,8 @@ async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, CliEr
     let node_status = state.node.status();
 
     Ok(Json(InfoResponse {
-        public_key: state.node.node_id(),
+        lightning_pk: state.node.node_id(),
+        iroh_pk: state.client_factory.endpoint().id(),
         alias: state
             .node
             .node_alias()

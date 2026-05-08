@@ -1,0 +1,21 @@
+[package]
+authors = { workspace = true }
+description = "One-shot iroh RPC primitives shared by picomint client and server."
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-rpc"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[lib]
+name = "picomint_rpc"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+futures = { workspace = true }
+iroh = { workspace = true }
+picomint-encoding = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }

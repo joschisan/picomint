@@ -6,7 +6,6 @@ use anyhow::Result;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::expiration::ExpirationStatus;
 use picomint_core::methods::CoreMethod;
-use picomint_core::module::ApiError;
 use picomint_core::module::audit::AuditSummary;
 use picomint_core::tx::{ConsensusItem, Transaction, TxError};
 
@@ -137,7 +136,7 @@ impl ConsensusApi {
 }
 
 impl ConsensusApi {
-    pub async fn handle_api(&self, method: CoreMethod) -> Result<Vec<u8>, ApiError> {
+    pub async fn handle_api(&self, method: CoreMethod) -> Result<Vec<u8>, String> {
         match method {
             CoreMethod::SubmitTx(req) => handler_async!(submit_tx, self, req).await,
             CoreMethod::Config(req) => handler!(config, self, req).await,

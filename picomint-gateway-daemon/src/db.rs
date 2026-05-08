@@ -7,10 +7,25 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_eventlog::EventLogId;
 use picomint_redb::table;
 
+/// Gateway-wide root state, written once on first start and read on every
+/// subsequent boot. Holds both root secrets together so the daemon's
+/// `GatewayPk` (i.e. its iroh node id) survives restarts and recovery is
+/// "back up this one struct".
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct GatewayConfig {
+    /// BIP39 mnemonic entropy used as the root for federation-client
+    /// derivation.
+    pub mnemonic_entropy: Vec<u8>,
+    /// Iroh secret key for the gateway's public-API endpoint.
+    pub iroh_sk: iroh::SecretKey,
+}
+
+picomint_redb::consensus_value!(GatewayConfig);
+
 table!(
-    ROOT_ENTROPY,
-    () => Vec<u8>,
-    "root-entropy",
+    GATEWAY_CONFIG,
+    () => GatewayConfig,
+    "gateway-config",
 );
 
 table!(

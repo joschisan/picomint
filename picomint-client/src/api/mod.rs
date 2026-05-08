@@ -5,15 +5,14 @@ use std::future::pending;
 use anyhow::{Context, anyhow};
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{Retryable, networking_backoff};
-use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
 use picomint_core::expiration::ExpirationStatus;
 use picomint_core::methods::{
     CoreMethod, ExpirationStatusRequest, ExpirationStatusResponse, LivenessRequest,
     LivenessResponse, SubmitTxRequest, SubmitTxResponse,
 };
-use picomint_core::module::{ApiError, Method, PICOMINT_ALPN};
+use picomint_core::module::Method;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
-use picomint_encoding::{Decodable, Encodable};
+use picomint_encoding::Decodable;
 use tokio::task::JoinSet;
 use tracing::{debug, instrument};
 
@@ -50,6 +49,13 @@ impl FederationApi {
         self.peer_node_ids.to_num_peers()
     }
 
+    /// Iroh endpoint owned by this client. Re-used by module code that
+    /// needs to talk to other iroh nodes (e.g. the Lightning module
+    /// dialing gateways).
+    pub fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
+    }
+
     #[instrument(
         skip_all,
         fields(peer = %peer, method = ?method),
@@ -60,7 +66,7 @@ impl FederationApi {
     {
         let node_id = *self.peer_node_ids.get(&peer).context("Invalid peer id")?;
 
-        request_single_node(&self.endpoint, node_id, method).await
+        picomint_rpc::request(&self.endpoint, node_id, method).await
     }
 
     /// As [`Self::request_single_peer`] but retries forever on transport /
@@ -233,50 +239,4 @@ impl FederationApi {
         .await
         .map(|r| r.status)
     }
-}
-
-const IROH_MAX_RESPONSE_BYTES: usize = BFT_UNIT_BYTE_LIMIT * 3600 * 4 * 2;
-
-/// One-shot iroh RPC: connect to `node_id`, send `method`, read the
-/// response, close. The receiver-side close mirrors iroh's recommended
-/// graceful-shutdown pattern (see `iroh/examples/echo-no-router.rs`):
-/// the server is awaiting `closed()` and tears down once this
-/// CONNECTION_CLOSE frame arrives.
-///
-/// Used at bootstrap time to fetch the federation config from an invite
-/// code's lone peer before the full peer set is known, and internally by
-/// [`FederationApi::request_single_peer`].
-pub async fn request_single_node<R: Decodable>(
-    endpoint: &Endpoint,
-    node_id: PublicKey,
-    method: Method,
-) -> anyhow::Result<R> {
-    let connection = endpoint
-        .connect(node_id, PICOMINT_ALPN)
-        .await
-        .context("Connection failed")?;
-
-    let request_bytes = method.consensus_encode_to_vec();
-
-    let (mut sink, mut stream) = connection.open_bi().await.context("Failed to open bi")?;
-
-    sink.write_all(&request_bytes)
-        .await
-        .context("Failed to write request")?;
-
-    sink.finish().context("Failed to finish send stream")?;
-
-    let response = stream
-        .read_to_end(IROH_MAX_RESPONSE_BYTES)
-        .await
-        .context("Failed to read response")?;
-
-    connection.close(0u32.into(), b"");
-
-    let response = <Result<Vec<u8>, ApiError>>::consensus_decode(&response)
-        .context("Failed to decode response envelope")?;
-
-    let bytes = response.map_err(|e| anyhow!("Api Error: {e:?}"))?;
-
-    R::consensus_decode(&bytes).context("Failed to decode response payload")
 }

@@ -30,8 +30,8 @@ picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-eventlog = { workspace = true }
 picomint-gateway-cli-core = { workspace = true }
-picomint-lnurl = { workspace = true }
 picomint-redb = { workspace = true }
+picomint-rpc = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }

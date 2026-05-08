@@ -9,7 +9,6 @@ use picomint_core::mint::methods::{
     SignatureSharesRecoveryRequest, SignatureSharesRecoveryResponse, SignatureSharesRequest,
     SignatureSharesResponse,
 };
-use picomint_core::module::ApiError;
 use picomint_encoding::Encodable as _;
 use picomint_redb::ReadTx;
 use tbs::BlindedSignatureShare;
@@ -20,7 +19,7 @@ use super::db::{BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, RECOV
 pub async fn signature_shares(
     mint: &Mint,
     req: SignatureSharesRequest,
-) -> Result<SignatureSharesResponse, ApiError> {
+) -> Result<SignatureSharesResponse, String> {
     // Wait until any BLINDED_SIGNATURE_SHARE for this txid exists. All mint
     // outputs of a given tx are signed atomically in the same consensus
     // commit, so observing one implies all are present.
@@ -37,7 +36,7 @@ pub async fn signature_shares(
 pub fn signature_shares_recovery(
     mint: &Mint,
     req: SignatureSharesRecoveryRequest,
-) -> Result<SignatureSharesRecoveryResponse, ApiError> {
+) -> Result<SignatureSharesRecoveryResponse, String> {
     let mut shares = Vec::new();
 
     let dbtx = mint.db.begin_read();
@@ -45,7 +44,7 @@ pub fn signature_shares_recovery(
     for message in req.messages {
         let share = dbtx
             .get(&BLINDED_SIGNATURE_SHARE_RECOVERY, &message)
-            .ok_or_else(|| ApiError::bad_request("No blinded signature share found".to_string()))?;
+            .ok_or_else(|| "No blinded signature share found".to_string())?;
 
         shares.push(share);
     }
@@ -56,7 +55,7 @@ pub fn signature_shares_recovery(
 pub fn recovery_slice(
     mint: &Mint,
     req: RecoverySliceRequest,
-) -> Result<RecoverySliceResponse, ApiError> {
+) -> Result<RecoverySliceResponse, String> {
     let dbtx = mint.db.begin_read();
     Ok(RecoverySliceResponse {
         items: collect_recovery_slice(&dbtx, req.start, req.end),
@@ -66,7 +65,7 @@ pub fn recovery_slice(
 pub fn recovery_slice_hash(
     mint: &Mint,
     req: RecoverySliceHashRequest,
-) -> Result<RecoverySliceHashResponse, ApiError> {
+) -> Result<RecoverySliceHashResponse, String> {
     let dbtx = mint.db.begin_read();
     Ok(RecoverySliceHashResponse {
         hash: collect_recovery_slice(&dbtx, req.start, req.end).consensus_hash(),
@@ -76,7 +75,7 @@ pub fn recovery_slice_hash(
 pub fn recovery_count(
     mint: &Mint,
     _: RecoveryCountRequest,
-) -> Result<RecoveryCountResponse, ApiError> {
+) -> Result<RecoveryCountResponse, String> {
     let dbtx = mint.db.begin_read();
     Ok(RecoveryCountResponse {
         count: super::get_recovery_count(&dbtx),

@@ -28,7 +28,7 @@ use tracing::info;
 ///
 /// `handler!(fn_name, self, req).await` calls `rpc::fn_name(self, req)` and
 /// consensus-encodes the response. Each module has a `mod rpc` submodule with
-/// one `fn name(module: &Self, req: XRequest) -> Result<XResponse, ApiError>`
+/// one `fn name(module: &Self, req: XRequest) -> Result<XResponse, String>`
 /// per endpoint. Use [`handler_async!`] when the rpc handler is itself async.
 #[macro_export]
 macro_rules! handler {

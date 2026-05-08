@@ -3522,10 +3522,10 @@ dependencies = [
  "picomint-eventlog",
  "picomint-lnurl",
  "picomint-redb",
+ "picomint-rpc",
  "picomint-tbs",
  "picomint-tpe",
  "rand 0.8.5",
- "reqwest 0.12.22",
  "secp256k1",
  "serde",
  "serde_json",
@@ -3639,6 +3639,7 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "clap",
+ "iroh-base",
  "lightning-invoice",
  "picomint-client",
  "picomint-core",
@@ -3667,8 +3668,8 @@ dependencies = [
  "picomint-encoding",
  "picomint-eventlog",
  "picomint-gateway-cli-core",
- "picomint-lnurl",
  "picomint-redb",
+ "picomint-rpc",
  "rand 0.8.5",
  "reqwest 0.12.22",
  "rusqlite",
@@ -3733,6 +3734,7 @@ dependencies = [
  "picomint-encoding",
  "picomint-guardian-cli-core",
  "picomint-redb",
+ "picomint-rpc",
  "picomint-tbs",
  "picomint-tpe",
  "qrcode",
@@ -3754,7 +3756,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-stream",
- "axum",
  "bitcoin",
  "bitcoincore-rpc",
  "futures",
@@ -3766,11 +3767,13 @@ dependencies = [
  "picomint-base32",
  "picomint-client",
  "picomint-core",
+ "picomint-encoding",
  "picomint-eventlog",
  "picomint-gateway-cli-core",
  "picomint-guardian-cli-core",
  "picomint-lnurl",
  "picomint-redb",
+ "picomint-rpc",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3800,14 +3803,16 @@ dependencies = [
  "axum",
  "bitcoin",
  "clap",
+ "iroh",
+ "iroh-mdns-address-lookup",
  "lightning-invoice",
  "picomint-base32",
  "picomint-core",
  "picomint-encoding",
  "picomint-lnurl",
+ "picomint-rpc",
  "picomint-tpe",
  "rand 0.8.5",
- "reqwest 0.12.22",
  "serde",
  "tokio",
  "tower-http",
@@ -3824,6 +3829,18 @@ dependencies = [
  "redb",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "picomint-rpc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "iroh",
+ "picomint-encoding",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

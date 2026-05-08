@@ -9,6 +9,7 @@ use tpe::DecryptionKeyShare;
 use crate::OutPoint;
 use crate::ln::ContractId;
 use crate::ln::contracts::IncomingContract;
+use crate::ln::gateway_api::GatewayPk;
 
 // ── consensus-block-count ───────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ pub struct GatewaysRequest;
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct GatewaysResponse {
-    pub gateways: Vec<String>,
+    pub gateways: Vec<GatewayPk>,
 }
 
 // ── dispatch enum ───────────────────────────────────────────────────────────

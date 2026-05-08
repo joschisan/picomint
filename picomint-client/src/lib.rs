@@ -47,7 +47,7 @@ pub mod wallet;
 use std::collections::BTreeMap;
 
 use anyhow::bail;
-use api::{FederationApi, request_single_node};
+use api::FederationApi;
 pub use iroh::Endpoint;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
@@ -118,7 +118,7 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
 
     let federation_id = invite.federation_id;
 
-    let invite_resp: ConfigResponse = request_single_node(
+    let invite_resp: ConfigResponse = picomint_rpc::request(
         endpoint,
         invite.node_id,
         Method::Core(CoreMethod::Config(ConfigRequest)),

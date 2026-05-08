@@ -1,16 +1,16 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use bitcoin::Network;
-use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
+use iroh::{Endpoint, SecretKey};
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_client::{Client, Mnemonic};
-use picomint_core::config::ConsensusConfig;
-use picomint_core::config::FederationId;
+use picomint_core::config::{ConsensusConfig, FederationId};
 use picomint_core::invite::InviteCode;
 use picomint_redb::Database;
 
-use crate::db::{CLIENT_CONFIG, ROOT_ENTROPY};
+use crate::db::{CLIENT_CONFIG, GATEWAY_CONFIG, GatewayConfig};
 
 #[derive(Clone)]
 pub struct GatewayClientFactory {
@@ -21,17 +21,31 @@ pub struct GatewayClientFactory {
 }
 
 impl GatewayClientFactory {
-    /// Initialize a new factory, storing the mnemonic entropy in the database.
-    pub async fn init(db: Database, mnemonic: Mnemonic, network: Network) -> anyhow::Result<Self> {
+    /// Initialize a new factory, storing both root secrets (mnemonic entropy
+    /// + freshly generated iroh secret key) atomically as one [`GatewayConfig`] row.
+    pub async fn init(
+        db: Database,
+        mnemonic: Mnemonic,
+        network: Network,
+        api_addr: SocketAddr,
+    ) -> anyhow::Result<Self> {
+        let iroh_sk = SecretKey::generate();
+
+        let config = GatewayConfig {
+            mnemonic_entropy: mnemonic.to_entropy(),
+            iroh_sk: iroh_sk.clone(),
+        };
+
         let dbtx = db.begin_write();
-        assert!(
-            dbtx.as_ref()
-                .insert(&ROOT_ENTROPY, &(), &mnemonic.to_entropy())
-                .is_none()
-        );
+
+        assert!(dbtx.insert(&GATEWAY_CONFIG, &(), &config).is_none());
+
         dbtx.commit();
 
         let endpoint = Endpoint::builder(N0)
+            .secret_key(iroh_sk)
+            .alpns(vec![picomint_rpc::ALPN.to_vec()])
+            .bind_addr(api_addr)?
             .address_lookup(MdnsAddressLookup::builder())
             .bind()
             .await?;
@@ -45,28 +59,38 @@ impl GatewayClientFactory {
     }
 
     /// Try to load an existing factory from the database.
-    pub async fn try_load(db: Database, network: Network) -> anyhow::Result<Option<Self>> {
-        let entropy = db.begin_read().as_ref().get(&ROOT_ENTROPY, &());
+    pub async fn try_load(
+        db: Database,
+        network: Network,
+        api_addr: SocketAddr,
+    ) -> anyhow::Result<Option<Self>> {
+        let Some(config) = db.begin_read().as_ref().get(&GATEWAY_CONFIG, &()) else {
+            return Ok(None);
+        };
 
-        match entropy {
-            Some(entropy) => {
-                let mnemonic = Mnemonic::from_entropy(&entropy)
-                    .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {e}"))?;
+        let mnemonic = Mnemonic::from_entropy(&config.mnemonic_entropy)
+            .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {e}"))?;
 
-                let endpoint = Endpoint::builder(N0)
-                    .address_lookup(MdnsAddressLookup::builder())
-                    .bind()
-                    .await?;
+        let endpoint = Endpoint::builder(N0)
+            .secret_key(config.iroh_sk)
+            .alpns(vec![picomint_rpc::ALPN.to_vec()])
+            .bind_addr(api_addr)?
+            .address_lookup(MdnsAddressLookup::builder())
+            .bind()
+            .await?;
 
-                Ok(Some(Self {
-                    endpoint,
-                    db,
-                    mnemonic,
-                    network,
-                }))
-            }
-            None => Ok(None),
-        }
+        Ok(Some(Self {
+            endpoint,
+            db,
+            mnemonic,
+            network,
+        }))
+    }
+
+    /// The iroh endpoint owned by this factory. Re-used as the gateway
+    /// daemon's accept-side endpoint for the public API.
+    pub fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
     }
 
     pub fn mnemonic(&self) -> &Mnemonic {

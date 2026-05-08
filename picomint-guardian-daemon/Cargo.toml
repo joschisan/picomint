@@ -42,6 +42,7 @@ picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-guardian-cli-core = { workspace = true }
 picomint-redb = { workspace = true }
+picomint-rpc = { workspace = true }
 qrcode = { workspace = true }
 rand = { workspace = true }
 secp256k1 = { workspace = true }

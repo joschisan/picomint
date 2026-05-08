@@ -20,7 +20,7 @@ use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletOutput};
 use miniscript::descriptor::Wsh;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::backoff::{Retryable, networking_backoff};
-use picomint_core::module::{ApiError, InputMeta, TxItemAmounts};
+use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::wallet as common;
 use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
@@ -460,7 +460,7 @@ impl Wallet {
             .map_or(0, |wallet| 1000 * wallet.value.to_sat() as i64)
     }
 
-    pub async fn handle_api(&self, method: WalletMethod) -> Result<Vec<u8>, ApiError> {
+    pub async fn handle_api(&self, method: WalletMethod) -> Result<Vec<u8>, String> {
         match method {
             WalletMethod::ConsensusBlockCount(req) => {
                 handler!(consensus_block_count, self, req).await

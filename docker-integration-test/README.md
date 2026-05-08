@@ -29,17 +29,14 @@ docker compose up -d
 ```
 
 `setup.sh` drives the DKG ceremony for each federation in turn, joins
-the gateway to both, registers the gateway URL with both, and pegs in 1
-BTC of seed liquidity into each federation. It prints the two invite
-codes, the gateway URL, the LNURL daemon URL, and the per-guardian
-UI URLs at the end.
+the gateway to both, registers the gateway's iroh public key with both,
+and pegs in 1 BTC of seed liquidity into each federation. It prints the
+two invite codes, the gateway iroh pk, the LNURL daemon URL, and the
+per-guardian UI URLs at the end.
 
-The gateway URL registered with the federations must be reachable from
-external clients, so `setup.sh` auto-detects the host's public IPv4 via
-`api.ipify.org` and uses `http://<public_ip>:8090`. Override with
-`GATEWAY_URL=http://...:8090 ./setup.sh` if auto-detection isn't right
-(e.g. behind NAT, or for purely local dev where you want
-`http://localhost:8090`).
+Federation guardians and clients reach the gateway over iroh (QUIC over
+UDP, with hole-punching and N0 relay fallback), so no public HTTP URL
+is needed — the gateway identity is its iroh public key.
 
 ## Endpoints
 
@@ -48,7 +45,7 @@ external clients, so `setup.sh` auto-detects the host's public IPv4 via
 | bitcoind RPC        | `http://localhost:18443`                    | user `bitcoin` / pass `bitcoin`      |
 | Federation I UIs    | `http://localhost:3000`..`3003`             | password `picomint`                  |
 | Federation II UIs   | `http://localhost:3010`..`3013`             | password `picomint`                  |
-| gateway API         | `http://localhost:8090`                     | LDK BOLT P2P on `9735`               |
+| gateway iroh API    | UDP `localhost:8090` → container `8080`     | iroh QUIC; LDK BOLT P2P on `9735`    |
 | LNURL daemon API    | `http://localhost:8091`                     |                                      |
 
 Within the compose network the same services are reachable as

@@ -1,4 +1,5 @@
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
+use picomint_core::ln::gateway_api::GatewayPk;
 use picomint_core::{OutPoint, PeerId};
 use picomint_redb::table;
 use tpe::DecryptionKeyShare;
@@ -41,8 +42,8 @@ table!(
 
 table!(
     GATEWAY,
-    String => (),
-    "ln-gateway",
+    GatewayPk => (),
+    "ln-gateway-pk",
 );
 
 // Incoming contracts are indexed in three ways:
