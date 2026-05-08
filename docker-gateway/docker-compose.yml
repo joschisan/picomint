@@ -12,7 +12,6 @@ services:
       - picomint_gateway_data:/data
     environment:
       - DATA_DIR=/data
-      - BITCOIN_NETWORK=bitcoin
       - ESPLORA_URL=https://mempool.space/api
       - API_ADDR=0.0.0.0:8080
       - LDK_ADDR=0.0.0.0:9735

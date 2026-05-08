@@ -35,7 +35,7 @@ struct ServerOpts {
     data_dir: PathBuf,
 
     /// The bitcoin network of the federation
-    #[arg(long, env = "BITCOIN_NETWORK", default_value = "regtest")]
+    #[arg(long, env = "BITCOIN_NETWORK", default_value = "bitcoin")]
     bitcoin_network: Network,
 
     /// Esplora HTTP base URL, e.g. <https://mempool.space/api>

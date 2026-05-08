@@ -50,7 +50,7 @@ pub struct GatewayOpts {
     pub data_dir: PathBuf,
 
     /// Bitcoin network this gateway will be running on
-    #[arg(long = "network", env = "BITCOIN_NETWORK")]
+    #[arg(long = "network", env = "BITCOIN_NETWORK", default_value = "bitcoin")]
     pub network: Network,
 
     /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
