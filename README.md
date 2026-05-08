@@ -4,6 +4,12 @@ A minimal implementation of a federated Chaumian ecash mint on Bitcoin.
 
 ## Deploy Guardian
 
+Pick a stable directory for the deployment:
+
+```bash
+mkdir -p ~/picomint-server && cd ~/picomint-server
+```
+
 Download the compose file:
 
 ```bash
@@ -13,7 +19,7 @@ curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-server/
 And then run:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 Admin actions including setup either go through the CLI running inside the container:
@@ -115,6 +121,12 @@ picomint-server-cli …`.
 
 ## Deploy Gateway
 
+Pick a stable directory for the deployment:
+
+```bash
+mkdir -p ~/picomint-gateway && cd ~/picomint-gateway
+```
+
 Download the compose file:
 
 ```bash
@@ -124,7 +136,7 @@ curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-gateway
 And then run:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 Admin actions go through `picomint-gateway-cli`, running inside the container:
