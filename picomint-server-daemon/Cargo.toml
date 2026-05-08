@@ -35,8 +35,8 @@ iroh-base = { workspace = true, default-features = false, features = ["key"] }
 iroh-mdns-address-lookup = { workspace = true }
 maud = { workspace = true }
 miniscript = { workspace = true }
-picomint-bft = { workspace = true }
 picomint-base32 = { workspace = true }
+picomint-bft = { workspace = true }
 picomint-bitcoin-rpc = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }

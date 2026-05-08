@@ -1,26 +1,19 @@
-# Stage 1: Download yq in a full-featured image
-FROM alpine:latest AS downloader
-ARG TARGETARCH
-ARG YQ_VERSION=v4.47.1
-RUN case "$TARGETARCH" in \
-        amd64) YQ_ARCH="amd64" ;; \
-        arm64) YQ_ARCH="arm64" ;; \
-        *) echo "Unsupported architecture: $TARGETARCH" && exit 1 ;; \
-    esac && \
-    wget -O /tmp/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${YQ_ARCH}" && \
-    chmod +x /tmp/yq
+FROM rustlang/rust:nightly-slim AS builder
 
-# Stage 2: Main image
-FROM picomint/picomint:v0.10.0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy yq from downloader stage
-COPY --from=downloader /tmp/yq /usr/local/bin/yq
+WORKDIR /app
+COPY . .
 
-ADD ./docker_entrypoint.sh /docker_entrypoint.sh
-ADD ./check-web.sh /usr/local/bin/check-web.sh
-RUN chmod +x /docker_entrypoint.sh /usr/local/bin/check-web.sh
+RUN cargo build --release --bin picomint-server-daemon --bin picomint-server-cli
 
-VOLUME ["/picomint", "/start-os"]
-EXPOSE 3000/tcp
+FROM debian:bookworm-slim
 
-ENTRYPOINT ["/docker_entrypoint.sh"]
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/release/picomint-server-daemon /usr/local/bin/picomint-server-daemon
+COPY --from=builder /app/target/release/picomint-server-cli /usr/local/bin/picomint-server-cli
