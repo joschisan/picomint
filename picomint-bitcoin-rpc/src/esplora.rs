@@ -2,47 +2,41 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use bitcoin::{BlockHash, Transaction};
+use esplora_client::{AsyncClient, Builder, convert_fee_rate};
 use tracing::info;
 
 use crate::Feerate;
 
 #[derive(Debug)]
-pub struct EsploraClient {
-    client: esplora_client::AsyncClient,
-}
+pub struct EsploraClient(AsyncClient);
 
 impl EsploraClient {
     pub fn new(url: &str) -> anyhow::Result<Self> {
-        // URL needs to have any trailing path including '/' removed
-        let without_trailing = url.trim_end_matches('/');
-
-        Ok(Self {
-            client: esplora_client::Builder::new(without_trailing).build_async()?,
-        })
+        Ok(Self(Builder::new(url.trim_end_matches('/')).build_async()?))
     }
 
     pub async fn get_block_count(&self) -> anyhow::Result<u64> {
-        match self.client.get_height().await {
+        match self.0.get_height().await {
             Ok(height) => Ok(u64::from(height) + 1),
             Err(e) => Err(e.into()),
         }
     }
 
     pub async fn get_block_hash(&self, height: u64) -> anyhow::Result<BlockHash> {
-        Ok(self.client.get_block_hash(u32::try_from(height)?).await?)
+        Ok(self.0.get_block_hash(u32::try_from(height)?).await?)
     }
 
     pub async fn get_block(&self, block_hash: &BlockHash) -> anyhow::Result<bitcoin::Block> {
-        self.client
+        self.0
             .get_block_by_hash(block_hash)
             .await?
             .context("Block with this hash is not available")
     }
 
     pub async fn get_feerate(&self) -> anyhow::Result<Option<Feerate>> {
-        let fee_estimates: HashMap<u16, f64> = self.client.get_fee_estimates().await?;
+        let fee_estimates: HashMap<u16, f64> = self.0.get_fee_estimates().await?;
 
-        let fee_rate_vb = esplora_client::convert_fee_rate(1, fee_estimates).unwrap_or(1.0);
+        let fee_rate_vb = convert_fee_rate(1, fee_estimates).unwrap_or(1.0);
 
         let fee_rate_kvb = fee_rate_vb * 1_000f32;
 
@@ -52,7 +46,7 @@ impl EsploraClient {
     }
 
     pub async fn submit_tx(&self, tx: Transaction) {
-        let _ = self.client.broadcast(&tx).await.map_err(|err| {
+        let _ = self.0.broadcast(&tx).await.map_err(|err| {
             info!(err = %err, "Error broadcasting transaction");
         });
     }
