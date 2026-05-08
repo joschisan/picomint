@@ -90,27 +90,25 @@ pub async fn render(lightning: &crate::consensus::ln::Lightning) -> Markup {
 
                         // Right tile - Add gateway form
                         div class="col-lg-6 ps-lg-4" {
-                            div class="d-flex flex-column align-items-center h-100" {
-                                form action=(LN_ADD_ROUTE) method="post" class="w-100" style="max-width: 400px;" {
-                                    div class="alert alert-warning mb-3" {
-                                        "All guardians have to enter the exact same set of Gateway URLs for it to be served to clients."
-                                    }
-                                    div class="mb-3" {
-                                        input
-                                            type="url"
-                                            class="form-control"
-                                            id="gateway-url"
-                                            name="gateway_url"
-                                            placeholder="Enter gateway URL"
-                                            required;
-                                    }
-                                    div class="text-muted mb-3 text-center" style="font-size: 0.875em;" {
-                                        "Please enter a valid URL starting with http:// or https://"
-                                    }
-                                    div class="text-center" {
-                                        button type="submit" class="btn btn-primary" style="min-width: 150px;" {
-                                            "Add Gateway"
-                                        }
+                            form action=(LN_ADD_ROUTE) method="post" class="w-100" {
+                                div class="alert alert-warning mb-3" {
+                                    "All guardians have to enter the exact same set of Gateway URLs for it to be served to clients."
+                                }
+                                div class="mb-3" {
+                                    input
+                                        type="url"
+                                        class="form-control"
+                                        id="gateway-url"
+                                        name="gateway_url"
+                                        placeholder="Enter gateway URL"
+                                        required;
+                                }
+                                div class="text-muted mb-3 text-center" style="font-size: 0.875em;" {
+                                    "Please enter a valid URL starting with http:// or https://"
+                                }
+                                div class="text-center" {
+                                    button type="submit" class="btn btn-primary" style="min-width: 150px;" {
+                                        "Add Gateway"
                                     }
                                 }
                             }
