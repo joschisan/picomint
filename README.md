@@ -94,6 +94,33 @@ List the current recommendations:
 picomint-server-cli module ln gateway list
 ```
 
+### Backup
+
+Once the setup ceremony completes, save your guardian's config to a file on
+your local machine and stash it somewhere safe (encrypted backup, password
+manager, paper printout):
+
+```bash
+docker exec -i picomint-server picomint-server-cli config > config.json
+```
+
+This single file is the only state you need to keep. It contains your
+guardian's secret keys plus the federation's consensus config. The live
+`database.redb` is operational state (BFT sessions, block sync) which is
+reconstructed from peers when a recovered guardian rejoins.
+
+If your deployment is ever lost, copy the backup back into a fresh container:
+
+```bash
+docker cp config.json picomint-server:/tmp/config.json
+```
+
+And run `setup recover`:
+
+```bash
+docker exec -it picomint-server picomint-server-cli setup recover /tmp/config.json
+```
+
 ### Interfaces
 
 | Port | Purpose                      | Safe to expose? |
@@ -326,7 +353,7 @@ picomint-gateway-cli …`.
 | Env                        | Required | Default           | Description                                 |
 |----------------------------|----------|-------------------|---------------------------------------------|
 | `DATA_DIR`                 | yes      |                   | Directory for redb + LDK node data          |
-| `BITCOIN_NETWORK`          | yes      |                   | Bitcoin network the gateway runs on         |
+| `BITCOIN_NETWORK`          | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`   |
 | `ESPLORA_URL`              | one of   |                   | Esplora HTTP URL                            |
 | `BITCOIND_URL`             | one of   |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |
 | `API_ADDR`                 | no       | `0.0.0.0:8080`    | Public API listen address                   |
