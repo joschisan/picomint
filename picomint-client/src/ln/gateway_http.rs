@@ -6,12 +6,12 @@
 use bitcoin::secp256k1::schnorr::Signature;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::config::FederationId;
+use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, GatewayInfo, SendPaymentPayload};
 use picomint_core::ln::routes::{
     ROUTE_CREATE_BOLT11_INVOICE, ROUTE_GATEWAY_INFO, ROUTE_SEND_PAYMENT,
 };
-use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
 use picomint_core::{Amount, OutPoint};
 use reqwest::Method;
 use serde::Serialize;
@@ -77,7 +77,6 @@ pub async fn bolt11_invoice(
     federation_id: FederationId,
     contract: IncomingContract,
     amount: Amount,
-    description: Bolt11InvoiceDescription,
     expiry_secs: u32,
 ) -> Result<Bolt11Invoice, GatewayError> {
     request(
@@ -88,7 +87,6 @@ pub async fn bolt11_invoice(
             federation_id,
             contract,
             amount,
-            description,
             expiry_secs,
         }),
     )

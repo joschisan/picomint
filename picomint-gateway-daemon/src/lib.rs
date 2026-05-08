@@ -27,11 +27,11 @@ use picomint_client::gw::events::ReceiveSuccessEvent;
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
+use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts::PaymentImage;
 use picomint_core::ln::gateway_api::{
     CreateBolt11InvoicePayload, GatewayInfo, PaymentFee, SendPaymentPayload,
 };
-use picomint_core::ln::{Bolt11InvoiceDescription, LightningInvoice};
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::FederationInfo;
@@ -389,14 +389,9 @@ impl AppState {
             return Ok(existing_invoice);
         }
 
-        let ldk_description = match payload.description.clone() {
-            Bolt11InvoiceDescription::Direct(desc) => LdkBolt11InvoiceDescription::Direct(
-                Description::new(desc).map_err(|_| anyhow!("Invalid invoice description"))?,
-            ),
-            Bolt11InvoiceDescription::Hash(hash) => {
-                LdkBolt11InvoiceDescription::Hash(lightning_invoice::Sha256(hash))
-            }
-        };
+        // Description is intentionally empty: clients can't influence what
+        // the gateway puts in BOLT11 invoices it signs.
+        let ldk_description = LdkBolt11InvoiceDescription::Direct(Description::empty());
 
         let invoice = self
             .node

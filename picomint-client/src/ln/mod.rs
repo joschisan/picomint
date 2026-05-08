@@ -24,8 +24,7 @@ use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentIm
 use picomint_core::ln::gateway_api::{GatewayInfo, PaymentFee};
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_core::ln::{
-    Bolt11InvoiceDescription, LightningInput, LightningInvoice, LightningOutput,
-    MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
+    LightningInput, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
 };
 use picomint_core::wire;
 
@@ -341,7 +340,6 @@ impl LightningClientModule {
         gateway_info: GatewayInfo,
         amount: Amount,
         expiry_secs: u32,
-        description: Bolt11InvoiceDescription,
     ) -> Result<Bolt11Invoice, ReceiveError> {
         let receive_keypair = self.secret.receive_keypair();
 
@@ -351,7 +349,6 @@ impl LightningClientModule {
             receive_keypair.public_key(),
             amount,
             expiry_secs,
-            description,
         )
         .await
     }
@@ -366,7 +363,6 @@ impl LightningClientModule {
         recipient_pk: PublicKey,
         amount: Amount,
         expiry_secs: u32,
-        description: Bolt11InvoiceDescription,
     ) -> Result<Bolt11Invoice, ReceiveError> {
         let ephemeral_kp = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
@@ -421,7 +417,6 @@ impl LightningClientModule {
             self.federation_id,
             contract.clone(),
             amount,
-            description,
             expiry_secs,
         )
         .await
