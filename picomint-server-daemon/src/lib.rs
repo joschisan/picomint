@@ -56,7 +56,6 @@ macro_rules! handler_async {
 }
 
 use crate::config::db::{load_server_config, store_server_config};
-use crate::config::file::{load_server_config_file, write_server_config_file};
 use crate::config::setup::SetupApi;
 use crate::config::{ConfigGenSettings, SetupResult};
 use crate::p2p::{
@@ -111,8 +110,6 @@ pub async fn run_server(
         }
     };
 
-    write_server_config_file(&data_dir, &cfg);
-
     info!("Starting consensus...");
 
     Box::pin(consensus::run(
@@ -140,13 +137,6 @@ pub async fn run_config_gen(
     ReconnectP2PConnections<P2PMessage>,
     P2PStatusReceivers,
 )> {
-    // If a config.json was previously written by this guardian (or restored
-    // from a Start9 backup, or manually imported), recover from it directly.
-    // No setup UI, no setup CLI — the daemon comes straight up.
-    if let Some(cfg) = load_server_config_file(data_dir) {
-        return finalize_recovered_config(&db, settings, foreign_conn_tx, cfg).await;
-    }
-
     info!("Starting config gen");
 
     let (setup_tx, mut setup_rx) = tokio::sync::mpsc::channel(1);
@@ -223,48 +213,29 @@ pub async fn run_config_gen(
             Ok((cfg, connections, p2p_status_receivers))
         }
         SetupResult::Recovered(cfg) => {
-            finalize_recovered_config(&db, settings, foreign_conn_tx, *cfg).await
+            let connector = P2PConnector::new(
+                cfg.private.iroh_sk.clone(),
+                settings.p2p_addr,
+                cfg.consensus
+                    .peers
+                    .iter()
+                    .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
+                    .collect(),
+            )
+            .await?;
+
+            let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
+
+            let connections = ReconnectP2PConnections::<P2PMessage>::new(
+                cfg.private.identity,
+                connector,
+                p2p_status_senders,
+                foreign_conn_tx,
+            );
+
+            store_server_config(&db, &cfg).await;
+
+            Ok((*cfg, connections, p2p_status_receivers))
         }
     }
-}
-
-/// Wire up p2p connections from an already-finalized `cfg`, persist it to the
-/// DB and the on-disk snapshot, and return the consensus-ready handles.
-///
-/// Used by both the auto-recover path (config.json on disk) and the
-/// CLI/UI-driven `setup recover` path. DKG completion has its own connection
-/// setup because it builds peers from `ConfigGenParams`, not `ServerConfig`.
-async fn finalize_recovered_config(
-    db: &Database,
-    settings: ConfigGenSettings,
-    foreign_conn_tx: async_channel::Sender<iroh::endpoint::Connection>,
-    cfg: ServerConfig,
-) -> anyhow::Result<(
-    ServerConfig,
-    ReconnectP2PConnections<P2PMessage>,
-    P2PStatusReceivers,
-)> {
-    let connector = P2PConnector::new(
-        cfg.private.iroh_sk.clone(),
-        settings.p2p_addr,
-        cfg.consensus
-            .peers
-            .iter()
-            .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
-            .collect(),
-    )
-    .await?;
-
-    let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
-
-    let connections = ReconnectP2PConnections::<P2PMessage>::new(
-        cfg.private.identity,
-        connector,
-        p2p_status_senders,
-        foreign_conn_tx,
-    );
-
-    store_server_config(db, &cfg).await;
-
-    Ok((cfg, connections, p2p_status_receivers))
 }

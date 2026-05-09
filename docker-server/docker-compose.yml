@@ -13,7 +13,6 @@ services:
       - picomint_server_data:/data
     environment:
       - DATA_DIR=/data
-      - BITCOIN_NETWORK=bitcoin
       - ESPLORA_URL=https://mempool.space/api
       # Enable the Web UI (optional, otherwise all admin actions go through
       # the CLI via `docker exec`):

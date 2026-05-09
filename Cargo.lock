@@ -3499,6 +3499,7 @@ dependencies = [
  "picomint-core",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]

@@ -23,11 +23,6 @@ use url::Url;
 #[command(version)]
 #[command(
     group(
-        ArgGroup::new("bitcoind_auth")
-            .args(["bitcoind_url"])
-            .requires_all(["bitcoind_username", "bitcoind_password", "bitcoind_url"])
-    ),
-    group(
         ArgGroup::new("bitcoin_rpc")
             .required(true)
             .multiple(false)
@@ -40,24 +35,17 @@ struct ServerOpts {
     data_dir: PathBuf,
 
     /// The bitcoin network of the federation
-    #[arg(long, env = "BITCOIN_NETWORK", default_value = "regtest")]
+    #[arg(long, env = "BITCOIN_NETWORK", default_value = "bitcoin")]
     bitcoin_network: Network,
 
     /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
     #[arg(long, env = "ESPLORA_URL")]
     esplora_url: Option<Url>,
 
-    /// Bitcoind RPC URL, e.g. <http://127.0.0.1:8332>
+    /// Bitcoind RPC URL with embedded credentials, e.g.
+    /// `http://user:pass@127.0.0.1:8332`.
     #[arg(long, env = "BITCOIND_URL")]
     bitcoind_url: Option<Url>,
-
-    /// The username to use when connecting to bitcoind
-    #[arg(long, env = "BITCOIND_USERNAME")]
-    bitcoind_username: Option<String>,
-
-    /// The password to use when connecting to bitcoind
-    #[arg(long, env = "BITCOIND_PASSWORD")]
-    bitcoind_password: Option<String>,
 
     /// Address we bind to for iroh (p2p consensus + client API)
     #[arg(long = "p2p-addr", env = "P2P_ADDR", default_value = "0.0.0.0:8080")]
@@ -111,33 +99,14 @@ async fn main() -> anyhow::Result<()> {
     let db = picomint_redb::Database::open(server_opts.data_dir.join(DB_FILE))
         .expect("Failed to open picomint-server-daemon database");
 
-    let bitcoin_backend = Arc::new(
-        match (
-            server_opts.bitcoind_url.as_ref(),
-            server_opts.esplora_url.as_ref(),
-        ) {
-            (Some(bitcoind_url), None) => {
-                let bitcoind_username = server_opts
-                    .bitcoind_username
-                    .clone()
-                    .expect("BITCOIND_URL is set but BITCOIND_USERNAME is not");
-                let bitcoind_password = server_opts
-                    .bitcoind_password
-                    .clone()
-                    .expect("BITCOIND_URL is set but BITCOIND_PASSWORD is not");
-                BitcoinBackend::Bitcoind(
-                    BitcoindClient::new(
-                        bitcoind_username,
-                        bitcoind_password,
-                        bitcoind_url.as_str(),
-                    )
-                    .unwrap(),
-                )
-            }
-            (None, Some(url)) => BitcoinBackend::Esplora(EsploraClient::new(url.as_str()).unwrap()),
-            _ => unreachable!("ArgGroup enforces exactly one of BITCOIND_URL or ESPLORA_URL"),
-        },
-    );
+    let bitcoin_backend = match (
+        server_opts.bitcoind_url.as_ref(),
+        server_opts.esplora_url.as_ref(),
+    ) {
+        (Some(url), None) => Arc::new(BitcoinBackend::Bitcoind(BitcoindClient::new(url)?)),
+        (None, Some(url)) => Arc::new(BitcoinBackend::Esplora(EsploraClient::new(url)?)),
+        _ => unreachable!("ArgGroup enforces exactly one of BITCOIND_URL or ESPLORA_URL"),
+    };
 
     tokio_rustls::rustls::crypto::ring::default_provider()
         .install_default()

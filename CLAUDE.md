@@ -31,7 +31,6 @@ Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitco
 - `picomint-recurring-daemon` — standalone recurring-payment helper daemon
 - `picomint-lnurl` / `picomint-base32` / `picomint-logging` — small shared utility crates
 - `picomint-integration-tests` — end-to-end integration tests (used by `test-integration.sh`)
-- `picomint-startos` — StartOS packaging support
 
 ### Wire + storage
 - Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-core::encoding`

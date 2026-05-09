@@ -88,7 +88,6 @@ async fn dashboard_view(
         .collect();
     let invite_code = picomint_base32::encode(&api.cfg.get_invite_code());
     let audit_summary = api.federation_audit().await;
-    let bitcoin_rpc_url = api.bitcoin_rpc_connection.url();
     let bitcoin_rpc_status = api.bitcoin_rpc_connection.status();
     let expiration_status = api.expiration_status_ui();
 
@@ -125,7 +124,7 @@ async fn dashboard_view(
 
         div class="row gy-4 mt-2" {
             div class="col-12" {
-                (bitcoin::render(bitcoin_rpc_url, &bitcoin_rpc_status))
+                (bitcoin::render(&bitcoin_rpc_status))
             }
         }
 

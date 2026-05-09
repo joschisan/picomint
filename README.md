@@ -4,6 +4,12 @@ A minimal implementation of a federated Chaumian ecash mint on Bitcoin.
 
 ## Deploy Guardian
 
+Pick a stable directory for the deployment:
+
+```bash
+mkdir -p ~/picomint-server && cd ~/picomint-server
+```
+
 Download the compose file:
 
 ```bash
@@ -13,7 +19,7 @@ curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-server/
 And then run:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 Admin actions including setup either go through the CLI running inside the container:
@@ -88,6 +94,33 @@ List the current recommendations:
 picomint-server-cli module ln gateway list
 ```
 
+### Backup
+
+Once the setup ceremony completes, save your guardian's config to a file on
+your local machine and stash it somewhere safe (encrypted backup, password
+manager, paper printout):
+
+```bash
+docker exec -i picomint-server picomint-server-cli config > config.json
+```
+
+This single file is the only state you need to keep. It contains your
+guardian's secret keys plus the federation's consensus config. The live
+`database.redb` is operational state (BFT sessions, block sync) which is
+reconstructed from peers when a recovered guardian rejoins.
+
+If your deployment is ever lost, copy the backup back into a fresh container:
+
+```bash
+docker cp config.json picomint-server:/tmp/config.json
+```
+
+And run `setup recover`:
+
+```bash
+docker exec -it picomint-server picomint-server-cli setup recover /tmp/config.json
+```
+
 ### Interfaces
 
 | Port | Purpose                      | Safe to expose? |
@@ -104,11 +137,9 @@ picomint-server-cli …`.
 | Env                          | Required | Default           | Description                                |
 |------------------------------|----------|-------------------|--------------------------------------------|
 | `DATA_DIR`                   | yes      |                   | Directory for the redb database file       |
-| `BITCOIN_NETWORK`            | yes      | `regtest`         | `bitcoin`, `testnet`, `signet`, `regtest`  |
+| `BITCOIN_NETWORK`            | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`  |
 | `ESPLORA_URL`                | one of   |                   | Esplora HTTP URL, e.g. `https://mempool.space/api` |
-| `BITCOIND_URL`               | one of   |                   | Bitcoin Core RPC URL                       |
-| `BITCOIND_USERNAME`          | if RPC   |                   | Bitcoin Core RPC user                      |
-| `BITCOIND_PASSWORD`          | if RPC   |                   | Bitcoin Core RPC password                  |
+| `BITCOIND_URL`               | one of   |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |
 | `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
 | `UI_ADDR`                    | no       |                   | Web UI listen address — unset disables UI  |
 | `UI_PASSWORD`                | if UI    |                   | Web UI password, required when `UI_ADDR` is set |
@@ -116,6 +147,12 @@ picomint-server-cli …`.
 *Either `ESPLORA_URL` or `BITCOIND_URL` must be set, but not both.*
 
 ## Deploy Gateway
+
+Pick a stable directory for the deployment:
+
+```bash
+mkdir -p ~/picomint-gateway && cd ~/picomint-gateway
+```
 
 Download the compose file:
 
@@ -126,7 +163,7 @@ curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-gateway
 And then run:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 Admin actions go through `picomint-gateway-cli`, running inside the container:
@@ -316,11 +353,9 @@ picomint-gateway-cli …`.
 | Env                        | Required | Default           | Description                                 |
 |----------------------------|----------|-------------------|---------------------------------------------|
 | `DATA_DIR`                 | yes      |                   | Directory for redb + LDK node data          |
-| `BITCOIN_NETWORK`          | yes      |                   | Bitcoin network the gateway runs on         |
+| `BITCOIN_NETWORK`          | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`   |
 | `ESPLORA_URL`              | one of   |                   | Esplora HTTP URL                            |
-| `BITCOIND_URL`             | one of   |                   | Bitcoin Core RPC URL                        |
-| `BITCOIND_USERNAME`        | if RPC   |                   | Bitcoin Core RPC user                       |
-| `BITCOIND_PASSWORD`        | if RPC   |                   | Bitcoin Core RPC password                   |
+| `BITCOIND_URL`             | one of   |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |
 | `API_ADDR`                 | no       | `0.0.0.0:8080`    | Public API listen address                   |
 | `LDK_ADDR`                 | no       | `0.0.0.0:9735`    | LDK Lightning P2P listen address (BOLT)     |
 | `ROUTING_FEE_BASE_MSAT`    | no       | `2000`            | Lightning base routing fee (msat)           |
