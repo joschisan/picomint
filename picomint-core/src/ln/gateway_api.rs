@@ -5,11 +5,11 @@
 //! and `picomint_core::module::Method` (federation API) don't byte-overlap.
 
 use std::ops::Add;
+use std::str::FromStr;
 
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::schnorr::Signature;
 use bitcoin::secp256k1::{PublicKey, XOnlyPublicKey};
-use derive_more::{Display, FromStr};
 use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
@@ -22,28 +22,44 @@ use crate::ln::contracts::{IncomingContract, OutgoingContract};
 
 /// A gateway's identity — its iroh public key. Newtype wrapper so we can
 /// derive `Encodable + Decodable + redb::Key` (orphan rule blocks doing
-/// it on `iroh_base::PublicKey` directly). `Display` / `FromStr` delegate
-/// to iroh's base32 encoding, so it round-trips cleanly through clap, web
-/// form input, and JSON.
+/// it on `iroh_base::PublicKey` directly). `Serialize` / `Deserialize` /
+/// `FromStr` round-trip through [`picomint_base32`] — same `picomint`-
+/// prefixed base32hex encoding used for [`crate::invite::InviteCode`] — so
+/// the on-the-wire string form is consistent across clap, web forms, and
+/// JSON. No `Display` impl on purpose; render via `picomint_base32::encode`.
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    Eq,
-    PartialEq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    Encodable,
-    Decodable,
-    Display,
-    FromStr,
+    Debug, Clone, Copy, Eq, PartialEq, Hash, PartialOrd, Ord, Encodable, Decodable,
 )]
 pub struct GatewayPk(pub iroh_base::PublicKey);
 
 picomint_redb::consensus_key!(GatewayPk);
+
+impl Serialize for GatewayPk {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        picomint_base32::encode(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for GatewayPk {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        picomint_base32::decode(&String::deserialize(deserializer)?)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+impl FromStr for GatewayPk {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        picomint_base32::decode(s)
+    }
+}
 
 /// Wire request — every gateway-API call is one of these. Each variant's
 /// response is its own typed struct, sent on the wire as

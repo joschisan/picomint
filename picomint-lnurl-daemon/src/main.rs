@@ -159,14 +159,15 @@ async fn invoice(
         }
     };
 
-    info!(%params.amount, %gateway_pk, "Created invoice");
+    info!(%params.amount, "Created invoice");
 
     // The verify URL routes through this daemon: we proxy the call to
     // the originating gateway over iroh. `gateway_pk` is base32-encoded
-    // by `Display`.
+    // via `picomint_base32` (same format as the rest of picomint).
     let verify = format!(
-        "{}verify/{gateway_pk}/{}",
+        "{}verify/{}/{}",
         base_url(&headers),
+        picomint_base32::encode(&gateway_pk),
         invoice.payment_hash()
     );
 

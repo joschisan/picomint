@@ -97,7 +97,7 @@ until $DC exec -T gateway picomint-gateway-cli info >/dev/null 2>&1; do
     sleep 1
 done
 
-GATEWAY_PK=$($DC exec -T gateway picomint-gateway-cli info | jq -r .iroh_pk)
+GATEWAY_PK=$($DC exec -T gateway picomint-gateway-cli info | jq -r .gateway_pk)
 echo "==> Gateway iroh pk: $GATEWAY_PK"
 
 # Join + register + peg-in for each federation.

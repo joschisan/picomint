@@ -203,7 +203,7 @@ pub fn guardian_ln_gateway_add(data_dir: &Path, gateway_pk: &GatewayPk) -> Resul
         .arg("ln")
         .arg("gateway")
         .arg("add")
-        .arg(gateway_pk.to_string())
+        .arg(picomint_base32::encode(gateway_pk))
         .run_cli::<bool>()
 }
 
@@ -213,7 +213,7 @@ pub fn guardian_ln_gateway_remove(data_dir: &Path, gateway_pk: &GatewayPk) -> Re
         .arg("ln")
         .arg("gateway")
         .arg("remove")
-        .arg(gateway_pk.to_string())
+        .arg(picomint_base32::encode(gateway_pk))
         .run_cli::<bool>()
 }
 

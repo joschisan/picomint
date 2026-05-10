@@ -53,7 +53,7 @@ pub struct InfoResponse {
     pub lightning_pk: secp256k1::PublicKey,
     /// Iroh public key the gateway accepts on for the picomint API.
     /// Federation guardians register this via `module ln gateway add`.
-    pub iroh_pk: iroh_base::PublicKey,
+    pub gateway_pk: picomint_core::ln::gateway_api::GatewayPk,
     pub alias: String,
     pub network: String,
     pub block_height: u64,

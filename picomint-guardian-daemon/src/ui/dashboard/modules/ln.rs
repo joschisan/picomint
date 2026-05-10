@@ -66,11 +66,12 @@ pub async fn render(lightning: &crate::consensus::ln::Lightning) -> Markup {
                                         table class="table table-hover" {
                                             tbody {
                                                 @for gateway in &gateways {
+                                                    @let encoded = picomint_base32::encode(gateway);
                                                     tr {
-                                                        td { (gateway.to_string()) }
+                                                        td { (encoded) }
                                                         td class="text-end" {
                                                             form action=(LN_REMOVE_ROUTE) method="post" style="display: inline;" {
-                                                                input type="hidden" name="gateway_pk" value=(gateway.to_string());
+                                                                input type="hidden" name="gateway_pk" value=(encoded);
                                                                 button type="submit" class="btn btn-sm btn-danger" {
                                                                     "Remove"
                                                                 }

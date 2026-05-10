@@ -115,9 +115,9 @@ impl TestEnv {
 
         info!("Waiting for gateway...");
         let gw_pk = runtime.block_on(retry("gw ready", || async {
-            Ok(GatewayPk(cli::gateway_info(&gw_data_dir)?.iroh_pk))
+            Ok(cli::gateway_info(&gw_data_dir)?.gateway_pk)
         }))?;
-        info!("Gateway ready, gateway_pk={gw_pk}");
+        info!("Gateway ready, gateway_pk={}", picomint_base32::encode(&gw_pk));
 
         runtime.block_on(start_lnurl_daemon(base, LNURL_DAEMON_PORT))?;
         let lnurl_daemon_url = format!("http://127.0.0.1:{LNURL_DAEMON_PORT}/");
