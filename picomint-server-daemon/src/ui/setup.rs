@@ -12,7 +12,7 @@ use serde::Deserialize;
 use crate::config::ServerConfig;
 use crate::config::setup::SetupApi;
 use crate::ui::assets::WithStaticRoutesExt;
-use crate::ui::{ROOT_ROUTE, UiState, copiable_text, single_card_layout};
+use crate::ui::{ROOT_ROUTE, copiable_text, single_card_layout};
 
 // Setup route constants
 pub const FEDERATION_SETUP_ROUTE: &str = "/federation-setup";
@@ -206,8 +206,8 @@ fn setup_form_content(error: Option<&str>) -> Markup {
 }
 
 // GET handler for the /setup route (display the setup form)
-async fn setup_form(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
-    if state.api.setup_code().await.is_some() {
+async fn setup_form(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
+    if state.setup_code().await.is_some() {
         return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
     }
 
@@ -217,8 +217,8 @@ async fn setup_form(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoRes
 
 // GET handler for the /recover route (dedicated page for recovering from a
 // previously-saved server config).
-async fn recover_page(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
-    if state.api.setup_code().await.is_some() {
+async fn recover_page(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
+    if state.setup_code().await.is_some() {
         return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
     }
 
@@ -228,7 +228,7 @@ async fn recover_page(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoR
 
 // POST handler for the /setup route (process the setup form)
 async fn setup_submit(
-    State(state): State<UiState<Arc<SetupApi>>>,
+    State(state): State<Arc<SetupApi>>,
     Form(input): Form<SetupInput>,
 ) -> impl IntoResponse {
     // Only use these settings if is_lead is true
@@ -256,7 +256,6 @@ async fn setup_submit(
     };
 
     match state
-        .api
         .set_local_parameters(input.name, federation_name, federation_size)
         .await
     {
@@ -270,16 +269,16 @@ async fn setup_submit(
 }
 
 // GET handler for the /federation-setup route (main federation management page)
-async fn federation_setup(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
+async fn federation_setup(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
     // If the user lands here too early (before local parameters have been
     // set), send them back to /setup to fill in their guardian params first.
-    let Some(our_connection_info) = state.api.setup_code().await else {
+    let Some(our_connection_info) = state.setup_code().await else {
         return Redirect::to(ROOT_ROUTE).into_response();
     };
 
-    let connected_peers = state.api.connected_peers().await;
-    let federation_size = state.api.federation_size().await;
-    let cfg_federation_name = state.api.cfg_federation_name().await;
+    let connected_peers = state.connected_peers().await;
+    let federation_size = state.federation_size().await;
+    let cfg_federation_name = state.cfg_federation_name().await;
 
     let content = html! {
         p { "Share this with your fellow guardians." }
@@ -402,14 +401,14 @@ async fn federation_setup(State(state): State<UiState<Arc<SetupApi>>>) -> impl I
 }
 
 async fn post_add_setup_code(
-    State(state): State<UiState<Arc<SetupApi>>>,
+    State(state): State<Arc<SetupApi>>,
     Form(input): Form<PeerInfoInput>,
 ) -> impl IntoResponse {
-    let error = state.api.add_peer_setup_code(input.peer_info).await.err();
+    let error = state.add_peer_setup_code(input.peer_info).await.err();
 
-    let connected_peers = state.api.connected_peers().await;
-    let federation_size = state.api.federation_size().await;
-    let cfg_federation_name = state.api.cfg_federation_name().await;
+    let connected_peers = state.connected_peers().await;
+    let federation_size = state.federation_size().await;
+    let cfg_federation_name = state.cfg_federation_name().await;
 
     Html(
         peer_list_section(
@@ -426,10 +425,10 @@ async fn post_add_setup_code(
     .into_response()
 }
 
-async fn post_start_dkg(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
-    let our_connection_info = state.api.setup_code().await;
+async fn post_start_dkg(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
+    let our_connection_info = state.setup_code().await;
 
-    match state.api.start_dkg().await {
+    match state.start_dkg().await {
         Ok(()) => {
             let content = html! {
                 @if let Some(ref info) = our_connection_info {
@@ -468,9 +467,9 @@ async fn post_start_dkg(State(state): State<UiState<Arc<SetupApi>>>) -> impl Int
                 .into_response()
         }
         Err(e) => {
-            let connected_peers = state.api.connected_peers().await;
-            let federation_size = state.api.federation_size().await;
-            let cfg_federation_name = state.api.cfg_federation_name().await;
+            let connected_peers = state.connected_peers().await;
+            let federation_size = state.federation_size().await;
+            let cfg_federation_name = state.cfg_federation_name().await;
 
             Html(
                 peer_list_section(
@@ -487,7 +486,7 @@ async fn post_start_dkg(State(state): State<UiState<Arc<SetupApi>>>) -> impl Int
 }
 
 async fn post_recover_config(
-    State(state): State<UiState<Arc<SetupApi>>>,
+    State(state): State<Arc<SetupApi>>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
     let bytes = match multipart.next_field().await {
@@ -520,7 +519,7 @@ async fn post_recover_config(
         }
     };
 
-    if let Err(e) = state.api.recover_config(cfg).await {
+    if let Err(e) = state.recover_config(cfg).await {
         return Html(recover_form_content(Some(&e.to_string())).into_string()).into_response();
     }
 
@@ -554,8 +553,8 @@ async fn post_recover_config(
         .into_response()
 }
 
-async fn post_reset_setup_codes(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
-    state.api.reset_setup_codes().await;
+async fn post_reset_setup_codes(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
+    state.reset_setup_codes().await;
 
     Redirect::to(FEDERATION_SETUP_ROUTE).into_response()
 }
@@ -570,5 +569,5 @@ pub fn router(api: Arc<SetupApi>) -> Router {
         .route(RECOVER_CONFIG_ROUTE, post(post_recover_config))
         .route(RECOVER_PAGE_ROUTE, get(recover_page))
         .with_static_routes()
-        .with_state(UiState::new(api))
+        .with_state(api)
 }

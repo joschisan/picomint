@@ -21,18 +21,6 @@ use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 pub const ROOT_ROUTE: &str = "/";
 
-/// Generic state wrapper for the setup and dashboard axum routers.
-#[derive(Clone)]
-pub struct UiState<T> {
-    pub api: T,
-}
-
-impl<T> UiState<T> {
-    pub fn new(api: T) -> Self {
-        Self { api }
-    }
-}
-
 pub fn common_head(title: &str) -> Markup {
     html! {
         meta charset="utf-8";

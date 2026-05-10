@@ -18,14 +18,14 @@ use maud::html;
 use crate::consensus::api::ConsensusApi;
 use crate::ui::assets::WithStaticRoutesExt;
 use crate::ui::dashboard::modules::{ln, mint, wallet};
-use crate::ui::{ROOT_ROUTE, UiState, dashboard_layout};
+use crate::ui::{ROOT_ROUTE, dashboard_layout};
 
 pub const BACKUP_CONFIG_ROUTE: &str = "/backup-config";
 pub const SET_EXPIRATION_ROUTE: &str = "/expiration/set";
 pub const CLEAR_EXPIRATION_ROUTE: &str = "/expiration/clear";
 
-async fn backup_config(State(state): State<UiState<Arc<ConsensusApi>>>) -> impl IntoResponse {
-    let body = serde_json::to_vec_pretty(&state.api.cfg).expect("ServerConfig is serializable");
+async fn backup_config(State(state): State<Arc<ConsensusApi>>) -> impl IntoResponse {
+    let body = serde_json::to_vec_pretty(&state.cfg).expect("ServerConfig is serializable");
 
     (
         [
@@ -39,8 +39,8 @@ async fn backup_config(State(state): State<UiState<Arc<ConsensusApi>>>) -> impl 
     )
 }
 
-async fn dashboard_view(State(state): State<UiState<Arc<ConsensusApi>>>) -> impl IntoResponse {
-    let api = &*state.api;
+async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResponse {
+    let api = &*state;
 
     let guardian_names: std::collections::BTreeMap<_, _> = api
         .cfg
@@ -125,5 +125,5 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         .route(ln::LN_ADD_ROUTE, post(ln::post_add))
         .route(ln::LN_REMOVE_ROUTE, post(ln::post_remove))
         .with_static_routes()
-        .with_state(UiState::new(api))
+        .with_state(api)
 }
