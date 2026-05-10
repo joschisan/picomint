@@ -8,6 +8,7 @@
 use bitcoin::hashes::{Hash, sha256};
 use bls12_381::Scalar;
 use group::ff::Field;
+use iroh_base::SecretKey as IrohSecretKey;
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
@@ -31,6 +32,10 @@ impl Secret {
 
     pub fn to_bytes(&self) -> [u8; 32] {
         self.0.to_byte_array()
+    }
+
+    pub fn to_iroh_secret_key(&self) -> IrohSecretKey {
+        IrohSecretKey::from_bytes(&self.to_bytes())
     }
 
     pub fn to_secp_keypair(&self) -> Keypair {
