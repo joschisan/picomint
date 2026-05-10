@@ -30,6 +30,16 @@ ssh -NL 3000:127.0.0.1:3000 <your_server>
 
 To disable the UI (CLI-only deployment), remove `UI_ADDR` and the `127.0.0.1:3000:3000` port mapping from `docker-compose.yml`.
 
+### Bootstrap on a fresh Ubuntu 26.04 LTS desktop
+
+For a fresh **Ubuntu 26.04 LTS desktop** with a screen and keyboard, the manual steps above are bundled into a single script. It installs Docker (if missing), brings up the guardian + bundled bitcoind compose in `~/picomint-guardian-daemon`, and optionally installs Signal Desktop for exchanging setup codes with co-guardians:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap.sh | bash
+```
+
+The script targets amd64 and aborts if a deployment already exists at `~/picomint-guardian-daemon`. Ubuntu 26.04 LTS is the recommended target on operator hardware; CI runs the bootstrap end-to-end on the latest Ubuntu runner GitHub Actions provides.
+
 ### Bitcoin Backend
 
 The bundled compose runs a local Bitcoin Core node alongside the guardian, pruned to roughly 30 days of recent blocks (`-prune=10000`, ~10 GiB on disk). Initial block download still pulls the full chain over the network before pruning takes effect, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth; the guardian will sit idle until bitcoind catches up.

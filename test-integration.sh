@@ -25,7 +25,9 @@ echo "Starting bitcoind in Docker..."
 docker run -d \
     --name "$CONTAINER_NAME" \
     -p 18443:18443 \
-    ruimarinho/bitcoin-core:latest \
+    btcpayserver/bitcoin:31.0 \
+    bitcoind \
+    -datadir=/data \
     -regtest=1 \
     -rpcuser=bitcoin \
     -rpcpassword=bitcoin \
@@ -48,7 +50,7 @@ done
 echo "Creating wallet..."
 docker exec "$CONTAINER_NAME" bitcoin-cli \
     -regtest -rpcuser=bitcoin -rpcpassword=bitcoin \
-    createwallet "" > /dev/null || true
+    createwallet default > /dev/null
 
 echo "Running integration tests..."
 RUST_LOG="${RUST_LOG:-info}" ./target/release/picomint-integration-tests

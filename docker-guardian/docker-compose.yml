@@ -22,13 +22,14 @@ services:
       - UI_ADDR=0.0.0.0:3000
 
   bitcoind:
-    image: lncm/bitcoind:v28.0
+    image: btcpayserver/bitcoin:31.0
     container_name: picomint-bitcoind
     restart: unless-stopped
     volumes:
-      - bitcoind_data:/data/.bitcoin
+      - bitcoind_data:/data
     command:
-      - -datadir=/data/.bitcoin
+      - bitcoind
+      - -datadir=/data
       - -server=1
       - -prune=10000
       - -rpcbind=0.0.0.0
