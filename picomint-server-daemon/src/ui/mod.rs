@@ -9,49 +9,27 @@
 //!   straight into the three typed module instances (`mint`, `wallet`, `ln`)
 //!   hanging off it.
 //!
-//! Previously this lived in two sibling crates (`picomint-server-ui` and
-//! `picomint-ui-common`) and exposed a trait-indirection (`IDashboardApi` /
-//! `ISetupApi` / `DynDashboardApi` / `DynSetupApi`) purely so those crates
-//! could avoid a dep cycle back into the daemon. That cycle is gone now that
-//! UI lives inside the daemon; we use the concrete types directly.
+//! The UI is unauthenticated. Operators are expected to bind it to loopback
+//! (or expose it via SSH tunnel / VPN). See README.md for the deployment
+//! patterns.
 
 pub mod assets;
-pub mod auth;
 pub mod dashboard;
 pub mod setup;
 
-use axum::response::{Html, IntoResponse};
-use axum_extra::extract::CookieJar;
-use axum_extra::extract::cookie::{Cookie, SameSite};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
-use picomint_core::hex::ToHex;
-use picomint_core::module::ApiAuth;
-use picomint_core::secp256k1::rand::{Rng, thread_rng};
-use serde::Deserialize;
 
-// Common route constants shared between setup and dashboard.
 pub const ROOT_ROUTE: &str = "/";
-pub const LOGIN_ROUTE: &str = "/login";
 
-/// Generic state wrapper for the setup and dashboard axum routers. Holds the
-/// concrete API handle, the admin password (verified by `UserAuth`), and a
-/// random per-process auth cookie pair used to gate authenticated routes.
+/// Generic state wrapper for the setup and dashboard axum routers.
 #[derive(Clone)]
 pub struct UiState<T> {
     pub api: T,
-    pub auth: ApiAuth,
-    pub auth_cookie_name: String,
-    pub auth_cookie_value: String,
 }
 
 impl<T> UiState<T> {
-    pub fn new(api: T, auth: ApiAuth) -> Self {
-        Self {
-            api,
-            auth,
-            auth_cookie_name: thread_rng().r#gen::<[u8; 4]>().encode_hex(),
-            auth_cookie_value: thread_rng().r#gen::<[u8; 32]>().encode_hex(),
-        }
+    pub fn new(api: T) -> Self {
+        Self { api }
     }
 }
 
@@ -105,11 +83,6 @@ pub fn common_head(title: &str) -> Markup {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct LoginInput {
-    pub password: String,
-}
-
 pub fn single_card_layout(header: &str, content: Markup) -> Markup {
     card_layout("col-md-8 col-lg-5 narrow-container", header, content)
 }
@@ -153,39 +126,6 @@ pub fn copiable_text(text: &str) -> Markup {
             }
         }
     }
-}
-
-pub fn login_form(error: Option<&str>) -> Markup {
-    html! {
-        form id="login-form" hx-post=(LOGIN_ROUTE) hx-target="#login-form" hx-swap="outerHTML" {
-            div class="form-group mb-3" {
-                input type="password" class="form-control" id="password" name="password" placeholder="Your Password" required autofocus;
-            }
-            @if let Some(error) = error {
-                div class="alert alert-danger mb-3" { (error) }
-            }
-            button type="submit" class="btn btn-primary w-100 py-2" { "Continue" }
-        }
-    }
-}
-
-pub fn login_submit_response(
-    auth: ApiAuth,
-    auth_cookie_name: String,
-    auth_cookie_value: String,
-    jar: CookieJar,
-    input: LoginInput,
-) -> impl IntoResponse {
-    if auth.verify(&input.password) {
-        let mut cookie = Cookie::new(auth_cookie_name, auth_cookie_value);
-
-        cookie.set_http_only(true);
-        cookie.set_same_site(Some(SameSite::Lax));
-
-        return (jar.add(cookie), [("HX-Redirect", "/")]).into_response();
-    }
-
-    Html(login_form(Some("The password is invalid")).into_string()).into_response()
 }
 
 pub fn dashboard_layout(content: Markup, version: &str) -> Markup {

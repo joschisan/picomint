@@ -9,7 +9,6 @@ use picomint_core::invite::InviteCode;
 use serde::Deserialize;
 
 use crate::consensus::api::ConsensusApi;
-use crate::ui::auth::UserAuth;
 use crate::ui::dashboard::{CLEAR_EXPIRATION_ROUTE, SET_EXPIRATION_ROUTE};
 use crate::ui::{ROOT_ROUTE, UiState, dashboard_layout};
 
@@ -90,7 +89,6 @@ pub fn render(status: Option<&ExpirationStatus>) -> Markup {
 
 pub async fn post_set(
     State(state): State<UiState<Arc<ConsensusApi>>>,
-    _auth: UserAuth,
     Form(form): Form<ExpirationForm>,
 ) -> impl IntoResponse {
     let timestamp = form
@@ -125,10 +123,7 @@ pub async fn post_set(
     Redirect::to(ROOT_ROUTE).into_response()
 }
 
-pub async fn post_clear(
-    State(state): State<UiState<Arc<ConsensusApi>>>,
-    _auth: UserAuth,
-) -> impl IntoResponse {
+pub async fn post_clear(State(state): State<UiState<Arc<ConsensusApi>>>) -> impl IntoResponse {
     state.api.set_expiration_status_ui(None);
 
     Redirect::to(ROOT_ROUTE)

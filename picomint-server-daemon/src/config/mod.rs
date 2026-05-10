@@ -10,7 +10,6 @@ pub use picomint_core::config::{FederationId, PeerEndpoint};
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::config::LightningConfigPrivate;
 use picomint_core::mint::config::{MintConfig, MintConfigPrivate};
-use picomint_core::module::ApiAuth;
 use picomint_core::wallet::config::{WalletConfig, WalletConfigPrivate};
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
 use rand::rngs::OsRng;
@@ -77,11 +76,9 @@ pub struct ServerConfigPrivate {
 pub struct ConfigGenSettings {
     /// Bind address for our P2P connection
     pub p2p_addr: SocketAddr,
-    /// Web UI bind address + admin password. `None` disables the UI and
-    /// requires all admin actions (including DKG setup) to go through the
-    /// CLI. `main` rejects boot if `UI_ADDR` is set without `UI_PASSWORD`
-    /// or vice versa, so these are always populated together.
-    pub ui_config: Option<(SocketAddr, ApiAuth)>,
+    /// Web UI bind address. `None` disables the UI and requires all admin
+    /// actions (including DKG setup) to go through the CLI.
+    pub ui_addr: Option<SocketAddr>,
     /// Bitcoin network for the federation
     pub network: bitcoin::Network,
 }

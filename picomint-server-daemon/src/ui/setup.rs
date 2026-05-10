@@ -5,20 +5,14 @@ use axum::extract::{Multipart, State};
 use axum::response::{Html, IntoResponse, Redirect};
 use axum::routing::{get, post};
 use axum_extra::extract::Form;
-use axum_extra::extract::cookie::CookieJar;
 use maud::{Markup, PreEscaped, html};
-use picomint_core::module::ApiAuth;
 use qrcode::QrCode;
 use serde::Deserialize;
 
 use crate::config::ServerConfig;
 use crate::config::setup::SetupApi;
 use crate::ui::assets::WithStaticRoutesExt;
-use crate::ui::auth::UserAuth;
-use crate::ui::{
-    LOGIN_ROUTE, LoginInput, ROOT_ROUTE, UiState, copiable_text, login_form, login_submit_response,
-    single_card_layout,
-};
+use crate::ui::{ROOT_ROUTE, UiState, copiable_text, single_card_layout};
 
 // Setup route constants
 pub const FEDERATION_SETUP_ROUTE: &str = "/federation-setup";
@@ -212,10 +206,7 @@ fn setup_form_content(error: Option<&str>) -> Markup {
 }
 
 // GET handler for the /setup route (display the setup form)
-async fn setup_form(
-    State(state): State<UiState<Arc<SetupApi>>>,
-    _auth: UserAuth,
-) -> impl IntoResponse {
+async fn setup_form(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
     if state.api.setup_code().await.is_some() {
         return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
     }
@@ -226,10 +217,7 @@ async fn setup_form(
 
 // GET handler for the /recover route (dedicated page for recovering from a
 // previously-saved server config).
-async fn recover_page(
-    State(state): State<UiState<Arc<SetupApi>>>,
-    _auth: UserAuth,
-) -> impl IntoResponse {
+async fn recover_page(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
     if state.api.setup_code().await.is_some() {
         return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
     }
@@ -241,7 +229,6 @@ async fn recover_page(
 // POST handler for the /setup route (process the setup form)
 async fn setup_submit(
     State(state): State<UiState<Arc<SetupApi>>>,
-    _auth: UserAuth,
     Form(input): Form<SetupInput>,
 ) -> impl IntoResponse {
     // Only use these settings if is_lead is true
@@ -282,37 +269,10 @@ async fn setup_submit(
     }
 }
 
-// GET handler for the /login route (display the login form). Always shown,
-// regardless of setup state — auth is the gate to /setup itself, so the login
-// form must be reachable before any local parameters exist.
-async fn login_form_handler(State(_state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
-    Html(single_card_layout("Enter Password", login_form(None)).into_string()).into_response()
-}
-
-// POST handler for the /login route (authenticate and set session cookie)
-async fn login_submit(
-    State(state): State<UiState<Arc<SetupApi>>>,
-    jar: CookieJar,
-    Form(input): Form<LoginInput>,
-) -> impl IntoResponse {
-    login_submit_response(
-        state.auth.clone(),
-        state.auth_cookie_name,
-        state.auth_cookie_value,
-        jar,
-        input,
-    )
-    .into_response()
-}
-
 // GET handler for the /federation-setup route (main federation management page)
-async fn federation_setup(
-    State(state): State<UiState<Arc<SetupApi>>>,
-    _auth: UserAuth,
-) -> impl IntoResponse {
-    // Auth no longer implies that local parameters have been set, since the
-    // login form is now reachable before setup. If the user lands here too
-    // early, send them back to /setup to fill in their guardian params first.
+async fn federation_setup(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
+    // If the user lands here too early (before local parameters have been
+    // set), send them back to /setup to fill in their guardian params first.
     let Some(our_connection_info) = state.api.setup_code().await else {
         return Redirect::to(ROOT_ROUTE).into_response();
     };
@@ -443,7 +403,6 @@ async fn federation_setup(
 
 async fn post_add_setup_code(
     State(state): State<UiState<Arc<SetupApi>>>,
-    _auth: UserAuth,
     Form(input): Form<PeerInfoInput>,
 ) -> impl IntoResponse {
     let error = state.api.add_peer_setup_code(input.peer_info).await.err();
@@ -467,10 +426,7 @@ async fn post_add_setup_code(
     .into_response()
 }
 
-async fn post_start_dkg(
-    State(state): State<UiState<Arc<SetupApi>>>,
-    _auth: UserAuth,
-) -> impl IntoResponse {
+async fn post_start_dkg(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
     let our_connection_info = state.api.setup_code().await;
 
     match state.api.start_dkg().await {
@@ -598,19 +554,15 @@ async fn post_recover_config(
         .into_response()
 }
 
-async fn post_reset_setup_codes(
-    State(state): State<UiState<Arc<SetupApi>>>,
-    _auth: UserAuth,
-) -> impl IntoResponse {
+async fn post_reset_setup_codes(State(state): State<UiState<Arc<SetupApi>>>) -> impl IntoResponse {
     state.api.reset_setup_codes().await;
 
     Redirect::to(FEDERATION_SETUP_ROUTE).into_response()
 }
 
-pub fn router(api: Arc<SetupApi>, auth: ApiAuth) -> Router {
+pub fn router(api: Arc<SetupApi>) -> Router {
     Router::new()
         .route(ROOT_ROUTE, get(setup_form).post(setup_submit))
-        .route(LOGIN_ROUTE, get(login_form_handler).post(login_submit))
         .route(FEDERATION_SETUP_ROUTE, get(federation_setup))
         .route(ADD_SETUP_CODE_ROUTE, post(post_add_setup_code))
         .route(RESET_SETUP_CODES_ROUTE, post(post_reset_setup_codes))
@@ -618,5 +570,5 @@ pub fn router(api: Arc<SetupApi>, auth: ApiAuth) -> Router {
         .route(RECOVER_CONFIG_ROUTE, post(post_recover_config))
         .route(RECOVER_PAGE_ROUTE, get(recover_page))
         .with_static_routes()
-        .with_state(UiState::new(api, auth))
+        .with_state(UiState::new(api))
 }

@@ -19,7 +19,7 @@ use bitcoin::Network;
 use futures::FutureExt;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
-use picomint_core::module::{ApiAuth, ApiError, Method};
+use picomint_core::module::{ApiError, Method};
 use picomint_core::tx::ConsensusItem;
 use picomint_core::wire;
 use picomint_encoding::{Decodable, Encodable};
@@ -50,7 +50,7 @@ pub async fn run(
     cfg: ServerConfig,
     db: Database,
     bitcoin_backend: Arc<BitcoinBackend>,
-    ui_config: Option<(SocketAddr, ApiAuth)>,
+    ui_addr: Option<SocketAddr>,
     data_dir: &Path,
 ) -> anyhow::Result<()> {
     cfg.validate_config(&cfg.private.identity)?;
@@ -155,9 +155,8 @@ pub async fn run(
         }
     });
 
-    if let Some((ui_addr, auth)) = ui_config {
-        let ui_service =
-            crate::ui::dashboard::router(consensus_api.clone(), auth).into_make_service();
+    if let Some(ui_addr) = ui_addr {
+        let ui_service = crate::ui::dashboard::router(consensus_api.clone()).into_make_service();
         let ui_listener = TcpListener::bind(ui_addr)
             .await
             .expect("Failed to bind dashboard UI");

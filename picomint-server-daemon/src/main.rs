@@ -56,11 +56,6 @@ struct ServerOpts {
     /// through the CLI.
     #[arg(long = "ui-addr", env = "UI_ADDR")]
     ui_addr: Option<SocketAddr>,
-
-    /// Password for the web UI. Required when `UI_ADDR` is set,
-    /// unused otherwise.
-    #[arg(long, env = "UI_PASSWORD")]
-    ui_password: Option<String>,
 }
 
 #[tokio::main]
@@ -80,19 +75,9 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting picomint-server-daemon (version: {picomint_version})");
 
-    let ui_config = match (server_opts.ui_addr, server_opts.ui_password.clone()) {
-        (Some(addr), Some(password)) => Some((addr, picomint_core::module::ApiAuth::new(password))),
-        (None, _) => None,
-        (Some(_), None) => {
-            panic!(
-                "UI_ADDR is set but UI_PASSWORD is not; refusing to start the web UI without a password"
-            )
-        }
-    };
-
     let settings = ConfigGenSettings {
         p2p_addr: server_opts.p2p_addr,
-        ui_config,
+        ui_addr: server_opts.ui_addr,
         network: server_opts.bitcoin_network,
     };
 

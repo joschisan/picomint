@@ -6,18 +6,15 @@ services:
     ports:
       # Iroh endpoint
       - "8080:8080"
-      # Web UI — uncomment to enable alongside `UI_ADDR` + `UI_PASSWORD` below.
-      # Never expose to the public internet without TLS (use a reverse proxy).
-      # - "127.0.0.1:3000:3000"
+      # Web UI — bound to host loopback only. Open <http://127.0.0.1:3000>
+      # locally, or `ssh -NL 3000:127.0.0.1:3000 <host>` from another machine.
+      - "127.0.0.1:3000:3000"
     volumes:
       - picomint_server_data:/data
     environment:
       - DATA_DIR=/data
       - ESPLORA_URL=https://mempool.space/api
-      # Enable the Web UI (optional, otherwise all admin actions go through
-      # the CLI via `docker exec`):
-      # - UI_ADDR=0.0.0.0:3000
-      # - UI_PASSWORD=<change-me>  # required when UI_ADDR is set
+      - UI_ADDR=0.0.0.0:3000
 
 volumes:
   picomint_server_data:

@@ -37,7 +37,6 @@ services:
       BITCOIND_URL: http://bitcoin:bitcoin@bitcoind:18443
       P2P_ADDR: 0.0.0.0:8080
       UI_ADDR: 0.0.0.0:3000
-      UI_PASSWORD: picomint
       RUST_LOG: info
     ports:
       - "3000:3000"

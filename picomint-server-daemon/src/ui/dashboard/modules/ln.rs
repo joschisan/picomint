@@ -6,7 +6,6 @@ use maud::{Markup, html};
 use url::Url;
 
 use crate::consensus::api::ConsensusApi;
-use crate::ui::auth::UserAuth;
 use crate::ui::{ROOT_ROUTE, UiState};
 
 // LN route constants
@@ -123,7 +122,6 @@ pub async fn render(lightning: &crate::consensus::ln::Lightning) -> Markup {
 // Handler for adding a new gateway
 pub async fn post_add(
     State(state): State<UiState<Arc<ConsensusApi>>>,
-    _auth: UserAuth,
     Form(form): Form<GatewayForm>,
 ) -> impl IntoResponse {
     state
@@ -139,7 +137,6 @@ pub async fn post_add(
 // Handler for removing a gateway
 pub async fn post_remove(
     State(state): State<UiState<Arc<ConsensusApi>>>,
-    _auth: UserAuth,
     Form(form): Form<GatewayForm>,
 ) -> impl IntoResponse {
     state
