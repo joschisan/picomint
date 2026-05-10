@@ -22,17 +22,19 @@ And then run:
 docker compose up -d
 ```
 
-Admin actions including setup either go through the CLI running inside the container:
+The Web UI is enabled by default and bound to host loopback at <http://127.0.0.1:3000>. If the federation runs on the same machine as your browser, just open that URL. If it's headless, forward the port over SSH first:
+
+```bash
+ssh -NL 3000:127.0.0.1:3000 <your_server>
+```
+
+The CLI inside the container does the same things if you prefer it:
 
 ```bash
 docker exec -it picomint-server picomint-server-cli setup status
 ```
 
-You can also enable the Web UI -- uncomment `UI_ADDR` and `UI_PASSWORD` in `docker-compose.yml` plus the `127.0.0.1:3000:3000` port mapping and restart the container. Never expose the UI to the public internet without TLS - if you dont run on a local machine you can either configure a domain or forward the port over SSH to a port on your local machine:
-
-```bash
-ssh -NL 3000:127.0.0.1:3000 <your_server>
-```
+To disable the UI (CLI-only deployment), remove `UI_ADDR` and the `127.0.0.1:3000:3000` port mapping from `docker-compose.yml`.
 
 ### Setup Ceremony
 
@@ -142,7 +144,6 @@ picomint-server-cli …`.
 | `BITCOIND_URL`               | one of   |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |
 | `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
 | `UI_ADDR`                    | no       |                   | Web UI listen address — unset disables UI  |
-| `UI_PASSWORD`                | if UI    |                   | Web UI password, required when `UI_ADDR` is set |
 
 *Either `ESPLORA_URL` or `BITCOIND_URL` must be set, but not both.*
 

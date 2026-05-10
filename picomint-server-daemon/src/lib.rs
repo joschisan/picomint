@@ -119,7 +119,7 @@ pub async fn run_server(
         cfg,
         db,
         bitcoin_rpc,
-        settings.ui_config,
+        settings.ui_addr,
         &data_dir,
     ))
     .await?;
@@ -143,8 +143,8 @@ pub async fn run_config_gen(
 
     let setup_api = Arc::new(SetupApi::new(settings.clone(), setup_tx));
 
-    let setup_ui_handle = if let Some((ui_addr, auth)) = settings.ui_config.clone() {
-        let ui_service = ui::setup::router(setup_api.clone(), auth).into_make_service();
+    let setup_ui_handle = if let Some(ui_addr) = settings.ui_addr {
+        let ui_service = ui::setup::router(setup_api.clone()).into_make_service();
         let ui_listener = TcpListener::bind(ui_addr)
             .await
             .expect("Failed to bind setup UI");

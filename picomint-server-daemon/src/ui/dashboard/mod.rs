@@ -10,49 +10,22 @@ pub mod peers;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{Form, State};
+use axum::extract::State;
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
-use axum_extra::extract::cookie::CookieJar;
 use maud::html;
-use picomint_core::module::ApiAuth;
 
 use crate::consensus::api::ConsensusApi;
 use crate::ui::assets::WithStaticRoutesExt;
-use crate::ui::auth::UserAuth;
 use crate::ui::dashboard::modules::{ln, mint, wallet};
-use crate::ui::{
-    LOGIN_ROUTE, LoginInput, ROOT_ROUTE, UiState, dashboard_layout, login_form,
-    login_submit_response, single_card_layout,
-};
+use crate::ui::{ROOT_ROUTE, dashboard_layout};
 
 pub const BACKUP_CONFIG_ROUTE: &str = "/backup-config";
 pub const SET_EXPIRATION_ROUTE: &str = "/expiration/set";
 pub const CLEAR_EXPIRATION_ROUTE: &str = "/expiration/clear";
 
-async fn login_form_handler() -> impl IntoResponse {
-    Html(single_card_layout("Enter Password", login_form(None)).into_string())
-}
-
-async fn login_submit(
-    State(state): State<UiState<Arc<ConsensusApi>>>,
-    jar: CookieJar,
-    Form(input): Form<LoginInput>,
-) -> impl IntoResponse {
-    login_submit_response(
-        state.auth.clone(),
-        state.auth_cookie_name,
-        state.auth_cookie_value,
-        jar,
-        input,
-    )
-}
-
-async fn backup_config(
-    State(state): State<UiState<Arc<ConsensusApi>>>,
-    _auth: UserAuth,
-) -> impl IntoResponse {
-    let body = serde_json::to_vec_pretty(&state.api.cfg).expect("ServerConfig is serializable");
+async fn backup_config(State(state): State<Arc<ConsensusApi>>) -> impl IntoResponse {
+    let body = serde_json::to_vec_pretty(&state.cfg).expect("ServerConfig is serializable");
 
     (
         [
@@ -66,11 +39,8 @@ async fn backup_config(
     )
 }
 
-async fn dashboard_view(
-    State(state): State<UiState<Arc<ConsensusApi>>>,
-    _auth: UserAuth,
-) -> impl IntoResponse {
-    let api = &*state.api;
+async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResponse {
+    let api = &*state;
 
     let guardian_names: std::collections::BTreeMap<_, _> = api
         .cfg
@@ -146,15 +116,14 @@ async fn dashboard_view(
     Html(dashboard_layout(content, env!("CARGO_PKG_VERSION")).into_string()).into_response()
 }
 
-pub fn router(api: Arc<ConsensusApi>, auth: ApiAuth) -> Router {
+pub fn router(api: Arc<ConsensusApi>) -> Router {
     Router::new()
         .route(ROOT_ROUTE, get(dashboard_view))
-        .route(LOGIN_ROUTE, get(login_form_handler).post(login_submit))
         .route(BACKUP_CONFIG_ROUTE, get(backup_config))
         .route(SET_EXPIRATION_ROUTE, post(expiration::post_set))
         .route(CLEAR_EXPIRATION_ROUTE, post(expiration::post_clear))
         .route(ln::LN_ADD_ROUTE, post(ln::post_add))
         .route(ln::LN_REMOVE_ROUTE, post(ln::post_remove))
         .with_static_routes()
-        .with_state(UiState::new(api, auth))
+        .with_state(api)
 }

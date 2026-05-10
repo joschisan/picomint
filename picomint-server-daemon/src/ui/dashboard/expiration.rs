@@ -9,9 +9,8 @@ use picomint_core::invite::InviteCode;
 use serde::Deserialize;
 
 use crate::consensus::api::ConsensusApi;
-use crate::ui::auth::UserAuth;
 use crate::ui::dashboard::{CLEAR_EXPIRATION_ROUTE, SET_EXPIRATION_ROUTE};
-use crate::ui::{ROOT_ROUTE, UiState, dashboard_layout};
+use crate::ui::{ROOT_ROUTE, dashboard_layout};
 
 /// Form payload for [`post_set`]. The timestamp is a unix-seconds value
 /// generated server-side by [`render`]; the successor is an optional
@@ -89,8 +88,7 @@ pub fn render(status: Option<&ExpirationStatus>) -> Markup {
 }
 
 pub async fn post_set(
-    State(state): State<UiState<Arc<ConsensusApi>>>,
-    _auth: UserAuth,
+    State(state): State<Arc<ConsensusApi>>,
     Form(form): Form<ExpirationForm>,
 ) -> impl IntoResponse {
     let timestamp = form
@@ -117,7 +115,7 @@ pub async fn post_set(
         None => None,
     };
 
-    state.api.set_expiration_status_ui(Some(ExpirationStatus {
+    state.set_expiration_status_ui(Some(ExpirationStatus {
         timestamp,
         successor,
     }));
@@ -125,11 +123,8 @@ pub async fn post_set(
     Redirect::to(ROOT_ROUTE).into_response()
 }
 
-pub async fn post_clear(
-    State(state): State<UiState<Arc<ConsensusApi>>>,
-    _auth: UserAuth,
-) -> impl IntoResponse {
-    state.api.set_expiration_status_ui(None);
+pub async fn post_clear(State(state): State<Arc<ConsensusApi>>) -> impl IntoResponse {
+    state.set_expiration_status_ui(None);
 
     Redirect::to(ROOT_ROUTE)
 }
