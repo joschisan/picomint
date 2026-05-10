@@ -71,19 +71,19 @@ impl TestEnv {
 
         let mut guardian_processes = Vec::with_capacity(NUM_GUARDIANS);
         for i in 0..NUM_GUARDIANS {
-            let child = runtime.block_on(start_server(base, i))?;
+            let child = runtime.block_on(start_guardian(base, i))?;
             guardian_processes.push(Some(child));
         }
 
         info!("Running DKG...");
         let peer_data_dirs: Vec<_> = (0..NUM_GUARDIANS)
-            .map(|i| base.join(format!("server-{i}")))
+            .map(|i| base.join(format!("guardian-{i}")))
             .collect();
         runtime.block_on(run_dkg(&peer_data_dirs))?;
 
         let peer0_data_dir = peer_data_dirs[0].clone();
         let invite_code_str = runtime.block_on(retry("fetch invite code", || async {
-            Ok(cli::server_invite(&peer0_data_dir)?.invite_code)
+            Ok(cli::guardian_invite(&peer0_data_dir)?.invite_code)
         }))?;
         let invite_code: InviteCode = picomint_base32::decode(invite_code_str.trim())?;
         info!("Federation ready");
@@ -156,23 +156,23 @@ impl TestEnv {
     /// SIGKILL a single guardian process and delete its data directory,
     /// simulating a total disk loss. Use `restart_guardian` to bring it
     /// back up against an empty data dir.
-    pub async fn wipe_guardian(&self, peer_idx: usize) -> anyhow::Result<()> {
+    pub async fn wipe_guardian(&self, peer: usize) -> anyhow::Result<()> {
         let mut procs = self.guardian_processes.lock().await;
-        if let Some(mut child) = procs[peer_idx].take() {
+        if let Some(mut child) = procs[peer].take() {
             child.kill().await?;
             child.wait().await?;
         }
         drop(procs);
 
-        let data_dir = self.data_dir.join(format!("server-{peer_idx}"));
+        let data_dir = self.data_dir.join(format!("guardian-{peer}"));
         tokio::fs::remove_dir_all(&data_dir).await?;
         Ok(())
     }
 
-    /// Spawn a fresh daemon for `peer_idx` against its existing data dir.
-    pub async fn restart_guardian(&self, peer_idx: usize) -> anyhow::Result<()> {
-        let child = start_server(&self.data_dir, peer_idx).await?;
-        self.guardian_processes.lock().await[peer_idx] = Some(child);
+    /// Spawn a fresh daemon for `peer` against its existing data dir.
+    pub async fn restart_guardian(&self, peer: usize) -> anyhow::Result<()> {
+        let child = start_guardian(&self.data_dir, peer).await?;
+        self.guardian_processes.lock().await[peer] = Some(child);
         Ok(())
     }
 
@@ -268,19 +268,19 @@ async fn build_client(
     Ok(client)
 }
 
-async fn start_server(base: &Path, peer_idx: usize) -> anyhow::Result<Child> {
-    let p2p_port = GUARDIAN_BASE_PORT + (peer_idx as u16 * PORTS_PER_GUARDIAN);
+async fn start_guardian(base: &Path, peer: usize) -> anyhow::Result<Child> {
+    let p2p_port = GUARDIAN_BASE_PORT + (peer as u16 * PORTS_PER_GUARDIAN);
     let ui_port = p2p_port + 1;
 
-    let data_dir = base.join(format!("server-{peer_idx}"));
+    let data_dir = base.join(format!("guardian-{peer}"));
     tokio::fs::create_dir_all(&data_dir).await?;
 
     let log_file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(base.join(format!("server-{peer_idx}.log")))?;
+        .open(base.join(format!("guardian-{peer}.log")))?;
 
-    let child = Command::new("target/release/picomint-server-daemon")
+    let child = Command::new("target/release/picomint-guardian-daemon")
         .env("DATA_DIR", data_dir.to_str().unwrap())
         .env("BITCOIN_NETWORK", "regtest")
         .env(
@@ -293,9 +293,9 @@ async fn start_server(base: &Path, peer_idx: usize) -> anyhow::Result<Child> {
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
         .spawn()
-        .context(format!("Failed to start server-{peer_idx}"))?;
+        .context(format!("Failed to start guardian-{peer}"))?;
 
-    info!("Started server-{peer_idx} on port {p2p_port} (UI: http://127.0.0.1:{ui_port})");
+    info!("Started guardian-{peer} on port {p2p_port} (UI: http://127.0.0.1:{ui_port})");
     Ok(child)
 }
 
@@ -338,13 +338,13 @@ async fn start_gateway(base: &Path, name: &str, gw_port: u16, ln_port: u16) -> a
 }
 
 async fn run_dkg(peer_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
-    use picomint_server_cli_core::SetupStatus;
+    use picomint_guardian_cli_core::SetupStatus;
 
     // Wait for all guardians to be ready (the CLI `setup status` call
     // returns once the daemon has bound its CLI socket).
     for (peer, data_dir) in peer_data_dirs.iter().enumerate() {
-        retry(&format!("server-{peer} setup status"), || async {
-            let status = cli::server_setup_status(data_dir)?;
+        retry(&format!("guardian-{peer} setup status"), || async {
+            let status = cli::guardian_setup_status(data_dir)?;
             ensure!(
                 status == SetupStatus::AwaitingLocalParams,
                 "Unexpected status: {status:?}"
@@ -364,8 +364,12 @@ async fn run_dkg(peer_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
         } else {
             (None, None)
         };
-        let resp =
-            cli::server_setup_set_local_params(data_dir, &name, federation_name, federation_size)?;
+        let resp = cli::guardian_setup_set_local_params(
+            data_dir,
+            &name,
+            federation_name,
+            federation_size,
+        )?;
         let setup_code = resp
             .get("setup_code")
             .and_then(|v| v.as_str())
@@ -381,14 +385,14 @@ async fn run_dkg(peer_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
             if other_peer == *peer {
                 continue;
             }
-            cli::server_setup_add_peer(data_dir, code)?;
+            cli::guardian_setup_add_peer(data_dir, code)?;
         }
     }
     info!("Peer info exchanged");
 
     // Start DKG on all peers
     for data_dir in peer_data_dirs {
-        cli::server_setup_start_dkg(data_dir)?;
+        cli::guardian_setup_start_dkg(data_dir)?;
     }
 
     info!("DKG started");

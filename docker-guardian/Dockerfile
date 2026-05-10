@@ -8,7 +8,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN cargo build --release --bin picomint-server-daemon --bin picomint-server-cli
+RUN cargo build --release --bin picomint-guardian-daemon --bin picomint-guardian-cli
 
 FROM debian:bookworm-slim
 
@@ -19,9 +19,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /data \
     && chown -R picomint:picomint /data
 
-COPY --from=builder /app/target/release/picomint-server-daemon /usr/local/bin/picomint-server-daemon
-COPY --from=builder /app/target/release/picomint-server-cli /usr/local/bin/picomint-server-cli
+COPY --from=builder /app/target/release/picomint-guardian-daemon /usr/local/bin/picomint-guardian-daemon
+COPY --from=builder /app/target/release/picomint-guardian-cli /usr/local/bin/picomint-guardian-cli
 
 USER picomint
 
-ENTRYPOINT ["picomint-server-daemon"]
+ENTRYPOINT ["picomint-guardian-daemon"]

@@ -112,7 +112,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 fn register_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
     for peer in 0..NUM_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        assert!(cli::server_ln_gateway_add(&data_dir, gateway)?);
+        assert!(cli::guardian_ln_gateway_add(&data_dir, gateway)?);
     }
     Ok(())
 }
@@ -120,7 +120,7 @@ fn register_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
 fn deregister_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
     for peer in 0..NUM_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        assert!(cli::server_ln_gateway_remove(&data_dir, gateway)?);
+        assert!(cli::guardian_ln_gateway_remove(&data_dir, gateway)?);
     }
     Ok(())
 }

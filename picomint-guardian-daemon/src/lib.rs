@@ -1,6 +1,6 @@
-//! Federation server daemon.
+//! Federation guardian daemon.
 //!
-//! This crate hosts both the daemon library and the `picomint-server-daemon`
+//! This crate hosts both the daemon library and the `picomint-guardian-daemon`
 //! binary (`src/main.rs`). It drives config generation, consensus, and the
 //! admin UI/CLI for the fixed module set (mint + lightning + wallet).
 

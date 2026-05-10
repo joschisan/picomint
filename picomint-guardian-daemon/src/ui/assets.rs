@@ -1,5 +1,5 @@
 //! Static asset routes for the admin UI (vendored CSS/JS/fonts + style
-//! sheet). Every file under `picomint-server-daemon/assets/` gets mounted
+//! sheet). Every file under `picomint-guardian-daemon/assets/` gets mounted
 //! under `/assets/...` by [`WithStaticRoutesExt::with_static_routes`].
 
 use axum::Router;

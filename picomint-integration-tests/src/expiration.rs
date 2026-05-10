@@ -26,8 +26,8 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     };
     for peer in 0..NUM_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        cli::server_expiration_set(&data_dir, timestamp, Some(&env.invite_code))?;
-        let stored = cli::server_expiration_status(&data_dir)?;
+        cli::guardian_expiration_set(&data_dir, timestamp, Some(&env.invite_code))?;
+        let stored = cli::guardian_expiration_status(&data_dir)?;
         ensure!(
             stored.as_ref() == Some(&expected),
             "guardian {peer} stored expiration mismatch: got {stored:?}"
@@ -55,7 +55,7 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     info!("Clearing expiration on all guardians");
     for peer in 0..NUM_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        cli::server_expiration_clear(&data_dir)?;
+        cli::guardian_expiration_clear(&data_dir)?;
     }
 
     picomint_client::Client::refresh_expiration_status(client.clone())

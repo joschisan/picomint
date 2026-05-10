@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 /// The daemon binds and the CLI connects at `{DATA_DIR}/{CLI_SOCKET_FILENAME}`.
 pub const CLI_SOCKET_FILENAME: &str = "cli.sock";
 
-/// Status of the setup flow — mirrors `picomint_server_ui::SetupStatus`
-/// as a CLI-consumed copy so `picomint-server-cli` doesn't need to pull in the
-/// server-ui crate.
+/// Status of the setup flow — mirrors the guardian UI's `SetupStatus`
+/// as a CLI-consumed copy so `picomint-guardian-cli` doesn't need to pull in
+/// the daemon crate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SetupStatus {
     AwaitingLocalParams,
@@ -43,7 +43,7 @@ pub const ROUTE_MODULE_LN_GATEWAY_REMOVE: &str = "/module/ln/gateway/remove";
 pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/ln/gateway/list";
 
 // --- /setup/status ---
-// Response: SetupStatus (re-exported from picomint-server-core)
+// Response: SetupStatus (defined above)
 
 // --- /setup/set-local-params ---
 

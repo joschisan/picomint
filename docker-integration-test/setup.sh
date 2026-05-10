@@ -15,10 +15,10 @@ GATEWAY_URL="${GATEWAY_URL:-http://$(curl -fsS --max-time 5 https://api.ipify.or
 echo "==> Gateway URL: $GATEWAY_URL"
 
 # Two federations, each with four guardians of its own. The compose file
-# defines services as `${prefix}-guardian-{0..3}`. Federation names are
-# user-visible, prefix is the docker compose service-name prefix.
+# defines services as `guardian-{fed_idx}-{0..3}`. Federation names are
+# user-visible, fed_idx is the docker compose service-name infix.
 declare -a FED_NAMES=("Test Federation I" "Test Federation II")
-declare -a FED_PREFIXES=("fed1" "fed2")
+declare -a FED_INDICES=("0" "1")
 declare -a GUARDIANS=(0 1 2 3)
 LEADER=0
 
@@ -29,28 +29,28 @@ declare -a INVITES
 # goes to stderr so the captured value is just the invite.
 setup_federation() {
     local fed_name="$1"
-    local prefix="$2"
+    local fed="$2"
 
     echo "==> [$fed_name] Waiting for guardians to enter AwaitingLocalParams..." >&2
     for i in "${GUARDIANS[@]}"; do
-        until $DC exec -T "${prefix}-guardian-$i" picomint-server-cli setup status 2>/dev/null \
+        until $DC exec -T "guardian-${fed}-$i" picomint-guardian-cli setup status 2>/dev/null \
             | grep -q AwaitingLocalParams; do
             sleep 1
         done
-        echo "    ${prefix}-guardian-$i ready" >&2
+        echo "    guardian-${fed}-$i ready" >&2
     done
 
     echo "==> [$fed_name] Setting local params..." >&2
     declare -a CODES
     for i in "${GUARDIANS[@]}"; do
         if [ "$i" -eq "$LEADER" ]; then
-            CODES[$i]=$($DC exec -T "${prefix}-guardian-$i" picomint-server-cli setup set-local-params \
+            CODES[$i]=$($DC exec -T "guardian-${fed}-$i" picomint-guardian-cli setup set-local-params \
                 "Guardian $i" \
                 --federation-name "$fed_name" \
                 --federation-size "${#GUARDIANS[@]}" \
                 | jq -r .setup_code)
         else
-            CODES[$i]=$($DC exec -T "${prefix}-guardian-$i" picomint-server-cli setup set-local-params \
+            CODES[$i]=$($DC exec -T "guardian-${fed}-$i" picomint-guardian-cli setup set-local-params \
                 "Guardian $i" \
                 | jq -r .setup_code)
         fi
@@ -60,20 +60,20 @@ setup_federation() {
     for i in "${GUARDIANS[@]}"; do
         for j in "${GUARDIANS[@]}"; do
             if [ "$i" != "$j" ]; then
-                $DC exec -T "${prefix}-guardian-$i" picomint-server-cli setup add-peer "${CODES[$j]}" >/dev/null
+                $DC exec -T "guardian-${fed}-$i" picomint-guardian-cli setup add-peer "${CODES[$j]}" >/dev/null
             fi
         done
     done
 
     echo "==> [$fed_name] Starting DKG..." >&2
     for i in "${GUARDIANS[@]}"; do
-        $DC exec -T "${prefix}-guardian-$i" picomint-server-cli setup start-dkg >/dev/null
+        $DC exec -T "guardian-${fed}-$i" picomint-guardian-cli setup start-dkg >/dev/null
     done
 
     echo "==> [$fed_name] Waiting for DKG completion (invite endpoint becomes reachable)..." >&2
     local invite=""
     for _ in $(seq 1 120); do
-        if invite=$($DC exec -T "${prefix}-guardian-$LEADER" picomint-server-cli invite 2>/dev/null \
+        if invite=$($DC exec -T "guardian-${fed}-$LEADER" picomint-guardian-cli invite 2>/dev/null \
             | jq -r .invite_code) && [ -n "$invite" ] && [ "$invite" != "null" ]; then
             break
         fi
@@ -92,7 +92,7 @@ setup_federation() {
 
 # Run DKG for each federation.
 for idx in "${!FED_NAMES[@]}"; do
-    INVITES[$idx]=$(setup_federation "${FED_NAMES[$idx]}" "${FED_PREFIXES[$idx]}")
+    INVITES[$idx]=$(setup_federation "${FED_NAMES[$idx]}" "${FED_INDICES[$idx]}")
 done
 
 echo "==> Waiting for gateway..."
@@ -103,7 +103,7 @@ done
 # Join + register + peg-in for each federation.
 for idx in "${!FED_NAMES[@]}"; do
     fed_name="${FED_NAMES[$idx]}"
-    prefix="${FED_PREFIXES[$idx]}"
+    fed="${FED_INDICES[$idx]}"
     invite="${INVITES[$idx]}"
 
     echo "==> [$fed_name] Joining gateway to federation..."
@@ -111,7 +111,7 @@ for idx in "${!FED_NAMES[@]}"; do
 
     echo "==> [$fed_name] Registering gateway with federation..."
     for i in "${GUARDIANS[@]}"; do
-        $DC exec -T "${prefix}-guardian-$i" picomint-server-cli module ln gateway add "$GATEWAY_URL"
+        $DC exec -T "guardian-${fed}-$i" picomint-guardian-cli module ln gateway add "$GATEWAY_URL"
     done
 
     echo "==> [$fed_name] Funding the gateway via federation peg-in..."

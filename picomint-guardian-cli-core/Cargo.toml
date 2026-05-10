@@ -1,9 +1,9 @@
 [package]
 authors = { workspace = true }
-description = "Shared types for picomint-server admin CLI"
+description = "Shared types for picomint-guardian admin CLI"
 edition = { workspace = true }
 license = { workspace = true }
-name = "picomint-server-cli-core"
+name = "picomint-guardian-cli-core"
 readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }

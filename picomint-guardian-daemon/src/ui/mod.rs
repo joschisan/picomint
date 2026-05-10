@@ -1,4 +1,4 @@
-//! Server-side admin web UI.
+//! Guardian admin web UI.
 //!
 //! The UI runs in two phases:
 //!

@@ -146,7 +146,7 @@ impl DataProvider<u64> for TimestampDataProvider {
 
 const N_PEERS: usize = 4;
 const ROUND_LIMIT: Round = 100;
-/// Same default as `picomint-server-daemon::config::BFT_ROUND_DELAY_MS`.
+/// Same default as `picomint-guardian-daemon::config::BFT_ROUND_DELAY_MS`.
 const UNIT_DELAY: Duration = Duration::from_millis(50);
 const SESSION: u64 = 0;
 

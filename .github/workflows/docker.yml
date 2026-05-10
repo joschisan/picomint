@@ -13,8 +13,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - image: picomint-server
-            dockerfile: docker-server/Dockerfile
+          - image: picomint-guardian-daemon
+            dockerfile: docker-guardian/Dockerfile
           - image: picomint-gateway
             dockerfile: docker-gateway/Dockerfile
           - image: picomint-recurring

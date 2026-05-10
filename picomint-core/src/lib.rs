@@ -1,10 +1,10 @@
 //! Picomint Core library
 //!
 //! `picomint-core` contains commonly used types, utilities and primitives,
-//! shared between both client and server code.
+//! shared between both client and guardian code.
 //!
-//! Things that are server-side only typically live in `picomint-server`, and
-//! client-side only in `picomint-client`.
+//! Things that are guardian-side only typically live in `picomint-guardian-daemon`,
+//! and client-side only in `picomint-client`.
 
 extern crate self as picomint_core;
 

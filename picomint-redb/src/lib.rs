@@ -170,7 +170,7 @@ pub struct Database {
     /// table opened through this handle to resolve to `"federation-xyz/{label}"`
     /// on disk. `None` means tables open at their bare label. Intentionally
     /// flat — no stacking — since the only runtime isolation the codebase
-    /// needs is per-federation in the gateway; server-daemon modules disambiguate
+    /// needs is per-federation in the gateway; guardian-daemon modules disambiguate
     /// at the label level (`"mint-note"`, etc.).
     prefix: Option<String>,
 }

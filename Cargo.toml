@@ -15,13 +15,13 @@ members = [
     "picomint-gateway-cli",
     "picomint-gateway-cli-core",
     "picomint-gateway-daemon",
+    "picomint-guardian-cli",
+    "picomint-guardian-cli-core",
+    "picomint-guardian-daemon",
     "picomint-integration-tests",
     "picomint-lnurl",
     "picomint-recurring-daemon",
     "picomint-redb",
-    "picomint-server-cli",
-    "picomint-server-cli-core",
-    "picomint-server-daemon",
 ]
 resolver = "2"
 
@@ -96,11 +96,11 @@ picomint-eventlog = { path = "./picomint-eventlog", version = "=0.1.0" }
 picomint-fountain = { path = "./picomint-fountain", version = "=0.1.0" }
 picomint-gateway-cli-core = { path = "./picomint-gateway-cli-core", version = "=0.1.0" }
 picomint-gateway-daemon = { path = "./picomint-gateway-daemon", version = "=0.1.0" }
+picomint-guardian-cli = { path = "./picomint-guardian-cli", version = "=0.1.0" }
+picomint-guardian-cli-core = { path = "./picomint-guardian-cli-core", version = "=0.1.0" }
+picomint-guardian-daemon = { path = "./picomint-guardian-daemon", version = "=0.1.0" }
 picomint-lnurl = { path = "./picomint-lnurl", version = "=0.1.0" }
 picomint-redb = { path = "./picomint-redb", version = "=0.1.0" }
-picomint-server-cli = { path = "./picomint-server-cli", version = "=0.1.0" }
-picomint-server-cli-core = { path = "./picomint-server-cli-core", version = "=0.1.0" }
-picomint-server-daemon = { path = "./picomint-server-daemon", version = "=0.1.0" }
 proc-macro2 = "1.0"
 qrcode = "0.14"
 quote = "1.0"

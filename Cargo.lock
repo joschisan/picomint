@@ -3682,6 +3682,73 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-guardian-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "picomint-guardian-cli-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-service",
+]
+
+[[package]]
+name = "picomint-guardian-cli-core"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "picomint-core",
+ "serde",
+]
+
+[[package]]
+name = "picomint-guardian-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "async-trait",
+ "axum",
+ "axum-extra",
+ "bitcoin",
+ "bls12_381",
+ "chrono",
+ "clap",
+ "futures",
+ "group",
+ "iroh",
+ "iroh-base",
+ "iroh-mdns-address-lookup",
+ "maud",
+ "miniscript",
+ "picomint-base32",
+ "picomint-bft",
+ "picomint-bitcoin-rpc",
+ "picomint-core",
+ "picomint-encoding",
+ "picomint-guardian-cli-core",
+ "picomint-redb",
+ "picomint-tbs",
+ "picomint-tpe",
+ "qrcode",
+ "rand 0.8.5",
+ "secp256k1",
+ "serde",
+ "serde_json",
+ "test-log",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "picomint-integration-tests"
 version = "0.1.0"
 dependencies = [
@@ -3701,9 +3768,9 @@ dependencies = [
  "picomint-core",
  "picomint-eventlog",
  "picomint-gateway-cli-core",
+ "picomint-guardian-cli-core",
  "picomint-lnurl",
  "picomint-redb",
- "picomint-server-cli-core",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3757,73 +3824,6 @@ dependencies = [
  "redb",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "picomint-server-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "http-body-util",
- "hyper",
- "hyper-util",
- "picomint-server-cli-core",
- "serde",
- "serde_json",
- "tokio",
- "tower-service",
-]
-
-[[package]]
-name = "picomint-server-cli-core"
-version = "0.1.0"
-dependencies = [
- "clap",
- "picomint-core",
- "serde",
-]
-
-[[package]]
-name = "picomint-server-daemon"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-channel",
- "async-trait",
- "axum",
- "axum-extra",
- "bitcoin",
- "bls12_381",
- "chrono",
- "clap",
- "futures",
- "group",
- "iroh",
- "iroh-base",
- "iroh-mdns-address-lookup",
- "maud",
- "miniscript",
- "picomint-base32",
- "picomint-bft",
- "picomint-bitcoin-rpc",
- "picomint-core",
- "picomint-encoding",
- "picomint-redb",
- "picomint-server-cli-core",
- "picomint-tbs",
- "picomint-tpe",
- "qrcode",
- "rand 0.8.5",
- "secp256k1",
- "serde",
- "serde_json",
- "test-log",
- "tokio",
- "tokio-rustls",
- "tracing",
- "tracing-subscriber",
- "url",
 ]
 
 [[package]]

@@ -7,10 +7,10 @@ Brings up:
 
 - `bitcoind` on regtest, with a sidecar that mines one block every ten
   seconds
-- 4 guardians for **Test Federation I** (`pm-fed1-guardian-0..3`)
-- 4 guardians for **Test Federation II** (`pm-fed2-guardian-0..3`)
-- 1 gateway (`pm-gateway`) joined to both federations
-- 1 recurring daemon (`pm-recurringd`)
+- 4 guardians for **Test Federation I** (`picomint-guardian-daemon-0-0..3`)
+- 4 guardians for **Test Federation II** (`picomint-guardian-daemon-1-0..3`)
+- 1 gateway (`picomint-gateway-daemon`) joined to both federations
+- 1 recurring daemon (`picomint-recurring-daemon`)
 
 All services share a docker network. Resetting state is a single command:
 `docker compose down -v`.
@@ -18,7 +18,7 @@ All services share a docker network. Resetting state is a single command:
 ## Bring it up
 
 The compose file pulls the prebuilt images CI publishes from `main`
-(`ghcr.io/joschisan/picomint-{server,gateway,recurring}:main`). To bump
+(`ghcr.io/joschisan/picomint-{guardian-daemon,gateway-daemon,recurring}:main`). To bump
 to a freshly built `main`:
 
 ```bash
@@ -52,7 +52,7 @@ external clients, so `setup.sh` auto-detects the host's public IPv4 via
 | recurring API       | `http://localhost:8091`                     |                                      |
 
 Within the compose network the same services are reachable as
-`bitcoind:18443`, `fed1-guardian-0..3:8080`, `fed2-guardian-0..3:8080`,
+`bitcoind:18443`, `guardian-0-0..3:8080`, `guardian-1-0..3:8080`,
 `gateway:8080`, `recurringd:8080`.
 
 ## Lightning
