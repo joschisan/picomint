@@ -28,6 +28,19 @@ if [[ "$ARCH" != "amd64" ]]; then
     exit 1
 fi
 
+DISTRO_ID="unknown"
+DISTRO_VERSION="unknown"
+if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    DISTRO_ID="${ID:-unknown}"
+    DISTRO_VERSION="${VERSION_ID:-unknown}"
+fi
+if [[ "$DISTRO_ID" != "ubuntu" ]]; then
+    echo "This installer is tested on Ubuntu 26.04 LTS desktop. You appear to be running $DISTRO_ID $DISTRO_VERSION." >&2
+    confirm "Continue anyway?" || { echo "Aborted."; exit 0; }
+fi
+
 if [[ -e "$DEPLOY_DIR" ]]; then
     echo "Existing deployment found at $DEPLOY_DIR. Aborting." >&2
     exit 1
