@@ -28,13 +28,23 @@ The Web UI is enabled by default and bound to host loopback at <http://127.0.0.1
 ssh -NL 3000:127.0.0.1:3000 <your_server>
 ```
 
-The CLI inside the container does the same things if you prefer it:
+To disable the UI (CLI-only deployment), remove `UI_ADDR` and the `127.0.0.1:3000:3000` port mapping from `docker-compose.yml`.
+
+### Accessing the Admin CLI
+
+The `picomint-guardian-cli` binary is included in the container and on the `PATH`. Open an interactive shell inside the container via:
 
 ```bash
-docker exec -it picomint-guardian-daemon picomint-guardian-cli setup status
+docker exec -it picomint-guardian-daemon bash
 ```
 
-To disable the UI (CLI-only deployment), remove `UI_ADDR` and the `127.0.0.1:3000:3000` port mapping from `docker-compose.yml`.
+Or run CLI commands directly from the host like:
+
+```bash
+docker exec picomint-guardian-daemon picomint-guardian-cli --help
+```
+
+The walkthroughs below use the bare `picomint-guardian-cli …` form. Run them from inside the container shell, or prefix with `docker exec picomint-guardian-daemon` to run from the host.
 
 ### Setup Ceremony
 
@@ -167,10 +177,26 @@ And then run:
 docker compose up -d
 ```
 
-Admin actions go through `picomint-gateway-cli`, running inside the container:
+### Accessing the Admin CLI
+
+The `picomint-gateway-cli` binary is included in the container and on the `PATH`. Open an interactive shell inside the container via:
 
 ```bash
-docker exec -it picomint-gateway-daemon picomint-gateway-cli info
+docker exec -it picomint-gateway-daemon bash
+```
+
+Or run CLI commands directly from the host like:
+
+```bash
+docker exec picomint-gateway-daemon picomint-gateway-cli --help
+```
+
+The walkthroughs below use the bare `picomint-gateway-cli …` form. Run them from inside the container shell, or prefix with `docker exec picomint-gateway-daemon` to run from the host.
+
+A first call to confirm everything is wired up:
+
+```bash
+picomint-gateway-cli info
 ```
 
 Your info will look like
@@ -346,7 +372,7 @@ if you need a view more granular than `payments`.
 | 9735 | LDK Lightning P2P (BOLT)     | Yes             |
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `docker exec -it picomint-gateway
+network exposure. Reach it with `docker exec -it picomint-gateway-daemon
 picomint-gateway-cli …`.
 
 ### Configuration
