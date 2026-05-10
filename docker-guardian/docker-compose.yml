@@ -1,20 +1,4 @@
 services:
-  bitcoind:
-    image: lncm/bitcoind:v28.0
-    container_name: picomint-bitcoind
-    restart: unless-stopped
-    volumes:
-      - bitcoind_data:/data/.bitcoin
-    command:
-      - -datadir=/data/.bitcoin
-      - -server=1
-      - -prune=10000
-      - -rpcbind=0.0.0.0
-      - -rpcallowip=172.16.0.0/12
-      - -rpcuser=bitcoin
-      - -rpcpassword=bitcoin
-      - -dbcache=1024
-
   picomint-guardian-daemon:
     image: ghcr.io/joschisan/picomint-guardian-daemon:main
     container_name: picomint-guardian-daemon
@@ -35,6 +19,22 @@ services:
       - BITCOIND_URL=http://bitcoin:bitcoin@bitcoind:8332
       - UI_ADDR=0.0.0.0:3000
 
+  bitcoind:
+    image: lncm/bitcoind:v28.0
+    container_name: picomint-bitcoind
+    restart: unless-stopped
+    volumes:
+      - bitcoind_data:/data/.bitcoin
+    command:
+      - -datadir=/data/.bitcoin
+      - -server=1
+      - -prune=10000
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=172.16.0.0/12
+      - -rpcuser=bitcoin
+      - -rpcpassword=bitcoin
+      - -dbcache=1024
+
 volumes:
-  bitcoind_data:
   picomint_guardian_data:
+  bitcoind_data:
