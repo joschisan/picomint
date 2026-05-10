@@ -88,7 +88,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     register_gateway(env, &env.gw_public)?;
     LightningClientModule::refresh_gateways(client_send.ln().clone()).await?;
     test_payments(env, client_send).await?;
-    test_lnurl_recurringd_roundtrip(env).await?;
+    test_lnurl_daemon_roundtrip(env).await?;
     deregister_gateway(env, &env.gw_public)?;
 
     let mock_gw = spawn_mock_gateway().await?;
@@ -112,7 +112,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 fn register_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
     for peer in 0..NUM_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        assert!(cli::server_ln_gateway_add(&data_dir, gateway)?);
+        assert!(cli::guardian_ln_gateway_add(&data_dir, gateway)?);
     }
     Ok(())
 }
@@ -120,7 +120,7 @@ fn register_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
 fn deregister_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
     for peer in 0..NUM_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        assert!(cli::server_ln_gateway_remove(&data_dir, gateway)?);
+        assert!(cli::guardian_ln_gateway_remove(&data_dir, gateway)?);
     }
     Ok(())
 }
@@ -132,7 +132,7 @@ fn deregister_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
 ///  - `test_payments` outgoing success  → 1 send, 1 send_success
 ///  - `test_payments` incoming success  → 1 receive, 1 receive_success, 1 complete
 ///  - `test_payments` outgoing cancel   → 1 send, 1 send_cancel
-///  - `test_lnurl_recurringd_roundtrip` → 1 receive, 1 receive_success, 1 complete
+///  - `test_lnurl_daemon_roundtrip` → 1 receive, 1 receive_success, 1 complete
 ///
 /// The mock-gateway tests and `test_direct_ln_payments` don't drive the real
 /// gateway's gw module, so they produce no rows here.
@@ -564,17 +564,17 @@ async fn test_unilateral_refund(env: &TestEnv, client: &Arc<Client>) -> anyhow::
     Ok(())
 }
 
-async fn test_lnurl_recurringd_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
-    info!("ln: test_lnurl_recurringd_roundtrip");
+async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
+    info!("ln: test_lnurl_daemon_roundtrip");
 
     // Fresh client so the receive-event stream starts empty.
     let client = env.new_client(None, false).await?;
 
-    let recurringd: String = env.recurring_url.parse()?;
+    let lnurl_daemon: String = env.lnurl_daemon_url.parse()?;
 
     let lnurl = client
         .ln()
-        .generate_lnurl(recurringd)
+        .generate_lnurl(lnurl_daemon)
         .await
         .map_err(|e| anyhow::anyhow!("generate_lnurl: {e}"))?;
 
@@ -656,7 +656,7 @@ async fn test_lnurl_recurringd_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
 
     client.shutdown().await;
 
-    info!("ln: test_lnurl_recurringd_roundtrip passed");
+    info!("ln: test_lnurl_daemon_roundtrip passed");
 
     Ok(())
 }

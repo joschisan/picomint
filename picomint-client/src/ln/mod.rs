@@ -503,7 +503,7 @@ impl LightningClientModule {
     }
 
     /// Generate an lnurl for the client.
-    pub async fn generate_lnurl(&self, recurringd: String) -> Result<String, GenerateLnurlError> {
+    pub async fn generate_lnurl(&self, lnurl_daemon: String) -> Result<String, GenerateLnurlError> {
         let gateways = self
             .client_ctx
             .api()
@@ -525,7 +525,7 @@ impl LightningClientModule {
         });
 
         Ok(picomint_lnurl::encode_lnurl(&format!(
-            "{recurringd}pay/{payload}"
+            "{lnurl_daemon}pay/{payload}"
         )))
     }
 

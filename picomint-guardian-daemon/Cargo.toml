@@ -1,9 +1,9 @@
 [package]
 authors = { workspace = true }
-description = "picomint-server-daemon facilitates federated consensus with atomic broadcast and distributed configuration. Produces the `picomint-server-daemon` binary."
+description = "picomint-guardian-daemon facilitates federated consensus with atomic broadcast and distributed configuration. Produces the `picomint-guardian-daemon` binary."
 edition = { workspace = true }
 license = { workspace = true }
-name = "picomint-server-daemon"
+name = "picomint-guardian-daemon"
 readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }
@@ -12,7 +12,7 @@ version = { workspace = true }
 rustc-args = ["--cfg", "tokio_unstable"]
 
 [lib]
-name = "picomint_server_daemon"
+name = "picomint_guardian_daemon"
 path = "src/lib.rs"
 
 [features]
@@ -40,8 +40,8 @@ picomint-bft = { workspace = true }
 picomint-bitcoin-rpc = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
+picomint-guardian-cli-core = { workspace = true }
 picomint-redb = { workspace = true }
-picomint-server-cli-core = { workspace = true }
 qrcode = { workspace = true }
 rand = { workspace = true }
 secp256k1 = { workspace = true }

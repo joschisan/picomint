@@ -1,15 +1,15 @@
 [package]
 authors = { workspace = true }
-description = "CLI for picomint server admin operations"
+description = "CLI for picomint guardian admin operations"
 edition = { workspace = true }
 license = { workspace = true }
-name = "picomint-server-cli"
+name = "picomint-guardian-cli"
 readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }
 
 [[bin]]
-name = "picomint-server-cli"
+name = "picomint-guardian-cli"
 path = "src/main.rs"
 
 [dependencies]
@@ -18,7 +18,7 @@ clap = { workspace = true }
 http-body-util = "0.1"
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
-picomint-server-cli-core = { workspace = true }
+picomint-guardian-cli-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt"] }

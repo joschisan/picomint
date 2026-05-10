@@ -1,6 +1,6 @@
-# Recurring Daemon
+# LNURL Daemon
 
-`picomint-recurring-daemon` is a stateless LNURL proxy service that allows picomint clients to receive LNURL payments via Lightning.
+`picomint-lnurl-daemon` is a stateless LNURL proxy service that allows picomint clients to receive LNURL payments via Lightning.
 
 This service requires no database or persistent state. All payment information is encoded in the LNURL itself, making it easy to deploy on platforms like Digital Ocean App Platform, Fly.io, Railway, etc.
 
@@ -15,12 +15,12 @@ The operator of the service is trusted to provide the correct invoice to the req
 5. Payer pays the invoice directly to the gateway
 6. Recipient claims funds from the federation when they come online
 
-Note that once the invoice is generated, `recurringd` cannot claim the funds for itself.
+Note that once the invoice is generated, the daemon cannot claim the funds for itself.
 
 ## Command line options
 
 ```text
-Usage: picomint-recurring-daemon [OPTIONS]
+Usage: picomint-lnurl-daemon [OPTIONS]
 
 Options:
       --api-addr <API_ADDR>  Public HTTP API listen address [env: API_ADDR=] [default: 0.0.0.0:8080]

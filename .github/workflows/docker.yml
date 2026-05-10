@@ -13,12 +13,12 @@ jobs:
     strategy:
       matrix:
         include:
-          - image: picomint-server
-            dockerfile: docker-server/Dockerfile
-          - image: picomint-gateway
+          - image: picomint-guardian-daemon
+            dockerfile: docker-guardian/Dockerfile
+          - image: picomint-gateway-daemon
             dockerfile: docker-gateway/Dockerfile
-          - image: picomint-recurring
-            dockerfile: docker-recurring/Dockerfile
+          - image: picomint-lnurl-daemon
+            dockerfile: docker-lnurl/Dockerfile
 
     steps:
     - uses: actions/checkout@v4

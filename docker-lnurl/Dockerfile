@@ -8,7 +8,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN cargo build --release --bin picomint-recurring-daemon
+RUN cargo build --release --bin picomint-lnurl-daemon
 
 FROM debian:bookworm-slim
 
@@ -17,8 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -u 1000 picomint
 
-COPY --from=builder /app/target/release/picomint-recurring-daemon /usr/local/bin/picomint-recurring-daemon
+COPY --from=builder /app/target/release/picomint-lnurl-daemon /usr/local/bin/picomint-lnurl-daemon
 
 USER picomint
 
-ENTRYPOINT ["picomint-recurring-daemon"]
+ENTRYPOINT ["picomint-lnurl-daemon"]

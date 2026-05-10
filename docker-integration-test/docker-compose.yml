@@ -1,7 +1,7 @@
 services:
   bitcoind:
     image: ruimarinho/bitcoin-core:latest
-    container_name: pm-bitcoind
+    container_name: picomint-bitcoind
     command:
       - -regtest=1
       - -rpcuser=bitcoin
@@ -19,16 +19,16 @@ services:
 
   miner:
     image: ruimarinho/bitcoin-core:latest
-    container_name: pm-miner
+    container_name: picomint-miner
     depends_on:
       - bitcoind
     entrypoint: ["/bin/sh", "/miner.sh"]
     volumes:
       - ./miner.sh:/miner.sh:ro
 
-  fed1-guardian-0: &guardian
-    image: ghcr.io/joschisan/picomint-server:main
-    container_name: pm-fed1-guardian-0
+  guardian-0-0: &guardian
+    image: ghcr.io/joschisan/picomint-guardian-daemon:main
+    container_name: picomint-guardian-daemon-0-0
     depends_on:
       - bitcoind
     environment: &guardian_env
@@ -41,81 +41,81 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - fed1_guardian_0_data:/data
+      - guardian_0_0_data:/data
 
-  fed1-guardian-1:
+  guardian-0-1:
     <<: *guardian
-    container_name: pm-fed1-guardian-1
+    container_name: picomint-guardian-daemon-0-1
     environment:
       <<: *guardian_env
     ports:
       - "3001:3000"
     volumes:
-      - fed1_guardian_1_data:/data
+      - guardian_0_1_data:/data
 
-  fed1-guardian-2:
+  guardian-0-2:
     <<: *guardian
-    container_name: pm-fed1-guardian-2
+    container_name: picomint-guardian-daemon-0-2
     environment:
       <<: *guardian_env
     ports:
       - "3002:3000"
     volumes:
-      - fed1_guardian_2_data:/data
+      - guardian_0_2_data:/data
 
-  fed1-guardian-3:
+  guardian-0-3:
     <<: *guardian
-    container_name: pm-fed1-guardian-3
+    container_name: picomint-guardian-daemon-0-3
     environment:
       <<: *guardian_env
     ports:
       - "3003:3000"
     volumes:
-      - fed1_guardian_3_data:/data
+      - guardian_0_3_data:/data
 
-  fed2-guardian-0:
+  guardian-1-0:
     <<: *guardian
-    container_name: pm-fed2-guardian-0
+    container_name: picomint-guardian-daemon-1-0
     environment:
       <<: *guardian_env
     ports:
       - "3010:3000"
     volumes:
-      - fed2_guardian_0_data:/data
+      - guardian_1_0_data:/data
 
-  fed2-guardian-1:
+  guardian-1-1:
     <<: *guardian
-    container_name: pm-fed2-guardian-1
+    container_name: picomint-guardian-daemon-1-1
     environment:
       <<: *guardian_env
     ports:
       - "3011:3000"
     volumes:
-      - fed2_guardian_1_data:/data
+      - guardian_1_1_data:/data
 
-  fed2-guardian-2:
+  guardian-1-2:
     <<: *guardian
-    container_name: pm-fed2-guardian-2
+    container_name: picomint-guardian-daemon-1-2
     environment:
       <<: *guardian_env
     ports:
       - "3012:3000"
     volumes:
-      - fed2_guardian_2_data:/data
+      - guardian_1_2_data:/data
 
-  fed2-guardian-3:
+  guardian-1-3:
     <<: *guardian
-    container_name: pm-fed2-guardian-3
+    container_name: picomint-guardian-daemon-1-3
     environment:
       <<: *guardian_env
     ports:
       - "3013:3000"
     volumes:
-      - fed2_guardian_3_data:/data
+      - guardian_1_3_data:/data
 
   gateway:
-    image: ghcr.io/joschisan/picomint-gateway:main
-    container_name: pm-gateway
+    image: ghcr.io/joschisan/picomint-gateway-daemon:main
+    container_name: picomint-gateway-daemon
     depends_on:
       - bitcoind
     environment:
@@ -131,9 +131,9 @@ services:
     volumes:
       - gateway_data:/data
 
-  recurringd:
-    image: ghcr.io/joschisan/picomint-recurring:main
-    container_name: pm-recurringd
+  lnurl-daemon:
+    image: ghcr.io/joschisan/picomint-lnurl-daemon:main
+    container_name: picomint-lnurl-daemon
     environment:
       API_ADDR: 0.0.0.0:8080
       RUST_LOG: info
@@ -142,12 +142,12 @@ services:
 
 volumes:
   bitcoind_data:
-  fed1_guardian_0_data:
-  fed1_guardian_1_data:
-  fed1_guardian_2_data:
-  fed1_guardian_3_data:
-  fed2_guardian_0_data:
-  fed2_guardian_1_data:
-  fed2_guardian_2_data:
-  fed2_guardian_3_data:
+  guardian_0_0_data:
+  guardian_0_1_data:
+  guardian_0_2_data:
+  guardian_0_3_data:
+  guardian_1_0_data:
+  guardian_1_1_data:
+  guardian_1_2_data:
+  guardian_1_3_data:
   gateway_data:

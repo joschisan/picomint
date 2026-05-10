@@ -68,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/invoice/{payload}", get(invoice))
         .layer(cors);
 
-    info!(api_addr = %cli_opts.api_addr, "recurring-daemon started");
+    info!(api_addr = %cli_opts.api_addr, "lnurl-daemon started");
 
     let listener = TcpListener::bind(cli_opts.api_addr).await?;
 
@@ -78,10 +78,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn health_check(headers: HeaderMap) -> impl IntoResponse {
-    format!(
-        "recurring-daemon is up and running at {}",
-        base_url(&headers)
-    )
+    format!("lnurl-daemon is up and running at {}", base_url(&headers))
 }
 
 fn base_url(headers: &HeaderMap) -> String {
@@ -105,7 +102,7 @@ async fn pay(headers: HeaderMap, Path(payload): Path<String>) -> Json<LnurlRespo
         max_sendable: MAX_SENDABLE_MSAT,
         min_sendable: MIN_SENDABLE_MSAT,
         tag: pay_request_tag(),
-        metadata: "[[\"text/plain\", \"Pay to Recurringd\"]]".to_string(),
+        metadata: "[[\"text/plain\", \"Pay to LNURL daemon\"]]".to_string(),
     }))
 }
 

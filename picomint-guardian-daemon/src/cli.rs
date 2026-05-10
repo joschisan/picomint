@@ -6,7 +6,7 @@ use axum::extract::{Json, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::post;
-use picomint_server_cli_core::{
+use picomint_guardian_cli_core::{
     CLI_SOCKET_FILENAME, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_RECOVER, ROUTE_SETUP_SET_LOCAL_PARAMS,
     ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddPeerRequest, SetupAddPeerResponse,
     SetupSetLocalParamsRequest, SetupSetLocalParamsResponse, SetupStatus,
@@ -86,7 +86,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     use axum::Json;
     use axum::routing::post;
     use picomint_core::expiration::ExpirationStatus;
-    use picomint_server_cli_core::{
+    use picomint_guardian_cli_core::{
         AuditResponse, ExpirationSetRequest, InviteResponse, LnGatewayRequest, ROUTE_AUDIT,
         ROUTE_CONFIG, ROUTE_EXPIRATION_CLEAR, ROUTE_EXPIRATION_SET, ROUTE_EXPIRATION_STATUS,
         ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST,

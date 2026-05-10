@@ -11,7 +11,7 @@ use hyper::Request;
 use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use picomint_server_cli_core::{
+use picomint_guardian_cli_core::{
     CLI_SOCKET_FILENAME, ExpirationSetRequest, LnGatewayRequest, ROUTE_AUDIT, ROUTE_CONFIG,
     ROUTE_EXPIRATION_CLEAR, ROUTE_EXPIRATION_SET, ROUTE_EXPIRATION_STATUS, ROUTE_INVITE,
     ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,

@@ -7,13 +7,13 @@ A minimal implementation of a federated Chaumian ecash mint on Bitcoin.
 Pick a stable directory for the deployment:
 
 ```bash
-mkdir -p ~/picomint-server && cd ~/picomint-server
+mkdir -p ~/picomint-guardian-daemon && cd ~/picomint-guardian-daemon
 ```
 
 Download the compose file:
 
 ```bash
-curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-server/docker-compose.yml
+curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-guardian/docker-compose.yml
 ```
 
 And then run:
@@ -31,7 +31,7 @@ ssh -NL 3000:127.0.0.1:3000 <your_server>
 The CLI inside the container does the same things if you prefer it:
 
 ```bash
-docker exec -it picomint-server picomint-server-cli setup status
+docker exec -it picomint-guardian-daemon picomint-guardian-cli setup status
 ```
 
 To disable the UI (CLI-only deployment), remove `UI_ADDR` and the `127.0.0.1:3000:3000` port mapping from `docker-compose.yml`.
@@ -43,25 +43,25 @@ Before the federation can start processing transactions, guardians run a one-tim
 Exactly one guardian sets the global federation config and passes `--federation-name` and `--federation-size`; the others pass only their own `<name>`:
 
 ```bash
-picomint-server-cli setup set-local-params <name> [--federation-name X] [--federation-size N]
+picomint-guardian-cli setup set-local-params <name> [--federation-name X] [--federation-size N]
 ```
 
 `set-local-params` returns a setup code. Every guardian then calls `add-peer` once per peer with that peer's setup code:
 
 ```bash
-picomint-server-cli setup add-peer <setup-code>
+picomint-guardian-cli setup add-peer <setup-code>
 ```
 
 Once every guardian has added every peer, everyone runs:
 
 ```bash
-picomint-server-cli setup start-dkg
+picomint-guardian-cli setup start-dkg
 ```
 
 Check your progress with:
 
 ```bash
-picomint-server-cli setup status
+picomint-guardian-cli setup status
 ```
 
 ### Invite Users
@@ -69,7 +69,7 @@ picomint-server-cli setup status
 Users join the federation with an invite code and any guardian can create one:
 
 ```bash
-picomint-server-cli invite
+picomint-guardian-cli invite
 ```
 
 The client can use this invite to download and verify the federation config from the guardian that generated it.
@@ -81,19 +81,19 @@ The federation maintains an explicit list of recommended Lightning gateways. Any
 Add a gateway:
 
 ```bash
-picomint-server-cli module ln gateway add <url>
+picomint-guardian-cli module ln gateway add <url>
 ```
 
 Remove one:
 
 ```bash
-picomint-server-cli module ln gateway remove <url>
+picomint-guardian-cli module ln gateway remove <url>
 ```
 
 List the current recommendations:
 
 ```bash
-picomint-server-cli module ln gateway list
+picomint-guardian-cli module ln gateway list
 ```
 
 ### Backup
@@ -103,7 +103,7 @@ your local machine and stash it somewhere safe (encrypted backup, password
 manager, paper printout):
 
 ```bash
-docker exec -i picomint-server picomint-server-cli config > config.json
+docker exec -i picomint-guardian-daemon picomint-guardian-cli config > config.json
 ```
 
 This single file is the only state you need to keep. It contains your
@@ -114,13 +114,13 @@ reconstructed from peers when a recovered guardian rejoins.
 If your deployment is ever lost, copy the backup back into a fresh container:
 
 ```bash
-docker cp config.json picomint-server:/tmp/config.json
+docker cp config.json picomint-guardian-daemon:/tmp/config.json
 ```
 
 And run `setup recover`:
 
 ```bash
-docker exec -it picomint-server picomint-server-cli setup recover /tmp/config.json
+docker exec -it picomint-guardian-daemon picomint-guardian-cli setup recover /tmp/config.json
 ```
 
 ### Interfaces
@@ -131,8 +131,8 @@ docker exec -it picomint-server picomint-server-cli setup recover /tmp/config.js
 | 3000 | Web UI (setup + dashboard)   | Localhost only  |
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `docker exec -it picomint-server
-picomint-server-cli …`.
+network exposure. Reach it with `docker exec -it picomint-guardian-daemon
+picomint-guardian-cli …`.
 
 ### Configuration
 
@@ -152,7 +152,7 @@ picomint-server-cli …`.
 Pick a stable directory for the deployment:
 
 ```bash
-mkdir -p ~/picomint-gateway && cd ~/picomint-gateway
+mkdir -p ~/picomint-gateway-daemon && cd ~/picomint-gateway-daemon
 ```
 
 Download the compose file:
@@ -170,7 +170,7 @@ docker compose up -d
 Admin actions go through `picomint-gateway-cli`, running inside the container:
 
 ```bash
-docker exec -it picomint-gateway picomint-gateway-cli info
+docker exec -it picomint-gateway-daemon picomint-gateway-cli info
 ```
 
 Your info will look like
@@ -300,7 +300,7 @@ output — without it `sqlite3` prints unlabeled pipe-delimited rows. See
 the ten most recent payments:
 
 ```bash
-docker exec -it picomint-gateway \
+docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
     "SELECT * FROM payments ORDER BY started_at DESC LIMIT 10;"
 ```
@@ -308,7 +308,7 @@ docker exec -it picomint-gateway \
 Breakdown by status:
 
 ```bash
-docker exec -it picomint-gateway \
+docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
     "SELECT status, COUNT(*) FROM payments GROUP BY status;"
 ```
@@ -316,7 +316,7 @@ docker exec -it picomint-gateway \
 Total processed volume per federation, in sats:
 
 ```bash
-docker exec -it picomint-gateway \
+docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
     "SELECT federation_id, SUM(amount_msat)/1000 AS sats FROM payments WHERE status='success' GROUP BY federation_id;"
 ```

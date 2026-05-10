@@ -1,7 +1,7 @@
 services:
-  picomint-server:
-    image: ghcr.io/joschisan/picomint-server:main
-    container_name: picomint-server
+  picomint-guardian-daemon:
+    image: ghcr.io/joschisan/picomint-guardian-daemon:main
+    container_name: picomint-guardian-daemon
     restart: unless-stopped
     ports:
       # Iroh endpoint
@@ -10,11 +10,11 @@ services:
       # locally, or `ssh -NL 3000:127.0.0.1:3000 <host>` from another machine.
       - "127.0.0.1:3000:3000"
     volumes:
-      - picomint_server_data:/data
+      - picomint_guardian_data:/data
     environment:
       - DATA_DIR=/data
       - ESPLORA_URL=https://mempool.space/api
       - UI_ADDR=0.0.0.0:3000
 
 volumes:
-  picomint_server_data:
+  picomint_guardian_data:

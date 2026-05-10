@@ -1,7 +1,7 @@
-//! `picomint-server-daemon` process entry point.
+//! `picomint-guardian-daemon` process entry point.
 //!
 //! Parses CLI arguments, opens the database, wires up the bitcoin RPC, and
-//! hands off to [`picomint_server_daemon::run_server`].
+//! hands off to [`picomint_guardian_daemon::run_server`].
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -10,8 +10,8 @@ use std::sync::Arc;
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoindClient, EsploraClient};
-use picomint_server_daemon::config::ConfigGenSettings;
-use picomint_server_daemon::{DB_FILE, run_server};
+use picomint_guardian_daemon::config::ConfigGenSettings;
+use picomint_guardian_daemon::{DB_FILE, run_server};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
@@ -73,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
         .try_init()
         .unwrap();
 
-    info!("Starting picomint-server-daemon (version: {picomint_version})");
+    info!("Starting picomint-guardian-daemon (version: {picomint_version})");
 
     let settings = ConfigGenSettings {
         p2p_addr: server_opts.p2p_addr,
@@ -82,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let db = picomint_redb::Database::open(server_opts.data_dir.join(DB_FILE))
-        .expect("Failed to open picomint-server-daemon database");
+        .expect("Failed to open picomint-guardian-daemon database");
 
     let bitcoin_backend = match (
         server_opts.bitcoind_url.as_ref(),
