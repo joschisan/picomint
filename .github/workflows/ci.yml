@@ -97,8 +97,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Run bootstrap.sh
-      run: printf 'y\ny\n' | bash bootstrap.sh
+    - name: Run bootstrap.sh via stdin (mirrors curl|bash on a real machine)
+      env:
+        AUTO_YES: "1"
+      run: cat bootstrap.sh | bash
 
     - name: Verify Web UI is reachable
       run: curl -fsS --retry 10 --retry-delay 2 --retry-connrefused http://127.0.0.1:3000 > /dev/null
