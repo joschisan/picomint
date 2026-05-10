@@ -179,7 +179,7 @@ impl TestEnv {
     fn connect_bitcoind(
         runtime: &tokio::runtime::Runtime,
     ) -> anyhow::Result<bitcoincore_rpc::Client> {
-        let url = format!("http://127.0.0.1:{BTC_RPC_PORT}/wallet/");
+        let url = format!("http://127.0.0.1:{BTC_RPC_PORT}/wallet/default");
         let auth =
             bitcoincore_rpc::Auth::UserPass(BTC_RPC_USER.to_string(), BTC_RPC_PASS.to_string());
         let client = bitcoincore_rpc::Client::new(&url, auth)?;

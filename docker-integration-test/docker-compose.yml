@@ -1,8 +1,10 @@
 services:
   bitcoind:
-    image: ruimarinho/bitcoin-core:latest
+    image: btcpayserver/bitcoin:31.0
     container_name: picomint-bitcoind
     command:
+      - bitcoind
+      - -datadir=/data
       - -regtest=1
       - -rpcuser=bitcoin
       - -rpcpassword=bitcoin
@@ -15,10 +17,10 @@ services:
     ports:
       - "18443:18443"
     volumes:
-      - bitcoind_data:/home/bitcoin/.bitcoin
+      - bitcoind_data:/data
 
   miner:
-    image: ruimarinho/bitcoin-core:latest
+    image: btcpayserver/bitcoin:31.0
     container_name: picomint-miner
     depends_on:
       - bitcoind
