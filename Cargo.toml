@@ -20,7 +20,7 @@ members = [
     "picomint-guardian-daemon",
     "picomint-integration-tests",
     "picomint-lnurl",
-    "picomint-recurring-daemon",
+    "picomint-lnurl-daemon",
     "picomint-redb",
 ]
 resolver = "2"

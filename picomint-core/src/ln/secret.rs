@@ -1,6 +1,6 @@
 //! Incoming-contract secret derivation.
 //!
-//! Both the contract creator (client receive path, recurringd) and the
+//! Both the contract creator (client receive path, lnurl-daemon) and the
 //! claimant (client recover path) start from the same 32-byte ECDH output
 //! and descend this tree to recover identical encryption seed, preimage, and
 //! claim tweak. The path enum is private; callers use the typed accessors on

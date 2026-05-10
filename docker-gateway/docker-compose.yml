@@ -1,7 +1,7 @@
 services:
-  picomint-gateway:
-    image: ghcr.io/joschisan/picomint-gateway:main
-    container_name: picomint-gateway
+  picomint-gateway-daemon:
+    image: ghcr.io/joschisan/picomint-gateway-daemon:main
+    container_name: picomint-gateway-daemon
     restart: unless-stopped
     ports:
       # Public API

@@ -114,7 +114,7 @@ services:
       - guardian_1_3_data:/data
 
   gateway:
-    image: ghcr.io/joschisan/picomint-gateway:main
+    image: ghcr.io/joschisan/picomint-gateway-daemon:main
     container_name: picomint-gateway-daemon
     depends_on:
       - bitcoind
@@ -131,9 +131,9 @@ services:
     volumes:
       - gateway_data:/data
 
-  recurringd:
-    image: ghcr.io/joschisan/picomint-recurring:main
-    container_name: picomint-recurringd
+  lnurl-daemon:
+    image: ghcr.io/joschisan/picomint-lnurl-daemon:main
+    container_name: picomint-lnurl-daemon
     environment:
       API_ADDR: 0.0.0.0:8080
       RUST_LOG: info

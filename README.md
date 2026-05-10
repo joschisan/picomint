@@ -152,7 +152,7 @@ picomint-guardian-cli …`.
 Pick a stable directory for the deployment:
 
 ```bash
-mkdir -p ~/picomint-gateway && cd ~/picomint-gateway
+mkdir -p ~/picomint-gateway-daemon && cd ~/picomint-gateway-daemon
 ```
 
 Download the compose file:
@@ -170,7 +170,7 @@ docker compose up -d
 Admin actions go through `picomint-gateway-cli`, running inside the container:
 
 ```bash
-docker exec -it picomint-gateway picomint-gateway-cli info
+docker exec -it picomint-gateway-daemon picomint-gateway-cli info
 ```
 
 Your info will look like
@@ -300,7 +300,7 @@ output — without it `sqlite3` prints unlabeled pipe-delimited rows. See
 the ten most recent payments:
 
 ```bash
-docker exec -it picomint-gateway \
+docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
     "SELECT * FROM payments ORDER BY started_at DESC LIMIT 10;"
 ```
@@ -308,7 +308,7 @@ docker exec -it picomint-gateway \
 Breakdown by status:
 
 ```bash
-docker exec -it picomint-gateway \
+docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
     "SELECT status, COUNT(*) FROM payments GROUP BY status;"
 ```
@@ -316,7 +316,7 @@ docker exec -it picomint-gateway \
 Total processed volume per federation, in sats:
 
 ```bash
-docker exec -it picomint-gateway \
+docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
     "SELECT federation_id, SUM(amount_msat)/1000 AS sats FROM payments WHERE status='success' GROUP BY federation_id;"
 ```

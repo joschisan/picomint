@@ -28,7 +28,7 @@ Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitco
 - `picomint-redb` — redb-based database layer
 - `picomint-eventlog` — append-only client event log
 - `picomint-bitcoin-rpc` — bitcoind RPC client used by the wallet module
-- `picomint-recurring-daemon` — standalone recurring-payment helper daemon
+- `picomint-lnurl-daemon` — standalone LNURL proxy daemon for receiving Lightning payments
 - `picomint-lnurl` / `picomint-base32` / `picomint-logging` — small shared utility crates
 - `picomint-integration-tests` — end-to-end integration tests (used by `test-integration.sh`)
 

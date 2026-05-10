@@ -158,7 +158,7 @@ Setup complete.
   ${FED_NAMES[1]} invite : ${INVITES[1]}
 
   Gateway URL       : $GATEWAY_URL   (registered with both federations)
-  Recurring daemon  : http://localhost:8091
+  LNURL daemon      : http://localhost:8091
   ${FED_NAMES[0]}  UIs    : http://localhost:3000..3003
   ${FED_NAMES[1]} UIs    : http://localhost:3010..3013     (password: picomint)
   Bitcoind RPC      : http://localhost:18443        (user: bitcoin / pass: bitcoin)
