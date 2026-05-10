@@ -15,7 +15,10 @@ COMPOSE_URL="https://raw.githubusercontent.com/joschisan/picomint/main/docker-gu
 UI_URL="http://127.0.0.1:3000"
 
 confirm() {
-    read -rp "$1 [y/N] " reply
+    if [[ "${AUTO_YES:-}" == "1" ]]; then
+        return 0
+    fi
+    read -rp "$1 [y/N] " reply </dev/tty
     [[ "$reply" =~ ^[Yy]$ ]]
 }
 
