@@ -30,7 +30,7 @@ ssh -NL 3000:127.0.0.1:3000 <your_server>
 
 To disable the UI (CLI-only deployment), remove `UI_ADDR` and the `127.0.0.1:3000:3000` port mapping from `docker-compose.yml`.
 
-### Accessing the Admin CLI
+### Accessing the CLI
 
 The `picomint-guardian-cli` binary is included in the container and on the `PATH`. Open an interactive shell inside the container via:
 
@@ -113,7 +113,7 @@ your local machine and stash it somewhere safe (encrypted backup, password
 manager, paper printout):
 
 ```bash
-docker exec -i picomint-guardian-daemon picomint-guardian-cli config > config.json
+picomint-guardian-cli config > config.json
 ```
 
 This single file is the only state you need to keep. It contains your
@@ -130,7 +130,7 @@ docker cp config.json picomint-guardian-daemon:/tmp/config.json
 And run `setup recover`:
 
 ```bash
-docker exec -it picomint-guardian-daemon picomint-guardian-cli setup recover /tmp/config.json
+picomint-guardian-cli setup recover /tmp/config.json
 ```
 
 ### Interfaces
@@ -177,7 +177,7 @@ And then run:
 docker compose up -d
 ```
 
-### Accessing the Admin CLI
+### Accessing the CLI
 
 The `picomint-gateway-cli` binary is included in the container and on the `PATH`. Open an interactive shell inside the container via:
 
