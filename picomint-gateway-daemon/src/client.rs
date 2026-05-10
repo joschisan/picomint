@@ -2,15 +2,16 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use bitcoin::Network;
+use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
-use iroh::{Endpoint, SecretKey};
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::config::{ConsensusConfig, FederationId};
 use picomint_core::invite::InviteCode;
+use picomint_core::secret::Secret;
 use picomint_redb::Database;
 
-use crate::db::{CLIENT_CONFIG, GATEWAY_CONFIG, GatewayConfig};
+use crate::db::{CLIENT_CONFIG, ROOT_ENTROPY};
 
 #[derive(Clone)]
 pub struct GatewayClientFactory {
@@ -21,26 +22,28 @@ pub struct GatewayClientFactory {
 }
 
 impl GatewayClientFactory {
-    /// Initialize a new factory, storing both root secrets (mnemonic entropy
-    /// + freshly generated iroh secret key) atomically as one [`GatewayConfig`] row.
+    /// Initialize a new factory, persisting the 16-byte BIP39 root entropy
+    /// as the sole root secret. The iroh secret key is derived from the same
+    /// entropy, so the daemon's `GatewayPk` is reproducible from this row
+    /// alone.
     pub async fn init(
         db: Database,
         mnemonic: Mnemonic,
         network: Network,
         api_addr: SocketAddr,
     ) -> anyhow::Result<Self> {
-        let iroh_sk = SecretKey::generate();
-
-        let config = GatewayConfig {
-            mnemonic_entropy: mnemonic.to_entropy(),
-            iroh_sk: iroh_sk.clone(),
-        };
+        let entropy: [u8; 16] = mnemonic
+            .to_entropy()
+            .try_into()
+            .expect("12-word mnemonic is exactly 16 bytes of entropy");
 
         let dbtx = db.begin_write();
 
-        assert!(dbtx.insert(&GATEWAY_CONFIG, &(), &config).is_none());
+        assert!(dbtx.insert(&ROOT_ENTROPY, &(), &entropy).is_none());
 
         dbtx.commit();
+
+        let iroh_sk = Secret::new_root(&entropy).to_iroh_secret_key();
 
         let endpoint = Endpoint::builder(N0)
             .secret_key(iroh_sk)
@@ -64,15 +67,17 @@ impl GatewayClientFactory {
         network: Network,
         api_addr: SocketAddr,
     ) -> anyhow::Result<Option<Self>> {
-        let Some(config) = db.begin_read().as_ref().get(&GATEWAY_CONFIG, &()) else {
+        let Some(entropy) = db.begin_read().as_ref().get(&ROOT_ENTROPY, &()) else {
             return Ok(None);
         };
 
-        let mnemonic = Mnemonic::from_entropy(&config.mnemonic_entropy)
-            .map_err(|e| anyhow::anyhow!("Invalid stored mnemonic: {e}"))?;
+        let mnemonic = Mnemonic::from_entropy(&entropy)
+            .map_err(|e| anyhow::anyhow!("Invalid stored entropy: {e}"))?;
+
+        let iroh_sk = Secret::new_root(&entropy).to_iroh_secret_key();
 
         let endpoint = Endpoint::builder(N0)
-            .secret_key(config.iroh_sk)
+            .secret_key(iroh_sk)
             .alpns(vec![picomint_rpc::ALPN.to_vec()])
             .bind_addr(api_addr)?
             .address_lookup(MdnsAddressLookup::builder())
