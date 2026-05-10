@@ -30,6 +30,12 @@ ssh -NL 3000:127.0.0.1:3000 <your_server>
 
 To disable the UI (CLI-only deployment), remove `UI_ADDR` and the `127.0.0.1:3000:3000` port mapping from `docker-compose.yml`.
 
+### Bitcoin Backend
+
+The bundled compose runs a local Bitcoin Core node alongside the guardian, pruned to roughly 30 days of recent blocks (`-prune=10000`, ~10 GiB on disk). Initial block download still pulls the full chain over the network before pruning takes effect, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth; the guardian will sit idle until bitcoind catches up.
+
+To use a remote esplora instance instead (lower resources, but requires trusting the third party), edit `docker-compose.yml` and toggle which line is commented in the guardian's `environment` block — keep exactly one of `ESPLORA_URL` / `BITCOIND_URL` active. You can also drop the `bitcoind` service entirely in that case.
+
 ### Accessing the CLI
 
 The `picomint-guardian-cli` binary is included in the container and on the `PATH`. Open an interactive shell inside the container via:
@@ -155,7 +161,7 @@ picomint-guardian-cli …`.
 | `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
 | `UI_ADDR`                    | no       |                   | Web UI listen address — unset disables UI  |
 
-*Either `ESPLORA_URL` or `BITCOIND_URL` must be set, but not both.*
+*Either `ESPLORA_URL` or `BITCOIND_URL` must be set, but not both. The bundled compose sets `BITCOIND_URL` and runs a local pruned Bitcoin Core node — see [Bitcoin Backend](#bitcoin-backend) above to switch to esplora.*
 
 ## Deploy Gateway
 
