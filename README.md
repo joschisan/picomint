@@ -19,7 +19,7 @@ curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-guardia
 And then run:
 
 ```bash
-docker compose up -d
+sudo docker compose up -d
 ```
 
 The Web UI is enabled by default and bound to host loopback at <http://127.0.0.1:3000>. If the federation runs on the same machine as your browser, just open that URL. If it's headless, forward the port over SSH first:
@@ -28,13 +28,23 @@ The Web UI is enabled by default and bound to host loopback at <http://127.0.0.1
 ssh -NL 3000:127.0.0.1:3000 <your_server>
 ```
 
-The CLI inside the container does the same things if you prefer it:
+To disable the UI (CLI-only deployment), remove `UI_ADDR` and the `127.0.0.1:3000:3000` port mapping from `docker-compose.yml`.
+
+### Accessing the CLI
+
+The `picomint-guardian-cli` binary is included in the container and on the `PATH`. Open an interactive shell inside the container via:
 
 ```bash
-docker exec -it picomint-guardian-daemon picomint-guardian-cli setup status
+sudo docker exec -it picomint-guardian-daemon bash
 ```
 
-To disable the UI (CLI-only deployment), remove `UI_ADDR` and the `127.0.0.1:3000:3000` port mapping from `docker-compose.yml`.
+Or run CLI commands directly from the host like:
+
+```bash
+sudo docker exec picomint-guardian-daemon picomint-guardian-cli --help
+```
+
+The walkthroughs below use the bare `picomint-guardian-cli …` form. Run them from inside the container shell, or prefix with `sudo docker exec picomint-guardian-daemon` to run from the host.
 
 ### Setup Ceremony
 
@@ -103,7 +113,7 @@ your local machine and stash it somewhere safe (encrypted backup, password
 manager, paper printout):
 
 ```bash
-docker exec -i picomint-guardian-daemon picomint-guardian-cli config > config.json
+picomint-guardian-cli config > config.json
 ```
 
 This single file is the only state you need to keep. It contains your
@@ -114,13 +124,13 @@ reconstructed from peers when a recovered guardian rejoins.
 If your deployment is ever lost, copy the backup back into a fresh container:
 
 ```bash
-docker cp config.json picomint-guardian-daemon:/tmp/config.json
+sudo docker cp config.json picomint-guardian-daemon:/tmp/config.json
 ```
 
 And run `setup recover`:
 
 ```bash
-docker exec -it picomint-guardian-daemon picomint-guardian-cli setup recover /tmp/config.json
+picomint-guardian-cli setup recover /tmp/config.json
 ```
 
 ### Interfaces
@@ -131,7 +141,7 @@ docker exec -it picomint-guardian-daemon picomint-guardian-cli setup recover /tm
 | 3000 | Web UI (setup + dashboard)   | Localhost only  |
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `docker exec -it picomint-guardian-daemon
+network exposure. Reach it with `sudo docker exec -it picomint-guardian-daemon
 picomint-guardian-cli …`.
 
 ### Configuration
@@ -164,13 +174,29 @@ curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-gateway
 And then run:
 
 ```bash
-docker compose up -d
+sudo docker compose up -d
 ```
 
-Admin actions go through `picomint-gateway-cli`, running inside the container:
+### Accessing the CLI
+
+The `picomint-gateway-cli` binary is included in the container and on the `PATH`. Open an interactive shell inside the container via:
 
 ```bash
-docker exec -it picomint-gateway-daemon picomint-gateway-cli info
+sudo docker exec -it picomint-gateway-daemon bash
+```
+
+Or run CLI commands directly from the host like:
+
+```bash
+sudo docker exec picomint-gateway-daemon picomint-gateway-cli --help
+```
+
+The walkthroughs below use the bare `picomint-gateway-cli …` form. Run them from inside the container shell, or prefix with `sudo docker exec picomint-gateway-daemon` to run from the host.
+
+A first call to confirm everything is wired up:
+
+```bash
+picomint-gateway-cli info
 ```
 
 Your info will look like
@@ -300,7 +326,7 @@ output — without it `sqlite3` prints unlabeled pipe-delimited rows. See
 the ten most recent payments:
 
 ```bash
-docker exec -it picomint-gateway-daemon \
+sudo docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
     "SELECT * FROM payments ORDER BY started_at DESC LIMIT 10;"
 ```
@@ -308,7 +334,7 @@ docker exec -it picomint-gateway-daemon \
 Breakdown by status:
 
 ```bash
-docker exec -it picomint-gateway-daemon \
+sudo docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
     "SELECT status, COUNT(*) FROM payments GROUP BY status;"
 ```
@@ -316,7 +342,7 @@ docker exec -it picomint-gateway-daemon \
 Total processed volume per federation, in sats:
 
 ```bash
-docker exec -it picomint-gateway-daemon \
+sudo docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
     "SELECT federation_id, SUM(amount_msat)/1000 AS sats FROM payments WHERE status='success' GROUP BY federation_id;"
 ```
@@ -346,7 +372,7 @@ if you need a view more granular than `payments`.
 | 9735 | LDK Lightning P2P (BOLT)     | Yes             |
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `docker exec -it picomint-gateway
+network exposure. Reach it with `sudo docker exec -it picomint-gateway-daemon
 picomint-gateway-cli …`.
 
 ### Configuration
