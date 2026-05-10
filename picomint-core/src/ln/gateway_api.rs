@@ -20,16 +20,10 @@ use crate::config::FederationId;
 use crate::ln::LightningInvoice;
 use crate::ln::contracts::{IncomingContract, OutgoingContract};
 
-/// A gateway's identity — its iroh public key. Newtype wrapper so we can
-/// derive `Encodable + Decodable + redb::Key` (orphan rule blocks doing
-/// it on `iroh_base::PublicKey` directly). `Serialize` / `Deserialize` /
-/// `FromStr` round-trip through [`picomint_base32`] — same `picomint`-
-/// prefixed base32hex encoding used for [`crate::invite::InviteCode`] — so
-/// the on-the-wire string form is consistent across clap, web forms, and
-/// JSON. No `Display` impl on purpose; render via `picomint_base32::encode`.
-#[derive(
-    Debug, Clone, Copy, Eq, PartialEq, Hash, PartialOrd, Ord, Encodable, Decodable,
-)]
+/// A gateway's identity — its iroh public key. `Serialize`, `Deserialize`,
+/// and `FromStr` round-trip via [`picomint_base32`]; render with
+/// `picomint_base32::encode`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, PartialOrd, Ord, Encodable, Decodable)]
 pub struct GatewayPk(pub iroh_base::PublicKey);
 
 picomint_redb::consensus_key!(GatewayPk);
@@ -112,7 +106,7 @@ pub struct CreateInvoiceResponse {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct VerifyPreimageRequest {
-    pub payment_hash: sha256::Hash,
+    pub hash: sha256::Hash,
     pub wait: bool,
 }
 

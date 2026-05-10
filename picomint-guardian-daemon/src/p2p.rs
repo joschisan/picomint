@@ -17,7 +17,7 @@ use iroh::{Endpoint, PublicKey, SecretKey};
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_bft::Message as BftMessage;
 use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
-use picomint_core::session_outcome::SignedSessionOutcome;
+use picomint_core::session::SignedSessionOutcome;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::{PeerId, secp256k1};
 use picomint_encoding::{Decodable, Encodable};

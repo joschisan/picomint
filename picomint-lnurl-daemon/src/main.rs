@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, ensure};
 use axum::extract::{Path, Query, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -289,26 +289,31 @@ async fn select_gateway(
 /// response), we forward via iroh to the originating gateway. The
 /// optional `?wait` query param turns this into a long-poll on the
 /// gateway side.
+///
+/// LUD-21 has no transient-vs-terminal error distinction — a wallet
+/// that sees `{"status":"ERROR"}` (or once `settled:true`, later
+/// `settled:false`) will give up. So on transport failure we return
+/// HTTP 502 with an empty body: the wallet's JSON parse fails the same
+/// way as a network error, and any sane polling client retries.
 async fn verify(
     State(endpoint): State<Endpoint>,
-    Path((gateway_pk, payment_hash)): Path<(GatewayPk, sha256::Hash)>,
+    Path((gateway_pk, hash)): Path<(GatewayPk, sha256::Hash)>,
     Query(query): Query<std::collections::HashMap<String, String>>,
-) -> Json<LnurlResponse<VerifyResponse>> {
+) -> Result<Json<LnurlResponse<VerifyResponse>>, StatusCode> {
     let wait = query.contains_key("wait");
 
-    match gateway_request::<GatewayVerifyResponse>(
+    let response = gateway_request::<GatewayVerifyResponse>(
         &endpoint,
         gateway_pk,
-        GatewayMethod::VerifyPreimage(VerifyPreimageRequest { payment_hash, wait }),
+        GatewayMethod::VerifyPreimage(VerifyPreimageRequest { hash, wait }),
     )
     .await
-    {
-        Ok(response) => Json(LnurlResponse::Ok(VerifyResponse {
-            settled: response.settled,
-            preimage: response.preimage,
-        })),
-        Err(e) => Json(LnurlResponse::error(e.to_string())),
-    }
+    .map_err(|_| StatusCode::BAD_GATEWAY)?;
+
+    Ok(Json(LnurlResponse::Ok(VerifyResponse {
+        settled: response.settled,
+        preimage: response.preimage,
+    })))
 }
 
 async fn gateway_request<R: Decodable>(

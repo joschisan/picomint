@@ -1,6 +1,6 @@
 use picomint_bft::{Entry, Round};
 use picomint_core::expiration::ExpirationStatus;
-use picomint_core::session_outcome::{AcceptedItem, SignedSessionOutcome};
+use picomint_core::session::{AcceptedItem, SignedSessionOutcome};
 use picomint_core::tx::ConsensusItem;
 use picomint_core::{PeerId, TransactionId};
 use picomint_redb::table;

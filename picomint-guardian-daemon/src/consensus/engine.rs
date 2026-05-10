@@ -8,7 +8,7 @@ use picomint_bft::{
     Graph as BftGraph, INetwork, Keychain as BftKeychain, Round as BftRound, run as run_bft,
 };
 use picomint_core::secp256k1::{SECP256K1, schnorr};
-use picomint_core::session_outcome::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
+use picomint_core::session::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use picomint_core::tx::ConsensusItem;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_redb::{Database, ReadTx, WriteTx};

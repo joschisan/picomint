@@ -7,12 +7,12 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_eventlog::EventLogId;
 use picomint_redb::table;
 
-// 16-byte BIP39 entropy for the daemon's 12-word mnemonic, written once on
-// first start. Drives both federation-client derivation and the iroh secret
-// key, so the `GatewayPk` (iroh node id) is reproducible from this row alone.
+// BIP39 entropy for the daemon's mnemonic, written once on first start.
+// Drives both federation-client derivation and the iroh secret key, so the
+// `GatewayPk` (iroh node id) is reproducible from this row alone.
 table!(
     ROOT_ENTROPY,
-    () => [u8; 16],
+    () => Vec<u8>,
     "root-entropy",
 );
 

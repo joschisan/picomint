@@ -3639,7 +3639,6 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "clap",
- "iroh-base",
  "lightning-invoice",
  "picomint-client",
  "picomint-core",

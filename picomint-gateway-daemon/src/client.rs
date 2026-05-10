@@ -22,28 +22,25 @@ pub struct GatewayClientFactory {
 }
 
 impl GatewayClientFactory {
-    /// Initialize a new factory, persisting the 16-byte BIP39 root entropy
-    /// as the sole root secret. The iroh secret key is derived from the same
-    /// entropy, so the daemon's `GatewayPk` is reproducible from this row
-    /// alone.
+    /// Initialize a new factory, persisting the BIP39 root entropy as the
+    /// sole root secret. The iroh secret key is derived from the same entropy,
+    /// so the daemon's `GatewayPk` is reproducible from this row alone.
     pub async fn init(
         db: Database,
         mnemonic: Mnemonic,
         network: Network,
         api_addr: SocketAddr,
     ) -> anyhow::Result<Self> {
-        let entropy: [u8; 16] = mnemonic
-            .to_entropy()
-            .try_into()
-            .expect("12-word mnemonic is exactly 16 bytes of entropy");
-
         let dbtx = db.begin_write();
 
-        assert!(dbtx.insert(&ROOT_ENTROPY, &(), &entropy).is_none());
+        assert!(
+            dbtx.insert(&ROOT_ENTROPY, &(), &mnemonic.to_entropy())
+                .is_none()
+        );
 
         dbtx.commit();
 
-        let iroh_sk = Secret::new_root(&entropy).to_iroh_secret_key();
+        let iroh_sk = Secret::new_root(&mnemonic.to_entropy()).to_iroh_secret_key();
 
         let endpoint = Endpoint::builder(N0)
             .secret_key(iroh_sk)

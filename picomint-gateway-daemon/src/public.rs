@@ -42,7 +42,7 @@ async fn dispatch(state: AppState, method: GatewayMethod) -> Result<Vec<u8>, Str
             .map(|invoice| CreateInvoiceResponse { invoice }.consensus_encode_to_vec())
             .map_err(|e| e.to_string()),
         GatewayMethod::VerifyPreimage(req) => state
-            .verify_bolt11_preimage(req.payment_hash, req.wait)
+            .verify_bolt11_preimage(req.hash, req.wait)
             .await
             .map(|resp| resp.consensus_encode_to_vec())
             .map_err(|e| e.to_string()),
