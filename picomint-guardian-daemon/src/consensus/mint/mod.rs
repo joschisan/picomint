@@ -14,7 +14,7 @@ use picomint_core::mint::{
     RecoveryItem, verify_note,
 };
 use picomint_core::module::{InputMeta, TxItemAmounts};
-use picomint_core::{Amount, InPoint, OutPoint, PeerId};
+use picomint_core::{Amount, OutPoint, PeerId};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
@@ -111,7 +111,6 @@ impl Mint {
         &self,
         dbtx: &WriteTxRef<'_>,
         input: &MintInput,
-        _in_point: InPoint,
     ) -> Result<InputMeta, MintInputError> {
         let pk = self
             .cfg

@@ -18,7 +18,7 @@ use picomint_core::ln::{
     LightningOutputError, OutgoingWitness,
 };
 use picomint_core::module::{InputMeta, TxItemAmounts};
-use picomint_core::{Amount, InPoint, NumPeersExt, OutPoint, PeerId};
+use picomint_core::{Amount, NumPeersExt, OutPoint, PeerId};
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use tpe::{PublicKeyShare, SecretKeyShare};
 use tracing::trace;
@@ -140,7 +140,6 @@ impl Lightning {
         &self,
         dbtx: &WriteTxRef<'_>,
         input: &LightningInput,
-        _in_point: InPoint,
     ) -> Result<InputMeta, LightningInputError> {
         let (pub_key, amount) = match input {
             LightningInput::Outgoing(outpoint, outgoing_witness) => {

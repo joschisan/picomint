@@ -9,7 +9,7 @@ use picomint_core::module::InputMeta;
 use picomint_core::module::audit::AuditSummary;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
-use picomint_core::{InPoint, OutPoint, PeerId};
+use picomint_core::{OutPoint, PeerId};
 use picomint_redb::{WriteTx, WriteTxRef};
 
 use crate::consensus::ln::Lightning;
@@ -48,22 +48,21 @@ impl Server {
         &self,
         dbtx: &WriteTxRef<'_>,
         input: &wire::Input,
-        in_point: InPoint,
     ) -> Result<InputMeta, wire::InputError> {
         match input {
             wire::Input::Mint(i) => self
                 .mint
-                .process_input(dbtx, i, in_point)
+                .process_input(dbtx, i)
                 .await
                 .map_err(wire::InputError::Mint),
             wire::Input::Wallet(i) => self
                 .wallet
-                .process_input(dbtx, i, in_point)
+                .process_input(dbtx, i)
                 .await
                 .map_err(wire::InputError::Wallet),
             wire::Input::Ln(i) => self
                 .ln
-                .process_input(dbtx, i, in_point)
+                .process_input(dbtx, i)
                 .await
                 .map_err(wire::InputError::Ln),
         }
@@ -122,9 +121,9 @@ pub async fn process_tx_with_server(
 
     let txid = tx.compute_txid();
 
-    for (input, in_idx) in tx.inputs.iter().zip(0u64..) {
+    for input in &tx.inputs {
         let meta = server
-            .process_input(&dbtx.as_ref(), input, InPoint { txid, in_idx })
+            .process_input(&dbtx.as_ref(), input)
             .await
             .map_err(TxError::Input)?;
 
