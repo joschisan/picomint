@@ -62,7 +62,8 @@ pub struct GatewayOpts {
     #[arg(long, env = "BITCOIND_URL")]
     pub bitcoind_url: Option<Url>,
 
-    /// Public API listen address
+    /// Public API listen address. The iroh endpoint binds here for the
+    /// gateway-API and outgoing federation client traffic.
     #[arg(long = "api-addr", env = "API_ADDR", default_value = "0.0.0.0:8080")]
     pub api_addr: SocketAddr,
 
@@ -121,12 +122,14 @@ fn main() -> anyhow::Result<()> {
     let client_factory = match runtime.block_on(GatewayClientFactory::try_load(
         gateway_db.clone(),
         opts.network,
+        opts.api_addr,
     ))? {
         Some(factory) => factory,
         None => runtime.block_on(GatewayClientFactory::init(
             gateway_db.clone(),
             picomint_client::random_mnemonic(&mut OsRng),
             opts.network,
+            opts.api_addr,
         ))?,
     };
 
@@ -187,7 +190,6 @@ fn main() -> anyhow::Result<()> {
         node: node.clone(),
         client_factory,
         gateway_db,
-        api_addr: opts.api_addr,
         data_dir: opts.data_dir.clone(),
         network: opts.network,
         send_fee: PaymentFee {
@@ -210,7 +212,10 @@ fn main() -> anyhow::Result<()> {
     //    so the runtime drop on process exit aborts cleanly.
     runtime.block_on(state.load_clients())?;
 
-    runtime.spawn(public::run_public(state.clone()));
+    runtime.spawn(public::run_public(
+        state.clone(),
+        state.client_factory.endpoint().clone(),
+    ));
 
     runtime.spawn(cli::run_cli(state.clone()));
 

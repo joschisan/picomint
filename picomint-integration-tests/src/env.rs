@@ -13,6 +13,7 @@ use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::invite::InviteCode;
+use picomint_core::ln::gateway_api::GatewayPk;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::block_in_place;
@@ -46,7 +47,7 @@ pub struct TestEnv {
     pub bitcoind: bitcoincore_rpc::Client,
     pub invite_code: InviteCode,
     pub gw_data_dir: std::path::PathBuf,
-    pub gw_public: String,
+    pub gw_pk: GatewayPk,
     pub lnurl_daemon_url: String,
     pub endpoint: Endpoint,
     pub client_counter: AtomicU64,
@@ -111,14 +112,15 @@ impl TestEnv {
         runtime.block_on(start_gateway(base, "gw", GW_PORT, GW_LN_PORT))?;
 
         let gw_data_dir = base.join("gw");
-        // Public API is on the base port
-        let gw_public = format!("http://127.0.0.1:{GW_PORT}");
 
         info!("Waiting for gateway...");
-        runtime.block_on(retry("gw ready", || async {
-            cli::gateway_info(&gw_data_dir).map(|_| ())
+        let gw_pk = runtime.block_on(retry("gw ready", || async {
+            Ok(cli::gateway_info(&gw_data_dir)?.gateway_pk)
         }))?;
-        info!("Gateway ready");
+        info!(
+            "Gateway ready, gateway_pk={}",
+            picomint_base32::encode(&gw_pk)
+        );
 
         runtime.block_on(start_lnurl_daemon(base, LNURL_DAEMON_PORT))?;
         let lnurl_daemon_url = format!("http://127.0.0.1:{LNURL_DAEMON_PORT}/");
@@ -143,7 +145,7 @@ impl TestEnv {
                 bitcoind,
                 invite_code,
                 gw_data_dir,
-                gw_public,
+                gw_pk,
                 lnurl_daemon_url,
                 endpoint,
                 client_counter,

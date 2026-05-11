@@ -44,7 +44,7 @@ mod peer;
 /// Consensus session outcome types (AcceptedItem, SessionOutcome, …).
 pub mod secret;
 
-pub mod session_outcome;
+pub mod session;
 /// Wire-level Transaction and ConsensusItem types.
 pub mod tx;
 /// Wallet module wire types / helpers (shared between client and server).

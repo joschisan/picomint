@@ -33,11 +33,10 @@ picomint-encoding = { workspace = true }
 picomint-eventlog = { workspace = true }
 picomint-lnurl = { workspace = true }
 picomint-redb = { workspace = true }
+picomint-rpc = { workspace = true }
 rand = { workspace = true }
-reqwest = { workspace = true }
 secp256k1 = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 tbs = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time", "macros", "rt"] }

@@ -16,13 +16,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bitcoin::Network;
-use futures::FutureExt;
+use futures::TryFutureExt;
 use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
 use picomint_core::NumPeers;
-use picomint_core::module::{ApiError, Method};
+use picomint_core::module::Method;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::wire;
-use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::Database;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
@@ -230,62 +229,19 @@ async fn run_iroh_api(
     let request_limit = Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS));
 
     while let Ok(connection) = foreign_conn_rx.recv().await {
+        let consensus_api = consensus_api.clone();
         tokio::spawn(
-            handle_request(consensus_api.clone(), connection, request_limit.clone()).then(
-                |result| async {
-                    if let Err(err) = result {
-                        warn!(err = %format_args!("{err:#}"), "Failed to handle iroh request");
-                    }
-                },
-            ),
+            picomint_rpc::handle_request(connection, request_limit.clone(), |method| {
+                dispatch(consensus_api, method)
+            })
+            .inspect_err(|e| {
+                warn!(?e, "Failed to handle iroh request");
+            }),
         );
     }
 }
 
-/// One request per connection. Accepts a single bi stream, dispatches the
-/// request, writes the response, then waits for the client to drive the
-/// close. Iroh's recommended graceful-close pattern (see
-/// `iroh/examples/echo-no-router.rs`): the receiver of application data
-/// closes the connection so the response bytes are fully delivered before
-/// the connection tears down. The QUIC idle timeout backstops a misbehaved
-/// client.
-async fn handle_request(
-    consensus_api: Arc<ConsensusApi>,
-    connection: iroh::endpoint::Connection,
-    request_limit: Arc<Semaphore>,
-) -> anyhow::Result<()> {
-    if request_limit.available_permits() == 0 {
-        warn!(
-            limit = MAX_CONCURRENT_REQUESTS,
-            "Iroh API request limit reached, blocking new requests"
-        );
-    }
-
-    let _permit = request_limit
-        .acquire_owned()
-        .await
-        .expect("semaphore should not be closed");
-
-    let (mut send_stream, mut recv_stream) = connection.accept_bi().await?;
-
-    let request = recv_stream.read_to_end(100_000).await?;
-
-    let method = Method::consensus_decode(&request)?;
-
-    let response = dispatch(consensus_api, method).await;
-
-    let response = response.consensus_encode_to_vec();
-
-    send_stream.write_all(&response).await?;
-
-    send_stream.finish()?;
-
-    connection.closed().await;
-
-    Ok(())
-}
-
-async fn dispatch(consensus_api: Arc<ConsensusApi>, method: Method) -> Result<Vec<u8>, ApiError> {
+async fn dispatch(consensus_api: Arc<ConsensusApi>, method: Method) -> Result<Vec<u8>, String> {
     match method {
         Method::Core(m) => consensus_api.handle_api(m).await,
         Method::Mint(m) => consensus_api.server.mint.handle_api(m).await,

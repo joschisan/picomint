@@ -17,8 +17,7 @@ use iroh::{Endpoint, PublicKey, SecretKey};
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_bft::Message as BftMessage;
 use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
-use picomint_core::module::PICOMINT_ALPN;
-use picomint_core::session_outcome::SignedSessionOutcome;
+use picomint_core::session::SignedSessionOutcome;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::{PeerId, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
@@ -148,7 +147,7 @@ impl P2PConnector {
 
         let endpoint = Endpoint::builder(N0)
             .secret_key(secret_key)
-            .alpns(vec![PICOMINT_ALPN.to_vec()])
+            .alpns(vec![picomint_rpc::ALPN.to_vec()])
             .bind_addr(p2p_addr)?
             .address_lookup(MdnsAddressLookup::builder())
             .bind()
@@ -170,7 +169,7 @@ impl P2PConnector {
     pub async fn connect(&self, peer: PeerId) -> anyhow::Result<P2PConnection> {
         let node_id = *self.node_ids.get(&peer).expect("No node id found for peer");
 
-        let connection = self.endpoint.connect(node_id, PICOMINT_ALPN).await?;
+        let connection = self.endpoint.connect(node_id, picomint_rpc::ALPN).await?;
 
         Ok(P2PConnection::new(connection))
     }

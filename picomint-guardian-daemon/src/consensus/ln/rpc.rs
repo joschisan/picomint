@@ -8,7 +8,6 @@ use picomint_core::ln::methods::{
     DecryptionKeyShareRequest, DecryptionKeyShareResponse, GatewaysRequest, GatewaysResponse,
     OutgoingContractExpirationRequest, OutgoingContractExpirationResponse,
 };
-use picomint_core::module::ApiError;
 use tokio::time::timeout;
 
 use super::Lightning;
@@ -20,7 +19,7 @@ use super::db::{
 pub fn consensus_block_count(
     ln: &Lightning,
     _: ConsensusBlockCountRequest,
-) -> Result<ConsensusBlockCountResponse, ApiError> {
+) -> Result<ConsensusBlockCountResponse, String> {
     let dbtx = ln.db.begin_read();
     Ok(ConsensusBlockCountResponse {
         count: ln.consensus_block_count(&dbtx),
@@ -30,7 +29,7 @@ pub fn consensus_block_count(
 pub async fn await_preimage(
     ln: &Lightning,
     req: AwaitPreimageRequest,
-) -> Result<AwaitPreimageResponse, ApiError> {
+) -> Result<AwaitPreimageResponse, String> {
     loop {
         let wait = ln
             .db
@@ -59,18 +58,18 @@ pub async fn await_preimage(
 pub fn decryption_key_share(
     ln: &Lightning,
     req: DecryptionKeyShareRequest,
-) -> Result<DecryptionKeyShareResponse, ApiError> {
+) -> Result<DecryptionKeyShareResponse, String> {
     ln.db
         .begin_read()
         .get(&DECRYPTION_KEY_SHARE, &req.outpoint)
         .map(|share| DecryptionKeyShareResponse { share })
-        .ok_or_else(|| ApiError::bad_request("No decryption key share found".to_string()))
+        .ok_or_else(|| "No decryption key share found".to_string())
 }
 
 pub fn outgoing_contract_expiration(
     ln: &Lightning,
     req: OutgoingContractExpirationRequest,
-) -> Result<OutgoingContractExpirationResponse, ApiError> {
+) -> Result<OutgoingContractExpirationResponse, String> {
     let dbtx = ln.db.begin_read();
 
     let Some(contract) = dbtx.get(&OUTGOING_CONTRACT, &req.outpoint) else {
@@ -89,11 +88,9 @@ pub fn outgoing_contract_expiration(
 pub async fn await_incoming_contracts(
     ln: &Lightning,
     req: AwaitIncomingContractsRequest,
-) -> Result<AwaitIncomingContractsResponse, ApiError> {
+) -> Result<AwaitIncomingContractsResponse, String> {
     if req.batch == 0 {
-        return Err(ApiError::bad_request(
-            "Batch size must be greater than 0".to_string(),
-        ));
+        return Err("Batch size must be greater than 0".to_string());
     }
 
     let (mut next_index, dbtx) = ln
@@ -121,11 +118,11 @@ pub async fn await_incoming_contracts(
     })
 }
 
-pub fn gateways(ln: &Lightning, _: GatewaysRequest) -> Result<GatewaysResponse, ApiError> {
+pub fn gateways(ln: &Lightning, _: GatewaysRequest) -> Result<GatewaysResponse, String> {
     Ok(GatewaysResponse {
         gateways: ln
             .db
             .begin_read()
-            .iter(&GATEWAY, |r| r.map(|(url, ())| url).collect()),
+            .iter(&GATEWAY, |r| r.map(|(pk, ())| pk).collect()),
     })
 }

@@ -38,8 +38,6 @@ pub enum Method {
     Ln(LnMethod),
 }
 
-pub const PICOMINT_ALPN: &[u8] = b"picomint";
-
 /// Authentication secret used to verify guardian admin API requests.
 ///
 /// The inner value is private to prevent timing leaks via direct comparison.
@@ -62,22 +60,5 @@ impl ApiAuth {
     pub fn verify(&self, password: &str) -> bool {
         use subtle::ConstantTimeEq as _;
         bool::from(self.0.as_bytes().ct_eq(password.as_bytes()))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable, thiserror::Error)]
-#[error("{code} {message}")]
-pub struct ApiError {
-    pub code: u32,
-    pub message: String,
-}
-
-impl ApiError {
-    pub fn not_found(message: String) -> Self {
-        Self { code: 404, message }
-    }
-
-    pub fn bad_request(message: String) -> Self {
-        Self { code: 400, message }
     }
 }

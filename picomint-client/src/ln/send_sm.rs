@@ -3,11 +3,13 @@ use crate::tx::{Input, TxBuilder};
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use futures::future::pending;
+use iroh::Endpoint;
 use picomint_core::TransactionId;
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::contracts::OutgoingContract;
+use picomint_core::ln::gateway_api::GatewayPk;
 use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::wire;
 use picomint_core::{OutPoint, secp256k1};
@@ -42,7 +44,7 @@ pub struct SendSMCommon {
     pub operation: OperationId,
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
-    pub gateway_api: Option<String>,
+    pub gateway_pk: Option<GatewayPk>,
     pub invoice: Option<LightningInvoice>,
     pub refund_keypair: Keypair,
 }
@@ -86,11 +88,12 @@ impl StateMachine for SendStateMachine {
                     .await,
             ),
             SendSMState::Funded => {
-                let gateway_api = self.common.gateway_api.clone().unwrap();
+                let gateway_pk = self.common.gateway_pk.unwrap();
                 let invoice = self.common.invoice.clone().unwrap();
                 tokio::select! {
                     response = gateway_send_payment_sm(
-                        gateway_api,
+                        ctx.client_ctx.api().endpoint().clone(),
+                        gateway_pk,
                         ctx.federation_id,
                         self.common.outpoint,
                         self.common.contract.clone(),
@@ -215,9 +218,10 @@ fn submit_refund(
         .expect("Cannot claim input, additional funding needed")
 }
 
-#[instrument(skip(refund_keypair))]
+#[instrument(skip(refund_keypair, endpoint))]
 async fn gateway_send_payment_sm(
-    gateway_api: String,
+    endpoint: Endpoint,
+    gateway_pk: GatewayPk,
     federation_id: FederationId,
     outpoint: OutPoint,
     contract: OutgoingContract,
@@ -225,8 +229,9 @@ async fn gateway_send_payment_sm(
     refund_keypair: Keypair,
 ) -> Result<[u8; 32], Signature> {
     (|| async {
-        let payment_result = crate::ln::gateway_http::send_payment(
-            &gateway_api,
+        let payment_result = crate::ln::gateway::send_payment(
+            &endpoint,
+            gateway_pk,
             federation_id,
             outpoint,
             contract.clone(),

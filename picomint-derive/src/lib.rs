@@ -210,7 +210,7 @@ fn derive_enum_decode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> T
     });
 
     quote! {
-        let variant = <u64 as ::picomint_encoding::Decodable>::consensus_decode_partial(reader)?;
+        let variant = <u8 as ::picomint_encoding::Decodable>::consensus_decode_partial(reader)?;
         match variant {
             #(#arms)*
             other => Err(::std::io::Error::new(
@@ -223,8 +223,8 @@ fn derive_enum_decode(ident: &Ident, variants: &Punctuated<Variant, Comma>) -> T
 
 // ─── Variant indexing ───────────────────────────────────────────────────
 
-/// Extracts the u64 index from `#[encodable(index = N)]` if present.
-fn parse_index_attribute(attributes: &[Attribute]) -> Option<u64> {
+/// Extracts the u8 index from `#[encodable(index = N)]` if present.
+fn parse_index_attribute(attributes: &[Attribute]) -> Option<u8> {
     attributes.iter().find_map(|attr| {
         if attr.path().is_ident("encodable") {
             attr.parse_args_with(|input: syn::parse::ParseStream| {
@@ -243,7 +243,12 @@ fn parse_index_attribute(attributes: &[Attribute]) -> Option<u64> {
     })
 }
 
-fn variant_indices(variants: &Punctuated<Variant, Comma>) -> Vec<(u64, Variant)> {
+fn variant_indices(variants: &Punctuated<Variant, Comma>) -> Vec<(u8, Variant)> {
+    assert!(
+        variants.len() <= u8::MAX as usize + 1,
+        "Encodable enums cannot have more than 256 variants (discriminant is a u8)"
+    );
+
     let pairs = variants
         .iter()
         .cloned()
@@ -266,7 +271,7 @@ fn variant_indices(variants: &Punctuated<Variant, Comma>) -> Vec<(u64, Variant)>
         pairs
             .into_iter()
             .enumerate()
-            .map(|(i, (_, v))| (i as u64, v))
+            .map(|(i, (_, v))| (u8::try_from(i).expect("checked above"), v))
             .collect()
     }
 }

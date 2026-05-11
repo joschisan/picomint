@@ -8,6 +8,7 @@
 use bitcoin::hashes::{Hash, sha256};
 use bls12_381::Scalar;
 use group::ff::Field;
+use iroh_base::SecretKey as IrohSecretKey;
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
@@ -16,6 +17,16 @@ use picomint_encoding::Encodable;
 
 const ROOT_TAG: &[u8] = b"PICOMINT_CLIENT_SECRET_ROOT";
 const CHILD_TAG: &[u8] = b"PICOMINT_CLIENT_SECRET_CHILD";
+const LEAF_TAG: &[u8] = b"PICOMINT_CLIENT_SECRET_LEAF";
+
+#[derive(Encodable)]
+enum LeafPath {
+    Bytes,
+    Iroh,
+    SecpKeypair,
+    SecpScalar,
+    BlsScalar,
+}
 
 #[derive(Copy, Clone, Debug)]
 pub struct Secret(sha256::Hash);
@@ -29,21 +40,31 @@ impl Secret {
         Self((CHILD_TAG, path, self.0).consensus_hash::<sha256::Hash>())
     }
 
-    pub fn to_bytes(&self) -> [u8; 32] {
-        self.0.to_byte_array()
+    fn leaf(&self, path: &LeafPath) -> [u8; 32] {
+        (LEAF_TAG, path, self.0)
+            .consensus_hash::<sha256::Hash>()
+            .to_byte_array()
+    }
+
+    pub fn to_byte_array(&self) -> [u8; 32] {
+        self.leaf(&LeafPath::Bytes)
+    }
+
+    pub fn to_iroh_secret_key(&self) -> IrohSecretKey {
+        IrohSecretKey::from_bytes(&self.leaf(&LeafPath::Iroh))
     }
 
     pub fn to_secp_keypair(&self) -> Keypair {
-        Keypair::from_seckey_slice(SECP256K1, &self.to_bytes())
+        Keypair::from_seckey_slice(SECP256K1, &self.leaf(&LeafPath::SecpKeypair))
             .expect("32-byte hash is within curve order")
     }
 
     pub fn to_secp_scalar(&self) -> secp256k1::Scalar {
-        secp256k1::Scalar::from_be_bytes(self.to_bytes())
+        secp256k1::Scalar::from_be_bytes(self.leaf(&LeafPath::SecpScalar))
             .expect("32-byte hash is within curve order")
     }
 
     pub fn to_bls_scalar(&self) -> Scalar {
-        Scalar::random(&mut ChaChaRng::from_seed(self.to_bytes()))
+        Scalar::random(&mut ChaChaRng::from_seed(self.leaf(&LeafPath::BlsScalar)))
     }
 }

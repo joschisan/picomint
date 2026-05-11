@@ -3,10 +3,11 @@ pub use picomint_core::ln as common;
 mod api;
 mod db;
 pub mod events;
-mod gateway_http;
+mod gateway;
 mod secret;
 mod send_sm;
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -21,7 +22,7 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentImage};
-use picomint_core::ln::gateway_api::{GatewayInfo, PaymentFee};
+use picomint_core::ln::gateway_api::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_core::ln::{
     LightningInput, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
@@ -112,11 +113,11 @@ impl LightningClientModule {
     /// Reconcile the local `GATEWAY_INFO` cache with the federation's
     /// announced gateway list:
     ///
-    /// 1. Fetch the announced list via threshold consensus.
-    /// 2. Prune cache entries whose URL is no longer in the list.
-    /// 3. Fetch fresh `GatewayInfo` from every URL in the list, in parallel.
-    /// 4. For each URL: insert on success, remove on failure — no stale info
-    ///    survives a refresh.
+    /// 1. Fetch the announced list (a `Vec<NodeId>`) via threshold consensus.
+    /// 2. Prune cache entries whose node id is no longer in the list.
+    /// 3. Fetch fresh `GatewayInfo` from every node id in the list, in parallel.
+    /// 4. For each node id: insert on success, remove on failure — no stale
+    ///    info survives a refresh.
     ///
     /// Called once at module startup; exposed publicly so integration tests
     /// can force a refresh after registering gateways with the guardians.
@@ -130,13 +131,15 @@ impl LightningClientModule {
             .await
             .map_err(|_| RefreshGatewaysError::FailedToRequestGateways)?;
 
+        let listed: BTreeSet<GatewayPk> = list.iter().copied().collect();
+
         let dbtx = module.client_ctx.db().begin_write();
 
-        let cached: Vec<String> = dbtx.iter(&GATEWAY_INFO, |r| r.map(|(url, _)| url).collect());
+        let cached: Vec<GatewayPk> = dbtx.iter(&GATEWAY_INFO, |r| r.map(|(k, _)| k).collect());
 
-        for url in cached {
-            if !list.contains(&url) {
-                dbtx.remove(&GATEWAY_INFO, &url);
+        for gateway_pk in cached {
+            if !listed.contains(&gateway_pk) {
+                dbtx.remove(&GATEWAY_INFO, &gateway_pk);
             }
         }
 
@@ -144,19 +147,24 @@ impl LightningClientModule {
 
         let handles: Vec<_> = list
             .into_iter()
-            .map(|url| {
+            .map(|gateway_pk| {
                 let module = module.clone();
                 tokio::spawn(async move {
-                    let info = gateway_http::gateway_info(&url, &module.federation_id).await;
+                    let info = gateway::gateway_info(
+                        module.client_ctx.api().endpoint(),
+                        gateway_pk,
+                        module.federation_id,
+                    )
+                    .await;
 
                     let dbtx = module.client_ctx.db().begin_write();
 
                     match info {
                         Ok(Some(info)) => {
-                            dbtx.insert(&GATEWAY_INFO, &url, &info);
+                            dbtx.insert(&GATEWAY_INFO, &gateway_pk, &info);
                         }
                         _ => {
-                            dbtx.remove(&GATEWAY_INFO, &url);
+                            dbtx.remove(&GATEWAY_INFO, &gateway_pk);
                         }
                     }
 
@@ -178,8 +186,8 @@ impl LightningClientModule {
     pub fn select_gateway(
         &self,
         invoice: Option<&Bolt11Invoice>,
-    ) -> Result<(String, GatewayInfo), SelectGatewayError> {
-        let entries: Vec<(String, GatewayInfo)> = self
+    ) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
+        let entries: Vec<(GatewayPk, GatewayInfo)> = self
             .client_ctx
             .db()
             .begin_read()
@@ -190,9 +198,9 @@ impl LightningClientModule {
         }
 
         if let Some(invoice) = invoice {
-            for (url, info) in &entries {
+            for (gateway_pk, info) in &entries {
                 if info.lightning_public_key == invoice.recover_payee_pub_key() {
-                    return Ok((url.clone(), info.clone()));
+                    return Ok((*gateway_pk, info.clone()));
                 }
             }
         }
@@ -206,7 +214,7 @@ impl LightningClientModule {
 
     /// Pay an invoice through a caller-selected gateway.
     ///
-    /// The caller obtains `(gateway_api, gateway_info)` via
+    /// The caller obtains `(gateway_pk, gateway_info)` via
     /// [`Self::select_gateway`] and inspects `gateway_info` to preview the
     /// cost before passing both back here. The library still enforces
     /// `PaymentFee::SEND_FEE_LIMIT` / `LN_FEE_LIMIT` and
@@ -215,7 +223,7 @@ impl LightningClientModule {
     #[allow(clippy::too_many_lines)]
     pub async fn send(
         &self,
-        gateway_api: String,
+        gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
         invoice: Bolt11Invoice,
     ) -> Result<OperationId, SendPaymentError> {
@@ -313,7 +321,7 @@ impl LightningClientModule {
                 operation,
                 outpoint: OutPoint { txid, out_idx: 0 },
                 contract,
-                gateway_api: Some(gateway_api),
+                gateway_pk: Some(gateway_pk),
                 invoice: Some(LightningInvoice::Bolt11(invoice.clone())),
                 refund_keypair,
             },
@@ -329,14 +337,14 @@ impl LightningClientModule {
 
     /// Request an invoice from a caller-selected gateway.
     ///
-    /// The caller obtains `(gateway_api, gateway_info)` via
+    /// The caller obtains `(gateway_pk, gateway_info)` via
     /// [`Self::select_gateway`] and inspects `gateway_info.receive_fee` to
     /// preview the cost before passing both back here. The library still
     /// enforces `PaymentFee::RECEIVE_FEE_LIMIT` on the supplied
     /// `gateway_info` as a backstop against an abusive gateway.
     pub async fn receive(
         &self,
-        gateway_api: String,
+        gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
         amount: Amount,
         expiry_secs: u32,
@@ -344,7 +352,7 @@ impl LightningClientModule {
         let receive_keypair = self.secret.receive_keypair();
 
         self.create_contract_and_fetch_invoice(
-            gateway_api,
+            gateway_pk,
             gateway_info,
             receive_keypair.public_key(),
             amount,
@@ -358,7 +366,7 @@ impl LightningClientModule {
     /// invoice.
     async fn create_contract_and_fetch_invoice(
         &self,
-        gateway_api: String,
+        gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
         recipient_pk: PublicKey,
         amount: Amount,
@@ -412,8 +420,9 @@ impl LightningClientModule {
             ephemeral_kp.public_key(),
         );
 
-        let invoice = gateway_http::bolt11_invoice(
-            &gateway_api,
+        let invoice = gateway::create_bolt11_invoice(
+            self.client_ctx.api().endpoint(),
+            gateway_pk,
             self.federation_id,
             contract.clone(),
             amount,

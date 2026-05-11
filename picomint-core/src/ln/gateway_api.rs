@@ -1,11 +1,16 @@
 //! Wire types shared between picomint clients and the gateway daemon.
-//! The HTTP request helpers themselves live client-side
-//! (`picomint_client::ln::gateway_http`).
+//! All requests/responses ride the same iroh ALPN as the federation API
+//! (`picomint_rpc::ALPN`), framed by [`GatewayMethod`] / [`GatewayResponse`]
+//! enums. The dispatch happens at the method-enum layer; `GatewayMethod`
+//! and `picomint_core::module::Method` (federation API) don't byte-overlap.
 
 use std::ops::Add;
+use std::str::FromStr;
 
+use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::schnorr::Signature;
 use bitcoin::secp256k1::{PublicKey, XOnlyPublicKey};
+use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
@@ -15,21 +20,103 @@ use crate::config::FederationId;
 use crate::ln::LightningInvoice;
 use crate::ln::contracts::{IncomingContract, OutgoingContract};
 
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct CreateBolt11InvoicePayload {
+/// A gateway's identity — its iroh public key. `Serialize`, `Deserialize`,
+/// and `FromStr` round-trip via [`picomint_base32`]; render with
+/// `picomint_base32::encode`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, PartialOrd, Ord, Encodable, Decodable)]
+pub struct GatewayPk(pub iroh_base::PublicKey);
+
+picomint_redb::consensus_key!(GatewayPk);
+
+impl Serialize for GatewayPk {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        picomint_base32::encode(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for GatewayPk {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        picomint_base32::decode(&String::deserialize(deserializer)?)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+impl FromStr for GatewayPk {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        picomint_base32::decode(s)
+    }
+}
+
+/// Wire request — every gateway-API call is one of these. Each variant's
+/// response is its own typed struct, sent on the wire as
+/// `Result<Vec<u8>, String>` where the bytes are the response struct
+/// consensus-encoded — same envelope shape as the federation API.
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub enum GatewayMethod {
+    Info(InfoRequest),
+    SendPayment(SendPaymentRequest),
+    CreateInvoice(CreateInvoiceRequest),
+    VerifyPreimage(VerifyPreimageRequest),
+}
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct InfoRequest {
+    pub federation_id: FederationId,
+}
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct InfoResponse {
+    pub info: Option<GatewayInfo>,
+}
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct SendPaymentRequest {
+    pub federation_id: FederationId,
+    pub outpoint: OutPoint,
+    pub contract: OutgoingContract,
+    pub invoice: LightningInvoice,
+    pub auth: Signature,
+}
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct SendPaymentResponse {
+    pub result: Result<[u8; 32], Signature>,
+}
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct CreateInvoiceRequest {
     pub federation_id: FederationId,
     pub contract: IncomingContract,
     pub amount: Amount,
     pub expiry_secs: u32,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct SendPaymentPayload {
-    pub federation_id: FederationId,
-    pub outpoint: OutPoint,
-    pub contract: OutgoingContract,
-    pub invoice: LightningInvoice,
-    pub auth: Signature,
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct CreateInvoiceResponse {
+    pub invoice: Bolt11Invoice,
+}
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct VerifyPreimageRequest {
+    pub hash: sha256::Hash,
+    pub wait: bool,
+}
+
+/// LUD-21 verify response — gateway-internal iroh wire shape. Recurringd
+/// translates this to [`picomint_lnurl::VerifyResponse`] at the JSON
+/// boundary it serves to external LNURL wallets.
+#[derive(Debug, Clone, Encodable, Decodable, PartialEq, Eq)]
+pub struct VerifyResponse {
+    pub settled: bool,
+    pub preimage: Option<[u8; 32]>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]

@@ -25,7 +25,7 @@ impl MintSecret {
     }
 
     pub fn tweak_filter(&self) -> [u8; 32] {
-        self.0.child(&Path::TweakFilter).to_bytes()
+        self.0.child(&Path::TweakFilter).to_byte_array()
     }
 
     pub fn note_nonce_keypair(&self, denomination: Denomination, tweak: [u8; 16]) -> Keypair {

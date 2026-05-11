@@ -13,7 +13,7 @@ use picomint_core::mint::{
     Denomination, MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError,
     RecoveryItem, verify_note,
 };
-use picomint_core::module::{ApiError, InputMeta, TxItemAmounts};
+use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, InPoint, OutPoint, PeerId};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
@@ -213,7 +213,7 @@ impl Mint {
         })
     }
 
-    pub async fn handle_api(&self, method: MintMethod) -> Result<Vec<u8>, ApiError> {
+    pub async fn handle_api(&self, method: MintMethod) -> Result<Vec<u8>, String> {
         match method {
             MintMethod::SignatureShares(req) => handler_async!(signature_shares, self, req).await,
             MintMethod::SignatureSharesRecovery(req) => {

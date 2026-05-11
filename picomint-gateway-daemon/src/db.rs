@@ -7,6 +7,9 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_eventlog::EventLogId;
 use picomint_redb::table;
 
+// BIP39 entropy for the daemon's mnemonic, written once on first start.
+// Drives both federation-client derivation and the iroh secret key, so the
+// `GatewayPk` (iroh node id) is reproducible from this row alone.
 table!(
     ROOT_ENTROPY,
     () => Vec<u8>,

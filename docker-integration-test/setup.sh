@@ -11,9 +11,6 @@ cd "$(dirname "$0")"
 
 DC="docker compose"
 
-GATEWAY_URL="${GATEWAY_URL:-http://$(curl -fsS --max-time 5 https://api.ipify.org):8090}"
-echo "==> Gateway URL: $GATEWAY_URL"
-
 # Two federations, each with four guardians of its own. The compose file
 # defines services as `guardian-{fed_idx}-{0..3}`. Federation names are
 # user-visible, fed_idx is the docker compose service-name infix.
@@ -100,6 +97,9 @@ until $DC exec -T gateway picomint-gateway-cli info >/dev/null 2>&1; do
     sleep 1
 done
 
+GATEWAY_PK=$($DC exec -T gateway picomint-gateway-cli info | jq -r .gateway_pk)
+echo "==> Gateway iroh pk: $GATEWAY_PK"
+
 # Join + register + peg-in for each federation.
 for idx in "${!FED_NAMES[@]}"; do
     fed_name="${FED_NAMES[$idx]}"
@@ -111,7 +111,7 @@ for idx in "${!FED_NAMES[@]}"; do
 
     echo "==> [$fed_name] Registering gateway with federation..."
     for i in "${GUARDIANS[@]}"; do
-        $DC exec -T "guardian-${fed}-$i" picomint-guardian-cli module ln gateway add "$GATEWAY_URL"
+        $DC exec -T "guardian-${fed}-$i" picomint-guardian-cli module ln gateway add "$GATEWAY_PK"
     done
 
     echo "==> [$fed_name] Funding the gateway via federation peg-in..."
@@ -157,7 +157,7 @@ Setup complete.
   ${FED_NAMES[0]}  invite : ${INVITES[0]}
   ${FED_NAMES[1]} invite : ${INVITES[1]}
 
-  Gateway URL       : $GATEWAY_URL   (registered with both federations)
+  Gateway iroh pk   : $GATEWAY_PK   (registered with both federations)
   LNURL daemon      : http://localhost:8091
   ${FED_NAMES[0]}  UIs    : http://localhost:3000..3003
   ${FED_NAMES[1]} UIs    : http://localhost:3010..3013     (password: picomint)

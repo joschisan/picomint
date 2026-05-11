@@ -49,7 +49,11 @@ pub const ROUTE_FEDERATION_MODULE_WALLET_RECEIVE: &str = "/federation/module/wal
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct InfoResponse {
-    pub public_key: secp256k1::PublicKey,
+    /// Lightning node public key (LDK node id).
+    pub lightning_pk: secp256k1::PublicKey,
+    /// Iroh public key the gateway accepts on for the picomint API.
+    /// Federation guardians register this via `module ln gateway add`.
+    pub gateway_pk: picomint_core::ln::gateway_api::GatewayPk,
     pub alias: String,
     pub network: String,
     pub block_height: u64,

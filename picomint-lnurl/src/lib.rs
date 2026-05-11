@@ -81,7 +81,8 @@ pub struct InvoiceResponse {
     pub verify: Option<String>,
 }
 
-/// LUD-21 verify response
+/// LUD-21 verify response. JSON shape served by recurringd to external
+/// LNURL-pay wallets — `preimage` is hex per the spec.
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifyResponse {

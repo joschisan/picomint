@@ -128,7 +128,7 @@ services:
       LDK_ADDR: 0.0.0.0:9735
       RUST_LOG: info
     ports:
-      - "8090:8080"
+      - "8090:8080/udp"
       - "9735:9735"
     volumes:
       - gateway_data:/data

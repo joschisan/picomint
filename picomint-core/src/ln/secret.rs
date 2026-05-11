@@ -27,11 +27,11 @@ impl IncomingContractSecret {
     }
 
     pub fn encryption_seed(&self) -> [u8; 32] {
-        self.0.child(&Path::EncryptionSeed).to_bytes()
+        self.0.child(&Path::EncryptionSeed).to_byte_array()
     }
 
     pub fn preimage(&self) -> [u8; 32] {
-        self.0.child(&Path::Preimage).to_bytes()
+        self.0.child(&Path::Preimage).to_byte_array()
     }
 
     pub fn claim_tweak(&self) -> Scalar {

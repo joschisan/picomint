@@ -8,7 +8,6 @@ pub mod contracts;
 pub mod gateway_api;
 pub mod lnurl;
 pub mod methods;
-pub mod routes;
 pub mod secret;
 
 use bitcoin::hashes::sha256;

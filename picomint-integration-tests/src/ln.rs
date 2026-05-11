@@ -1,31 +1,28 @@
-use std::net::{Ipv4Addr, SocketAddrV4};
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::ensure;
 use async_stream::stream;
-use axum::Router;
-use axum::extract::Json;
-use axum::http::StatusCode;
-use axum::routing::post;
 use bitcoin::hashes::{Hash, sha256};
-use bitcoin::secp256k1::schnorr::Signature;
 use bitcoin::secp256k1::{Keypair, SECP256K1, SecretKey};
-use futures::StreamExt;
+use futures::stream::StreamExt;
+use iroh::Endpoint;
+use iroh::endpoint::presets::N0;
+use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning_invoice::{Bolt11Invoice, Currency, InvoiceBuilder, PaymentSecret};
 use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
 use picomint_client::ln::{LightningClientModule, SendPaymentError};
 use picomint_client::tx::{Input, TxBuilder};
 use picomint_client::{Client, OperationId};
-use picomint_core::config::FederationId;
-use picomint_core::ln::gateway_api::{GatewayInfo, PaymentFee, SendPaymentPayload};
-use picomint_core::ln::routes::{ROUTE_GATEWAY_INFO, ROUTE_SEND_PAYMENT};
+use picomint_core::ln::gateway_api::{
+    GatewayInfo, GatewayMethod, GatewayPk, InfoResponse, PaymentFee, SendPaymentResponse,
+};
 use picomint_core::ln::{LightningInput, LightningInvoice, OutgoingWitness};
 use picomint_core::{Amount, OutPoint, wire};
+use picomint_encoding::Encodable as _;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_invoice};
-use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::cli;
@@ -85,22 +82,22 @@ fn try_parse_ln_event(
 }
 
 pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
-    register_gateway(env, &env.gw_public)?;
+    register_gateway(env, &env.gw_pk)?;
     LightningClientModule::refresh_gateways(client_send.ln().clone()).await?;
     test_payments(env, client_send).await?;
     test_lnurl_daemon_roundtrip(env).await?;
-    deregister_gateway(env, &env.gw_public)?;
+    deregister_gateway(env, &env.gw_pk)?;
 
-    let mock_gw = spawn_mock_gateway().await?;
+    let mock_gw_pk = spawn_mock_gateway().await?;
 
-    register_gateway(env, &mock_gw)?;
+    register_gateway(env, &mock_gw_pk)?;
     LightningClientModule::refresh_gateways(client_send.ln().clone()).await?;
     test_mock_send_exactly_once(client_send).await?;
     test_mock_send_refund_forfeit(client_send).await?;
     test_mock_wrong_network(client_send).await?;
     test_claim_outgoing_contract(client_send).await?;
     test_unilateral_refund(env, client_send).await?;
-    deregister_gateway(env, &mock_gw)?;
+    deregister_gateway(env, &mock_gw_pk)?;
 
     test_direct_ln_payments(env).await?;
 
@@ -109,18 +106,18 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     Ok(())
 }
 
-fn register_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
+fn register_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()> {
     for peer in 0..NUM_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        assert!(cli::guardian_ln_gateway_add(&data_dir, gateway)?);
+        assert!(cli::guardian_ln_gateway_add(&data_dir, gateway_pk)?);
     }
     Ok(())
 }
 
-fn deregister_gateway(env: &TestEnv, gateway: &str) -> anyhow::Result<()> {
+fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()> {
     for peer in 0..NUM_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        assert!(cli::guardian_ln_gateway_remove(&data_dir, gateway)?);
+        assert!(cli::guardian_ln_gateway_remove(&data_dir, gateway_pk)?);
     }
     Ok(())
 }
@@ -250,8 +247,8 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
             3600,
         )?;
 
-        let (gateway_api, gateway_info) = ln.select_gateway(Some(&invoice))?;
-        let send_op = ln.send(gateway_api, gateway_info, invoice).await?;
+        let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
+        let send_op = ln.send(gateway_pk, gateway_info, invoice).await?;
 
         let Some((op, LnEvent::Send(_))) = events.next().await else {
             panic!("Expected Send event");
@@ -280,9 +277,9 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     info!("Testing payment from LDK node to client (half of first send)...");
 
     {
-        let (gateway_api, gateway_info) = ln.select_gateway(None)?;
+        let (gateway_pk, gateway_info) = ln.select_gateway(None)?;
         let invoice = ln
-            .receive(gateway_api, gateway_info, Amount::from_msats(500_000), 300)
+            .receive(gateway_pk, gateway_info, Amount::from_msats(500_000), 300)
             .await?;
 
         env.ldk_node.bolt11_payment().send(&invoice, None)?;
@@ -321,8 +318,8 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
             payment_hash,
         )?;
 
-        let (gateway_api, gateway_info) = ln.select_gateway(Some(&invoice))?;
-        let send_op = ln.send(gateway_api, gateway_info, invoice).await?;
+        let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
+        let send_op = ln.send(gateway_pk, gateway_info, invoice).await?;
 
         let Some((op, LnEvent::Send(_))) = events.next().await else {
             panic!("Expected Send event");
@@ -411,9 +408,9 @@ async fn test_mock_send_exactly_once(client: &Arc<Client>) -> anyhow::Result<()>
 
     let mut events = pin!(ln_event_stream(client));
 
-    let (gateway_api, gateway_info) = ln.select_gateway(Some(&invoice))?;
+    let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
     let send_op = ln
-        .send(gateway_api.clone(), gateway_info.clone(), invoice.clone())
+        .send(gateway_pk, gateway_info.clone(), invoice.clone())
         .await?;
 
     wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
@@ -422,7 +419,7 @@ async fn test_mock_send_exactly_once(client: &Arc<Client>) -> anyhow::Result<()>
     })
     .await;
 
-    match ln.send(gateway_api, gateway_info, invoice).await {
+    match ln.send(gateway_pk, gateway_info, invoice).await {
         Err(SendPaymentError::InvoiceAlreadyAttempted(op)) => assert_eq!(op, send_op),
         other => panic!("Expected InvoiceAlreadyAttempted, got {other:?}"),
     }
@@ -438,8 +435,8 @@ async fn test_mock_send_refund_forfeit(client: &Arc<Client>) -> anyhow::Result<(
     let mut events = pin!(ln_event_stream(client));
 
     let invoice = unpayable_invoice();
-    let (gateway_api, gateway_info) = client.ln().select_gateway(Some(&invoice))?;
-    let send_op = client.ln().send(gateway_api, gateway_info, invoice).await?;
+    let (gateway_pk, gateway_info) = client.ln().select_gateway(Some(&invoice))?;
+    let send_op = client.ln().send(gateway_pk, gateway_info, invoice).await?;
 
     wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
     wait_ln_event(&mut events, send_op, |e| {
@@ -456,9 +453,9 @@ async fn test_mock_wrong_network(client: &Arc<Client>) -> anyhow::Result<()> {
     info!("ln: test_mock_wrong_network");
 
     let invoice = signet_invoice();
-    let (gateway_api, gateway_info) = client.ln().select_gateway(Some(&invoice))?;
+    let (gateway_pk, gateway_info) = client.ln().select_gateway(Some(&invoice))?;
 
-    match client.ln().send(gateway_api, gateway_info, invoice).await {
+    match client.ln().send(gateway_pk, gateway_info, invoice).await {
         Err(SendPaymentError::WrongCurrency {
             invoice_currency: Currency::Signet,
             federation_currency: Currency::Regtest,
@@ -484,8 +481,8 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
     let preimage = [12u8; 32];
 
     let invoice = crash_invoice(preimage);
-    let (gateway_api, gateway_info) = ln.select_gateway(Some(&invoice))?;
-    let send_op = ln.send(gateway_api, gateway_info, invoice).await?;
+    let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
+    let send_op = ln.send(gateway_pk, gateway_info, invoice).await?;
 
     let send_event =
         match wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await {
@@ -544,8 +541,8 @@ async fn test_unilateral_refund(env: &TestEnv, client: &Arc<Client>) -> anyhow::
     // preimage reveal the contract must eventually expire so the client can
     // pull its funds back via `OutgoingWitness::Refund`.
     let invoice = crash_invoice([13; 32]);
-    let (gateway_api, gateway_info) = client.ln().select_gateway(Some(&invoice))?;
-    let send_op = client.ln().send(gateway_api, gateway_info, invoice).await?;
+    let (gateway_pk, gateway_info) = client.ln().select_gateway(Some(&invoice))?;
+    let send_op = client.ln().send(gateway_pk, gateway_info, invoice).await?;
 
     wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
 
@@ -719,56 +716,59 @@ fn mock_invoice(preimage: [u8; 32], payment_secret: [u8; 32], currency: Currency
         .expect("invoice build")
 }
 
-async fn spawn_mock_gateway() -> anyhow::Result<String> {
-    let app = Router::new()
-        .route(ROUTE_GATEWAY_INFO, post(mock_gateway_info))
-        .route(ROUTE_SEND_PAYMENT, post(mock_send_payment));
+/// Spawns a mock gateway via [`picomint_rpc::run_accept_loop`] — same
+/// dispatch lifecycle the real gateway daemon uses. Returns the mock's iroh
+/// public key for guardian registration.
+async fn spawn_mock_gateway() -> anyhow::Result<GatewayPk> {
+    let endpoint = Endpoint::builder(N0)
+        .alpns(vec![picomint_rpc::ALPN.to_vec()])
+        .address_lookup(MdnsAddressLookup::builder())
+        .bind()
+        .await?;
 
-    let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).await?;
+    let pk = GatewayPk(endpoint.id());
 
-    let addr = listener.local_addr()?;
+    tokio::spawn(picomint_rpc::run_accept_loop(endpoint, 1000, mock_handler));
 
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
-    });
-
-    Ok(format!("http://{addr}").parse().expect("valid url"))
+    Ok(pk)
 }
 
-async fn mock_gateway_info(Json(_federation_id): Json<FederationId>) -> Json<Option<GatewayInfo>> {
-    // Short expiration deltas keep the unilateral-refund test fast — the
-    // federation's consensus block count must advance past the contract's
-    // expiration for `await_preimage` to return `None`.
-    let tx_fee = PaymentFee {
-        base: picomint_core::Amount::from_sats(2),
-        ppm: 3000,
-    };
-    Json(Some(GatewayInfo {
-        lightning_public_key: gateway_keypair().public_key(),
-        module_public_key: gateway_keypair().x_only_public_key().0,
-        send_fee: tx_fee,
-        receive_fee: tx_fee,
-        ln_fee: tx_fee,
-        expiration_delta: 50,
-    }))
-}
-
-async fn mock_send_payment(
-    Json(payload): Json<SendPaymentPayload>,
-) -> Result<Json<Result<[u8; 32], Signature>>, StatusCode> {
-    let LightningInvoice::Bolt11(invoice) = payload.invoice;
-
-    let payment_secret = invoice.payment_secret().0;
-
-    if payment_secret == CRASH_PAYMENT_SECRET {
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+async fn mock_handler(method: GatewayMethod) -> Result<Vec<u8>, String> {
+    match method {
+        GatewayMethod::Info(_) => {
+            // Short expiration deltas keep the unilateral-refund test
+            // fast — the federation's consensus block count must advance
+            // past the contract's expiration for `await_preimage` to
+            // return `None`.
+            let tx_fee = PaymentFee {
+                base: picomint_core::Amount::from_sats(2),
+                ppm: 3000,
+            };
+            Ok(InfoResponse {
+                info: Some(GatewayInfo {
+                    lightning_public_key: gateway_keypair().public_key(),
+                    module_public_key: gateway_keypair().x_only_public_key().0,
+                    send_fee: tx_fee,
+                    receive_fee: tx_fee,
+                    ln_fee: tx_fee,
+                    expiration_delta: 50,
+                }),
+            }
+            .consensus_encode_to_vec())
+        }
+        GatewayMethod::SendPayment(req) => {
+            let LightningInvoice::Bolt11(invoice) = req.invoice;
+            let payment_secret = invoice.payment_secret().0;
+            if payment_secret == CRASH_PAYMENT_SECRET {
+                return Err("mock gateway crashed".to_string());
+            }
+            let result = if payment_secret == UNPAYABLE_PAYMENT_SECRET {
+                Err(gateway_keypair().sign_schnorr(req.contract.forfeit_message()))
+            } else {
+                Ok(PAYABLE_PREIMAGE)
+            };
+            Ok(SendPaymentResponse { result }.consensus_encode_to_vec())
+        }
+        _ => Err("mock gateway does not support this method".to_string()),
     }
-
-    if payment_secret == UNPAYABLE_PAYMENT_SECRET {
-        return Ok(Json(Err(
-            gateway_keypair().sign_schnorr(payload.contract.forfeit_message())
-        )));
-    }
-
-    Ok(Json(Ok(PAYABLE_PREIMAGE)))
 }

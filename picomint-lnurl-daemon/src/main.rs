@@ -1,29 +1,36 @@
 use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, bail, ensure};
-use axum::extract::{Path, Query};
-use axum::http::HeaderMap;
+use anyhow::{bail, ensure};
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
+use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::{self, Keypair, PublicKey, ecdh};
 use clap::Parser;
+use iroh::Endpoint;
+use iroh::endpoint::presets::N0;
+use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::ln::MINIMUM_INCOMING_CONTRACT_AMOUNT;
 use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
-use picomint_core::ln::gateway_api::{CreateBolt11InvoicePayload, GatewayInfo, PaymentFee};
+use picomint_core::ln::gateway_api::{
+    CreateInvoiceRequest, CreateInvoiceResponse, GatewayInfo, GatewayMethod, GatewayPk,
+    InfoRequest, InfoResponse, PaymentFee, VerifyPreimageRequest,
+    VerifyResponse as GatewayVerifyResponse,
+};
 use picomint_core::ln::lnurl::LnurlRequest;
-use picomint_core::ln::routes::{ROUTE_CREATE_BOLT11_INVOICE, ROUTE_GATEWAY_INFO};
 use picomint_core::ln::secret::IncomingContractSecret;
-use picomint_encoding::Encodable;
-use picomint_lnurl::{InvoiceResponse, LnurlResponse, PayResponse, pay_request_tag};
-use reqwest::Method;
+use picomint_encoding::{Decodable, Encodable};
+use picomint_lnurl::{
+    InvoiceResponse, LnurlResponse, PayResponse, VerifyResponse, pay_request_tag,
+};
 use serde::Deserialize;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 use tokio::net::TcpListener;
 use tower_http::cors;
 use tower_http::cors::CorsLayer;
@@ -57,6 +64,11 @@ async fn main() -> anyhow::Result<()> {
 
     let cli_opts = CliOpts::parse();
 
+    let endpoint = Endpoint::builder(N0)
+        .address_lookup(MdnsAddressLookup::builder())
+        .bind()
+        .await?;
+
     let cors = CorsLayer::new()
         .allow_origin(cors::Any)
         .allow_methods(cors::Any)
@@ -66,7 +78,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/", get(health_check))
         .route("/pay/{payload}", get(pay))
         .route("/invoice/{payload}", get(invoice))
-        .layer(cors);
+        .route("/verify/{gateway_pk}/{payment_hash}", get(verify))
+        .layer(cors)
+        .with_state(endpoint);
 
     info!(api_addr = %cli_opts.api_addr, "lnurl-daemon started");
 
@@ -112,6 +126,8 @@ struct GetInvoiceParams {
 }
 
 async fn invoice(
+    headers: HeaderMap,
+    State(endpoint): State<Endpoint>,
     Path(payload): Path<String>,
     Query(params): Query<GetInvoiceParams>,
 ) -> Json<LnurlResponse<InvoiceResponse>> {
@@ -126,7 +142,8 @@ async fn invoice(
         )));
     }
 
-    let (gateway, invoice) = match create_contract_and_fetch_invoice(
+    let (gateway_pk, invoice) = match create_contract_and_fetch_invoice(
+        &endpoint,
         request.federation_id,
         request.recipient_pk,
         request.aggregate_pk,
@@ -142,11 +159,15 @@ async fn invoice(
         }
     };
 
-    info!(%params.amount, %gateway, "Created invoice");
+    info!(%params.amount, "Created invoice");
 
+    // The verify URL routes through this daemon: we proxy the call to
+    // the originating gateway over iroh. `gateway_pk` is base32-encoded
+    // via `picomint_base32` (same format as the rest of picomint).
     let verify = format!(
-        "{}/verify/{}",
-        gateway.trim_end_matches('/'),
+        "{}verify/{}/{}",
+        base_url(&headers),
+        picomint_base32::encode(&gateway_pk),
         invoice.payment_hash()
     );
 
@@ -157,13 +178,14 @@ async fn invoice(
 }
 
 async fn create_contract_and_fetch_invoice(
+    endpoint: &Endpoint,
     federation_id: FederationId,
     recipient_pk: PublicKey,
     aggregate_pk: AggregatePublicKey,
-    gateways: Vec<String>,
+    gateways: Vec<GatewayPk>,
     amount: u64,
     expiry_secs: u32,
-) -> anyhow::Result<(String, Bolt11Invoice)> {
+) -> anyhow::Result<(GatewayPk, Bolt11Invoice)> {
     let ephemeral_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
     let shared_secret =
@@ -181,7 +203,7 @@ async fn create_contract_and_fetch_invoice(
         .x_only_public_key()
         .0;
 
-    let (gateway_info, gateway) = select_gateway(gateways, federation_id).await?;
+    let (gateway_info, gateway_pk) = select_gateway(endpoint, gateways, federation_id).await?;
 
     ensure!(
         gateway_info.receive_fee.le(&PaymentFee::RECEIVE_FEE_LIMIT),
@@ -216,17 +238,18 @@ async fn create_contract_and_fetch_invoice(
         ephemeral_keypair.public_key(),
     );
 
-    let invoice: Bolt11Invoice = gateway_request(
-        &gateway,
-        ROUTE_CREATE_BOLT11_INVOICE,
-        &CreateBolt11InvoicePayload {
+    let invoice = gateway_request::<CreateInvoiceResponse>(
+        endpoint,
+        gateway_pk,
+        GatewayMethod::CreateInvoice(CreateInvoiceRequest {
             federation_id,
             contract: contract.clone(),
             amount: Amount::from_msats(amount),
             expiry_secs,
-        },
+        }),
     )
-    .await?;
+    .await?
+    .invoice;
 
     ensure!(
         invoice.payment_hash() == &preimage.consensus_hash(),
@@ -238,51 +261,65 @@ async fn create_contract_and_fetch_invoice(
         "Invalid invoice amount"
     );
 
-    Ok((gateway, invoice))
+    Ok((gateway_pk, invoice))
 }
 
 async fn select_gateway(
-    gateways: Vec<String>,
+    endpoint: &Endpoint,
+    gateways: Vec<GatewayPk>,
     federation_id: FederationId,
-) -> anyhow::Result<(GatewayInfo, String)> {
-    for gateway in gateways {
-        if let Ok(gateway_info) =
-            gateway_request::<_, Option<GatewayInfo>>(&gateway, ROUTE_GATEWAY_INFO, &federation_id)
-                .await
-            && let Some(gateway_info) = gateway_info
+) -> anyhow::Result<(GatewayInfo, GatewayPk)> {
+    for gateway_pk in gateways {
+        if let Ok(InfoResponse { info: Some(info) }) = gateway_request(
+            endpoint,
+            gateway_pk,
+            GatewayMethod::Info(InfoRequest { federation_id }),
+        )
+        .await
         {
-            return Ok((gateway_info, gateway));
+            return Ok((info, gateway_pk));
         }
     }
 
     bail!("All gateways are offline or do not support this federation")
 }
 
-/// One-shot POST to a gateway endpoint with a JSON payload, returning the
-/// JSON-decoded response.
-async fn gateway_request<P: Serialize, T: DeserializeOwned>(
-    base_url: &str,
-    route: &str,
-    payload: &P,
-) -> anyhow::Result<T> {
-    let url = format!("{}{route}", base_url.trim_end_matches('/'));
+/// Proxy LUD-21 verify: external LNURL wallet hits us at
+/// `/verify/{gateway_pk}/{payment_hash}` (URL embedded in the LNURL pay
+/// response), we forward via iroh to the originating gateway. The
+/// optional `?wait` query param turns this into a long-poll on the
+/// gateway side.
+///
+/// LUD-21 has no transient-vs-terminal error distinction — a wallet
+/// that sees `{"status":"ERROR"}` (or once `settled:true`, later
+/// `settled:false`) will give up. So on transport failure we return
+/// HTTP 502 with an empty body: the wallet's JSON parse fails the same
+/// way as a network error, and any sane polling client retries.
+async fn verify(
+    State(endpoint): State<Endpoint>,
+    Path((gateway_pk, hash)): Path<(GatewayPk, sha256::Hash)>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<LnurlResponse<VerifyResponse>>, StatusCode> {
+    let wait = query.contains_key("wait");
 
-    let response = reqwest::Client::new()
-        .request(Method::POST, url)
-        .json(payload)
-        .send()
-        .await
-        .map_err(|e| anyhow!("Could not connect to gateway: {e}"))?;
+    let response = gateway_request::<GatewayVerifyResponse>(
+        &endpoint,
+        gateway_pk,
+        GatewayMethod::VerifyPreimage(VerifyPreimageRequest { hash, wait }),
+    )
+    .await
+    .map_err(|_| StatusCode::BAD_GATEWAY)?;
 
-    if response.status() != reqwest::StatusCode::OK {
-        bail!(
-            "Gateway returned an unexpected status: {}",
-            response.status()
-        );
-    }
+    Ok(Json(LnurlResponse::Ok(VerifyResponse {
+        settled: response.settled,
+        preimage: response.preimage,
+    })))
+}
 
-    response
-        .json()
-        .await
-        .map_err(|e| anyhow!("Failed to parse gateway response: {e}"))
+async fn gateway_request<R: Decodable>(
+    endpoint: &Endpoint,
+    gateway_pk: GatewayPk,
+    method: GatewayMethod,
+) -> anyhow::Result<R> {
+    picomint_rpc::request(endpoint, gateway_pk.0, method).await
 }

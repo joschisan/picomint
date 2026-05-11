@@ -14,7 +14,6 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 async-stream = { workspace = true }
-axum = { workspace = true }
 bitcoin = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 futures = { workspace = true }
@@ -26,11 +25,13 @@ lightning-types = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-client = { workspace = true }
 picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
 picomint-eventlog = { workspace = true }
 picomint-gateway-cli-core = { workspace = true }
 picomint-guardian-cli-core = { workspace = true }
 picomint-lnurl = { workspace = true }
 picomint-redb = { workspace = true }
+picomint-rpc = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

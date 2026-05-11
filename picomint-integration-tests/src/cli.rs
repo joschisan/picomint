@@ -4,6 +4,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use picomint_core::expiration::ExpirationStatus;
 use picomint_core::invite::InviteCode;
+use picomint_core::ln::gateway_api::GatewayPk;
 use picomint_gateway_cli_core::{
     FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkInvoiceCreateResponse,
     LdkOnchainReceiveResponse,
@@ -196,23 +197,23 @@ pub fn guardian_session_count(data_dir: &Path) -> Result<u64> {
     guardian_cmd(data_dir).arg("session-count").run_cli::<u64>()
 }
 
-pub fn guardian_ln_gateway_add(data_dir: &Path, gateway: &str) -> Result<bool> {
+pub fn guardian_ln_gateway_add(data_dir: &Path, gateway_pk: &GatewayPk) -> Result<bool> {
     guardian_cmd(data_dir)
         .arg("module")
         .arg("ln")
         .arg("gateway")
         .arg("add")
-        .arg(gateway)
+        .arg(picomint_base32::encode(gateway_pk))
         .run_cli::<bool>()
 }
 
-pub fn guardian_ln_gateway_remove(data_dir: &Path, gateway: &str) -> Result<bool> {
+pub fn guardian_ln_gateway_remove(data_dir: &Path, gateway_pk: &GatewayPk) -> Result<bool> {
     guardian_cmd(data_dir)
         .arg("module")
         .arg("ln")
         .arg("gateway")
         .arg("remove")
-        .arg(gateway)
+        .arg(picomint_base32::encode(gateway_pk))
         .run_cli::<bool>()
 }
 

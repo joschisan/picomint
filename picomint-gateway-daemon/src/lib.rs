@@ -6,7 +6,6 @@ pub mod public;
 pub mod trailer;
 
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -30,12 +29,11 @@ use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts::PaymentImage;
 use picomint_core::ln::gateway_api::{
-    CreateBolt11InvoicePayload, GatewayInfo, PaymentFee, SendPaymentPayload,
+    CreateInvoiceRequest, GatewayInfo, PaymentFee, SendPaymentRequest, VerifyResponse,
 };
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::FederationInfo;
-use picomint_lnurl::VerifyResponse;
 use picomint_redb::Database;
 use std::sync::RwLock;
 use tracing::warn;
@@ -57,7 +55,6 @@ pub struct AppState {
     pub node: Arc<ldk_node::Node>,
     pub client_factory: GatewayClientFactory,
     pub gateway_db: Database,
-    pub api_addr: SocketAddr,
     pub data_dir: std::path::PathBuf,
     pub network: Network,
     pub send_fee: PaymentFee,
@@ -159,7 +156,7 @@ impl AppState {
     /// (`SendSuccessEvent` / `SendCancelEvent`) is observed in F1's event log.
     pub async fn send_payment(
         &self,
-        payload: SendPaymentPayload,
+        payload: SendPaymentRequest,
     ) -> anyhow::Result<std::result::Result<[u8; 32], Signature>> {
         let f1_client = self
             .select_client(payload.federation_id)
@@ -323,7 +320,7 @@ impl AppState {
     /// contract returns the previously generated invoice.
     pub async fn create_bolt11_invoice(
         &self,
-        payload: CreateBolt11InvoicePayload,
+        payload: CreateInvoiceRequest,
     ) -> anyhow::Result<Bolt11Invoice> {
         if !payload.contract.verify() {
             bail!("The contract is invalid");

@@ -1,14 +1,14 @@
 use picomint_core::core::OperationId;
-use picomint_core::ln::gateway_api::GatewayInfo;
+use picomint_core::ln::gateway_api::{GatewayInfo, GatewayPk};
 use picomint_redb::table;
 
 // Local cache of `GatewayInfo` for every gateway in the federation's
 // announced list. Refreshed by `refresh_gateways` at startup (and on demand
-// from tests). Read synchronously from `select_gateway` — no live HTTP in
+// from tests). Read synchronously from `select_gateway` — no live RPC in
 // the hot path.
 table!(
     GATEWAY_INFO,
-    String => GatewayInfo,
+    GatewayPk => GatewayInfo,
     "ln-gateway-info",
 );
 
