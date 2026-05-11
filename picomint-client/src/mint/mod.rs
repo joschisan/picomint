@@ -585,20 +585,21 @@ impl MintClientModule {
         let mut selected_notes = Vec::new();
         let mut reserve_notes = Vec::new();
 
-        let notes_by_denom: BTreeMap<Denomination, Vec<SpendableNote>> = dbtx.iter(&NOTE, |r| {
-            let mut map: BTreeMap<Denomination, Vec<SpendableNote>> = BTreeMap::new();
-            for (note, ()) in r {
-                map.entry(note.denomination).or_default().push(note);
-            }
-            map
-        });
+        let all_notes: Vec<SpendableNote> =
+            dbtx.iter(&NOTE, |r| r.map(|(note, ())| note).collect());
 
-        // For each tier (largest first): keep up to TARGET_PER_DENOMINATION as
-        // reserve, sweep everything above into the tx as funding
-        // (consolidation). The change-side greedy adds at most one note per
-        // non-top tier, so the steady-state post-tx count per tier is bounded
-        // by TARGET_PER_DENOMINATION + 1.
-        for (_, mut notes_amount) in notes_by_denom.into_iter().rev() {
+        // For each tier: keep up to TARGET_PER_DENOMINATION as reserve, sweep
+        // everything above into the tx as funding (consolidation). The
+        // change-side greedy adds at most one note per non-top tier, so the
+        // steady-state post-tx count per tier is bounded by
+        // TARGET_PER_DENOMINATION + 1.
+        for amount in client_denominations().rev() {
+            let mut notes_amount: Vec<SpendableNote> = all_notes
+                .iter()
+                .filter(|note| note.denomination == amount)
+                .cloned()
+                .collect();
+
             let excess = notes_amount.split_off(notes_amount.len().min(TARGET_PER_DENOMINATION));
 
             reserve_notes.extend(notes_amount);
