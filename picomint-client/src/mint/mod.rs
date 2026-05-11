@@ -476,7 +476,7 @@ impl MintClientModule {
         assert_eq!(builder.deficit(), Amount::ZERO);
 
         let mut denoms =
-            Self::select_output_denominations(dbtx, self.cfg.output_fee, builder.excess_input());
+            Self::select_output_denominations(self.cfg.output_fee, builder.excess_input());
 
         // Sort to minimize information leaked about the change shape.
         denoms.sort();
@@ -584,7 +584,6 @@ impl MintClientModule {
     ) -> Option<Vec<SpendableNote>> {
         let mut selected_notes = Vec::new();
         let mut target_notes = Vec::new();
-        let mut excess_notes = Vec::new();
 
         let all_notes: Vec<SpendableNote> =
             dbtx.iter(&NOTE, |r| r.map(|(note, ())| note).collect());
@@ -598,19 +597,15 @@ impl MintClientModule {
 
             target_notes.extend(notes_amount.iter().take(TARGET_PER_DENOMINATION).cloned());
 
-            if notes_amount.len() > 2 * TARGET_PER_DENOMINATION {
-                for note in notes_amount.into_iter().skip(TARGET_PER_DENOMINATION) {
-                    let note_value = note
-                        .amount()
-                        .checked_sub(self.cfg.input_fee)
-                        .expect("All our notes are economical");
+            for note in notes_amount.into_iter().skip(TARGET_PER_DENOMINATION) {
+                let note_value = note
+                    .amount()
+                    .checked_sub(self.cfg.input_fee)
+                    .expect("All our notes are economical");
 
-                    excess_output = excess_output.saturating_sub(note_value);
+                excess_output = excess_output.saturating_sub(note_value);
 
-                    selected_notes.push(note);
-                }
-            } else {
-                excess_notes.extend(notes_amount.into_iter().skip(TARGET_PER_DENOMINATION));
+                selected_notes.push(note);
             }
         }
 
@@ -618,7 +613,7 @@ impl MintClientModule {
             return Some(selected_notes);
         }
 
-        for note in excess_notes.into_iter().chain(target_notes) {
+        for note in target_notes {
             let note_value = note
                 .amount()
                 .checked_sub(self.cfg.input_fee)
@@ -637,31 +632,16 @@ impl MintClientModule {
     }
 
     fn select_output_denominations(
-        dbtx: &WriteTxRef<'_>,
         output_fee: Amount,
         mut excess_input: Amount,
     ) -> Vec<Denomination> {
-        let n_denominations = Self::get_count_by_denomination_dbtx(dbtx);
-
         let mut output_denominations = Vec::new();
 
-        // Rebalance per-tier reserves up to TARGET_PER_DENOMINATION, smallest->largest.
-        for d in client_denominations() {
-            let n_missing = TARGET_PER_DENOMINATION
-                .saturating_sub(n_denominations.get(&d).copied().unwrap_or(0) as usize);
-
-            for _ in 0..n_missing {
-                match excess_input.checked_sub(d.amount() + output_fee) {
-                    Some(remaining) => {
-                        excess_input = remaining;
-                        output_denominations.push(d);
-                    }
-                    None => break,
-                }
-            }
-        }
-
-        // Absorb remaining excess as change, largest->smallest.
+        // Greedy binary representation of excess_input, largest->smallest.
+        // For every tier except the largest, the descent ensures at most one
+        // output per tier (since we only reach tier d once the remainder is
+        // already below `denom(d+1) + output_fee`, and two of `denom(d)` cost
+        // more than that). The largest tier absorbs whatever remains.
         for d in client_denominations().rev() {
             for _ in 0.. {
                 match excess_input.checked_sub(d.amount() + output_fee) {
