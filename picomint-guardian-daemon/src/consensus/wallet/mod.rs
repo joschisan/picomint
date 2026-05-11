@@ -22,7 +22,7 @@ use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::wallet as common;
-use picomint_core::{InPoint, NumPeersExt, OutPoint, PeerId};
+use picomint_core::{NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, ReadTxRef, WriteTxRef};
 use tokio::time::sleep;
@@ -186,7 +186,6 @@ impl Wallet {
         &self,
         dbtx: &WriteTxRef<'_>,
         input: &WalletInput,
-        _in_point: InPoint,
     ) -> Result<InputMeta, WalletInputError> {
         if dbtx
             .insert(&SPENT_OUTPUT, &input.output_index, &())
