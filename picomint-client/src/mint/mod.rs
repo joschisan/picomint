@@ -583,28 +583,21 @@ impl MintClientModule {
         mut excess_output: Amount,
     ) -> Option<Vec<SpendableNote>> {
         let mut selected_notes = Vec::new();
-        let mut reserve_notes = Vec::new();
+        let mut target_notes = Vec::new();
 
         let all_notes: Vec<SpendableNote> =
             dbtx.iter(&NOTE, |r| r.map(|(note, ())| note).collect());
 
-        // For each tier: keep up to TARGET_PER_DENOMINATION as reserve, sweep
-        // everything above into the tx as funding (consolidation). The
-        // change-side greedy adds at most one note per non-top tier, so the
-        // steady-state post-tx count per tier is bounded by
-        // TARGET_PER_DENOMINATION + 1.
         for amount in client_denominations().rev() {
-            let mut notes_amount: Vec<SpendableNote> = all_notes
+            let notes_amount: Vec<SpendableNote> = all_notes
                 .iter()
                 .filter(|note| note.denomination == amount)
                 .cloned()
                 .collect();
 
-            let excess = notes_amount.split_off(notes_amount.len().min(TARGET_PER_DENOMINATION));
+            target_notes.extend(notes_amount.iter().take(TARGET_PER_DENOMINATION).cloned());
 
-            reserve_notes.extend(notes_amount);
-
-            for note in excess {
+            for note in notes_amount.into_iter().skip(TARGET_PER_DENOMINATION) {
                 let note_value = note
                     .amount()
                     .checked_sub(self.cfg.input_fee)
@@ -620,9 +613,7 @@ impl MintClientModule {
             return Some(selected_notes);
         }
 
-        // Fall back to dipping into the per-tier reserves, largest first
-        // (already ordered by the descending pass above).
-        for note in reserve_notes {
+        for note in target_notes {
             let note_value = note
                 .amount()
                 .checked_sub(self.cfg.input_fee)
