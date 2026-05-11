@@ -476,7 +476,7 @@ impl MintClientModule {
         assert_eq!(builder.deficit(), Amount::ZERO);
 
         let mut denoms =
-            Self::select_output_denominations(dbtx, self.cfg.output_fee, builder.excess_input());
+            Self::select_output_denominations(self.cfg.output_fee, builder.excess_input());
 
         // Sort to minimize information leaked about the change shape.
         denoms.sort();
@@ -583,34 +583,36 @@ impl MintClientModule {
         mut excess_output: Amount,
     ) -> Option<Vec<SpendableNote>> {
         let mut selected_notes = Vec::new();
-        let mut target_notes = Vec::new();
-        let mut excess_notes = Vec::new();
+        let mut reserve_notes = Vec::new();
 
         let all_notes: Vec<SpendableNote> =
             dbtx.iter(&NOTE, |r| r.map(|(note, ())| note).collect());
 
+        // For each tier: keep up to TARGET_PER_DENOMINATION as reserve, sweep
+        // everything above into the tx as funding (consolidation). The
+        // change-side greedy adds at most one note per non-top tier, so the
+        // steady-state post-tx count per tier is bounded by
+        // TARGET_PER_DENOMINATION + 1.
         for amount in client_denominations().rev() {
-            let notes_amount: Vec<SpendableNote> = all_notes
+            let mut notes_amount: Vec<SpendableNote> = all_notes
                 .iter()
                 .filter(|note| note.denomination == amount)
                 .cloned()
                 .collect();
 
-            target_notes.extend(notes_amount.iter().take(TARGET_PER_DENOMINATION).cloned());
+            let excess = notes_amount.split_off(notes_amount.len().min(TARGET_PER_DENOMINATION));
 
-            if notes_amount.len() > 2 * TARGET_PER_DENOMINATION {
-                for note in notes_amount.into_iter().skip(TARGET_PER_DENOMINATION) {
-                    let note_value = note
-                        .amount()
-                        .checked_sub(self.cfg.input_fee)
-                        .expect("All our notes are economical");
+            reserve_notes.extend(notes_amount);
 
-                    excess_output = excess_output.saturating_sub(note_value);
+            for note in excess {
+                let note_value = note
+                    .amount()
+                    .checked_sub(self.cfg.input_fee)
+                    .expect("All our notes are economical");
 
-                    selected_notes.push(note);
-                }
-            } else {
-                excess_notes.extend(notes_amount.into_iter().skip(TARGET_PER_DENOMINATION));
+                excess_output = excess_output.saturating_sub(note_value);
+
+                selected_notes.push(note);
             }
         }
 
@@ -618,7 +620,9 @@ impl MintClientModule {
             return Some(selected_notes);
         }
 
-        for note in excess_notes.into_iter().chain(target_notes) {
+        // Fall back to dipping into the per-tier reserves, largest first
+        // (already ordered by the descending pass above).
+        for note in reserve_notes {
             let note_value = note
                 .amount()
                 .checked_sub(self.cfg.input_fee)
@@ -637,31 +641,16 @@ impl MintClientModule {
     }
 
     fn select_output_denominations(
-        dbtx: &WriteTxRef<'_>,
         output_fee: Amount,
         mut excess_input: Amount,
     ) -> Vec<Denomination> {
-        let n_denominations = Self::get_count_by_denomination_dbtx(dbtx);
-
         let mut output_denominations = Vec::new();
 
-        // Rebalance per-tier reserves up to TARGET_PER_DENOMINATION, smallest->largest.
-        for d in client_denominations() {
-            let n_missing = TARGET_PER_DENOMINATION
-                .saturating_sub(n_denominations.get(&d).copied().unwrap_or(0) as usize);
-
-            for _ in 0..n_missing {
-                match excess_input.checked_sub(d.amount() + output_fee) {
-                    Some(remaining) => {
-                        excess_input = remaining;
-                        output_denominations.push(d);
-                    }
-                    None => break,
-                }
-            }
-        }
-
-        // Absorb remaining excess as change, largest->smallest.
+        // Greedy binary representation of excess_input, largest->smallest.
+        // For every tier except the largest, the descent ensures at most one
+        // output per tier (since we only reach tier d once the remainder is
+        // already below `denom(d+1) + output_fee`, and two of `denom(d)` cost
+        // more than that). The largest tier absorbs whatever remains.
         for d in client_denominations().rev() {
             for _ in 0.. {
                 match excess_input.checked_sub(d.amount() + output_fee) {
