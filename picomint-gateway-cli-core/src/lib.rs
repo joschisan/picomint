@@ -37,6 +37,8 @@ pub const ROUTE_FEDERATION_LIST: &str = "/federation/list";
 pub const ROUTE_FEDERATION_CONFIG: &str = "/federation/config";
 pub const ROUTE_FEDERATION_INVITE: &str = "/federation/invite";
 pub const ROUTE_FEDERATION_BALANCE: &str = "/federation/balance";
+pub const ROUTE_FEDERATION_DISABLE: &str = "/federation/disable";
+pub const ROUTE_FEDERATION_ENABLE: &str = "/federation/enable";
 
 // Per-federation module commands
 pub const ROUTE_FEDERATION_MODULE_MINT_COUNT: &str = "/federation/module/mint/count";
@@ -212,6 +214,18 @@ pub struct PeerInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationJoinRequest {
     pub invite: InviteCode,
+}
+
+// --- /federation/disable + /federation/enable ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct FederationDisableRequest {
+    pub federation_id: FederationId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct FederationEnableRequest {
+    pub federation_id: FederationId,
 }
 
 // --- /federation/balance ---

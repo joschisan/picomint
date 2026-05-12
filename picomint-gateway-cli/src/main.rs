@@ -13,12 +13,14 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, FederationBalanceRequest, FederationConfigRequest,
-    FederationInviteRequest, FederationJoinRequest, FederationMintCountRequest,
-    FederationMintReceiveRequest, FederationMintSendRequest, FederationWalletReceiveRequest,
-    FederationWalletSendFeeRequest, FederationWalletSendRequest, LdkChannelCloseRequest,
-    LdkChannelOpenRequest, LdkInvoiceCreateRequest, LdkInvoicePayRequest, LdkOnchainSendRequest,
-    LdkPeerConnectRequest, LdkPeerDisconnectRequest, ROUTE_FEDERATION_BALANCE,
-    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
+    FederationDisableRequest, FederationEnableRequest, FederationInviteRequest,
+    FederationJoinRequest, FederationMintCountRequest, FederationMintReceiveRequest,
+    FederationMintSendRequest, FederationWalletReceiveRequest, FederationWalletSendFeeRequest,
+    FederationWalletSendRequest, LdkChannelCloseRequest, LdkChannelOpenRequest,
+    LdkInvoiceCreateRequest, LdkInvoicePayRequest, LdkOnchainSendRequest, LdkPeerConnectRequest,
+    LdkPeerDisconnectRequest, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
+    ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_INVITE,
+    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
     ROUTE_FEDERATION_MODULE_MINT_COUNT, ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
     ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
     ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
@@ -117,6 +119,11 @@ enum LdkPeerCommands {
 enum FederationCommands {
     /// Join a federation
     Join(FederationJoinRequest),
+    /// Disable a federation's public client API (gateway_info,
+    /// create_bolt11_invoice). In-flight contracts continue to settle.
+    Disable(FederationDisableRequest),
+    /// Re-enable a previously disabled federation
+    Enable(FederationEnableRequest),
     /// List connected federations
     List,
     /// Get a connected federation's JSON client config
@@ -264,6 +271,10 @@ async fn main() -> Result<()> {
 
         Commands::Federation(cmd) => match cmd {
             FederationCommands::Join(req) => request(d, ROUTE_FEDERATION_JOIN, req).await?,
+            FederationCommands::Disable(req) => {
+                request(d, ROUTE_FEDERATION_DISABLE, req).await?
+            }
+            FederationCommands::Enable(req) => request(d, ROUTE_FEDERATION_ENABLE, req).await?,
             FederationCommands::List => request(d, ROUTE_FEDERATION_LIST, ()).await?,
             FederationCommands::Config(req) => request(d, ROUTE_FEDERATION_CONFIG, req).await?,
             FederationCommands::Invite(req) => request(d, ROUTE_FEDERATION_INVITE, req).await?,

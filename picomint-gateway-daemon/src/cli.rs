@@ -19,19 +19,21 @@ use picomint_core::config::FederationId;
 use picomint_core::ln::gateway_api::GatewayPk;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, ChannelInfo, FederationBalanceRequest, FederationBalanceResponse,
-    FederationConfigRequest, FederationConfigResponse, FederationInviteRequest,
-    FederationInviteResponse, FederationJoinRequest, FederationListResponse,
-    FederationMintCountRequest, FederationMintCountResponse, FederationMintReceiveRequest,
-    FederationMintReceiveResponse, FederationMintSendRequest, FederationMintSendResponse,
-    FederationWalletReceiveRequest, FederationWalletReceiveResponse,
-    FederationWalletSendFeeRequest, FederationWalletSendFeeResponse, FederationWalletSendRequest,
-    FederationWalletSendResponse, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
-    LdkChannelCloseResponse, LdkChannelListResponse, LdkChannelOpenRequest,
-    LdkInvoiceCreateRequest, LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
-    LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
-    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
-    PeerInfo, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
-    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
+    FederationConfigRequest, FederationConfigResponse, FederationDisableRequest,
+    FederationEnableRequest, FederationInviteRequest, FederationInviteResponse,
+    FederationJoinRequest, FederationListResponse, FederationMintCountRequest,
+    FederationMintCountResponse, FederationMintReceiveRequest, FederationMintReceiveResponse,
+    FederationMintSendRequest, FederationMintSendResponse, FederationWalletReceiveRequest,
+    FederationWalletReceiveResponse, FederationWalletSendFeeRequest,
+    FederationWalletSendFeeResponse, FederationWalletSendRequest, FederationWalletSendResponse,
+    InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelCloseResponse,
+    LdkChannelListResponse, LdkChannelOpenRequest, LdkInvoiceCreateRequest,
+    LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse, LdkOnchainReceiveResponse,
+    LdkOnchainSendRequest, LdkOnchainSendResponse, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
+    LdkPeerListResponse, MnemonicResponse, PeerInfo, ROUTE_FEDERATION_BALANCE,
+    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE,
+    ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
+    ROUTE_FEDERATION_MODULE_MINT_COUNT,
     ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
     ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
     ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
@@ -125,6 +127,8 @@ fn router() -> Router<AppState> {
         .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
         // Federation management
         .route(ROUTE_FEDERATION_JOIN, post(federation_join))
+        .route(ROUTE_FEDERATION_DISABLE, post(federation_disable))
+        .route(ROUTE_FEDERATION_ENABLE, post(federation_enable))
         .route(ROUTE_FEDERATION_LIST, post(federation_list))
         .route(ROUTE_FEDERATION_CONFIG, post(federation_config))
         .route(ROUTE_FEDERATION_INVITE, post(federation_invite))
@@ -512,6 +516,36 @@ async fn federation_join(
     Json(payload): Json<FederationJoinRequest>,
 ) -> Result<Json<()>, CliError> {
     state.client_factory.join(&payload.invite).await?;
+
+    Ok(Json(()))
+}
+
+/// Disable a federation's public client API. Blind insert into
+/// `DISABLED_FEDERATION` — no validation of whether the fed is even joined.
+#[instrument(skip_all, err)]
+async fn federation_disable(
+    State(state): State<AppState>,
+    Json(payload): Json<FederationDisableRequest>,
+) -> Result<Json<()>, CliError> {
+    let dbtx = state.gateway_db.begin_write();
+    dbtx.as_ref()
+        .insert(&crate::db::DISABLED_FEDERATION, &payload.federation_id, &());
+    dbtx.commit();
+
+    Ok(Json(()))
+}
+
+/// Re-enable a previously disabled federation. Blind remove from
+/// `DISABLED_FEDERATION` — no-op if the row isn't there.
+#[instrument(skip_all, err)]
+async fn federation_enable(
+    State(state): State<AppState>,
+    Json(payload): Json<FederationEnableRequest>,
+) -> Result<Json<()>, CliError> {
+    let dbtx = state.gateway_db.begin_write();
+    dbtx.as_ref()
+        .remove(&crate::db::DISABLED_FEDERATION, &payload.federation_id);
+    dbtx.commit();
 
     Ok(Json(()))
 }

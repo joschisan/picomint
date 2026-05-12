@@ -38,7 +38,8 @@ use picomint_redb::Database;
 use std::sync::RwLock;
 
 use crate::db::{
-    CLIENT_CONFIG, INCOMING_CONTRACT, IncomingContractRow, OUTGOING_CONTRACT, OutgoingContractRow,
+    CLIENT_CONFIG, DISABLED_FEDERATION, INCOMING_CONTRACT, IncomingContractRow, OUTGOING_CONTRACT,
+    OutgoingContractRow,
 };
 
 /// Default Bitcoin network for testing purposes.
@@ -119,6 +120,15 @@ impl AppState {
 // Lightning Gateway implementation
 impl AppState {
     pub async fn gateway_info(&self, federation_id: &FederationId) -> anyhow::Result<GatewayInfo> {
+        ensure!(
+            self.gateway_db
+                .begin_read()
+                .as_ref()
+                .get(&DISABLED_FEDERATION, federation_id)
+                .is_none(),
+            "Federation is disabled",
+        );
+
         let client = self
             .select_client(*federation_id)
             .context("Federation not connected")?;
