@@ -84,7 +84,7 @@ pub struct SetupAddPeerResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InviteResponse {
-    pub invite_code: String,
+    pub invite: InviteCode,
 }
 
 // --- /audit ---

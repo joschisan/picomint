@@ -45,7 +45,7 @@ pub struct TestEnv {
     pub ldk_node: Arc<ldk_node::Node>,
     pub data_dir: std::path::PathBuf,
     pub bitcoind: bitcoincore_rpc::Client,
-    pub invite_code: InviteCode,
+    pub invite: InviteCode,
     pub gw_data_dir: std::path::PathBuf,
     pub gw_pk: GatewayPk,
     pub lnurl_daemon_url: String,
@@ -83,10 +83,11 @@ impl TestEnv {
         runtime.block_on(run_dkg(&peer_data_dirs))?;
 
         let peer0_data_dir = peer_data_dirs[0].clone();
-        let invite_code_str = runtime.block_on(retry("fetch invite code", || async {
-            Ok(cli::guardian_invite(&peer0_data_dir)?.invite_code)
-        }))?;
-        let invite_code: InviteCode = picomint_base32::decode(invite_code_str.trim())?;
+        let invite = runtime
+            .block_on(retry("fetch invite code", || async {
+                cli::guardian_invite(&peer0_data_dir)
+            }))?
+            .invite;
         info!("Federation ready");
 
         // Bind the iroh endpoint now so we can start building the first client
@@ -102,7 +103,7 @@ impl TestEnv {
         let client_counter = AtomicU64::new(0);
         let client_send = runtime.block_on(build_client(
             endpoint.clone(),
-            invite_code.clone(),
+            invite.clone(),
             data_dir.clone(),
             client_counter.fetch_add(1, Ordering::Relaxed),
             None,
@@ -127,7 +128,7 @@ impl TestEnv {
         info!("LNURL daemon started on {LNURL_DAEMON_PORT}");
 
         info!("Connecting gateway to federation...");
-        cli::gateway_federation_join(&gw_data_dir, invite_code_str.trim())?;
+        cli::gateway_federation_join(&gw_data_dir, &invite)?;
         info!("Gateway connected");
 
         info!("Building freestanding LDK node...");
@@ -143,7 +144,7 @@ impl TestEnv {
                 ldk_node,
                 data_dir,
                 bitcoind,
-                invite_code,
+                invite,
                 gw_data_dir,
                 gw_pk,
                 lnurl_daemon_url,
@@ -210,7 +211,7 @@ impl TestEnv {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
         build_client(
             self.endpoint.clone(),
-            self.invite_code.clone(),
+            self.invite.clone(),
             self.data_dir.clone(),
             n,
             mnemonic,

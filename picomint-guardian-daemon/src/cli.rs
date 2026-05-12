@@ -112,7 +112,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<InviteResponse>, CliError> {
         Ok(Json(InviteResponse {
-            invite_code: picomint_base32::encode(&api.cfg.get_invite_code()),
+            invite: api.cfg.get_invite_code(),
         }))
     }
 

@@ -266,7 +266,7 @@ pub struct FederationInviteRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FederationInviteResponse {
-    pub invite: String,
+    pub invite: InviteCode,
 }
 
 // --- /federation/module/mint/count ---

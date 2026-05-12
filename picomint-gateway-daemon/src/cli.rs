@@ -570,7 +570,7 @@ async fn federation_invite(
         .await
         .ok_or_else(|| CliError::bad_request("Unknown peer id for this federation"))?;
     Ok(Json(FederationInviteResponse {
-        invite: picomint_base32::encode(&invite_code),
+        invite: invite_code,
     }))
 }
 

@@ -58,11 +58,11 @@ pub fn gateway_info(gw_data_dir: &Path) -> Result<InfoResponse> {
         .run_cli::<InfoResponse>()
 }
 
-pub fn gateway_federation_join(gw_data_dir: &Path, invite: &str) -> Result<Value> {
+pub fn gateway_federation_join(gw_data_dir: &Path, invite: &InviteCode) -> Result<Value> {
     gateway_cmd(gw_data_dir)
         .arg("federation")
         .arg("join")
-        .arg(invite)
+        .arg(picomint_base32::encode(invite))
         .run_cli::<Value>()
 }
 

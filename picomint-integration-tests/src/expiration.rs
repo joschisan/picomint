@@ -22,11 +22,11 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     info!("Setting expiration on all {NUM_GUARDIANS} guardians");
     let expected = ExpirationStatus {
         timestamp,
-        successor: Some(env.invite_code.clone()),
+        successor: Some(env.invite.clone()),
     };
     for peer in 0..NUM_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        cli::guardian_expiration_set(&data_dir, timestamp, Some(&env.invite_code))?;
+        cli::guardian_expiration_set(&data_dir, timestamp, Some(&env.invite))?;
         let stored = cli::guardian_expiration_status(&data_dir)?;
         ensure!(
             stored.as_ref() == Some(&expected),
