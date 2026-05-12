@@ -7,8 +7,8 @@ mod gateway;
 mod secret;
 mod send_sm;
 
-use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::executor::ModuleExecutor;
@@ -16,13 +16,14 @@ use crate::module::ClientContext;
 use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
-use db::{GATEWAY_INFO, INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
+use db::{INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
 use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentImage};
 use picomint_core::ln::gateway_api::{GatewayInfo, GatewayPk, PaymentFee};
+use picomint_core::ln::lnurl::MAX_GATEWAYS_PER_LNURL;
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_core::ln::{
     LightningInput, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
@@ -36,6 +37,7 @@ use picomint_redb::WriteTxRef;
 use rand::seq::IteratorRandom;
 use secp256k1::{Keypair, PublicKey, SecretKey, ecdh};
 use thiserror::Error;
+use tokio::task::JoinSet;
 use tpe::{AggregateDecryptionKey, derive_agg_dk};
 
 use self::events::{ReceiveEvent, SendEvent};
@@ -66,6 +68,10 @@ pub struct LightningClientModule {
     mint: Arc<crate::mint::MintClientModule>,
     secret: LnSecret,
     executor: ModuleExecutor<SendStateMachine>,
+    // In-memory only: populated by `refresh_gateways` at module startup.
+    // Lost on restart — every cold start has to re-probe the federation's
+    // gateway list before `select_gateway` can return anything.
+    gateway_info: Arc<RwLock<HashMap<GatewayPk, GatewayInfo>>>,
 }
 
 impl LightningClientModule {
@@ -77,7 +83,7 @@ impl LightningClientModule {
         self.cfg.output_fee
     }
 
-    pub async fn new(
+    pub fn new(
         federation_id: FederationId,
         cfg: LightningConfigConsensus,
         client_ctx: ClientContext,
@@ -92,7 +98,7 @@ impl LightningClientModule {
             input_fee: cfg.input_fee,
         };
 
-        let executor = ModuleExecutor::new(client_ctx.db().clone(), sm_context, tg.clone()).await;
+        let executor = ModuleExecutor::new(client_ctx.db().clone(), sm_context, tg.clone());
 
         let module = Self {
             federation_id,
@@ -101,6 +107,7 @@ impl LightningClientModule {
             mint,
             secret,
             executor,
+            gateway_info: Arc::new(RwLock::new(HashMap::new())),
         };
 
         tg.spawn(Self::receive_scan(module.clone()));
@@ -110,14 +117,12 @@ impl LightningClientModule {
         Ok(module)
     }
 
-    /// Reconcile the local `GATEWAY_INFO` cache with the federation's
+    /// Rebuild the in-memory `gateway_info` map from the federation's
     /// announced gateway list:
     ///
-    /// 1. Fetch the announced list (a `Vec<NodeId>`) via threshold consensus.
-    /// 2. Prune cache entries whose node id is no longer in the list.
-    /// 3. Fetch fresh `GatewayInfo` from every node id in the list, in parallel.
-    /// 4. For each node id: insert on success, remove on failure — no stale
-    ///    info survives a refresh.
+    /// 1. Fetch the announced list via threshold consensus.
+    /// 2. Probe every gateway concurrently; collect the successful responses.
+    /// 3. Atomically replace the map — no stale info survives a refresh.
     ///
     /// Called once at module startup; exposed publicly so integration tests
     /// can force a refresh after registering gateways with the guardians.
@@ -131,83 +136,69 @@ impl LightningClientModule {
             .await
             .map_err(|_| RefreshGatewaysError::FailedToRequestGateways)?;
 
-        let listed: BTreeSet<GatewayPk> = list.iter().copied().collect();
+        let mut probes: JoinSet<Option<(GatewayPk, GatewayInfo)>> = JoinSet::new();
 
-        let dbtx = module.client_ctx.db().begin_write();
+        for gateway_pk in list {
+            let module = module.clone();
+            probes.spawn(async move {
+                let info = gateway::gateway_info(
+                    module.client_ctx.api().endpoint(),
+                    gateway_pk,
+                    module.federation_id,
+                )
+                .await
+                .ok()
+                .flatten()?;
+                Some((gateway_pk, info))
+            });
+        }
 
-        let cached: Vec<GatewayPk> = dbtx.iter(&GATEWAY_INFO, |r| r.map(|(k, _)| k).collect());
+        let mut fresh = HashMap::new();
 
-        for gateway_pk in cached {
-            if !listed.contains(&gateway_pk) {
-                dbtx.remove(&GATEWAY_INFO, &gateway_pk);
+        while let Some(result) = probes.join_next().await {
+            if let Ok(Some((gateway_pk, info))) = result {
+                fresh.insert(gateway_pk, info);
             }
         }
 
-        dbtx.commit();
-
-        let handles: Vec<_> = list
-            .into_iter()
-            .map(|gateway_pk| {
-                let module = module.clone();
-                tokio::spawn(async move {
-                    let info = gateway::gateway_info(
-                        module.client_ctx.api().endpoint(),
-                        gateway_pk,
-                        module.federation_id,
-                    )
-                    .await;
-
-                    let dbtx = module.client_ctx.db().begin_write();
-
-                    match info {
-                        Ok(Some(info)) => {
-                            dbtx.insert(&GATEWAY_INFO, &gateway_pk, &info);
-                        }
-                        _ => {
-                            dbtx.remove(&GATEWAY_INFO, &gateway_pk);
-                        }
-                    }
-
-                    dbtx.commit();
-                })
-            })
-            .collect();
-
-        futures::future::join_all(handles).await;
+        *module
+            .gateway_info
+            .write()
+            .expect("gateway_info RwLock poisoned") = fresh;
 
         Ok(())
     }
 
-    /// Pick a gateway from the local cache. With `invoice = Some(_)`,
+    /// Pick a gateway from the in-memory cache. With `invoice = Some(_)`,
     /// prefer a gateway whose lightning public key matches the invoice's
     /// recovered payee — that's a direct ecash swap, no LN routing.
     /// Otherwise return any cached gateway, picked at random for load
-    /// distribution. Synchronous: hits redb only.
+    /// distribution. Synchronous: holds the read lock briefly.
     pub fn select_gateway(
         &self,
         invoice: Option<&Bolt11Invoice>,
     ) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
-        let entries: Vec<(GatewayPk, GatewayInfo)> = self
-            .client_ctx
-            .db()
-            .begin_read()
-            .iter(&GATEWAY_INFO, |r| r.collect());
+        let guard = self
+            .gateway_info
+            .read()
+            .expect("gateway_info RwLock poisoned");
 
-        if entries.is_empty() {
+        if guard.is_empty() {
             return Err(SelectGatewayError::NoGatewaysAvailable);
         }
 
         if let Some(invoice) = invoice {
-            for (gateway_pk, info) in &entries {
+            for (gateway_pk, info) in guard.iter() {
                 if info.lightning_public_key == invoice.recover_payee_pub_key() {
                     return Ok((*gateway_pk, info.clone()));
                 }
             }
         }
 
-        entries
-            .into_iter()
+        guard
+            .iter()
             .choose(&mut rand::thread_rng())
+            .map(|(pk, info)| (*pk, info.clone()))
             .map(Ok)
             .expect("entries is non-empty")
     }
@@ -524,6 +515,12 @@ impl LightningClientModule {
             return Err(GenerateLnurlError::NoGatewaysAvailable);
         }
 
+        // Random sample so load spreads across the federation's announced
+        // gateways instead of always pinning the byte-canonically smallest few.
+        let gateways = gateways
+            .into_iter()
+            .choose_multiple(&mut rand::thread_rng(), MAX_GATEWAYS_PER_LNURL);
+
         let receive_keypair = self.secret.receive_keypair();
 
         let payload = picomint_base32::encode(&lnurl::LnurlRequest {
@@ -628,7 +625,6 @@ pub enum RefreshGatewaysError {
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
 pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>) {
-    dbtx.delete_table(&GATEWAY_INFO);
     dbtx.delete_table(&INCOMING_CONTRACT_STREAM_INDEX);
     dbtx.delete_table(&SEND_OPERATION);
     dbtx.delete_table(&crate::executor::table::<SendStateMachine>());

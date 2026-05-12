@@ -63,7 +63,7 @@ impl WalletClientModule {
 }
 
 impl WalletClientModule {
-    pub async fn new(
+    pub fn new(
         cfg: WalletConfigConsensus,
         context: ClientContext,
         mint: std::sync::Arc<crate::mint::MintClientModule>,
@@ -73,7 +73,7 @@ impl WalletClientModule {
         let sm_context = WalletClientContext {
             client_ctx: context.clone(),
         };
-        let send_executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone()).await;
+        let send_executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone());
 
         let module = WalletClientModule {
             secret,

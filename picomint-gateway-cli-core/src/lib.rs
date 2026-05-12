@@ -5,6 +5,7 @@ use clap::Args;
 use lightning_invoice::Bolt11Invoice;
 use picomint_client::mint::ECash;
 use picomint_core::config::FederationId;
+use picomint_core::invite::InviteCode;
 use picomint_core::mint::Denomination;
 use picomint_core::{Amount, PeerId, secp256k1};
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,8 @@ pub const ROUTE_FEDERATION_LIST: &str = "/federation/list";
 pub const ROUTE_FEDERATION_CONFIG: &str = "/federation/config";
 pub const ROUTE_FEDERATION_INVITE: &str = "/federation/invite";
 pub const ROUTE_FEDERATION_BALANCE: &str = "/federation/balance";
+pub const ROUTE_FEDERATION_DISABLE: &str = "/federation/disable";
+pub const ROUTE_FEDERATION_ENABLE: &str = "/federation/enable";
 
 // Per-federation module commands
 pub const ROUTE_FEDERATION_MODULE_MINT_COUNT: &str = "/federation/module/mint/count";
@@ -210,7 +213,19 @@ pub struct PeerInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationJoinRequest {
-    pub invite: String,
+    pub invite: InviteCode,
+}
+
+// --- /federation/disable + /federation/enable ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct FederationDisableRequest {
+    pub federation_id: FederationId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct FederationEnableRequest {
+    pub federation_id: FederationId,
 }
 
 // --- /federation/balance ---
@@ -265,7 +280,7 @@ pub struct FederationInviteRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FederationInviteResponse {
-    pub invite: String,
+    pub invite: InviteCode,
 }
 
 // --- /federation/module/mint/count ---

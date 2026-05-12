@@ -22,6 +22,16 @@ table!(
     "client-config",
 );
 
+// Set of federation ids whose public-facing endpoints (`gateway_info`,
+// `create_bolt11_invoice`) are gated off. Disable stops *new* client-initiated
+// work; back doors (LDK event handlers, trailer, terminal settlement of
+// in-flight contracts) stay open so existing operations drain naturally.
+table!(
+    DISABLED_FEDERATION,
+    FederationId => (),
+    "disabled-federation",
+);
+
 table!(
     OUTGOING_CONTRACT,
     OperationId => OutgoingContractRow,

@@ -3661,7 +3661,6 @@ dependencies = [
  "ldk-node",
  "lightning",
  "lightning-invoice",
- "picomint-base32",
  "picomint-client",
  "picomint-core",
  "picomint-encoding",

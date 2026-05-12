@@ -19,23 +19,24 @@ use picomint_core::config::FederationId;
 use picomint_core::ln::gateway_api::GatewayPk;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, ChannelInfo, FederationBalanceRequest, FederationBalanceResponse,
-    FederationConfigRequest, FederationConfigResponse, FederationInviteRequest,
-    FederationInviteResponse, FederationJoinRequest, FederationListResponse,
-    FederationMintCountRequest, FederationMintCountResponse, FederationMintReceiveRequest,
-    FederationMintReceiveResponse, FederationMintSendRequest, FederationMintSendResponse,
-    FederationWalletReceiveRequest, FederationWalletReceiveResponse,
-    FederationWalletSendFeeRequest, FederationWalletSendFeeResponse, FederationWalletSendRequest,
-    FederationWalletSendResponse, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
-    LdkChannelCloseResponse, LdkChannelListResponse, LdkChannelOpenRequest,
-    LdkInvoiceCreateRequest, LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
+    FederationConfigRequest, FederationConfigResponse, FederationDisableRequest,
+    FederationEnableRequest, FederationInviteRequest, FederationInviteResponse,
+    FederationJoinRequest, FederationListResponse, FederationMintCountRequest,
+    FederationMintCountResponse, FederationMintReceiveRequest, FederationMintReceiveResponse,
+    FederationMintSendRequest, FederationMintSendResponse, FederationWalletReceiveRequest,
+    FederationWalletReceiveResponse, FederationWalletSendFeeRequest,
+    FederationWalletSendFeeResponse, FederationWalletSendRequest, FederationWalletSendResponse,
+    InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelCloseResponse,
+    LdkChannelListResponse, LdkChannelOpenRequest, LdkInvoiceCreateRequest,
+    LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
     LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
     LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
-    PeerInfo, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_INVITE,
-    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
-    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
-    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    PeerInfo, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE,
+    ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
+    ROUTE_FEDERATION_MODULE_MINT_COUNT, ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
+    ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_MNEMONIC,
@@ -43,7 +44,7 @@ use picomint_gateway_cli_core::{
 use reqwest::StatusCode;
 use tokio::net::UnixListener;
 use tower_http::cors::CorsLayer;
-use tracing::{debug, error, info, instrument};
+use tracing::{error, info, instrument};
 
 use crate::AppState;
 
@@ -125,6 +126,8 @@ fn router() -> Router<AppState> {
         .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
         // Federation management
         .route(ROUTE_FEDERATION_JOIN, post(federation_join))
+        .route(ROUTE_FEDERATION_DISABLE, post(federation_disable))
+        .route(ROUTE_FEDERATION_ENABLE, post(federation_enable))
         .route(ROUTE_FEDERATION_LIST, post(federation_list))
         .route(ROUTE_FEDERATION_CONFIG, post(federation_config))
         .route(ROUTE_FEDERATION_INVITE, post(federation_invite))
@@ -511,34 +514,37 @@ async fn federation_join(
     State(state): State<AppState>,
     Json(payload): Json<FederationJoinRequest>,
 ) -> Result<Json<()>, CliError> {
-    let invite_code: picomint_core::invite::InviteCode = picomint_base32::decode(&payload.invite)
-        .map_err(|e| {
-        CliError::bad_request(format!("Invalid federation member string {e:?}"))
-    })?;
+    state.client_factory.join(&payload.invite).await?;
 
-    if state
-        .clients
-        .read()
-        .expect("clients RwLock poisoned")
-        .contains_key(&invite_code.federation_id)
-    {
-        return Err(CliError::bad_request(
-            "Federation has already been registered",
-        ));
-    }
+    Ok(Json(()))
+}
 
-    let client = state.client_factory.join(&invite_code).await?;
+/// Disable a federation's public client API. Blind insert into
+/// `DISABLED_FEDERATION` — no validation of whether the fed is even joined.
+#[instrument(skip_all, err)]
+async fn federation_disable(
+    State(state): State<AppState>,
+    Json(payload): Json<FederationDisableRequest>,
+) -> Result<Json<()>, CliError> {
+    let dbtx = state.gateway_db.begin_write();
+    dbtx.as_ref()
+        .insert(&crate::db::DISABLED_FEDERATION, &payload.federation_id, &());
+    dbtx.commit();
 
-    state
-        .clients
-        .write()
-        .expect("clients RwLock poisoned")
-        .insert(invite_code.federation_id, client);
+    Ok(Json(()))
+}
 
-    // Trailers are daemon-wide singletons spawned at startup; new
-    // federations' events flow through the existing global event log.
-
-    debug!(federation_id = %invite_code.federation_id, "Federation connected");
+/// Re-enable a previously disabled federation. Blind remove from
+/// `DISABLED_FEDERATION` — no-op if the row isn't there.
+#[instrument(skip_all, err)]
+async fn federation_enable(
+    State(state): State<AppState>,
+    Json(payload): Json<FederationEnableRequest>,
+) -> Result<Json<()>, CliError> {
+    let dbtx = state.gateway_db.begin_write();
+    dbtx.as_ref()
+        .remove(&crate::db::DISABLED_FEDERATION, &payload.federation_id);
+    dbtx.commit();
 
     Ok(Json(()))
 }
@@ -548,7 +554,7 @@ async fn federation_join(
 async fn federation_list(
     State(state): State<AppState>,
 ) -> Result<Json<FederationListResponse>, CliError> {
-    let federations = state.federation_info_all().await;
+    let federations = state.federation_info_all();
     Ok(Json(FederationListResponse { federations }))
 }
 
@@ -597,7 +603,7 @@ async fn federation_invite(
         .await
         .ok_or_else(|| CliError::bad_request("Unknown peer id for this federation"))?;
     Ok(Json(FederationInviteResponse {
-        invite: picomint_base32::encode(&invite_code),
+        invite: invite_code,
     }))
 }
 

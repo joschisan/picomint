@@ -263,7 +263,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
 
     info!("Polling gateway federation balance...");
 
-    let fed_id = env.invite_code.federation_id.to_string();
+    let fed_id = env.invite.federation_id.to_string();
     retry("gateway federation balance", || {
         let fed_id = fed_id.clone();
         async move {

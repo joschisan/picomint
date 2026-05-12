@@ -104,7 +104,7 @@ struct Inner<S: StateMachine> {
 impl<S: StateMachine> ModuleExecutor<S> {
     /// Create the executor and spawn driver tasks for any state machines
     /// persisted from a previous run.
-    pub async fn new(db: Database, context: S::Context, tg: TaskGroup) -> Self {
+    pub fn new(db: Database, context: S::Context, tg: TaskGroup) -> Self {
         let inner = Arc::new(Inner { db, context, tg });
 
         for (id, state) in inner.get_active_states() {

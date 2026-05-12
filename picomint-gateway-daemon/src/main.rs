@@ -207,11 +207,10 @@ fn main() -> anyhow::Result<()> {
         analytics: picomint_gateway_daemon::analytics::Analytics::wipe_and_init(&opts.data_dir)?,
     };
 
-    // 6. Load federation clients, then fire-and-forget every long-running
-    //    task. All work is persisted incrementally and idempotent on retry,
-    //    so the runtime drop on process exit aborts cleanly.
-    runtime.block_on(state.load_clients())?;
-
+    // 6. Fire-and-forget every long-running task. Federation clients are
+    //    lazy-loaded on first use; all work is persisted incrementally and
+    //    idempotent on retry, so the runtime drop on process exit aborts
+    //    cleanly.
     runtime.spawn(public::run_public(
         state.clone(),
         state.client_factory.endpoint().clone(),

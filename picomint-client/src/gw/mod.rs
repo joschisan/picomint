@@ -31,7 +31,7 @@ use receive_sm::ReceiveStateMachine;
 pub const EXPIRATION_DELTA_MINIMUM: u64 = 144;
 
 impl GatewayClientModule {
-    pub async fn new(
+    pub fn new(
         federation_id: FederationId,
         cfg: LightningConfigConsensus,
         context: ClientContext,
@@ -50,8 +50,7 @@ impl GatewayClientModule {
             tpe_pks: cfg.tpe_pks.clone(),
         };
 
-        let receive_executor =
-            ModuleExecutor::new(context.db().clone(), sm_context, tg.clone()).await;
+        let receive_executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone());
 
         Ok(GatewayClientModule {
             federation_id,
