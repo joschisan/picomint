@@ -304,7 +304,7 @@ impl MintClientModule {
 }
 
 impl MintClientModule {
-    pub async fn new(
+    pub fn new(
         federation_id: FederationId,
         cfg: MintConfigConsensus,
         context: ClientContext,
@@ -337,9 +337,9 @@ impl MintClientModule {
         };
 
         let mint_executor =
-            ModuleExecutor::new(context.db().clone(), sm_context.clone(), tg.clone()).await;
+            ModuleExecutor::new(context.db().clone(), sm_context.clone(), tg.clone());
 
-        let send_executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone()).await;
+        let send_executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone());
 
         let tx_submission_executor = ModuleExecutor::new(
             context.db().clone(),
@@ -348,8 +348,7 @@ impl MintClientModule {
                 federation_id,
             },
             tg.clone(),
-        )
-        .await;
+        );
 
         let module = MintClientModule {
             federation_id,

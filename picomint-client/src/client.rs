@@ -60,28 +60,28 @@ impl Client {
     /// Join a federation for the first time using a regular lightning
     /// flavor. Downloads the federation config via the invite, persists it,
     /// and brings up the client.
-    pub async fn new(
+    pub fn new(
         endpoint: Endpoint,
         db: Database,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
     ) -> anyhow::Result<Arc<Self>> {
-        Self::build(endpoint, db, mnemonic, config, LnChoice::Regular).await
+        Self::build(endpoint, db, mnemonic, config, LnChoice::Regular)
     }
 
     /// Gateway-flavor counterpart of [`Client::new`]. Used by the gateway
     /// daemon, which mounts [`GatewayClientModule`] in place of the regular
     /// lightning module.
-    pub async fn new_gateway(
+    pub fn new_gateway(
         endpoint: Endpoint,
         db: Database,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
     ) -> anyhow::Result<Arc<Self>> {
-        Self::build(endpoint, db, mnemonic, config, LnChoice::Gateway).await
+        Self::build(endpoint, db, mnemonic, config, LnChoice::Gateway)
     }
 
-    async fn build(
+    fn build(
         endpoint: Endpoint,
         db: Database,
         mnemonic: &Mnemonic,
@@ -106,60 +106,48 @@ impl Client {
 
         let mint_context =
             crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
-        let mint = Arc::new(
-            MintClientModule::new(
-                federation_id,
-                config.mint.clone(),
-                mint_context,
-                client_secret.mint_secret(),
-                &tg,
-            )
-            .await?,
-        );
+        let mint = Arc::new(MintClientModule::new(
+            federation_id,
+            config.mint.clone(),
+            mint_context,
+            client_secret.mint_secret(),
+            &tg,
+        )?);
 
         let wallet_context =
             crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
-        let wallet = Arc::new(
-            WalletClientModule::new(
-                config.wallet.clone(),
-                wallet_context,
-                mint.clone(),
-                client_secret.wallet_secret(),
-                &tg,
-            )
-            .await?,
-        );
+        let wallet = Arc::new(WalletClientModule::new(
+            config.wallet.clone(),
+            wallet_context,
+            mint.clone(),
+            client_secret.wallet_secret(),
+            &tg,
+        )?);
 
         let ln = match ln_choice {
             LnChoice::Regular => {
                 let ln_context =
                     crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
-                LnFlavor::Regular(Arc::new(
-                    LightningClientModule::new(
-                        federation_id,
-                        config.ln.clone(),
-                        ln_context,
-                        mint.clone(),
-                        client_secret.ln_secret(),
-                        &tg,
-                    )
-                    .await?,
-                ))
+                LnFlavor::Regular(Arc::new(LightningClientModule::new(
+                    federation_id,
+                    config.ln.clone(),
+                    ln_context,
+                    mint.clone(),
+                    client_secret.ln_secret(),
+                    &tg,
+                )?))
             }
             LnChoice::Gateway => {
                 let gw_context =
                     crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
-                LnFlavor::Gateway(Arc::new(
-                    GatewayClientModule::new(
-                        federation_id,
-                        config.ln.clone(),
-                        gw_context,
-                        mint.clone(),
-                        client_secret.gw_secret(),
-                        &tg,
-                    )
-                    .await?,
-                ))
+                LnFlavor::Gateway(Arc::new(GatewayClientModule::new(
+                    federation_id,
+                    config.ln.clone(),
+                    gw_context,
+                    mint.clone(),
+                    client_secret.gw_secret(),
+                    &tg,
+                )?))
             }
         };
 

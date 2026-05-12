@@ -264,7 +264,7 @@ async fn build_client(
         dbtx.commit();
     }
 
-    let client = Client::new(endpoint, db, &mnemonic, config).await?;
+    let client = Client::new(endpoint, db, &mnemonic, config)?;
 
     info!("Created client-{n}");
     Ok(client)

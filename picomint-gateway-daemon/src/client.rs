@@ -153,7 +153,6 @@ impl GatewayClientFactory {
             &self.mnemonic,
             config,
         )
-        .await
         .map_err(|e| anyhow::anyhow!("Client open error: {e}"))
     }
 

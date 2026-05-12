@@ -77,7 +77,7 @@ impl LightningClientModule {
         self.cfg.output_fee
     }
 
-    pub async fn new(
+    pub fn new(
         federation_id: FederationId,
         cfg: LightningConfigConsensus,
         client_ctx: ClientContext,
@@ -92,7 +92,7 @@ impl LightningClientModule {
             input_fee: cfg.input_fee,
         };
 
-        let executor = ModuleExecutor::new(client_ctx.db().clone(), sm_context, tg.clone()).await;
+        let executor = ModuleExecutor::new(client_ctx.db().clone(), sm_context, tg.clone());
 
         let module = Self {
             federation_id,
