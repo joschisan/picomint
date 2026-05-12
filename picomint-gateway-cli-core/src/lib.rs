@@ -5,6 +5,7 @@ use clap::Args;
 use lightning_invoice::Bolt11Invoice;
 use picomint_client::mint::ECash;
 use picomint_core::config::FederationId;
+use picomint_core::invite::InviteCode;
 use picomint_core::mint::Denomination;
 use picomint_core::{Amount, PeerId, secp256k1};
 use serde::{Deserialize, Serialize};
@@ -210,7 +211,7 @@ pub struct PeerInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationJoinRequest {
-    pub invite: String,
+    pub invite: InviteCode,
 }
 
 // --- /federation/balance ---
