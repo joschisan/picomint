@@ -43,7 +43,7 @@ use picomint_gateway_cli_core::{
 use reqwest::StatusCode;
 use tokio::net::UnixListener;
 use tower_http::cors::CorsLayer;
-use tracing::{debug, error, info, instrument};
+use tracing::{error, info, instrument};
 
 use crate::AppState;
 
@@ -516,29 +516,7 @@ async fn federation_join(
         CliError::bad_request(format!("Invalid federation member string {e:?}"))
     })?;
 
-    if state
-        .clients
-        .read()
-        .expect("clients RwLock poisoned")
-        .contains_key(&invite_code.federation_id)
-    {
-        return Err(CliError::bad_request(
-            "Federation has already been registered",
-        ));
-    }
-
-    let client = state.client_factory.join(&invite_code).await?;
-
-    state
-        .clients
-        .write()
-        .expect("clients RwLock poisoned")
-        .insert(invite_code.federation_id, client);
-
-    // Trailers are daemon-wide singletons spawned at startup; new
-    // federations' events flow through the existing global event log.
-
-    debug!(federation_id = %invite_code.federation_id, "Federation connected");
+    state.client_factory.join(&invite_code).await?;
 
     Ok(Json(()))
 }
@@ -548,7 +526,7 @@ async fn federation_join(
 async fn federation_list(
     State(state): State<AppState>,
 ) -> Result<Json<FederationListResponse>, CliError> {
-    let federations = state.federation_info_all().await;
+    let federations = state.federation_info_all();
     Ok(Json(FederationListResponse { federations }))
 }
 

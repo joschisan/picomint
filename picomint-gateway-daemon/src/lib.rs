@@ -36,9 +36,10 @@ use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_redb::Database;
 use std::sync::RwLock;
-use tracing::warn;
 
-use crate::db::{INCOMING_CONTRACT, IncomingContractRow, OUTGOING_CONTRACT, OutgoingContractRow};
+use crate::db::{
+    CLIENT_CONFIG, INCOMING_CONTRACT, IncomingContractRow, OUTGOING_CONTRACT, OutgoingContractRow,
+};
 
 /// Default Bitcoin network for testing purposes.
 pub const DEFAULT_NETWORK: Network = Network::Regtest;
@@ -64,71 +65,54 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Retrieves a client for a given federation. Sync — the `clients` map
-    /// is only written at startup and is effectively read-only afterwards.
+    /// Get a client for `federation_id`, lazily loading it from
+    /// [`CLIENT_CONFIG`] on cache miss. Returns `None` only if no config is
+    /// persisted for that federation — i.e. the gateway has never joined it.
+    ///
+    /// Double-checked: read lock → cache hit returns immediately; cache miss
+    /// drops the read lock, takes the write lock, re-checks the cache (in
+    /// case another caller raced and inserted), and otherwise loads + inserts
+    /// exactly once. The write lock is held across the load, so cold loads
+    /// for *different* feds are serialized — fine because cold loads are
+    /// rare and `Client::new_gateway` is fast.
     pub fn select_client(&self, federation_id: FederationId) -> Option<Arc<Client>> {
-        self.clients
+        if let Some(client) = self
+            .clients
             .read()
             .expect("clients RwLock poisoned")
             .get(&federation_id)
             .cloned()
-    }
-
-    /// Load all persisted federation clients on startup.
-    pub async fn load_clients(&self) -> anyhow::Result<()> {
-        let federations = self.client_factory.list_federations().await;
-
-        let mut loaded = Vec::new();
-
-        for federation_id in federations {
-            match self.client_factory.load(&federation_id).await {
-                Ok(Some(client)) => {
-                    loaded.push((client.federation_id(), client));
-                }
-                Ok(None) => {
-                    warn!(%federation_id, "Client DB not initialized, skipping");
-                }
-                Err(err) => {
-                    warn!(%federation_id, %err, "Failed to load client");
-                }
-            }
+        {
+            return Some(client);
         }
 
         let mut clients = self.clients.write().expect("clients RwLock poisoned");
 
-        for (id, client) in loaded {
-            clients.insert(id, client);
+        if let Some(client) = clients.get(&federation_id).cloned() {
+            return Some(client);
         }
 
-        Ok(())
+        let client = self.client_factory.load(&federation_id).ok().flatten()?;
+
+        clients.insert(federation_id, client.clone());
+
+        Some(client)
     }
 
-    /// Get the name of a federation from its client config.
-    pub async fn federation_name(client: &Arc<Client>) -> String {
-        client.config().await.name
-    }
-
-    /// Snapshot the current clients map into an owned Vec so we can release
-    /// the sync RwLock before entering async work.
-    fn clients_snapshot(&self) -> Vec<(FederationId, Arc<Client>)> {
-        self.clients
-            .read()
-            .expect("clients RwLock poisoned")
-            .iter()
-            .map(|(id, c)| (*id, c.clone()))
-            .collect()
-    }
-
-    /// Get info for all connected federations.
-    pub async fn federation_info_all(&self) -> Vec<FederationInfo> {
-        let mut infos = Vec::new();
-        for (federation_id, client) in self.clients_snapshot() {
-            infos.push(FederationInfo {
-                federation_id,
-                federation_name: Self::federation_name(&client).await,
-            });
-        }
-        infos
+    /// List every federation the gateway has joined, with its config-declared
+    /// name. Reads [`CLIENT_CONFIG`] directly so dormant federations are not
+    /// forced to lazy-load.
+    pub fn federation_info_all(&self) -> Vec<FederationInfo> {
+        self.gateway_db
+            .begin_read()
+            .as_ref()
+            .iter(&CLIENT_CONFIG, |r| {
+                r.map(|(federation_id, config)| FederationInfo {
+                    federation_id,
+                    federation_name: config.name,
+                })
+                .collect()
+            })
     }
 }
 

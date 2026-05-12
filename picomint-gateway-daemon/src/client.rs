@@ -103,16 +103,18 @@ impl GatewayClientFactory {
         self.db.isolate(federation_id)
     }
 
-    async fn read_config(&self, federation_id: &FederationId) -> Option<ConsensusConfig> {
+    fn read_config(&self, federation_id: &FederationId) -> Option<ConsensusConfig> {
         self.db
             .begin_read()
             .as_ref()
             .get(&CLIENT_CONFIG, federation_id)
     }
 
-    /// Join a federation for the first time. Errors if a config for this
-    /// federation is already persisted — use [`Self::load`] in that case.
-    pub async fn join(&self, invite: &InviteCode) -> anyhow::Result<Arc<picomint_client::Client>> {
+    /// Download and persist the consensus config for a federation. The
+    /// `Client` itself is brought up lazily on first use via
+    /// [`AppState::select_client`]. Errors if a config for this federation is
+    /// already persisted.
+    pub async fn join(&self, invite: &InviteCode) -> anyhow::Result<()> {
         let config = picomint_client::download(&self.endpoint, invite).await?;
 
         if config.network != self.network {
@@ -131,22 +133,22 @@ impl GatewayClientFactory {
 
         dbtx.commit();
 
-        self.open(config).await
+        Ok(())
     }
 
     /// Open the client for a federation whose config is already persisted.
     /// Returns `None` if no config is stored for `federation_id`.
-    pub async fn load(
+    pub fn load(
         &self,
         federation_id: &FederationId,
     ) -> anyhow::Result<Option<Arc<picomint_client::Client>>> {
-        match self.read_config(federation_id).await {
-            Some(config) => self.open(config).await.map(Some),
+        match self.read_config(federation_id) {
+            Some(config) => self.open(config).map(Some),
             None => Ok(None),
         }
     }
 
-    async fn open(&self, config: ConsensusConfig) -> anyhow::Result<Arc<picomint_client::Client>> {
+    fn open(&self, config: ConsensusConfig) -> anyhow::Result<Arc<picomint_client::Client>> {
         Client::new_gateway(
             self.endpoint.clone(),
             self.client_database(config.calculate_federation_id()),
