@@ -23,6 +23,7 @@ use picomint_core::core::OperationId;
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentImage};
 use picomint_core::ln::gateway_api::{GatewayInfo, GatewayPk, PaymentFee};
+use picomint_core::ln::lnurl::MAX_GATEWAYS_PER_LNURL;
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_core::ln::{
     LightningInput, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
@@ -523,6 +524,12 @@ impl LightningClientModule {
         if gateways.is_empty() {
             return Err(GenerateLnurlError::NoGatewaysAvailable);
         }
+
+        // Random sample so load spreads across the federation's announced
+        // gateways instead of always pinning the byte-canonically smallest few.
+        let gateways = gateways
+            .into_iter()
+            .choose_multiple(&mut rand::thread_rng(), MAX_GATEWAYS_PER_LNURL);
 
         let receive_keypair = self.secret.receive_keypair();
 

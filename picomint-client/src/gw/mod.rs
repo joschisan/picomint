@@ -50,8 +50,7 @@ impl GatewayClientModule {
             tpe_pks: cfg.tpe_pks.clone(),
         };
 
-        let receive_executor =
-            ModuleExecutor::new(context.db().clone(), sm_context, tg.clone());
+        let receive_executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone());
 
         Ok(GatewayClientModule {
             federation_id,

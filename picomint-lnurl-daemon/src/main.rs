@@ -23,7 +23,7 @@ use picomint_core::ln::gateway_api::{
     InfoRequest, InfoResponse, PaymentFee, VerifyPreimageRequest,
     VerifyResponse as GatewayVerifyResponse,
 };
-use picomint_core::ln::lnurl::LnurlRequest;
+use picomint_core::ln::lnurl::{LnurlRequest, MAX_GATEWAYS_PER_LNURL};
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_lnurl::{
@@ -32,6 +32,7 @@ use picomint_lnurl::{
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::net::TcpListener;
+use tokio::task::JoinSet;
 use tower_http::cors;
 use tower_http::cors::CorsLayer;
 use tpe::AggregatePublicKey;
@@ -134,6 +135,12 @@ async fn invoice(
     let Ok(request) = picomint_base32::decode::<LnurlRequest>(&payload) else {
         return Json(LnurlResponse::error("Failed to decode payload"));
     };
+
+    if request.gateways.len() > MAX_GATEWAYS_PER_LNURL {
+        return Json(LnurlResponse::error(format!(
+            "Too many gateways in request (max {MAX_GATEWAYS_PER_LNURL})"
+        )));
+    }
 
     if params.amount < MIN_SENDABLE_MSAT || params.amount > MAX_SENDABLE_MSAT {
         return Json(LnurlResponse::error(format!(
@@ -269,15 +276,25 @@ async fn select_gateway(
     gateways: Vec<GatewayPk>,
     federation_id: FederationId,
 ) -> anyhow::Result<(GatewayInfo, GatewayPk)> {
+    let mut probes = JoinSet::new();
+
     for gateway_pk in gateways {
-        if let Ok(InfoResponse { info: Some(info) }) = gateway_request(
-            endpoint,
-            gateway_pk,
-            GatewayMethod::Info(InfoRequest { federation_id }),
-        )
-        .await
-        {
-            return Ok((info, gateway_pk));
+        let endpoint = endpoint.clone();
+        probes.spawn(async move {
+            let response = gateway_request::<InfoResponse>(
+                &endpoint,
+                gateway_pk,
+                GatewayMethod::Info(InfoRequest { federation_id }),
+            )
+            .await
+            .ok()?;
+            Some((response.info?, gateway_pk))
+        });
+    }
+
+    while let Some(result) = probes.join_next().await {
+        if let Ok(Some(hit)) = result {
+            return Ok(hit);
         }
     }
 
