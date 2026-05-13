@@ -528,8 +528,11 @@ async fn federation_disable(
     Json(payload): Json<FederationDisableRequest>,
 ) -> Result<Json<()>, CliError> {
     let dbtx = state.gateway_db.begin_write();
-    dbtx.as_ref()
-        .insert(&crate::db::DisabledFederationTable, &payload.federation, &());
+    dbtx.as_ref().insert(
+        &crate::db::DisabledFederationTable,
+        &payload.federation,
+        &(),
+    );
     dbtx.commit();
 
     Ok(Json(()))
