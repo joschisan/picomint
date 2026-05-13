@@ -1,4 +1,4 @@
-use crate::executor::StateMachine;
+use crate::executor::{SmId, StateMachine};
 use crate::tx::{Input, TxBuilder};
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
@@ -21,6 +21,12 @@ use tracing::{error, instrument};
 
 use super::events::{SendFailureEvent, SendRefundEvent, SendSuccessEvent};
 use super::{LightningClientContext, LightningInvoice};
+
+crate::client_table!(
+    SendStateMachineTable,
+    SmId => SendStateMachine,
+    "ln-send-sm",
+);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
@@ -59,14 +65,14 @@ pub enum SendSMState {
 /// Outcome produced by [`SendStateMachine::trigger`]. Which variant is
 /// yielded depends on the current [`SendSMState`]:
 /// - `Funding`     → [`SendOutcome::FundingResult`]
-/// - `Funded`      → [`SendOutcome::GatewayResponse`] / [`SendOutcome::Preimage`]
+/// - `Funded`      → [`SendOutcome::GatewayResponse`] / [`SendOutcome::PreimageTable`]
 ///   / [`SendOutcome::Expired`]
-/// - `Refunding{}` → [`SendOutcome::Refunded`] / [`SendOutcome::Preimage`]
+/// - `Refunding{}` → [`SendOutcome::Refunded`] / [`SendOutcome::PreimageTable`]
 ///   / [`SendOutcome::Failure`]
 pub enum SendOutcome {
     FundingResult(Result<(), String>),
     GatewayResponse(Result<[u8; 32], Signature>),
-    Preimage([u8; 32]),
+    PreimageTable([u8; 32]),
     Expired,
     Refunded,
     Failure,
@@ -75,8 +81,6 @@ pub enum SendOutcome {
 /// State machine that requests the lightning gateway to pay an invoice on
 /// behalf of a federation client.
 impl StateMachine for SendStateMachine {
-    const TABLE_NAME: &'static str = "ln-send-sm";
-
     type Context = LightningClientContext;
     type Outcome = SendOutcome;
 
@@ -94,7 +98,7 @@ impl StateMachine for SendStateMachine {
                     response = gateway_send_payment_sm(
                         ctx.client_ctx.api().endpoint().clone(),
                         gateway_pk,
-                        ctx.federation_id,
+                        ctx.federation,
                         self.common.outpoint,
                         self.common.contract.clone(),
                         invoice,
@@ -105,7 +109,7 @@ impl StateMachine for SendStateMachine {
                         self.common.contract.clone(),
                         ctx.clone(),
                     ) => match preimage {
-                        Some(p) => SendOutcome::Preimage(p),
+                        Some(p) => SendOutcome::PreimageTable(p),
                         None => SendOutcome::Expired,
                     },
                 }
@@ -132,7 +136,7 @@ impl StateMachine for SendStateMachine {
                             .await
                             .filter(|p| self.common.contract.verify_preimage(p));
                         match p {
-                            Some(p) => SendOutcome::Preimage(p),
+                            Some(p) => SendOutcome::PreimageTable(p),
                             None => SendOutcome::Failure,
                         }
                     }
@@ -150,7 +154,7 @@ impl StateMachine for SendStateMachine {
         match outcome {
             SendOutcome::FundingResult(Ok(())) => Some(self.update(SendSMState::Funded)),
             SendOutcome::FundingResult(Err(_)) => None,
-            SendOutcome::Preimage(preimage) => {
+            SendOutcome::PreimageTable(preimage) => {
                 ctx.client_ctx.log_event(
                     dbtx,
                     self.common.operation,
@@ -222,7 +226,7 @@ fn submit_refund(
 async fn gateway_send_payment_sm(
     endpoint: Endpoint,
     gateway_pk: GatewayPk,
-    federation_id: FederationId,
+    federation: FederationId,
     outpoint: OutPoint,
     contract: OutgoingContract,
     invoice: LightningInvoice,
@@ -232,7 +236,7 @@ async fn gateway_send_payment_sm(
         let payment_result = crate::ln::gateway::send_payment(
             &endpoint,
             gateway_pk,
-            federation_id,
+            federation,
             outpoint,
             contract.clone(),
             invoice.clone(),

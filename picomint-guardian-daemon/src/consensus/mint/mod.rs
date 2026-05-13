@@ -24,8 +24,8 @@ use crate::config::poly::eval_poly_g2;
 use crate::{handler, handler_async};
 
 use self::db::{
-    BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, ISSUANCE_COUNTER, NOTE_NONCE,
-    NoteNonceKey, RECOVERY_ITEM,
+    BlindedSignatureShareRecoveryTable, BlindedSignatureShareTable, IssuanceCounterTable,
+    NoteNonceKey, NoteNonceTable, RecoveryItemTable,
 };
 
 /// Run DKG for the mint module, producing a fresh `MintConfig` for this peer.
@@ -87,7 +87,7 @@ impl Mint {
     }
 
     pub async fn note_distribution_ui(&self) -> BTreeMap<Denomination, u64> {
-        self.db.begin_read().iter(&ISSUANCE_COUNTER, |r| {
+        self.db.begin_read().iter(&IssuanceCounterTable, |r| {
             r.filter(|(_, count)| *count > 0).collect()
         })
     }
@@ -124,24 +124,24 @@ impl Mint {
         }
 
         if dbtx
-            .insert(&NOTE_NONCE, &NoteNonceKey(input.note.nonce), &())
+            .insert(&NoteNonceTable, &NoteNonceKey(input.note.nonce), &())
             .is_some()
         {
             return Err(MintInputError::SpentCoin);
         }
 
         let new_count = dbtx
-            .remove(&ISSUANCE_COUNTER, &input.note.denomination)
+            .remove(&IssuanceCounterTable, &input.note.denomination)
             .unwrap_or(0)
             .checked_sub(1)
             .expect("Failed to decrement issuance counter");
 
-        dbtx.insert(&ISSUANCE_COUNTER, &input.note.denomination, &new_count);
+        dbtx.insert(&IssuanceCounterTable, &input.note.denomination, &new_count);
 
         let next_index = get_recovery_count(dbtx);
 
         dbtx.insert(
-            &RECOVERY_ITEM,
+            &RecoveryItemTable,
             &next_index,
             &RecoveryItem::Input {
                 nonce_hash: input.note.nonce.consensus_hash(),
@@ -173,22 +173,26 @@ impl Mint {
             .map(|key| tbs::sign_message(output.nonce, *key))
             .ok_or(MintOutputError::InvalidDenomination)?;
 
-        dbtx.insert(&BLINDED_SIGNATURE_SHARE, &outpoint, &signature);
+        dbtx.insert(&BlindedSignatureShareTable, &outpoint, &signature);
 
-        dbtx.insert(&BLINDED_SIGNATURE_SHARE_RECOVERY, &output.nonce, &signature);
+        dbtx.insert(
+            &BlindedSignatureShareRecoveryTable,
+            &output.nonce,
+            &signature,
+        );
 
         let new_count = dbtx
-            .remove(&ISSUANCE_COUNTER, &output.denomination)
+            .remove(&IssuanceCounterTable, &output.denomination)
             .unwrap_or(0)
             .checked_add(1)
             .expect("Failed to increment issuance counter");
 
-        dbtx.insert(&ISSUANCE_COUNTER, &output.denomination, &new_count);
+        dbtx.insert(&IssuanceCounterTable, &output.denomination, &new_count);
 
         let next_index = get_recovery_count(dbtx);
 
         dbtx.insert(
-            &RECOVERY_ITEM,
+            &RecoveryItemTable,
             &next_index,
             &RecoveryItem::Output {
                 denomination: output.denomination,
@@ -206,7 +210,7 @@ impl Mint {
     }
 
     pub async fn audit(&self, dbtx: &WriteTxRef<'_>) -> i64 {
-        dbtx.iter(&ISSUANCE_COUNTER, |r| {
+        dbtx.iter(&IssuanceCounterTable, |r| {
             r.map(|(denomination, count)| -((denomination.amount().msats * count) as i64))
                 .sum()
         })
@@ -226,5 +230,7 @@ impl Mint {
 }
 
 pub(crate) fn get_recovery_count(dbtx: &impl picomint_redb::DbRead) -> u64 {
-    dbtx.iter(&RECOVERY_ITEM, |r| r.next_back().map_or(0, |(k, _)| k + 1))
+    dbtx.iter(&RecoveryItemTable, |r| {
+        r.next_back().map_or(0, |(k, _)| k + 1)
+    })
 }

@@ -9,13 +9,15 @@ use picomint_client::{Client, Mnemonic};
 use picomint_core::config::{ConsensusConfig, FederationId};
 use picomint_core::invite::InviteCode;
 use picomint_core::secret::Secret;
+use picomint_eventlog::EventLogger;
 use picomint_redb::Database;
 
-use crate::db::{CLIENT_CONFIG, ROOT_ENTROPY};
+use crate::db::{ClientConfigTable, RootEntropyTable};
 
 #[derive(Clone)]
 pub struct GatewayClientFactory {
     db: Database,
+    logger: EventLogger,
     mnemonic: Mnemonic,
     endpoint: Endpoint,
     network: Network,
@@ -27,6 +29,7 @@ impl GatewayClientFactory {
     /// so the daemon's `GatewayPk` is reproducible from this row alone.
     pub async fn init(
         db: Database,
+        logger: EventLogger,
         mnemonic: Mnemonic,
         network: Network,
         api_addr: SocketAddr,
@@ -34,7 +37,7 @@ impl GatewayClientFactory {
         let dbtx = db.begin_write();
 
         assert!(
-            dbtx.insert(&ROOT_ENTROPY, &(), &mnemonic.to_entropy())
+            dbtx.insert(&RootEntropyTable, &(), &mnemonic.to_entropy())
                 .is_none()
         );
 
@@ -53,6 +56,7 @@ impl GatewayClientFactory {
         Ok(Self {
             endpoint,
             db,
+            logger,
             mnemonic,
             network,
         })
@@ -61,10 +65,11 @@ impl GatewayClientFactory {
     /// Try to load an existing factory from the database.
     pub async fn try_load(
         db: Database,
+        logger: EventLogger,
         network: Network,
         api_addr: SocketAddr,
     ) -> anyhow::Result<Option<Self>> {
-        let Some(entropy) = db.begin_read().as_ref().get(&ROOT_ENTROPY, &()) else {
+        let Some(entropy) = db.begin_read().as_ref().get(&RootEntropyTable, &()) else {
             return Ok(None);
         };
 
@@ -84,6 +89,7 @@ impl GatewayClientFactory {
         Ok(Some(Self {
             endpoint,
             db,
+            logger,
             mnemonic,
             network,
         }))
@@ -99,15 +105,11 @@ impl GatewayClientFactory {
         &self.mnemonic
     }
 
-    fn client_database(&self, federation_id: FederationId) -> Database {
-        self.db.isolate(federation_id)
-    }
-
-    fn read_config(&self, federation_id: &FederationId) -> Option<ConsensusConfig> {
+    fn read_config(&self, federation: &FederationId) -> Option<ConsensusConfig> {
         self.db
             .begin_read()
             .as_ref()
-            .get(&CLIENT_CONFIG, federation_id)
+            .get(&ClientConfigTable, federation)
     }
 
     /// Download and persist the consensus config for a federation. The
@@ -125,7 +127,11 @@ impl GatewayClientFactory {
 
         if dbtx
             .as_ref()
-            .insert(&CLIENT_CONFIG, &config.calculate_federation_id(), &config)
+            .insert(
+                &ClientConfigTable,
+                &config.calculate_federation_id(),
+                &config,
+            )
             .is_some()
         {
             anyhow::bail!("Federation is already joined");
@@ -137,12 +143,12 @@ impl GatewayClientFactory {
     }
 
     /// Open the client for a federation whose config is already persisted.
-    /// Returns `None` if no config is stored for `federation_id`.
+    /// Returns `None` if no config is stored for `federation`.
     pub fn load(
         &self,
-        federation_id: &FederationId,
+        federation: &FederationId,
     ) -> anyhow::Result<Option<Arc<picomint_client::Client>>> {
-        match self.read_config(federation_id) {
+        match self.read_config(federation) {
             Some(config) => self.open(config).map(Some),
             None => Ok(None),
         }
@@ -151,7 +157,8 @@ impl GatewayClientFactory {
     fn open(&self, config: ConsensusConfig) -> anyhow::Result<Arc<picomint_client::Client>> {
         Client::new_gateway(
             self.endpoint.clone(),
-            self.client_database(config.calculate_federation_id()),
+            self.db.clone(),
+            self.logger.clone(),
             &self.mnemonic,
             config,
         )
@@ -163,6 +170,6 @@ impl GatewayClientFactory {
         self.db
             .begin_read()
             .as_ref()
-            .iter(&CLIENT_CONFIG, |r| r.map(|(id, _)| id).collect())
+            .iter(&ClientConfigTable, |r| r.map(|(id, _)| id).collect())
     }
 }

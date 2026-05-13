@@ -7,14 +7,14 @@
 //! event log and drives the external side effect that makes the payment
 //! terminal from the outside world's point of view:
 //!
-//! - Direct swap (daemon DB has an `OUTGOING_CONTRACT[operation]` row): call
+//! - Direct swap (daemon DB has an `OutgoingContract[operation]` row): call
 //!   `finalize_send` on the sending federation's client so the sender gets
 //!   the preimage (or refund signature).
 //! - External LN receive (no outgoing row): call `claim_for_hash` /
 //!   `fail_for_hash` on the LDK node so the upstream LN sender's HTLC
 //!   settles or times out.
 //!
-//! Cursor is persisted daemon-wide in `EVENT_CURSOR` and advanced after
+//! Cursor is persisted daemon-wide in `EventCursorTable` and advanced after
 //! each dispatched event. Dispatches are idempotent, so on a crash the
 //! trailer just re-runs the last event on restart.
 use bitcoin::hashes::{Hash as _, sha256};
@@ -26,7 +26,7 @@ use picomint_eventlog::EventLogEntry;
 use picomint_redb::WriteTxRef;
 
 use crate::AppState;
-use crate::db::{EVENT_CURSOR, INCOMING_CONTRACT, OUTGOING_CONTRACT};
+use crate::db::{EventCursorTable, IncomingContractTable, OutgoingContractTable};
 
 const CHUNK_SIZE: u64 = 1_000;
 
@@ -35,15 +35,17 @@ pub async fn run(state: AppState) {
         .gateway_db
         .begin_read()
         .as_ref()
-        .get(&EVENT_CURSOR, &())
+        .get(&EventCursorTable, &())
         .unwrap_or_default();
 
-    let notify = picomint_eventlog::event_notify(&state.gateway_db);
+    let notify = state.logger.event_notify(&state.gateway_db);
 
     loop {
         let notified = notify.notified();
 
-        let chunk = picomint_eventlog::get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
+        let chunk = state
+            .logger
+            .get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
 
         for (id, entry) in &chunk {
             let dbtx = state.gateway_db.begin_write();
@@ -52,7 +54,7 @@ pub async fn run(state: AppState) {
 
             cursor = id.saturating_add(1);
 
-            dbtx.insert(&EVENT_CURSOR, &(), &cursor);
+            dbtx.insert(&EventCursorTable, &(), &cursor);
 
             dbtx.commit();
         }
@@ -74,7 +76,7 @@ fn dispatch(state: &AppState, tx_ref: &WriteTxRef<'_>, entry: &EventLogEntry) {
 
     let operation = entry.operation;
 
-    if let Some(row) = tx_ref.get(&OUTGOING_CONTRACT, &operation) {
+    if let Some(row) = tx_ref.get(&OutgoingContractTable, &operation) {
         dispatch_direct_swap(state, tx_ref, operation, row, preimage);
     } else {
         dispatch_ln_receive(state, tx_ref, operation, preimage);
@@ -89,11 +91,11 @@ fn dispatch_direct_swap(
     preimage: Option<[u8; 32]>,
 ) {
     let source_client = state
-        .select_client(row.federation_id)
+        .select_client(row.federation)
         .expect("source federation for outgoing contract is connected");
 
     source_client.gw().finalize_send(
-        &tx_ref.isolate(row.federation_id),
+        tx_ref,
         operation,
         row.contract,
         row.outpoint,
@@ -117,7 +119,7 @@ fn dispatch_ln_receive(
     };
 
     let row = tx_ref
-        .get(&INCOMING_CONTRACT, &operation)
+        .get(&IncomingContractTable, &operation)
         .expect("incoming_contract row registered by create_bolt11_invoice");
 
     let ph = match row.contract.commitment.payment_image {

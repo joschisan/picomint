@@ -2,21 +2,21 @@
 //!
 //! The federation's announced expiration is fetched once at client startup
 //! via threshold consensus and mirrored into the local
-//! [`EXPIRATION_STATUS`] table. [`Client::expiration_status`] is a fast,
+//! [`ExpirationStatusTable`]. [`Client::expiration_status`] is a fast,
 //! non-blocking read from that cache; [`Client::refresh_expiration_status`]
 //! re-runs the federation query on demand (used by tests and by apps that
 //! want to force a re-sync).
 
 use std::sync::Arc;
 
+use picomint_core::config::FederationId;
 use picomint_core::expiration::ExpirationStatus;
-use picomint_redb::table;
 use thiserror::Error;
 
 use crate::Client;
 
-table!(
-    EXPIRATION_STATUS,
+client_table!(
+    ExpirationStatusTable,
     () => ExpirationStatus,
     "expiration-status",
 );
@@ -33,7 +33,9 @@ impl Client {
     /// `None` until that completes successfully or if the federation has
     /// not announced an expiration.
     pub fn expiration_status(&self) -> Option<ExpirationStatus> {
-        self.db().begin_read().get(&EXPIRATION_STATUS, &())
+        self.db()
+            .begin_read()
+            .get(&ExpirationStatusTable(self.federation()), &())
     }
 
     /// Re-fetch the announced expiration via threshold consensus and
@@ -51,10 +53,10 @@ impl Client {
 
         match status {
             Some(s) => {
-                dbtx.insert(&EXPIRATION_STATUS, &(), &s);
+                dbtx.insert(&ExpirationStatusTable(client.federation()), &(), &s);
             }
             None => {
-                dbtx.remove(&EXPIRATION_STATUS, &());
+                dbtx.remove(&ExpirationStatusTable(client.federation()), &());
             }
         }
 
@@ -65,6 +67,6 @@ impl Client {
 }
 
 /// Drop the expiration cache table. Called by [`Client::wipe`].
-pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>) {
-    dbtx.delete_table(&EXPIRATION_STATUS);
+pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>, federation: FederationId) {
+    dbtx.delete_table(&ExpirationStatusTable(federation));
 }

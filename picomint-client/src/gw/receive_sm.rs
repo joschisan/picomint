@@ -16,9 +16,15 @@ use tracing::warn;
 
 use super::GwSmContext;
 use super::events::{ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent};
-use crate::executor::StateMachine;
+use crate::executor::{SmId, StateMachine};
 use crate::query::FilterMapThreshold;
 use crate::tx::{Input, TxBuilder};
+
+crate::client_table!(
+    ReceiveStateMachineTable,
+    SmId => ReceiveStateMachine,
+    "gw-receive-sm",
+);
 
 /// Single-state state machine covering the federation side of the receive
 /// flow. `trigger` waits for tx acceptance and gathers TPE decryption shares;
@@ -37,8 +43,6 @@ pub struct ReceiveStateMachine {
 picomint_redb::consensus_value!(ReceiveStateMachine);
 
 impl StateMachine for ReceiveStateMachine {
-    const TABLE_NAME: &'static str = "gw-receive-sm";
-
     type Context = GwSmContext;
     type Outcome = Result<BTreeMap<PeerId, DecryptionKeyShare>, String>;
 

@@ -12,14 +12,24 @@ use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_client::{Client, Mnemonic};
+use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::gateway_api::GatewayPk;
+use picomint_eventlog::{EventLogEntry, EventLogId, EventLogger};
+use picomint_redb::table;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::block_in_place;
 use tracing::info;
 
 use crate::cli;
+
+table!(EventLogTable, EventLogId => EventLogEntry, "event-log");
+table!(
+    EventLogByOperationTable,
+    (OperationId, EventLogId) => EventLogEntry,
+    "operation-event-log",
+);
 
 pub const BTC_RPC_PORT: u16 = 18443;
 pub const GUARDIAN_BASE_PORT: u16 = 17000;
@@ -261,11 +271,12 @@ async fn build_client(
     // spawns the driver.
     if init_recovery {
         let dbtx = db.begin_write();
-        Client::init_recovery(&dbtx.as_ref());
+        Client::init_recovery(&dbtx.as_ref(), config.calculate_federation_id());
         dbtx.commit();
     }
 
-    let client = Client::new(endpoint, db, &mnemonic, config)?;
+    let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
+    let client = Client::new(endpoint, db, logger, &mnemonic, config)?;
 
     info!("Created client-{n}");
     Ok(client)

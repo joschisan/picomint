@@ -9,7 +9,7 @@ use picomint_core::wallet::methods::{
 };
 
 use super::Wallet;
-use super::db::FEDERATION_WALLET;
+use super::db::FederationWalletTable;
 
 pub fn consensus_block_count(
     wallet: &Wallet,
@@ -36,7 +36,7 @@ pub fn federation_wallet(
     _: FederationWalletRequest,
 ) -> Result<FederationWalletResponse, String> {
     Ok(FederationWalletResponse {
-        wallet: wallet.db.begin_read().get(&FEDERATION_WALLET, &()),
+        wallet: wallet.db.begin_read().get(&FederationWalletTable, &()),
     })
 }
 

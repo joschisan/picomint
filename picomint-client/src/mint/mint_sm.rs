@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::executor::StateMachine;
+use crate::executor::{SmId, StateMachine};
 use anyhow::ensure;
 use picomint_core::core::OperationId;
 use picomint_core::mint::{Denomination, verify_note};
@@ -9,22 +9,28 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTxRef;
 use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
-use super::client_db::NOTE;
+use super::client_db::NoteTable;
 use super::events::{MintFailureEvent, MintSuccessEvent};
 use super::{MintSmContext, NoteIssuanceRequest, SpendableNote};
+
+crate::client_table!(
+    MintStateMachineTable,
+    SmId => MintStateMachine,
+    "mint-mint-sm",
+);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct MintStateMachine {
     pub operation: OperationId,
     /// Notes consumed on the input side that originated from our own
     /// wallet db (or, for recovery, were materialised from recovered
-    /// nonces). Re-inserted into `NOTE` on tx rejection.
+    /// nonces). Re-inserted into `NoteTable` on tx rejection.
     pub spendable_notes: Vec<SpendableNote>,
     /// Tx the SM is tied to. Recovery now submits a real reissuance
     /// tx, so this is always set.
     pub txid: TransactionId,
     /// Blinded outputs this tx issues. Finalized into `SpendableNote`s and
-    /// inserted into `NOTE` once the federation's blind-signature shares are
+    /// inserted into `NoteTable` once the federation's blind-signature shares are
     /// aggregated.
     pub issuance_requests: Vec<NoteIssuanceRequest>,
 }
@@ -32,8 +38,6 @@ pub struct MintStateMachine {
 picomint_redb::consensus_value!(MintStateMachine);
 
 impl StateMachine for MintStateMachine {
-    const TABLE_NAME: &'static str = "mint-mint-sm";
-
     type Context = MintSmContext;
     type Outcome = Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String>;
 
@@ -63,7 +67,7 @@ impl StateMachine for MintStateMachine {
     ) -> Option<Self> {
         let Ok(signature_shares) = outcome else {
             for note in &self.spendable_notes {
-                dbtx.insert(&NOTE, note, &());
+                dbtx.insert(&NoteTable(ctx.federation), note, &());
             }
 
             return None;
@@ -91,7 +95,10 @@ impl StateMachine for MintStateMachine {
                 return None;
             }
 
-            assert!(dbtx.insert(&NOTE, &spendable_note, &()).is_none());
+            assert!(
+                dbtx.insert(&NoteTable(ctx.federation), &spendable_note, &())
+                    .is_none()
+            );
         }
 
         let event = MintSuccessEvent {

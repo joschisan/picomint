@@ -3,21 +3,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use bitcoin_hashes::hash160;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::table;
 
 use super::SpendableNote;
 use super::issuance::NoteIssuanceRequest;
 
 // Tracks that a `receive(ecash)` has been started for this deterministic
 // [`OperationId`]. Used to make `receive` idempotent.
-table!(
-    RECEIVE_OPERATION,
+client_table!(
+    ReceiveOperationTable,
     OperationId => (),
     "mint-receive-operation",
 );
 
-table!(
-    NOTE,
+client_table!(
+    NoteTable,
     SpendableNote => (),
     "mint-note",
 );
@@ -46,8 +45,8 @@ pub struct Recovery {
 
 picomint_redb::consensus_value!(Recovery);
 
-table!(
-    RECOVERY,
+client_table!(
+    RecoveryTable,
     () => Recovery,
     "mint-recovery",
 );

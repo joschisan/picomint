@@ -20,12 +20,12 @@ use picomint_core::{Amount, OutPoint};
 pub async fn gateway_info(
     endpoint: &Endpoint,
     gateway_pk: GatewayPk,
-    federation_id: FederationId,
+    federation: FederationId,
 ) -> anyhow::Result<Option<GatewayInfo>> {
     picomint_rpc::request::<_, InfoResponse>(
         endpoint,
         gateway_pk.0,
-        GatewayMethod::Info(InfoRequest { federation_id }),
+        GatewayMethod::Info(InfoRequest { federation }),
     )
     .await
     .map(|r| r.info)
@@ -34,7 +34,7 @@ pub async fn gateway_info(
 pub async fn create_bolt11_invoice(
     endpoint: &Endpoint,
     gateway_pk: GatewayPk,
-    federation_id: FederationId,
+    federation: FederationId,
     contract: IncomingContract,
     amount: Amount,
     expiry_secs: u32,
@@ -43,7 +43,7 @@ pub async fn create_bolt11_invoice(
         endpoint,
         gateway_pk.0,
         GatewayMethod::CreateInvoice(CreateInvoiceRequest {
-            federation_id,
+            federation,
             contract,
             amount,
             expiry_secs,
@@ -56,7 +56,7 @@ pub async fn create_bolt11_invoice(
 pub async fn send_payment(
     endpoint: &Endpoint,
     gateway_pk: GatewayPk,
-    federation_id: FederationId,
+    federation: FederationId,
     outpoint: OutPoint,
     contract: OutgoingContract,
     invoice: LightningInvoice,
@@ -66,7 +66,7 @@ pub async fn send_payment(
         endpoint,
         gateway_pk.0,
         GatewayMethod::SendPayment(SendPaymentRequest {
-            federation_id,
+            federation,
             outpoint,
             contract,
             invoice,

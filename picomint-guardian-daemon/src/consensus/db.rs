@@ -1,25 +1,25 @@
 use picomint_bft::{Entry, Round};
-use picomint_core::expiration::ExpirationStatus;
-use picomint_core::session::{AcceptedItem, SignedSessionOutcome};
+use picomint_core::expiration;
+use picomint_core::session;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::{PeerId, TransactionId};
 use picomint_redb::table;
 
 table!(
-    ACCEPTED_ITEM,
-    u64 => AcceptedItem,
+    AcceptedItemTable,
+    u64 => session::AcceptedItem,
     "accepted-item",
 );
 
 table!(
-    ACCEPTED_TX,
+    AcceptedTxTable,
     TransactionId => (),
     "accepted-tx",
 );
 
 table!(
-    SIGNED_SESSION_OUTCOME,
-    u64 => SignedSessionOutcome,
+    SignedSessionOutcomeTable,
+    u64 => session::SignedSessionOutcome,
     "signed-session-outcome",
 );
 
@@ -28,7 +28,7 @@ table!(
 // natural key order yields `(round, peer)` lex order — the order the
 // engine expects for recover.
 table!(
-    BFT_UNITS,
+    BftUnitsTable,
     (Round, PeerId) => Entry<ConsensusItem>,
     "bft-units",
 );
@@ -38,7 +38,7 @@ table!(
 // returned over the wire so a threshold of guardians must agree on the
 // byte-equal value before clients trust it.
 table!(
-    EXPIRATION_STATUS,
-    () => ExpirationStatus,
+    ExpirationStatusTable,
+    () => expiration::ExpirationStatus,
     "expiration-status",
 );

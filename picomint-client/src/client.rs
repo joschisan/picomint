@@ -16,7 +16,7 @@ use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
-use picomint_eventlog::{EventLogEntry, EventLogId};
+use picomint_eventlog::{EventLogEntry, EventLogId, EventLogger};
 use picomint_redb::Database;
 use tracing::debug;
 
@@ -48,7 +48,8 @@ pub(crate) enum LnFlavor {
 pub struct Client {
     config: tokio::sync::RwLock<ConsensusConfig>,
     db: Database,
-    federation_id: FederationId,
+    federation: FederationId,
+    logger: EventLogger,
     pub(crate) mint: Arc<MintClientModule>,
     pub(crate) wallet: Arc<WalletClientModule>,
     pub(crate) ln: LnFlavor,
@@ -63,10 +64,11 @@ impl Client {
     pub fn new(
         endpoint: Endpoint,
         db: Database,
+        logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
     ) -> anyhow::Result<Arc<Self>> {
-        Self::build(endpoint, db, mnemonic, config, LnChoice::Regular)
+        Self::build(endpoint, db, logger, mnemonic, config, LnChoice::Regular)
     }
 
     /// Gateway-flavor counterpart of [`Client::new`]. Used by the gateway
@@ -75,15 +77,17 @@ impl Client {
     pub fn new_gateway(
         endpoint: Endpoint,
         db: Database,
+        logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
     ) -> anyhow::Result<Arc<Self>> {
-        Self::build(endpoint, db, mnemonic, config, LnChoice::Gateway)
+        Self::build(endpoint, db, logger, mnemonic, config, LnChoice::Gateway)
     }
 
     fn build(
         endpoint: Endpoint,
         db: Database,
+        logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
         ln_choice: LnChoice,
@@ -92,8 +96,8 @@ impl Client {
             version = %env!("CARGO_PKG_VERSION"),
             "Building picomint client",
         );
-        let federation_id = config.calculate_federation_id();
-        let client_secret = ClientSecret::new(mnemonic, federation_id);
+        let federation = config.calculate_federation_id();
+        let client_secret = ClientSecret::new(mnemonic, federation);
 
         let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
             .peers
@@ -104,18 +108,26 @@ impl Client {
 
         let tg = TaskGroup::new();
 
-        let mint_context =
-            crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
+        let mint_context = crate::module::ClientContext::new(
+            api.clone(),
+            db.clone(),
+            logger.clone(),
+            config.clone(),
+        );
         let mint = Arc::new(MintClientModule::new(
-            federation_id,
+            federation,
             config.mint.clone(),
             mint_context,
             client_secret.mint_secret(),
             &tg,
         )?);
 
-        let wallet_context =
-            crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
+        let wallet_context = crate::module::ClientContext::new(
+            api.clone(),
+            db.clone(),
+            logger.clone(),
+            config.clone(),
+        );
         let wallet = Arc::new(WalletClientModule::new(
             config.wallet.clone(),
             wallet_context,
@@ -126,10 +138,14 @@ impl Client {
 
         let ln = match ln_choice {
             LnChoice::Regular => {
-                let ln_context =
-                    crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
+                let ln_context = crate::module::ClientContext::new(
+                    api.clone(),
+                    db.clone(),
+                    logger.clone(),
+                    config.clone(),
+                );
                 LnFlavor::Regular(Arc::new(LightningClientModule::new(
-                    federation_id,
+                    federation,
                     config.ln.clone(),
                     ln_context,
                     mint.clone(),
@@ -138,10 +154,14 @@ impl Client {
                 )?))
             }
             LnChoice::Gateway => {
-                let gw_context =
-                    crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
+                let gw_context = crate::module::ClientContext::new(
+                    api.clone(),
+                    db.clone(),
+                    logger.clone(),
+                    config.clone(),
+                );
                 LnFlavor::Gateway(Arc::new(GatewayClientModule::new(
-                    federation_id,
+                    federation,
                     config.ln.clone(),
                     gw_context,
                     mint.clone(),
@@ -154,7 +174,8 @@ impl Client {
         let client = Arc::new(Client {
             config: tokio::sync::RwLock::new(config),
             db,
-            federation_id,
+            federation,
+            logger,
             mint,
             wallet,
             ln,
@@ -184,25 +205,25 @@ impl Client {
     /// `dbtx` is supplied by the caller so the wipe commits atomically
     /// with whatever else the caller is doing — typically removing
     /// root-level rows scoped to this client by some other key (the
-    /// gateway's `CLIENT_CONFIG[fed_id]`, per-federation event-log
+    /// gateway's `ClientConfigTable[federation]`, per-federation event-log
     /// entries, …) and dropping the live `Arc<Client>` from any cache.
     /// The caller is responsible for [`Client::shutdown`] before calling
     /// this so no task is mid-write.
     pub fn wipe(&self, dbtx: &picomint_redb::WriteTxRef<'_>) {
-        crate::mint::wipe_tables(dbtx);
-        crate::wallet::wipe_tables(dbtx);
-        crate::ln::wipe_tables(dbtx);
-        crate::gw::wipe_tables(dbtx);
-        crate::tx::wipe_tables(dbtx);
-        crate::expiration::wipe_tables(dbtx);
+        crate::mint::wipe_tables(dbtx, self.federation);
+        crate::wallet::wipe_tables(dbtx, self.federation);
+        crate::ln::wipe_tables(dbtx, self.federation);
+        crate::gw::wipe_tables(dbtx, self.federation);
+        crate::tx::wipe_tables(dbtx, self.federation);
+        crate::expiration::wipe_tables(dbtx, self.federation);
     }
 
     pub fn api(&self) -> &FederationApi {
         &self.api
     }
 
-    pub fn federation_id(&self) -> FederationId {
-        self.federation_id
+    pub fn federation(&self) -> FederationId {
+        self.federation
     }
 
     pub async fn config(&self) -> ConsensusConfig {
@@ -245,8 +266,11 @@ impl Client {
     /// `RecoveryEvent` will be logged under. The driver is picked up by
     /// the next [`Client::new`] / [`Client::new_gateway`] on the
     /// persisted db. Panics if a recovery is already in progress.
-    pub fn init_recovery(dbtx: &picomint_redb::WriteTxRef<'_>) -> OperationId {
-        crate::mint::init_recovery(dbtx)
+    pub fn init_recovery(
+        dbtx: &picomint_redb::WriteTxRef<'_>,
+        federation: FederationId,
+    ) -> OperationId {
+        crate::mint::init_recovery(dbtx, federation)
     }
 
     pub async fn get_balance(&self) -> anyhow::Result<Amount> {
@@ -295,7 +319,7 @@ impl Client {
             .await
             .into_iter()
             .find_map(|(p, node_id)| (peer == p).then_some(node_id))
-            .map(|node_id| InviteCode::new(node_id, self.federation_id()))
+            .map(|node_id| InviteCode::new(node_id, self.federation()))
     }
 
     /// Returns the guardian public key set from the client config.
@@ -315,18 +339,18 @@ impl Client {
         pos: EventLogId,
         limit: u64,
     ) -> Vec<(EventLogId, EventLogEntry)> {
-        picomint_eventlog::get_event_log(&self.db, pos, limit)
+        self.logger.get_event_log(&self.db, pos, limit)
     }
 
     /// Shared [`Notify`] that fires on every commit touching the event log.
     pub fn event_notify(&self) -> Arc<tokio::sync::Notify> {
-        picomint_eventlog::event_notify(&self.db)
+        self.logger.event_notify(&self.db)
     }
 
     /// One-shot snapshot of every event currently logged for `operation`,
     /// in insertion order.
     pub fn read_operation_events(&self, operation: OperationId) -> Vec<EventLogEntry> {
-        picomint_eventlog::read_operation_events(&self.db, operation)
+        self.logger.read_operation_events(&self.db, operation)
     }
 
     /// Stream every event belonging to `operation`, starting from the
@@ -335,7 +359,7 @@ impl Client {
         &self,
         operation: OperationId,
     ) -> BoxStream<'static, EventLogEntry> {
-        Box::pin(picomint_eventlog::subscribe_operation_events(
+        Box::pin(self.logger.subscribe_operation_events(
             self.db.clone(),
             self.event_notify(),
             operation,

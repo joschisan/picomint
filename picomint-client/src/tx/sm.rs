@@ -5,10 +5,17 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::tx::Transaction;
 use picomint_encoding::{Decodable, Encodable};
+use picomint_eventlog::EventLogger;
 use picomint_redb::WriteTxRef;
 
-use crate::executor::StateMachine;
+use crate::executor::{SmId, StateMachine};
 use crate::{TxAcceptEvent, TxRejectEvent};
+
+crate::client_table!(
+    TxSubmissionStateMachineTable,
+    SmId => TxSubmissionStateMachine,
+    "tx-submission-sm",
+);
 
 /// State machine that submits a transaction and waits for the final outcome.
 /// The server long-polls on `submit_tx`, returning either `Ok(())` once the
@@ -27,12 +34,11 @@ picomint_redb::consensus_value!(TxSubmissionStateMachine);
 #[derive(Debug, Clone)]
 pub struct TxSubmissionSmContext {
     pub api: FederationApi,
-    pub federation_id: FederationId,
+    pub federation: FederationId,
+    pub logger: EventLogger,
 }
 
 impl StateMachine for TxSubmissionStateMachine {
-    const TABLE_NAME: &'static str = "tx-submission-sm";
-
     type Context = TxSubmissionSmContext;
     type Outcome = Result<(), String>;
 
@@ -53,17 +59,13 @@ impl StateMachine for TxSubmissionStateMachine {
 
         match outcome {
             Ok(()) => {
-                picomint_eventlog::log_event(
-                    dbtx,
-                    ctx.federation_id,
-                    self.operation,
-                    TxAcceptEvent { txid },
-                );
+                ctx.logger
+                    .log_event(dbtx, ctx.federation, self.operation, TxAcceptEvent { txid });
             }
             Err(error) => {
-                picomint_eventlog::log_event(
+                ctx.logger.log_event(
                     dbtx,
-                    ctx.federation_id,
+                    ctx.federation,
                     self.operation,
                     TxRejectEvent { txid, error },
                 );

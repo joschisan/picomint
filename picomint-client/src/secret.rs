@@ -35,14 +35,14 @@ enum Path {
     Gw,
 }
 
-/// Per-federation client root secret, derived from `mnemonic → federation_id`.
+/// Per-federation client root secret, derived from `mnemonic → federation`.
 /// Exposes typed accessors for each module's sub-secret.
 #[derive(Copy, Clone, Debug)]
 pub struct ClientSecret(Secret);
 
 impl ClientSecret {
-    pub fn new(mnemonic: &Mnemonic, federation_id: FederationId) -> Self {
-        Self(Secret::new_root(&mnemonic.to_entropy()).child(&federation_id))
+    pub fn new(mnemonic: &Mnemonic, federation: FederationId) -> Self {
+        Self(Secret::new_root(&mnemonic.to_entropy()).child(&federation))
     }
 
     pub fn mint_secret(&self) -> MintSecret {

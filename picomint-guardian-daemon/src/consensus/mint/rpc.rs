@@ -14,18 +14,20 @@ use picomint_redb::ReadTx;
 use tbs::BlindedSignatureShare;
 
 use super::Mint;
-use super::db::{BLINDED_SIGNATURE_SHARE, BLINDED_SIGNATURE_SHARE_RECOVERY, RECOVERY_ITEM};
+use super::db::{
+    BlindedSignatureShareRecoveryTable, BlindedSignatureShareTable, RecoveryItemTable,
+};
 
 pub async fn signature_shares(
     mint: &Mint,
     req: SignatureSharesRequest,
 ) -> Result<SignatureSharesResponse, String> {
-    // Wait until any BLINDED_SIGNATURE_SHARE for this txid exists. All mint
+    // Wait until any BlindedSignatureShareTable for this txid exists. All mint
     // outputs of a given tx are signed atomically in the same consensus
     // commit, so observing one implies all are present.
     let (shares, _dbtx) = mint
         .db
-        .wait_table_check(&BLINDED_SIGNATURE_SHARE, |dbtx| {
+        .wait_table_check(&BlindedSignatureShareTable, |dbtx| {
             Some(collect_signature_shares(dbtx, req.txid)).filter(|s| !s.is_empty())
         })
         .await;
@@ -43,7 +45,7 @@ pub fn signature_shares_recovery(
 
     for message in req.messages {
         let share = dbtx
-            .get(&BLINDED_SIGNATURE_SHARE_RECOVERY, &message)
+            .get(&BlindedSignatureShareRecoveryTable, &message)
             .ok_or_else(|| "No blinded signature share found".to_string())?;
 
         shares.push(share);
@@ -88,11 +90,13 @@ fn collect_signature_shares(dbtx: &ReadTx, txid: TransactionId) -> Vec<BlindedSi
         out_idx: u64::MAX,
     };
 
-    dbtx.range(&BLINDED_SIGNATURE_SHARE, bounds, |r| {
+    dbtx.range(&BlindedSignatureShareTable, bounds, |r| {
         r.map(|(_, v)| v).collect()
     })
 }
 
 fn collect_recovery_slice(dbtx: &ReadTx, start: u64, end: u64) -> Vec<RecoveryItem> {
-    dbtx.range(&RECOVERY_ITEM, start..end, |r| r.map(|(_, v)| v).collect())
+    dbtx.range(&RecoveryItemTable, start..end, |r| {
+        r.map(|(_, v)| v).collect()
+    })
 }

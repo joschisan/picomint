@@ -3,16 +3,24 @@ use std::sync::atomic::AtomicU8;
 
 use anyhow::bail;
 use futures::StreamExt as _;
-use picomint_redb::Database;
+use picomint_redb::{Database, table};
 use tokio::try_join;
 use tracing::info;
 
-use super::{EVENT_LOG, EventKind, EventSource, log_event_raw, subscribe_operation_events};
+use super::{EventKind, EventLogEntry, EventLogId, EventLogger, EventSource};
+
+table!(TestEventLogTable, EventLogId => EventLogEntry, "test-event-log");
+table!(
+    TestEventLogByOperationTable,
+    (picomint_core::core::OperationId, EventLogId) => EventLogEntry,
+    "test-event-log-by-operation",
+);
 
 #[test_log::test(tokio::test)]
 async fn sanity_subscribe_operation_events() {
     let db = Database::open_in_memory();
-    let event_notify = db.notify_for_table(&EVENT_LOG);
+    let logger = EventLogger::new(TestEventLogTable, TestEventLogByOperationTable);
+    let event_notify = logger.event_notify(&db);
 
     let operation = picomint_core::core::OperationId::new_random();
     let counter = Arc::new(AtomicU8::new(0));
@@ -22,8 +30,10 @@ async fn sanity_subscribe_operation_events() {
             let counter = counter.clone();
             let db = db.clone();
             let event_notify = event_notify.clone();
+            let logger = logger.clone();
             async move {
-                let mut stream = Box::pin(subscribe_operation_events(db, event_notify, operation));
+                let mut stream =
+                    Box::pin(logger.subscribe_operation_events(db, event_notify, operation));
                 while let Some(entry) = stream.next().await {
                     info!("{entry:?}");
                     assert_eq!(
@@ -42,14 +52,14 @@ async fn sanity_subscribe_operation_events() {
             }
         },
         async {
-            let federation_id = picomint_core::config::FederationId::dummy();
+            let federation = picomint_core::config::FederationId::dummy();
             for i in 0..=4 {
                 let dbtx = db.begin_write();
-                log_event_raw(
+                logger.log_event_raw(
                     &dbtx.as_ref(),
                     EventKind::from(format!("{i}")),
                     EventSource::Core,
-                    federation_id,
+                    federation,
                     operation,
                     vec![],
                 );

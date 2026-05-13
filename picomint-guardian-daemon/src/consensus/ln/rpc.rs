@@ -12,8 +12,8 @@ use tokio::time::timeout;
 
 use super::Lightning;
 use super::db::{
-    DECRYPTION_KEY_SHARE, GATEWAY, INCOMING_CONTRACT_STREAM, INCOMING_CONTRACT_STREAM_INDEX,
-    OUTGOING_CONTRACT, PREIMAGE,
+    DecryptionKeyShareTable, GatewayTable, IncomingContractStreamIndexTable,
+    IncomingContractStreamTable, OutgoingContractTable, PreimageTable,
 };
 
 pub fn consensus_block_count(
@@ -31,9 +31,9 @@ pub async fn await_preimage(
     req: AwaitPreimageRequest,
 ) -> Result<AwaitPreimageResponse, String> {
     loop {
-        let wait = ln
-            .db
-            .wait_table_check(&PREIMAGE, |dbtx| dbtx.get(&PREIMAGE, &req.outpoint));
+        let wait = ln.db.wait_table_check(&PreimageTable, |dbtx| {
+            dbtx.get(&PreimageTable, &req.outpoint)
+        });
 
         if let Ok((preimage, _dbtx)) = timeout(Duration::from_secs(10), wait).await {
             return Ok(AwaitPreimageResponse {
@@ -43,7 +43,7 @@ pub async fn await_preimage(
 
         let dbtx = ln.db.begin_read();
 
-        if let Some(preimage) = dbtx.get(&PREIMAGE, &req.outpoint) {
+        if let Some(preimage) = dbtx.get(&PreimageTable, &req.outpoint) {
             return Ok(AwaitPreimageResponse {
                 preimage: Some(preimage),
             });
@@ -61,7 +61,7 @@ pub fn decryption_key_share(
 ) -> Result<DecryptionKeyShareResponse, String> {
     ln.db
         .begin_read()
-        .get(&DECRYPTION_KEY_SHARE, &req.outpoint)
+        .get(&DecryptionKeyShareTable, &req.outpoint)
         .map(|share| DecryptionKeyShareResponse { share })
         .ok_or_else(|| "No decryption key share found".to_string())
 }
@@ -72,7 +72,7 @@ pub fn outgoing_contract_expiration(
 ) -> Result<OutgoingContractExpirationResponse, String> {
     let dbtx = ln.db.begin_read();
 
-    let Some(contract) = dbtx.get(&OUTGOING_CONTRACT, &req.outpoint) else {
+    let Some(contract) = dbtx.get(&OutgoingContractTable, &req.outpoint) else {
         return Ok(OutgoingContractExpirationResponse { contract: None });
     };
 
@@ -95,13 +95,13 @@ pub async fn await_incoming_contracts(
 
     let (mut next_index, dbtx) = ln
         .db
-        .wait_table_check(&INCOMING_CONTRACT_STREAM_INDEX, |dbtx| {
-            dbtx.get(&INCOMING_CONTRACT_STREAM_INDEX, &())
+        .wait_table_check(&IncomingContractStreamIndexTable, |dbtx| {
+            dbtx.get(&IncomingContractStreamIndexTable, &())
                 .filter(|i| *i > req.start)
         })
         .await;
 
-    let entries = dbtx.range(&INCOMING_CONTRACT_STREAM, req.start..u64::MAX, |r| {
+    let entries = dbtx.range(&IncomingContractStreamTable, req.start..u64::MAX, |r| {
         r.take(req.batch as usize).collect::<Vec<_>>()
     });
 
@@ -123,6 +123,6 @@ pub fn gateways(ln: &Lightning, _: GatewaysRequest) -> Result<GatewaysResponse, 
         gateways: ln
             .db
             .begin_read()
-            .iter(&GATEWAY, |r| r.map(|(pk, ())| pk).collect()),
+            .iter(&GatewayTable, |r| r.map(|(pk, ())| pk).collect()),
     })
 }

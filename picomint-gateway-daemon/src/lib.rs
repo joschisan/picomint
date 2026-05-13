@@ -33,13 +33,14 @@ use picomint_core::ln::gateway_api::{
 };
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
+use picomint_eventlog::EventLogger;
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_redb::Database;
 use std::sync::RwLock;
 
 use crate::db::{
-    CLIENT_CONFIG, DISABLED_FEDERATION, INCOMING_CONTRACT, IncomingContractRow, OUTGOING_CONTRACT,
-    OutgoingContractRow,
+    ClientConfigTable, DisabledFederationTable, IncomingContractRow, IncomingContractTable,
+    OutgoingContractRow, OutgoingContractTable,
 };
 
 /// Default Bitcoin network for testing purposes.
@@ -57,6 +58,7 @@ pub struct AppState {
     pub node: Arc<ldk_node::Node>,
     pub client_factory: GatewayClientFactory,
     pub gateway_db: Database,
+    pub logger: EventLogger,
     pub data_dir: std::path::PathBuf,
     pub network: Network,
     pub send_fee: PaymentFee,
@@ -66,9 +68,10 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Get a client for `federation_id`, lazily loading it from
-    /// [`CLIENT_CONFIG`] on cache miss. Returns `None` only if no config is
-    /// persisted for that federation — i.e. the gateway has never joined it.
+    /// Get a client for `federation`, lazily loading it from
+    /// [`ClientConfigTable`] on cache miss. Returns `None` only if no config
+    /// is persisted for that federation — i.e. the gateway has never joined
+    /// it.
     ///
     /// Double-checked: read lock → cache hit returns immediately; cache miss
     /// drops the read lock, takes the write lock, re-checks the cache (in
@@ -76,12 +79,12 @@ impl AppState {
     /// exactly once. The write lock is held across the load, so cold loads
     /// for *different* feds are serialized — fine because cold loads are
     /// rare and `Client::new_gateway` is fast.
-    pub fn select_client(&self, federation_id: FederationId) -> Option<Arc<Client>> {
+    pub fn select_client(&self, federation: FederationId) -> Option<Arc<Client>> {
         if let Some(client) = self
             .clients
             .read()
             .expect("clients RwLock poisoned")
-            .get(&federation_id)
+            .get(&federation)
             .cloned()
         {
             return Some(client);
@@ -89,27 +92,27 @@ impl AppState {
 
         let mut clients = self.clients.write().expect("clients RwLock poisoned");
 
-        if let Some(client) = clients.get(&federation_id).cloned() {
+        if let Some(client) = clients.get(&federation).cloned() {
             return Some(client);
         }
 
-        let client = self.client_factory.load(&federation_id).ok().flatten()?;
+        let client = self.client_factory.load(&federation).ok().flatten()?;
 
-        clients.insert(federation_id, client.clone());
+        clients.insert(federation, client.clone());
 
         Some(client)
     }
 
     /// List every federation the gateway has joined, with its config-declared
-    /// name. Reads [`CLIENT_CONFIG`] directly so dormant federations are not
-    /// forced to lazy-load.
+    /// name. Reads [`ClientConfigTable`] directly so dormant federations are
+    /// not forced to lazy-load.
     pub fn federation_info_all(&self) -> Vec<FederationInfo> {
         self.gateway_db
             .begin_read()
             .as_ref()
-            .iter(&CLIENT_CONFIG, |r| {
-                r.map(|(federation_id, config)| FederationInfo {
-                    federation_id,
+            .iter(&ClientConfigTable, |r| {
+                r.map(|(federation, config)| FederationInfo {
+                    federation,
                     federation_name: config.name,
                 })
                 .collect()
@@ -119,18 +122,18 @@ impl AppState {
 
 // Lightning Gateway implementation
 impl AppState {
-    pub async fn gateway_info(&self, federation_id: &FederationId) -> anyhow::Result<GatewayInfo> {
+    pub async fn gateway_info(&self, federation: &FederationId) -> anyhow::Result<GatewayInfo> {
         ensure!(
             self.gateway_db
                 .begin_read()
                 .as_ref()
-                .get(&DISABLED_FEDERATION, federation_id)
+                .get(&DisabledFederationTable, federation)
                 .is_none(),
             "Federation is disabled",
         );
 
         let client = self
-            .select_client(*federation_id)
+            .select_client(*federation)
             .context("Federation not connected")?;
 
         Ok(GatewayInfo {
@@ -153,7 +156,7 @@ impl AppState {
         payload: SendPaymentRequest,
     ) -> anyhow::Result<std::result::Result<[u8; 32], Signature>> {
         let f1_client = self
-            .select_client(payload.federation_id)
+            .select_client(payload.federation)
             .context("Federation not connected")?;
 
         // --- Verify the request ---------------------------------------------
@@ -222,7 +225,7 @@ impl AppState {
             .gateway_db
             .begin_read()
             .as_ref()
-            .get(&OUTGOING_CONTRACT, &operation)
+            .get(&OutgoingContractTable, &operation)
             .is_some()
         {
             return Ok(f1_client.gw().subscribe_send(operation).await);
@@ -233,10 +236,10 @@ impl AppState {
         let dbtx = self.gateway_db.begin_write();
 
         dbtx.as_ref().insert(
-            &OUTGOING_CONTRACT,
+            &OutgoingContractTable,
             &operation,
             &OutgoingContractRow {
-                federation_id: payload.federation_id,
+                federation: payload.federation,
                 contract: payload.contract.clone(),
                 outpoint: payload.outpoint,
                 invoice: payload.invoice.clone(),
@@ -244,7 +247,7 @@ impl AppState {
         );
 
         f1_client.gw().log_send_started(
-            &dbtx.as_ref().isolate(payload.federation_id),
+            &dbtx.as_ref(),
             operation,
             payload.outpoint,
             Amount::from_msats(amount),
@@ -260,7 +263,7 @@ impl AppState {
                 .gateway_db
                 .begin_read()
                 .as_ref()
-                .get(&INCOMING_CONTRACT, &operation)
+                .get(&IncomingContractTable, &operation)
                 .ok_or_else(|| {
                     anyhow!("Direct-swap target not registered for this payment hash")
                 })?;
@@ -271,17 +274,13 @@ impl AppState {
             );
 
             let f2_client = self
-                .select_client(incoming_row.federation_id)
+                .select_client(incoming_row.federation)
                 .ok_or_else(|| anyhow!("Direct-swap target federation not connected"))?;
 
             let dbtx = self.gateway_db.begin_write();
             f2_client
                 .gw()
-                .start_receive(
-                    &dbtx.as_ref().isolate(incoming_row.federation_id),
-                    operation,
-                    incoming_row.contract,
-                )
+                .start_receive(&dbtx.as_ref(), operation, incoming_row.contract)
                 .map_err(|e| anyhow!("Failed to start direct-swap receive: {e}"))?;
             dbtx.commit();
         } else {
@@ -321,9 +320,9 @@ impl AppState {
         }
 
         let gateway_info = self
-            .gateway_info(&payload.federation_id)
+            .gateway_info(&payload.federation)
             .await
-            .map_err(|_| anyhow!("Federation {} does not exist", payload.federation_id))?;
+            .map_err(|_| anyhow!("Federation {} does not exist", payload.federation))?;
 
         if payload.contract.commitment.refund_pk != gateway_info.module_public_key {
             bail!("The incoming contract is keyed to another gateway");
@@ -371,9 +370,9 @@ impl AppState {
             .gateway_db
             .begin_read()
             .as_ref()
-            .get(&INCOMING_CONTRACT, &operation)
+            .get(&IncomingContractTable, &operation)
         {
-            if existing.federation_id != payload.federation_id {
+            if existing.federation != payload.federation {
                 bail!("PaymentHash is already registered on a different federation");
             }
             let LightningInvoice::Bolt11(existing_invoice) = existing.invoice;
@@ -398,10 +397,10 @@ impl AppState {
         let dbtx = self.gateway_db.begin_write();
 
         dbtx.as_ref().insert(
-            &INCOMING_CONTRACT,
+            &IncomingContractTable,
             &operation,
             &IncomingContractRow {
-                federation_id: payload.federation_id,
+                federation: payload.federation,
                 contract: payload.contract,
                 invoice: LightningInvoice::Bolt11(invoice.clone()),
                 amount: payload.amount,
@@ -424,11 +423,11 @@ impl AppState {
             .gateway_db
             .begin_read()
             .as_ref()
-            .get(&INCOMING_CONTRACT, &operation)
+            .get(&IncomingContractTable, &operation)
             .ok_or_else(|| anyhow!("Unknown payment hash"))?;
 
         let client = self
-            .select_client(row.federation_id)
+            .select_client(row.federation)
             .expect("source federation for incoming contract is connected");
 
         if !wait {

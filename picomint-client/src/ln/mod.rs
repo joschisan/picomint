@@ -16,7 +16,7 @@ use crate::module::ClientContext;
 use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
-use db::{INCOMING_CONTRACT_STREAM_INDEX, SEND_OPERATION};
+use db::{IncomingContractStreamIndexTable, SendOperationTable};
 use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -41,7 +41,7 @@ use tokio::task::JoinSet;
 use tpe::{AggregateDecryptionKey, derive_agg_dk};
 
 use self::events::{ReceiveEvent, SendEvent};
-use self::send_sm::{SendSMCommon, SendSMState, SendStateMachine};
+use self::send_sm::{SendSMCommon, SendSMState, SendStateMachine, SendStateMachineTable};
 
 /// Number of blocks until outgoing lightning contracts times out and user
 /// client can refund it unilaterally
@@ -54,7 +54,7 @@ pub type SendResult = Result<OperationId, SendPaymentError>;
 
 #[derive(Clone)]
 pub struct LightningClientContext {
-    pub(crate) federation_id: FederationId,
+    pub(crate) federation: FederationId,
     pub(crate) client_ctx: ClientContext,
     pub(crate) mint: Arc<crate::mint::MintClientModule>,
     pub(crate) input_fee: Amount,
@@ -62,12 +62,12 @@ pub struct LightningClientContext {
 
 #[derive(Clone)]
 pub struct LightningClientModule {
-    federation_id: FederationId,
+    federation: FederationId,
     cfg: LightningConfigConsensus,
     client_ctx: ClientContext,
     mint: Arc<crate::mint::MintClientModule>,
     secret: LnSecret,
-    executor: ModuleExecutor<SendStateMachine>,
+    executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
     // In-memory only: populated by `refresh_gateways` at module startup.
     // Lost on restart — every cold start has to re-probe the federation's
     // gateway list before `select_gateway` can return anything.
@@ -84,7 +84,7 @@ impl LightningClientModule {
     }
 
     pub fn new(
-        federation_id: FederationId,
+        federation: FederationId,
         cfg: LightningConfigConsensus,
         client_ctx: ClientContext,
         mint: Arc<crate::mint::MintClientModule>,
@@ -92,16 +92,21 @@ impl LightningClientModule {
         tg: &TaskGroup,
     ) -> anyhow::Result<Self> {
         let sm_context = LightningClientContext {
-            federation_id,
+            federation,
             client_ctx: client_ctx.clone(),
             mint: mint.clone(),
             input_fee: cfg.input_fee,
         };
 
-        let executor = ModuleExecutor::new(client_ctx.db().clone(), sm_context, tg.clone());
+        let executor = ModuleExecutor::new(
+            client_ctx.db().clone(),
+            SendStateMachineTable(federation),
+            sm_context,
+            tg.clone(),
+        );
 
         let module = Self {
-            federation_id,
+            federation,
             cfg,
             client_ctx,
             mint,
@@ -144,7 +149,7 @@ impl LightningClientModule {
                 let info = gateway::gateway_info(
                     module.client_ctx.api().endpoint(),
                     gateway_pk,
-                    module.federation_id,
+                    module.federation,
                 )
                 .await
                 .ok()
@@ -292,7 +297,7 @@ impl LightningClientModule {
 
         if dbtx
             .as_ref()
-            .insert(&SEND_OPERATION, &operation, &())
+            .insert(&SendOperationTable(self.federation), &operation, &())
             .is_some()
         {
             return Err(SendPaymentError::InvoiceAlreadyAttempted(operation));
@@ -414,7 +419,7 @@ impl LightningClientModule {
         let invoice = gateway::create_bolt11_invoice(
             self.client_ctx.api().endpoint(),
             gateway_pk,
-            self.federation_id,
+            self.federation,
             contract.clone(),
             amount,
             expiry_secs,
@@ -524,7 +529,7 @@ impl LightningClientModule {
         let receive_keypair = self.secret.receive_keypair();
 
         let payload = picomint_base32::encode(&lnurl::LnurlRequest {
-            federation_id: self.federation_id,
+            federation: self.federation,
             recipient_pk: receive_keypair.public_key(),
             aggregate_pk: self.cfg.tpe_agg_pk,
             gateways,
@@ -541,7 +546,7 @@ impl LightningClientModule {
                 .client_ctx
                 .db()
                 .begin_read()
-                .get(&INCOMING_CONTRACT_STREAM_INDEX, &())
+                .get(&IncomingContractStreamIndexTable(module.federation), &())
                 .unwrap_or(0);
 
             let (entries, next_index) = module
@@ -558,7 +563,11 @@ impl LightningClientModule {
                 module.receive_incoming_contract(&dbtx.as_ref(), sk, *outpoint, contract);
             }
 
-            dbtx.insert(&INCOMING_CONTRACT_STREAM_INDEX, &(), &next_index);
+            dbtx.insert(
+                &IncomingContractStreamIndexTable(module.federation),
+                &(),
+                &next_index,
+            );
 
             dbtx.commit();
         }
@@ -624,8 +633,8 @@ pub enum RefreshGatewaysError {
 
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
-pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>) {
-    dbtx.delete_table(&INCOMING_CONTRACT_STREAM_INDEX);
-    dbtx.delete_table(&SEND_OPERATION);
-    dbtx.delete_table(&crate::executor::table::<SendStateMachine>());
+pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>, federation: FederationId) {
+    dbtx.delete_table(&IncomingContractStreamIndexTable(federation));
+    dbtx.delete_table(&SendOperationTable(federation));
+    dbtx.delete_table(&SendStateMachineTable(federation));
 }

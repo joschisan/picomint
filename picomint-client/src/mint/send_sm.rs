@@ -5,10 +5,16 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTxRef;
 
 use crate::TxRejectEvent;
-use crate::executor::StateMachine;
+use crate::executor::{SmId, StateMachine};
 
 use super::MintSmContext;
 use super::events::{MintFailureEvent, MintSuccessEvent, SendFailureEvent, SendSuccessEvent};
+
+crate::client_table!(
+    SendStateMachineTable,
+    SmId => SendStateMachine,
+    "mint-send-sm",
+);
 
 /// Drives the slow-path tail of `mint().send()`. The reissuance tx and
 /// `MintStateMachine` are wired up in the same dbtx that submits the
@@ -26,7 +32,7 @@ picomint_redb::consensus_value!(SendStateMachine);
 #[derive(Debug)]
 pub enum SendOutcome {
     /// `MintSuccessEvent` landed — the freshly reissued notes are in
-    /// `NOTE`, attempt assembly.
+    /// `NoteTable`, attempt assembly.
     Success,
     /// `TxRejectEvent` or `MintFailureEvent` landed — reissuance is
     /// dead, the send can't complete.
@@ -34,8 +40,6 @@ pub enum SendOutcome {
 }
 
 impl StateMachine for SendStateMachine {
-    const TABLE_NAME: &'static str = "mint-send-sm";
-
     type Context = MintSmContext;
     type Outcome = SendOutcome;
 
@@ -63,7 +67,7 @@ impl StateMachine for SendStateMachine {
     ) -> Option<Self> {
         match outcome {
             SendOutcome::Success => {
-                match super::send_ecash_dbtx(dbtx, ctx.federation_id, self.amount) {
+                match super::send_ecash_dbtx(dbtx, ctx.federation, self.amount) {
                     Some(ecash) => {
                         ctx.client_ctx
                             .log_event(dbtx, self.operation, SendSuccessEvent { ecash })
