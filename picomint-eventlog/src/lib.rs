@@ -12,6 +12,7 @@
 //! `EventLogByOperationTable` and constructs an [`EventLogger`] over them
 //! via [`EventLogger::new`]. All log/subscribe operations live as methods
 //! on that value; this crate ships no global table state.
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -93,23 +94,23 @@ impl From<EventLogId> for u64 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encodable, Decodable, Display)]
-pub struct EventKind(std::borrow::Cow<'static, str>);
+pub struct EventKind(Cow<'static, str>);
 
 impl EventKind {
     pub const fn from_static(value: &'static str) -> Self {
-        Self(std::borrow::Cow::Borrowed(value))
+        Self(Cow::Borrowed(value))
     }
 }
 
 impl<'s> From<&'s str> for EventKind {
     fn from(value: &'s str) -> Self {
-        Self(std::borrow::Cow::Owned(value.to_owned()))
+        Self(Cow::Owned(value.to_owned()))
     }
 }
 
 impl From<String> for EventKind {
     fn from(value: String) -> Self {
-        Self(std::borrow::Cow::Owned(value))
+        Self(Cow::Owned(value))
     }
 }
 
@@ -347,19 +348,6 @@ impl EventLogger {
                 notified.await;
             }
         }
-    }
-
-    /// Typed variant of [`Self::subscribe_operation_events`] — filters by
-    /// `E::KIND`/`E::SOURCE` and decodes each matching entry.
-    pub fn subscribe_operation_events_typed<E: Event + 'static>(
-        &self,
-        db: Database,
-        event_notify: Arc<Notify>,
-        operation: OperationId,
-    ) -> impl Stream<Item = E> + 'static {
-        use futures::StreamExt as _;
-        self.subscribe_operation_events(db, event_notify, operation)
-            .filter_map(|entry| async move { entry.to_event::<E>() })
     }
 }
 

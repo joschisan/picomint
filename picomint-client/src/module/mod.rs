@@ -109,21 +109,6 @@ impl ClientContext {
         ))
     }
 
-    /// Typed variant of [`Self::subscribe_operation_events`] — yields only
-    /// entries of kind `E`, decoded.
-    pub fn subscribe_operation_events_typed<E>(
-        &self,
-        operation: OperationId,
-    ) -> BoxStream<'static, E>
-    where
-        E: Event + Send + 'static,
-    {
-        Box::pin(
-            self.subscribe_operation_events(operation)
-                .filter_map(|entry| async move { entry.to_event::<E>() }),
-        )
-    }
-
     pub fn log_event<E>(&self, dbtx: &WriteTxRef<'_>, operation: OperationId, event: E)
     where
         E: Event + Send,
