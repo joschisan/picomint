@@ -21,9 +21,11 @@ use lightning::types::payment::PaymentHash;
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::ln::gateway_api::PaymentFee;
+use picomint_eventlog::EventLogger;
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::db::{
-    IncomingContractTable, OutgoingContractTable, ProcessedLdkEventTable,
+    EventLogByOperationTable, EventLogTable, IncomingContractTable, OutgoingContractTable,
+    ProcessedLdkEventTable,
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
 use picomint_redb::WriteTxRef;
@@ -120,15 +122,19 @@ fn main() -> anyhow::Result<()> {
 
     let gateway_db = picomint_redb::Database::open(opts.data_dir.join(DB_FILE))?;
 
+    let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
+
     // 3. Load or init client factory (mnemonic)
     let client_factory = match runtime.block_on(GatewayClientFactory::try_load(
         gateway_db.clone(),
+        logger.clone(),
         opts.network,
         opts.api_addr,
     ))? {
         Some(factory) => factory,
         None => runtime.block_on(GatewayClientFactory::init(
             gateway_db.clone(),
+            logger.clone(),
             picomint_client::random_mnemonic(&mut OsRng),
             opts.network,
             opts.api_addr,
@@ -192,6 +198,7 @@ fn main() -> anyhow::Result<()> {
         node: node.clone(),
         client_factory,
         gateway_db,
+        logger,
         data_dir: opts.data_dir.clone(),
         network: opts.network,
         send_fee: PaymentFee {

@@ -16,7 +16,7 @@ use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
-use picomint_eventlog::{EventLogEntry, EventLogId};
+use picomint_eventlog::{EventLogEntry, EventLogId, EventLogger};
 use picomint_redb::Database;
 use tracing::debug;
 
@@ -49,6 +49,7 @@ pub struct Client {
     config: tokio::sync::RwLock<ConsensusConfig>,
     db: Database,
     federation: FederationId,
+    logger: EventLogger,
     pub(crate) mint: Arc<MintClientModule>,
     pub(crate) wallet: Arc<WalletClientModule>,
     pub(crate) ln: LnFlavor,
@@ -63,10 +64,11 @@ impl Client {
     pub fn new(
         endpoint: Endpoint,
         db: Database,
+        logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
     ) -> anyhow::Result<Arc<Self>> {
-        Self::build(endpoint, db, mnemonic, config, LnChoice::Regular)
+        Self::build(endpoint, db, logger, mnemonic, config, LnChoice::Regular)
     }
 
     /// Gateway-flavor counterpart of [`Client::new`]. Used by the gateway
@@ -75,15 +77,17 @@ impl Client {
     pub fn new_gateway(
         endpoint: Endpoint,
         db: Database,
+        logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
     ) -> anyhow::Result<Arc<Self>> {
-        Self::build(endpoint, db, mnemonic, config, LnChoice::Gateway)
+        Self::build(endpoint, db, logger, mnemonic, config, LnChoice::Gateway)
     }
 
     fn build(
         endpoint: Endpoint,
         db: Database,
+        logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
         ln_choice: LnChoice,
@@ -104,8 +108,12 @@ impl Client {
 
         let tg = TaskGroup::new();
 
-        let mint_context =
-            crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
+        let mint_context = crate::module::ClientContext::new(
+            api.clone(),
+            db.clone(),
+            logger.clone(),
+            config.clone(),
+        );
         let mint = Arc::new(MintClientModule::new(
             federation,
             config.mint.clone(),
@@ -114,8 +122,12 @@ impl Client {
             &tg,
         )?);
 
-        let wallet_context =
-            crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
+        let wallet_context = crate::module::ClientContext::new(
+            api.clone(),
+            db.clone(),
+            logger.clone(),
+            config.clone(),
+        );
         let wallet = Arc::new(WalletClientModule::new(
             config.wallet.clone(),
             wallet_context,
@@ -126,8 +138,12 @@ impl Client {
 
         let ln = match ln_choice {
             LnChoice::Regular => {
-                let ln_context =
-                    crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
+                let ln_context = crate::module::ClientContext::new(
+                    api.clone(),
+                    db.clone(),
+                    logger.clone(),
+                    config.clone(),
+                );
                 LnFlavor::Regular(Arc::new(LightningClientModule::new(
                     federation,
                     config.ln.clone(),
@@ -138,8 +154,12 @@ impl Client {
                 )?))
             }
             LnChoice::Gateway => {
-                let gw_context =
-                    crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
+                let gw_context = crate::module::ClientContext::new(
+                    api.clone(),
+                    db.clone(),
+                    logger.clone(),
+                    config.clone(),
+                );
                 LnFlavor::Gateway(Arc::new(GatewayClientModule::new(
                     federation,
                     config.ln.clone(),
@@ -155,6 +175,7 @@ impl Client {
             config: tokio::sync::RwLock::new(config),
             db,
             federation,
+            logger,
             mint,
             wallet,
             ln,
@@ -318,18 +339,18 @@ impl Client {
         pos: EventLogId,
         limit: u64,
     ) -> Vec<(EventLogId, EventLogEntry)> {
-        picomint_eventlog::get_event_log(&self.db, pos, limit)
+        self.logger.get_event_log(&self.db, pos, limit)
     }
 
     /// Shared [`Notify`] that fires on every commit touching the event log.
     pub fn event_notify(&self) -> Arc<tokio::sync::Notify> {
-        picomint_eventlog::event_notify(&self.db)
+        self.logger.event_notify(&self.db)
     }
 
     /// One-shot snapshot of every event currently logged for `operation`,
     /// in insertion order.
     pub fn read_operation_events(&self, operation: OperationId) -> Vec<EventLogEntry> {
-        picomint_eventlog::read_operation_events(&self.db, operation)
+        self.logger.read_operation_events(&self.db, operation)
     }
 
     /// Stream every event belonging to `operation`, starting from the
@@ -338,7 +359,7 @@ impl Client {
         &self,
         operation: OperationId,
     ) -> BoxStream<'static, EventLogEntry> {
-        Box::pin(picomint_eventlog::subscribe_operation_events(
+        Box::pin(self.logger.subscribe_operation_events(
             self.db.clone(),
             self.event_notify(),
             operation,

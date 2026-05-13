@@ -192,14 +192,16 @@ LEFT JOIN receive_refund  refund
 /// when caught up with the head. Spawned daemon-wide at startup.
 pub async fn trailer(state: AppState) {
     let mut cursor = EventLogId::default();
-    let notify = picomint_eventlog::event_notify(&state.gateway_db);
+    let notify = state.logger.event_notify(&state.gateway_db);
 
     loop {
         // Register interest in the next commit BEFORE reading, so we don't
         // miss a commit that lands between the read and `.await`.
         let notified = notify.notified();
 
-        let chunk = picomint_eventlog::get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
+        let chunk = state
+            .logger
+            .get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
 
         if let Some((last_id, _)) = chunk.last() {
             cursor = last_id.saturating_add(1);

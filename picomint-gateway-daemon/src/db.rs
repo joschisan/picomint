@@ -4,7 +4,7 @@ use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts;
 use picomint_core::{Amount, OutPoint};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_eventlog::EventLogId;
+use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_redb::table;
 
 // BIP39 entropy for the daemon's mnemonic, written once on first start.
@@ -63,6 +63,22 @@ table!(
     EventCursorTable,
     () => EventLogId,
     "event-cursor",
+);
+
+// Daemon-wide event log. The two tables are owned here (not by
+// `picomint-eventlog`) so the daemon controls the on-disk schema; an
+// [`picomint_eventlog::EventLogger`] is constructed over these at startup
+// and handed to every consumer (federation clients, trailer, analytics).
+table!(
+    EventLogTable,
+    EventLogId => EventLogEntry,
+    "event-log",
+);
+
+table!(
+    EventLogByOperationTable,
+    (OperationId, EventLogId) => EventLogEntry,
+    "operation-event-log",
 );
 
 #[derive(Debug, Clone, Encodable, Decodable)]

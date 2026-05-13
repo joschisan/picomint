@@ -7,7 +7,7 @@ use picomint_core::TransactionId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_eventlog::{Event, EventLogEntry, EventLogId};
+use picomint_eventlog::{Event, EventLogEntry, EventLogId, EventLogger};
 use picomint_redb::{Database, WriteTxRef};
 use tokio::sync::Notify;
 
@@ -19,12 +19,23 @@ use crate::{TxAcceptEvent, TxRejectEvent};
 pub struct ClientContext {
     api: FederationApi,
     db: Database,
+    logger: EventLogger,
     config: ConsensusConfig,
 }
 
 impl ClientContext {
-    pub fn new(api: FederationApi, db: Database, config: ConsensusConfig) -> Self {
-        Self { api, db, config }
+    pub fn new(
+        api: FederationApi,
+        db: Database,
+        logger: EventLogger,
+        config: ConsensusConfig,
+    ) -> Self {
+        Self {
+            api,
+            db,
+            logger,
+            config,
+        }
     }
 
     pub fn network(&self) -> bitcoin::Network {
@@ -73,7 +84,7 @@ impl ClientContext {
 
     /// Shared [`Notify`] that fires on every commit touching the event log.
     pub fn event_notify(&self) -> Arc<Notify> {
-        picomint_eventlog::event_notify(&self.db)
+        self.logger.event_notify(&self.db)
     }
 
     /// Read a batch of persisted event log entries starting at `pos`.
@@ -82,7 +93,7 @@ impl ClientContext {
         pos: EventLogId,
         limit: u64,
     ) -> Vec<(EventLogId, EventLogEntry)> {
-        picomint_eventlog::get_event_log(&self.db, pos, limit)
+        self.logger.get_event_log(&self.db, pos, limit)
     }
 
     /// Stream every event belonging to `operation`, starting from the
@@ -91,7 +102,7 @@ impl ClientContext {
         &self,
         operation: OperationId,
     ) -> BoxStream<'static, EventLogEntry> {
-        Box::pin(picomint_eventlog::subscribe_operation_events(
+        Box::pin(self.logger.subscribe_operation_events(
             self.db.clone(),
             self.event_notify(),
             operation,
@@ -117,6 +128,11 @@ impl ClientContext {
     where
         E: Event + Send,
     {
-        picomint_eventlog::log_event(dbtx, self.federation(), operation, event);
+        self.logger
+            .log_event(dbtx, self.federation(), operation, event);
+    }
+
+    pub fn logger(&self) -> &EventLogger {
+        &self.logger
     }
 }

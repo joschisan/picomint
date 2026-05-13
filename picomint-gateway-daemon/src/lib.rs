@@ -33,6 +33,7 @@ use picomint_core::ln::gateway_api::{
 };
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
+use picomint_eventlog::EventLogger;
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_redb::Database;
 use std::sync::RwLock;
@@ -57,6 +58,7 @@ pub struct AppState {
     pub node: Arc<ldk_node::Node>,
     pub client_factory: GatewayClientFactory,
     pub gateway_db: Database,
+    pub logger: EventLogger,
     pub data_dir: std::path::PathBuf,
     pub network: Network,
     pub send_fee: PaymentFee,

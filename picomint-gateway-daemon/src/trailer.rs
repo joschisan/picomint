@@ -38,12 +38,14 @@ pub async fn run(state: AppState) {
         .get(&EventCursorTable, &())
         .unwrap_or_default();
 
-    let notify = picomint_eventlog::event_notify(&state.gateway_db);
+    let notify = state.logger.event_notify(&state.gateway_db);
 
     loop {
         let notified = notify.notified();
 
-        let chunk = picomint_eventlog::get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
+        let chunk = state
+            .logger
+            .get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
 
         for (id, entry) in &chunk {
             let dbtx = state.gateway_db.begin_write();

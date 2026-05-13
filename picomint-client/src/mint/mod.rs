@@ -291,9 +291,8 @@ impl MintClientModule {
                 }
             })?;
         } else {
-            picomint_eventlog::log_event(
+            self.client_ctx.log_event(
                 &dbtx.as_ref(),
-                self.federation,
                 operation,
                 events::RecoveryEvent { amount, txid: None },
             );
@@ -358,6 +357,7 @@ impl MintClientModule {
             TxSubmissionSmContext {
                 api: context.api(),
                 federation,
+                logger: context.logger().clone(),
             },
             tg.clone(),
         );

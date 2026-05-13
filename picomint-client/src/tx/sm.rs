@@ -5,6 +5,7 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::tx::Transaction;
 use picomint_encoding::{Decodable, Encodable};
+use picomint_eventlog::EventLogger;
 use picomint_redb::WriteTxRef;
 
 use crate::executor::{SmId, StateMachine};
@@ -34,6 +35,7 @@ picomint_redb::consensus_value!(TxSubmissionStateMachine);
 pub struct TxSubmissionSmContext {
     pub api: FederationApi,
     pub federation: FederationId,
+    pub logger: EventLogger,
 }
 
 impl StateMachine for TxSubmissionStateMachine {
@@ -57,15 +59,11 @@ impl StateMachine for TxSubmissionStateMachine {
 
         match outcome {
             Ok(()) => {
-                picomint_eventlog::log_event(
-                    dbtx,
-                    ctx.federation,
-                    self.operation,
-                    TxAcceptEvent { txid },
-                );
+                ctx.logger
+                    .log_event(dbtx, ctx.federation, self.operation, TxAcceptEvent { txid });
             }
             Err(error) => {
-                picomint_eventlog::log_event(
+                ctx.logger.log_event(
                     dbtx,
                     ctx.federation,
                     self.operation,
