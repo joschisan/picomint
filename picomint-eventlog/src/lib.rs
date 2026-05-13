@@ -203,14 +203,6 @@ impl EventLogger {
         }
     }
 
-    fn event_log_ref(&self) -> EventLogRef<'_> {
-        EventLogRef(&self.event_log)
-    }
-
-    fn by_operation_ref(&self) -> ByOperationRef<'_> {
-        ByOperationRef(&self.by_operation)
-    }
-
     /// Append an event to the two tables. IDs are allocated inline under
     /// redb's single-writer serialization. The per-table [`Notify`] for the
     /// main event-log table is woken automatically on commit by the redb
@@ -248,13 +240,18 @@ impl EventLogger {
         };
 
         assert!(
-            dbtx.insert(&self.event_log_ref(), &id, &entry).is_none(),
+            dbtx.insert(&EventLogRef(&self.event_log), &id, &entry)
+                .is_none(),
             "Must never overwrite existing event"
         );
 
         assert!(
-            dbtx.insert(&self.by_operation_ref(), &(operation, id), &entry)
-                .is_none(),
+            dbtx.insert(
+                &ByOperationRef(&self.by_operation),
+                &(operation, id),
+                &entry
+            )
+            .is_none(),
             "Must never overwrite existing event"
         );
     }
@@ -278,7 +275,7 @@ impl EventLogger {
     }
 
     fn next_event_log_id(&self, dbtx: &WriteTxRef<'_>) -> EventLogId {
-        dbtx.iter(&self.event_log_ref(), |it| {
+        dbtx.iter(&EventLogRef(&self.event_log), |it| {
             it.next_back().map(|(k, _)| k.next()).unwrap_or_default()
         })
     }
@@ -286,7 +283,7 @@ impl EventLogger {
     /// [`Notify`] handle that fires on every commit touching the event log
     /// table.
     pub fn event_notify(&self, db: &Database) -> Arc<Notify> {
-        db.notify_for_table(&self.event_log_ref())
+        db.notify_for_table(&EventLogRef(&self.event_log))
     }
 
     /// Read up to `limit` consecutive event-log entries starting at `pos`.
@@ -301,7 +298,7 @@ impl EventLogger {
     ) -> Vec<(EventLogId, EventLogEntry)> {
         let end = pos.saturating_add(limit);
         db.begin_read()
-            .range(&self.event_log_ref(), pos..end, |it| it.collect())
+            .range(&EventLogRef(&self.event_log), pos..end, |it| it.collect())
     }
 
     /// One-shot snapshot of every event currently logged for `operation`,
@@ -313,7 +310,7 @@ impl EventLogger {
         operation: OperationId,
     ) -> Vec<EventLogEntry> {
         db.begin_read().range(
-            &self.by_operation_ref(),
+            &ByOperationRef(&self.by_operation),
             (operation, EventLogId::LOG_START)..(operation, EventLogId::LOG_END),
             |it| it.map(|(_, v)| v).collect(),
         )
