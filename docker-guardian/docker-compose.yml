@@ -38,6 +38,20 @@ services:
       - -rpcpassword=bitcoin
       - -dbcache=1024
 
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: picomint-dozzle
+    restart: unless-stopped
+    ports:
+      # Browser log viewer — bound to host loopback only. Open
+      # <http://127.0.0.1:3001> locally, or
+      # `ssh -NL 3001:127.0.0.1:3001 <host>` from another machine.
+      - "127.0.0.1:3001:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - DOZZLE_NO_ANALYTICS=true
+
 volumes:
   picomint_guardian_data:
   bitcoind_data:
