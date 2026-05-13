@@ -28,9 +28,9 @@ use crate::config::poly::eval_poly_g1;
 use crate::{handler, handler_async};
 
 use self::db::{
-    BLOCK_COUNT_VOTE, DECRYPTION_KEY_SHARE, GATEWAY, INCOMING_CONTRACT, INCOMING_CONTRACT_INDEX,
-    INCOMING_CONTRACT_STREAM, INCOMING_CONTRACT_STREAM_INDEX, OUTGOING_CONTRACT, PREIMAGE,
-    UNIX_TIME_VOTE,
+    BlockCountVoteTable, DecryptionKeyShareTable, GatewayTable, IncomingContractIndexTable,
+    IncomingContractStreamIndexTable, IncomingContractStreamTable, IncomingContractTable,
+    OutgoingContractTable, PreimageTable, UnixTimeVoteTable,
 };
 
 /// Run DKG for the lightning module, producing a fresh `LightningConfig` for
@@ -120,14 +120,14 @@ impl Lightning {
 
         match consensus_item {
             LightningConsensusItem::BlockCountVote(vote) => {
-                let current_vote = dbtx.insert(&BLOCK_COUNT_VOTE, &peer, &vote).unwrap_or(0);
+                let current_vote = dbtx.insert(&BlockCountVoteTable, &peer, &vote).unwrap_or(0);
 
                 ensure!(current_vote < vote, "Block count vote is redundant");
 
                 Ok(())
             }
             LightningConsensusItem::UnixTimeVote(vote) => {
-                let current_vote = dbtx.insert(&UNIX_TIME_VOTE, &peer, &vote).unwrap_or(0);
+                let current_vote = dbtx.insert(&UnixTimeVoteTable, &peer, &vote).unwrap_or(0);
 
                 ensure!(current_vote < vote, "Unix time vote is redundant");
 
@@ -144,7 +144,7 @@ impl Lightning {
         let (pub_key, amount) = match input {
             LightningInput::Outgoing(outpoint, outgoing_witness) => {
                 let contract = dbtx
-                    .remove(&OUTGOING_CONTRACT, outpoint)
+                    .remove(&OutgoingContractTable, outpoint)
                     .ok_or(LightningInputError::UnknownContract)?;
 
                 let pub_key = match outgoing_witness {
@@ -157,7 +157,7 @@ impl Lightning {
                             return Err(LightningInputError::InvalidPreimage);
                         }
 
-                        dbtx.insert(&PREIMAGE, outpoint, preimage);
+                        dbtx.insert(&PreimageTable, outpoint, preimage);
 
                         contract.claim_pk
                     }
@@ -186,14 +186,14 @@ impl Lightning {
             }
             LightningInput::Incoming(outpoint, agg_decryption_key) => {
                 let contract = dbtx
-                    .remove(&INCOMING_CONTRACT, outpoint)
+                    .remove(&IncomingContractTable, outpoint)
                     .ok_or(LightningInputError::UnknownContract)?;
 
                 let index = dbtx
-                    .remove(&INCOMING_CONTRACT_INDEX, outpoint)
+                    .remove(&IncomingContractIndexTable, outpoint)
                     .expect("Incoming contract index should exist");
 
-                dbtx.remove(&INCOMING_CONTRACT_STREAM, &index);
+                dbtx.remove(&IncomingContractStreamTable, &index);
 
                 if !contract
                     .verify_agg_decryption_key(&self.cfg.consensus.tpe_agg_pk, agg_decryption_key)
@@ -238,7 +238,7 @@ impl Lightning {
                     .checked_add(contract.fee)
                     .ok_or(LightningOutputError::ArithmeticOverflow)?;
 
-                dbtx.insert(&OUTGOING_CONTRACT, &outpoint, contract);
+                dbtx.insert(&OutgoingContractTable, &outpoint, contract);
 
                 amount
             }
@@ -251,23 +251,25 @@ impl Lightning {
                     return Err(LightningOutputError::ContractExpired);
                 }
 
-                dbtx.insert(&INCOMING_CONTRACT, &outpoint, contract);
+                dbtx.insert(&IncomingContractTable, &outpoint, contract);
 
-                let stream_index = dbtx.get(&INCOMING_CONTRACT_STREAM_INDEX, &()).unwrap_or(0);
+                let stream_index = dbtx
+                    .get(&IncomingContractStreamIndexTable, &())
+                    .unwrap_or(0);
 
                 dbtx.insert(
-                    &INCOMING_CONTRACT_STREAM,
+                    &IncomingContractStreamTable,
                     &stream_index,
                     &(outpoint, contract.clone()),
                 );
 
-                dbtx.insert(&INCOMING_CONTRACT_INDEX, &outpoint, &stream_index);
+                dbtx.insert(&IncomingContractIndexTable, &outpoint, &stream_index);
 
-                dbtx.insert(&INCOMING_CONTRACT_STREAM_INDEX, &(), &(stream_index + 1));
+                dbtx.insert(&IncomingContractStreamIndexTable, &(), &(stream_index + 1));
 
                 let dk_share = contract.create_decryption_key_share(&self.cfg.private.sk);
 
-                dbtx.insert(&DECRYPTION_KEY_SHARE, &outpoint, &dk_share);
+                dbtx.insert(&DecryptionKeyShareTable, &outpoint, &dk_share);
 
                 contract
                     .commitment
@@ -292,12 +294,12 @@ impl Lightning {
     /// recipient claims that on success, with `fee` accruing to the
     /// federation as implicit revenue).
     pub async fn audit(&self, dbtx: &WriteTxRef<'_>) -> i64 {
-        let outgoing: i64 = dbtx.iter(&OUTGOING_CONTRACT, |r| {
+        let outgoing: i64 = dbtx.iter(&OutgoingContractTable, |r| {
             r.map(|(_, contract)| -((contract.amount.msats + contract.fee.msats) as i64))
                 .sum()
         });
 
-        let incoming: i64 = dbtx.iter(&INCOMING_CONTRACT, |r| {
+        let incoming: i64 = dbtx.iter(&IncomingContractTable, |r| {
             r.map(|(_, contract)| {
                 -((contract.commitment.amount.msats - contract.commitment.fee.msats) as i64)
             })
@@ -334,7 +336,7 @@ impl Lightning {
     pub(crate) fn consensus_block_count(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
-        let mut counts = dbtx.iter(&BLOCK_COUNT_VOTE, |r| {
+        let mut counts = dbtx.iter(&BlockCountVoteTable, |r| {
             r.map(|(_, v)| v).collect::<Vec<u64>>()
         });
 
@@ -354,7 +356,9 @@ impl Lightning {
     pub(crate) fn consensus_unix_time(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
-        let mut times = dbtx.iter(&UNIX_TIME_VOTE, |r| r.map(|(_, v)| v).collect::<Vec<u64>>());
+        let mut times = dbtx.iter(&UnixTimeVoteTable, |r| {
+            r.map(|(_, v)| v).collect::<Vec<u64>>()
+        });
 
         times.sort_unstable();
 
@@ -377,14 +381,14 @@ impl Lightning {
 
     pub async fn add_gateway_ui(&self, gateway_pk: GatewayPk) -> bool {
         let dbtx = self.db.begin_write();
-        let is_new_entry = dbtx.insert(&GATEWAY, &gateway_pk, &()).is_none();
+        let is_new_entry = dbtx.insert(&GatewayTable, &gateway_pk, &()).is_none();
         dbtx.commit();
         is_new_entry
     }
 
     pub async fn remove_gateway_ui(&self, gateway_pk: GatewayPk) -> bool {
         let dbtx = self.db.begin_write();
-        let entry_existed = dbtx.remove(&GATEWAY, &gateway_pk).is_some();
+        let entry_existed = dbtx.remove(&GatewayTable, &gateway_pk).is_some();
         dbtx.commit();
         entry_existed
     }
@@ -393,6 +397,6 @@ impl Lightning {
     pub fn gateways_ui(&self) -> Vec<GatewayPk> {
         self.db
             .begin_read()
-            .iter(&GATEWAY, |r| r.map(|(pk, ())| pk).collect())
+            .iter(&GatewayTable, |r| r.map(|(pk, ())| pk).collect())
     }
 }

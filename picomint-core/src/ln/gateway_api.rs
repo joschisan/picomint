@@ -69,7 +69,7 @@ pub enum GatewayMethod {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct InfoRequest {
-    pub federation_id: FederationId,
+    pub federation: FederationId,
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]
@@ -79,7 +79,7 @@ pub struct InfoResponse {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct SendPaymentRequest {
-    pub federation_id: FederationId,
+    pub federation: FederationId,
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
     pub invoice: LightningInvoice,
@@ -93,7 +93,7 @@ pub struct SendPaymentResponse {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct CreateInvoiceRequest {
-    pub federation_id: FederationId,
+    pub federation: FederationId,
     pub contract: IncomingContract,
     pub amount: Amount,
     pub expiry_secs: u32,

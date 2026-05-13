@@ -261,7 +261,7 @@ async fn build_client(
     // spawns the driver.
     if init_recovery {
         let dbtx = db.begin_write();
-        Client::init_recovery(&dbtx.as_ref());
+        Client::init_recovery(&dbtx.as_ref(), config.calculate_federation_id());
         dbtx.commit();
     }
 

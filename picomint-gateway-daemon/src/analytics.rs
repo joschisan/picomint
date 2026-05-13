@@ -10,7 +10,7 @@
 //! derived, not authoritative. The event log in the gateway redb is the
 //! source of truth; the trailer replays from position 0 on every boot.
 //!
-//! Users and agents inspect the db directly via `sqlite3 analytics.sqlite`.
+//! UsersTable and agents inspect the db directly via `sqlite3 analytics.sqlite`.
 //! No query transport is layered on top.
 
 use std::path::{Path, PathBuf};
@@ -80,63 +80,63 @@ const SCHEMA_SQL: &str = r#"
 CREATE TABLE send (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,   -- msecs since unix epoch
-    federation_id TEXT NOT NULL,
+    federation TEXT NOT NULL,
     outpoint      TEXT NOT NULL,
     amount_msat   INTEGER NOT NULL,
     ln_fee_msat   INTEGER NOT NULL,
     fee_msat      INTEGER NOT NULL,
-    PRIMARY KEY (federation_id, operation)
+    PRIMARY KEY (federation, operation)
 );
 
 CREATE TABLE send_success (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation_id TEXT NOT NULL,
+    federation TEXT NOT NULL,
     preimage      TEXT NOT NULL,
     txid          TEXT NOT NULL,
     ln_fee_msat   INTEGER NOT NULL,
-    PRIMARY KEY (federation_id, operation)
+    PRIMARY KEY (federation, operation)
 );
 
 CREATE TABLE send_cancel (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation_id TEXT NOT NULL,
+    federation TEXT NOT NULL,
     signature     TEXT NOT NULL,
-    PRIMARY KEY (federation_id, operation)
+    PRIMARY KEY (federation, operation)
 );
 
 CREATE TABLE receive (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation_id TEXT NOT NULL,
+    federation TEXT NOT NULL,
     txid          TEXT NOT NULL,
     amount_msat   INTEGER NOT NULL,
     fee_msat      INTEGER NOT NULL,
-    PRIMARY KEY (federation_id, operation)
+    PRIMARY KEY (federation, operation)
 );
 
 CREATE TABLE receive_success (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation_id TEXT NOT NULL,
+    federation TEXT NOT NULL,
     preimage      TEXT NOT NULL,
-    PRIMARY KEY (federation_id, operation)
+    PRIMARY KEY (federation, operation)
 );
 
 CREATE TABLE receive_failure (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation_id TEXT NOT NULL,
-    PRIMARY KEY (federation_id, operation)
+    federation TEXT NOT NULL,
+    PRIMARY KEY (federation, operation)
 );
 
 CREATE TABLE receive_refund (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation_id TEXT NOT NULL,
+    federation TEXT NOT NULL,
     txid          TEXT NOT NULL,
-    PRIMARY KEY (federation_id, operation)
+    PRIMARY KEY (federation, operation)
 );
 
 CREATE INDEX idx_send_ts             ON send(ts);
@@ -146,7 +146,7 @@ CREATE INDEX idx_receive_success_ts  ON receive_success(ts);
 
 CREATE VIEW payments AS
 SELECT
-    s.federation_id,
+    s.federation,
     s.operation,
     'outgoing' AS direction,
     s.ts AS started_at,
@@ -160,12 +160,12 @@ SELECT
     succ.preimage
 FROM send s
 LEFT JOIN send_success succ
-       ON succ.federation_id = s.federation_id AND succ.operation = s.operation
+       ON succ.federation = s.federation AND succ.operation = s.operation
 LEFT JOIN send_cancel  canc
-       ON canc.federation_id = s.federation_id AND canc.operation = s.operation
+       ON canc.federation = s.federation AND canc.operation = s.operation
 UNION ALL
 SELECT
-    r.federation_id,
+    r.federation,
     r.operation,
     'incoming' AS direction,
     r.ts AS started_at,
@@ -180,11 +180,11 @@ SELECT
     succ.preimage
 FROM receive r
 LEFT JOIN receive_success succ
-       ON succ.federation_id = r.federation_id AND succ.operation = r.operation
+       ON succ.federation = r.federation AND succ.operation = r.operation
 LEFT JOIN receive_failure fail
-       ON fail.federation_id = r.federation_id AND fail.operation = r.operation
+       ON fail.federation = r.federation AND fail.operation = r.operation
 LEFT JOIN receive_refund  refund
-       ON refund.federation_id = r.federation_id AND refund.operation = r.operation;
+       ON refund.federation = r.federation AND refund.operation = r.operation;
 "#;
 
 /// Drain the global event log forward in chunks and mirror each gw event
@@ -233,14 +233,14 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
     for entry in entries {
         let operation = entry.operation.to_string();
         let ts = entry.timestamp as i64;
-        let fed_id = entry.federation_id.to_string();
+        let federation = entry.federation.to_string();
         if let Some(e) = entry.to_event::<SendEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO send \
-                 (federation_id, operation, ts, outpoint, amount_msat, ln_fee_msat, fee_msat) \
+                 (federation, operation, ts, outpoint, amount_msat, ln_fee_msat, fee_msat) \
                  VALUES (?, ?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
-                    fed_id,
+                    federation,
                     operation,
                     ts,
                     format!("{}:{}", e.outpoint.txid, e.outpoint.out_idx),
@@ -252,10 +252,10 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
         } else if let Some(e) = entry.to_event::<SendSuccessEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO send_success \
-                 (federation_id, operation, ts, preimage, txid, ln_fee_msat) \
+                 (federation, operation, ts, preimage, txid, ln_fee_msat) \
                  VALUES (?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
-                    fed_id,
+                    federation,
                     operation,
                     ts,
                     hex::encode(e.preimage),
@@ -266,16 +266,16 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
         } else if let Some(e) = entry.to_event::<SendCancelEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO send_cancel \
-                 (federation_id, operation, ts, signature) VALUES (?, ?, ?, ?)",
-                rusqlite::params![fed_id, operation, ts, e.signature.to_string()],
+                 (federation, operation, ts, signature) VALUES (?, ?, ?, ?)",
+                rusqlite::params![federation, operation, ts, e.signature.to_string()],
             )?;
         } else if let Some(e) = entry.to_event::<ReceiveEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO receive \
-                 (federation_id, operation, ts, txid, amount_msat, fee_msat) \
+                 (federation, operation, ts, txid, amount_msat, fee_msat) \
                  VALUES (?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
-                    fed_id,
+                    federation,
                     operation,
                     ts,
                     e.txid.to_string(),
@@ -286,20 +286,20 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
         } else if let Some(e) = entry.to_event::<ReceiveSuccessEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO receive_success \
-                 (federation_id, operation, ts, preimage) VALUES (?, ?, ?, ?)",
-                rusqlite::params![fed_id, operation, ts, hex::encode(e.preimage)],
+                 (federation, operation, ts, preimage) VALUES (?, ?, ?, ?)",
+                rusqlite::params![federation, operation, ts, hex::encode(e.preimage)],
             )?;
         } else if entry.to_event::<ReceiveFailureEvent>().is_some() {
             tx.execute(
                 "INSERT OR IGNORE INTO receive_failure \
-                 (federation_id, operation, ts) VALUES (?, ?, ?)",
-                rusqlite::params![fed_id, operation, ts],
+                 (federation, operation, ts) VALUES (?, ?, ?)",
+                rusqlite::params![federation, operation, ts],
             )?;
         } else if let Some(e) = entry.to_event::<ReceiveRefundEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO receive_refund \
-                 (federation_id, operation, ts, txid) VALUES (?, ?, ?, ?)",
-                rusqlite::params![fed_id, operation, ts, e.txid.to_string()],
+                 (federation, operation, ts, txid) VALUES (?, ?, ?, ?)",
+                rusqlite::params![federation, operation, ts, e.txid.to_string()],
             )?;
         }
     }

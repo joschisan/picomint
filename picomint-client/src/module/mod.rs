@@ -67,7 +67,7 @@ impl ClientContext {
         &self.config
     }
 
-    pub fn federation_id(&self) -> FederationId {
+    pub fn federation(&self) -> FederationId {
         self.config.calculate_federation_id()
     }
 
@@ -117,6 +117,6 @@ impl ClientContext {
     where
         E: Event + Send,
     {
-        picomint_eventlog::log_event(dbtx, self.federation_id(), operation, event);
+        picomint_eventlog::log_event(dbtx, self.federation(), operation, event);
     }
 }

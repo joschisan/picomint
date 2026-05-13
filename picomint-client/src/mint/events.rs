@@ -38,7 +38,7 @@ impl Event for SendSuccessEvent {
 
 /// Terminal failure event for [`crate::mint::MintClientModule::send`].
 /// Fires when reissuance failed (`TxRejectEvent`/`MintFailureEvent`)
-/// or — defensively — when the post-reissuance NOTE table no longer
+/// or — defensively — when the post-reissuance NoteTable table no longer
 /// has the exact denominations the send needs.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendFailureEvent;

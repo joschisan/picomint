@@ -5,8 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use self::db::{
-    BLOCK_COUNT_VOTE, FEDERATION_WALLET, FEE_RATE_VOTE, OUTPUT, Output, SIGNATURES, SPENT_OUTPUT,
-    Signatures, TX_INFO, TX_INFO_INDEX, TxidKey, UNCONFIRMED_TX, UNSIGNED_TX,
+    BlockCountVoteTable, FederationWalletTable, FeeRateVoteTable, Output, OutputTable, Signatures,
+    SignaturesTable, SpentOutputTable, TxInfoIndexTable, TxInfoTable, TxidKey, UnconfirmedTxTable,
+    UnsignedTxTable,
 };
 use anyhow::{Context, anyhow, bail, ensure};
 use bitcoin::absolute::LockTime;
@@ -71,10 +72,10 @@ pub struct SpentTxOut {
 }
 
 fn pending_txs_unordered(dbtx: &impl picomint_redb::DbRead) -> Vec<FederationTx> {
-    let unsigned: Vec<FederationTx> = dbtx.iter(&UNSIGNED_TX, |r| r.map(|(_, v)| v).collect());
+    let unsigned: Vec<FederationTx> = dbtx.iter(&UnsignedTxTable, |r| r.map(|(_, v)| v).collect());
 
     let unconfirmed: Vec<FederationTx> =
-        dbtx.iter(&UNCONFIRMED_TX, |r| r.map(|(_, v)| v).collect());
+        dbtx.iter(&UnconfirmedTxTable, |r| r.map(|(_, v)| v).collect());
 
     unsigned.into_iter().chain(unconfirmed).collect()
 }
@@ -113,7 +114,8 @@ pub fn validate_config(identity: &PeerId, cfg: &WalletConfig) -> anyhow::Result<
 
 impl Wallet {
     pub async fn consensus_proposal(&self, dbtx: &ReadTxRef<'_>) -> Vec<WalletConsensusItem> {
-        let unsigned_txs: Vec<(TxidKey, FederationTx)> = dbtx.iter(&UNSIGNED_TX, |r| r.collect());
+        let unsigned_txs: Vec<(TxidKey, FederationTx)> =
+            dbtx.iter(&UnsignedTxTable, |r| r.collect());
 
         let mut items: Vec<WalletConsensusItem> = unsigned_txs
             .into_iter()
@@ -170,7 +172,7 @@ impl Wallet {
                 self.process_block_count(dbtx, block_count_vote, peer).await
             }
             WalletConsensusItem::Feerate(feerate) => {
-                if Some(feerate) == dbtx.insert(&FEE_RATE_VOTE, &peer, &feerate) {
+                if Some(feerate) == dbtx.insert(&FeeRateVoteTable, &peer, &feerate) {
                     return Err(anyhow!("Fee rate vote is redundant"));
                 }
 
@@ -188,14 +190,14 @@ impl Wallet {
         input: &WalletInput,
     ) -> Result<InputMeta, WalletInputError> {
         if dbtx
-            .insert(&SPENT_OUTPUT, &input.output_index, &())
+            .insert(&SpentOutputTable, &input.output_index, &())
             .is_some()
         {
             return Err(WalletInputError::OutputAlreadySpent);
         }
 
         let Output(tracked_outpoint, tracked_output) = dbtx
-            .get(&OUTPUT, &input.output_index)
+            .get(&OutputTable, &input.output_index)
             .ok_or(WalletInputError::UnknownOutputIndex)?;
 
         let tweaked_pubkey = self
@@ -223,7 +225,7 @@ impl Wallet {
             .checked_sub(input.fee)
             .ok_or(WalletInputError::ArithmeticOverflow)?;
 
-        if let Some(wallet) = dbtx.remove(&FEDERATION_WALLET, &()) {
+        if let Some(wallet) = dbtx.remove(&FederationWalletTable, &()) {
             // Assuming the first receive into the federation is made through a
             // standard transaction, its output value is over the P2WSH dust
             // limit. By induction so is this change value.
@@ -256,7 +258,7 @@ impl Wallet {
             };
 
             dbtx.insert(
-                &FEDERATION_WALLET,
+                &FederationWalletTable,
                 &(),
                 &FederationWallet {
                     value: change_value,
@@ -273,7 +275,7 @@ impl Wallet {
             let created = self.consensus_block_count(dbtx);
 
             dbtx.insert(
-                &TX_INFO,
+                &TxInfoTable,
                 &tx_index,
                 &TxInfo {
                     index: tx_index,
@@ -287,7 +289,7 @@ impl Wallet {
             );
 
             dbtx.insert(
-                &UNSIGNED_TX,
+                &UnsignedTxTable,
                 &TxidKey(tx.compute_txid()),
                 &FederationTx {
                     tx: tx.clone(),
@@ -307,7 +309,7 @@ impl Wallet {
             );
         } else {
             dbtx.insert(
-                &FEDERATION_WALLET,
+                &FederationWalletTable,
                 &(),
                 &FederationWallet {
                     value: tracked_output.value,
@@ -343,7 +345,7 @@ impl Wallet {
         }
 
         let wallet = dbtx
-            .remove(&FEDERATION_WALLET, &())
+            .remove(&FederationWalletTable, &())
             .ok_or(WalletOutputError::NoFederationUTXO)?;
 
         let consensus_send_fee = self
@@ -396,7 +398,7 @@ impl Wallet {
         };
 
         dbtx.insert(
-            &FEDERATION_WALLET,
+            &FederationWalletTable,
             &(),
             &FederationWallet {
                 value: change_value,
@@ -413,7 +415,7 @@ impl Wallet {
         let created = self.consensus_block_count(dbtx);
 
         dbtx.insert(
-            &TX_INFO,
+            &TxInfoTable,
             &tx_index,
             &TxInfo {
                 index: tx_index,
@@ -426,10 +428,10 @@ impl Wallet {
             },
         );
 
-        dbtx.insert(&TX_INFO_INDEX, &outpoint, &tx_index);
+        dbtx.insert(&TxInfoIndexTable, &outpoint, &tx_index);
 
         dbtx.insert(
-            &UNSIGNED_TX,
+            &UnsignedTxTable,
             &TxidKey(tx.compute_txid()),
             &FederationTx {
                 tx: tx.clone(),
@@ -455,7 +457,7 @@ impl Wallet {
     }
 
     pub async fn audit(&self, dbtx: &WriteTxRef<'_>) -> i64 {
-        dbtx.get(&FEDERATION_WALLET, &())
+        dbtx.get(&FederationWalletTable, &())
             .map_or(0, |wallet| 1000 * wallet.value.to_sat() as i64)
     }
 
@@ -509,7 +511,7 @@ impl Wallet {
             loop {
                 let unconfirmed_txs: Vec<FederationTx> = db
                     .begin_read()
-                    .iter(&UNCONFIRMED_TX, |r| r.map(|(_, v)| v).collect());
+                    .iter(&UnconfirmedTxTable, |r| r.map(|(_, v)| v).collect());
 
                 for unconfirmed_tx in unconfirmed_txs {
                     btc_rpc.submit_tx(unconfirmed_tx.tx).await;
@@ -533,7 +535,7 @@ impl Wallet {
         let old_consensus_block_count = self.consensus_block_count(dbtx);
 
         let current_vote = dbtx
-            .insert(&BLOCK_COUNT_VOTE, &peer, &block_count_vote)
+            .insert(&BlockCountVoteTable, &peer, &block_count_vote)
             .unwrap_or(0);
 
         ensure!(
@@ -583,7 +585,7 @@ impl Wallet {
             let pks_hash = self.cfg.consensus.bitcoin_pks.consensus_hash();
 
             for tx in block.txdata {
-                dbtx.remove(&UNCONFIRMED_TX, &TxidKey(tx.compute_txid()));
+                dbtx.remove(&UnconfirmedTxTable, &TxidKey(tx.compute_txid()));
 
                 // We maintain an append-only log of transaction outputs that pass
                 // the probabilistic receive filter created since the federation was
@@ -598,9 +600,10 @@ impl Wallet {
                                 .expect("Bitcoin transaction has more than u32::MAX outputs"),
                         };
 
-                        let index = dbtx.iter(&OUTPUT, |r| r.next_back().map_or(0, |(k, _)| k + 1));
+                        let index =
+                            dbtx.iter(&OutputTable, |r| r.next_back().map_or(0, |(k, _)| k + 1));
 
-                        dbtx.insert(&OUTPUT, &index, &Output(outpoint, tx_out.clone()));
+                        dbtx.insert(&OutputTable, &index, &Output(outpoint, tx_out.clone()));
                     }
                 }
             }
@@ -617,7 +620,7 @@ impl Wallet {
         peer: PeerId,
     ) -> anyhow::Result<()> {
         let mut unsigned = dbtx
-            .get(&UNSIGNED_TX, &TxidKey(txid))
+            .get(&UnsignedTxTable, &TxidKey(txid))
             .context("Unsigned transaction does not exist")?;
 
         let pk = self
@@ -631,7 +634,7 @@ impl Wallet {
 
         if dbtx
             .insert(
-                &SIGNATURES,
+                &SignaturesTable,
                 &(TxidKey(txid), peer),
                 &Signatures(signatures.clone()),
             )
@@ -643,20 +646,20 @@ impl Wallet {
         let range = (TxidKey(txid), PeerId::from(u8::MIN))..=(TxidKey(txid), PeerId::from(u8::MAX));
 
         let signatures_by_peer: BTreeMap<PeerId, Vec<Signature>> =
-            dbtx.range(&SIGNATURES, range, |r| {
+            dbtx.range(&SignaturesTable, range, |r| {
                 r.map(|((_, peer), sigs)| (peer, sigs.0)).collect()
             });
 
         if signatures_by_peer.len() == self.cfg.consensus.bitcoin_pks.to_num_peers().threshold() {
-            dbtx.remove(&UNSIGNED_TX, &TxidKey(txid));
+            dbtx.remove(&UnsignedTxTable, &TxidKey(txid));
 
             for peer in signatures_by_peer.keys() {
-                dbtx.remove(&SIGNATURES, &(TxidKey(txid), *peer));
+                dbtx.remove(&SignaturesTable, &(TxidKey(txid), *peer));
             }
 
             self.finalize_tx(&mut unsigned, &signatures_by_peer);
 
-            dbtx.insert(&UNCONFIRMED_TX, &TxidKey(txid), &unsigned);
+            dbtx.insert(&UnconfirmedTxTable, &TxidKey(txid), &unsigned);
 
             self.btc_rpc.submit_tx(unsigned.tx).await;
         }
@@ -687,7 +690,7 @@ impl Wallet {
     pub fn consensus_block_count(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.bitcoin_pks.to_num_peers();
 
-        let mut counts: Vec<u64> = dbtx.iter(&BLOCK_COUNT_VOTE, |r| r.map(|(_, v)| v).collect());
+        let mut counts: Vec<u64> = dbtx.iter(&BlockCountVoteTable, |r| r.map(|(_, v)| v).collect());
 
         assert!(counts.len() <= num_peers.total());
 
@@ -707,7 +710,8 @@ impl Wallet {
     pub fn consensus_feerate(&self, dbtx: &impl picomint_redb::DbRead) -> Option<u64> {
         let num_peers = self.cfg.consensus.bitcoin_pks.to_num_peers();
 
-        let mut rates: Vec<u64> = dbtx.iter(&FEE_RATE_VOTE, |r| r.filter_map(|(_, v)| v).collect());
+        let mut rates: Vec<u64> =
+            dbtx.iter(&FeeRateVoteTable, |r| r.filter_map(|(_, v)| v).collect());
 
         assert!(rates.len() <= num_peers.total());
 
@@ -863,9 +867,9 @@ impl Wallet {
     }
 
     fn tx_id(dbtx: &impl picomint_redb::DbRead, outpoint: OutPoint) -> Option<Txid> {
-        let index = dbtx.get(&TX_INFO_INDEX, &outpoint)?;
+        let index = dbtx.get(&TxInfoIndexTable, &outpoint)?;
 
-        dbtx.get(&TX_INFO, &index).map(|entry| entry.txid)
+        dbtx.get(&TxInfoTable, &index).map(|entry| entry.txid)
     }
 
     fn get_outputs(
@@ -873,11 +877,11 @@ impl Wallet {
         start_index: u64,
         end_index: u64,
     ) -> Vec<OutputInfo> {
-        let spent: BTreeSet<u64> = dbtx.range(&SPENT_OUTPUT, start_index..end_index, |r| {
+        let spent: BTreeSet<u64> = dbtx.range(&SpentOutputTable, start_index..end_index, |r| {
             r.map(|(idx, ())| idx).collect()
         });
 
-        dbtx.range(&OUTPUT, start_index..end_index, |r| {
+        dbtx.range(&OutputTable, start_index..end_index, |r| {
             r.filter_map(|(idx, Output(_, tx_out))| {
                 tx_out.script_pubkey.is_p2wsh().then(|| OutputInfo {
                     index: idx,
@@ -893,7 +897,7 @@ impl Wallet {
     fn pending_tx_chain(dbtx: &impl picomint_redb::DbRead) -> Vec<TxInfo> {
         let n_pending = pending_txs_unordered(dbtx).len();
 
-        let mut items: Vec<TxInfo> = dbtx.iter(&TX_INFO, |r| r.map(|(_, v)| v).collect());
+        let mut items: Vec<TxInfo> = dbtx.iter(&TxInfoTable, |r| r.map(|(_, v)| v).collect());
 
         items.reverse();
         items.truncate(n_pending);
@@ -901,11 +905,11 @@ impl Wallet {
     }
 
     fn tx_chain(dbtx: &impl picomint_redb::DbRead) -> Vec<TxInfo> {
-        dbtx.iter(&TX_INFO, |r| r.map(|(_, v)| v).collect())
+        dbtx.iter(&TxInfoTable, |r| r.map(|(_, v)| v).collect())
     }
 
     fn total_txs(dbtx: &WriteTxRef<'_>) -> u64 {
-        dbtx.iter(&TX_INFO, |r| r.next_back().map_or(0, |(k, _)| k + 1))
+        dbtx.iter(&TxInfoTable, |r| r.next_back().map_or(0, |(k, _)| k + 1))
     }
 
     /// Get the network for UI display
@@ -915,7 +919,7 @@ impl Wallet {
 
     /// Get the current federation wallet info for UI display
     pub fn federation_wallet_ui(&self) -> Option<FederationWallet> {
-        self.db.begin_read().get(&FEDERATION_WALLET, &())
+        self.db.begin_read().get(&FederationWalletTable, &())
     }
 
     /// Get the current consensus block count for UI display

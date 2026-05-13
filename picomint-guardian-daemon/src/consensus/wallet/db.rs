@@ -27,61 +27,61 @@ pub struct Signatures(pub Vec<Signature>);
 picomint_redb::consensus_value!(Signatures);
 
 table!(
-    OUTPUT,
+    OutputTable,
     u64 => Output,
     "wallet-output",
 );
 
 table!(
-    SPENT_OUTPUT,
+    SpentOutputTable,
     u64 => (),
     "wallet-spent-output",
 );
 
 table!(
-    FEDERATION_WALLET,
+    FederationWalletTable,
     () => FederationWallet,
     "wallet-federation-wallet",
 );
 
 table!(
-    TX_INFO,
+    TxInfoTable,
     u64 => TxInfo,
     "wallet-tx-info",
 );
 
 table!(
-    TX_INFO_INDEX,
+    TxInfoIndexTable,
     picomint_core::OutPoint => u64,
     "wallet-tx-info-index",
 );
 
 table!(
-    UNSIGNED_TX,
+    UnsignedTxTable,
     TxidKey => FederationTx,
     "wallet-unsigned-tx",
 );
 
 table!(
-    SIGNATURES,
+    SignaturesTable,
     (TxidKey, PeerId) => Signatures,
     "wallet-signatures",
 );
 
 table!(
-    UNCONFIRMED_TX,
+    UnconfirmedTxTable,
     TxidKey => FederationTx,
     "wallet-unconfirmed-tx",
 );
 
 table!(
-    BLOCK_COUNT_VOTE,
+    BlockCountVoteTable,
     PeerId => u64,
     "wallet-block-count-vote",
 );
 
 table!(
-    FEE_RATE_VOTE,
+    FeeRateVoteTable,
     PeerId => Option<u64>,
     "wallet-fee-rate-vote",
 );

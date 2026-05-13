@@ -6,20 +6,20 @@ use crate::config::ServerConfig;
 picomint_redb::consensus_value!(ServerConfig);
 
 table!(
-    SERVER_CONFIG,
+    ServerConfigTable,
     () => ServerConfig,
     "server-config",
 );
 
 pub async fn load_server_config(db: &Database) -> Option<ServerConfig> {
-    db.begin_read().get(&SERVER_CONFIG, &())
+    db.begin_read().get(&ServerConfigTable, &())
 }
 
 pub async fn store_server_config(db: &Database, cfg: &ServerConfig) {
     let dbtx = db.begin_write();
 
     assert!(
-        dbtx.insert(&SERVER_CONFIG, &(), cfg).is_none(),
+        dbtx.insert(&ServerConfigTable, &(), cfg).is_none(),
         "Server config already present in database"
     );
 

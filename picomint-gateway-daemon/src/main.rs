@@ -22,7 +22,9 @@ use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::ln::gateway_api::PaymentFee;
 use picomint_gateway_daemon::client::GatewayClientFactory;
-use picomint_gateway_daemon::db::{INCOMING_CONTRACT, OUTGOING_CONTRACT, PROCESSED_LDK_EVENT};
+use picomint_gateway_daemon::db::{
+    IncomingContractTable, OutgoingContractTable, ProcessedLdkEventTable,
+};
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
 use picomint_redb::WriteTxRef;
 use rand::rngs::OsRng;
@@ -301,7 +303,7 @@ fn handle_payment_claimable(
     let operation = OperationId::from_encodable(&payment_hash);
 
     if dbtx
-        .insert(&PROCESSED_LDK_EVENT, &payment_hash, &())
+        .insert(&ProcessedLdkEventTable, &payment_hash, &())
         .is_some()
     {
         return;
@@ -309,9 +311,9 @@ fn handle_payment_claimable(
 
     // LDK only fires PaymentClaimable for hashes we registered via
     // `receive_for_hash` in `create_bolt11_invoice`, which commits the
-    // INCOMING_CONTRACT row before returning the invoice.
+    // IncomingContract row before returning the invoice.
     let row = dbtx
-        .get(&INCOMING_CONTRACT, &operation)
+        .get(&IncomingContractTable, &operation)
         .expect("PaymentClaimable for an unregistered payment_hash");
 
     if row.contract.commitment.amount.msats != amount_msat {
@@ -328,12 +330,12 @@ fn handle_payment_claimable(
             .expect("LDK has this payment_hash (registered via receive_for_hash)");
     } else {
         let client = state
-            .select_client(row.federation_id)
+            .select_client(row.federation)
             .expect("source federation for incoming contract is connected");
 
         if client
             .gw()
-            .start_receive(&dbtx.isolate(row.federation_id), operation, row.contract)
+            .start_receive(dbtx, operation, row.contract)
             .is_err()
         {
             tracing::error!("start_receive failed; failing HTLC",);
@@ -360,19 +362,19 @@ fn handle_payment_successful(
     let operation = OperationId::from_encodable(&payment_hash);
 
     if dbtx
-        .insert(&PROCESSED_LDK_EVENT, &payment_hash, &())
+        .insert(&ProcessedLdkEventTable, &payment_hash, &())
         .is_some()
     {
         return;
     }
 
-    if let Some(row) = dbtx.get(&OUTGOING_CONTRACT, &operation) {
+    if let Some(row) = dbtx.get(&OutgoingContractTable, &operation) {
         let client = state
-            .select_client(row.federation_id)
+            .select_client(row.federation)
             .expect("source federation for outgoing contract is connected");
 
         client.gw().finalize_send(
-            &dbtx.isolate(row.federation_id),
+            dbtx,
             operation,
             row.contract,
             row.outpoint,
@@ -388,18 +390,18 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTxRef<'_>, payment_hash: 
     let operation = OperationId::from_encodable(&payment_hash);
 
     if dbtx
-        .insert(&PROCESSED_LDK_EVENT, &payment_hash, &())
+        .insert(&ProcessedLdkEventTable, &payment_hash, &())
         .is_some()
     {
         return;
     }
 
-    if let Some(row) = dbtx.get(&OUTGOING_CONTRACT, &operation) {
+    if let Some(row) = dbtx.get(&OutgoingContractTable, &operation) {
         let client = state
-            .select_client(row.federation_id)
+            .select_client(row.federation)
             .expect("source federation for outgoing contract is connected");
         client.gw().finalize_send(
-            &dbtx.isolate(row.federation_id),
+            dbtx,
             operation,
             row.contract,
             row.outpoint,

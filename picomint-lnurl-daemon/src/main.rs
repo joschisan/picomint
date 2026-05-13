@@ -151,7 +151,7 @@ async fn invoice(
 
     let (gateway_pk, invoice) = match create_contract_and_fetch_invoice(
         &endpoint,
-        request.federation_id,
+        request.federation,
         request.recipient_pk,
         request.aggregate_pk,
         request.gateways,
@@ -186,7 +186,7 @@ async fn invoice(
 
 async fn create_contract_and_fetch_invoice(
     endpoint: &Endpoint,
-    federation_id: FederationId,
+    federation: FederationId,
     recipient_pk: PublicKey,
     aggregate_pk: AggregatePublicKey,
     gateways: Vec<GatewayPk>,
@@ -210,7 +210,7 @@ async fn create_contract_and_fetch_invoice(
         .x_only_public_key()
         .0;
 
-    let (gateway_info, gateway_pk) = select_gateway(endpoint, gateways, federation_id).await?;
+    let (gateway_info, gateway_pk) = select_gateway(endpoint, gateways, federation).await?;
 
     ensure!(
         gateway_info.receive_fee.le(&PaymentFee::RECEIVE_FEE_LIMIT),
@@ -249,7 +249,7 @@ async fn create_contract_and_fetch_invoice(
         endpoint,
         gateway_pk,
         GatewayMethod::CreateInvoice(CreateInvoiceRequest {
-            federation_id,
+            federation,
             contract: contract.clone(),
             amount: Amount::from_msats(amount),
             expiry_secs,
@@ -274,7 +274,7 @@ async fn create_contract_and_fetch_invoice(
 async fn select_gateway(
     endpoint: &Endpoint,
     gateways: Vec<GatewayPk>,
-    federation_id: FederationId,
+    federation: FederationId,
 ) -> anyhow::Result<(GatewayInfo, GatewayPk)> {
     let mut probes = JoinSet::new();
 
@@ -284,7 +284,7 @@ async fn select_gateway(
             let response = gateway_request::<InfoResponse>(
                 &endpoint,
                 gateway_pk,
-                GatewayMethod::Info(InfoRequest { federation_id }),
+                GatewayMethod::Info(InfoRequest { federation }),
             )
             .await
             .ok()?;

@@ -17,7 +17,9 @@ use tokio::sync::watch::{Receiver, Sender};
 use tracing::warn;
 
 use crate::config::ServerConfig;
-use crate::consensus::db::{ACCEPTED_ITEM, ACCEPTED_TX, EXPIRATION_STATUS, SIGNED_SESSION_OUTCOME};
+use crate::consensus::db::{
+    AcceptedItemTable, AcceptedTxTable, ExpirationStatusTable, SignedSessionOutcomeTable,
+};
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::server::{Server, process_tx_with_server};
 use crate::p2p::P2PStatusReceivers;
@@ -43,15 +45,15 @@ impl ConsensusApi {
     /// Submit a transaction and long-poll until it is either accepted by
     /// consensus or becomes invalid.
     pub async fn submit_tx(&self, tx: Transaction) -> Result<(), TxError> {
-        let notify_item = self.db.notify_for_table(&ACCEPTED_ITEM);
-        let notify_session = self.db.notify_for_table(&SIGNED_SESSION_OUTCOME);
+        let notify_item = self.db.notify_for_table(&AcceptedItemTable);
+        let notify_session = self.db.notify_for_table(&SignedSessionOutcomeTable);
 
         let mut notified_item = Box::pin(notify_item.notified());
         let mut notified_session = Box::pin(notify_session.notified());
 
         let dbtx = self.db.begin_write();
 
-        if dbtx.get(&ACCEPTED_TX, &tx.compute_txid()).is_some() {
+        if dbtx.get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
             return Ok(());
         }
 
@@ -73,7 +75,7 @@ impl ConsensusApi {
                 _ = &mut notified_item => {
                     let dbtx = self.db.begin_write();
 
-                    if dbtx.get(&ACCEPTED_TX, &tx.compute_txid()).is_some() {
+                    if dbtx.get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
                         return Ok(());
                     }
 
@@ -111,11 +113,11 @@ impl ConsensusApi {
     }
 
     /// Read this guardian's announced expiration status from the local
-    /// `EXPIRATION_STATUS` table. Returned over the wire by the
+    /// `ExpirationStatus` table. Returned over the wire by the
     /// `ExpirationStatus` RPC and surfaced on the dashboard.
     #[must_use]
     pub fn expiration_status_ui(&self) -> Option<ExpirationStatus> {
-        self.db.begin_read().get(&EXPIRATION_STATUS, &())
+        self.db.begin_read().get(&ExpirationStatusTable, &())
     }
 
     /// Set or clear this guardian's announced expiration status. All
@@ -125,10 +127,10 @@ impl ConsensusApi {
         let dbtx = self.db.begin_write();
         match status {
             Some(s) => {
-                dbtx.insert(&EXPIRATION_STATUS, &(), &s);
+                dbtx.insert(&ExpirationStatusTable, &(), &s);
             }
             None => {
-                dbtx.remove(&EXPIRATION_STATUS, &());
+                dbtx.remove(&ExpirationStatusTable, &());
             }
         }
         dbtx.commit();

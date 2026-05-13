@@ -13,7 +13,7 @@ pub const MAX_GATEWAYS_PER_LNURL: usize = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct LnurlRequest {
-    pub federation_id: FederationId,
+    pub federation: FederationId,
     pub recipient_pk: secp256k1::PublicKey,
     pub aggregate_pk: AggregatePublicKey,
     pub gateways: Vec<GatewayPk>,

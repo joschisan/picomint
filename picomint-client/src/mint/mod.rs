@@ -18,10 +18,12 @@ use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
-use crate::tx::{Transaction, TxSubmissionSmContext, TxSubmissionStateMachine};
+use crate::tx::{
+    Transaction, TxSubmissionSmContext, TxSubmissionStateMachine, TxSubmissionStateMachineTable,
+};
 use anyhow::{Context as _, bail};
 use bitcoin_hashes::sha256;
-use client_db::{NOTE, RECEIVE_OPERATION, RECOVERY, Recovery};
+use client_db::{NoteTable, ReceiveOperationTable, Recovery, RecoveryTable};
 pub use events::*;
 use futures::StreamExt;
 use picomint_core::config::FederationId;
@@ -39,9 +41,9 @@ use thiserror::Error;
 
 pub use self::ecash::ECash;
 use self::issuance::NoteIssuanceRequest;
-use self::mint_sm::MintStateMachine;
+use self::mint_sm::{MintStateMachine, MintStateMachineTable};
 pub use self::secret::MintSecret;
-use self::send_sm::SendStateMachine;
+use self::send_sm::{SendStateMachine, SendStateMachineTable};
 
 const TARGET_PER_DENOMINATION: usize = 3;
 const SLICE_SIZE: u64 = 10000;
@@ -78,7 +80,7 @@ impl SpendableNote {
 }
 
 /// Seed the mint recovery state. Caller writes this in the same tx that
-/// persists their `CLIENT_CONFIG` row, so "join + start recovery" is one
+/// persists their `ClientConfigTable` row, so "join + start recovery" is one
 /// atomic commit. The driver picks the row up the next time
 /// [`MintClientModule::new`] runs and finally emits a single terminal
 /// `RecoveryEvent` under the returned operation id (also persisted in
@@ -93,7 +95,7 @@ impl SpendableNote {
 /// emitted on each batch).
 ///
 /// Panics if a recovery is already in progress.
-pub fn init_recovery(dbtx: &WriteTxRef<'_>) -> OperationId {
+pub fn init_recovery(dbtx: &WriteTxRef<'_>, federation: FederationId) -> OperationId {
     let operation = OperationId::new_random();
 
     let state = Recovery {
@@ -105,7 +107,8 @@ pub fn init_recovery(dbtx: &WriteTxRef<'_>) -> OperationId {
     };
 
     assert!(
-        dbtx.insert(&RECOVERY, &(), &state).is_none(),
+        dbtx.insert(&RecoveryTable(federation), &(), &state)
+            .is_none(),
         "init_recovery called when a recovery is already in progress"
     );
 
@@ -124,7 +127,7 @@ impl MintClientModule {
         let db = self.client_ctx.db().clone();
 
         // First awakening of a freshly-init'd recovery: fetch the count
-        // from the federation and persist it. The RECOVERY-table commit
+        // from the federation and persist it. The RecoveryTable-table commit
         // wakes any subscribers of `subscribe_recovery_progress`.
         let total_items = match state.total_items {
             Some(t) => t,
@@ -135,7 +138,7 @@ impl MintClientModule {
 
                 let dbtx = db.begin_write();
 
-                dbtx.insert(&RECOVERY, &(), &state);
+                dbtx.insert(&RecoveryTable(self.federation), &(), &state);
 
                 dbtx.commit();
 
@@ -227,7 +230,7 @@ impl MintClientModule {
 
             let dbtx = db.begin_write();
 
-            dbtx.insert(&RECOVERY, &(), &state);
+            dbtx.insert(&RecoveryTable(self.federation), &(), &state);
 
             dbtx.commit();
         }
@@ -235,12 +238,11 @@ impl MintClientModule {
 
     /// Final phase of recovery: fetch shares for the recovered nonces,
     /// materialise `SpendableNote`s, and submit a single reissuance tx
-    /// — atomically with deletion of the `RECOVERY` row and emission
+    /// — atomically with deletion of the `RecoveryTable` row and emission
     /// of the terminal `RecoveryEvent`.
     async fn finalize_recovery(self, state: Recovery) -> anyhow::Result<()> {
         let module_api = self.client_ctx.api();
         let db = self.client_ctx.db().clone();
-        let federation_id = self.client_ctx.federation_id();
 
         let issuance_requests: Vec<NoteIssuanceRequest> = state.requests.into_values().collect();
 
@@ -269,7 +271,7 @@ impl MintClientModule {
 
         let operation = state.operation;
 
-        dbtx.remove(&RECOVERY, &());
+        dbtx.remove(&RecoveryTable(self.federation), &());
 
         if !spendable_notes.is_empty() {
             let mut builder = TxBuilder::new();
@@ -291,7 +293,7 @@ impl MintClientModule {
         } else {
             picomint_eventlog::log_event(
                 &dbtx.as_ref(),
-                federation_id,
+                self.federation,
                 operation,
                 events::RecoveryEvent { amount, txid: None },
             );
@@ -305,7 +307,7 @@ impl MintClientModule {
 
 impl MintClientModule {
     pub fn new(
-        federation_id: FederationId,
+        federation: FederationId,
         cfg: MintConfigConsensus,
         context: ClientContext,
         secret: MintSecret,
@@ -331,27 +333,37 @@ impl MintClientModule {
 
         let sm_context = MintSmContext {
             client_ctx: context.clone(),
-            federation_id,
+            federation,
             tbs_agg_pks: cfg.tbs_agg_pks.clone(),
             tbs_pks: cfg.tbs_pks.clone(),
         };
 
-        let mint_executor =
-            ModuleExecutor::new(context.db().clone(), sm_context.clone(), tg.clone());
+        let mint_executor = ModuleExecutor::new(
+            context.db().clone(),
+            MintStateMachineTable(federation),
+            sm_context.clone(),
+            tg.clone(),
+        );
 
-        let send_executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone());
+        let send_executor = ModuleExecutor::new(
+            context.db().clone(),
+            SendStateMachineTable(federation),
+            sm_context,
+            tg.clone(),
+        );
 
         let tx_submission_executor = ModuleExecutor::new(
             context.db().clone(),
+            TxSubmissionStateMachineTable(federation),
             TxSubmissionSmContext {
                 api: context.api(),
-                federation_id,
+                federation,
             },
             tg.clone(),
         );
 
         let module = MintClientModule {
-            federation_id,
+            federation,
             cfg,
             secret,
             client_ctx: context,
@@ -365,7 +377,12 @@ impl MintClientModule {
         // hasn't been cleaned up yet, drive it to completion in the
         // background. The driver wipes the row when done, so a clean
         // shutdown mid-recovery just resumes on the next boot.
-        if let Some(state) = module.client_ctx.db().begin_read().get(&RECOVERY, &()) {
+        if let Some(state) = module
+            .client_ctx
+            .db()
+            .begin_read()
+            .get(&RecoveryTable(federation), &())
+        {
             let module = module.clone();
             tg.spawn(module.run_recovery(state));
         }
@@ -376,14 +393,14 @@ impl MintClientModule {
 
 #[derive(Clone)]
 pub struct MintClientModule {
-    federation_id: FederationId,
+    federation: FederationId,
     cfg: MintConfigConsensus,
     secret: MintSecret,
     client_ctx: ClientContext,
     tweak_rx: async_channel::Receiver<[u8; 16]>,
-    tx_submission_executor: ModuleExecutor<TxSubmissionStateMachine>,
-    mint_executor: ModuleExecutor<MintStateMachine>,
-    send_executor: ModuleExecutor<SendStateMachine>,
+    tx_submission_executor: ModuleExecutor<TxSubmissionStateMachine, TxSubmissionStateMachineTable>,
+    mint_executor: ModuleExecutor<MintStateMachine, MintStateMachineTable>,
+    send_executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
 }
 
 /// Context handed to per-SM executors. Keeps the `ClientContext` handle
@@ -391,7 +408,7 @@ pub struct MintClientModule {
 #[derive(Clone)]
 pub struct MintSmContext {
     pub client_ctx: ClientContext,
-    pub federation_id: FederationId,
+    pub federation: FederationId,
     pub tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,
     pub tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, tbs::PublicKeyShare>>,
 }
@@ -463,7 +480,7 @@ impl MintClientModule {
         spendable_notes.sort_by_key(|note| note.denomination);
 
         for note in &spendable_notes {
-            Self::remove_spendable_note(dbtx, note);
+            Self::remove_spendable_note(dbtx, self.federation, note);
             builder.add_input(Input {
                 input: wire::Input::Mint(MintInput { note: note.note() }),
                 keypair: note.keypair,
@@ -537,31 +554,37 @@ impl MintClientModule {
     }
 
     pub fn get_balance(&self, dbtx: &impl picomint_redb::DbRead) -> Amount {
-        Self::get_count_by_denomination_dbtx(dbtx)
+        Self::get_count_by_denomination_dbtx(dbtx, self.federation)
             .into_iter()
             .map(|(denomination, count)| denomination.amount().mul_u64(count))
             .sum()
     }
 
     pub fn balance_notify(&self) -> Arc<tokio::sync::Notify> {
-        self.client_ctx.db().notify_for_table(&NOTE)
+        self.client_ctx
+            .db()
+            .notify_for_table(&NoteTable(self.federation))
     }
 
     /// Yields the in-flight recovery's progress as a percentage
-    /// (0.0..=100.0) on every commit touching the `RECOVERY` row.
+    /// (0.0..=100.0) on every commit touching the `RecoveryTable` row.
     /// Returns immediately if no recovery is active at subscribe time;
     /// ends when `finalize_recovery` removes the row. Mirrors the shape
     /// of [`crate::Client::subscribe_balance_changes`] — UIs typically
     /// pair the live percentage with the terminal `RecoveryEvent` on
     /// the same operation id.
     pub fn subscribe_recovery_progress(&self) -> futures::stream::BoxStream<'static, f64> {
-        let notify = self.client_ctx.db().notify_for_table(&RECOVERY);
+        let notify = self
+            .client_ctx
+            .db()
+            .notify_for_table(&RecoveryTable(self.federation));
         let db = self.client_ctx.db().clone();
+        let federation = self.federation;
 
         Box::pin(async_stream::stream! {
             loop {
                 let notified = notify.notified();
-                match db.begin_read().as_ref().get(&RECOVERY, &()) {
+                match db.begin_read().as_ref().get(&RecoveryTable(federation), &()) {
                     Some(state) => {
                         let percent = state
                             .total_items
@@ -584,8 +607,9 @@ impl MintClientModule {
         let mut selected_notes = Vec::new();
         let mut target_notes = Vec::new();
 
-        let all_notes: Vec<SpendableNote> =
-            dbtx.iter(&NOTE, |r| r.map(|(note, ())| note).collect());
+        let all_notes: Vec<SpendableNote> = dbtx.iter(&NoteTable(self.federation), |r| {
+            r.map(|(note, ())| note).collect()
+        });
 
         for amount in client_denominations().rev() {
             let notes_amount: Vec<SpendableNote> = all_notes
@@ -662,13 +686,14 @@ impl MintClientModule {
     pub fn get_count_by_denomination(&self) -> BTreeMap<Denomination, u64> {
         let dbtx = self.client_ctx.db().begin_write();
 
-        Self::get_count_by_denomination_dbtx(&dbtx.as_ref())
+        Self::get_count_by_denomination_dbtx(&dbtx.as_ref(), self.federation)
     }
 
     fn get_count_by_denomination_dbtx(
         dbtx: &impl picomint_redb::DbRead,
+        federation: FederationId,
     ) -> BTreeMap<Denomination, u64> {
-        dbtx.iter(&NOTE, |r| {
+        dbtx.iter(&NoteTable(federation), |r| {
             let mut acc = BTreeMap::new();
             for (note, ()) in r {
                 acc.entry(note.denomination)
@@ -698,7 +723,7 @@ impl MintClientModule {
         // atomically in one dbtx — no tx, no SM.
         let dbtx = self.client_ctx.db().begin_write();
 
-        if let Some(ecash) = send_ecash_dbtx(&dbtx.as_ref(), self.federation_id, amount) {
+        if let Some(ecash) = send_ecash_dbtx(&dbtx.as_ref(), self.federation, amount) {
             self.client_ctx
                 .log_event(&dbtx.as_ref(), operation, SendEvent { amount });
             self.client_ctx.log_event(
@@ -825,7 +850,7 @@ impl MintClientModule {
     pub fn receive(&self, ecash: &ECash) -> Result<OperationId, ReceiveECashError> {
         let operation = OperationId::from_encodable(ecash);
 
-        if ecash.mint != self.federation_id {
+        if ecash.mint != self.federation {
             return Err(ReceiveECashError::WrongFederation);
         }
 
@@ -851,7 +876,7 @@ impl MintClientModule {
 
         if dbtx
             .as_ref()
-            .insert(&RECEIVE_OPERATION, &operation, &())
+            .insert(&ReceiveOperationTable(self.federation), &operation, &())
             .is_some()
         {
             return Ok(operation);
@@ -870,22 +895,28 @@ impl MintClientModule {
         Ok(operation)
     }
 
-    fn remove_spendable_note(dbtx: &WriteTxRef<'_>, spendable_note: &SpendableNote) {
-        dbtx.remove(&NOTE, spendable_note)
+    fn remove_spendable_note(
+        dbtx: &WriteTxRef<'_>,
+        federation: FederationId,
+        spendable_note: &SpendableNote,
+    ) {
+        dbtx.remove(&NoteTable(federation), spendable_note)
             .expect("Must delete existing spendable note");
     }
 }
 
-/// Pull a set of `SpendableNote`s out of `NOTE` whose denominations sum
+/// Pull a set of `SpendableNote`s out of `NoteTable` whose denominations sum
 /// exactly to `remaining_amount`, remove them, and return the resulting
 /// `ECash`. Returns `None` if no exact-match combination exists. No
 /// events are logged — callers do that.
 fn send_ecash_dbtx(
     dbtx: &WriteTxRef<'_>,
-    federation_id: FederationId,
+    federation: FederationId,
     mut remaining_amount: Amount,
 ) -> Option<ECash> {
-    let mut sorted: Vec<SpendableNote> = dbtx.iter(&NOTE, |r| r.map(|(note, ())| note).collect());
+    let mut sorted: Vec<SpendableNote> = dbtx.iter(&NoteTable(federation), |r| {
+        r.map(|(note, ())| note).collect()
+    });
 
     sorted.sort_by_key(|n| std::cmp::Reverse(n.denomination));
 
@@ -905,21 +936,21 @@ fn send_ecash_dbtx(
     }
 
     for spendable_note in &notes {
-        dbtx.remove(&NOTE, spendable_note)
+        dbtx.remove(&NoteTable(federation), spendable_note)
             .expect("Must delete existing spendable note");
     }
 
-    Some(ECash::new(federation_id, notes))
+    Some(ECash::new(federation, notes))
 }
 
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
-pub(crate) fn wipe_tables(dbtx: &WriteTxRef<'_>) {
-    dbtx.delete_table(&NOTE);
-    dbtx.delete_table(&RECEIVE_OPERATION);
-    dbtx.delete_table(&RECOVERY);
-    dbtx.delete_table(&crate::executor::table::<MintStateMachine>());
-    dbtx.delete_table(&crate::executor::table::<SendStateMachine>());
+pub(crate) fn wipe_tables(dbtx: &WriteTxRef<'_>, federation: FederationId) {
+    dbtx.delete_table(&NoteTable(federation));
+    dbtx.delete_table(&ReceiveOperationTable(federation));
+    dbtx.delete_table(&RecoveryTable(federation));
+    dbtx.delete_table(&MintStateMachineTable(federation));
+    dbtx.delete_table(&SendStateMachineTable(federation));
 }
 
 #[derive(Clone)]

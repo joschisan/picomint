@@ -7,12 +7,12 @@ use picomint_redb::Database;
 use tokio::try_join;
 use tracing::info;
 
-use super::{EVENT_LOG, EventKind, EventSource, log_event_raw, subscribe_operation_events};
+use super::{EventKind, EventLogTable, EventSource, log_event_raw, subscribe_operation_events};
 
 #[test_log::test(tokio::test)]
 async fn sanity_subscribe_operation_events() {
     let db = Database::open_in_memory();
-    let event_notify = db.notify_for_table(&EVENT_LOG);
+    let event_notify = db.notify_for_table(&EventLogTable);
 
     let operation = picomint_core::core::OperationId::new_random();
     let counter = Arc::new(AtomicU8::new(0));
@@ -42,14 +42,14 @@ async fn sanity_subscribe_operation_events() {
             }
         },
         async {
-            let federation_id = picomint_core::config::FederationId::dummy();
+            let federation = picomint_core::config::FederationId::dummy();
             for i in 0..=4 {
                 let dbtx = db.begin_write();
                 log_event_raw(
                     &dbtx.as_ref(),
                     EventKind::from(format!("{i}")),
                     EventSource::Core,
-                    federation_id,
+                    federation,
                     operation,
                     vec![],
                 );

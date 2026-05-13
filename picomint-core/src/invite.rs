@@ -9,14 +9,14 @@ use picomint_encoding::{Decodable, Encodable};
 /// and the iroh public key of one bootstrap peer.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct InviteCode {
-    pub federation_id: FederationId,
+    pub federation: FederationId,
     pub node_id: PublicKey,
 }
 
 impl InviteCode {
-    pub fn new(node_id: PublicKey, federation_id: FederationId) -> Self {
+    pub fn new(node_id: PublicKey, federation: FederationId) -> Self {
         Self {
-            federation_id,
+            federation,
             node_id,
         }
     }

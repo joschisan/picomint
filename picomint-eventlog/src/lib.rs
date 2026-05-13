@@ -7,14 +7,10 @@
 //! secondary table keyed by `(operation, event_log_id)` so a subscriber
 //! can tail events for a specific operation cheaply via a stream API.
 //!
-//! The log lives at the un-isolated root of the redb database regardless
-//! of where callers are operating. All read/write/notify entry points
-//! internally call [`picomint_redb::Database::un_prefixed`] /
-//! [`picomint_redb::WriteTxRef::un_prefixed`], so a caller holding an
-//! isolated handle (e.g. a gateway federation client) still hits the
-//! shared root tables. This makes the log a daemon-wide stream — a
-//! single operation id can carry events from multiple isolated clients (e.g.
-//! both halves of a gateway-internal direct swap).
+//! [`EventLogTable`] and [`EventLogByOperationTable`] are daemon-global
+//! [`picomint_redb::table!`]s. Any caller — including one mid-state-machine
+//! commit on a per-federation client — can write to them in the same atomic
+//! redb commit; per-federation scoping lives elsewhere in the schema.
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -127,12 +123,12 @@ pub struct EventLogEntry {
     /// Federation this event belongs to. Every event is federation-scoped
     /// — there are no global events. For events that span two clients in
     /// the same daemon (e.g. a gateway-internal direct swap), each side
-    /// emits its own entry tagged with its own federation_id; the shared
+    /// emits its own entry tagged with its own federation; the shared
     /// `operation` lets a subscriber stitch them together.
-    pub federation_id: FederationId,
+    pub federation: FederationId,
 
     /// Operation this event belongs to. Used to index the event into
-    /// [`EVENT_LOG_BY_OPERATION`] for op-scoped tailing.
+    /// [`EventLogByOperationTable`] for op-scoped tailing.
     pub operation: OperationId,
 
     /// Timestamp in milliseconds after unix epoch.
@@ -153,44 +149,39 @@ impl EventLogEntry {
 consensus_value!(EventLogEntry);
 
 table!(
-    EVENT_LOG,
+    EventLogTable,
     EventLogId => EventLogEntry,
     "global-event-log",
 );
 
 table!(
-    EVENT_LOG_BY_OPERATION,
+    EventLogByOperationTable,
     (OperationId, EventLogId) => EventLogEntry,
     "operation-event-log",
 );
 
-/// Append an event to [`EVENT_LOG`] and [`EVENT_LOG_BY_OPERATION`]. IDs are
+/// Append an event to [`EventLogTable`] and [`EventLogByOperationTable`]. IDs are
 /// allocated inline under redb's single-writer serialization. The per-table
-/// [`Notify`] for `EVENT_LOG` is woken automatically on commit by the redb
+/// [`Notify`] for `EventLogTable` is woken automatically on commit by the redb
 /// layer.
 pub fn log_event_raw(
     dbtx: &WriteTxRef<'_>,
     kind: EventKind,
     source: EventSource,
-    federation_id: FederationId,
+    federation: FederationId,
     operation: OperationId,
     payload: Vec<u8>,
 ) {
     tracing::info!(
         kind = %kind,
         source = ?source,
-        %federation_id,
+        %federation,
         operation = %operation,
         payload = %String::from_utf8_lossy(&payload),
         "event",
     );
 
-    // Always write at the root: the event log is a daemon-wide stream,
-    // not per-client/per-federation. Callers may pass an isolated tx
-    // (e.g. a gateway federation client mid-state-machine commit) but
-    // the events still land in the shared root tables.
-    let dbtx = dbtx.un_prefixed();
-    let id = next_event_log_id(&dbtx);
+    let id = next_event_log_id(dbtx);
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("System time before Unix epoch")
@@ -198,19 +189,19 @@ pub fn log_event_raw(
     let entry = EventLogEntry {
         kind,
         source,
-        federation_id,
+        federation,
         operation,
         timestamp,
         payload,
     };
 
     assert!(
-        dbtx.insert(&EVENT_LOG, &id, &entry).is_none(),
+        dbtx.insert(&EventLogTable, &id, &entry).is_none(),
         "Must never overwrite existing event"
     );
 
     assert!(
-        dbtx.insert(&EVENT_LOG_BY_OPERATION, &(operation, id), &entry)
+        dbtx.insert(&EventLogByOperationTable, &(operation, id), &entry)
             .is_none(),
         "Must never overwrite existing event"
     );
@@ -219,7 +210,7 @@ pub fn log_event_raw(
 /// Typed convenience: encode an [`Event`] into the log.
 pub fn log_event<E: Event>(
     dbtx: &WriteTxRef<'_>,
-    federation_id: FederationId,
+    federation: FederationId,
     operation: OperationId,
     event: E,
 ) {
@@ -227,7 +218,7 @@ pub fn log_event<E: Event>(
         dbtx,
         E::KIND,
         E::SOURCE,
-        federation_id,
+        federation,
         operation,
         serde_json::to_vec(&event).expect("Serialization can't fail"),
     );
@@ -235,19 +226,18 @@ pub fn log_event<E: Event>(
 
 /// Next unused log id — one past the max existing id, or 0 if empty.
 fn next_event_log_id(dbtx: &WriteTxRef<'_>) -> EventLogId {
-    dbtx.iter(&EVENT_LOG, |it| {
+    dbtx.iter(&EventLogTable, |it| {
         it.next_back().map(|(k, _)| k.next()).unwrap_or_default()
     })
 }
 
 /// [`Notify`] handle that fires on every commit touching the global event
-/// log. Resolves on the un-prefixed root regardless of `db`'s isolation,
-/// so subscribers always observe the daemon-wide stream.
+/// log.
 pub fn event_notify(db: &Database) -> Arc<Notify> {
-    db.un_prefixed().notify_for_table(&EVENT_LOG)
+    db.notify_for_table(&EventLogTable)
 }
 
-/// Read up to `limit` consecutive [`EVENT_LOG`] entries starting at
+/// Read up to `limit` consecutive [`EventLogTable`] entries starting at
 /// `pos`. Trailers paging through the log in chunks call this in a loop,
 /// advancing `pos` past the last returned id between calls. Pass
 /// [`EventLogId::LOG_START`] to read from the head.
@@ -257,17 +247,16 @@ pub fn get_event_log(
     limit: u64,
 ) -> Vec<(EventLogId, EventLogEntry)> {
     let end = pos.saturating_add(limit);
-    db.un_prefixed()
-        .begin_read()
-        .range(&EVENT_LOG, pos..end, |it| it.collect())
+    db.begin_read()
+        .range(&EventLogTable, pos..end, |it| it.collect())
 }
 
 /// One-shot snapshot of every event currently logged for `operation`, in
 /// insertion order. See [`subscribe_operation_events`] for the streaming
 /// variant that also yields events arriving after the call.
 pub fn read_operation_events(db: &Database, operation: OperationId) -> Vec<EventLogEntry> {
-    db.un_prefixed().begin_read().range(
-        &EVENT_LOG_BY_OPERATION,
+    db.begin_read().range(
+        &EventLogByOperationTable,
         (operation, EventLogId::LOG_START)..(operation, EventLogId::LOG_END),
         |it| it.map(|(_, v)| v).collect(),
     )
@@ -283,13 +272,12 @@ pub fn subscribe_operation_events(
     event_notify: Arc<Notify>,
     operation: OperationId,
 ) -> impl Stream<Item = EventLogEntry> {
-    let db = db.un_prefixed();
     async_stream::stream! {
         let mut next_id = EventLogId::LOG_START;
         loop {
             let notified = event_notify.notified();
             let batch: Vec<(EventLogId, EventLogEntry)> = db.begin_read().range(
-                &EVENT_LOG_BY_OPERATION,
+                &EventLogByOperationTable,
                 (operation, next_id)..(operation, EventLogId::LOG_END),
                 |it| it.map(|((_, id), entry)| (id, entry)).collect(),
             );

@@ -1,11 +1,10 @@
 //! Per-module state machine executor.
 //!
 //! Each module (and the client-level tx submission) owns a single
-//! [`ModuleExecutor<S>`] parameterised by its state type. The caller
-//! must hand the executor a [`Database`] it owns exclusively (typically
-//! via [`Database::isolate`]); the executor persists active states in a
-//! per-state-machine table keyed by a random [`SmId`] and drives
-//! transitions in a typed reactor loop.
+//! [`ModuleExecutor<S, T>`] parameterised by its state type and the
+//! per-federation [`Table`] that persists it. The executor stores active
+//! states in `T` keyed by a random [`SmId`] and drives transitions in a
+//! typed reactor loop.
 //!
 //! Each driver iteration: wait for [`StateMachine::trigger`] to resolve,
 //! then apply [`StateMachine::transition`] atomically in a DB tx. A
@@ -18,7 +17,7 @@ use std::sync::Arc;
 
 use crate::task::TaskGroup;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::{Database, WriteTxRef, redb};
+use picomint_redb::{Database, Table, WriteTxRef, redb};
 
 /// Random opaque identifier assigned by the executor when a state
 /// machine is first inserted. Used as the table key; the state machine
@@ -44,11 +43,6 @@ impl SmId {
 pub trait StateMachine:
     Debug + Clone + for<'a> redb::Value<SelfType<'a> = Self> + Send + Sync + 'static
 {
-    /// Logical table name under which this state machine's active states are
-    /// persisted in the owning [`ModuleExecutor`]'s database. Must be unique
-    /// among state machine types sharing a module DB namespace.
-    const TABLE_NAME: &'static str;
-
     /// Per-module context handed to `trigger` and `transition`.
     type Context: Clone + Send + Sync + 'static;
 
@@ -79,33 +73,34 @@ pub trait StateMachine:
     ) -> Option<Self>;
 }
 
-/// Typed `(SmId, S)` table definition for `S`'s persisted active states.
-/// Public so callers (e.g. `Client::wipe`) can name SM tables alongside
-/// module tables when issuing per-table operations.
-pub fn table<S: StateMachine>() -> picomint_redb::NativeTableDef<SmId, S> {
-    picomint_redb::NativeTableDef::new(S::TABLE_NAME)
-}
-
-// ---- Executor --------------------------------------------------------------
-
-/// Per-module reactor driving state machines of type `S`. Cheaply
-/// cloneable ([`Arc`]-backed).
+/// Per-module reactor driving state machines of type `S` persisted in `T`.
+/// Cheaply cloneable ([`Arc`]-backed).
 #[derive(Clone)]
-pub struct ModuleExecutor<S: StateMachine> {
-    inner: Arc<Inner<S>>,
+pub struct ModuleExecutor<S: StateMachine, T> {
+    inner: Arc<Inner<S, T>>,
 }
 
-struct Inner<S: StateMachine> {
+struct Inner<S: StateMachine, T> {
     db: Database,
+    table: T,
     context: S::Context,
     tg: TaskGroup,
 }
 
-impl<S: StateMachine> ModuleExecutor<S> {
-    /// Create the executor and spawn driver tasks for any state machines
-    /// persisted from a previous run.
-    pub fn new(db: Database, context: S::Context, tg: TaskGroup) -> Self {
-        let inner = Arc::new(Inner { db, context, tg });
+impl<S, T> ModuleExecutor<S, T>
+where
+    S: StateMachine,
+    T: Table<Key = SmId, Value = S> + Copy + Send + Sync + 'static,
+{
+    /// persisted from a previous run. `table` is the (per-federation)
+    /// [`Table`] this executor reads and writes through.
+    pub fn new(db: Database, table: T, context: S::Context, tg: TaskGroup) -> Self {
+        let inner = Arc::new(Inner {
+            db,
+            table,
+            context,
+            tg,
+        });
 
         for (id, state) in inner.get_active_states() {
             inner.clone().spawn_drive(id, state);
@@ -117,12 +112,10 @@ impl<S: StateMachine> ModuleExecutor<S> {
     /// Atomically insert `state` as a new active state machine under a
     /// freshly-generated [`SmId`]. A driver task is spawned for it when
     /// the DB transaction commits.
-    ///
-    /// `dbtx` must be scoped to the module's DB namespace.
     pub fn add_state_machine_dbtx(&self, dbtx: &WriteTxRef<'_>, state: S) {
         let id = SmId::random();
         assert!(
-            dbtx.insert(&table::<S>(), &id, &state).is_none(),
+            dbtx.insert(&self.inner.table, &id, &state).is_none(),
             "SmId collision"
         );
 
@@ -138,9 +131,13 @@ impl<S: StateMachine> ModuleExecutor<S> {
     }
 }
 
-impl<S: StateMachine> Inner<S> {
+impl<S, T> Inner<S, T>
+where
+    S: StateMachine,
+    T: Table<Key = SmId, Value = S> + Copy + Send + Sync + 'static,
+{
     fn get_active_states(&self) -> Vec<(SmId, S)> {
-        self.db.begin_read().iter(&table::<S>(), |r| r.collect())
+        self.db.begin_read().iter(&self.table, |r| r.collect())
     }
 
     fn spawn_drive(self: Arc<Self>, id: SmId, state: S) {
@@ -159,12 +156,12 @@ impl<S: StateMachine> Inner<S> {
 
             match state.transition(&self.context, &dbtx.as_ref(), outcome) {
                 Some(new_state) => {
-                    dbtx.insert(&table::<S>(), &id, &new_state);
+                    dbtx.insert(&self.table, &id, &new_state);
                     dbtx.commit();
                     state = new_state;
                 }
                 None => {
-                    dbtx.remove(&table::<S>(), &id);
+                    dbtx.remove(&self.table, &id);
                     dbtx.commit();
                     return;
                 }

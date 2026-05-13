@@ -28,7 +28,7 @@ pub async fn run_public(state: AppState, endpoint: Endpoint) {
 async fn dispatch(state: AppState, method: GatewayMethod) -> Result<Vec<u8>, String> {
     match method {
         GatewayMethod::Info(req) => Ok(InfoResponse {
-            info: state.gateway_info(&req.federation_id).await.ok(),
+            info: state.gateway_info(&req.federation).await.ok(),
         }
         .consensus_encode_to_vec()),
         GatewayMethod::SendPayment(req) => state

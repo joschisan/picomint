@@ -16,7 +16,7 @@ use crate::tx::{Input, Output, TxBuilder};
 use anyhow::{Context, anyhow};
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
-use db::{NEXT_OUTPUT_INDEX, VALID_ADDRESS_INDEX};
+use db::{NextOutputIndexTable, ValidAddressIndexTable};
 use events::{ReceiveEvent, SendEvent};
 use picomint_core::core::OperationId;
 use picomint_core::wallet::config::WalletConfigConsensus;
@@ -29,7 +29,7 @@ use picomint_encoding::Encodable;
 
 pub use self::secret::WalletSecret;
 use secp256k1::Keypair;
-use send_sm::SendStateMachine;
+use send_sm::{SendStateMachine, SendStateMachineTable};
 use thiserror::Error;
 use tokio::task::block_in_place;
 use tokio::time::sleep;
@@ -44,7 +44,7 @@ pub struct WalletClientModule {
     cfg: WalletConfigConsensus,
     client_ctx: ClientContext,
     mint: std::sync::Arc<crate::mint::MintClientModule>,
-    send_executor: ModuleExecutor<SendStateMachine>,
+    send_executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
 }
 
 #[derive(Clone)]
@@ -70,10 +70,16 @@ impl WalletClientModule {
         secret: WalletSecret,
         tg: &TaskGroup,
     ) -> anyhow::Result<WalletClientModule> {
+        let federation = context.federation();
         let sm_context = WalletClientContext {
             client_ctx: context.clone(),
         };
-        let send_executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone());
+        let send_executor = ModuleExecutor::new(
+            context.db().clone(),
+            SendStateMachineTable(federation),
+            sm_context,
+            tg.clone(),
+        );
 
         let module = WalletClientModule {
             secret,
@@ -200,7 +206,9 @@ impl WalletClientModule {
                 .client_ctx
                 .db()
                 .begin_read()
-                .iter(&VALID_ADDRESS_INDEX, |r| r.next_back().map(|(k, ())| k));
+                .iter(&ValidAddressIndexTable(self.client_ctx.federation()), |r| {
+                    r.next_back().map(|(k, ())| k)
+                });
 
             if let Some(idx) = idx {
                 return self.derive_address(idx);
@@ -279,17 +287,21 @@ impl WalletClientModule {
     }
 
     async fn output_scanner(module: WalletClientModule) {
-        let has_seed = module
-            .client_ctx
-            .db()
-            .begin_read()
-            .iter(&VALID_ADDRESS_INDEX, |r| r.next().is_some());
+        let has_seed = module.client_ctx.db().begin_read().iter(
+            &ValidAddressIndexTable(module.client_ctx.federation()),
+            |r| r.next().is_some(),
+        );
 
         if !has_seed {
             let index = module.next_valid_index(0);
             let dbtx = module.client_ctx.db().begin_write();
             assert!(
-                dbtx.insert(&VALID_ADDRESS_INDEX, &index, &()).is_none(),
+                dbtx.insert(
+                    &ValidAddressIndexTable(module.client_ctx.federation()),
+                    &index,
+                    &()
+                )
+                .is_none(),
                 "seed address index already present"
             );
             dbtx.commit();
@@ -318,10 +330,14 @@ impl WalletClientModule {
     async fn check_outputs(&self) -> anyhow::Result<bool> {
         let dbtx = self.client_ctx.db().begin_read();
 
-        let next_output_index = dbtx.get(&NEXT_OUTPUT_INDEX, &()).unwrap_or(0);
+        let next_output_index = dbtx
+            .get(&NextOutputIndexTable(self.client_ctx.federation()), &())
+            .unwrap_or(0);
 
-        let mut valid_indices: Vec<u64> =
-            dbtx.iter(&VALID_ADDRESS_INDEX, |r| r.map(|(idx, ())| idx).collect());
+        let mut valid_indices: Vec<u64> = dbtx
+            .iter(&ValidAddressIndexTable(self.client_ctx.federation()), |r| {
+                r.map(|(idx, ())| idx).collect()
+            });
 
         drop(dbtx);
 
@@ -350,7 +366,11 @@ impl WalletClientModule {
 
                     let dbtx = self.client_ctx.db().begin_write();
 
-                    dbtx.insert(&VALID_ADDRESS_INDEX, &index, &());
+                    dbtx.insert(
+                        &ValidAddressIndexTable(self.client_ctx.federation()),
+                        &index,
+                        &(),
+                    );
 
                     dbtx.commit();
 
@@ -400,7 +420,11 @@ impl WalletClientModule {
 
             let dbtx = self.client_ctx.db().begin_write();
 
-            dbtx.insert(&NEXT_OUTPUT_INDEX, &(), &(output.index + 1));
+            dbtx.insert(
+                &NextOutputIndexTable(self.client_ctx.federation()),
+                &(),
+                &(output.index + 1),
+            );
 
             dbtx.commit();
         }
@@ -411,10 +435,13 @@ impl WalletClientModule {
 
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
-pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>) {
-    dbtx.delete_table(&NEXT_OUTPUT_INDEX);
-    dbtx.delete_table(&VALID_ADDRESS_INDEX);
-    dbtx.delete_table(&crate::executor::table::<SendStateMachine>());
+pub(crate) fn wipe_tables(
+    dbtx: &picomint_redb::WriteTxRef<'_>,
+    federation: picomint_core::config::FederationId,
+) {
+    dbtx.delete_table(&NextOutputIndexTable(federation));
+    dbtx.delete_table(&ValidAddressIndexTable(federation));
+    dbtx.delete_table(&SendStateMachineTable(federation));
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]

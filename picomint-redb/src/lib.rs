@@ -1,24 +1,26 @@
 //! redb-backed database for picomint.
 //!
-//! A [`NativeTableDef<K, V>`] is a typed table reference backed by redb's
-//! native `TableDefinition<K, V>`. Keys implement `redb::Key + redb::Value`
-//! directly; values implement `redb::Value` directly. Two per-type helper
-//! macros:
+//! Tables are typed value-like handles that implement the [`Table`] trait.
+//! The [`table!`] macro declares a zero-sized unit struct implementing
+//! [`Table`] with a fixed resolved name. Per-federation scoping is layered
+//! on top by callers (see `picomint-client`'s `client_table!` macro): a
+//! tuple struct `Name(FederationId)` implementing [`Table`] resolves to
+//! `"{federation}/{label}"`. There is no namespace mode on [`Database`] or
+//! transactions — the dbtx is always at root, so any caller holding a
+//! single dbtx can write to global and per-federation tables in the same
+//! atomic redb commit.
+//!
+//! Per-type encoding macros:
 //!
 //! - [`consensus_value!`] — implements `redb::Value` via consensus encoding.
 //! - [`consensus_key!`] — implements `redb::Key` + `redb::Value` via consensus
 //!   encoding with byte-lex compare. Byte-lex compare matches numeric /
 //!   lexicographic order because our encoding is fixed-width big-endian for
 //!   integers and raw bytes for hashes.
-//!
-//! The concrete tx and database types (`Database`, `ReadTx`,
-//! `WriteTx`, `ReadTxRef`, `WriteTxRef`) expose `insert`/`get`/
-//! `remove`/`iter`/`range`/`delete_table` as inherent methods over
-//! `NativeTableDef`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
-use std::marker::PhantomData;
+use std::ops::RangeBounds;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -102,47 +104,27 @@ macro_rules! consensus_key {
     };
 }
 
-// ─── NativeTableDef: redb-native typed table reference ───────────────────
-//
-// Typed table handle: `K` and `V` are real redb types (implement
-// `redb::Key`/`redb::Value`). Gives direct access to redb's native typed
-// `TableDefinition<K, V>` with zero bytes-level indirection.
+// ─── Table trait + table-declaring macros ────────────────────────────────
 
-pub struct NativeTableDef<K: redb::Key + 'static, V: redb::Value + 'static> {
-    name: &'static str,
-    _phantom: PhantomData<(K, V)>,
+/// A typed table reference. Each implementor pairs `Key`/`Value` types with a
+/// runtime [`resolved_name`](Self::resolved_name) that determines which on-disk
+/// table the op should hit. Op methods on [`WriteTx`]/[`ReadTx`]/etc. accept
+/// any `&T: Table` and dispatch via `resolved_name()`, so the dbtx itself
+/// never needs a "namespace mode."
+pub trait Table {
+    type Key: redb::Key + 'static;
+    type Value: redb::Value + 'static;
+
+    /// On-disk table name.
+    fn resolved_name(&self) -> String;
 }
 
-impl<K, V> NativeTableDef<K, V>
-where
-    K: redb::Key + 'static,
-    V: redb::Value + 'static,
-{
-    pub const fn new(name: &'static str) -> Self {
-        Self {
-            name,
-            _phantom: PhantomData,
-        }
-    }
-
-    pub fn resolved_name(&self, prefix: &Option<String>) -> String {
-        match prefix {
-            Some(p) => format!("{p}/{}", self.name),
-            None => self.name.to_string(),
-        }
-    }
-}
-
-// ─── table! macro ────────────────────────────────────────────────────────
-
-/// Declare a typed [`NativeTableDef`] constant.
-///
-/// Both `$k` and `$v` must already implement the relevant redb traits
-/// directly — see `consensus_value!` and `consensus_key!`.
+/// Declare a daemon-global table. Expands to a zero-sized unit struct
+/// implementing [`Table`] with a fixed resolved name.
 ///
 /// ```ignore
 /// table!(
-///     UNIX_TIME_VOTE,
+///     UnixTimeVoteTable,
 ///     PeerId => u64,
 ///     "unix-time-vote",
 /// );
@@ -156,8 +138,17 @@ macro_rules! table {
         $label:literal $(,)?
     ) => {
         $(#[$attr])*
-        pub const $name: $crate::NativeTableDef<$k, $v> =
-            $crate::NativeTableDef::new($label);
+        #[derive(Copy, Clone, Debug)]
+        pub struct $name;
+
+        impl $crate::Table for $name {
+            type Key = $k;
+            type Value = $v;
+
+            fn resolved_name(&self) -> ::std::string::String {
+                $label.to_string()
+            }
+        }
     };
 }
 
@@ -166,13 +157,6 @@ macro_rules! table {
 #[derive(Clone)]
 pub struct Database {
     inner: Arc<DatabaseInner>,
-    /// Optional single-level namespace. `Some("federation-xyz")` causes every
-    /// table opened through this handle to resolve to `"federation-xyz/{label}"`
-    /// on disk. `None` means tables open at their bare label. Intentionally
-    /// flat — no stacking — since the only runtime isolation the codebase
-    /// needs is per-federation in the gateway; guardian-daemon modules disambiguate
-    /// at the label level (`"mint-note"`, etc.).
-    prefix: Option<String>,
 }
 
 struct DatabaseInner {
@@ -207,7 +191,6 @@ impl Database {
                 notify: Mutex::new(BTreeMap::new()),
                 global_notify: Arc::new(Notify::new()),
             }),
-            prefix: None,
         })
     }
 
@@ -223,33 +206,6 @@ impl Database {
                 notify: Mutex::new(BTreeMap::new()),
                 global_notify: Arc::new(Notify::new()),
             }),
-            prefix: None,
-        }
-    }
-
-    /// Carve out a single-level namespace. Resolves tables on disk as
-    /// `"{prefix}/{label}"`. Flat by design — panics if called on an
-    /// already-isolated handle. The only legitimate production use is the
-    /// gateway's per-federation client DB.
-    pub fn isolate(&self, prefix: impl std::fmt::Display) -> Database {
-        match self.prefix {
-            None => Self {
-                inner: self.inner.clone(),
-                prefix: Some(prefix.to_string()),
-            },
-            Some(_) => panic!("You tried to isolate a db twice"),
-        }
-    }
-
-    /// Sibling handle to the same underlying redb env with no prefix —
-    /// resolves tables at their bare label. The inverse of [`Self::isolate`].
-    /// Used by code that lives "above" the federation namespace (e.g. the
-    /// daemon-wide event log) to read/write root tables from a handle the
-    /// caller already had isolated.
-    pub fn un_prefixed(&self) -> Database {
-        Self {
-            inner: self.inner.clone(),
-            prefix: None,
         }
     }
 
@@ -263,7 +219,6 @@ impl Database {
         WriteTx {
             tx,
             db: self.inner.clone(),
-            prefix: self.prefix.clone(),
             touched: Mutex::new(BTreeSet::new()),
             on_commit: Mutex::new(Vec::new()),
         }
@@ -272,10 +227,7 @@ impl Database {
     pub fn begin_read(&self) -> ReadTx {
         let tx = self.inner.env.begin_read().expect("redb begin_read failed");
 
-        ReadTx {
-            tx,
-            prefix: self.prefix.clone(),
-        }
+        ReadTx { tx }
     }
 
     /// Notification future for the next commit on this database. Fires on
@@ -291,29 +243,24 @@ impl Database {
         self.inner.global_notify.notified()
     }
 
-    /// Shared [`Notify`] handle for `table`'s resolved name (i.e. table name
-    /// under this [`Database`]'s prefix). Fires via `notify_waiters` on every
-    /// commit that opened the table for write. Callers should construct
-    /// `notified()` *before* the check it guards (see [`Self::wait_commit`]).
-    pub fn notify_for_table<WK, WV>(&self, def: &NativeTableDef<WK, WV>) -> Arc<Notify>
-    where
-        WK: redb::Key + 'static,
-        WV: redb::Value + 'static,
-    {
-        self.inner.notify_for(&def.resolved_name(&self.prefix))
+    /// Shared [`Notify`] handle for `table`'s resolved name. Fires via
+    /// `notify_waiters` on every commit that opened the table for write.
+    /// Callers should construct `notified()` *before* the check it guards
+    /// (see [`Self::wait_commit`]).
+    pub fn notify_for_table<T: Table>(&self, def: &T) -> Arc<Notify> {
+        self.inner.notify_for(&def.resolved_name())
     }
 
     /// Wait until `check` returns `Some(T)`, then return `(T, ReadTx)`.
     /// The returned tx is the one that observed the matched state. `check` is
     /// called once on entry and again after every commit that touches `table`.
-    pub async fn wait_table_check<WK, WV, T>(
+    pub async fn wait_table_check<D, R>(
         &self,
-        def: &NativeTableDef<WK, WV>,
-        mut check: impl FnMut(&ReadTx) -> Option<T>,
-    ) -> (T, ReadTx)
+        def: &D,
+        mut check: impl FnMut(&ReadTx) -> Option<R>,
+    ) -> (R, ReadTx)
     where
-        WK: redb::Key + 'static,
-        WV: redb::Value + 'static,
+        D: Table,
     {
         let notify = self.notify_for_table(def);
 
@@ -337,29 +284,23 @@ impl Database {
 
 pub struct ReadTx {
     tx: redb::ReadTransaction,
-    prefix: Option<String>,
 }
 
 impl ReadTx {
-    /// Borrow a view at this tx's root prefix.
+    /// Borrow a view of this read tx.
     pub fn as_ref(&self) -> ReadTxRef<'_> {
-        ReadTxRef {
-            tx: &self.tx,
-            prefix: self.prefix.clone(),
-        }
+        ReadTxRef { tx: &self.tx }
     }
 }
 
-/// Borrowed view of a [`ReadTx`] carrying its prefix.
+/// Borrowed view of a [`ReadTx`].
 pub struct ReadTxRef<'tx> {
     tx: &'tx redb::ReadTransaction,
-    prefix: Option<String>,
 }
 
 pub struct WriteTx {
     tx: redb::WriteTransaction,
     db: Arc<DatabaseInner>,
-    prefix: Option<String>,
     /// Resolved names of tables opened for write during this tx. Populated any
     /// time a table is opened (including for read), used to notify waiters on
     /// commit. Over-notifies on pure reads — harmless but slightly noisy.
@@ -368,11 +309,11 @@ pub struct WriteTx {
 }
 
 impl WriteTx {
-    /// Borrow a view at this tx's root prefix.
+    /// Borrow a view of this write tx. The view cannot commit; only the
+    /// owning [`WriteTx`] can.
     pub fn as_ref(&self) -> WriteTxRef<'_> {
         WriteTxRef {
             tx: &self.tx,
-            prefix: self.prefix.clone(),
             touched: &self.touched,
             on_commit: &self.on_commit,
         }
@@ -406,13 +347,12 @@ impl WriteTx {
     }
 }
 
-/// Borrowed view of a [`WriteTx`] carrying its prefix. This is what
-/// server modules receive from the consensus engine; they cannot commit, but
-/// they can read, write, and register post-commit callbacks that the owning
-/// [`WriteTx::commit`] will fire.
+/// Borrowed view of a [`WriteTx`]. This is what server modules and client
+/// state machines receive; they cannot commit, but they can read, write, and
+/// register post-commit callbacks that the owning [`WriteTx::commit`] will
+/// fire.
 pub struct WriteTxRef<'tx> {
     tx: &'tx redb::WriteTransaction,
-    prefix: Option<String>,
     touched: &'tx Mutex<BTreeSet<String>>,
     on_commit: &'tx Mutex<Vec<Box<dyn FnOnce() + Send + 'static>>>,
 }
@@ -426,60 +366,18 @@ impl<'tx> WriteTxRef<'tx> {
             .push(Box::new(f));
     }
 
-    /// Carve out a single-level namespace on top of this tx. Resolves tables
-    /// on disk as `"{prefix}/{label}"`. Flat by design — panics if called on
-    /// an already-isolated ref. Shares `touched` and `on_commit` with the
-    /// parent, so writes made via the returned ref land in the parent's
-    /// single physical commit.
-    ///
-    /// Used by the gateway daemon to open one daemon-global write tx and
-    /// atomically write to a per-federation (isolated) client DB in the same
-    /// commit — avoiding the nested-begin_write deadlock redb's single-writer
-    /// lock would otherwise produce.
-    pub fn isolate(&self, prefix: impl std::fmt::Display) -> WriteTxRef<'_> {
-        match self.prefix {
-            None => WriteTxRef {
-                tx: self.tx,
-                prefix: Some(prefix.to_string()),
-                touched: self.touched,
-                on_commit: self.on_commit,
-            },
-            Some(_) => panic!("You tried to isolate a tx twice"),
-        }
-    }
-
-    /// Sibling view of the same underlying tx with no prefix — resolves
-    /// tables at their bare label. Inverse of [`Self::isolate`]. Used by
-    /// the global event log to write to root tables atomically alongside
-    /// state writes that come in via an isolated [`WriteTxRef`].
-    pub fn un_prefixed(&self) -> WriteTxRef<'_> {
-        WriteTxRef {
-            tx: self.tx,
-            prefix: None,
-            touched: self.touched,
-            on_commit: self.on_commit,
-        }
-    }
-
-    // ─── Native-typed ops (spike; will replace the bytes layer) ──────────
-    //
-    // Closure-based to sidestep GAT-related trait-resolution pain around
-    // `redb::Value::SelfType<'a>`. The closure gets a real `redb::Table<'_>`
-    // and can call `.insert`, `.get`, `.range`, `.iter` etc. directly.
-
-    /// Open the native redb table at this view's prefix+name and hand it to
+    /// Open the native redb table at `def`'s resolved name and hand it to
     /// `f`. Registers the table in `touched` for post-commit notification.
-    pub(crate) fn with_native_table<K, V, R>(
+    pub(crate) fn with_native_table<D, R>(
         &self,
-        def: &NativeTableDef<K, V>,
-        f: impl FnOnce(&mut redb::Table<'_, K, V>) -> R,
+        def: &D,
+        f: impl FnOnce(&mut redb::Table<'_, D::Key, D::Value>) -> R,
     ) -> R
     where
-        K: redb::Key + 'static,
-        V: redb::Value + 'static,
+        D: Table,
     {
-        let resolved = def.resolved_name(&self.prefix);
-        let td: TableDefinition<K, V> = TableDefinition::new(&resolved);
+        let resolved = def.resolved_name();
+        let td: TableDefinition<D::Key, D::Value> = TableDefinition::new(&resolved);
         let mut table = self
             .tx
             .open_table(td)
@@ -497,17 +395,16 @@ impl<'tx> WriteTxRef<'tx> {
 impl ReadTxRef<'_> {
     /// Open the native redb table and hand it to `f`. Returns `None` if the
     /// table has never been written — treat that as "empty" at the call site.
-    pub(crate) fn with_native_table<K, V, R>(
+    pub(crate) fn with_native_table<D, R>(
         &self,
-        def: &NativeTableDef<K, V>,
-        f: impl FnOnce(&redb::ReadOnlyTable<K, V>) -> R,
+        def: &D,
+        f: impl FnOnce(&redb::ReadOnlyTable<D::Key, D::Value>) -> R,
     ) -> Option<R>
     where
-        K: redb::Key + 'static,
-        V: redb::Value + 'static,
+        D: Table,
     {
-        let resolved = def.resolved_name(&self.prefix);
-        let td: TableDefinition<K, V> = TableDefinition::new(&resolved);
+        let resolved = def.resolved_name();
+        let td: TableDefinition<D::Key, D::Value> = TableDefinition::new(&resolved);
         match self.tx.open_table(td) {
             Ok(t) => Some(f(&t)),
             Err(redb::TableError::TableDoesNotExist(_)) => None,
@@ -516,14 +413,12 @@ impl ReadTxRef<'_> {
     }
 }
 
-// ─── Ergonomic typed ops over NativeTableDef<K, V> ───────────────────────
+// ─── Ergonomic typed ops over Table ──────────────────────────────────────
 //
 // HRTB `T: for<'a> redb::Value<SelfType<'a> = T>` is the "owned" contract —
 // call sites hand in and receive back owned `T`, not borrowed slices.
 // Satisfied by any type built with `consensus_value!` / `consensus_key!`
 // and tuples thereof.
-
-use std::ops::RangeBounds;
 
 /// Closure-scoped iterator over a redb table. Wraps [`redb::Range`] so callers
 /// receive owned `(K, V)` pairs directly — decoding and error unwrapping happen
@@ -565,15 +460,11 @@ where
 }
 
 impl<'tx> WriteTxRef<'tx> {
-    pub fn insert<WK, K, WV, V>(
-        &self,
-        def: &NativeTableDef<WK, WV>,
-        key: &K,
-        value: &V,
-    ) -> Option<V>
+    pub fn insert<D, K, V>(&self, def: &D, key: &K, value: &V) -> Option<V>
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: Debug + 'static,
         V: Debug + 'static,
     {
@@ -584,10 +475,11 @@ impl<'tx> WriteTxRef<'tx> {
         })
     }
 
-    pub fn remove<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    pub fn remove<D, K, V>(&self, def: &D, key: &K) -> Option<V>
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: Debug + 'static,
         V: Debug + 'static,
     {
@@ -598,13 +490,9 @@ impl<'tx> WriteTxRef<'tx> {
         })
     }
 
-    pub fn delete_table<WK, WV>(&self, def: &NativeTableDef<WK, WV>)
-    where
-        WK: redb::Key + 'static,
-        WV: redb::Value + 'static,
-    {
-        let resolved = def.resolved_name(&self.prefix);
-        let td: TableDefinition<WK, WV> = TableDefinition::new(&resolved);
+    pub fn delete_table<D: Table>(&self, def: &D) {
+        let resolved = def.resolved_name();
+        let td: TableDefinition<D::Key, D::Value> = TableDefinition::new(&resolved);
         match self.tx.delete_table(td) {
             Ok(_) => {}
             Err(redb::TableError::TableDoesNotExist(_)) => {}
@@ -616,10 +504,11 @@ impl<'tx> WriteTxRef<'tx> {
             .insert(resolved);
     }
 
-    pub fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    pub fn get<D, K, V>(&self, def: &D, key: &K) -> Option<V>
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: Debug + 'static,
         V: Debug + 'static,
     {
@@ -628,14 +517,15 @@ impl<'tx> WriteTxRef<'tx> {
         })
     }
 
-    pub fn iter<WK, K, WV, V, R>(
+    pub fn iter<D, K, V, R>(
         &self,
-        def: &NativeTableDef<WK, WV>,
-        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+        def: &D,
+        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
     ) -> R
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: 'static,
         V: 'static,
     {
@@ -647,15 +537,16 @@ impl<'tx> WriteTxRef<'tx> {
         })
     }
 
-    pub fn range<WK, K, WV, V, B, R>(
+    pub fn range<D, K, V, B, R>(
         &self,
-        def: &NativeTableDef<WK, WV>,
+        def: &D,
         range: B,
-        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
     ) -> R
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: 'static,
         V: 'static,
         B: RangeBounds<K>,
@@ -672,10 +563,11 @@ impl<'tx> WriteTxRef<'tx> {
 }
 
 impl ReadTxRef<'_> {
-    pub fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    pub fn get<D, K, V>(&self, def: &D, key: &K) -> Option<V>
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: Debug + 'static,
         V: Debug + 'static,
     {
@@ -685,14 +577,15 @@ impl ReadTxRef<'_> {
         .flatten()
     }
 
-    pub fn iter<WK, K, WV, V, R>(
+    pub fn iter<D, K, V, R>(
         &self,
-        def: &NativeTableDef<WK, WV>,
-        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+        def: &D,
+        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
     ) -> R
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: 'static,
         V: 'static,
         R: Default,
@@ -706,15 +599,16 @@ impl ReadTxRef<'_> {
         .unwrap_or_default()
     }
 
-    pub fn range<WK, K, WV, V, B, R>(
+    pub fn range<D, K, V, B, R>(
         &self,
-        def: &NativeTableDef<WK, WV>,
+        def: &D,
         range: B,
-        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
     ) -> R
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: 'static,
         V: 'static,
         B: RangeBounds<K>,
@@ -735,39 +629,42 @@ impl ReadTxRef<'_> {
 // ─── DbRead / DbWrite trait abstraction ──────────────────────────────────
 //
 // Successor to the old `IReadDatabaseTransactionOps` trait tower. Typed
-// methods are defined directly over `NativeTableDef<WK, WV>` and implemented
-// on each concrete tx type. Server modules take `&impl DbRead` /
+// methods are defined directly over `Table`-implementing tables and
+// implemented on each concrete tx type. Server modules take `&impl DbRead` /
 // `&impl DbWrite` to stay generic over owned-vs-borrowed and read-vs-write.
 
 pub trait DbRead {
-    fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    fn get<D, K, V>(&self, def: &D, key: &K) -> Option<V>
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: Debug + 'static,
         V: Debug + 'static;
 
-    fn iter<WK, K, WV, V, R>(
+    fn iter<D, K, V, R>(
         &self,
-        def: &NativeTableDef<WK, WV>,
-        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+        def: &D,
+        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
     ) -> R
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: 'static,
         V: 'static,
         R: Default;
 
-    fn range<WK, K, WV, V, B, R>(
+    fn range<D, K, V, B, R>(
         &self,
-        def: &NativeTableDef<WK, WV>,
+        def: &D,
         range: B,
-        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
     ) -> R
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: 'static,
         V: 'static,
         B: RangeBounds<K>,
@@ -775,49 +672,50 @@ pub trait DbRead {
 }
 
 pub trait DbWrite: DbRead {
-    fn insert<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K, value: &V) -> Option<V>
+    fn insert<D, K, V>(&self, def: &D, key: &K, value: &V) -> Option<V>
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: Debug + 'static,
         V: Debug + 'static;
 
-    fn remove<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    fn remove<D, K, V>(&self, def: &D, key: &K) -> Option<V>
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: Debug + 'static,
         V: Debug + 'static;
 
-    fn delete_table<WK, WV>(&self, def: &NativeTableDef<WK, WV>)
-    where
-        WK: redb::Key + 'static,
-        WV: redb::Value + 'static;
+    fn delete_table<D: Table>(&self, def: &D);
 }
 
-// Macro to cut the 3 read + 3 write method-body duplication per type.
+// Macro to cut the read + write method-body duplication per type.
 // Each impl delegates to inherent methods that carry the actual logic.
 macro_rules! impl_db_read_via_inherent {
     ($ty:ty) => {
         impl DbRead for $ty {
-            fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+            fn get<D, K, V>(&self, def: &D, key: &K) -> Option<V>
             where
-                WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-                WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+                D: Table,
+                D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+                D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
                 K: Debug + 'static,
                 V: Debug + 'static,
             {
                 <$ty>::get(self, def, key)
             }
 
-            fn iter<WK, K, WV, V, R>(
+            fn iter<D, K, V, R>(
                 &self,
-                def: &NativeTableDef<WK, WV>,
-                f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+                def: &D,
+                f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
             ) -> R
             where
-                WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-                WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+                D: Table,
+                D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+                D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
                 K: 'static,
                 V: 'static,
                 R: Default,
@@ -825,15 +723,16 @@ macro_rules! impl_db_read_via_inherent {
                 <$ty>::iter(self, def, f)
             }
 
-            fn range<WK, K, WV, V, B, R>(
+            fn range<D, K, V, B, R>(
                 &self,
-                def: &NativeTableDef<WK, WV>,
+                def: &D,
                 range: B,
-                f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+                f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
             ) -> R
             where
-                WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-                WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+                D: Table,
+                D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+                D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
                 K: 'static,
                 V: 'static,
                 B: RangeBounds<K>,
@@ -848,36 +747,29 @@ macro_rules! impl_db_read_via_inherent {
 macro_rules! impl_db_write_via_inherent {
     ($ty:ty) => {
         impl DbWrite for $ty {
-            fn insert<WK, K, WV, V>(
-                &self,
-                def: &NativeTableDef<WK, WV>,
-                key: &K,
-                value: &V,
-            ) -> Option<V>
+            fn insert<D, K, V>(&self, def: &D, key: &K, value: &V) -> Option<V>
             where
-                WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-                WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+                D: Table,
+                D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+                D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
                 K: Debug + 'static,
                 V: Debug + 'static,
             {
                 <$ty>::insert(self, def, key, value)
             }
 
-            fn remove<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+            fn remove<D, K, V>(&self, def: &D, key: &K) -> Option<V>
             where
-                WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-                WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+                D: Table,
+                D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+                D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
                 K: Debug + 'static,
                 V: Debug + 'static,
             {
                 <$ty>::remove(self, def, key)
             }
 
-            fn delete_table<WK, WV>(&self, def: &NativeTableDef<WK, WV>)
-            where
-                WK: redb::Key + 'static,
-                WV: redb::Value + 'static,
-            {
+            fn delete_table<D: Table>(&self, def: &D) {
                 <$ty>::delete_table(self, def)
             }
         }
@@ -886,29 +778,31 @@ macro_rules! impl_db_write_via_inherent {
 
 // ─── Owned-tx delegation ─────────────────────────────────────────────────
 //
-// Users commonly call `.insert/.get/...` directly on the owned
+// UsersTable commonly call `.insert/.get/...` directly on the owned
 // `WriteTx`/`ReadTx` (not just on the borrowed
 // `WriteTxRef`/`ReadTxRef`). These inherent impls delegate via `.as_ref()`.
 
 impl ReadTx {
-    pub fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    pub fn get<D, K, V>(&self, def: &D, key: &K) -> Option<V>
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: Debug + 'static,
         V: Debug + 'static,
     {
         self.as_ref().get(def, key)
     }
 
-    pub fn iter<WK, K, WV, V, R>(
+    pub fn iter<D, K, V, R>(
         &self,
-        def: &NativeTableDef<WK, WV>,
-        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+        def: &D,
+        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
     ) -> R
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: 'static,
         V: 'static,
         R: Default,
@@ -916,15 +810,16 @@ impl ReadTx {
         self.as_ref().iter(def, f)
     }
 
-    pub fn range<WK, K, WV, V, B, R>(
+    pub fn range<D, K, V, B, R>(
         &self,
-        def: &NativeTableDef<WK, WV>,
+        def: &D,
         range: B,
-        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
     ) -> R
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: 'static,
         V: 'static,
         B: RangeBounds<K>,
@@ -935,57 +830,52 @@ impl ReadTx {
 }
 
 impl WriteTx {
-    pub fn insert<WK, K, WV, V>(
-        &self,
-        def: &NativeTableDef<WK, WV>,
-        key: &K,
-        value: &V,
-    ) -> Option<V>
+    pub fn insert<D, K, V>(&self, def: &D, key: &K, value: &V) -> Option<V>
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: Debug + 'static,
         V: Debug + 'static,
     {
         self.as_ref().insert(def, key, value)
     }
 
-    pub fn remove<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    pub fn remove<D, K, V>(&self, def: &D, key: &K) -> Option<V>
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: Debug + 'static,
         V: Debug + 'static,
     {
         self.as_ref().remove(def, key)
     }
 
-    pub fn delete_table<WK, WV>(&self, def: &NativeTableDef<WK, WV>)
-    where
-        WK: redb::Key + 'static,
-        WV: redb::Value + 'static,
-    {
+    pub fn delete_table<D: Table>(&self, def: &D) {
         self.as_ref().delete_table(def)
     }
 
-    pub fn get<WK, K, WV, V>(&self, def: &NativeTableDef<WK, WV>, key: &K) -> Option<V>
+    pub fn get<D, K, V>(&self, def: &D, key: &K) -> Option<V>
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: Debug + 'static,
         V: Debug + 'static,
     {
         self.as_ref().get(def, key)
     }
 
-    pub fn iter<WK, K, WV, V, R>(
+    pub fn iter<D, K, V, R>(
         &self,
-        def: &NativeTableDef<WK, WV>,
-        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+        def: &D,
+        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
     ) -> R
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: 'static,
         V: 'static,
         R: Default,
@@ -993,15 +883,16 @@ impl WriteTx {
         self.as_ref().iter(def, f)
     }
 
-    pub fn range<WK, K, WV, V, B, R>(
+    pub fn range<D, K, V, B, R>(
         &self,
-        def: &NativeTableDef<WK, WV>,
+        def: &D,
         range: B,
-        f: impl FnOnce(&mut RedbIter<'_, WK, K, WV, V>) -> R,
+        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
     ) -> R
     where
-        WK: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        WV: for<'a> redb::Value<SelfType<'a> = V> + 'static,
+        D: Table,
+        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
+        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
         K: 'static,
         V: 'static,
         B: RangeBounds<K>,
@@ -1027,24 +918,24 @@ mod tests {
 
     use super::*;
 
-    table!(USERS, u64 => String, "users");
-    table!(BALANCES, u64 => u64, "balances");
+    table!(UsersTable, u64 => String, "users");
+    table!(BalancesTable, u64 => u64, "balances");
 
     #[test]
     fn basic_read_write() {
         let db = Database::open_in_memory();
 
         let tx = db.begin_write();
-        tx.insert(&USERS, &1, &"alice".to_string());
-        tx.insert(&USERS, &2, &"bob".to_string());
-        tx.insert(&BALANCES, &1, &100);
+        tx.insert(&UsersTable, &1, &"alice".to_string());
+        tx.insert(&UsersTable, &2, &"bob".to_string());
+        tx.insert(&BalancesTable, &1, &100);
         tx.commit();
 
         let tx = db.begin_read();
-        assert_eq!(tx.get(&USERS, &1), Some("alice".to_string()));
-        assert_eq!(tx.get(&USERS, &2), Some("bob".to_string()));
-        assert_eq!(tx.get(&USERS, &3), None);
-        assert_eq!(tx.get(&BALANCES, &1), Some(100));
+        assert_eq!(tx.get(&UsersTable, &1), Some("alice".to_string()));
+        assert_eq!(tx.get(&UsersTable, &2), Some("bob".to_string()));
+        assert_eq!(tx.get(&UsersTable, &3), None);
+        assert_eq!(tx.get(&BalancesTable, &1), Some(100));
     }
 
     #[test]
@@ -1052,42 +943,11 @@ mod tests {
         let db = Database::open_in_memory();
 
         let tx = db.begin_write();
-        tx.insert(&USERS, &1, &"alice".to_string());
+        tx.insert(&UsersTable, &1, &"alice".to_string());
         drop(tx);
 
         let tx = db.begin_read();
-        assert_eq!(tx.get(&USERS, &1), None);
-    }
-
-    #[test]
-    fn isolation_separates_namespaces() {
-        let db = Database::open_in_memory();
-        let client_a = db.isolate("client_a");
-        let client_b = db.isolate("client_b");
-
-        let tx = client_a.begin_write();
-        tx.insert(&USERS, &1, &"alice".to_string());
-        tx.commit();
-
-        let tx = client_b.begin_write();
-        tx.insert(&USERS, &1, &"bob".to_string());
-        tx.commit();
-
-        assert_eq!(
-            client_a.begin_read().get(&USERS, &1),
-            Some("alice".to_string())
-        );
-        assert_eq!(
-            client_b.begin_read().get(&USERS, &1),
-            Some("bob".to_string())
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "You tried to isolate a db twice")]
-    fn nested_isolation_panics() {
-        let db = Database::open_in_memory();
-        let _ = db.isolate("gateway").isolate("client_7");
+        assert_eq!(tx.get(&UsersTable, &1), None);
     }
 
     #[test]
@@ -1096,12 +956,12 @@ mod tests {
 
         let tx = db.begin_write();
         for i in 0u64..10 {
-            tx.insert(&BALANCES, &i, &(i * 10));
+            tx.insert(&BalancesTable, &i, &(i * 10));
         }
         tx.commit();
 
         let tx = db.begin_read();
-        let items = tx.range(&BALANCES, 3u64..7u64, |r| r.collect::<Vec<_>>());
+        let items = tx.range(&BalancesTable, 3u64..7u64, |r| r.collect::<Vec<_>>());
 
         assert_eq!(items, vec![(3, 30), (4, 40), (5, 50), (6, 60)]);
     }
@@ -1114,11 +974,13 @@ mod tests {
         let writer = tokio::task::spawn_blocking(move || {
             std::thread::sleep(Duration::from_millis(50));
             let tx = db_writer.begin_write();
-            tx.insert(&USERS, &1, &"alice".to_string());
+            tx.insert(&UsersTable, &1, &"alice".to_string());
             tx.commit();
         });
 
-        let (value, _tx) = db.wait_table_check(&USERS, |tx| tx.get(&USERS, &1)).await;
+        let (value, _tx) = db
+            .wait_table_check(&UsersTable, |tx| tx.get(&UsersTable, &1))
+            .await;
         assert_eq!(value, "alice");
 
         writer.await.unwrap();
@@ -1129,23 +991,25 @@ mod tests {
         let db = Database::open_in_memory();
 
         let tx = db.begin_write();
-        tx.insert(&BALANCES, &1, &50);
+        tx.insert(&BalancesTable, &1, &50);
         tx.commit();
 
         let db_writer = db.clone();
         tokio::task::spawn_blocking(move || {
             std::thread::sleep(Duration::from_millis(50));
             let tx = db_writer.begin_write();
-            tx.insert(&BALANCES, &1, &150);
+            tx.insert(&BalancesTable, &1, &150);
             tx.commit();
         });
 
         let (v, tx) = db
-            .wait_table_check(&BALANCES, |tx| tx.get(&BALANCES, &1).filter(|n| *n >= 100))
+            .wait_table_check(&BalancesTable, |tx| {
+                tx.get(&BalancesTable, &1).filter(|n| *n >= 100)
+            })
             .await;
 
         assert_eq!(v, 150);
-        assert_eq!(tx.get(&BALANCES, &1), Some(150));
+        assert_eq!(tx.get(&BalancesTable, &1), Some(150));
     }
 
     #[test]
@@ -1156,37 +1020,13 @@ mod tests {
         let fired = Arc::new(AtomicBool::new(false));
 
         let tx = db.begin_write();
-        tx.insert(&USERS, &1, &"alice".to_string());
+        tx.insert(&UsersTable, &1, &"alice".to_string());
         let f = fired.clone();
         tx.on_commit(move || f.store(true, Ordering::SeqCst));
         assert!(!fired.load(Ordering::SeqCst));
         tx.commit();
 
         assert!(fired.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn isolate_gives_separate_keyspaces() {
-        let db = Database::open_in_memory();
-
-        let tx_a = db.isolate("a").begin_write();
-        tx_a.insert(&USERS, &1, &"alice".to_string());
-        tx_a.commit();
-
-        let tx_b = db.isolate("b").begin_write();
-        tx_b.insert(&USERS, &1, &"bob".to_string());
-        tx_b.commit();
-
-        assert_eq!(
-            db.isolate("a").begin_read().get(&USERS, &1),
-            Some("alice".into())
-        );
-        assert_eq!(
-            db.isolate("b").begin_read().get(&USERS, &1),
-            Some("bob".into())
-        );
-        // Root (no prefix) sees neither.
-        assert_eq!(db.begin_read().get(&USERS, &1), None);
     }
 
     #[test]

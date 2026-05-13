@@ -1,8 +1,7 @@
 use picomint_core::core::OperationId;
-use picomint_redb::table;
 
-table!(
-    INCOMING_CONTRACT_STREAM_INDEX,
+client_table!(
+    IncomingContractStreamIndexTable,
     () => u64,
     "ln-incoming-contract-stream-index",
 );
@@ -10,8 +9,8 @@ table!(
 // Tracks that a send operation has been started for this [`OperationId`].
 // Used to reject duplicate pay attempts for the same invoice (the operation id is
 // derived from the invoice payment hash).
-table!(
-    SEND_OPERATION,
+client_table!(
+    SendOperationTable,
     OperationId => (),
     "ln-send-operation",
 );

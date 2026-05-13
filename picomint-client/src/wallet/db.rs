@@ -1,13 +1,11 @@
-use picomint_redb::table;
-
-table!(
-    NEXT_OUTPUT_INDEX,
+client_table!(
+    NextOutputIndexTable,
     () => u64,
     "wallet-next-output-index",
 );
 
-table!(
-    VALID_ADDRESS_INDEX,
+client_table!(
+    ValidAddressIndexTable,
     u64 => (),
     "wallet-valid-address-index",
 );

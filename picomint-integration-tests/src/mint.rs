@@ -85,7 +85,7 @@ fn recovery_event_stream(client: &Arc<Client>) -> impl futures::Stream<Item = Re
 /// Wait until a receive operation is fully settled. Returns:
 /// - `Ok` once both `TxAcceptEvent` AND `MintSuccessEvent` have been
 ///   observed — at that point the spendable notes have been written
-///   to the local NOTE table and the balance reflects the receive.
+///   to the local NoteTable table and the balance reflects the receive.
 /// - `Err` on `TxRejectEvent` (federation rejected the tx).
 ///
 /// Callers must wait for `MintSuccessEvent`, not just `TxAcceptEvent`,

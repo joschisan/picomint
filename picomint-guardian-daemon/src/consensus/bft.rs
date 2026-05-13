@@ -18,7 +18,7 @@ use picomint_encoding::Encodable;
 use picomint_redb::Database;
 use tracing::{error, warn};
 
-use crate::consensus::db::{BFT_UNITS, SIGNED_SESSION_OUTCOME};
+use crate::consensus::db::{BftUnitsTable, SignedSessionOutcomeTable};
 use crate::p2p::{P2PMessage, Recipient as P2PRecipient, ReconnectP2PConnections};
 
 /// `INetwork` adapter wrapping `ReconnectP2PConnections<P2PMessage>`.
@@ -82,7 +82,7 @@ impl INetwork<BftMessage<ConsensusItem>> for Network {
                     if let Some(outcome) = self
                         .db
                         .begin_read()
-                        .get(&SIGNED_SESSION_OUTCOME, &their_session)
+                        .get(&SignedSessionOutcomeTable, &their_session)
                     {
                         self.connections.send(
                             P2PRecipient::Peer(peer),
@@ -169,7 +169,7 @@ impl BftDataProvider<ConsensusItem> for DataProvider {
 }
 
 /// `Backup<ConsensusItem>` impl persisting each `Entry` into the
-/// `BFT_UNITS` table keyed by `(round, creator)`. Overwrites in place
+/// `BftUnitsTable` table keyed by `(round, creator)`. Overwrites in place
 /// on every save; loading iterates the table in natural key order, which
 /// is `(round, peer)` lex order — i.e. the order the engine expects for
 /// recover (parents before children).
@@ -188,13 +188,13 @@ impl BftBackup<ConsensusItem> for RedbBackup {
         let key = (entry.unit().round, entry.unit().creator);
 
         let dbtx = self.db.begin_write();
-        dbtx.insert(&BFT_UNITS, &key, entry);
+        dbtx.insert(&BftUnitsTable, &key, entry);
         dbtx.commit();
     }
 
     fn load(&self) -> Vec<BftEntry<ConsensusItem>> {
-        self.db
-            .begin_read()
-            .iter(&BFT_UNITS, |rows| rows.map(|(_, entry)| entry).collect())
+        self.db.begin_read().iter(&BftUnitsTable, |rows| {
+            rows.map(|(_, entry)| entry).collect()
+        })
     }
 }

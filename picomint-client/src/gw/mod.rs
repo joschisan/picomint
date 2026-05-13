@@ -25,14 +25,14 @@ use tpe::{AggregatePublicKey, PublicKeyShare};
 use tracing::warn;
 
 pub use self::secret::GwSecret;
-use receive_sm::ReceiveStateMachine;
+use receive_sm::{ReceiveStateMachine, ReceiveStateMachineTable};
 
 /// Lightning CLTV Delta in blocks
 pub const EXPIRATION_DELTA_MINIMUM: u64 = 144;
 
 impl GatewayClientModule {
     pub fn new(
-        federation_id: FederationId,
+        federation: FederationId,
         cfg: LightningConfigConsensus,
         context: ClientContext,
         mint: Arc<crate::mint::MintClientModule>,
@@ -50,10 +50,15 @@ impl GatewayClientModule {
             tpe_pks: cfg.tpe_pks.clone(),
         };
 
-        let receive_executor = ModuleExecutor::new(context.db().clone(), sm_context, tg.clone());
+        let receive_executor = ModuleExecutor::new(
+            context.db().clone(),
+            ReceiveStateMachineTable(federation),
+            sm_context,
+            tg.clone(),
+        );
 
         Ok(GatewayClientModule {
-            federation_id,
+            federation,
             cfg,
             client_ctx: context,
             mint,
@@ -65,12 +70,12 @@ impl GatewayClientModule {
 
 #[derive(Clone)]
 pub struct GatewayClientModule {
-    pub federation_id: FederationId,
+    pub federation: FederationId,
     pub cfg: LightningConfigConsensus,
     pub client_ctx: ClientContext,
     pub mint: Arc<crate::mint::MintClientModule>,
     pub keypair: Keypair,
-    receive_executor: ModuleExecutor<ReceiveStateMachine>,
+    receive_executor: ModuleExecutor<ReceiveStateMachine, ReceiveStateMachineTable>,
 }
 
 /// Context shared with the ReceiveSM executor.
@@ -96,7 +101,7 @@ impl GatewayClientModule {
     /// Log a `SendEvent` on this federation's event log. Called by the daemon's
     /// HTTP `/send-payment` handler after it has inserted the outgoing contract
     /// row in the daemon DB. Called at most once per operation id — `send_payment`
-    /// short-circuits on the existing `OUTGOING_CONTRACT` row.
+    /// short-circuits on the existing `OutgoingContract` row.
     ///
     /// `dbtx` must be scoped to this federation's client DB namespace (see
     /// [`WriteTxRef::isolate`]).
@@ -186,8 +191,8 @@ impl GatewayClientModule {
     /// `SendCancelEvent`.
     ///
     /// Called at most once per operation id: both callers short-circuit re-entry
-    /// via upstream markers (`PROCESSED_LDK_EVENT` on the LDK path,
-    /// `EVENT_CURSOR` on the trailer path) in the same unified dbtx.
+    /// via upstream markers (`ProcessedLdkEventTable` on the LDK path,
+    /// `EventCursorTable` on the trailer path) in the same unified dbtx.
     ///
     /// `dbtx` must be scoped to this federation's client DB namespace (see
     /// [`WriteTxRef::isolate`]).
@@ -250,6 +255,6 @@ impl GatewayClientModule {
 
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
-pub(crate) fn wipe_tables(dbtx: &WriteTxRef<'_>) {
-    dbtx.delete_table(&crate::executor::table::<ReceiveStateMachine>());
+pub(crate) fn wipe_tables(dbtx: &WriteTxRef<'_>, federation: picomint_core::config::FederationId) {
+    dbtx.delete_table(&ReceiveStateMachineTable(federation));
 }

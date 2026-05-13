@@ -68,13 +68,13 @@ pub fn gateway_federation_join(gw_data_dir: &Path, invite: &InviteCode) -> Resul
 
 pub fn gateway_federation_balance(
     gw_data_dir: &Path,
-    fed_id: &str,
+    federation: &str,
 ) -> Result<FederationBalanceResponse> {
     gateway_cmd(gw_data_dir)
         .arg("federation")
         .arg("balance")
         .arg("--id")
-        .arg(fed_id)
+        .arg(federation)
         .run_cli::<FederationBalanceResponse>()
 }
 

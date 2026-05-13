@@ -1,4 +1,4 @@
-use crate::executor::StateMachine;
+use crate::executor::{SmId, StateMachine};
 use picomint_core::OutPoint;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
@@ -6,6 +6,12 @@ use picomint_redb::WriteTxRef;
 
 use super::WalletClientContext;
 use super::events::{SendFailureEvent, SendSuccessEvent};
+
+crate::client_table!(
+    SendStateMachineTable,
+    SmId => SendStateMachine,
+    "wallet-send-sm",
+);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
@@ -25,8 +31,6 @@ pub enum AwaitFundingResult {
 }
 
 impl StateMachine for SendStateMachine {
-    const TABLE_NAME: &'static str = "wallet-send-sm";
-
     type Context = WalletClientContext;
     type Outcome = AwaitFundingResult;
 

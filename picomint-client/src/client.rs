@@ -48,7 +48,7 @@ pub(crate) enum LnFlavor {
 pub struct Client {
     config: tokio::sync::RwLock<ConsensusConfig>,
     db: Database,
-    federation_id: FederationId,
+    federation: FederationId,
     pub(crate) mint: Arc<MintClientModule>,
     pub(crate) wallet: Arc<WalletClientModule>,
     pub(crate) ln: LnFlavor,
@@ -92,8 +92,8 @@ impl Client {
             version = %env!("CARGO_PKG_VERSION"),
             "Building picomint client",
         );
-        let federation_id = config.calculate_federation_id();
-        let client_secret = ClientSecret::new(mnemonic, federation_id);
+        let federation = config.calculate_federation_id();
+        let client_secret = ClientSecret::new(mnemonic, federation);
 
         let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
             .peers
@@ -107,7 +107,7 @@ impl Client {
         let mint_context =
             crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
         let mint = Arc::new(MintClientModule::new(
-            federation_id,
+            federation,
             config.mint.clone(),
             mint_context,
             client_secret.mint_secret(),
@@ -129,7 +129,7 @@ impl Client {
                 let ln_context =
                     crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
                 LnFlavor::Regular(Arc::new(LightningClientModule::new(
-                    federation_id,
+                    federation,
                     config.ln.clone(),
                     ln_context,
                     mint.clone(),
@@ -141,7 +141,7 @@ impl Client {
                 let gw_context =
                     crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
                 LnFlavor::Gateway(Arc::new(GatewayClientModule::new(
-                    federation_id,
+                    federation,
                     config.ln.clone(),
                     gw_context,
                     mint.clone(),
@@ -154,7 +154,7 @@ impl Client {
         let client = Arc::new(Client {
             config: tokio::sync::RwLock::new(config),
             db,
-            federation_id,
+            federation,
             mint,
             wallet,
             ln,
@@ -184,25 +184,25 @@ impl Client {
     /// `dbtx` is supplied by the caller so the wipe commits atomically
     /// with whatever else the caller is doing — typically removing
     /// root-level rows scoped to this client by some other key (the
-    /// gateway's `CLIENT_CONFIG[fed_id]`, per-federation event-log
+    /// gateway's `ClientConfigTable[federation]`, per-federation event-log
     /// entries, …) and dropping the live `Arc<Client>` from any cache.
     /// The caller is responsible for [`Client::shutdown`] before calling
     /// this so no task is mid-write.
     pub fn wipe(&self, dbtx: &picomint_redb::WriteTxRef<'_>) {
-        crate::mint::wipe_tables(dbtx);
-        crate::wallet::wipe_tables(dbtx);
-        crate::ln::wipe_tables(dbtx);
-        crate::gw::wipe_tables(dbtx);
-        crate::tx::wipe_tables(dbtx);
-        crate::expiration::wipe_tables(dbtx);
+        crate::mint::wipe_tables(dbtx, self.federation);
+        crate::wallet::wipe_tables(dbtx, self.federation);
+        crate::ln::wipe_tables(dbtx, self.federation);
+        crate::gw::wipe_tables(dbtx, self.federation);
+        crate::tx::wipe_tables(dbtx, self.federation);
+        crate::expiration::wipe_tables(dbtx, self.federation);
     }
 
     pub fn api(&self) -> &FederationApi {
         &self.api
     }
 
-    pub fn federation_id(&self) -> FederationId {
-        self.federation_id
+    pub fn federation(&self) -> FederationId {
+        self.federation
     }
 
     pub async fn config(&self) -> ConsensusConfig {
@@ -245,8 +245,11 @@ impl Client {
     /// `RecoveryEvent` will be logged under. The driver is picked up by
     /// the next [`Client::new`] / [`Client::new_gateway`] on the
     /// persisted db. Panics if a recovery is already in progress.
-    pub fn init_recovery(dbtx: &picomint_redb::WriteTxRef<'_>) -> OperationId {
-        crate::mint::init_recovery(dbtx)
+    pub fn init_recovery(
+        dbtx: &picomint_redb::WriteTxRef<'_>,
+        federation: FederationId,
+    ) -> OperationId {
+        crate::mint::init_recovery(dbtx, federation)
     }
 
     pub async fn get_balance(&self) -> anyhow::Result<Amount> {
@@ -295,7 +298,7 @@ impl Client {
             .await
             .into_iter()
             .find_map(|(p, node_id)| (peer == p).then_some(node_id))
-            .map(|node_id| InviteCode::new(node_id, self.federation_id()))
+            .map(|node_id| InviteCode::new(node_id, self.federation()))
     }
 
     /// Returns the guardian public key set from the client config.

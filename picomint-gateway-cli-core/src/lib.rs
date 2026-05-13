@@ -220,12 +220,12 @@ pub struct FederationJoinRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationDisableRequest {
-    pub federation_id: FederationId,
+    pub federation: FederationId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationEnableRequest {
-    pub federation_id: FederationId,
+    pub federation: FederationId,
 }
 
 // --- /federation/balance ---
@@ -233,7 +233,7 @@ pub struct FederationEnableRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationBalanceRequest {
     #[arg(long = "id")]
-    pub federation_id: Option<FederationId>,
+    pub federation: Option<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -250,7 +250,7 @@ pub struct FederationListResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FederationInfo {
-    pub federation_id: FederationId,
+    pub federation: FederationId,
     pub federation_name: String,
 }
 
@@ -259,7 +259,7 @@ pub struct FederationInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationConfigRequest {
     #[arg(long = "id")]
-    pub federation_id: Option<FederationId>,
+    pub federation: Option<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -275,7 +275,7 @@ pub struct FederationConfigResponse {
 pub struct FederationInviteRequest {
     pub peer: PeerId,
     #[arg(long = "id")]
-    pub federation_id: Option<FederationId>,
+    pub federation: Option<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -288,7 +288,7 @@ pub struct FederationInviteResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationMintCountRequest {
     #[arg(long = "id")]
-    pub federation_id: Option<FederationId>,
+    pub federation: Option<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -303,7 +303,7 @@ pub struct FederationMintCountResponse {
 pub struct FederationMintSendRequest {
     pub amount: bitcoin::Amount,
     #[arg(long = "id")]
-    pub federation_id: Option<FederationId>,
+    pub federation: Option<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -328,7 +328,7 @@ pub struct FederationMintReceiveResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationWalletSendFeeRequest {
     #[arg(long = "id")]
-    pub federation_id: Option<FederationId>,
+    pub federation: Option<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -345,7 +345,7 @@ pub struct FederationWalletSendRequest {
     #[arg(long)]
     pub fee: Option<bitcoin::Amount>,
     #[arg(long = "id")]
-    pub federation_id: Option<FederationId>,
+    pub federation: Option<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -358,7 +358,7 @@ pub struct FederationWalletSendResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationWalletReceiveRequest {
     #[arg(long = "id")]
-    pub federation_id: Option<FederationId>,
+    pub federation: Option<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
