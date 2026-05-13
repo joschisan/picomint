@@ -13,6 +13,7 @@ set -euo pipefail
 DEPLOY_DIR="$HOME/picomint-guardian-daemon"
 COMPOSE_URL="https://raw.githubusercontent.com/joschisan/picomint/main/docker-guardian/docker-compose.yml"
 UI_URL="http://127.0.0.1:3000"
+LOGS_URL="http://127.0.0.1:3001"
 
 confirm() {
     if [[ "${AUTO_YES:-}" == "1" ]]; then
@@ -114,6 +115,7 @@ cat <<EOF
 Guardian is running.
 
   Web UI:   $UI_URL
+  Logs UI:  $LOGS_URL
   Compose:  $DEPLOY_DIR/docker-compose.yml
   Logs:     sudo docker compose -f $DEPLOY_DIR/docker-compose.yml logs -f
 
