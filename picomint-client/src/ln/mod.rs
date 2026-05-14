@@ -43,9 +43,10 @@ use tpe::{AggregateDecryptionKey, derive_agg_dk};
 use self::events::{ReceiveEvent, SendEvent};
 use self::send_sm::{SendSMCommon, SendSMState, SendStateMachine, SendStateMachineTable};
 
-/// Number of blocks until outgoing lightning contracts times out and user
-/// client can refund it unilaterally
-const EXPIRATION_DELTA_LIMIT: u64 = 1440;
+/// Maximum total contract lock, in blocks, the client is willing to accept
+/// from a gateway. Backstop against an abusive gateway tying funds up before
+/// the unilateral refund path opens.
+const EXPIRATION_DELTA_LIMIT: u64 = 1000;
 
 /// A two hour buffer in case either the client or gateway go offline
 const CONTRACT_CONFIRMATION_BUFFER: u64 = 12;

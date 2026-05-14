@@ -98,7 +98,7 @@ fn dispatch_direct_swap(
         row.contract,
         row.outpoint,
         preimage,
-        // Direct swap — no LN hop, no routing cost to record.
+        // Direct swap — no routing cost
         picomint_core::Amount::ZERO,
     );
 }
