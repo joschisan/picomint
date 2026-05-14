@@ -117,13 +117,13 @@ pub async fn run(
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             loop {
                 let dbtx = db.begin_read();
-                for item in server.mint.consensus_proposal(&dbtx.as_ref()).await {
+                for item in server.mint.consensus_proposal(&dbtx).await {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Mint(item)))
                         .await
                         .ok();
                 }
-                for item in server.wallet.consensus_proposal(&dbtx.as_ref()).await {
+                for item in server.wallet.consensus_proposal(&dbtx).await {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
                             item,
@@ -131,7 +131,7 @@ pub async fn run(
                         .await
                         .ok();
                 }
-                for item in server.ln.consensus_proposal(&dbtx.as_ref()).await {
+                for item in server.ln.consensus_proposal(&dbtx).await {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
                         .await

@@ -8,6 +8,7 @@
 use bitcoin::secp256k1::schnorr::Signature;
 use iroh::Endpoint;
 use lightning_invoice::Bolt11Invoice;
+use picomint_core::OutPoint;
 use picomint_core::config::FederationId;
 use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
@@ -15,7 +16,6 @@ use picomint_core::ln::gateway_api::{
     CreateInvoiceRequest, CreateInvoiceResponse, GatewayInfo, GatewayMethod, GatewayPk,
     InfoRequest, InfoResponse, SendPaymentRequest, SendPaymentResponse,
 };
-use picomint_core::{Amount, OutPoint};
 
 pub async fn gateway_info(
     endpoint: &Endpoint,
@@ -36,8 +36,6 @@ pub async fn create_bolt11_invoice(
     gateway_pk: GatewayPk,
     federation: FederationId,
     contract: IncomingContract,
-    amount: Amount,
-    expiry_secs: u32,
 ) -> anyhow::Result<Bolt11Invoice> {
     picomint_rpc::request::<_, CreateInvoiceResponse>(
         endpoint,
@@ -45,8 +43,6 @@ pub async fn create_bolt11_invoice(
         GatewayMethod::CreateInvoice(CreateInvoiceRequest {
             federation,
             contract,
-            amount,
-            expiry_secs,
         }),
     )
     .await

@@ -26,6 +26,16 @@ pub enum LightningInvoice {
     Bolt11(Bolt11Invoice),
 }
 
+impl LightningInvoice {
+    /// Access the wrapped Bolt11 invoice. Single-variant for now; the
+    /// getter exists so callers don't have to peel the enum.
+    pub fn bolt11(&self) -> &Bolt11Invoice {
+        match self {
+            LightningInvoice::Bolt11(invoice) => invoice,
+        }
+    }
+}
+
 /// Minimum contract amount to ensure the incoming contract can be claimed
 /// without additional funds.
 pub const MINIMUM_INCOMING_CONTRACT_AMOUNT: Amount = Amount::from_sats(5);

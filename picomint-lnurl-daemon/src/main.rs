@@ -17,7 +17,7 @@ use lightning_invoice::Bolt11Invoice;
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::ln::MINIMUM_INCOMING_CONTRACT_AMOUNT;
-use picomint_core::ln::contracts::{IncomingContract, PaymentImage};
+use picomint_core::ln::contracts::IncomingContract;
 use picomint_core::ln::gateway_api::{
     CreateInvoiceRequest, CreateInvoiceResponse, GatewayInfo, GatewayMethod, GatewayPk,
     InfoRequest, InfoResponse, PaymentFee, VerifyPreimageRequest,
@@ -236,7 +236,7 @@ async fn create_contract_and_fetch_invoice(
         aggregate_pk,
         encryption_seed,
         preimage,
-        PaymentImage::Hash(preimage.consensus_hash()),
+        preimage.consensus_hash(),
         Amount::from_msats(amount),
         fee,
         expiration,
@@ -251,8 +251,6 @@ async fn create_contract_and_fetch_invoice(
         GatewayMethod::CreateInvoice(CreateInvoiceRequest {
             federation,
             contract: contract.clone(),
-            amount: Amount::from_msats(amount),
-            expiry_secs,
         }),
     )
     .await?

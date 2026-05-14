@@ -67,6 +67,6 @@ impl Client {
 }
 
 /// Drop the expiration cache table. Called by [`Client::wipe`].
-pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>, federation: FederationId) {
+pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTx, federation: FederationId) {
     dbtx.delete_table(&ExpirationStatusTable(federation));
 }

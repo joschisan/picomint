@@ -6,7 +6,7 @@ use picomint_core::core::OperationId;
 use picomint_core::tx::Transaction;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_eventlog::EventLogger;
-use picomint_redb::WriteTxRef;
+use picomint_redb::WriteTx;
 
 use crate::executor::{SmId, StateMachine};
 use crate::{TxAcceptEvent, TxRejectEvent};
@@ -52,7 +52,7 @@ impl StateMachine for TxSubmissionStateMachine {
     fn transition(
         &self,
         ctx: &Self::Context,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {
         let txid = self.tx.compute_txid();

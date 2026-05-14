@@ -17,13 +17,12 @@
 //! Cursor is persisted daemon-wide in `EventCursorTable` and advanced after
 //! each dispatched event. Dispatches are idempotent, so on a crash the
 //! trailer just re-runs the last event on restart.
-use bitcoin::hashes::{Hash as _, sha256};
+use bitcoin::hashes::Hash as _;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use picomint_client::gw::events::{ReceiveRefundEvent, ReceiveSuccessEvent};
 use picomint_core::core::OperationId;
-use picomint_core::ln::contracts::PaymentImage;
 use picomint_eventlog::EventLogEntry;
-use picomint_redb::WriteTxRef;
+use picomint_redb::WriteTx;
 
 use crate::AppState;
 use crate::db::{EventCursorTable, IncomingContractTable, OutgoingContractTable};
@@ -34,7 +33,6 @@ pub async fn run(state: AppState) {
     let mut cursor = state
         .gateway_db
         .begin_read()
-        .as_ref()
         .get(&EventCursorTable, &())
         .unwrap_or_default();
 
@@ -50,7 +48,7 @@ pub async fn run(state: AppState) {
         for (id, entry) in &chunk {
             let dbtx = state.gateway_db.begin_write();
 
-            dispatch(&state, &dbtx.as_ref(), entry);
+            dispatch(&state, &dbtx, entry);
 
             cursor = id.saturating_add(1);
 
@@ -65,7 +63,7 @@ pub async fn run(state: AppState) {
     }
 }
 
-fn dispatch(state: &AppState, tx_ref: &WriteTxRef<'_>, entry: &EventLogEntry) {
+fn dispatch(state: &AppState, tx_ref: &WriteTx, entry: &EventLogEntry) {
     let preimage = if let Some(ev) = entry.to_event::<ReceiveSuccessEvent>() {
         Some(ev.preimage)
     } else if entry.to_event::<ReceiveRefundEvent>().is_some() {
@@ -85,7 +83,7 @@ fn dispatch(state: &AppState, tx_ref: &WriteTxRef<'_>, entry: &EventLogEntry) {
 
 fn dispatch_direct_swap(
     state: &AppState,
-    tx_ref: &WriteTxRef<'_>,
+    tx_ref: &WriteTx,
     operation: OperationId,
     row: crate::db::OutgoingContractRow,
     preimage: Option<[u8; 32]>,
@@ -107,7 +105,7 @@ fn dispatch_direct_swap(
 
 fn dispatch_ln_receive(
     state: &AppState,
-    tx_ref: &WriteTxRef<'_>,
+    tx_ref: &WriteTx,
     operation: OperationId,
     preimage: Option<[u8; 32]>,
 ) {
@@ -122,16 +120,15 @@ fn dispatch_ln_receive(
         .get(&IncomingContractTable, &operation)
         .expect("incoming_contract row registered by create_bolt11_invoice");
 
-    let ph = match row.contract.commitment.payment_image {
-        PaymentImage::Hash(h) => PaymentHash(*sha256::Hash::as_byte_array(&h)),
-        PaymentImage::Point(_) => {
-            unreachable!("create_bolt11_invoice rejects non-Hash payment images")
-        }
-    };
+    let ph = PaymentHash(*row.contract.commitment.payment_hash.as_byte_array());
 
     state
         .node
         .bolt11_payment()
-        .claim_for_hash(ph, row.amount.msats, PaymentPreimage(preimage))
+        .claim_for_hash(
+            ph,
+            row.contract.commitment.amount.msats,
+            PaymentPreimage(preimage),
+        )
         .expect("LDK has this payment_hash (registered via receive_for_hash)");
 }

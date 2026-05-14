@@ -28,7 +28,7 @@ use picomint_gateway_daemon::db::{
     ProcessedLdkEventTable,
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
-use picomint_redb::WriteTxRef;
+use picomint_redb::WriteTx;
 use rand::rngs::OsRng;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -99,6 +99,10 @@ pub struct GatewayOpts {
     /// Lightning routing fee rate in parts per million.
     #[arg(long, env = "LN_FEE_PPM", default_value_t = 3000)]
     pub ln_fee_ppm: u64,
+
+    /// BOLT11 invoice expiry, in seconds, for invoices the gateway issues.
+    #[arg(long, env = "INVOICE_EXPIRY_SECS", default_value_t = 86_400)]
+    pub invoice_expiry_secs: u32,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -213,6 +217,7 @@ fn main() -> anyhow::Result<()> {
             base: Amount::from_msats(opts.ln_fee_base_msat),
             ppm: opts.ln_fee_ppm,
         },
+        invoice_expiry_secs: opts.invoice_expiry_secs,
         analytics: picomint_gateway_daemon::analytics::Analytics::wipe_and_init(&opts.data_dir)?,
     };
 
@@ -274,7 +279,7 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
             payment_hash,
             claimable_amount_msat,
             ..
-        } => handle_payment_claimable(state, &dbtx.as_ref(), payment_hash.0, claimable_amount_msat),
+        } => handle_payment_claimable(state, &dbtx, payment_hash.0, claimable_amount_msat),
         ldk_node::Event::PaymentSuccessful {
             payment_hash,
             payment_preimage: Some(preimage),
@@ -282,7 +287,7 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
             ..
         } => handle_payment_successful(
             state,
-            &dbtx.as_ref(),
+            &dbtx,
             payment_hash.0,
             preimage.0,
             Amount::from_msats(fee_paid_msat.unwrap_or(0)),
@@ -290,7 +295,7 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
         ldk_node::Event::PaymentFailed {
             payment_hash: Some(ph),
             ..
-        } => handle_payment_failed(state, &dbtx.as_ref(), ph.0),
+        } => handle_payment_failed(state, &dbtx, ph.0),
         _ => return,
     }
 
@@ -303,7 +308,7 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
 /// reason and fail the HTLC so the LN sender gets a refund.
 fn handle_payment_claimable(
     state: &AppState,
-    dbtx: &WriteTxRef<'_>,
+    dbtx: &WriteTx,
     payment_hash: [u8; 32],
     amount_msat: u64,
 ) {
@@ -361,7 +366,7 @@ fn handle_payment_claimable(
 /// preimage carried on the `PaymentSuccessful` event.
 fn handle_payment_successful(
     state: &AppState,
-    dbtx: &WriteTxRef<'_>,
+    dbtx: &WriteTx,
     payment_hash: [u8; 32],
     preimage: [u8; 32],
     ln_fee: Amount,
@@ -393,7 +398,7 @@ fn handle_payment_successful(
 
 /// Outbound LN payment failed. Look up the outgoing contract row and tell
 /// the source federation's client to forfeit the contract.
-fn handle_payment_failed(state: &AppState, dbtx: &WriteTxRef<'_>, payment_hash: [u8; 32]) {
+fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32]) {
     let operation = OperationId::from_encodable(&payment_hash);
 
     if dbtx

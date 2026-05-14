@@ -2,7 +2,7 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::ensure;
+use anyhow::{Context as _, ensure};
 use async_stream::stream;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1::{Keypair, SECP256K1, SecretKey};
@@ -18,7 +18,7 @@ use picomint_client::{Client, OperationId};
 use picomint_core::ln::gateway_api::{
     GatewayInfo, GatewayMethod, GatewayPk, InfoResponse, PaymentFee, SendPaymentResponse,
 };
-use picomint_core::ln::{LightningInput, LightningInvoice, OutgoingWitness};
+use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::{Amount, OutPoint, wire};
 use picomint_encoding::Encodable as _;
 use picomint_eventlog::{EventLogEntry, EventLogId};
@@ -126,9 +126,11 @@ fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<(
 /// after all real-gateway-driven scenarios in `run_tests` have completed.
 ///
 /// Expected events (module = Ln, emitted by the gateway's gw-module):
-///  - `test_payments` outgoing success  → 1 send, 1 send_success
-///  - `test_payments` incoming success  → 1 receive, 1 receive_success, 1 complete
-///  - `test_payments` outgoing cancel   → 1 send, 1 send_cancel
+///  - `test_payments` self-pay no-liquidity → 1 send, 1 send_cancel
+///  - `test_payments` no-route              → 1 send, 1 send_cancel
+///  - `test_payments` outgoing success      → 1 send, 1 send_success
+///  - `test_payments` incoming success      → 1 receive, 1 receive_success, 1 complete
+///  - `test_payments` outgoing cancel       → 1 send, 1 send_cancel
 ///  - `test_lnurl_daemon_roundtrip` → 1 receive, 1 receive_success, 1 complete
 ///
 /// The mock-gateway tests and `test_direct_ln_payments` don't drive the real
@@ -145,23 +147,23 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     };
 
     // Raw event tables
-    assert_eq!(count("SELECT COUNT(*) FROM send")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM send")?, 4);
     assert_eq!(count("SELECT COUNT(*) FROM send_success")?, 1);
-    assert_eq!(count("SELECT COUNT(*) FROM send_cancel")?, 1);
+    assert_eq!(count("SELECT COUNT(*) FROM send_cancel")?, 3);
     assert_eq!(count("SELECT COUNT(*) FROM receive")?, 2);
     assert_eq!(count("SELECT COUNT(*) FROM receive_success")?, 2);
     assert_eq!(count("SELECT COUNT(*) FROM receive_failure")?, 0);
     assert_eq!(count("SELECT COUNT(*) FROM receive_refund")?, 0);
 
     // `payments` view stitches sends/receives into one row per operation
-    assert_eq!(count("SELECT COUNT(*) FROM payments")?, 4);
+    assert_eq!(count("SELECT COUNT(*) FROM payments")?, 6);
     assert_eq!(
         count("SELECT COUNT(*) FROM payments WHERE direction='outgoing' AND status='success'")?,
         1
     );
     assert_eq!(
         count("SELECT COUNT(*) FROM payments WHERE direction='outgoing' AND status='cancelled'")?,
-        1
+        3
     );
     assert_eq!(
         count("SELECT COUNT(*) FROM payments WHERE direction='incoming' AND status='success'")?,
@@ -235,6 +237,71 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     let ln = client.ln();
 
     let mut events = pin!(ln_event_stream(client));
+
+    info!("Testing self-pay refund when the gateway has no federation liquidity yet...");
+
+    // First scenario in the suite, so the gateway hasn't been funded by the
+    // client→LDK send below — its federation balance is zero. The self-pay
+    // routes through the gateway as a direct swap, which has to fund the
+    // incoming contract from gateway ecash. With no ecash available the
+    // gateway must signal a cancel so the client gets a gateway-signed refund
+    // (`expired = false`), not a wait-for-CLTV unilateral refund.
+    {
+        let (gateway_pk, gateway_info) = ln.select_gateway(None)?;
+        let invoice = ln
+            .receive(
+                gateway_pk,
+                gateway_info.clone(),
+                Amount::from_msats(500_000),
+                300,
+            )
+            .await?;
+
+        let send_op = ln.send(gateway_pk, gateway_info, invoice).await?;
+
+        let Some((op, LnEvent::Send(_))) = events.next().await else {
+            panic!("Expected Send event");
+        };
+        assert_eq!(op, send_op);
+
+        let Some((op, LnEvent::SendRefund(refund))) = events.next().await else {
+            panic!("Expected SendRefund event");
+        };
+        assert_eq!(op, send_op);
+        assert!(
+            !refund.expired,
+            "expected gateway-signed cancel, got CLTV-expiry refund",
+        );
+    }
+
+    info!("Testing external-LN refund when LDK has no route to the invoice payee...");
+
+    // Bolt11Invoice signed by a random keypair (via `mock_invoice`); its
+    // payee pubkey is not in the gateway's LDK network graph, so
+    // `is_direct_swap = false` and `bolt11_payment().send()` returns
+    // `Error::PaymentSendingFailed { RouteNotFound }` synchronously. The
+    // gateway must write a cancel so the client gets a gateway-signed
+    // refund (`expired = false`) without waiting for CLTV expiry.
+    {
+        let invoice = mock_invoice([30; 32], [31; 32], Currency::Regtest);
+
+        let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
+        let send_op = ln.send(gateway_pk, gateway_info, invoice).await?;
+
+        let Some((op, LnEvent::Send(_))) = events.next().await else {
+            panic!("Expected Send event");
+        };
+        assert_eq!(op, send_op);
+
+        let Some((op, LnEvent::SendRefund(refund))) = events.next().await else {
+            panic!("Expected SendRefund event");
+        };
+        assert_eq!(op, send_op);
+        assert!(
+            !refund.expired,
+            "expected gateway-signed cancel, got CLTV-expiry refund",
+        );
+    }
 
     info!("Testing payment from client to LDK node (funds gateway federation liquidity)...");
 
@@ -514,12 +581,12 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
 
     let dbtx = client.db().begin_write();
 
-    client.mint().finalize_and_submit_tx(
-        &dbtx.as_ref(),
-        OperationId::new_random(),
-        tx_builder,
-        |_| SendSuccessEvent { preimage },
-    )?;
+    client
+        .mint()
+        .finalize_and_submit_tx(&dbtx, OperationId::new_random(), tx_builder, |_| {
+            SendSuccessEvent { preimage }
+        })
+        .context("Insufficient funds")?;
 
     dbtx.commit();
 
@@ -758,8 +825,7 @@ async fn mock_handler(method: GatewayMethod) -> Result<Vec<u8>, String> {
             .consensus_encode_to_vec())
         }
         GatewayMethod::SendPayment(req) => {
-            let LightningInvoice::Bolt11(invoice) = req.invoice;
-            let payment_secret = invoice.payment_secret().0;
+            let payment_secret = req.invoice.bolt11().payment_secret().0;
             if payment_secret == CRASH_PAYMENT_SECRET {
                 return Err("mock gateway crashed".to_string());
             }

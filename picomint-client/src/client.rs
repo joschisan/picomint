@@ -209,7 +209,7 @@ impl Client {
     /// entries, …) and dropping the live `Arc<Client>` from any cache.
     /// The caller is responsible for [`Client::shutdown`] before calling
     /// this so no task is mid-write.
-    pub fn wipe(&self, dbtx: &picomint_redb::WriteTxRef<'_>) {
+    pub fn wipe(&self, dbtx: &picomint_redb::WriteTx) {
         crate::mint::wipe_tables(dbtx, self.federation);
         crate::wallet::wipe_tables(dbtx, self.federation);
         crate::ln::wipe_tables(dbtx, self.federation);
@@ -266,10 +266,7 @@ impl Client {
     /// `RecoveryEvent` will be logged under. The driver is picked up by
     /// the next [`Client::new`] / [`Client::new_gateway`] on the
     /// persisted db. Panics if a recovery is already in progress.
-    pub fn init_recovery(
-        dbtx: &picomint_redb::WriteTxRef<'_>,
-        federation: FederationId,
-    ) -> OperationId {
+    pub fn init_recovery(dbtx: &picomint_redb::WriteTx, federation: FederationId) -> OperationId {
         crate::mint::init_recovery(dbtx, federation)
     }
 

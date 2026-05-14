@@ -3,7 +3,7 @@ use bitcoin::hashes::sha256;
 use bitcoin::secp256k1;
 use picomint_encoding::{Decodable, Encodable};
 use secp256k1::schnorr::Signature;
-use secp256k1::{Message, PublicKey, SecretKey, XOnlyPublicKey};
+use secp256k1::{Message, PublicKey, XOnlyPublicKey};
 use serde::{Deserialize, Serialize};
 use tpe::{
     AggregateDecryptionKey, AggregatePublicKey, CipherText, DecryptionKeyShare, PublicKeyShare,
@@ -12,14 +12,6 @@ use tpe::{
 };
 
 use crate::ln::ContractId;
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub enum PaymentImage {
-    Hash(sha256::Hash),
-    Point(PublicKey),
-}
-
-picomint_redb::consensus_key!(PaymentImage);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct IncomingContract {
@@ -31,7 +23,7 @@ picomint_redb::consensus_value!(IncomingContract);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct Commitment {
-    pub payment_image: PaymentImage,
+    pub payment_hash: sha256::Hash,
     /// Invoice amount: what the LN payer paid the gateway.
     pub amount: Amount,
     /// Gateway's combined cut (LN routing + tx fee). The federation will
@@ -49,7 +41,7 @@ impl IncomingContract {
         agg_pk: AggregatePublicKey,
         encryption_seed: [u8; 32],
         preimage: [u8; 32],
-        payment_image: PaymentImage,
+        payment_hash: sha256::Hash,
         amount: Amount,
         fee: Amount,
         expiration: u64,
@@ -58,7 +50,7 @@ impl IncomingContract {
         ephemeral_pk: PublicKey,
     ) -> Self {
         let commitment = Commitment {
-            payment_image,
+            payment_hash,
             amount,
             fee,
             expiration,
@@ -115,7 +107,7 @@ impl IncomingContract {
     }
 
     pub fn verify_preimage(&self, preimage: &[u8; 32]) -> bool {
-        verify_preimage(&self.commitment.payment_image, preimage)
+        verify_preimage(&self.commitment.payment_hash, preimage)
     }
 
     pub fn decrypt_preimage(
@@ -138,7 +130,7 @@ impl IncomingContract {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct OutgoingContract {
-    pub payment_image: PaymentImage,
+    pub payment_hash: sha256::Hash,
     /// Invoice amount: what the gateway will pay over LN.
     pub amount: Amount,
     /// Gateway's combined cut (LN routing + tx fee). The client funds
@@ -162,7 +154,7 @@ impl OutgoingContract {
     }
 
     pub fn verify_preimage(&self, preimage: &[u8; 32]) -> bool {
-        verify_preimage(&self.payment_image, preimage)
+        verify_preimage(&self.payment_hash, preimage)
     }
 
     pub fn verify_forfeit_signature(&self, signature: &Signature) -> bool {
@@ -189,14 +181,8 @@ impl OutgoingContract {
     }
 }
 
-fn verify_preimage(payment_image: &PaymentImage, preimage: &[u8; 32]) -> bool {
-    match payment_image {
-        PaymentImage::Hash(hash) => preimage.consensus_hash::<sha256::Hash>() == *hash,
-        PaymentImage::Point(pk) => match SecretKey::from_slice(preimage) {
-            Ok(sk) => sk.public_key(secp256k1::SECP256K1) == *pk,
-            Err(..) => false,
-        },
-    }
+fn verify_preimage(payment_hash: &sha256::Hash, preimage: &[u8; 32]) -> bool {
+    preimage.consensus_hash::<sha256::Hash>() == *payment_hash
 }
 
 #[test]
@@ -204,14 +190,7 @@ fn test_verify_preimage() {
     use bitcoin::hashes::Hash;
 
     assert!(verify_preimage(
-        &PaymentImage::Hash(bitcoin::hashes::sha256::Hash::hash(&[42; 32])),
+        &bitcoin::hashes::sha256::Hash::hash(&[42; 32]),
         &[42; 32]
-    ));
-
-    let (secret_key, public_key) = secp256k1::generate_keypair(&mut secp256k1::rand::thread_rng());
-
-    assert!(verify_preimage(
-        &PaymentImage::Point(public_key),
-        &secret_key.secret_bytes()
     ));
 }

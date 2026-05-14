@@ -25,7 +25,7 @@ use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::wallet as common;
 use picomint_core::{NumPeersExt, OutPoint, PeerId, peer_range};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::{Database, ReadTxRef, WriteTx};
+use picomint_redb::{Database, ReadTx, WriteTx};
 use tokio::time::sleep;
 
 use crate::config::dkg::DkgHandle;
@@ -113,7 +113,7 @@ pub fn validate_config(identity: &PeerId, cfg: &WalletConfig) -> anyhow::Result<
 }
 
 impl Wallet {
-    pub async fn consensus_proposal(&self, dbtx: &ReadTxRef<'_>) -> Vec<WalletConsensusItem> {
+    pub async fn consensus_proposal(&self, dbtx: &ReadTx) -> Vec<WalletConsensusItem> {
         let unsigned_txs: Vec<(TxidKey, FederationTx)> =
             dbtx.iter(&UnsignedTxTable, |r| r.collect());
 

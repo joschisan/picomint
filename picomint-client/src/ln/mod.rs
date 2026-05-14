@@ -7,6 +7,7 @@ mod gateway;
 mod secret;
 mod send_sm;
 
+use picomint_redb::WriteTx;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,7 +22,7 @@ use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::config::LightningConfigConsensus;
-use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentImage};
+use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::ln::gateway_api::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::ln::lnurl::MAX_GATEWAYS_PER_LNURL;
 use picomint_core::ln::secret::IncomingContractSecret;
@@ -33,7 +34,6 @@ use picomint_core::wire;
 pub use self::secret::LnSecret;
 use picomint_core::{Amount, OutPoint};
 use picomint_encoding::Encodable;
-use picomint_redb::WriteTxRef;
 use rand::seq::IteratorRandom;
 use secp256k1::{Keypair, PublicKey, SecretKey, ecdh};
 use thiserror::Error;
@@ -276,7 +276,7 @@ impl LightningClientModule {
             .map_err(|_| SendPaymentError::FailedToRequestBlockCount)?;
 
         let contract = OutgoingContract {
-            payment_image: PaymentImage::Hash(*invoice.payment_hash()),
+            payment_hash: *invoice.payment_hash(),
             amount,
             fee,
             expiration: consensus_block_count
@@ -296,7 +296,6 @@ impl LightningClientModule {
         let dbtx = self.client_ctx.db().begin_write();
 
         if dbtx
-            .as_ref()
             .insert(&SendOperationTable(self.federation), &operation, &())
             .is_some()
         {
@@ -305,12 +304,12 @@ impl LightningClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder, |txid| SendEvent {
+            .finalize_and_submit_tx(&dbtx, operation, tx_builder, |txid| SendEvent {
                 txid,
                 amount,
                 fee,
             })
-            .map_err(|e| SendPaymentError::FailedToFundPayment(e.to_string()))?;
+            .ok_or_else(|| SendPaymentError::FailedToFundPayment("Insufficient funds".into()))?;
 
         let sm = SendStateMachine {
             common: SendSMCommon {
@@ -324,7 +323,7 @@ impl LightningClientModule {
             state: SendSMState::Funding,
         };
 
-        self.executor.add_state_machine_dbtx(&dbtx.as_ref(), sm);
+        self.executor.add_state_machine_dbtx(&dbtx, sm);
 
         dbtx.commit();
 
@@ -407,7 +406,7 @@ impl LightningClientModule {
             self.cfg.tpe_agg_pk,
             encryption_seed,
             preimage,
-            PaymentImage::Hash(preimage.consensus_hash()),
+            preimage.consensus_hash(),
             amount,
             fee,
             expiration,
@@ -421,8 +420,6 @@ impl LightningClientModule {
             gateway_pk,
             self.federation,
             contract.clone(),
-            amount,
-            expiry_secs,
         )
         .await
         .map_err(|e| ReceiveError::FailedToConnectToGateway(e.to_string()))?;
@@ -444,7 +441,7 @@ impl LightningClientModule {
     /// stream index atomically).
     fn receive_incoming_contract(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         sk: SecretKey,
         outpoint: OutPoint,
         contract: &IncomingContract,
@@ -560,7 +557,7 @@ impl LightningClientModule {
             let dbtx = module.client_ctx.db().begin_write();
 
             for (outpoint, contract) in &entries {
-                module.receive_incoming_contract(&dbtx.as_ref(), sk, *outpoint, contract);
+                module.receive_incoming_contract(&dbtx, sk, *outpoint, contract);
             }
 
             dbtx.insert(
@@ -633,7 +630,7 @@ pub enum RefreshGatewaysError {
 
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
-pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>, federation: FederationId) {
+pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTx, federation: FederationId) {
     dbtx.delete_table(&IncomingContractStreamIndexTable(federation));
     dbtx.delete_table(&SendOperationTable(federation));
     dbtx.delete_table(&SendStateMachineTable(federation));
