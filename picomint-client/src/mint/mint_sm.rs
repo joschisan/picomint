@@ -1,3 +1,4 @@
+use picomint_redb::WriteTx;
 use std::collections::BTreeMap;
 
 use crate::executor::{SmId, StateMachine};
@@ -6,7 +7,6 @@ use picomint_core::core::OperationId;
 use picomint_core::mint::{Denomination, verify_note};
 use picomint_core::{PeerId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::WriteTxRef;
 use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use super::client_db::NoteTable;
@@ -62,7 +62,7 @@ impl StateMachine for MintStateMachine {
     fn transition(
         &self,
         ctx: &Self::Context,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {
         let Ok(signature_shares) = outcome else {

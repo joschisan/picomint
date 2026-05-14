@@ -21,8 +21,7 @@ use futures::Stream;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::{Database, Table, TableDef, WriteTxRef};
-use picomint_redb::{consensus_key, consensus_value};
+use picomint_redb::{Database, Table, TableDef, WriteTx, consensus_key, consensus_value};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
@@ -181,7 +180,7 @@ impl EventLogger {
     /// layer.
     pub fn log_event_raw(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         kind: EventKind,
         source: EventSource,
         federation: FederationId,
@@ -226,7 +225,7 @@ impl EventLogger {
     /// Typed convenience: encode an [`Event`] into the log.
     pub fn log_event<E: Event>(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         federation: FederationId,
         operation: OperationId,
         event: E,
@@ -241,7 +240,7 @@ impl EventLogger {
         );
     }
 
-    fn next_event_log_id(&self, dbtx: &WriteTxRef<'_>) -> EventLogId {
+    fn next_event_log_id(&self, dbtx: &WriteTx) -> EventLogId {
         dbtx.iter(&self.event_log, |it| {
             it.next_back().map(|(k, _)| k.next()).unwrap_or_default()
         })

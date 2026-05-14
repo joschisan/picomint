@@ -14,7 +14,7 @@ use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::wire;
 use picomint_core::{OutPoint, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::WriteTxRef;
+use picomint_redb::WriteTx;
 use secp256k1::Keypair;
 use secp256k1::schnorr::Signature;
 use tracing::{error, instrument};
@@ -148,7 +148,7 @@ impl StateMachine for SendStateMachine {
     fn transition(
         &self,
         ctx: &Self::Context,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {
         match outcome {
@@ -200,7 +200,7 @@ impl StateMachine for SendStateMachine {
 /// txid for the SM to advance into the `Refunding` state with.
 fn submit_refund(
     ctx: &LightningClientContext,
-    dbtx: &WriteTxRef<'_>,
+    dbtx: &WriteTx,
     old_state: &SendStateMachine,
     witness: OutgoingWitness,
     expired: bool,

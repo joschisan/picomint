@@ -1,3 +1,4 @@
+use picomint_redb::WriteTx;
 use std::collections::BTreeMap;
 
 use anyhow::{Context, anyhow};
@@ -10,7 +11,6 @@ use picomint_core::secp256k1::Keypair;
 use picomint_core::wire;
 use picomint_core::{OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::WriteTxRef;
 use tpe::{DecryptionKeyShare, aggregate_dk_shares};
 use tracing::warn;
 
@@ -83,7 +83,7 @@ impl StateMachine for ReceiveStateMachine {
     fn transition(
         &self,
         ctx: &Self::Context,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {
         let shares = match outcome {

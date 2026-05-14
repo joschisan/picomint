@@ -7,6 +7,7 @@ mod gateway;
 mod secret;
 mod send_sm;
 
+use picomint_redb::WriteTx;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -33,7 +34,6 @@ use picomint_core::wire;
 pub use self::secret::LnSecret;
 use picomint_core::{Amount, OutPoint};
 use picomint_encoding::Encodable;
-use picomint_redb::WriteTxRef;
 use rand::seq::IteratorRandom;
 use secp256k1::{Keypair, PublicKey, SecretKey, ecdh};
 use thiserror::Error;
@@ -296,7 +296,6 @@ impl LightningClientModule {
         let dbtx = self.client_ctx.db().begin_write();
 
         if dbtx
-            .as_ref()
             .insert(&SendOperationTable(self.federation), &operation, &())
             .is_some()
         {
@@ -305,7 +304,7 @@ impl LightningClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder, |txid| SendEvent {
+            .finalize_and_submit_tx(&dbtx, operation, tx_builder, |txid| SendEvent {
                 txid,
                 amount,
                 fee,
@@ -324,7 +323,7 @@ impl LightningClientModule {
             state: SendSMState::Funding,
         };
 
-        self.executor.add_state_machine_dbtx(&dbtx.as_ref(), sm);
+        self.executor.add_state_machine_dbtx(&dbtx, sm);
 
         dbtx.commit();
 
@@ -444,7 +443,7 @@ impl LightningClientModule {
     /// stream index atomically).
     fn receive_incoming_contract(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         sk: SecretKey,
         outpoint: OutPoint,
         contract: &IncomingContract,
@@ -560,7 +559,7 @@ impl LightningClientModule {
             let dbtx = module.client_ctx.db().begin_write();
 
             for (outpoint, contract) in &entries {
-                module.receive_incoming_contract(&dbtx.as_ref(), sk, *outpoint, contract);
+                module.receive_incoming_contract(&dbtx, sk, *outpoint, contract);
             }
 
             dbtx.insert(
@@ -633,7 +632,7 @@ pub enum RefreshGatewaysError {
 
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
-pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTxRef<'_>, federation: FederationId) {
+pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTx, federation: FederationId) {
     dbtx.delete_table(&IncomingContractStreamIndexTable(federation));
     dbtx.delete_table(&SendOperationTable(federation));
     dbtx.delete_table(&SendStateMachineTable(federation));

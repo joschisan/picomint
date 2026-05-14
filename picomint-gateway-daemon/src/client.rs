@@ -126,7 +126,6 @@ impl GatewayClientFactory {
         let dbtx = self.db.begin_write();
 
         if dbtx
-            .as_ref()
             .insert(
                 &ClientConfigTable,
                 &config.calculate_federation_id(),

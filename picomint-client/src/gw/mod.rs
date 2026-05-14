@@ -3,6 +3,7 @@ pub mod events;
 mod receive_sm;
 mod secret;
 
+use picomint_redb::WriteTx;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -19,7 +20,6 @@ use picomint_core::ln::{LightningInput, LightningOutput, OutgoingWitness};
 use picomint_core::secp256k1::Keypair;
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
-use picomint_redb::WriteTxRef;
 use secp256k1::schnorr::Signature;
 use tpe::{AggregatePublicKey, PublicKeyShare};
 use tracing::warn;
@@ -104,10 +104,10 @@ impl GatewayClientModule {
     /// short-circuits on the existing `OutgoingContract` row.
     ///
     /// `dbtx` must be scoped to this federation's client DB namespace (see
-    /// [`WriteTxRef::isolate`]).
+    /// [`::isolate`]).
     pub fn log_send_started(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         operation: OperationId,
         outpoint: OutPoint,
         amount: Amount,
@@ -136,10 +136,10 @@ impl GatewayClientModule {
     /// drive it).
     ///
     /// `dbtx` must be scoped to this federation's client DB namespace (see
-    /// [`WriteTxRef::isolate`]).
+    /// [`::isolate`]).
     pub fn start_receive(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         operation: OperationId,
         contract: IncomingContract,
     ) -> anyhow::Result<()> {
@@ -189,10 +189,10 @@ impl GatewayClientModule {
     /// `EventCursorTable` on the trailer path) in the same unified dbtx.
     ///
     /// `dbtx` must be scoped to this federation's client DB namespace (see
-    /// [`WriteTxRef::isolate`]).
+    /// [`::isolate`]).
     pub fn finalize_send(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         operation: OperationId,
         contract: OutgoingContract,
         outpoint: OutPoint,
@@ -249,6 +249,6 @@ impl GatewayClientModule {
 
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
-pub(crate) fn wipe_tables(dbtx: &WriteTxRef<'_>, federation: picomint_core::config::FederationId) {
+pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: picomint_core::config::FederationId) {
     dbtx.delete_table(&ReceiveStateMachineTable(federation));
 }

@@ -222,7 +222,6 @@ impl AppState {
         let dbtx = self.gateway_db.begin_write();
 
         if dbtx
-            .as_ref()
             .insert(
                 &OutgoingContractTable,
                 &operation,
@@ -239,7 +238,7 @@ impl AppState {
         }
 
         f1_client.gw().log_send_started(
-            &dbtx.as_ref(),
+            &dbtx,
             operation,
             payload.outpoint,
             Amount::from_msats(amount),
@@ -250,7 +249,6 @@ impl AppState {
         // --- Direct-swap vs external LN -------------------------------------
         if is_direct_swap {
             let incoming_row = dbtx
-                .as_ref()
                 .get(&IncomingContractTable, &operation)
                 .expect("Direct-swap target not registered for this payment hash");
 
@@ -265,11 +263,11 @@ impl AppState {
 
             if f2_client
                 .gw()
-                .start_receive(&dbtx.as_ref(), operation, incoming_row.contract)
+                .start_receive(&dbtx, operation, incoming_row.contract)
                 .is_err()
             {
                 f1_client.gw().finalize_send(
-                    &dbtx.as_ref(),
+                    &dbtx,
                     operation,
                     payload.contract,
                     payload.outpoint,
@@ -295,7 +293,7 @@ impl AppState {
                 .is_err()
             {
                 f1_client.gw().finalize_send(
-                    &dbtx.as_ref(),
+                    &dbtx,
                     operation,
                     payload.contract,
                     payload.outpoint,
@@ -400,7 +398,7 @@ impl AppState {
 
         let dbtx = self.gateway_db.begin_write();
 
-        dbtx.as_ref().insert(
+        dbtx.insert(
             &IncomingContractTable,
             &operation,
             &IncomingContractRow {

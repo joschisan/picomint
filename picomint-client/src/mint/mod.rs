@@ -9,6 +9,7 @@ mod mint_sm;
 mod secret;
 mod send_sm;
 
+use picomint_redb::WriteTx;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
@@ -34,7 +35,6 @@ use picomint_core::secp256k1::rand::{Rng, thread_rng};
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_core::{Amount, PeerId, TransactionId, wire};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::WriteTxRef;
 use rand::seq::IteratorRandom;
 use tbs::{AggregatePublicKey, aggregate_signature_shares};
 use thiserror::Error;
@@ -95,7 +95,7 @@ impl SpendableNote {
 /// emitted on each batch).
 ///
 /// Panics if a recovery is already in progress.
-pub fn init_recovery(dbtx: &WriteTxRef<'_>, federation: FederationId) -> OperationId {
+pub fn init_recovery(dbtx: &WriteTx, federation: FederationId) -> OperationId {
     let operation = OperationId::new_random();
 
     let state = Recovery {
@@ -284,15 +284,13 @@ impl MintClientModule {
                 });
             }
 
-            self.finalize_and_submit_tx(&dbtx.as_ref(), operation, builder, |txid| {
-                events::RecoveryEvent {
-                    amount,
-                    txid: Some(txid),
-                }
+            self.finalize_and_submit_tx(&dbtx, operation, builder, |txid| events::RecoveryEvent {
+                amount,
+                txid: Some(txid),
             })?;
         } else {
             self.client_ctx.log_event(
-                &dbtx.as_ref(),
+                &dbtx,
                 operation,
                 events::RecoveryEvent { amount, txid: None },
             );
@@ -434,7 +432,7 @@ impl MintClientModule {
     /// module event.
     pub fn finalize_and_submit_tx<E: picomint_eventlog::Event + Send>(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         operation: OperationId,
         mut builder: TxBuilder,
         event: impl FnOnce(TransactionId) -> E,
@@ -468,7 +466,7 @@ impl MintClientModule {
     /// left as implicit federation revenue.
     fn balance(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         builder: &mut TxBuilder,
     ) -> anyhow::Result<(Vec<SpendableNote>, Vec<NoteIssuanceRequest>)> {
         let mut spendable_notes = self
@@ -526,7 +524,7 @@ impl MintClientModule {
     /// `TxCreateEvent`.
     fn submit<E: picomint_eventlog::Event + Send>(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         operation: OperationId,
         builder: TxBuilder,
         remint: Amount,
@@ -602,7 +600,7 @@ impl MintClientModule {
 
     fn select_funding_input(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         mut excess_output: Amount,
     ) -> Option<Vec<SpendableNote>> {
         let mut selected_notes = Vec::new();
@@ -687,7 +685,7 @@ impl MintClientModule {
     pub fn get_count_by_denomination(&self) -> BTreeMap<Denomination, u64> {
         let dbtx = self.client_ctx.db().begin_write();
 
-        Self::get_count_by_denomination_dbtx(&dbtx.as_ref(), self.federation)
+        Self::get_count_by_denomination_dbtx(&dbtx, self.federation)
     }
 
     fn get_count_by_denomination_dbtx(
@@ -724,11 +722,11 @@ impl MintClientModule {
         // atomically in one dbtx — no tx, no SM.
         let dbtx = self.client_ctx.db().begin_write();
 
-        if let Some(ecash) = send_ecash_dbtx(&dbtx.as_ref(), self.federation, amount) {
+        if let Some(ecash) = send_ecash_dbtx(&dbtx, self.federation, amount) {
             self.client_ctx
-                .log_event(&dbtx.as_ref(), operation, SendEvent { amount });
+                .log_event(&dbtx, operation, SendEvent { amount });
             self.client_ctx.log_event(
-                &dbtx.as_ref(),
+                &dbtx,
                 operation,
                 SendSuccessEvent {
                     ecash: ecash.clone(),
@@ -778,7 +776,7 @@ impl MintClientModule {
         let deficit = builder.deficit();
 
         let (funding_notes, change_requests) = self
-            .balance(&dbtx.as_ref(), &mut builder)
+            .balance(&dbtx, &mut builder)
             .map_err(|_| SendECashError::InsufficientBalance)?;
 
         let funding: Amount = funding_notes.iter().map(|n| n.amount()).sum();
@@ -799,19 +797,16 @@ impl MintClientModule {
         // MintSM + SendSM. A crash before the commit leaves no half-state
         // behind; on restart the operation simply doesn't exist.
         self.tx_submission_executor
-            .add_state_machine_dbtx(&dbtx.as_ref(), TxSubmissionStateMachine { operation, tx });
+            .add_state_machine_dbtx(&dbtx, TxSubmissionStateMachine { operation, tx });
 
         self.client_ctx
-            .log_event(&dbtx.as_ref(), operation, SendEvent { amount });
+            .log_event(&dbtx, operation, SendEvent { amount });
 
         self.client_ctx
-            .log_event(&dbtx.as_ref(), operation, RemintEvent { txid });
+            .log_event(&dbtx, operation, RemintEvent { txid });
 
-        self.client_ctx.log_event(
-            &dbtx.as_ref(),
-            operation,
-            crate::TxCreateEvent { txid, remint, fee },
-        );
+        self.client_ctx
+            .log_event(&dbtx, operation, crate::TxCreateEvent { txid, remint, fee });
 
         issuance_requests.extend(change_requests);
 
@@ -822,13 +817,11 @@ impl MintClientModule {
             issuance_requests,
         };
 
-        self.mint_executor
-            .add_state_machine_dbtx(&dbtx.as_ref(), mint_sm);
+        self.mint_executor.add_state_machine_dbtx(&dbtx, mint_sm);
 
         let send_sm = SendStateMachine { operation, amount };
 
-        self.send_executor
-            .add_state_machine_dbtx(&dbtx.as_ref(), send_sm);
+        self.send_executor.add_state_machine_dbtx(&dbtx, send_sm);
 
         dbtx.commit();
 
@@ -876,7 +869,6 @@ impl MintClientModule {
         let dbtx = self.client_ctx.db().begin_write();
 
         if dbtx
-            .as_ref()
             .insert(&ReceiveOperationTable(self.federation), &operation, &())
             .is_some()
         {
@@ -885,7 +877,7 @@ impl MintClientModule {
 
         let amount = ecash.amount();
 
-        self.finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder, |txid| ReceiveEvent {
+        self.finalize_and_submit_tx(&dbtx, operation, tx_builder, |txid| ReceiveEvent {
             txid,
             amount,
         })
@@ -897,7 +889,7 @@ impl MintClientModule {
     }
 
     fn remove_spendable_note(
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         federation: FederationId,
         spendable_note: &SpendableNote,
     ) {
@@ -911,7 +903,7 @@ impl MintClientModule {
 /// `ECash`. Returns `None` if no exact-match combination exists. No
 /// events are logged — callers do that.
 fn send_ecash_dbtx(
-    dbtx: &WriteTxRef<'_>,
+    dbtx: &WriteTx,
     federation: FederationId,
     mut remaining_amount: Amount,
 ) -> Option<ECash> {
@@ -946,7 +938,7 @@ fn send_ecash_dbtx(
 
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
-pub(crate) fn wipe_tables(dbtx: &WriteTxRef<'_>, federation: FederationId) {
+pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
     dbtx.delete_table(&NoteTable(federation));
     dbtx.delete_table(&ReceiveOperationTable(federation));
     dbtx.delete_table(&RecoveryTable(federation));

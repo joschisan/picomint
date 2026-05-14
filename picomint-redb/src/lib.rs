@@ -347,55 +347,6 @@ pub struct WriteTx {
 }
 
 impl WriteTx {
-    /// Borrow a view of this write tx. The view cannot commit; only the
-    /// owning [`WriteTx`] can.
-    pub fn as_ref(&self) -> WriteTxRef<'_> {
-        WriteTxRef {
-            tx: &self.tx,
-            touched: &self.touched,
-            on_commit: &self.on_commit,
-        }
-    }
-
-    /// Register a callback to run after a successful commit.
-    pub fn on_commit(&self, f: impl FnOnce() + Send + 'static) {
-        self.as_ref().on_commit(f);
-    }
-
-    pub fn commit(self) {
-        let Self {
-            tx,
-            db,
-            touched,
-            on_commit,
-            ..
-        } = self;
-
-        tx.commit().expect("redb commit failed");
-
-        for name in touched.into_inner().expect("touched poisoned") {
-            db.notify_for(&name).notify_waiters();
-        }
-
-        db.global_notify.notify_waiters();
-
-        for cb in on_commit.into_inner().expect("on_commit poisoned") {
-            cb();
-        }
-    }
-}
-
-/// Borrowed view of a [`WriteTx`]. This is what server modules and client
-/// state machines receive; they cannot commit, but they can read, write, and
-/// register post-commit callbacks that the owning [`WriteTx::commit`] will
-/// fire.
-pub struct WriteTxRef<'tx> {
-    tx: &'tx redb::WriteTransaction,
-    touched: &'tx Mutex<BTreeSet<String>>,
-    on_commit: &'tx Mutex<Vec<Box<dyn FnOnce() + Send + 'static>>>,
-}
-
-impl<'tx> WriteTxRef<'tx> {
     /// Register a callback to run after a successful commit.
     pub fn on_commit(&self, f: impl FnOnce() + Send + 'static) {
         self.on_commit
@@ -427,6 +378,28 @@ impl<'tx> WriteTxRef<'tx> {
             .expect("touched poisoned")
             .insert(resolved);
         r
+    }
+
+    pub fn commit(self) {
+        let Self {
+            tx,
+            db,
+            touched,
+            on_commit,
+            ..
+        } = self;
+
+        tx.commit().expect("redb commit failed");
+
+        for name in touched.into_inner().expect("touched poisoned") {
+            db.notify_for(&name).notify_waiters();
+        }
+
+        db.global_notify.notify_waiters();
+
+        for cb in on_commit.into_inner().expect("on_commit poisoned") {
+            cb();
+        }
     }
 }
 
@@ -497,7 +470,7 @@ where
     }
 }
 
-impl<'tx> WriteTxRef<'tx> {
+impl WriteTx {
     pub fn insert<D, K, V>(&self, def: &D, key: &K, value: &V) -> Option<V>
     where
         D: Table,
@@ -816,9 +789,8 @@ macro_rules! impl_db_write_via_inherent {
 
 // ─── Owned-tx delegation ─────────────────────────────────────────────────
 //
-// UsersTable commonly call `.insert/.get/...` directly on the owned
-// `WriteTx`/`ReadTx` (not just on the borrowed
-// `WriteTxRef`/`ReadTxRef`). These inherent impls delegate via `.as_ref()`.
+// `ReadTx` delegates its typed ops to `ReadTxRef` via `as_ref()`; `WriteTx`
+// owns the typed-ops impl directly now that `WriteTxRef` is gone.
 
 impl ReadTx {
     pub fn get<D, K, V>(&self, def: &D, key: &K) -> Option<V>
@@ -867,84 +839,9 @@ impl ReadTx {
     }
 }
 
-impl WriteTx {
-    pub fn insert<D, K, V>(&self, def: &D, key: &K, value: &V) -> Option<V>
-    where
-        D: Table,
-        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
-    {
-        self.as_ref().insert(def, key, value)
-    }
-
-    pub fn remove<D, K, V>(&self, def: &D, key: &K) -> Option<V>
-    where
-        D: Table,
-        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
-    {
-        self.as_ref().remove(def, key)
-    }
-
-    pub fn delete_table<D: Table>(&self, def: &D) {
-        self.as_ref().delete_table(def)
-    }
-
-    pub fn get<D, K, V>(&self, def: &D, key: &K) -> Option<V>
-    where
-        D: Table,
-        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
-    {
-        self.as_ref().get(def, key)
-    }
-
-    pub fn iter<D, K, V, R>(
-        &self,
-        def: &D,
-        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
-    ) -> R
-    where
-        D: Table,
-        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: 'static,
-        V: 'static,
-        R: Default,
-    {
-        self.as_ref().iter(def, f)
-    }
-
-    pub fn range<D, K, V, B, R>(
-        &self,
-        def: &D,
-        range: B,
-        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
-    ) -> R
-    where
-        D: Table,
-        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: 'static,
-        V: 'static,
-        B: RangeBounds<K>,
-        R: Default,
-    {
-        self.as_ref().range(def, range, f)
-    }
-}
-
 impl_db_read_via_inherent!(ReadTxRef<'_>);
-impl_db_read_via_inherent!(WriteTxRef<'_>);
 impl_db_read_via_inherent!(ReadTx);
 impl_db_read_via_inherent!(WriteTx);
-impl_db_write_via_inherent!(WriteTxRef<'_>);
 impl_db_write_via_inherent!(WriteTx);
 
 // ─── Playground tests ────────────────────────────────────────────────────

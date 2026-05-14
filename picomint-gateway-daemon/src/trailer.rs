@@ -23,7 +23,7 @@ use picomint_client::gw::events::{ReceiveRefundEvent, ReceiveSuccessEvent};
 use picomint_core::core::OperationId;
 use picomint_core::ln::contracts::PaymentImage;
 use picomint_eventlog::EventLogEntry;
-use picomint_redb::WriteTxRef;
+use picomint_redb::WriteTx;
 
 use crate::AppState;
 use crate::db::{EventCursorTable, IncomingContractTable, OutgoingContractTable};
@@ -50,7 +50,7 @@ pub async fn run(state: AppState) {
         for (id, entry) in &chunk {
             let dbtx = state.gateway_db.begin_write();
 
-            dispatch(&state, &dbtx.as_ref(), entry);
+            dispatch(&state, &dbtx, entry);
 
             cursor = id.saturating_add(1);
 
@@ -65,7 +65,7 @@ pub async fn run(state: AppState) {
     }
 }
 
-fn dispatch(state: &AppState, tx_ref: &WriteTxRef<'_>, entry: &EventLogEntry) {
+fn dispatch(state: &AppState, tx_ref: &WriteTx, entry: &EventLogEntry) {
     let preimage = if let Some(ev) = entry.to_event::<ReceiveSuccessEvent>() {
         Some(ev.preimage)
     } else if entry.to_event::<ReceiveRefundEvent>().is_some() {
@@ -85,7 +85,7 @@ fn dispatch(state: &AppState, tx_ref: &WriteTxRef<'_>, entry: &EventLogEntry) {
 
 fn dispatch_direct_swap(
     state: &AppState,
-    tx_ref: &WriteTxRef<'_>,
+    tx_ref: &WriteTx,
     operation: OperationId,
     row: crate::db::OutgoingContractRow,
     preimage: Option<[u8; 32]>,
@@ -107,7 +107,7 @@ fn dispatch_direct_swap(
 
 fn dispatch_ln_receive(
     state: &AppState,
-    tx_ref: &WriteTxRef<'_>,
+    tx_ref: &WriteTx,
     operation: OperationId,
     preimage: Option<[u8; 32]>,
 ) {

@@ -56,7 +56,7 @@ async fn sanity_subscribe_operation_events() {
             for i in 0..=4 {
                 let dbtx = db.begin_write();
                 logger.log_event_raw(
-                    &dbtx.as_ref(),
+                    &dbtx,
                     EventKind::from(format!("{i}")),
                     EventSource::Core,
                     federation,

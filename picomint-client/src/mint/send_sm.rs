@@ -2,7 +2,7 @@ use futures::StreamExt;
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::WriteTxRef;
+use picomint_redb::WriteTx;
 
 use crate::TxRejectEvent;
 use crate::executor::{SmId, StateMachine};
@@ -62,7 +62,7 @@ impl StateMachine for SendStateMachine {
     fn transition(
         &self,
         ctx: &Self::Context,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {
         match outcome {

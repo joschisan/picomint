@@ -8,7 +8,7 @@ use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_eventlog::{Event, EventLogEntry, EventLogId, EventLogger};
-use picomint_redb::{Database, WriteTxRef};
+use picomint_redb::{Database, WriteTx};
 use tokio::sync::Notify;
 
 use crate::{TxAcceptEvent, TxRejectEvent};
@@ -109,7 +109,7 @@ impl ClientContext {
         ))
     }
 
-    pub fn log_event<E>(&self, dbtx: &WriteTxRef<'_>, operation: OperationId, event: E)
+    pub fn log_event<E>(&self, dbtx: &WriteTx, operation: OperationId, event: E)
     where
         E: Event + Send,
     {

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use crate::task::TaskGroup;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::{Database, Table, WriteTxRef, redb};
+use picomint_redb::{Database, Table, WriteTx, redb};
 
 /// Random opaque identifier assigned by the executor when a state
 /// machine is first inserted. Used as the table key; the state machine
@@ -68,7 +68,7 @@ pub trait StateMachine:
     fn transition(
         &self,
         ctx: &Self::Context,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self>;
 }
@@ -112,7 +112,7 @@ where
     /// Atomically insert `state` as a new active state machine under a
     /// freshly-generated [`SmId`]. A driver task is spawned for it when
     /// the DB transaction commits.
-    pub fn add_state_machine_dbtx(&self, dbtx: &WriteTxRef<'_>, state: S) {
+    pub fn add_state_machine_dbtx(&self, dbtx: &WriteTx, state: S) {
         let id = SmId::random();
         assert!(
             dbtx.insert(&self.inner.table, &id, &state).is_none(),
@@ -154,7 +154,7 @@ where
 
             let dbtx = self.db.begin_write();
 
-            match state.transition(&self.context, &dbtx.as_ref(), outcome) {
+            match state.transition(&self.context, &dbtx, outcome) {
                 Some(new_state) => {
                     dbtx.insert(&self.table, &id, &new_state);
                     dbtx.commit();

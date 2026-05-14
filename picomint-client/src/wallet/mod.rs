@@ -175,7 +175,7 @@ impl WalletClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder, |txid| SendEvent {
+            .finalize_and_submit_tx(&dbtx, operation, tx_builder, |txid| SendEvent {
                 txid,
                 address,
                 amount,
@@ -190,8 +190,7 @@ impl WalletClientModule {
             fee,
         };
 
-        self.send_executor
-            .add_state_machine_dbtx(&dbtx.as_ref(), sm);
+        self.send_executor.add_state_machine_dbtx(&dbtx, sm);
 
         dbtx.commit();
 
@@ -273,7 +272,7 @@ impl WalletClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx.as_ref(), operation, tx_builder, |txid| ReceiveEvent {
+            .finalize_and_submit_tx(&dbtx, operation, tx_builder, |txid| ReceiveEvent {
                 txid,
                 address,
                 amount,
@@ -436,7 +435,7 @@ impl WalletClientModule {
 /// Drop every redb table this module owns under the caller's prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
 pub(crate) fn wipe_tables(
-    dbtx: &picomint_redb::WriteTxRef<'_>,
+    dbtx: &picomint_redb::WriteTx,
     federation: picomint_core::config::FederationId,
 ) {
     dbtx.delete_table(&NextOutputIndexTable(federation));
