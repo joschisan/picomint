@@ -41,9 +41,6 @@ use crate::db::{
     OutgoingContractRow, OutgoingContractTable,
 };
 
-/// Default Bitcoin network for testing purposes.
-pub const DEFAULT_NETWORK: Network = Network::Regtest;
-
 /// Name of the gateway's database.
 pub const DB_FILE: &str = "database.redb";
 
