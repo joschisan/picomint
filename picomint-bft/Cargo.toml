@@ -13,6 +13,7 @@ name = "picomint_bft"
 path = "src/lib.rs"
 
 [dependencies]
+anyhow = { workspace = true }
 async-channel = { workspace = true }
 async-trait = { workspace = true }
 bitcoin = { workspace = true }
@@ -21,6 +22,7 @@ picomint-encoding = { workspace = true }
 picomint-redb = { workspace = true }
 rand = { workspace = true }
 tokio = { workspace = true, features = ["macros", "time"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }

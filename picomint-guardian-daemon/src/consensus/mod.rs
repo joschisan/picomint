@@ -9,7 +9,6 @@ pub mod server;
 pub mod tx;
 pub mod wallet;
 
-use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -93,16 +92,6 @@ pub async fn run(
     let (submission_tx, submission_rx) = async_channel::bounded(TX_BUFFER);
     let (shutdown_tx, shutdown_rx) = watch::channel(None);
 
-    let mut ci_status_senders = BTreeMap::new();
-    let mut ci_status_receivers = BTreeMap::new();
-
-    for peer in cfg.consensus.peers.keys().copied() {
-        let (ci_tx, ci_rx) = watch::channel(None);
-
-        ci_status_senders.insert(peer, ci_tx);
-        ci_status_receivers.insert(peer, ci_rx);
-    }
-
     let consensus_api = Arc::new(ConsensusApi {
         cfg: cfg.clone(),
         db: db.clone(),
@@ -111,7 +100,6 @@ pub async fn run(
         shutdown_tx,
         shutdown_rx: shutdown_rx.clone(),
         p2p_status_receivers,
-        ci_status_receivers,
         bitcoin_rpc_connection: bitcoin_rpc_connection.clone(),
     });
 
@@ -211,7 +199,6 @@ pub async fn run(
         db,
         cfg: cfg.clone(),
         connections,
-        ci_status_senders,
         submission_rx,
         shutdown_rx,
         server: consensus_api.server.clone(),

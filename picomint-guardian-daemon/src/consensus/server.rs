@@ -10,7 +10,7 @@ use picomint_core::module::audit::AuditSummary;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
 use picomint_core::{OutPoint, PeerId};
-use picomint_redb::{WriteTx, WriteTxRef};
+use picomint_redb::WriteTx;
 
 use crate::consensus::ln::Lightning;
 use crate::consensus::mint::Mint;
@@ -25,28 +25,28 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn process_consensus_item(
+    pub async fn process_module_ci(
         &self,
-        dbtx: &WriteTxRef<'_>,
-        item: &wire::ModuleConsensusItem,
+        dbtx: &WriteTx,
         peer: PeerId,
+        item: &wire::ModuleConsensusItem,
     ) -> anyhow::Result<()> {
         match item {
             wire::ModuleConsensusItem::Mint(ci) => match *ci {},
             wire::ModuleConsensusItem::Wallet(ci) => {
                 self.wallet
-                    .process_consensus_item(dbtx, ci.clone(), peer)
+                    .process_consensus_item(dbtx, peer, ci.clone())
                     .await
             }
             wire::ModuleConsensusItem::Ln(ci) => {
-                self.ln.process_consensus_item(dbtx, ci.clone(), peer).await
+                self.ln.process_consensus_item(dbtx, peer, ci.clone()).await
             }
         }
     }
 
     pub async fn process_input(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         input: &wire::Input,
     ) -> Result<InputMeta, wire::InputError> {
         match input {
@@ -70,7 +70,7 @@ impl Server {
 
     pub async fn process_output(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         output: &wire::Output,
         out_point: OutPoint,
     ) -> Result<picomint_core::module::TxItemAmounts, wire::OutputError> {
@@ -94,10 +94,9 @@ impl Server {
     }
 
     pub async fn audit(&self, dbtx: &WriteTx) -> AuditSummary {
-        let dbtx = dbtx.as_ref();
-        let mint = self.mint.audit(&dbtx).await;
-        let wallet = self.wallet.audit(&dbtx).await;
-        let ln = self.ln.audit(&dbtx).await;
+        let mint = self.mint.audit(dbtx).await;
+        let wallet = self.wallet.audit(dbtx).await;
+        let ln = self.ln.audit(dbtx).await;
         AuditSummary::new(mint, wallet, ln)
     }
 }
@@ -123,7 +122,7 @@ pub async fn process_tx_with_server(
 
     for input in &tx.inputs {
         let meta = server
-            .process_input(&dbtx.as_ref(), input)
+            .process_input(dbtx, input)
             .await
             .map_err(TxError::Input)?;
 
@@ -135,7 +134,7 @@ pub async fn process_tx_with_server(
 
     for (output, out_idx) in tx.outputs.iter().zip(0u64..) {
         let amount = server
-            .process_output(&dbtx.as_ref(), output, OutPoint { txid, out_idx })
+            .process_output(dbtx, output, OutPoint { txid, out_idx })
             .await
             .map_err(TxError::Output)?;
 

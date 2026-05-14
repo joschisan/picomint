@@ -1,13 +1,16 @@
-//! Adapters binding `picomint-bft` to the daemon's transport,
-//! mempool, and storage — a `Network` impl over
-//! `ReconnectP2PConnections<P2PMessage>`, a `DataProvider` impl pulling
-//! from the submission channel, and a `Backup` impl backed by redb.
+//! Adapters binding `picomint-bft` to the daemon's transport and
+//! mempool — an `INetwork` impl over `ReconnectP2PConnections<P2PMessage>`
+//! and a `DataProvider` impl pulling from the submission channel.
+//!
+//! Storage is owned by `picomint-bft` directly via redb tables
+//! (`BFT_UNITS` + `BFT_COSIGS`). The application consumer that drains
+//! committed items lives in [`crate::consensus::engine`] and receives
+//! through the `ordered_tx` channel passed to `BftEngine::new`.
 
 use async_channel::{Receiver, Sender};
 use async_trait::async_trait;
 use picomint_bft::{
-    Backup as BftBackup, DataProvider as BftDataProvider, Entry as BftEntry, INetwork,
-    Message as BftMessage, Recipient as BftRecipient,
+    DataProvider as BftDataProvider, INetwork, Message as BftMessage, Recipient as BftRecipient,
 };
 use picomint_core::PeerId;
 use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
@@ -18,14 +21,14 @@ use picomint_encoding::Encodable;
 use picomint_redb::Database;
 use tracing::{error, warn};
 
-use crate::consensus::db::{BftUnitsTable, SignedSessionOutcomeTable};
+use crate::consensus::db::SignedSessionOutcomeTable;
 use crate::p2p::{P2PMessage, Recipient as P2PRecipient, ReconnectP2PConnections};
 
 /// `INetwork` adapter wrapping `ReconnectP2PConnections<P2PMessage>`.
 /// Bft traffic flows on the `P2PMessage::Bft` variant; non-bft
 /// variants (`SessionSignature`, `SessionIndex`, `SignedSessionOutcome`)
 /// are dispatched to their respective channels here so the engine sees
-/// only `bft::Message<ConsensusItem>` on `receive`.
+/// only `bft::Message` on `receive`.
 ///
 /// Session isolation is handled inside the engine — every unit carries
 /// its own `session` field, and the graph rejects mismatches — so the
@@ -61,7 +64,7 @@ fn into_p2p_recipient(r: BftRecipient) -> P2PRecipient {
 }
 
 #[async_trait]
-impl INetwork<BftMessage<ConsensusItem>> for Network {
+impl INetwork<ConsensusItem> for Network {
     fn send(&self, recipient: BftRecipient, msg: BftMessage<ConsensusItem>) {
         self.connections
             .send(into_p2p_recipient(recipient), P2PMessage::Bft(msg));
@@ -108,13 +111,10 @@ impl INetwork<BftMessage<ConsensusItem>> for Network {
 }
 
 /// `DataProvider` impl draining the daemon's submission channel into the
-/// next unit's payload, capped at [`BFT_UNIT_BYTE_LIMIT`] bytes
-/// of encoded payload per unit. The first item that would push the
-/// payload past the cap is stashed in `leftover_item` and tried again
-/// on the next call — without this the engine could create an oversize
-/// unit whenever the submission channel had a backlog and would then
-/// trip the `Accepted` assertion in `advance_round` against
-/// `Graph::insert_unit`'s own size check.
+/// next unit's payload, capped at [`BFT_UNIT_BYTE_LIMIT`] bytes of
+/// encoded payload per unit. The first item that would push the payload
+/// past the cap is stashed in `leftover_item` and tried again on the
+/// next call.
 pub struct DataProvider {
     submission_rx: Receiver<ConsensusItem>,
     leftover_item: Option<ConsensusItem>,
@@ -145,9 +145,6 @@ impl BftDataProvider<ConsensusItem> for DataProvider {
                 n_bytes += item_bytes;
                 items.push(item);
             } else {
-                // Larger than an entire unit's worth of payload —
-                // dropping is the only option; it would never fit no
-                // matter how many calls we deferred it across.
                 warn!(?item, "Consensus item exceeds BFT_UNIT_BYTE_LIMIT; dropped");
             }
         }
@@ -165,36 +162,5 @@ impl BftDataProvider<ConsensusItem> for DataProvider {
         }
 
         items
-    }
-}
-
-/// `Backup<ConsensusItem>` impl persisting each `Entry` into the
-/// `BftUnitsTable` table keyed by `(round, creator)`. Overwrites in place
-/// on every save; loading iterates the table in natural key order, which
-/// is `(round, peer)` lex order — i.e. the order the engine expects for
-/// recover (parents before children).
-pub struct RedbBackup {
-    db: Database,
-}
-
-impl RedbBackup {
-    pub fn new(db: Database) -> Self {
-        Self { db }
-    }
-}
-
-impl BftBackup<ConsensusItem> for RedbBackup {
-    fn save(&self, entry: &BftEntry<ConsensusItem>) {
-        let key = (entry.unit().round, entry.unit().creator);
-
-        let dbtx = self.db.begin_write();
-        dbtx.insert(&BftUnitsTable, &key, entry);
-        dbtx.commit();
-    }
-
-    fn load(&self) -> Vec<BftEntry<ConsensusItem>> {
-        self.db.begin_read().iter(&BftUnitsTable, |rows| {
-            rows.map(|(_, entry)| entry).collect()
-        })
     }
 }

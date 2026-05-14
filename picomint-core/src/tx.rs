@@ -92,3 +92,5 @@ pub enum ConsensusItem {
     /// Any data that modules require consensus on
     Module(wire::ModuleConsensusItem),
 }
+
+picomint_redb::consensus_value!(ConsensusItem);

@@ -22,87 +22,84 @@
 //! pick the same head.
 //!
 //! On commit, the head's not-yet-emitted causal ancestors are
-//! extracted BFS-style and emitted as the round's batch.
+//! extracted BFS-style and sent through the ordered-item channel in
+//! oldest-first order. Each emitted slot is marked in the in-memory
+//! `emitted` set so subsequent batches don't re-emit it.
 
 use std::collections::{BTreeMap, VecDeque};
 
-use async_channel::Sender;
 use bitcoin::hashes::sha256;
-use picomint_core::{NumPeers, PeerId};
+use picomint_core::PeerId;
 use picomint_encoding::Encodable;
+use picomint_redb::DbRead;
 
+use crate::data::DataProvider;
+use crate::engine::Engine;
 use crate::unit::{Round, Unit, UnitData};
 
-/// Drives leader-vote ordering over a stream of confirmed units.
-///
-/// Units are fed one at a time via [`Self::add_unit`]; whenever the
-/// new unit unlocks one or more leader rounds, every datum from each
-/// committed batch is pushed to `ordered_tx` (oldest-first per batch).
-/// The extender processes leader rounds strictly in order — round
-/// `r+1`'s decision is not attempted until round `r`'s has resolved.
-pub struct Extender<D: UnitData> {
-    units: Units<D>,
-    num_peers: NumPeers,
-    next_round_to_decide: Round,
-    ordered_tx: Sender<(Round, PeerId, D)>,
+enum CandidateOutcome {
+    Yes,
+    No,
 }
 
-impl<D: UnitData> Extender<D> {
-    /// Build an empty extender for a federation of size `n`. Ordered
-    /// items emitted on commit are pushed to `ordered_tx`.
-    pub fn new(n: NumPeers, ordered_tx: Sender<(Round, PeerId, D)>) -> Self {
-        Self {
-            units: Units::new(),
-            num_peers: n,
-            next_round_to_decide: 0,
-            ordered_tx,
-        }
-    }
+enum Decision {
+    Commit(Round, PeerId),
+    Skip,
+}
 
-    /// Feed a freshly-confirmed unit. Every batch unlocked by the
-    /// arrival is BFS-extracted and each contained datum is pushed to
-    /// `ordered_tx` as a `(round, creator, datum)` triple, oldest-first
-    /// per batch.
-    pub fn add_unit(&mut self, unit: Unit<D>) {
-        self.units.add(unit);
+impl<P, D> Engine<P, D>
+where
+    D: UnitData,
+    P: DataProvider<D>,
+{
+    /// Drain leader-round decisions from `self.next_decide_round`
+    /// upward while each one resolves to `Commit` or `Skip`. For every
+    /// committed head, BFS-extract the not-yet-emitted causal ancestors
+    /// (oldest-first) and send each item through `self.ordered_tx`;
+    /// each emitted slot is added to `self.emitted`.
+    pub(crate) async fn run_extender(&mut self, dbtx: &impl DbRead) {
+        loop {
+            let highest = self.highest_extended_round();
 
-        while let Some(decision) = self.try_decide(self.next_round_to_decide) {
+            let Some(decision) = self.try_decide(dbtx, self.next_decide_round, highest) else {
+                break;
+            };
+
             if let Decision::Commit(round, creator) = decision {
-                for u in self.units.remove_batch(round, creator) {
-                    for d in &u.data {
-                        self.ordered_tx
-                            .try_send((u.round, u.creator, d.clone()))
-                            .expect("ordered channel is unbounded; receiver kept alive");
+                let batch = self.bfs_batch(dbtx, round, creator);
+
+                for u in batch {
+                    for item in u.data {
+                        // Unbounded channel; send() returns Err only
+                        // when the receiver is dropped — which means
+                        // the daemon is gone and we'd be shutting
+                        // down anyway.
+                        let _ = self.ordered_tx.send((u.round, u.creator, item)).await;
                     }
+
+                    self.emitted.insert((u.round, u.creator));
                 }
             }
 
-            self.next_round_to_decide += 1;
+            self.next_decide_round += 1;
         }
     }
 
-    /// The deterministic random order in which to walk candidates for
-    /// `round`. Seeded by the round number so every honest peer
-    /// computes the same permutation.
-    fn candidate_order(&self, round: Round) -> Vec<PeerId> {
-        let mut peers: Vec<(PeerId, sha256::Hash)> = self
-            .num_peers
-            .peer_ids()
-            .map(|p| (p, (round, p).consensus_hash_sha256()))
-            .collect();
-
-        peers.sort_by_key(|(_, h)| *h);
-
-        peers.into_iter().map(|(p, _)| p).collect()
+    fn highest_extended_round(&self) -> Round {
+        self.extended.iter().next_back().map_or(0, |(r, _)| *r)
     }
 
     /// Try to resolve `leader_round`'s verdict by walking candidates
     /// in the round's random order. Returns `None` when the current
-    /// candidate is still undecided — caller re-tries after more units
-    /// confirm.
-    fn try_decide(&self, leader_round: Round) -> Option<Decision> {
-        for candidate_peer in self.candidate_order(leader_round) {
-            match self.decide_candidate(leader_round, candidate_peer) {
+    /// candidate is still undecided.
+    fn try_decide(
+        &self,
+        dbtx: &impl DbRead,
+        leader_round: Round,
+        highest_round: Round,
+    ) -> Option<Decision> {
+        for candidate_peer in candidate_order(self.n, leader_round) {
+            match self.decide_candidate(dbtx, leader_round, candidate_peer, highest_round) {
                 Some(CandidateOutcome::Yes) => {
                     return Some(Decision::Commit(leader_round, candidate_peer));
                 }
@@ -120,19 +117,18 @@ impl<D: UnitData> Extender<D> {
     /// crossed yet.
     fn decide_candidate(
         &self,
+        dbtx: &impl DbRead,
         leader_round: Round,
         candidate_peer: PeerId,
+        highest_round: Round,
     ) -> Option<CandidateOutcome> {
-        // Vote table built incrementally over rounds R+1, R+2, ….
-        // Keyed by (round, creator) since at most one confirmed unit
-        // per slot exists — slot uniquely identifies the voter.
         let mut votes: BTreeMap<(Round, PeerId), bool> = BTreeMap::new();
 
-        for k in (leader_round..self.units.highest_round()).map(|k| k + 1) {
+        for k in (leader_round..highest_round).map(|k| k + 1) {
             let mut yes = 0;
             let mut no = 0;
 
-            for unit in self.units.in_round(k) {
+            for unit in self.round_extended_units(dbtx, k) {
                 let vote = if k == leader_round + 1 {
                     unit.parents.contains(&candidate_peer)
                 } else {
@@ -150,7 +146,7 @@ impl<D: UnitData> Extender<D> {
                         }
                     }
 
-                    assert_eq!(yes_parents + no_parents, self.num_peers.threshold());
+                    assert_eq!(yes_parents + no_parents, self.n.threshold());
 
                     assert_ne!(yes_parents, no_parents);
 
@@ -166,81 +162,56 @@ impl<D: UnitData> Extender<D> {
                 }
             }
 
-            if yes >= self.num_peers.threshold() {
+            if yes >= self.n.threshold() {
                 return Some(CandidateOutcome::Yes);
             }
 
-            if no >= self.num_peers.threshold() {
+            if no >= self.n.threshold() {
                 return Some(CandidateOutcome::No);
             }
         }
 
         None
     }
-}
 
-enum CandidateOutcome {
-    Yes,
-    No,
-}
-
-enum Decision {
-    Commit(Round, PeerId),
-    Skip,
-}
-
-/// In-memory store of confirmed units, keyed by `(round, creator)`.
-/// Slot-keying is enough because consistent broadcast guarantees at most
-/// one confirmed unit per slot, and `BTreeMap`'s `range` gives us
-/// round-restricted iteration without a separate by-round index.
-struct Units<D: UnitData> {
-    by_slot: BTreeMap<(Round, PeerId), Unit<D>>,
-    highest_round: Round,
-}
-
-impl<D: UnitData> Units<D> {
-    fn new() -> Self {
-        Self {
-            by_slot: BTreeMap::new(),
-            highest_round: 0,
-        }
+    /// Extended units in `round`, used by the vote-table computation.
+    /// Reads bodies on demand from `BFT_UNITS`; the slot set comes
+    /// from the in-memory `extended`.
+    fn round_extended_units(&self, dbtx: &impl DbRead, round: Round) -> Vec<Unit<D>> {
+        self.extended
+            .range((round, PeerId::from(0u8))..=(round, PeerId::from(u8::MAX)))
+            .filter_map(|(r, c)| dbtx.get(&self.units_table, &(*r, *c)))
+            .collect()
     }
 
-    fn add(&mut self, unit: Unit<D>) {
-        self.highest_round = self.highest_round.max(unit.round);
-
-        self.by_slot.insert((unit.round, unit.creator), unit);
-    }
-
-    fn in_round(&self, round: Round) -> impl Iterator<Item = &Unit<D>> {
-        self.by_slot
-            .range((round, PeerId::from(0u8))..)
-            .take_while(move |((r, _), _)| *r == round)
-            .map(|(_, u)| u)
-    }
-
-    fn highest_round(&self) -> Round {
-        self.highest_round
-    }
-
-    /// BFS over the `(round, creator)` head's ancestors, removing each
-    /// from the store as we visit it. Already-emitted ancestors (removed
-    /// by an earlier batch) are skipped — that's how successive batches
-    /// partition the DAG. Returns oldest-first.
-    fn remove_batch(&mut self, round: Round, creator: PeerId) -> Vec<Unit<D>> {
+    /// BFS over the head's not-yet-emitted ancestors, marking each
+    /// visited slot in `self.emitted` as we enqueue it. Returns the
+    /// units oldest-first so the caller emits them in that order.
+    fn bfs_batch(&mut self, dbtx: &impl DbRead, round: Round, creator: PeerId) -> Vec<Unit<D>> {
         let mut batch = Vec::new();
         let mut queue = VecDeque::new();
 
-        let head = self.by_slot.remove(&(round, creator)).expect("head exists");
+        if self.emitted.contains(&(round, creator)) {
+            return batch;
+        }
+
+        let head: Unit<D> = dbtx
+            .get(&self.units_table, &(round, creator))
+            .expect("commit head must exist");
 
         queue.push_back(head);
 
         while let Some(unit) = queue.pop_front() {
-            for parent_creator in &unit.parents {
-                let parent_round = unit.round - 1;
-
-                if let Some(parent) = self.by_slot.remove(&(parent_round, *parent_creator)) {
-                    queue.push_back(parent);
+            if let Some(parent_round) = unit.round.checked_sub(1) {
+                for parent_creator in &unit.parents {
+                    if self.emitted.contains(&(parent_round, *parent_creator)) {
+                        continue;
+                    }
+                    if let Some(p) = dbtx.get(&self.units_table, &(parent_round, *parent_creator)) {
+                        // Tentatively mark so the deeper BFS doesn't enqueue twice.
+                        self.emitted.insert((parent_round, *parent_creator));
+                        queue.push_back(p);
+                    }
                 }
             }
 
@@ -251,4 +222,18 @@ impl<D: UnitData> Units<D> {
 
         batch
     }
+}
+
+/// The deterministic random order in which to walk candidates for
+/// `round`. Seeded by the round number so every honest peer
+/// computes the same permutation.
+fn candidate_order(n: picomint_core::NumPeers, round: Round) -> Vec<PeerId> {
+    let mut peers: Vec<(PeerId, sha256::Hash)> = n
+        .peer_ids()
+        .map(|p| (p, (round, p).consensus_hash_sha256()))
+        .collect();
+
+    peers.sort_by_key(|(_, h)| *h);
+
+    peers.into_iter().map(|(p, _)| p).collect()
 }

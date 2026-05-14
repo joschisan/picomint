@@ -19,7 +19,7 @@ use picomint_core::ln::{
 };
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, NumPeersExt, OutPoint, PeerId};
-use picomint_redb::{Database, ReadTxRef, WriteTxRef};
+use picomint_redb::{Database, ReadTxRef, WriteTx};
 use tpe::{PublicKeyShare, SecretKeyShare};
 use tracing::trace;
 
@@ -112,9 +112,9 @@ impl Lightning {
 
     pub async fn process_consensus_item(
         &self,
-        dbtx: &WriteTxRef<'_>,
-        consensus_item: LightningConsensusItem,
+        dbtx: &WriteTx,
         peer: PeerId,
+        consensus_item: LightningConsensusItem,
     ) -> anyhow::Result<()> {
         trace!(?consensus_item, "Processing consensus item proposal");
 
@@ -138,7 +138,7 @@ impl Lightning {
 
     pub async fn process_input(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         input: &LightningInput,
     ) -> Result<InputMeta, LightningInputError> {
         let (pub_key, amount) = match input {
@@ -227,7 +227,7 @@ impl Lightning {
 
     pub async fn process_output(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         output: &LightningOutput,
         outpoint: OutPoint,
     ) -> Result<TxItemAmounts, LightningOutputError> {
@@ -293,7 +293,7 @@ impl Lightning {
     /// or the sender does on refund); incoming locks `amount - fee` (the
     /// recipient claims that on success, with `fee` accruing to the
     /// federation as implicit revenue).
-    pub async fn audit(&self, dbtx: &WriteTxRef<'_>) -> i64 {
+    pub async fn audit(&self, dbtx: &WriteTx) -> i64 {
         let outgoing: i64 = dbtx.iter(&OutgoingContractTable, |r| {
             r.map(|(_, contract)| -((contract.amount.msats + contract.fee.msats) as i64))
                 .sum()
