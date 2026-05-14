@@ -16,7 +16,7 @@ use picomint_core::mint::{
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, OutPoint, PeerId};
 use picomint_encoding::Encodable;
-use picomint_redb::{Database, ReadTxRef, WriteTx};
+use picomint_redb::{Database, ReadTx, WriteTx};
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
 
 use crate::config::dkg::DkgHandle;
@@ -94,7 +94,7 @@ impl Mint {
 }
 
 impl Mint {
-    pub async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<MintConsensusItem> {
+    pub async fn consensus_proposal(&self, _dbtx: &ReadTx) -> Vec<MintConsensusItem> {
         Vec::new()
     }
 

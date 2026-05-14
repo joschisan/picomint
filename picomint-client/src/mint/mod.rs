@@ -583,7 +583,7 @@ impl MintClientModule {
         Box::pin(async_stream::stream! {
             loop {
                 let notified = notify.notified();
-                match db.begin_read().as_ref().get(&RecoveryTable(federation), &()) {
+                match db.begin_read().get(&RecoveryTable(federation), &()) {
                     Some(state) => {
                         let percent = state
                             .total_items

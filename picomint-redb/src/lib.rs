@@ -324,18 +324,6 @@ pub struct ReadTx {
     tx: redb::ReadTransaction,
 }
 
-impl ReadTx {
-    /// Borrow a view of this read tx.
-    pub fn as_ref(&self) -> ReadTxRef<'_> {
-        ReadTxRef { tx: &self.tx }
-    }
-}
-
-/// Borrowed view of a [`ReadTx`].
-pub struct ReadTxRef<'tx> {
-    tx: &'tx redb::ReadTransaction,
-}
-
 pub struct WriteTx {
     tx: redb::WriteTransaction,
     db: Arc<DatabaseInner>,
@@ -403,7 +391,7 @@ impl WriteTx {
     }
 }
 
-impl ReadTxRef<'_> {
+impl ReadTx {
     /// Open the native redb table and hand it to `f`. Returns `None` if the
     /// table has never been written — treat that as "empty" at the call site.
     pub(crate) fn with_native_table<D, R>(
@@ -573,7 +561,7 @@ impl WriteTx {
     }
 }
 
-impl ReadTxRef<'_> {
+impl ReadTx {
     pub fn get<D, K, V>(&self, def: &D, key: &K) -> Option<V>
     where
         D: Table,
@@ -787,59 +775,6 @@ macro_rules! impl_db_write_via_inherent {
     };
 }
 
-// ─── Owned-tx delegation ─────────────────────────────────────────────────
-//
-// `ReadTx` delegates its typed ops to `ReadTxRef` via `as_ref()`; `WriteTx`
-// owns the typed-ops impl directly now that `WriteTxRef` is gone.
-
-impl ReadTx {
-    pub fn get<D, K, V>(&self, def: &D, key: &K) -> Option<V>
-    where
-        D: Table,
-        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: Debug + 'static,
-        V: Debug + 'static,
-    {
-        self.as_ref().get(def, key)
-    }
-
-    pub fn iter<D, K, V, R>(
-        &self,
-        def: &D,
-        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
-    ) -> R
-    where
-        D: Table,
-        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: 'static,
-        V: 'static,
-        R: Default,
-    {
-        self.as_ref().iter(def, f)
-    }
-
-    pub fn range<D, K, V, B, R>(
-        &self,
-        def: &D,
-        range: B,
-        f: impl FnOnce(&mut RedbIter<'_, D::Key, K, D::Value, V>) -> R,
-    ) -> R
-    where
-        D: Table,
-        D::Key: for<'a> redb::Key<SelfType<'a> = K> + 'static,
-        D::Value: for<'a> redb::Value<SelfType<'a> = V> + 'static,
-        K: 'static,
-        V: 'static,
-        B: RangeBounds<K>,
-        R: Default,
-    {
-        self.as_ref().range(def, range, f)
-    }
-}
-
-impl_db_read_via_inherent!(ReadTxRef<'_>);
 impl_db_read_via_inherent!(ReadTx);
 impl_db_read_via_inherent!(WriteTx);
 impl_db_write_via_inherent!(WriteTx);

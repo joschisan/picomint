@@ -69,7 +69,7 @@ impl GatewayClientFactory {
         network: Network,
         api_addr: SocketAddr,
     ) -> anyhow::Result<Option<Self>> {
-        let Some(entropy) = db.begin_read().as_ref().get(&RootEntropyTable, &()) else {
+        let Some(entropy) = db.begin_read().get(&RootEntropyTable, &()) else {
             return Ok(None);
         };
 
@@ -106,10 +106,7 @@ impl GatewayClientFactory {
     }
 
     fn read_config(&self, federation: &FederationId) -> Option<ConsensusConfig> {
-        self.db
-            .begin_read()
-            .as_ref()
-            .get(&ClientConfigTable, federation)
+        self.db.begin_read().get(&ClientConfigTable, federation)
     }
 
     /// Download and persist the consensus config for a federation. The
@@ -168,7 +165,6 @@ impl GatewayClientFactory {
     pub async fn list_federations(&self) -> Vec<FederationId> {
         self.db
             .begin_read()
-            .as_ref()
             .iter(&ClientConfigTable, |r| r.map(|(id, _)| id).collect())
     }
 }

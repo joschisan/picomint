@@ -19,7 +19,7 @@ use picomint_core::ln::{
 };
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, NumPeersExt, OutPoint, PeerId};
-use picomint_redb::{Database, ReadTxRef, WriteTx};
+use picomint_redb::{Database, ReadTx, WriteTx};
 use tpe::{PublicKeyShare, SecretKeyShare};
 use tracing::trace;
 
@@ -93,7 +93,7 @@ impl Lightning {
 }
 
 impl Lightning {
-    pub async fn consensus_proposal(&self, _dbtx: &ReadTxRef<'_>) -> Vec<LightningConsensusItem> {
+    pub async fn consensus_proposal(&self, _dbtx: &ReadTx) -> Vec<LightningConsensusItem> {
         // We reduce the time granularity to deduplicate votes more often and not save
         // one consensus item every second.
         let unix_secs = SystemTime::now()

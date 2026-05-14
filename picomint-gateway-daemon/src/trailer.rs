@@ -34,7 +34,6 @@ pub async fn run(state: AppState) {
     let mut cursor = state
         .gateway_db
         .begin_read()
-        .as_ref()
         .get(&EventCursorTable, &())
         .unwrap_or_default();
 

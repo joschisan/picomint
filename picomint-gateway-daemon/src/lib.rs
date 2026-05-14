@@ -106,16 +106,13 @@ impl AppState {
     /// name. Reads [`ClientConfigTable`] directly so dormant federations are
     /// not forced to lazy-load.
     pub fn federation_info_all(&self) -> Vec<FederationInfo> {
-        self.gateway_db
-            .begin_read()
-            .as_ref()
-            .iter(&ClientConfigTable, |r| {
-                r.map(|(federation, config)| FederationInfo {
-                    federation,
-                    federation_name: config.name,
-                })
-                .collect()
+        self.gateway_db.begin_read().iter(&ClientConfigTable, |r| {
+            r.map(|(federation, config)| FederationInfo {
+                federation,
+                federation_name: config.name,
             })
+            .collect()
+        })
     }
 }
 
@@ -125,7 +122,6 @@ impl AppState {
         ensure!(
             self.gateway_db
                 .begin_read()
-                .as_ref()
                 .get(&DisabledFederationTable, federation)
                 .is_none(),
             "Federation is disabled",
@@ -371,7 +367,6 @@ impl AppState {
         if let Some(existing) = self
             .gateway_db
             .begin_read()
-            .as_ref()
             .get(&IncomingContractTable, &operation)
         {
             if existing.federation != payload.federation {
@@ -424,7 +419,6 @@ impl AppState {
         let row = self
             .gateway_db
             .begin_read()
-            .as_ref()
             .get(&IncomingContractTable, &operation)
             .ok_or_else(|| anyhow!("Unknown payment hash"))?;
 
