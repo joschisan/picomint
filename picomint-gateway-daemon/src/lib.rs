@@ -242,17 +242,14 @@ impl AppState {
             // External LN send: `ln_fee` becomes LDK's hard cap on route cost.
             let max_delay = expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM);
 
+            let rpc = RouteParametersConfig::default()
+                .with_max_total_routing_fee_msat(ln_fee.msats)
+                .with_max_total_cltv_expiry_delta(max_delay as u32);
+
             if self
                 .node
                 .bolt11_payment()
-                .send(
-                    payload.invoice.bolt11(),
-                    Some(RouteParametersConfig {
-                        max_total_routing_fee_msat: Some(ln_fee.msats),
-                        max_total_cltv_expiry_delta: max_delay as u32,
-                        ..RouteParametersConfig::default()
-                    }),
-                )
+                .send(payload.invoice.bolt11(), Some(rpc))
                 .is_err()
             {
                 f1_client.gw().finalize_send(
