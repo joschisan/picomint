@@ -28,9 +28,9 @@ services:
     volumes:
       - ./miner.sh:/miner.sh:ro
 
-  guardian-0-0: &guardian
+  guardian-0: &guardian
     image: ghcr.io/joschisan/picomint-guardian-daemon:main
-    container_name: picomint-guardian-daemon-0-0
+    container_name: picomint-guardian-daemon-0
     depends_on:
       - bitcoind
     environment: &guardian_env
@@ -43,77 +43,37 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - guardian_0_0_data:/data
+      - guardian_0_data:/data
 
-  guardian-0-1:
+  guardian-1:
     <<: *guardian
-    container_name: picomint-guardian-daemon-0-1
+    container_name: picomint-guardian-daemon-1
     environment:
       <<: *guardian_env
     ports:
       - "3001:3000"
     volumes:
-      - guardian_0_1_data:/data
+      - guardian_1_data:/data
 
-  guardian-0-2:
+  guardian-2:
     <<: *guardian
-    container_name: picomint-guardian-daemon-0-2
+    container_name: picomint-guardian-daemon-2
     environment:
       <<: *guardian_env
     ports:
       - "3002:3000"
     volumes:
-      - guardian_0_2_data:/data
+      - guardian_2_data:/data
 
-  guardian-0-3:
+  guardian-3:
     <<: *guardian
-    container_name: picomint-guardian-daemon-0-3
+    container_name: picomint-guardian-daemon-3
     environment:
       <<: *guardian_env
     ports:
       - "3003:3000"
     volumes:
-      - guardian_0_3_data:/data
-
-  guardian-1-0:
-    <<: *guardian
-    container_name: picomint-guardian-daemon-1-0
-    environment:
-      <<: *guardian_env
-    ports:
-      - "3010:3000"
-    volumes:
-      - guardian_1_0_data:/data
-
-  guardian-1-1:
-    <<: *guardian
-    container_name: picomint-guardian-daemon-1-1
-    environment:
-      <<: *guardian_env
-    ports:
-      - "3011:3000"
-    volumes:
-      - guardian_1_1_data:/data
-
-  guardian-1-2:
-    <<: *guardian
-    container_name: picomint-guardian-daemon-1-2
-    environment:
-      <<: *guardian_env
-    ports:
-      - "3012:3000"
-    volumes:
-      - guardian_1_2_data:/data
-
-  guardian-1-3:
-    <<: *guardian
-    container_name: picomint-guardian-daemon-1-3
-    environment:
-      <<: *guardian_env
-    ports:
-      - "3013:3000"
-    volumes:
-      - guardian_1_3_data:/data
+      - guardian_3_data:/data
 
   gateway:
     image: ghcr.io/joschisan/picomint-gateway-daemon:main
@@ -144,12 +104,8 @@ services:
 
 volumes:
   bitcoind_data:
-  guardian_0_0_data:
-  guardian_0_1_data:
-  guardian_0_2_data:
-  guardian_0_3_data:
-  guardian_1_0_data:
-  guardian_1_1_data:
-  guardian_1_2_data:
-  guardian_1_3_data:
+  guardian_0_data:
+  guardian_1_data:
+  guardian_2_data:
+  guardian_3_data:
   gateway_data:

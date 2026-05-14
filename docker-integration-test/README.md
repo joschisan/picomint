@@ -1,15 +1,14 @@
 # docker-integration-test
 
-A long-running, fully-local two-federation deployment for client-app
+A long-running, fully-local single-federation deployment for client-app
 development.
 
 Brings up:
 
 - `bitcoind` on regtest, with a sidecar that mines one block every ten
   seconds
-- 4 guardians for **Test Federation I** (`picomint-guardian-daemon-0-0..3`)
-- 4 guardians for **Test Federation II** (`picomint-guardian-daemon-1-0..3`)
-- 1 gateway (`picomint-gateway-daemon`) joined to both federations
+- 4 guardians for **Test Federation** (`picomint-guardian-daemon-0..3`)
+- 1 gateway (`picomint-gateway-daemon`) joined to the federation
 - 1 LNURL daemon (`picomint-lnurl-daemon`)
 
 All services share a docker network. Resetting state is a single command:
@@ -28,11 +27,10 @@ docker compose up -d
 ./setup.sh
 ```
 
-`setup.sh` drives the DKG ceremony for each federation in turn, joins
-the gateway to both, registers the gateway's iroh public key with both,
-and pegs in 1 BTC of seed liquidity into each federation. It prints the
-two invite codes, the gateway iroh pk, the LNURL daemon URL, and the
-per-guardian UI URLs at the end.
+`setup.sh` drives the DKG ceremony, joins the gateway to the federation,
+registers the gateway's iroh public key with every guardian, and pegs in
+1 BTC of seed liquidity. It prints the invite code, the gateway iroh pk,
+the LNURL daemon URL, and the per-guardian UI URLs at the end.
 
 Federation guardians and clients reach the gateway over iroh (QUIC over
 UDP, with hole-punching and N0 relay fallback), so no public HTTP URL
@@ -43,14 +41,13 @@ is needed — the gateway identity is its iroh public key.
 | Service             | Host port                                   | Notes                                |
 |---------------------|---------------------------------------------|--------------------------------------|
 | bitcoind RPC        | `http://localhost:18443`                    | user `bitcoin` / pass `bitcoin`      |
-| Federation I UIs    | `http://localhost:3000`..`3003`             | password `picomint`                  |
-| Federation II UIs   | `http://localhost:3010`..`3013`             | password `picomint`                  |
+| Guardian UIs        | `http://localhost:3000`..`3003`             | password `picomint`                  |
 | gateway iroh API    | UDP `localhost:8090` → container `8080`     | iroh QUIC; LDK BOLT P2P on `9735`    |
 | LNURL daemon API    | `http://localhost:8091`                     |                                      |
 
 Within the compose network the same services are reachable as
-`bitcoind:18443`, `guardian-0-0..3:8080`, `guardian-1-0..3:8080`,
-`gateway:8080`, `lnurl-daemon:8080`.
+`bitcoind:18443`, `guardian-0..3:8080`, `gateway:8080`,
+`lnurl-daemon:8080`.
 
 ## Lightning
 
@@ -58,8 +55,7 @@ The gateway boots an LDK node but starts with no channels and no funds.
 For LN flows, fund it from the regtest miner wallet and open a channel
 to a counterparty (a second LDK node container is not bundled here yet).
 Onchain peg-in/out, ecash, and federation flows work without any LN
-setup. Cross-federation lightning payments between clients of Federation
-I and Federation II flow through the gateway as a normal LN hop.
+setup.
 
 ## Reset
 
@@ -68,5 +64,5 @@ docker compose down -v
 ```
 
 Wipes all guardian/gateway/bitcoind state. Re-run `up -d` and
-`./setup.sh` to start fresh — both federations get fresh DKG-derived
-keys and brand new invite codes.
+`./setup.sh` to start fresh — the federation gets fresh DKG-derived
+keys and a brand new invite code.
