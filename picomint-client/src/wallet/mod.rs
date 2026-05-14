@@ -181,7 +181,7 @@ impl WalletClientModule {
                 amount,
                 fee,
             })
-            .map_err(|_| SendError::InsufficientFunds)?;
+            .ok_or(SendError::InsufficientFunds)?;
 
         let sm = SendStateMachine {
             operation,

@@ -309,7 +309,7 @@ impl LightningClientModule {
                 amount,
                 fee,
             })
-            .map_err(|e| SendPaymentError::FailedToFundPayment(e.to_string()))?;
+            .ok_or_else(|| SendPaymentError::FailedToFundPayment("Insufficient funds".into()))?;
 
         let sm = SendStateMachine {
             common: SendSMCommon {

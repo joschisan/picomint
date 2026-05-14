@@ -2,7 +2,7 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::ensure;
+use anyhow::{Context as _, ensure};
 use async_stream::stream;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1::{Keypair, SECP256K1, SecretKey};
@@ -585,7 +585,8 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
         .mint()
         .finalize_and_submit_tx(&dbtx, OperationId::new_random(), tx_builder, |_| {
             SendSuccessEvent { preimage }
-        })?;
+        })
+        .context("Insufficient funds")?;
 
     dbtx.commit();
 

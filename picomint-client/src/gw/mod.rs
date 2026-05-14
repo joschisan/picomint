@@ -3,6 +3,7 @@ pub mod events;
 mod receive_sm;
 mod secret;
 
+use anyhow::Context as _;
 use picomint_redb::WriteTx;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -158,7 +159,8 @@ impl GatewayClientModule {
                 txid,
                 amount,
                 fee,
-            })?;
+            })
+            .context("Insufficient funds")?;
 
         let outpoint = OutPoint { txid, out_idx: 0 };
 

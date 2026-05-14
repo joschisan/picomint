@@ -287,7 +287,8 @@ impl MintClientModule {
             self.finalize_and_submit_tx(&dbtx, operation, builder, |txid| events::RecoveryEvent {
                 amount,
                 txid: Some(txid),
-            })?;
+            })
+            .expect("Recovery sweep must fund from the recovered notes themselves");
         } else {
             self.client_ctx.log_event(
                 &dbtx,
@@ -436,7 +437,7 @@ impl MintClientModule {
         operation: OperationId,
         mut builder: TxBuilder,
         event: impl FnOnce(TransactionId) -> E,
-    ) -> anyhow::Result<TransactionId> {
+    ) -> Option<TransactionId> {
         let deficit = builder.deficit();
 
         let (spendable_notes, issuance_requests) = self.balance(dbtx, &mut builder)?;
@@ -457,21 +458,22 @@ impl MintClientModule {
             self.mint_executor.add_state_machine_dbtx(dbtx, sm);
         }
 
-        Ok(txid)
+        Some(txid)
     }
 
     /// Mint-side transaction balancing. Pulls funding notes from the wallet
     /// when the builder is underfunded, then absorbs any excess as change
     /// outputs. Sub-denomination dust below `smallest_denom + output_fee` is
-    /// left as implicit federation revenue.
+    /// left as implicit federation revenue. Returns `None` iff the wallet
+    /// holds insufficient funds to cover the builder's deficit — the sole
+    /// failure mode after tx-too-large became a programmer-error panic in
+    /// [`Mint::submit`].
     fn balance(
         &self,
         dbtx: &WriteTx,
         builder: &mut TxBuilder,
-    ) -> anyhow::Result<(Vec<SpendableNote>, Vec<NoteIssuanceRequest>)> {
-        let mut spendable_notes = self
-            .select_funding_input(dbtx, builder.deficit())
-            .context("Insufficient funds")?;
+    ) -> Option<(Vec<SpendableNote>, Vec<NoteIssuanceRequest>)> {
+        let mut spendable_notes = self.select_funding_input(dbtx, builder.deficit())?;
 
         // Sort by denomination to minimize information leaked about
         // which notes the wallet held.
@@ -516,7 +518,7 @@ impl MintClientModule {
 
         assert_eq!(builder.deficit(), Amount::ZERO);
 
-        Ok((spendable_notes, issuance_requests))
+        Some((spendable_notes, issuance_requests))
     }
 
     /// Sign the builder, size-check the encoded transaction, spawn the
@@ -777,7 +779,7 @@ impl MintClientModule {
 
         let (funding_notes, change_requests) = self
             .balance(&dbtx, &mut builder)
-            .map_err(|_| SendECashError::InsufficientBalance)?;
+            .ok_or(SendECashError::InsufficientBalance)?;
 
         let funding: Amount = funding_notes.iter().map(|n| n.amount()).sum();
 
@@ -881,7 +883,7 @@ impl MintClientModule {
             txid,
             amount,
         })
-        .map_err(|_| ReceiveECashError::InsufficientFunds)?;
+        .ok_or(ReceiveECashError::InsufficientFunds)?;
 
         dbtx.commit();
 
