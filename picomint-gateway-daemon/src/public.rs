@@ -37,7 +37,7 @@ async fn dispatch(state: AppState, method: GatewayMethod) -> Result<Vec<u8>, Str
             .map(|result| SendPaymentResponse { result }.consensus_encode_to_vec())
             .map_err(|e| e.to_string()),
         GatewayMethod::CreateInvoice(req) => state
-            .create_bolt11_invoice(req)
+            .create_invoice(req)
             .await
             .map(|invoice| CreateInvoiceResponse { invoice }.consensus_encode_to_vec())
             .map_err(|e| e.to_string()),

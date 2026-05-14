@@ -306,75 +306,49 @@ impl AppState {
     /// `IncomingContract` + the generated invoice in the daemon-global
     /// `incoming_contract` table. Idempotent on operation: a retry with the same
     /// contract returns the previously generated invoice.
-    pub async fn create_bolt11_invoice(
+    pub async fn create_invoice(
         &self,
         payload: CreateInvoiceRequest,
     ) -> anyhow::Result<Bolt11Invoice> {
-        if !payload.contract.verify() {
-            bail!("The contract is invalid");
-        }
+        ensure!(payload.contract.verify(), "The contract is invalid");
 
-        let gateway_info = self
-            .gateway_info(&payload.federation)
-            .await
-            .map_err(|_| anyhow!("Federation {} does not exist", payload.federation))?;
+        let client = self
+            .select_client(payload.federation)
+            .context("Federation not connected")?;
 
-        if payload.contract.commitment.refund_pk != gateway_info.module_public_key {
-            bail!("The incoming contract is keyed to another gateway");
-        }
+        ensure!(
+            payload.contract.commitment.refund_pk == client.gw().keypair.x_only_public_key().0,
+            "The incoming contract is keyed to another gateway"
+        );
 
-        let receive_fee = gateway_info.receive_fee.fee(payload.amount.msats);
+        let receive_fee = self.receive_fee.fee(payload.amount.msats);
 
-        if payload
-            .amount
-            .checked_sub(receive_fee)
-            .unwrap_or(Amount::ZERO)
-            == Amount::ZERO
-        {
-            bail!("Zero amount incoming contracts are not supported");
-        }
+        ensure!(
+            payload.contract.commitment.amount == payload.amount,
+            "Contract amount does not match the invoice amount"
+        );
 
-        if payload.contract.commitment.amount != payload.amount {
-            bail!("Contract amount does not match the invoice amount");
-        }
-
-        if payload.contract.commitment.fee != receive_fee {
-            bail!("Contract fee does not match the gateway receive fee");
-        }
+        ensure!(
+            payload.contract.commitment.fee == receive_fee,
+            "Contract fee does not match the gateway receive fee"
+        );
 
         let now_secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("System time before Unix epoch")
             .as_secs();
 
-        if payload.contract.commitment.expiration <= now_secs {
-            bail!("The contract has already expired");
-        }
-
-        let operation = OperationId::from_encodable(&payload.contract.commitment.payment_hash);
-
-        // Idempotency: if we already registered this contract, return its invoice.
-        if let Some(existing) = self
-            .gateway_db
-            .begin_read()
-            .get(&IncomingContractTable, &operation)
-        {
-            if existing.federation != payload.federation {
-                bail!("PaymentHash is already registered on a different federation");
-            }
-            return Ok(existing.invoice.bolt11().clone());
-        }
-
-        // Description is intentionally empty: clients can't influence what
-        // the gateway puts in BOLT11 invoices it signs.
-        let ldk_description = LdkBolt11InvoiceDescription::Direct(Description::empty());
+        ensure!(
+            payload.contract.commitment.expiration > now_secs,
+            "The contract has already expired"
+        );
 
         let invoice = self
             .node
             .bolt11_payment()
             .receive_for_hash(
-                payload.amount.msats,
-                &ldk_description,
+                payload.contract.commitment.amount.msats,
+                &LdkBolt11InvoiceDescription::Direct(Description::empty()),
                 payload.expiry_secs,
                 PaymentHash(*payload.contract.commitment.payment_hash.as_byte_array()),
             )
@@ -382,16 +356,21 @@ impl AppState {
 
         let dbtx = self.gateway_db.begin_write();
 
-        dbtx.insert(
-            &IncomingContractTable,
-            &operation,
-            &IncomingContractRow {
-                federation: payload.federation,
-                contract: payload.contract,
-                invoice: LightningInvoice::Bolt11(invoice.clone()),
-                amount: payload.amount,
-            },
-        );
+        if dbtx
+            .insert(
+                &IncomingContractTable,
+                &OperationId::from_encodable(&payload.contract.commitment.payment_hash),
+                &IncomingContractRow {
+                    federation: payload.federation,
+                    contract: payload.contract,
+                    invoice: LightningInvoice::Bolt11(invoice.clone()),
+                    amount: payload.amount,
+                },
+            )
+            .is_some()
+        {
+            bail!("A conract for this hash has already been registered")
+        }
 
         dbtx.commit();
 
