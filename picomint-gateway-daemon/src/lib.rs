@@ -181,32 +181,29 @@ impl AppState {
             "Contract Id returned by the federation does not match contract in request"
         );
 
-        let LightningInvoice::Bolt11(invoice) = &payload.invoice;
-        let amount = invoice
+        let amount = payload
+            .invoice
+            .bolt11()
             .amount_milli_satoshis()
             .ok_or(anyhow!("Invoice is missing amount"))?;
 
         ensure!(
-            PaymentImage::Hash(*invoice.payment_hash()) == payload.contract.payment_image,
+            PaymentImage::Hash(*payload.invoice.bolt11().payment_hash())
+                == payload.contract.payment_image,
             "The invoice's payment hash does not match the contract's payment hash"
         );
-
-        let operation = OperationId::from_encodable(invoice.payment_hash());
-
-        let is_direct_swap = self.node.node_id() == invoice.get_payee_pub_key();
-
-        let fee = self.send_fee.fee(amount);
-
-        let ln_fee = if is_direct_swap {
-            Amount::ZERO
-        } else {
-            self.ln_fee.fee(amount)
-        };
 
         ensure!(
             payload.contract.amount == Amount::from_msats(amount),
             "Contract amount does not match invoice amount"
         );
+
+        let fee = self.send_fee.fee(amount);
+
+        let ln_fee = match self.node.node_id() != payload.invoice.bolt11().get_payee_pub_key() {
+            true => self.ln_fee.fee(amount),
+            false => Amount::ZERO,
+        };
 
         ensure!(
             payload.contract.fee == fee + ln_fee,
@@ -214,6 +211,8 @@ impl AppState {
         );
 
         // --- Insert outgoing_contract row + log SendEvent on F1 (one tx) ---
+
+        let operation = OperationId::from_encodable(payload.invoice.bolt11().payment_hash());
 
         let dbtx = self.gateway_db.begin_write();
 
@@ -243,7 +242,33 @@ impl AppState {
         );
 
         // --- Direct-swap vs external LN -------------------------------------
-        if is_direct_swap {
+        if self.node.node_id() != payload.invoice.bolt11().get_payee_pub_key() {
+            // External LN send: `ln_fee` becomes LDK's hard cap on route cost.
+            let max_delay = expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM);
+
+            if self
+                .node
+                .bolt11_payment()
+                .send(
+                    payload.invoice.bolt11(),
+                    Some(RouteParametersConfig {
+                        max_total_routing_fee_msat: Some(ln_fee.msats),
+                        max_total_cltv_expiry_delta: max_delay as u32,
+                        ..RouteParametersConfig::default()
+                    }),
+                )
+                .is_err()
+            {
+                f1_client.gw().finalize_send(
+                    &dbtx,
+                    operation,
+                    payload.contract,
+                    payload.outpoint,
+                    None,
+                    picomint_core::Amount::ZERO, // Direct swap — no routing cost
+                );
+            }
+        } else {
             let incoming_row = dbtx
                 .get(&IncomingContractTable, &operation)
                 .expect("Direct-swap target not registered for this payment hash");
@@ -260,32 +285,6 @@ impl AppState {
             if f2_client
                 .gw()
                 .start_receive(&dbtx, operation, incoming_row.contract)
-                .is_err()
-            {
-                f1_client.gw().finalize_send(
-                    &dbtx,
-                    operation,
-                    payload.contract,
-                    payload.outpoint,
-                    None,
-                    picomint_core::Amount::ZERO, // Direct swap — no routing cost
-                );
-            }
-        } else {
-            // External LN send: `ln_fee` becomes LDK's hard cap on route cost.
-            let max_delay = expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM);
-
-            if self
-                .node
-                .bolt11_payment()
-                .send(
-                    invoice,
-                    Some(RouteParametersConfig {
-                        max_total_routing_fee_msat: Some(ln_fee.msats),
-                        max_total_cltv_expiry_delta: max_delay as u32,
-                        ..RouteParametersConfig::default()
-                    }),
-                )
                 .is_err()
             {
                 f1_client.gw().finalize_send(
@@ -372,8 +371,7 @@ impl AppState {
             if existing.federation != payload.federation {
                 bail!("PaymentHash is already registered on a different federation");
             }
-            let LightningInvoice::Bolt11(existing_invoice) = existing.invoice;
-            return Ok(existing_invoice);
+            return Ok(existing.invoice.bolt11().clone());
         }
 
         // Description is intentionally empty: clients can't influence what

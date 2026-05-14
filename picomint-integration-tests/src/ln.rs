@@ -18,7 +18,7 @@ use picomint_client::{Client, OperationId};
 use picomint_core::ln::gateway_api::{
     GatewayInfo, GatewayMethod, GatewayPk, InfoResponse, PaymentFee, SendPaymentResponse,
 };
-use picomint_core::ln::{LightningInput, LightningInvoice, OutgoingWitness};
+use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::{Amount, OutPoint, wire};
 use picomint_encoding::Encodable as _;
 use picomint_eventlog::{EventLogEntry, EventLogId};
@@ -825,8 +825,7 @@ async fn mock_handler(method: GatewayMethod) -> Result<Vec<u8>, String> {
             .consensus_encode_to_vec())
         }
         GatewayMethod::SendPayment(req) => {
-            let LightningInvoice::Bolt11(invoice) = req.invoice;
-            let payment_secret = invoice.payment_secret().0;
+            let payment_secret = req.invoice.bolt11().payment_secret().0;
             if payment_secret == CRASH_PAYMENT_SECRET {
                 return Err("mock gateway crashed".to_string());
             }
