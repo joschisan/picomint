@@ -95,7 +95,6 @@ pub struct SendPaymentResponse {
 pub struct CreateInvoiceRequest {
     pub federation: FederationId,
     pub contract: IncomingContract,
-    pub expiry_secs: u32,
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]

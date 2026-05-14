@@ -1,8 +1,8 @@
+use picomint_core::OutPoint;
 use picomint_core::config::{ConsensusConfig, FederationId};
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts;
-use picomint_core::OutPoint;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_redb::table;

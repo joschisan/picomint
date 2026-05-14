@@ -99,6 +99,10 @@ pub struct GatewayOpts {
     /// Lightning routing fee rate in parts per million.
     #[arg(long, env = "LN_FEE_PPM", default_value_t = 3000)]
     pub ln_fee_ppm: u64,
+
+    /// BOLT11 invoice expiry, in seconds, for invoices the gateway issues.
+    #[arg(long, env = "INVOICE_EXPIRY_SECS", default_value_t = 86_400)]
+    pub invoice_expiry_secs: u32,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -213,6 +217,7 @@ fn main() -> anyhow::Result<()> {
             base: Amount::from_msats(opts.ln_fee_base_msat),
             ppm: opts.ln_fee_ppm,
         },
+        invoice_expiry_secs: opts.invoice_expiry_secs,
         analytics: picomint_gateway_daemon::analytics::Analytics::wipe_and_init(&opts.data_dir)?,
     };
 

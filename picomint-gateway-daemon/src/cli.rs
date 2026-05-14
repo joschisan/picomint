@@ -557,8 +557,9 @@ async fn federation_enable(
 async fn federation_list(
     State(state): State<AppState>,
 ) -> Result<Json<FederationListResponse>, CliError> {
-    let federations = state.federation_info_all();
-    Ok(Json(FederationListResponse { federations }))
+    Ok(Json(FederationListResponse {
+        federations: state.federation_list(),
+    }))
 }
 
 /// Display federation config

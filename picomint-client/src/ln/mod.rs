@@ -420,7 +420,6 @@ impl LightningClientModule {
             gateway_pk,
             self.federation,
             contract.clone(),
-            expiry_secs,
         )
         .await
         .map_err(|e| ReceiveError::FailedToConnectToGateway(e.to_string()))?;

@@ -62,6 +62,7 @@ pub struct AppState {
     pub send_fee: PaymentFee,
     pub receive_fee: PaymentFee,
     pub ln_fee: PaymentFee,
+    pub invoice_expiry_secs: u32,
     pub analytics: analytics::Analytics,
 }
 
@@ -104,11 +105,11 @@ impl AppState {
     /// List every federation the gateway has joined, with its config-declared
     /// name. Reads [`ClientConfigTable`] directly so dormant federations are
     /// not forced to lazy-load.
-    pub fn federation_info_all(&self) -> Vec<FederationInfo> {
+    pub fn federation_list(&self) -> Vec<FederationInfo> {
         self.gateway_db.begin_read().iter(&ClientConfigTable, |r| {
-            r.map(|(federation, config)| FederationInfo {
-                federation,
-                federation_name: config.name,
+            r.map(|entry| FederationInfo {
+                federation: entry.1.calculate_federation_id(),
+                federation_name: entry.1.name,
             })
             .collect()
         })
@@ -346,8 +347,8 @@ impl AppState {
             .receive_for_hash(
                 payload.contract.commitment.amount.msats,
                 &LdkBolt11InvoiceDescription::Direct(Description::empty()),
-                payload.expiry_secs,
-                PaymentHash(*payload.contract.commitment.payment_hash.as_byte_array()),
+                self.invoice_expiry_secs,
+                PaymentHash(payload.contract.commitment.payment_hash.to_byte_array()),
             )
             .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))?;
 
