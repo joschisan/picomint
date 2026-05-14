@@ -16,7 +16,7 @@ use picomint_core::mint::{
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, OutPoint, PeerId};
 use picomint_encoding::Encodable;
-use picomint_redb::{Database, ReadTxRef, WriteTxRef};
+use picomint_redb::{Database, ReadTxRef, WriteTx};
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
 
 use crate::config::dkg::DkgHandle;
@@ -100,16 +100,16 @@ impl Mint {
 
     pub async fn process_consensus_item(
         &self,
-        _dbtx: &WriteTxRef<'_>,
+        _dbtx: &WriteTx,
+        _peer: PeerId,
         consensus_item: MintConsensusItem,
-        _peer_id: PeerId,
     ) -> anyhow::Result<()> {
         match consensus_item {}
     }
 
     pub async fn process_input(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         input: &MintInput,
     ) -> Result<InputMeta, MintInputError> {
         let pk = self
@@ -161,7 +161,7 @@ impl Mint {
 
     pub async fn process_output(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         output: &MintOutput,
         outpoint: OutPoint,
     ) -> Result<TxItemAmounts, MintOutputError> {
@@ -209,7 +209,7 @@ impl Mint {
         })
     }
 
-    pub async fn audit(&self, dbtx: &WriteTxRef<'_>) -> i64 {
+    pub async fn audit(&self, dbtx: &WriteTx) -> i64 {
         dbtx.iter(&IssuanceCounterTable, |r| {
             r.map(|(denomination, count)| -((denomination.amount().msats * count) as i64))
                 .sum()

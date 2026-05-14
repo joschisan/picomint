@@ -10,10 +10,17 @@ use crate::{PeerId, secp256k1};
 /// are guaranteed to be in the same order. However, an ordered items is
 /// only guaranteed to be seen by all correct nodes if a correct node decides to
 /// accept it.
+///
+/// `index` is the position of this item in the bft delivery stream for
+/// the session (sparse w.r.t. accepted items, since rejected items also
+/// consume positions). It lets guardians recovering via P2P place each
+/// accepted item back into `ACCEPTED_ITEM` at the same key the local bft
+/// replay would assign on a subsequent restart.
 #[derive(Clone, Debug, PartialEq, Eq, Encodable, Decodable)]
 pub struct AcceptedItem {
-    pub item: ConsensusItem,
+    pub index: u64,
     pub peer: PeerId,
+    pub item: ConsensusItem,
 }
 
 picomint_redb::consensus_value!(AcceptedItem);

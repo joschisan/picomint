@@ -3478,6 +3478,7 @@ dependencies = [
 name = "picomint-bft"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-channel",
  "async-trait",
  "bitcoin",
@@ -3486,6 +3487,7 @@ dependencies = [
  "picomint-redb",
  "rand 0.8.5",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

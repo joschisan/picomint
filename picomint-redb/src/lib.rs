@@ -20,6 +20,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::ops::RangeBounds;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -117,6 +118,43 @@ pub trait Table {
 
     /// On-disk table name.
     fn resolved_name(&self) -> String;
+}
+
+/// Type-erased carrier for any [`Table`] implementor. Holds a resolved
+/// name plus the key/value type parameters, so callers can store a
+/// table reference in a struct field (`TableDef<K, V>`) without pinning
+/// the underlying concrete type. Build one from any `T: Table` via
+/// [`TableDef::from`]; pass `&self.field` directly to dbtx op methods.
+#[derive(Clone, Debug)]
+pub struct TableDef<K, V> {
+    name: String,
+    _phantom: PhantomData<(K, V)>,
+}
+
+impl<K, V> TableDef<K, V>
+where
+    K: redb::Key + 'static,
+    V: redb::Value + 'static,
+{
+    pub fn from<T: Table<Key = K, Value = V>>(t: T) -> Self {
+        Self {
+            name: t.resolved_name(),
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<K, V> Table for TableDef<K, V>
+where
+    K: redb::Key + 'static,
+    V: redb::Value + 'static,
+{
+    type Key = K;
+    type Value = V;
+
+    fn resolved_name(&self) -> String {
+        self.name.clone()
+    }
 }
 
 /// Declare a daemon-global table. Expands to a zero-sized unit struct

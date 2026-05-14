@@ -26,17 +26,16 @@ pub enum Message<D: UnitData> {
         round: Round,
         creator: PeerId,
         signer: PeerId,
-        sig: schnorr::Signature,
+        cosig: schnorr::Signature,
     },
-    /// Threshold-proven slot view: body + creator sig + exactly `2f`
-    /// cosigs. Sole `Request` response, and only emitted when the
-    /// responder holds the slot at threshold locally. Receivers
-    /// atomically install or overwrite their entry — quorum math
-    /// forbids two distinct bodies reaching threshold, so a valid
-    /// `SignedUnit` proves canonical body.
+    /// Threshold-proven slot view: body + exactly `threshold` cosigs
+    /// keyed by signer (creator's sig included). Sole `Request`
+    /// response, and only emitted when the responder holds the slot
+    /// at threshold locally. Receivers atomically install or overwrite
+    /// their entry — quorum math forbids two distinct bodies reaching
+    /// threshold, so a valid `SignedUnit` proves canonical body.
     SignedUnit {
         unit: Unit<D>,
-        sig: schnorr::Signature,
         cosigs: BTreeMap<PeerId, schnorr::Signature>,
     },
     /// Targeted backfill. The recipient replies with `SignedUnit` if
@@ -52,25 +51,25 @@ pub enum Recipient {
     Peer(PeerId),
 }
 
-pub type DynNetwork<M> = Arc<dyn INetwork<M>>;
+pub type DynNetwork<D> = Arc<dyn INetwork<D>>;
 
 /// Engine's network surface. Shape mirrors fedimint's
 /// `IP2PConnections<M>` so it can be reused by a future DKG that wants
 /// per-peer round-robin reads.
 #[async_trait]
-pub trait INetwork<M>: Send + Sync + 'static {
+pub trait INetwork<D: UnitData>: Send + Sync + 'static {
     /// Fire-and-forget. Drops are silently swallowed; the consensus
     /// layer retransmits.
-    fn send(&self, recipient: Recipient, msg: M);
+    fn send(&self, recipient: Recipient, msg: Message<D>);
 
     /// `None` once every sender has been dropped.
-    async fn receive(&self) -> Option<(PeerId, M)>;
+    async fn receive(&self) -> Option<(PeerId, Message<D>)>;
 
     /// Per-peer read for round-robin DKG. Mocks may leave this as
     /// `unimplemented!()`.
-    async fn receive_from_peer(&self, peer: PeerId) -> Option<M>;
+    async fn receive_from_peer(&self, peer: PeerId) -> Option<Message<D>>;
 
-    fn into_dyn(self) -> DynNetwork<M>
+    fn into_dyn(self) -> DynNetwork<D>
     where
         Self: Sized,
     {

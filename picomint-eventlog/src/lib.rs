@@ -21,7 +21,7 @@ use futures::Stream;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::{Database, Table, WriteTxRef};
+use picomint_redb::{Database, Table, TableDef, WriteTxRef};
 use picomint_redb::{consensus_key, consensus_value};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
@@ -149,57 +149,29 @@ impl EventLogEntry {
 
 consensus_value!(EventLogEntry);
 
-// ─── Private Table refs ──────────────────────────────────────────────────
-//
-// Reconstructed from the resolved names the daemon passed in. Used by
-// `EventLogger`'s methods to dispatch dbtx ops via the existing
-// [`picomint_redb::Table`] runtime mechanism.
-
-struct EventLogRef<'a>(&'a str);
-
-impl Table for EventLogRef<'_> {
-    type Key = EventLogId;
-    type Value = EventLogEntry;
-
-    fn resolved_name(&self) -> String {
-        self.0.to_owned()
-    }
-}
-
-struct ByOperationRef<'a>(&'a str);
-
-impl Table for ByOperationRef<'_> {
-    type Key = (OperationId, EventLogId);
-    type Value = EventLogEntry;
-
-    fn resolved_name(&self) -> String {
-        self.0.to_owned()
-    }
-}
-
 // ─── EventLogger ─────────────────────────────────────────────────────────
 
 /// Runtime value bundling the two event-log tables the owning daemon
 /// declared. Construct once via [`Self::new`] and share via [`Clone`]
-/// (cheap — two `String`s).
+/// (cheap — two type-erased table refs).
 #[derive(Clone, Debug)]
 pub struct EventLogger {
-    event_log: String,
-    by_operation: String,
+    event_log: TableDef<EventLogId, EventLogEntry>,
+    by_operation: TableDef<(OperationId, EventLogId), EventLogEntry>,
 }
 
 impl EventLogger {
-    /// Bind the two tables that back this logger. Resolves them via
-    /// [`Table::resolved_name`] once at construction; all subsequent ops
-    /// dispatch through the cached names.
+    /// Bind the two tables that back this logger. Type-erases them
+    /// through [`TableDef`] at construction; all subsequent ops dispatch
+    /// through the stored refs.
     pub fn new<T, U>(event_log: T, by_operation: U) -> Self
     where
         T: Table<Key = EventLogId, Value = EventLogEntry>,
         U: Table<Key = (OperationId, EventLogId), Value = EventLogEntry>,
     {
         Self {
-            event_log: event_log.resolved_name(),
-            by_operation: by_operation.resolved_name(),
+            event_log: TableDef::from(event_log),
+            by_operation: TableDef::from(by_operation),
         }
     }
 
@@ -240,18 +212,13 @@ impl EventLogger {
         };
 
         assert!(
-            dbtx.insert(&EventLogRef(&self.event_log), &id, &entry)
-                .is_none(),
+            dbtx.insert(&self.event_log, &id, &entry).is_none(),
             "Must never overwrite existing event"
         );
 
         assert!(
-            dbtx.insert(
-                &ByOperationRef(&self.by_operation),
-                &(operation, id),
-                &entry
-            )
-            .is_none(),
+            dbtx.insert(&self.by_operation, &(operation, id), &entry)
+                .is_none(),
             "Must never overwrite existing event"
         );
     }
@@ -275,7 +242,7 @@ impl EventLogger {
     }
 
     fn next_event_log_id(&self, dbtx: &WriteTxRef<'_>) -> EventLogId {
-        dbtx.iter(&EventLogRef(&self.event_log), |it| {
+        dbtx.iter(&self.event_log, |it| {
             it.next_back().map(|(k, _)| k.next()).unwrap_or_default()
         })
     }
@@ -283,7 +250,7 @@ impl EventLogger {
     /// [`Notify`] handle that fires on every commit touching the event log
     /// table.
     pub fn event_notify(&self, db: &Database) -> Arc<Notify> {
-        db.notify_for_table(&EventLogRef(&self.event_log))
+        db.notify_for_table(&self.event_log)
     }
 
     /// Read up to `limit` consecutive event-log entries starting at `pos`.
@@ -298,7 +265,7 @@ impl EventLogger {
     ) -> Vec<(EventLogId, EventLogEntry)> {
         let end = pos.saturating_add(limit);
         db.begin_read()
-            .range(&EventLogRef(&self.event_log), pos..end, |it| it.collect())
+            .range(&self.event_log, pos..end, |it| it.collect())
     }
 
     /// One-shot snapshot of every event currently logged for `operation`,
@@ -310,7 +277,7 @@ impl EventLogger {
         operation: OperationId,
     ) -> Vec<EventLogEntry> {
         db.begin_read().range(
-            &ByOperationRef(&self.by_operation),
+            &self.by_operation,
             (operation, EventLogId::LOG_START)..(operation, EventLogId::LOG_END),
             |it| it.map(|(_, v)| v).collect(),
         )
@@ -332,9 +299,8 @@ impl EventLogger {
             let mut next_id = EventLogId::LOG_START;
             loop {
                 let notified = event_notify.notified();
-                let table = ByOperationRef(&by_operation);
                 let batch: Vec<(EventLogId, EventLogEntry)> = db.begin_read().range(
-                    &table,
+                    &by_operation,
                     (operation, next_id)..(operation, EventLogId::LOG_END),
                     |it| it.map(|((_, id), entry)| (id, entry)).collect(),
                 );

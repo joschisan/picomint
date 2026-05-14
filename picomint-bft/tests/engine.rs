@@ -1,12 +1,14 @@
 //! End-to-end test of the per-peer engine driving DAG growth, order
-//! extraction, and `(round, creator, datum)` emission over a mock
-//! channel-based network. N engines spawn as tasks, each owns a `Graph`,
-//! `Keychain`, `MockChannel`, and (inside `run`) an `Extender`. Each peer
-//! feeds its own per-unit `Vec<u64>` payload via a closure. The engines
-//! never stop on their own — the test reads each peer's stream up to and
-//! including the last item at `ROUND_LIMIT`, then aborts the engine
-//! tasks. We then assert every peer observed the same total order of
-//! `(creator, datum)` pairs.
+//! extraction, and emission of ordered items through the bft engine's
+//! `ordered_tx` channel over a mock channel-based network. N engines
+//! spawn as tasks, each owns a per-peer in-memory `Database`, a
+//! `Keychain`, a `MockChannel`, and the receiving end of its own
+//! `ordered_tx`. Each peer feeds its own per-unit payload of one
+//! `u64` carrying a monotonic timestamp. The engines never stop on
+//! their own — the test drains each peer's `ordered_rx` until
+//! `ROUND_LIMIT` is reached, then aborts the engine tasks. We then
+//! assert every peer observed the same total order of `(creator,
+//! item)` pairs.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -15,12 +17,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_channel::{Receiver, Sender};
 use async_trait::async_trait;
 use picomint_bft::{
-    Backup, DataProvider, Graph, INetwork, Keychain, Message, NoopBackup, Recipient, Round,
-    UnitData, run,
+    Cosig, DataProvider, Engine, INetwork, Keychain, Message, Recipient, Round, Unit,
 };
 use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
 use picomint_core::{NumPeers, PeerId};
+use picomint_redb::{Database, table};
 use rand::Rng;
+
+table!(BftUnits, (Round, PeerId) => Unit<u64>, "bft-units");
+table!(BftCosigs, (Round, PeerId, PeerId) => Cosig, "bft-cosigs");
 
 /// Per-recipient probability of silently dropping a message in the mock
 /// network. Each unicast send and each fan-out leg of a broadcast rolls
@@ -33,19 +38,19 @@ const DROP_RATE: f64 = 0.10;
 const BASE_LATENCY: Duration = Duration::from_millis(25);
 const JITTER: Duration = Duration::from_millis(15);
 
-/// Channel-backed mock network. Each peer holds one `MockChannel<D>`.
+/// Channel-backed mock network. Each peer holds one `MockChannel`.
 /// Built via [`MockChannel::mesh`] for an N-peer fully-connected mesh;
 /// sends drop with probability `DROP_RATE` per recipient leg to simulate
-/// an unreliable network. Implements [`INetwork<Message<D>>`].
-struct MockChannel<D: UnitData> {
+/// an unreliable network. Implements [`INetwork`].
+struct MockChannel {
     own_id: PeerId,
-    senders: BTreeMap<PeerId, Sender<(PeerId, Message<D>)>>,
-    rx: Receiver<(PeerId, Message<D>)>,
+    senders: BTreeMap<PeerId, Sender<(PeerId, Message<u64>)>>,
+    rx: Receiver<(PeerId, Message<u64>)>,
 }
 
-impl<D: UnitData> MockChannel<D> {
+impl MockChannel {
     /// Build a fully-connected mesh of channels, one per peer in `n`.
-    fn mesh(n: NumPeers) -> BTreeMap<PeerId, MockChannel<D>> {
+    fn mesh(n: NumPeers) -> BTreeMap<PeerId, MockChannel> {
         let mut receivers = BTreeMap::new();
         let mut senders = BTreeMap::new();
 
@@ -69,7 +74,7 @@ impl<D: UnitData> MockChannel<D> {
     }
 }
 
-fn delayed_send<D: UnitData>(sender: Sender<(PeerId, Message<D>)>, from: PeerId, msg: Message<D>) {
+fn delayed_send(sender: Sender<(PeerId, Message<u64>)>, from: PeerId, msg: Message<u64>) {
     let jitter = Duration::from_micros(rand::thread_rng().gen_range(0..=JITTER.as_micros() as u64));
     let delay = BASE_LATENCY + jitter;
 
@@ -80,8 +85,8 @@ fn delayed_send<D: UnitData>(sender: Sender<(PeerId, Message<D>)>, from: PeerId,
 }
 
 #[async_trait]
-impl<D: UnitData> INetwork<Message<D>> for MockChannel<D> {
-    fn send(&self, recipient: Recipient, msg: Message<D>) {
+impl INetwork<u64> for MockChannel {
+    fn send(&self, recipient: Recipient, msg: Message<u64>) {
         match recipient {
             Recipient::Everyone => {
                 for (peer, sender) in &self.senders {
@@ -113,11 +118,11 @@ impl<D: UnitData> INetwork<Message<D>> for MockChannel<D> {
         }
     }
 
-    async fn receive(&self) -> Option<(PeerId, Message<D>)> {
+    async fn receive(&self) -> Option<(PeerId, Message<u64>)> {
         self.rx.recv().await.ok()
     }
 
-    async fn receive_from_peer(&self, _peer: PeerId) -> Option<Message<D>> {
+    async fn receive_from_peer(&self, _peer: PeerId) -> Option<Message<u64>> {
         unimplemented!(
             "MockChannel multiplexes inbound traffic on a single receiver; \
              per-peer reads are only meaningful for round-robin DKG, which \
@@ -133,8 +138,6 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-/// Stamps each datum with the current unix timestamp (ms) at the moment
-/// the engine asks for it.
 struct TimestampDataProvider;
 
 #[async_trait]
@@ -174,43 +177,47 @@ async fn engines_agree_on_ordered_data() {
     let mut channels = MockChannel::mesh(n);
 
     let mut handles = Vec::new();
-    let mut ordered_rxs = BTreeMap::new();
+    let mut ordered_rxs: BTreeMap<PeerId, Receiver<(Round, PeerId, u64)>> = BTreeMap::new();
 
     for peer in n.peer_ids() {
-        let (tx, rx) = async_channel::unbounded::<(Round, PeerId, u64)>();
-        ordered_rxs.insert(peer, rx);
+        let db = Database::open_in_memory();
+        let (ordered_tx, ordered_rx) = async_channel::unbounded();
+        ordered_rxs.insert(peer, ordered_rx);
 
-        let network = channels.remove(&peer).expect("mesh built above").into_dyn();
+        let network = Arc::new(channels.remove(&peer).expect("mesh built above"));
 
-        let backup: Arc<dyn Backup<u64>> = Arc::new(NoopBackup);
-
-        let graph = Graph::new(n, SESSION, backup, tx);
-
-        let h = tokio::spawn(run(
+        let engine = Engine::new(
             peer,
-            graph,
+            SESSION,
+            n,
+            db,
             keychains.remove(&peer).expect("built above"),
             network,
             TimestampDataProvider,
             Box::new(|_round| UNIT_DELAY),
-        ));
+            ordered_tx,
+            BftUnits,
+            BftCosigs,
+        );
 
-        handles.push(h);
+        handles.push(tokio::spawn(engine.run()));
     }
 
     let mut reader_handles = Vec::new();
-    for (peer, rx) in ordered_rxs {
+    for (peer, ordered_rx) in ordered_rxs {
         reader_handles.push(tokio::spawn(async move {
-            let mut seq = Vec::new();
-            let mut delays = Vec::new();
-            while let Ok((round, creator, datum)) = rx.recv().await {
+            let mut sequence: Vec<(PeerId, u64)> = Vec::new();
+            let mut delays: Vec<u64> = Vec::new();
+
+            while let Ok((round, creator, datum)) = ordered_rx.recv().await {
                 if round > ROUND_LIMIT {
                     break;
                 }
                 delays.push(now_ms().saturating_sub(datum));
-                seq.push((creator, datum));
+                sequence.push((creator, datum));
             }
-            (peer, seq, delays)
+
+            (peer, sequence, delays)
         }));
     }
 

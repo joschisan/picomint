@@ -9,19 +9,15 @@
 //! peer creates its own round-0 unit with an empty parent set, disseminates
 //! and co-signs it like any other.
 
-mod backup;
 mod data;
 mod engine;
 mod extender;
-mod graph;
 mod keychain;
 mod network;
 mod unit;
 
-pub use backup::{Backup, DynBackup, NoopBackup};
 pub use data::DataProvider;
-pub use engine::run;
-pub use graph::{Entry, Graph};
+pub use engine::Engine;
 pub use keychain::Keychain;
 pub use network::{DynNetwork, INetwork, Message, Recipient};
-pub use unit::{Round, Unit, UnitData};
+pub use unit::{Cosig, Round, Unit};

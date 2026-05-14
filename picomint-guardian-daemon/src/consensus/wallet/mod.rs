@@ -23,9 +23,9 @@ use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::wallet as common;
-use picomint_core::{NumPeersExt, OutPoint, PeerId};
+use picomint_core::{NumPeersExt, OutPoint, PeerId, peer_range};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::{Database, ReadTxRef, WriteTxRef};
+use picomint_redb::{Database, ReadTxRef, WriteTx};
 use tokio::time::sleep;
 
 use crate::config::dkg::DkgHandle;
@@ -163,9 +163,9 @@ impl Wallet {
 
     pub async fn process_consensus_item(
         &self,
-        dbtx: &WriteTxRef<'_>,
-        consensus_item: WalletConsensusItem,
+        dbtx: &WriteTx,
         peer: PeerId,
+        consensus_item: WalletConsensusItem,
     ) -> anyhow::Result<()> {
         match consensus_item {
             WalletConsensusItem::BlockCount(block_count_vote) => {
@@ -186,7 +186,7 @@ impl Wallet {
 
     pub async fn process_input(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         input: &WalletInput,
     ) -> Result<InputMeta, WalletInputError> {
         if dbtx
@@ -336,7 +336,7 @@ impl Wallet {
 
     pub async fn process_output(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         output: &WalletOutput,
         outpoint: OutPoint,
     ) -> Result<TxItemAmounts, WalletOutputError> {
@@ -456,7 +456,7 @@ impl Wallet {
         })
     }
 
-    pub async fn audit(&self, dbtx: &WriteTxRef<'_>) -> i64 {
+    pub async fn audit(&self, dbtx: &WriteTx) -> i64 {
         dbtx.get(&FederationWalletTable, &())
             .map_or(0, |wallet| 1000 * wallet.value.to_sat() as i64)
     }
@@ -528,7 +528,7 @@ impl Wallet {
 
     async fn process_block_count(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         block_count_vote: u64,
         peer: PeerId,
     ) -> anyhow::Result<()> {
@@ -614,7 +614,7 @@ impl Wallet {
 
     async fn process_signatures(
         &self,
-        dbtx: &WriteTxRef<'_>,
+        dbtx: &WriteTx,
         txid: bitcoin::Txid,
         signatures: Vec<Signature>,
         peer: PeerId,
@@ -643,10 +643,8 @@ impl Wallet {
             bail!("Already received valid signatures from this peer")
         }
 
-        let range = (TxidKey(txid), PeerId::from(u8::MIN))..=(TxidKey(txid), PeerId::from(u8::MAX));
-
         let signatures_by_peer: BTreeMap<PeerId, Vec<Signature>> =
-            dbtx.range(&SignaturesTable, range, |r| {
+            dbtx.range(&SignaturesTable, peer_range!(TxidKey(txid)), |r| {
                 r.map(|((_, peer), sigs)| (peer, sigs.0)).collect()
             });
 
@@ -908,7 +906,7 @@ impl Wallet {
         dbtx.iter(&TxInfoTable, |r| r.map(|(_, v)| v).collect())
     }
 
-    fn total_txs(dbtx: &WriteTxRef<'_>) -> u64 {
+    fn total_txs(dbtx: &WriteTx) -> u64 {
         dbtx.iter(&TxInfoTable, |r| r.next_back().map_or(0, |(k, _)| k + 1))
     }
 

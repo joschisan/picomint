@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 
 use picomint_core::PeerId;
+use picomint_core::secp256k1::schnorr;
 use picomint_encoding::{Decodable, Encodable};
 
 /// Round number within a session. Round 0 is the first row of the DAG;
@@ -9,17 +10,21 @@ use picomint_encoding::{Decodable, Encodable};
 /// disseminated like every other unit.
 pub type Round = u16;
 
-/// Bound bundle for unit payloads. `D` rides through `Unit`, `Graph`,
-/// `Extender`, and `Message` purely as data — the protocol never inspects
-/// it — but the wire encoding, cloning into the extender's store, and
-/// task-spawned engines impose this combined surface. `Debug` is also
-/// required so [`crate::Entry<D>`] can be a `redb::Value` (whose trait
-/// requires `Debug`).
-pub trait UnitData: Debug + Clone + Encodable + Decodable + Send + Sync + 'static {}
+/// Type alias for the trait bound every consumer of `D` ends up
+/// repeating. Anything that round-trips on the wire, can be moved
+/// across tasks, and lives as long as the program needs it to.
+pub trait UnitData:
+    Encodable + Decodable + Clone + Debug + PartialEq + Eq + Send + Sync + 'static
+{
+}
 
-impl<T: Debug + Clone + Encodable + Decodable + Send + Sync + 'static> UnitData for T {}
+impl<T> UnitData for T where
+    T: Encodable + Decodable + Clone + Debug + PartialEq + Eq + Send + Sync + 'static
+{
+}
 
-/// One node in the consensus DAG.
+/// One node in the consensus DAG, parameterized by the application
+/// payload type `D`.
 ///
 /// A unit is uniquely identified by its `(round, creator)` coordinate
 /// within a session; at most one body per slot can ever be confirmed.
@@ -35,9 +40,8 @@ impl<T: Debug + Clone + Encodable + Decodable + Send + Sync + 'static> UnitData 
 /// Round-0 units carry an empty parent set. Parent hashes are not
 /// carried — at most one unit per slot can ever confirm, so the creator
 /// is sufficient to identify the parent. `data` is the creator's
-/// payload at this slot, generic over the element type `D`; once the
-/// total order is extracted, each unit's `data` items are emitted in
-/// order keyed by the unit's creator.
+/// payload at this slot; once the total order is extracted, each
+/// unit's `data` items are emitted in order keyed by the unit's creator.
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
 pub struct Unit<D: UnitData> {
     /// The round this unit belongs to.
@@ -49,3 +53,12 @@ pub struct Unit<D: UnitData> {
     /// Creator's payload for this slot.
     pub data: Vec<D>,
 }
+
+picomint_redb::consensus_value!([D: UnitData] Unit<D>);
+
+/// Storage wrapper for `schnorr::Signature` — the orphan rule forbids
+/// implementing `redb::Value` for foreign types directly. Delegates
+/// `Encodable`/`Decodable` to the inner signature.
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct Cosig(pub schnorr::Signature);
+picomint_redb::consensus_value!(Cosig);
