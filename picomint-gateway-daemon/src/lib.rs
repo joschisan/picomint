@@ -14,7 +14,6 @@ use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
 use client::GatewayClientFactory;
 use futures::StreamExt as _;
-use lightning::ln::channelmanager::PaymentId;
 use lightning::routing::router::RouteParametersConfig;
 use lightning::types::payment::PaymentHash;
 use lightning_invoice::{
@@ -218,33 +217,26 @@ impl AppState {
             "Contract fee does not match send fee + ln fee"
         );
 
-        // --- Idempotency: if outgoing_contract row already exists, subscribe
-        //     and return. subscribe_send replays event history, so a
-        //     completed op resolves immediately.
-        if self
-            .gateway_db
-            .begin_read()
-            .as_ref()
-            .get(&OutgoingContractTable, &operation)
-            .is_some()
-        {
-            return Ok(f1_client.gw().subscribe_send(operation).await);
-        }
-
         // --- Insert outgoing_contract row + log SendEvent on F1 (one tx) ---
 
         let dbtx = self.gateway_db.begin_write();
 
-        dbtx.as_ref().insert(
-            &OutgoingContractTable,
-            &operation,
-            &OutgoingContractRow {
-                federation: payload.federation,
-                contract: payload.contract.clone(),
-                outpoint: payload.outpoint,
-                invoice: payload.invoice.clone(),
-            },
-        );
+        if dbtx
+            .as_ref()
+            .insert(
+                &OutgoingContractTable,
+                &operation,
+                &OutgoingContractRow {
+                    federation: payload.federation,
+                    contract: payload.contract.clone(),
+                    outpoint: payload.outpoint,
+                    invoice: payload.invoice.clone(),
+                },
+            )
+            .is_some()
+        {
+            return Ok(f1_client.gw().subscribe_send(operation).await);
+        }
 
         f1_client.gw().log_send_started(
             &dbtx.as_ref(),
@@ -255,18 +247,12 @@ impl AppState {
             fee,
         );
 
-        dbtx.commit();
-
         // --- Direct-swap vs external LN -------------------------------------
         if is_direct_swap {
-            let incoming_row = self
-                .gateway_db
-                .begin_read()
+            let incoming_row = dbtx
                 .as_ref()
                 .get(&IncomingContractTable, &operation)
-                .ok_or_else(|| {
-                    anyhow!("Direct-swap target not registered for this payment hash")
-                })?;
+                .expect("Direct-swap target not registered for this payment hash");
 
             ensure!(
                 incoming_row.contract.commitment.amount.msats == amount,
@@ -275,33 +261,51 @@ impl AppState {
 
             let f2_client = self
                 .select_client(incoming_row.federation)
-                .ok_or_else(|| anyhow!("Direct-swap target federation not connected"))?;
+                .expect("Direct-swap target federation not connected");
 
-            let dbtx = self.gateway_db.begin_write();
-            f2_client
+            if f2_client
                 .gw()
                 .start_receive(&dbtx.as_ref(), operation, incoming_row.contract)
-                .map_err(|e| anyhow!("Failed to start direct-swap receive: {e}"))?;
-            dbtx.commit();
+                .is_err()
+            {
+                f1_client.gw().finalize_send(
+                    &dbtx.as_ref(),
+                    operation,
+                    payload.contract,
+                    payload.outpoint,
+                    None,
+                    picomint_core::Amount::ZERO, // Direct swap — no routing cost
+                );
+            }
         } else {
             // External LN send: `ln_fee` becomes LDK's hard cap on route cost.
             let max_delay = expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM);
 
-            let payment_id = PaymentId(invoice.payment_hash().to_byte_array());
-            if self.node.payment(&payment_id).is_none() {
-                self.node
-                    .bolt11_payment()
-                    .send(
-                        invoice,
-                        Some(RouteParametersConfig {
-                            max_total_routing_fee_msat: Some(ln_fee.msats),
-                            max_total_cltv_expiry_delta: max_delay as u32,
-                            ..RouteParametersConfig::default()
-                        }),
-                    )
-                    .map_err(|e| anyhow!("LDK payment failed to initialize: {e:?}"))?;
+            if self
+                .node
+                .bolt11_payment()
+                .send(
+                    invoice,
+                    Some(RouteParametersConfig {
+                        max_total_routing_fee_msat: Some(ln_fee.msats),
+                        max_total_cltv_expiry_delta: max_delay as u32,
+                        ..RouteParametersConfig::default()
+                    }),
+                )
+                .is_err()
+            {
+                f1_client.gw().finalize_send(
+                    &dbtx.as_ref(),
+                    operation,
+                    payload.contract,
+                    payload.outpoint,
+                    None,
+                    picomint_core::Amount::ZERO, // Direct swap — no routing cost
+                );
             }
         }
+
+        dbtx.commit();
 
         // --- Await terminal event on F1 -------------------------------------
         Ok(f1_client.gw().subscribe_send(operation).await)

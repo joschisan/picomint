@@ -152,19 +152,13 @@ impl GatewayClientModule {
         let amount = contract.commitment.amount;
         let fee = contract.commitment.fee;
 
-        // Idempotency: finalize_and_submit_tx fails if a tx was
-        // already submitted for this operation. In that case the existing SM is
-        // already driving the flow — nothing more to do.
-        let txid = match self
+        let txid = self
             .mint
             .finalize_and_submit_tx(dbtx, operation, tx_builder, |txid| ReceiveEvent {
                 txid,
                 amount,
                 fee,
-            }) {
-            Ok(txid) => txid,
-            Err(_) => return Ok(()),
-        };
+            })?;
 
         let outpoint = OutPoint { txid, out_idx: 0 };
 

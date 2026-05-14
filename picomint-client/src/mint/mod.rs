@@ -21,7 +21,7 @@ use crate::tx::{Input, Output, TxBuilder};
 use crate::tx::{
     Transaction, TxSubmissionSmContext, TxSubmissionStateMachine, TxSubmissionStateMachineTable,
 };
-use anyhow::{Context as _, bail};
+use anyhow::Context as _;
 use bitcoin_hashes::sha256;
 use client_db::{NoteTable, ReceiveOperationTable, Recovery, RecoveryTable};
 pub use events::*;
@@ -447,7 +447,7 @@ impl MintClientModule {
 
         let remint = funding.saturating_sub(deficit);
 
-        let txid = self.submit(dbtx, operation, builder, remint, event)?;
+        let txid = self.submit(dbtx, operation, builder, remint, event);
 
         if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
             let sm = MintStateMachine {
@@ -531,13 +531,14 @@ impl MintClientModule {
         builder: TxBuilder,
         remint: Amount,
         event: impl FnOnce(TransactionId) -> E,
-    ) -> anyhow::Result<TransactionId> {
+    ) -> TransactionId {
         let fee = builder.total_fee();
         let tx = builder.build();
 
-        if tx.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
-            bail!("The generated transaction is too large.");
-        }
+        assert!(
+            tx.consensus_encode_to_vec().len() <= Transaction::MAX_TX_SIZE,
+            "The generated transaction is too large.",
+        );
 
         let txid = tx.compute_txid();
 
@@ -550,7 +551,7 @@ impl MintClientModule {
         self.client_ctx
             .log_event(dbtx, operation, crate::TxCreateEvent { txid, remint, fee });
 
-        Ok(txid)
+        txid
     }
 
     pub fn get_balance(&self, dbtx: &impl picomint_redb::DbRead) -> Amount {
