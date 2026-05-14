@@ -17,11 +17,10 @@
 //! Cursor is persisted daemon-wide in `EventCursorTable` and advanced after
 //! each dispatched event. Dispatches are idempotent, so on a crash the
 //! trailer just re-runs the last event on restart.
-use bitcoin::hashes::{Hash as _, sha256};
+use bitcoin::hashes::Hash as _;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use picomint_client::gw::events::{ReceiveRefundEvent, ReceiveSuccessEvent};
 use picomint_core::core::OperationId;
-use picomint_core::ln::contracts::PaymentImage;
 use picomint_eventlog::EventLogEntry;
 use picomint_redb::WriteTx;
 
@@ -121,12 +120,7 @@ fn dispatch_ln_receive(
         .get(&IncomingContractTable, &operation)
         .expect("incoming_contract row registered by create_bolt11_invoice");
 
-    let ph = match row.contract.commitment.payment_image {
-        PaymentImage::Hash(h) => PaymentHash(*sha256::Hash::as_byte_array(&h)),
-        PaymentImage::Point(_) => {
-            unreachable!("create_bolt11_invoice rejects non-Hash payment images")
-        }
-    };
+    let ph = PaymentHash(*row.contract.commitment.payment_hash.as_byte_array());
 
     state
         .node

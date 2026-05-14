@@ -26,7 +26,6 @@ use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInvoice;
-use picomint_core::ln::contracts::PaymentImage;
 use picomint_core::ln::gateway_api::{
     CreateInvoiceRequest, GatewayInfo, PaymentFee, SendPaymentRequest, VerifyResponse,
 };
@@ -188,8 +187,7 @@ impl AppState {
             .ok_or(anyhow!("Invoice is missing amount"))?;
 
         ensure!(
-            PaymentImage::Hash(*payload.invoice.bolt11().payment_hash())
-                == payload.contract.payment_image,
+            *payload.invoice.bolt11().payment_hash() == payload.contract.payment_hash,
             "The invoice's payment hash does not match the contract's payment hash"
         );
 
@@ -353,14 +351,7 @@ impl AppState {
             bail!("The contract has already expired");
         }
 
-        let payment_hash = match payload.contract.commitment.payment_image {
-            PaymentImage::Hash(h) => h,
-            PaymentImage::Point(..) => {
-                bail!("PaymentImage is not a payment hash")
-            }
-        };
-
-        let operation = OperationId::from_encodable(&payment_hash);
+        let operation = OperationId::from_encodable(&payload.contract.commitment.payment_hash);
 
         // Idempotency: if we already registered this contract, return its invoice.
         if let Some(existing) = self
@@ -385,7 +376,7 @@ impl AppState {
                 payload.amount.msats,
                 &ldk_description,
                 payload.expiry_secs,
-                PaymentHash(*payment_hash.as_byte_array()),
+                PaymentHash(*payload.contract.commitment.payment_hash.as_byte_array()),
             )
             .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))?;
 

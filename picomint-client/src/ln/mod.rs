@@ -22,7 +22,7 @@ use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::config::LightningConfigConsensus;
-use picomint_core::ln::contracts::{IncomingContract, OutgoingContract, PaymentImage};
+use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::ln::gateway_api::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::ln::lnurl::MAX_GATEWAYS_PER_LNURL;
 use picomint_core::ln::secret::IncomingContractSecret;
@@ -276,7 +276,7 @@ impl LightningClientModule {
             .map_err(|_| SendPaymentError::FailedToRequestBlockCount)?;
 
         let contract = OutgoingContract {
-            payment_image: PaymentImage::Hash(*invoice.payment_hash()),
+            payment_hash: *invoice.payment_hash(),
             amount,
             fee,
             expiration: consensus_block_count
@@ -406,7 +406,7 @@ impl LightningClientModule {
             self.cfg.tpe_agg_pk,
             encryption_seed,
             preimage,
-            PaymentImage::Hash(preimage.consensus_hash()),
+            preimage.consensus_hash(),
             amount,
             fee,
             expiration,
