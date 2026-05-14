@@ -59,7 +59,7 @@ echo "==> [$FED_NAME] Waiting for DKG completion (invite endpoint becomes reacha
 INVITE=""
 for _ in $(seq 1 120); do
     if INVITE=$($DC exec -T "guardian-$LEADER" picomint-guardian-cli invite 2>/dev/null \
-        | jq -r .invite_code) && [ -n "$INVITE" ] && [ "$INVITE" != "null" ]; then
+        | jq -r .invite) && [ -n "$INVITE" ] && [ "$INVITE" != "null" ]; then
         break
     fi
     INVITE=""
@@ -91,7 +91,7 @@ done
 
 echo "==> [$FED_NAME] Funding the gateway via federation peg-in..."
 FEDERATION_ID=$($DC exec -T gateway picomint-gateway-cli federation list \
-    | jq -r --arg name "$FED_NAME" '.federations[] | select(.federation_name == $name) | .federation_id')
+    | jq -r --arg name "$FED_NAME" '.federations[] | select(.federation_name == $name) | .federation')
 
 if [ -z "$FEDERATION_ID" ] || [ "$FEDERATION_ID" = "null" ]; then
     echo "[$FED_NAME] Could not resolve federation_id from gateway list" >&2
