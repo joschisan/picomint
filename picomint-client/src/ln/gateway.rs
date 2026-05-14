@@ -15,7 +15,7 @@ use picomint_core::ln::gateway_api::{
     CreateInvoiceRequest, CreateInvoiceResponse, GatewayInfo, GatewayMethod, GatewayPk,
     InfoRequest, InfoResponse, SendPaymentRequest, SendPaymentResponse,
 };
-use picomint_core::{Amount, OutPoint};
+use picomint_core::OutPoint;
 
 pub async fn gateway_info(
     endpoint: &Endpoint,
@@ -36,7 +36,6 @@ pub async fn create_bolt11_invoice(
     gateway_pk: GatewayPk,
     federation: FederationId,
     contract: IncomingContract,
-    amount: Amount,
     expiry_secs: u32,
 ) -> anyhow::Result<Bolt11Invoice> {
     picomint_rpc::request::<_, CreateInvoiceResponse>(
@@ -45,7 +44,6 @@ pub async fn create_bolt11_invoice(
         GatewayMethod::CreateInvoice(CreateInvoiceRequest {
             federation,
             contract,
-            amount,
             expiry_secs,
         }),
     )

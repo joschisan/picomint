@@ -125,6 +125,10 @@ fn dispatch_ln_receive(
     state
         .node
         .bolt11_payment()
-        .claim_for_hash(ph, row.amount.msats, PaymentPreimage(preimage))
+        .claim_for_hash(
+            ph,
+            row.contract.commitment.amount.msats,
+            PaymentPreimage(preimage),
+        )
         .expect("LDK has this payment_hash (registered via receive_for_hash)");
 }

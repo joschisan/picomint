@@ -251,7 +251,6 @@ async fn create_contract_and_fetch_invoice(
         GatewayMethod::CreateInvoice(CreateInvoiceRequest {
             federation,
             contract: contract.clone(),
-            amount: Amount::from_msats(amount),
             expiry_secs,
         }),
     )

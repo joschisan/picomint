@@ -420,7 +420,6 @@ impl LightningClientModule {
             gateway_pk,
             self.federation,
             contract.clone(),
-            amount,
             expiry_secs,
         )
         .await

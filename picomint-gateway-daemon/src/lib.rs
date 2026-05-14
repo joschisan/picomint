@@ -321,12 +321,9 @@ impl AppState {
             "The incoming contract is keyed to another gateway"
         );
 
-        let receive_fee = self.receive_fee.fee(payload.amount.msats);
-
-        ensure!(
-            payload.contract.commitment.amount == payload.amount,
-            "Contract amount does not match the invoice amount"
-        );
+        let receive_fee = self
+            .receive_fee
+            .fee(payload.contract.commitment.amount.msats);
 
         ensure!(
             payload.contract.commitment.fee == receive_fee,
@@ -364,12 +361,11 @@ impl AppState {
                     federation: payload.federation,
                     contract: payload.contract,
                     invoice: LightningInvoice::Bolt11(invoice.clone()),
-                    amount: payload.amount,
                 },
             )
             .is_some()
         {
-            bail!("A conract for this hash has already been registered")
+            bail!("A contract for this hash has already been registered")
         }
 
         dbtx.commit();
