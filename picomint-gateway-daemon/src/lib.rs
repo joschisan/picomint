@@ -190,7 +190,7 @@ impl AppState {
         );
 
         ensure!(
-            payload.contract.amount == Amount::from_msats(amount),
+            payload.contract.amount == Amount::from_msat(amount),
             "Contract amount does not match invoice amount"
         );
 
@@ -237,7 +237,7 @@ impl AppState {
             &dbtx,
             operation,
             payload.outpoint,
-            Amount::from_msats(amount),
+            Amount::from_msat(amount),
             ln_fee,
             fee,
         );
@@ -245,7 +245,7 @@ impl AppState {
         // --- Direct-swap vs external LN -------------------------------------
         if self.node.node_id() != payload.invoice.bolt11().get_payee_pub_key() {
             let rpc = RouteParametersConfig::default()
-                .with_max_total_routing_fee_msat(ln_fee.msats)
+                .with_max_total_routing_fee_msat(ln_fee.msat)
                 .with_max_total_cltv_expiry_delta(self.cltv_expiry_delta);
 
             if self
@@ -269,7 +269,7 @@ impl AppState {
                 .expect("Direct-swap target not registered for this payment hash");
 
             ensure!(
-                incoming_row.contract.commitment.amount.msats == amount,
+                incoming_row.contract.commitment.amount.msat == amount,
                 "Direct-swap amount mismatch"
             );
 
@@ -320,7 +320,7 @@ impl AppState {
 
         let receive_fee = self
             .receive_fee
-            .fee(payload.contract.commitment.amount.msats);
+            .fee(payload.contract.commitment.amount.msat);
 
         ensure!(
             payload.contract.commitment.fee == receive_fee,
@@ -341,7 +341,7 @@ impl AppState {
             .node
             .bolt11_payment()
             .receive_for_hash(
-                payload.contract.commitment.amount.msats,
+                payload.contract.commitment.amount.msat,
                 &LdkBolt11InvoiceDescription::Direct(Description::empty()),
                 self.invoice_expiry_secs,
                 PaymentHash(payload.contract.commitment.payment_hash.to_byte_array()),

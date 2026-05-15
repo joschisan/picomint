@@ -128,7 +128,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<WalletTotalValueResponse>, CliError> {
         Ok(Json(WalletTotalValueResponse {
-            total_value_sats: api
+            total_value_sat: api
                 .server
                 .wallet
                 .federation_wallet_ui()
@@ -148,7 +148,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<WalletFeerateResponse>, CliError> {
         Ok(Json(WalletFeerateResponse {
-            sats_per_vbyte: api.server.wallet.consensus_feerate_ui(),
+            sat_per_vbyte: api.server.wallet.consensus_feerate_ui(),
         }))
     }
 

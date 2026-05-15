@@ -98,7 +98,7 @@ pub struct AuditResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WalletTotalValueResponse {
-    pub total_value_sats: Option<u64>,
+    pub total_value_sat: Option<u64>,
 }
 
 // --- /module/wallet/block-count ---
@@ -112,7 +112,7 @@ pub struct WalletBlockCountResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WalletFeerateResponse {
-    pub sats_per_vbyte: Option<u64>,
+    pub sat_per_vbyte: Option<u64>,
 }
 
 // --- /module/ln/gateway/* ---

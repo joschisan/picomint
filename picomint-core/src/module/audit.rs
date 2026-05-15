@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Per-module + total net-asset snapshot, all in signed msats.
+/// Per-module + total net-asset snapshot, all in signed msat.
 ///
 /// `total` is the sum of the three module fields and must never drop below
 /// zero — that's the federation's balance-sheet invariant, checked on every

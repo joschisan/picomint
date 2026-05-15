@@ -49,7 +49,7 @@ impl BitcoindClient {
         })?
         .fee_rate
         .map(|per_kb| Feerate {
-            sats_per_kvb: per_kb.to_sat(),
+            sat_per_kvb: per_kb.to_sat(),
         });
 
         Ok(feerate)

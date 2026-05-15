@@ -55,8 +55,8 @@ pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<MintConfig
         consensus: MintConfigConsensus {
             tbs_agg_pks,
             tbs_pks,
-            input_fee: Amount::from_msats(100),
-            output_fee: Amount::from_msats(100),
+            input_fee: Amount::from_msat(100),
+            output_fee: Amount::from_msat(100),
         },
     })
 }
@@ -211,7 +211,7 @@ impl Mint {
 
     pub async fn audit(&self, dbtx: &WriteTx) -> i64 {
         dbtx.iter(&IssuanceCounterTable, |r| {
-            r.map(|(denomination, count)| -((denomination.amount().msats * count) as i64))
+            r.map(|(denomination, count)| -((denomination.amount().msat * count) as i64))
                 .sum()
         })
     }

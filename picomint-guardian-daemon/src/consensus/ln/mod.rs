@@ -46,8 +46,8 @@ pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<LightningC
                 .peer_ids()
                 .map(|peer| (peer, PublicKeyShare(eval_poly_g1(&polynomial, &peer))))
                 .collect(),
-            input_fee: Amount::from_sats(1),
-            output_fee: Amount::from_sats(1),
+            input_fee: Amount::from_sat(1),
+            output_fee: Amount::from_sat(1),
         },
         private: LightningConfigPrivate {
             sk: SecretKeyShare(sks),
@@ -295,13 +295,13 @@ impl Lightning {
     /// federation as implicit revenue).
     pub async fn audit(&self, dbtx: &WriteTx) -> i64 {
         let outgoing: i64 = dbtx.iter(&OutgoingContractTable, |r| {
-            r.map(|(_, contract)| -((contract.amount.msats + contract.fee.msats) as i64))
+            r.map(|(_, contract)| -((contract.amount.msat + contract.fee.msat) as i64))
                 .sum()
         });
 
         let incoming: i64 = dbtx.iter(&IncomingContractTable, |r| {
             r.map(|(_, contract)| {
-                -((contract.commitment.amount.msats - contract.commitment.fee.msats) as i64)
+                -((contract.commitment.amount.msat - contract.commitment.fee.msat) as i64)
             })
             .sum()
         });

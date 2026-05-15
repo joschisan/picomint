@@ -266,7 +266,7 @@ impl LightningClientModule {
         };
 
         let send_fee = gateway_info.send_fee.fee(amount);
-        let amount = Amount::from_msats(amount);
+        let amount = Amount::from_msat(amount);
         let fee = ln_fee + send_fee;
 
         let consensus_block_count = self
@@ -382,7 +382,7 @@ impl LightningClientModule {
             return Err(ReceiveError::GatewayFeeExceedsLimit);
         }
 
-        let fee = gateway_info.receive_fee.fee(amount.msats);
+        let fee = gateway_info.receive_fee.fee(amount.msat);
 
         if amount
             .checked_sub(fee)
@@ -429,7 +429,7 @@ impl LightningClientModule {
             return Err(ReceiveError::InvalidInvoice);
         }
 
-        if invoice.amount_milli_satoshis() != Some(amount.msats) {
+        if invoice.amount_milli_satoshis() != Some(amount.msat) {
             return Err(ReceiveError::IncorrectInvoiceAmount);
         }
 

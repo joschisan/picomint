@@ -121,7 +121,7 @@ if [ "${BAL:-0}" -eq 0 ]; then
     echo "[$FED_NAME] Gateway federation balance still zero — peg-in did not confirm in time" >&2
     exit 1
 fi
-echo "    gateway federation balance: $((BAL / 1000)) sats"
+echo "    gateway federation balance: $((BAL / 1000)) sat"
 
 cat <<EOF
 

@@ -149,7 +149,7 @@ impl Wallet {
 
             let feerate_vote = status
                 .fee_rate
-                .sats_per_kvb
+                .sat_per_kvb
                 .max(MIN_FEERATE_VOTE_SATS_PER_KVB);
 
             items.push(WalletConsensusItem::Feerate(Some(feerate_vote)));
@@ -322,7 +322,7 @@ impl Wallet {
         let amount = output_value
             .to_sat()
             .checked_mul(1000)
-            .map(picomint_core::Amount::from_msats)
+            .map(picomint_core::Amount::from_msat)
             .ok_or(WalletInputError::ArithmeticOverflow)?;
 
         Ok(InputMeta {
@@ -447,7 +447,7 @@ impl Wallet {
         let amount = output_value
             .to_sat()
             .checked_mul(1000)
-            .map(picomint_core::Amount::from_msats)
+            .map(picomint_core::Amount::from_msat)
             .ok_or(WalletOutputError::ArithmeticOverflow)?;
 
         Ok(TxItemAmounts {

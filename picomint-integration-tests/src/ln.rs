@@ -252,7 +252,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
             .receive(
                 gateway_pk,
                 gateway_info.clone(),
-                Amount::from_msats(500_000),
+                Amount::from_msat(500_000),
                 300,
             )
             .await?;
@@ -336,7 +336,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
         async move {
             let balance =
                 cli::gateway_federation_balance(&env.gw_data_dir, &federation)?.balance_msat;
-            ensure!(balance.msats > 0, "gateway federation balance is zero");
+            ensure!(balance.msat > 0, "gateway federation balance is zero");
             Ok(())
         }
     })
@@ -347,7 +347,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     {
         let (gateway_pk, gateway_info) = ln.select_gateway(None)?;
         let invoice = ln
-            .receive(gateway_pk, gateway_info, Amount::from_msats(500_000), 300)
+            .receive(gateway_pk, gateway_info, Amount::from_msat(500_000), 300)
             .await?;
 
         env.ldk_node.bolt11_payment().send(&invoice, None)?;
@@ -809,7 +809,7 @@ async fn mock_handler(method: GatewayMethod) -> Result<Vec<u8>, String> {
             // past the contract's expiration for `await_preimage` to
             // return `None`.
             let tx_fee = PaymentFee {
-                base: picomint_core::Amount::from_sats(2),
+                base: picomint_core::Amount::from_sat(2),
                 ppm: 3000,
             };
             Ok(InfoResponse {

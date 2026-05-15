@@ -90,8 +90,8 @@ pub fn gateway_ldk_channel_open(
     gw_data_dir: &Path,
     node_id: &str,
     ln_addr: &str,
-    channel_sats: u64,
-    push_sats: u64,
+    channel_sat: u64,
+    push_sat: u64,
 ) -> Result<Value> {
     gateway_cmd(gw_data_dir)
         .arg("ldk")
@@ -99,9 +99,9 @@ pub fn gateway_ldk_channel_open(
         .arg("open")
         .arg(node_id)
         .arg(ln_addr)
-        .arg(channel_sats.to_string())
-        .arg("--push-amount-sats")
-        .arg(push_sats.to_string())
+        .arg(channel_sat.to_string())
+        .arg("--push-amount-sat")
+        .arg(push_sat.to_string())
         .run_cli::<Value>()
 }
 

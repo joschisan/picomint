@@ -72,7 +72,7 @@ pub enum TxError {
     EmptyOutputs,
     #[error("The transaction is underfunded")]
     Underfunded,
-    #[error("Amount arithmetic overflowed u64 msats")]
+    #[error("Amount arithmetic overflowed u64 msat")]
     Overflow,
     #[error("The transaction did not have the correct number of signatures")]
     InvalidWitnessLength,

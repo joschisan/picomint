@@ -169,40 +169,39 @@ impl PaymentFee {
     /// sender against an abusive gateway's configured tx cut on outgoing
     /// payments.
     pub const SEND_FEE_LIMIT: Self = Self {
-        base: Amount::from_sats(50),
+        base: Amount::from_sat(50),
         ppm: 5_000,
     };
 
     /// Upper bound a client accepts on `GatewayInfo::receive_fee`.
     pub const RECEIVE_FEE_LIMIT: Self = Self {
-        base: Amount::from_sats(50),
+        base: Amount::from_sat(50),
         ppm: 5_000,
     };
 
     /// Upper bound a client accepts on `GatewayInfo::ln_fee` — the LN
     /// routing headroom the gateway is allowed to charge.
     pub const LN_FEE_LIMIT: Self = Self {
-        base: Amount::from_sats(100),
+        base: Amount::from_sat(100),
         ppm: 15_000,
     };
 
-    pub fn add_to(&self, msats: u64) -> Amount {
-        Amount::from_msats(msats.saturating_add(self.absolute_fee(msats)))
+    pub fn add_to(&self, msat: u64) -> Amount {
+        Amount::from_msat(msat.saturating_add(self.absolute_fee(msat)))
     }
 
-    pub fn subtract_from(&self, msats: u64) -> Amount {
-        Amount::from_msats(msats.saturating_sub(self.absolute_fee(msats)))
+    pub fn subtract_from(&self, msat: u64) -> Amount {
+        Amount::from_msat(msat.saturating_sub(self.absolute_fee(msat)))
     }
 
-    pub fn fee(&self, msats: u64) -> Amount {
-        Amount::from_msats(self.absolute_fee(msats))
+    pub fn fee(&self, msat: u64) -> Amount {
+        Amount::from_msat(self.absolute_fee(msat))
     }
 
-    fn absolute_fee(&self, msats: u64) -> u64 {
-        msats
-            .saturating_mul(self.ppm)
+    fn absolute_fee(&self, msat: u64) -> u64 {
+        msat.saturating_mul(self.ppm)
             .saturating_div(1_000_000)
-            .checked_add(self.base.msats)
+            .checked_add(self.base.msat)
             .expect("The division creates sufficient headroom to add the base fee")
     }
 }

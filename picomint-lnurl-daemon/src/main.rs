@@ -221,8 +221,8 @@ async fn create_contract_and_fetch_invoice(
 
     ensure!(
         amount
-            .checked_sub(fee.msats)
-            .is_some_and(|net| Amount::from_msats(net) >= MINIMUM_INCOMING_CONTRACT_AMOUNT),
+            .checked_sub(fee.msat)
+            .is_some_and(|net| Amount::from_msat(net) >= MINIMUM_INCOMING_CONTRACT_AMOUNT),
         "Amount too small"
     );
 
@@ -237,7 +237,7 @@ async fn create_contract_and_fetch_invoice(
         encryption_seed,
         preimage,
         preimage.consensus_hash(),
-        Amount::from_msats(amount),
+        Amount::from_msat(amount),
         fee,
         expiration,
         claim_pk,

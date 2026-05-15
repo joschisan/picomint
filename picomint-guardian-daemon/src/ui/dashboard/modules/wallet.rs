@@ -73,7 +73,7 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
                                     th { "Send Fee" }
                                     td {
                                         @if let Some(fee) = send_fee {
-                                            (fee.to_sat()) " sats"
+                                            (fee.to_sat()) " sat"
                                         } @else {
                                             "No send fee available"
                                         }
@@ -83,7 +83,7 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
                                     th { "Receive Fee" }
                                     td {
                                         @if let Some(fee) = receive_fee {
-                                            (fee.to_sat()) " sats"
+                                            (fee.to_sat()) " sat"
                                         } @else {
                                             "No receive fee available"
                                         }

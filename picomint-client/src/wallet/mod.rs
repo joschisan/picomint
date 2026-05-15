@@ -167,7 +167,7 @@ impl WalletClientModule {
                 value: amount,
                 fee,
             }),
-            amount: Amount::from_sats((amount + fee).to_sat()),
+            amount: Amount::from_sat((amount + fee).to_sat()),
             fee: self.cfg.output_fee,
         });
 
@@ -262,7 +262,7 @@ impl WalletClientModule {
                 tweak: self.derive_tweak(address_index).x_only_public_key().0,
             }),
             keypair: self.derive_tweak(address_index),
-            amount: Amount::from_sats((amount - fee).to_sat()),
+            amount: Amount::from_sat((amount - fee).to_sat()),
             fee: self.cfg.input_fee,
         });
 

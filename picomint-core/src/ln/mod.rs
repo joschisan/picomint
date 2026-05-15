@@ -38,7 +38,7 @@ impl LightningInvoice {
 
 /// Minimum contract amount to ensure the incoming contract can be claimed
 /// without additional funds.
-pub const MINIMUM_INCOMING_CONTRACT_AMOUNT: Amount = Amount::from_sats(5);
+pub const MINIMUM_INCOMING_CONTRACT_AMOUNT: Amount = Amount::from_sat(5);
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct ContractId(pub sha256::Hash);
@@ -79,7 +79,7 @@ pub enum LightningInputError {
     InvalidDecryptionKey,
     #[error("The forfeit signature is invalid")]
     InvalidForfeitSignature,
-    #[error("Amount arithmetic overflowed u64 msats")]
+    #[error("Amount arithmetic overflowed u64 msat")]
     ArithmeticOverflow,
 }
 
@@ -89,7 +89,7 @@ pub enum LightningOutputError {
     InvalidContract,
     #[error("The contract is expired")]
     ContractExpired,
-    #[error("Amount arithmetic overflowed u64 msats")]
+    #[error("Amount arithmetic overflowed u64 msat")]
     ArithmeticOverflow,
 }
 

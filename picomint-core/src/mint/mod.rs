@@ -13,7 +13,7 @@ pub mod config;
 pub mod methods;
 
 /// Compact representation of a power-of-2 amount denomination
-/// Represents 2^denomination msats
+/// Represents 2^denomination msat
 #[derive(
     Debug,
     Copy,
@@ -35,7 +35,7 @@ picomint_redb::consensus_key!(Denomination);
 impl Denomination {
     /// Convert to Amount (only call at boundaries)
     pub fn amount(self) -> Amount {
-        Amount::from_msats(1 << self.0 as usize)
+        Amount::from_msat(1 << self.0 as usize)
     }
 }
 

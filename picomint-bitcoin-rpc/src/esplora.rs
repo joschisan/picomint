@@ -44,7 +44,7 @@ impl EsploraClient {
         let fee_rate_kvb = fee_rate_vb * 1_000f32;
 
         Ok(Some(Feerate {
-            sats_per_kvb: (fee_rate_kvb).ceil() as u64,
+            sat_per_kvb: (fee_rate_kvb).ceil() as u64,
         }))
     }
 
