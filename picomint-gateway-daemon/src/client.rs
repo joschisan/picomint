@@ -160,11 +160,4 @@ impl GatewayClientFactory {
         )
         .map_err(|e| anyhow::anyhow!("Client open error: {e}"))
     }
-
-    /// List all federation ids the gateway has joined.
-    pub async fn list_federations(&self) -> Vec<FederationId> {
-        self.db
-            .begin_read()
-            .iter(&ClientConfigTable, |r| r.map(|(id, _)| id).collect())
-    }
 }
