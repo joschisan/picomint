@@ -47,11 +47,6 @@ pub struct WalletClientModule {
     send_executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
 }
 
-#[derive(Clone)]
-pub struct WalletClientContext {
-    pub client_ctx: ClientContext,
-}
-
 impl WalletClientModule {
     pub fn input_fee(&self) -> Amount {
         self.cfg.input_fee
@@ -71,13 +66,10 @@ impl WalletClientModule {
         tg: &TaskGroup,
     ) -> anyhow::Result<WalletClientModule> {
         let federation = context.federation();
-        let sm_context = WalletClientContext {
-            client_ctx: context.clone(),
-        };
         let send_executor = ModuleExecutor::new(
             context.db().clone(),
             SendStateMachineTable(federation),
-            sm_context,
+            context.clone(),
             tg.clone(),
         );
 

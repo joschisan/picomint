@@ -128,11 +128,6 @@ impl Event for TxRejectEvent {
     const KIND: EventKind = EventKind::from_static("tx-reject");
 }
 
-#[derive(Deserialize)]
-pub struct GetInviteCodeRequest {
-    pub peer: PeerId,
-}
-
 /// Downloads the [`ConsensusConfig`] using the peers advertised in the invite
 /// code, then re-verifies it with the full peer set from the config itself.
 pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<ConsensusConfig> {

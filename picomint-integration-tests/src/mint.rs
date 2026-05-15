@@ -156,7 +156,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // opportunistically pulls excess notes (>TARGET_PER_DENOMINATION) into
     // the IssuanceSM's `spendable_notes` and only recovers them once the SM
     // transitions on Err. Capturing here avoids racing that recovery.
-    let expected = client_receive.get_balance().await?;
+    let expected = client_receive.get_balance();
 
     ensure!(
         expected != Amount::ZERO,
@@ -229,7 +229,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // re-mints under fresh outputs, so the post-recovery balance is
     // slightly below `expected` due to mint fees on the reissuance.
     retry("recovery balance match", || async {
-        let bal = recovered.get_balance().await?;
+        let bal = recovered.get_balance();
 
         ensure!(
             bal > Amount::ZERO && bal <= expected,

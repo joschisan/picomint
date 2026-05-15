@@ -567,13 +567,11 @@ async fn federation_config(
     State(state): State<AppState>,
     Json(payload): Json<FederationConfigRequest>,
 ) -> Result<Json<FederationConfigResponse>, CliError> {
-    let config = resolve_client(&state, payload.federation)
-        .await?
-        .config()
-        .await;
+    let client = resolve_client(&state, payload.federation).await?;
+    let config = client.config();
 
     Ok(Json(FederationConfigResponse {
-        config: serde_json::to_value(&config).expect("ConsensusConfig is serializable"),
+        config: serde_json::to_value(config).expect("ConsensusConfig is serializable"),
     }))
 }
 
@@ -585,10 +583,7 @@ async fn federation_balance(
 ) -> Result<Json<FederationBalanceResponse>, CliError> {
     let client = resolve_client(&state, payload.federation).await?;
 
-    let balance_msat = client
-        .get_balance()
-        .await
-        .map_err(|e| CliError::internal(format!("Failed to read balance: {e}")))?;
+    let balance_msat = client.get_balance();
 
     Ok(Json(FederationBalanceResponse { balance_msat }))
 }
@@ -603,7 +598,6 @@ async fn federation_invite(
     let client = resolve_client(&state, payload.federation).await?;
     let invite_code = client
         .invite_code(payload.peer)
-        .await
         .ok_or_else(|| CliError::bad_request("Unknown peer id for this federation"))?;
     Ok(Json(FederationInviteResponse {
         invite: invite_code,
