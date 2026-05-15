@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use picomint_client::TxCreateEvent;
 use picomint_client::gw::events::{
     ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent, SendCancelEvent,
     SendEvent, SendSuccessEvent,
@@ -139,10 +140,21 @@ CREATE TABLE receive_refund (
     PRIMARY KEY (federation, operation)
 );
 
+CREATE TABLE tx_create (
+    operation     TEXT NOT NULL,
+    ts            INTEGER NOT NULL,
+    federation    TEXT NOT NULL,
+    txid          TEXT NOT NULL,
+    remint_msat   INTEGER NOT NULL,
+    fee_msat      INTEGER NOT NULL,
+    PRIMARY KEY (federation, operation)
+);
+
 CREATE INDEX idx_send_ts             ON send(ts);
 CREATE INDEX idx_send_success_ts     ON send_success(ts);
 CREATE INDEX idx_receive_ts          ON receive(ts);
 CREATE INDEX idx_receive_success_ts  ON receive_success(ts);
+CREATE INDEX idx_tx_create_ts        ON tx_create(ts);
 
 CREATE VIEW payments AS
 SELECT
@@ -157,12 +169,17 @@ SELECT
         ELSE 'pending'
     END AS status,
     s.amount_msat,
-    succ.preimage
+    succ.preimage,
+    tx.txid          AS tx_txid,
+    tx.remint_msat   AS tx_remint_msat,
+    tx.fee_msat      AS tx_fee_msat
 FROM send s
 LEFT JOIN send_success succ
        ON succ.federation = s.federation AND succ.operation = s.operation
 LEFT JOIN send_cancel  canc
        ON canc.federation = s.federation AND canc.operation = s.operation
+LEFT JOIN tx_create    tx
+       ON tx.federation = s.federation AND tx.operation = s.operation
 UNION ALL
 SELECT
     r.federation,
@@ -177,14 +194,19 @@ SELECT
         ELSE 'pending'
     END AS status,
     r.amount_msat,
-    succ.preimage
+    succ.preimage,
+    tx.txid          AS tx_txid,
+    tx.remint_msat   AS tx_remint_msat,
+    tx.fee_msat      AS tx_fee_msat
 FROM receive r
 LEFT JOIN receive_success succ
        ON succ.federation = r.federation AND succ.operation = r.operation
 LEFT JOIN receive_failure fail
        ON fail.federation = r.federation AND fail.operation = r.operation
 LEFT JOIN receive_refund  refund
-       ON refund.federation = r.federation AND refund.operation = r.operation;
+       ON refund.federation = r.federation AND refund.operation = r.operation
+LEFT JOIN tx_create       tx
+       ON tx.federation = r.federation AND tx.operation = r.operation;
 "#;
 
 /// Drain the global event log forward in chunks and mirror each gw event
@@ -302,6 +324,20 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
                 "INSERT OR IGNORE INTO receive_refund \
                  (federation, operation, ts, txid) VALUES (?, ?, ?, ?)",
                 rusqlite::params![federation, operation, ts, e.txid.to_string()],
+            )?;
+        } else if let Some(e) = entry.to_event::<TxCreateEvent>() {
+            tx.execute(
+                "INSERT OR IGNORE INTO tx_create \
+                 (federation, operation, ts, txid, remint_msat, fee_msat) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                rusqlite::params![
+                    federation,
+                    operation,
+                    ts,
+                    e.txid.to_string(),
+                    e.remint.msats as i64,
+                    e.fee.msats as i64,
+                ],
             )?;
         }
     }

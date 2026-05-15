@@ -28,9 +28,6 @@ use tracing::warn;
 pub use self::secret::GwSecret;
 use receive_sm::{ReceiveStateMachine, ReceiveStateMachineTable};
 
-/// Lightning CLTV Delta in blocks
-pub const EXPIRATION_DELTA_MINIMUM: u64 = 144;
-
 impl GatewayClientModule {
     pub fn new(
         federation: FederationId,

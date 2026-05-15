@@ -103,6 +103,13 @@ pub struct GatewayOpts {
     /// BOLT11 invoice expiry, in seconds, for invoices the gateway issues.
     #[arg(long, env = "INVOICE_EXPIRY_SECS", default_value_t = 86_400)]
     pub invoice_expiry_secs: u32,
+
+    /// Maximum total CLTV expiry delta, in blocks, the gateway will accept
+    /// across the outgoing route. Used as LDK's `max_total_cltv_expiry_delta`
+    /// and (with a +144-block safety slack) as the contract lock the gateway
+    /// announces to clients.
+    #[arg(long, env = "CLTV_EXPIRY_DELTA", default_value_t = 500)]
+    pub cltv_expiry_delta: u32,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -218,6 +225,7 @@ fn main() -> anyhow::Result<()> {
             ppm: opts.ln_fee_ppm,
         },
         invoice_expiry_secs: opts.invoice_expiry_secs,
+        cltv_expiry_delta: opts.cltv_expiry_delta,
         analytics: picomint_gateway_daemon::analytics::Analytics::wipe_and_init(&opts.data_dir)?,
     };
 

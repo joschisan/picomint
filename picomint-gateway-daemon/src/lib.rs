@@ -20,7 +20,6 @@ use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
 use picomint_client::Client;
-use picomint_client::gw::EXPIRATION_DELTA_MINIMUM;
 use picomint_client::gw::events::ReceiveSuccessEvent;
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
@@ -60,6 +59,7 @@ pub struct AppState {
     pub receive_fee: PaymentFee,
     pub ln_fee: PaymentFee,
     pub invoice_expiry_secs: u32,
+    pub cltv_expiry_delta: u32,
     pub analytics: analytics::Analytics,
 }
 
@@ -134,7 +134,7 @@ impl AppState {
             send_fee: self.send_fee,
             receive_fee: self.receive_fee,
             ln_fee: self.ln_fee,
-            expiration_delta: 1440,
+            expiration_delta: self.cltv_expiry_delta as u64 + 144,
         })
     }
 
@@ -206,6 +206,11 @@ impl AppState {
             "Contract fee does not match send fee + ln fee"
         );
 
+        ensure!(
+            expiration >= self.cltv_expiry_delta as u64 + 144,
+            "Contract expiration does not leave enough room for routing"
+        );
+
         // --- Insert outgoing_contract row + log SendEvent on F1 (one tx) ---
 
         let operation = OperationId::from_encodable(payload.invoice.bolt11().payment_hash());
@@ -239,20 +244,14 @@ impl AppState {
 
         // --- Direct-swap vs external LN -------------------------------------
         if self.node.node_id() != payload.invoice.bolt11().get_payee_pub_key() {
-            // External LN send: `ln_fee` becomes LDK's hard cap on route cost.
-            let max_delay = expiration.saturating_sub(EXPIRATION_DELTA_MINIMUM);
+            let rpc = RouteParametersConfig::default()
+                .with_max_total_routing_fee_msat(ln_fee.msats)
+                .with_max_total_cltv_expiry_delta(self.cltv_expiry_delta);
 
             if self
                 .node
                 .bolt11_payment()
-                .send(
-                    payload.invoice.bolt11(),
-                    Some(RouteParametersConfig {
-                        max_total_routing_fee_msat: Some(ln_fee.msats),
-                        max_total_cltv_expiry_delta: max_delay as u32,
-                        ..RouteParametersConfig::default()
-                    }),
-                )
+                .send(payload.invoice.bolt11(), Some(rpc))
                 .is_err()
             {
                 f1_client.gw().finalize_send(
