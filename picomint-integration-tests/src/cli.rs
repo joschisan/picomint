@@ -6,7 +6,7 @@ use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
-    FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkInvoiceCreateResponse,
+    FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkLnReceiveResponse,
     LdkOnchainReceiveResponse,
 };
 use picomint_guardian_cli_core::{InviteResponse, SetupStatus};
@@ -113,23 +113,23 @@ pub fn gateway_ldk_channel_list(gw_data_dir: &Path) -> Result<LdkChannelListResp
         .run_cli::<LdkChannelListResponse>()
 }
 
-pub fn gateway_ldk_invoice_create(
+pub fn gateway_ldk_ln_receive(
     gw_data_dir: &Path,
     amount_msat: u64,
-) -> Result<LdkInvoiceCreateResponse> {
+) -> Result<LdkLnReceiveResponse> {
     gateway_cmd(gw_data_dir)
         .arg("ldk")
-        .arg("invoice")
-        .arg("create")
+        .arg("ln")
+        .arg("receive")
         .arg(amount_msat.to_string())
-        .run_cli::<LdkInvoiceCreateResponse>()
+        .run_cli::<LdkLnReceiveResponse>()
 }
 
-pub fn gateway_ldk_invoice_pay(gw_data_dir: &Path, invoice: &str) -> Result<Value> {
+pub fn gateway_ldk_ln_send(gw_data_dir: &Path, invoice: &str) -> Result<Value> {
     gateway_cmd(gw_data_dir)
         .arg("ldk")
-        .arg("invoice")
-        .arg("pay")
+        .arg("ln")
+        .arg("send")
         .arg(invoice)
         .run_cli::<Value>()
 }

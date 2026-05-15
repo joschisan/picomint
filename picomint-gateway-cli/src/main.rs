@@ -16,18 +16,16 @@ use picomint_gateway_cli_core::{
     FederationDisableRequest, FederationEnableRequest, FederationInviteRequest,
     FederationJoinRequest, FederationMintCountRequest, FederationMintReceiveRequest,
     FederationMintSendRequest, FederationWalletReceiveRequest, FederationWalletSendFeeRequest,
-    FederationWalletSendRequest, LdkChannelCloseRequest, LdkChannelOpenRequest,
-    LdkInvoiceCreateRequest, LdkInvoicePayRequest, LdkOnchainSendRequest, LdkPeerConnectRequest,
-    LdkPeerDisconnectRequest, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
-    ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_INVITE,
-    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
-    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
-    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
-    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
-    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
-    ROUTE_MNEMONIC,
+    FederationWalletSendRequest, LdkChannelCloseRequest, LdkChannelOpenRequest, LdkLnReceiveRequest,
+    LdkLnSendRequest, LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
+    ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE,
+    ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
+    ROUTE_FEDERATION_MODULE_MINT_COUNT, ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
+    ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
+    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -71,9 +69,9 @@ enum LdkCommands {
     /// Channel operations
     #[command(subcommand)]
     Channel(LdkChannelCommands),
-    /// Invoice operations
+    /// Lightning operations
     #[command(subcommand)]
-    Invoice(LdkInvoiceCommands),
+    Ln(LdkLnCommands),
     /// Peer management
     #[command(subcommand)]
     Peer(LdkPeerCommands),
@@ -98,11 +96,11 @@ enum LdkChannelCommands {
 }
 
 #[derive(Subcommand)]
-enum LdkInvoiceCommands {
-    /// Create a bolt11 invoice
-    Create(LdkInvoiceCreateRequest),
+enum LdkLnCommands {
+    /// Create a bolt11 invoice to receive a payment
+    Receive(LdkLnReceiveRequest),
     /// Pay a bolt11 invoice
-    Pay(LdkInvoicePayRequest),
+    Send(LdkLnSendRequest),
 }
 
 #[derive(Subcommand)]
@@ -254,11 +252,9 @@ async fn main() -> Result<()> {
                 LdkChannelCommands::Close(req) => request(d, ROUTE_LDK_CHANNEL_CLOSE, req).await?,
                 LdkChannelCommands::List => request(d, ROUTE_LDK_CHANNEL_LIST, ()).await?,
             },
-            LdkCommands::Invoice(cmd) => match cmd {
-                LdkInvoiceCommands::Create(req) => {
-                    request(d, ROUTE_LDK_INVOICE_CREATE, req).await?
-                }
-                LdkInvoiceCommands::Pay(req) => request(d, ROUTE_LDK_INVOICE_PAY, req).await?,
+            LdkCommands::Ln(cmd) => match cmd {
+                LdkLnCommands::Receive(req) => request(d, ROUTE_LDK_LN_RECEIVE, req).await?,
+                LdkLnCommands::Send(req) => request(d, ROUTE_LDK_LN_SEND, req).await?,
             },
             LdkCommands::Peer(cmd) => match cmd {
                 LdkPeerCommands::Connect(req) => request(d, ROUTE_LDK_PEER_CONNECT, req).await?,

@@ -205,12 +205,12 @@ async fn test_direct_ln_payments(env: &TestEnv) -> anyhow::Result<()> {
             3600,
         )?;
 
-        cli::gateway_ldk_invoice_pay(&env.gw_data_dir, &invoice.to_string())?;
+        cli::gateway_ldk_ln_send(&env.gw_data_dir, &invoice.to_string())?;
     }
 
     info!("LDK node pays gateway invoice...");
     {
-        let invoice_str = cli::gateway_ldk_invoice_create(&env.gw_data_dir, 1_000_000)?.invoice;
+        let invoice_str = cli::gateway_ldk_ln_receive(&env.gw_data_dir, 1_000_000)?.invoice;
         let invoice: lightning_invoice::Bolt11Invoice = invoice_str.parse()?;
 
         // The freestanding node may need a moment to consider the channel ready

@@ -27,19 +27,18 @@ use picomint_gateway_cli_core::{
     FederationWalletReceiveResponse, FederationWalletSendFeeRequest,
     FederationWalletSendFeeResponse, FederationWalletSendRequest, FederationWalletSendResponse,
     InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelCloseResponse,
-    LdkChannelListResponse, LdkChannelOpenRequest, LdkInvoiceCreateRequest,
-    LdkInvoiceCreateResponse, LdkInvoicePayRequest, LdkInvoicePayResponse,
-    LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
-    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
-    PeerInfo, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE,
-    ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_INVITE, ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST,
-    ROUTE_FEDERATION_MODULE_MINT_COUNT, ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
-    ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
-    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
-    ROUTE_LDK_INVOICE_CREATE, ROUTE_LDK_INVOICE_PAY, ROUTE_LDK_ONCHAIN_RECEIVE,
-    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
-    ROUTE_MNEMONIC,
+    LdkChannelListResponse, LdkChannelOpenRequest, LdkLnReceiveRequest, LdkLnReceiveResponse,
+    LdkLnSendRequest, LdkLnSendResponse, LdkOnchainReceiveResponse, LdkOnchainSendRequest,
+    LdkOnchainSendResponse, LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse,
+    MnemonicResponse, PeerInfo, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
+    ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_INVITE,
+    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
+    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
+    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_LN_RECEIVE,
+    ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT,
+    ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
 };
 use reqwest::StatusCode;
 use tokio::net::UnixListener;
@@ -119,8 +118,8 @@ fn router() -> Router<AppState> {
         .route(ROUTE_LDK_CHANNEL_LIST, post(ldk_channel_list))
         .route(ROUTE_LDK_ONCHAIN_RECEIVE, post(ldk_onchain_receive))
         .route(ROUTE_LDK_ONCHAIN_SEND, post(ldk_onchain_send))
-        .route(ROUTE_LDK_INVOICE_CREATE, post(ldk_invoice_create))
-        .route(ROUTE_LDK_INVOICE_PAY, post(ldk_invoice_pay))
+        .route(ROUTE_LDK_LN_RECEIVE, post(ldk_ln_receive))
+        .route(ROUTE_LDK_LN_SEND, post(ldk_ln_send))
         .route(ROUTE_LDK_PEER_CONNECT, post(ldk_peer_connect))
         .route(ROUTE_LDK_PEER_DISCONNECT, post(ldk_peer_disconnect))
         .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
@@ -388,10 +387,10 @@ async fn ldk_onchain_send(
 
 /// Creates an invoice directly payable to the gateway's lightning node
 #[instrument(skip_all, err)]
-async fn ldk_invoice_create(
+async fn ldk_ln_receive(
     State(state): State<AppState>,
-    Json(payload): Json<LdkInvoiceCreateRequest>,
-) -> Result<Json<LdkInvoiceCreateResponse>, CliError> {
+    Json(payload): Json<LdkLnReceiveRequest>,
+) -> Result<Json<LdkLnReceiveResponse>, CliError> {
     let expiry_secs = payload.expiry_secs.unwrap_or(3600);
     let description = match payload.description {
         Some(desc) => LdkBolt11InvoiceDescription::Direct(
@@ -407,17 +406,17 @@ async fn ldk_invoice_create(
         .receive(payload.amount_msat, &description, expiry_secs)
         .map_err(|e| CliError::internal(format!("Failed to get invoice: {e}")))?;
 
-    Ok(Json(LdkInvoiceCreateResponse {
+    Ok(Json(LdkLnReceiveResponse {
         invoice: invoice.to_string(),
     }))
 }
 
 /// Pays an outgoing LN invoice using the gateway's own funds
 #[instrument(skip_all, err)]
-async fn ldk_invoice_pay(
+async fn ldk_ln_send(
     State(state): State<AppState>,
-    Json(payload): Json<LdkInvoicePayRequest>,
-) -> Result<Json<LdkInvoicePayResponse>, CliError> {
+    Json(payload): Json<LdkLnSendRequest>,
+) -> Result<Json<LdkLnSendResponse>, CliError> {
     let payment_id = state
         .node
         .bolt11_payment()
@@ -445,7 +444,7 @@ async fn ldk_invoice_pay(
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
-    Ok(Json(LdkInvoicePayResponse {
+    Ok(Json(LdkLnSendResponse {
         preimage: preimage.encode_hex::<String>(),
     }))
 }
