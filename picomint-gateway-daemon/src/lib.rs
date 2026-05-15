@@ -302,10 +302,7 @@ impl AppState {
     /// `IncomingContract` + the generated invoice in the daemon-global
     /// `incoming_contract` table. Idempotent on operation: a retry with the same
     /// contract returns the previously generated invoice.
-    pub async fn receive(
-        &self,
-        payload: ReceiveRequest,
-    ) -> anyhow::Result<Bolt11Invoice> {
+    pub async fn receive(&self, payload: ReceiveRequest) -> anyhow::Result<Bolt11Invoice> {
         ensure!(payload.contract.verify(), "The contract is invalid");
 
         let client = self
