@@ -30,7 +30,7 @@ use picomint_gateway_daemon::db::{
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
 use picomint_redb::WriteTx;
 use rand::rngs::OsRng;
-use tracing::{info, warn};
+use tracing::info;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -337,12 +337,6 @@ fn handle_payment_claimable(
         .expect("PaymentClaimable for an unregistered payment_hash");
 
     if row.contract.commitment.amount.msat != amount_msat {
-        warn!(
-            expected = row.contract.commitment.amount.msat,
-            got = amount_msat,
-            "Incoming HTLC amount mismatch",
-        );
-
         state
             .node
             .bolt11_payment()
@@ -358,8 +352,6 @@ fn handle_payment_claimable(
             .start_receive(dbtx, operation, row.contract)
             .is_err()
         {
-            tracing::error!("start_receive failed; failing HTLC",);
-
             state
                 .node
                 .bolt11_payment()
@@ -420,6 +412,7 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32
         let client = state
             .select_client(row.federation)
             .expect("source federation for outgoing contract is connected");
+
         client.gw().finalize_send(
             dbtx,
             operation,
