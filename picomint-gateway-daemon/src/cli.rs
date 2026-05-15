@@ -617,30 +617,31 @@ async fn federation_invite(
 
 /// Resolve the target federation client. When `id` is `None` and the gateway
 /// has exactly one federation joined, that one is used; otherwise the caller
-/// must supply `--id`.
+/// must supply `--id`. Resolves against persisted configs, not the in-memory
+/// client cache, so a joined-but-not-yet-warm federation works on first use.
 async fn resolve_client(
     state: &AppState,
     id: Option<FederationId>,
 ) -> Result<Arc<Client>, CliError> {
-    let clients = state.clients.read().expect("clients RwLock poisoned");
-    match id {
-        Some(id) => clients
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| CliError::bad_request("Federation not connected")),
+    let id = match id {
+        Some(id) => id,
         None => {
-            if clients.len() > 1 {
+            let mut federations = state.federation_list();
+            if federations.len() > 1 {
                 return Err(CliError::bad_request(
                     "Multiple federations connected — pass --id <FEDERATION_ID>",
                 ));
             }
-            clients
-                .values()
-                .next()
-                .cloned()
-                .ok_or_else(|| CliError::bad_request("No federations connected"))
+            federations
+                .pop()
+                .ok_or_else(|| CliError::bad_request("No federations connected"))?
+                .federation
         }
-    }
+    };
+
+    state
+        .select_client(id)
+        .ok_or_else(|| CliError::bad_request("Federation not connected"))
 }
 
 /// Count held ecash notes by denomination
