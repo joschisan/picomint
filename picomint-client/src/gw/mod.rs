@@ -97,8 +97,8 @@ impl GatewayClientModule {
     }
 
     /// Log a `SendEvent` on this federation's event log. Called by the daemon's
-    /// HTTP `/send-payment` handler after it has inserted the outgoing contract
-    /// row in the daemon DB. Called at most once per operation id — `send_payment`
+    /// public `Send` handler after it has inserted the outgoing contract row
+    /// in the daemon DB. Called at most once per operation id — `AppState::send`
     /// short-circuits on the existing `OutgoingContract` row.
     ///
     /// `dbtx` must be scoped to this federation's client DB namespace (see

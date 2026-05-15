@@ -95,7 +95,7 @@ impl StateMachine for SendStateMachine {
                 let gateway_pk = self.common.gateway_pk.unwrap();
                 let invoice = self.common.invoice.clone().unwrap();
                 tokio::select! {
-                    response = gateway_send_payment_sm(
+                    response = gateway_send_sm(
                         ctx.client_ctx.api().endpoint().clone(),
                         gateway_pk,
                         ctx.federation,
@@ -220,7 +220,7 @@ fn submit_refund(
 }
 
 #[instrument(skip(refund_keypair, endpoint))]
-async fn gateway_send_payment_sm(
+async fn gateway_send_sm(
     endpoint: Endpoint,
     gateway_pk: GatewayPk,
     federation: FederationId,
@@ -230,7 +230,7 @@ async fn gateway_send_payment_sm(
     refund_keypair: Keypair,
 ) -> Result<[u8; 32], Signature> {
     (|| async {
-        let payment_result = crate::ln::gateway::send_payment(
+        let payment_result = crate::ln::gateway::send(
             &endpoint,
             gateway_pk,
             federation,

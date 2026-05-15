@@ -26,9 +26,7 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::gateway::{GatewayInfo, PaymentFee};
-use picomint_core::ln::methods::{
-    CreateInvoiceRequest, SendPaymentRequest, VerifyPreimageResponse,
-};
+use picomint_core::ln::methods::{ReceiveRequest, SendRequest, VerifyResponse};
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
 use picomint_eventlog::EventLogger;
@@ -144,9 +142,9 @@ impl AppState {
     /// `SendEvent` on F1, and kicks off either a direct-swap receive on the
     /// target federation or an LN send via LDK. Returns once a terminal event
     /// (`SendSuccessEvent` / `SendCancelEvent`) is observed in F1's event log.
-    pub async fn send_payment(
+    pub async fn send(
         &self,
-        payload: SendPaymentRequest,
+        payload: SendRequest,
     ) -> anyhow::Result<std::result::Result<[u8; 32], Signature>> {
         let f1_client = self
             .select_client(payload.federation)
@@ -304,10 +302,7 @@ impl AppState {
     /// `IncomingContract` + the generated invoice in the daemon-global
     /// `incoming_contract` table. Idempotent on operation: a retry with the same
     /// contract returns the previously generated invoice.
-    pub async fn create_invoice(
-        &self,
-        payload: CreateInvoiceRequest,
-    ) -> anyhow::Result<Bolt11Invoice> {
+    pub async fn receive(&self, payload: ReceiveRequest) -> anyhow::Result<Bolt11Invoice> {
         ensure!(payload.contract.verify(), "The contract is invalid");
 
         let client = self
@@ -371,11 +366,11 @@ impl AppState {
         Ok(invoice)
     }
 
-    pub async fn verify_bolt11_preimage(
+    pub async fn verify(
         &self,
         payment_hash: sha256::Hash,
         wait: bool,
-    ) -> anyhow::Result<VerifyPreimageResponse> {
+    ) -> anyhow::Result<VerifyResponse> {
         let operation = OperationId::from_encodable(&payment_hash);
 
         let row = self
@@ -394,13 +389,13 @@ impl AppState {
                 .into_iter()
                 .find_map(|entry| entry.to_event::<ReceiveSuccessEvent>().map(|e| e.preimage))
             {
-                return Ok(VerifyPreimageResponse {
+                return Ok(VerifyResponse {
                     settled: true,
                     preimage: Some(preimage),
                 });
             }
 
-            return Ok(VerifyPreimageResponse {
+            return Ok(VerifyResponse {
                 settled: false,
                 preimage: None,
             });
@@ -415,7 +410,7 @@ impl AppState {
                 .expect("subscribe_operation_events only ends at client shutdown");
 
             if let Some(ev) = entry.to_event::<ReceiveSuccessEvent>() {
-                return Ok(VerifyPreimageResponse {
+                return Ok(VerifyResponse {
                     settled: true,
                     preimage: Some(ev.preimage),
                 });

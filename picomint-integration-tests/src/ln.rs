@@ -16,7 +16,7 @@ use picomint_client::ln::{LightningClientModule, SendPaymentError};
 use picomint_client::tx::{Input, TxBuilder};
 use picomint_client::{Client, OperationId};
 use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
-use picomint_core::ln::methods::{GatewayMethod, InfoResponse, SendPaymentResponse};
+use picomint_core::ln::methods::{GatewayMethod, InfoResponse, SendResponse};
 use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::{Amount, OutPoint, wire};
 use picomint_encoding::Encodable as _;
@@ -205,12 +205,12 @@ async fn test_direct_ln_payments(env: &TestEnv) -> anyhow::Result<()> {
             3600,
         )?;
 
-        cli::gateway_ldk_invoice_pay(&env.gw_data_dir, &invoice.to_string())?;
+        cli::gateway_ldk_ln_send(&env.gw_data_dir, &invoice.to_string())?;
     }
 
     info!("LDK node pays gateway invoice...");
     {
-        let invoice_str = cli::gateway_ldk_invoice_create(&env.gw_data_dir, 1_000_000)?.invoice;
+        let invoice_str = cli::gateway_ldk_ln_receive(&env.gw_data_dir, 1_000_000)?.invoice;
         let invoice: lightning_invoice::Bolt11Invoice = invoice_str.parse()?;
 
         // The freestanding node may need a moment to consider the channel ready
@@ -542,7 +542,7 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
 
     let mut events = pin!(ln_event_stream(client));
 
-    // Crash scenario: mock HTTP-500s on `send_payment`, so the client loops
+    // Crash scenario: mock HTTP-500s on `Send`, so the client loops
     // retrying indefinitely — giving us room to claim the on-chain contract
     // manually before the client ever sees a gateway response.
     let preimage = [12u8; 32];
@@ -729,7 +729,7 @@ const GATEWAY_SECRET: [u8; 32] = [1; 32];
 const INVOICE_SECRET: [u8; 32] = [2; 32];
 
 // Scenario selectors: embedded in the invoice's `payment_secret` to pick a
-// branch in `mock_send_payment`; the preimage defines the invoice's
+// branch in `mock_handler`'s `Send` arm; the preimage defines the invoice's
 // `payment_hash` (so the federation's preimage check succeeds server-side
 // and each test's operation — derived from the payment hash — is unique).
 const PAYABLE_PREIMAGE: [u8; 32] = [10; 32];
@@ -823,7 +823,7 @@ async fn mock_handler(method: GatewayMethod) -> Result<Vec<u8>, String> {
             }
             .consensus_encode_to_vec())
         }
-        GatewayMethod::SendPayment(req) => {
+        GatewayMethod::Send(req) => {
             let payment_secret = req.invoice.bolt11().payment_secret().0;
             if payment_secret == CRASH_PAYMENT_SECRET {
                 return Err("mock gateway crashed".to_string());
@@ -833,7 +833,7 @@ async fn mock_handler(method: GatewayMethod) -> Result<Vec<u8>, String> {
             } else {
                 Ok(PAYABLE_PREIMAGE)
             };
-            Ok(SendPaymentResponse { result }.consensus_encode_to_vec())
+            Ok(SendResponse { result }.consensus_encode_to_vec())
         }
         _ => Err("mock gateway does not support this method".to_string()),
     }

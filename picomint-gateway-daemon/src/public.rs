@@ -7,9 +7,7 @@
 //! client-driven close.
 
 use iroh::Endpoint;
-use picomint_core::ln::methods::{
-    CreateInvoiceResponse, GatewayMethod, InfoResponse, SendPaymentResponse,
-};
+use picomint_core::ln::methods::{GatewayMethod, InfoResponse, ReceiveResponse, SendResponse};
 use picomint_encoding::Encodable as _;
 
 use crate::AppState;
@@ -31,18 +29,18 @@ async fn dispatch(state: AppState, method: GatewayMethod) -> Result<Vec<u8>, Str
             info: state.gateway_info(&req.federation).await.ok(),
         }
         .consensus_encode_to_vec()),
-        GatewayMethod::SendPayment(req) => state
-            .send_payment(req)
+        GatewayMethod::Send(req) => state
+            .send(req)
             .await
-            .map(|result| SendPaymentResponse { result }.consensus_encode_to_vec())
+            .map(|result| SendResponse { result }.consensus_encode_to_vec())
             .map_err(|e| e.to_string()),
-        GatewayMethod::CreateInvoice(req) => state
-            .create_invoice(req)
+        GatewayMethod::Receive(req) => state
+            .receive(req)
             .await
-            .map(|invoice| CreateInvoiceResponse { invoice }.consensus_encode_to_vec())
+            .map(|invoice| ReceiveResponse { invoice }.consensus_encode_to_vec())
             .map_err(|e| e.to_string()),
-        GatewayMethod::VerifyPreimage(req) => state
-            .verify_bolt11_preimage(req.hash, req.wait)
+        GatewayMethod::Verify(req) => state
+            .verify(req.hash, req.wait)
             .await
             .map(|resp| resp.consensus_encode_to_vec())
             .map_err(|e| e.to_string()),
