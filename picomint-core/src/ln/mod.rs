@@ -5,7 +5,7 @@
 
 pub mod config;
 pub mod contracts;
-pub mod gateway_api;
+pub mod gateway;
 pub mod lnurl;
 pub mod methods;
 pub mod secret;

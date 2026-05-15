@@ -25,8 +25,9 @@ use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInvoice;
-use picomint_core::ln::gateway_api::{
-    CreateInvoiceRequest, GatewayInfo, PaymentFee, SendPaymentRequest, VerifyResponse,
+use picomint_core::ln::gateway::{GatewayInfo, PaymentFee};
+use picomint_core::ln::methods::{
+    CreateInvoiceRequest, SendPaymentRequest, VerifyPreimageResponse,
 };
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
@@ -374,7 +375,7 @@ impl AppState {
         &self,
         payment_hash: sha256::Hash,
         wait: bool,
-    ) -> anyhow::Result<VerifyResponse> {
+    ) -> anyhow::Result<VerifyPreimageResponse> {
         let operation = OperationId::from_encodable(&payment_hash);
 
         let row = self
@@ -393,13 +394,13 @@ impl AppState {
                 .into_iter()
                 .find_map(|entry| entry.to_event::<ReceiveSuccessEvent>().map(|e| e.preimage))
             {
-                return Ok(VerifyResponse {
+                return Ok(VerifyPreimageResponse {
                     settled: true,
                     preimage: Some(preimage),
                 });
             }
 
-            return Ok(VerifyResponse {
+            return Ok(VerifyPreimageResponse {
                 settled: false,
                 preimage: None,
             });
@@ -414,7 +415,7 @@ impl AppState {
                 .expect("subscribe_operation_events only ends at client shutdown");
 
             if let Some(ev) = entry.to_event::<ReceiveSuccessEvent>() {
-                return Ok(VerifyResponse {
+                return Ok(VerifyPreimageResponse {
                     settled: true,
                     preimage: Some(ev.preimage),
                 });

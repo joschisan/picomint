@@ -14,7 +14,7 @@ use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
-use picomint_core::ln::gateway_api::GatewayPk;
+use picomint_core::ln::gateway::GatewayPk;
 use picomint_eventlog::{EventLogEntry, EventLogId, EventLogger};
 use picomint_redb::table;
 use tokio::process::{Child, Command};

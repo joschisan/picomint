@@ -120,7 +120,7 @@ pub struct WalletFeerateResponse {
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct LnGatewayRequest {
     /// Gateway iroh public key (base32-encoded).
-    pub gateway_pk: picomint_core::ln::gateway_api::GatewayPk,
+    pub gateway_pk: picomint_core::ln::gateway::GatewayPk,
 }
 
 // --- /expiry/set ---

@@ -16,7 +16,7 @@ use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription,
 use picomint_client::wallet::events::{SendFailureEvent, SendSuccessEvent};
 use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
-use picomint_core::ln::gateway_api::GatewayPk;
+use picomint_core::ln::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, ChannelInfo, FederationBalanceRequest, FederationBalanceResponse,
     FederationConfigRequest, FederationConfigResponse, FederationDisableRequest,

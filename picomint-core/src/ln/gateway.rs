@@ -1,24 +1,14 @@
-//! Wire types shared between picomint clients and the gateway daemon.
-//! All requests/responses ride the same iroh ALPN as the federation API
-//! (`picomint_rpc::ALPN`), framed by [`GatewayMethod`] / [`GatewayResponse`]
-//! enums. The dispatch happens at the method-enum layer; `GatewayMethod`
-//! and `picomint_core::module::Method` (federation API) don't byte-overlap.
+//! Gateway identity and pricing types — shared between clients and the
+//! gateway daemon. Wire methods live in [`crate::ln::methods`].
 
 use std::ops::Add;
 use std::str::FromStr;
 
-use bitcoin::hashes::sha256;
-use bitcoin::secp256k1::schnorr::Signature;
 use bitcoin::secp256k1::{PublicKey, XOnlyPublicKey};
-use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
 use crate::Amount;
-use crate::OutPoint;
-use crate::config::FederationId;
-use crate::ln::LightningInvoice;
-use crate::ln::contracts::{IncomingContract, OutgoingContract};
 
 /// A gateway's identity — its iroh public key. `Serialize`, `Deserialize`,
 /// and `FromStr` round-trip via [`picomint_base32`]; render with
@@ -53,68 +43,6 @@ impl FromStr for GatewayPk {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         picomint_base32::decode(s)
     }
-}
-
-/// Wire request — every gateway-API call is one of these. Each variant's
-/// response is its own typed struct, sent on the wire as
-/// `Result<Vec<u8>, String>` where the bytes are the response struct
-/// consensus-encoded — same envelope shape as the federation API.
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub enum GatewayMethod {
-    Info(InfoRequest),
-    SendPayment(SendPaymentRequest),
-    CreateInvoice(CreateInvoiceRequest),
-    VerifyPreimage(VerifyPreimageRequest),
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct InfoRequest {
-    pub federation: FederationId,
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct InfoResponse {
-    pub info: Option<GatewayInfo>,
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SendPaymentRequest {
-    pub federation: FederationId,
-    pub outpoint: OutPoint,
-    pub contract: OutgoingContract,
-    pub invoice: LightningInvoice,
-    pub auth: Signature,
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SendPaymentResponse {
-    pub result: Result<[u8; 32], Signature>,
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct CreateInvoiceRequest {
-    pub federation: FederationId,
-    pub contract: IncomingContract,
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct CreateInvoiceResponse {
-    pub invoice: Bolt11Invoice,
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct VerifyPreimageRequest {
-    pub hash: sha256::Hash,
-    pub wait: bool,
-}
-
-/// LUD-21 verify response — gateway-internal iroh wire shape. Recurringd
-/// translates this to [`picomint_lnurl::VerifyResponse`] at the JSON
-/// boundary it serves to external LNURL wallets.
-#[derive(Debug, Clone, Encodable, Decodable, PartialEq, Eq)]
-pub struct VerifyResponse {
-    pub settled: bool,
-    pub preimage: Option<[u8; 32]>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]

@@ -18,12 +18,12 @@ use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::ln::MINIMUM_INCOMING_CONTRACT_AMOUNT;
 use picomint_core::ln::contracts::IncomingContract;
-use picomint_core::ln::gateway_api::{
-    CreateInvoiceRequest, CreateInvoiceResponse, GatewayInfo, GatewayMethod, GatewayPk,
-    InfoRequest, InfoResponse, PaymentFee, VerifyPreimageRequest,
-    VerifyResponse as GatewayVerifyResponse,
-};
+use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::ln::lnurl::{LnurlRequest, MAX_GATEWAYS_PER_LNURL};
+use picomint_core::ln::methods::{
+    CreateInvoiceRequest, CreateInvoiceResponse, GatewayMethod, InfoRequest, InfoResponse,
+    VerifyPreimageRequest, VerifyPreimageResponse,
+};
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_lnurl::{
@@ -317,7 +317,7 @@ async fn verify(
 ) -> Result<Json<LnurlResponse<VerifyResponse>>, StatusCode> {
     let wait = query.contains_key("wait");
 
-    let response = gateway_request::<GatewayVerifyResponse>(
+    let response = gateway_request::<VerifyPreimageResponse>(
         &endpoint,
         gateway_pk,
         GatewayMethod::VerifyPreimage(VerifyPreimageRequest { hash, wait }),

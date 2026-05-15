@@ -15,7 +15,7 @@ pub const LN_REMOVE_ROUTE: &str = "/ln/remove";
 // public key, base32-encoded.
 #[derive(serde::Deserialize)]
 pub struct GatewayForm {
-    pub gateway_pk: picomint_core::ln::gateway_api::GatewayPk,
+    pub gateway_pk: picomint_core::ln::gateway::GatewayPk,
 }
 
 // Function to render the Lightning module UI section

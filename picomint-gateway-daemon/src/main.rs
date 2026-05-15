@@ -20,7 +20,7 @@ use clap::{ArgGroup, Parser};
 use lightning::types::payment::PaymentHash;
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
-use picomint_core::ln::gateway_api::PaymentFee;
+use picomint_core::ln::gateway::PaymentFee;
 use picomint_eventlog::EventLogger;
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::db::{

@@ -4,7 +4,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
-use picomint_core::ln::gateway_api::GatewayPk;
+use picomint_core::ln::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
     FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkInvoiceCreateResponse,
     LdkOnchainReceiveResponse,

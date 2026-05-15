@@ -15,9 +15,8 @@ use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, Send
 use picomint_client::ln::{LightningClientModule, SendPaymentError};
 use picomint_client::tx::{Input, TxBuilder};
 use picomint_client::{Client, OperationId};
-use picomint_core::ln::gateway_api::{
-    GatewayInfo, GatewayMethod, GatewayPk, InfoResponse, PaymentFee, SendPaymentResponse,
-};
+use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
+use picomint_core::ln::methods::{GatewayMethod, InfoResponse, SendPaymentResponse};
 use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::{Amount, OutPoint, wire};
 use picomint_encoding::Encodable as _;

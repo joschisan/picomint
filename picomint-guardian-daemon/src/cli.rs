@@ -182,7 +182,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
 
     async fn ln_gateway_list(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<Vec<picomint_core::ln::gateway_api::GatewayPk>>, CliError> {
+    ) -> Result<Json<Vec<picomint_core::ln::gateway::GatewayPk>>, CliError> {
         Ok(Json(api.server.ln.gateways_ui()))
     }
 

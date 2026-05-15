@@ -1,6 +1,6 @@
 //! Client-side iroh RPC calls to the gateway daemon. The wire types
 //! ([`GatewayMethod`] + per-method `*Request`/`*Response` structs) live in
-//! [`picomint_core::ln::gateway_api`] because the gateway daemon must
+//! [`picomint_core::ln::methods`] because the gateway daemon must
 //! agree on them. The wire envelope is `Result<Vec<u8>, String>` — same
 //! shape as the federation API: bytes are the response struct
 //! consensus-encoded.
@@ -12,9 +12,10 @@ use picomint_core::OutPoint;
 use picomint_core::config::FederationId;
 use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
-use picomint_core::ln::gateway_api::{
-    CreateInvoiceRequest, CreateInvoiceResponse, GatewayInfo, GatewayMethod, GatewayPk,
-    InfoRequest, InfoResponse, SendPaymentRequest, SendPaymentResponse,
+use picomint_core::ln::gateway::{GatewayInfo, GatewayPk};
+use picomint_core::ln::methods::{
+    CreateInvoiceRequest, CreateInvoiceResponse, GatewayMethod, InfoRequest, InfoResponse,
+    SendPaymentRequest, SendPaymentResponse,
 };
 
 pub async fn gateway_info(

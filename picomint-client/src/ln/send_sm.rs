@@ -9,7 +9,7 @@ use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::contracts::OutgoingContract;
-use picomint_core::ln::gateway_api::GatewayPk;
+use picomint_core::ln::gateway::GatewayPk;
 use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::wire;
 use picomint_core::{OutPoint, secp256k1};
