@@ -625,18 +625,15 @@ async fn resolve_client(
 ) -> Result<Arc<Client>, CliError> {
     let id = match id {
         Some(id) => id,
-        None => {
-            let mut federations = state.federation_list();
-            if federations.len() > 1 {
+        None => match state.federation_list().as_slice() {
+            [] => return Err(CliError::bad_request("No federations connected")),
+            [info] => info.federation,
+            _ => {
                 return Err(CliError::bad_request(
                     "Multiple federations connected — pass --id <FEDERATION_ID>",
                 ));
             }
-            federations
-                .pop()
-                .ok_or_else(|| CliError::bad_request("No federations connected"))?
-                .federation
-        }
+        },
     };
 
     state
