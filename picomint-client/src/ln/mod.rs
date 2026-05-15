@@ -416,7 +416,7 @@ impl LightningClientModule {
             ephemeral_kp.public_key(),
         );
 
-        let invoice = gateway::create_bolt11_invoice(
+        let invoice = gateway::receive(
             self.client_ctx.api().endpoint(),
             gateway_pk,
             self.federation,

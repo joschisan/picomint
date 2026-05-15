@@ -112,10 +112,10 @@ pub struct InfoResponse {
     pub info: Option<GatewayInfo>,
 }
 
-// ── send-payment ────────────────────────────────────────────────────────────
+// ── send ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SendPaymentRequest {
+pub struct SendRequest {
     pub federation: FederationId,
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
@@ -124,27 +124,27 @@ pub struct SendPaymentRequest {
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SendPaymentResponse {
+pub struct SendResponse {
     pub result: Result<[u8; 32], Signature>,
 }
 
-// ── create-invoice ──────────────────────────────────────────────────────────
+// ── receive ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct CreateInvoiceRequest {
+pub struct ReceiveRequest {
     pub federation: FederationId,
     pub contract: IncomingContract,
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct CreateInvoiceResponse {
+pub struct ReceiveResponse {
     pub invoice: Bolt11Invoice,
 }
 
-// ── verify-preimage ─────────────────────────────────────────────────────────
+// ── verify ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct VerifyPreimageRequest {
+pub struct VerifyRequest {
     pub hash: sha256::Hash,
     pub wait: bool,
 }
@@ -153,7 +153,7 @@ pub struct VerifyPreimageRequest {
 /// daemon translates this to [`picomint_lnurl::VerifyResponse`] at the JSON
 /// boundary it serves to external LNURL wallets.
 #[derive(Debug, Clone, Encodable, Decodable, PartialEq, Eq)]
-pub struct VerifyPreimageResponse {
+pub struct VerifyResponse {
     pub settled: bool,
     pub preimage: Option<[u8; 32]>,
 }
@@ -163,7 +163,7 @@ pub struct VerifyPreimageResponse {
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum GatewayMethod {
     Info(InfoRequest),
-    SendPayment(SendPaymentRequest),
-    CreateInvoice(CreateInvoiceRequest),
-    VerifyPreimage(VerifyPreimageRequest),
+    Send(SendRequest),
+    Receive(ReceiveRequest),
+    Verify(VerifyRequest),
 }

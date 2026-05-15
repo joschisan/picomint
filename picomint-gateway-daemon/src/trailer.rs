@@ -118,7 +118,7 @@ fn dispatch_ln_receive(
 
     let row = tx_ref
         .get(&IncomingContractTable, &operation)
-        .expect("incoming_contract row registered by create_bolt11_invoice");
+        .expect("incoming_contract row registered by AppState::receive");
 
     let ph = PaymentHash(*row.contract.commitment.payment_hash.as_byte_array());
 

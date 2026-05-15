@@ -330,7 +330,7 @@ fn handle_payment_claimable(
     }
 
     // LDK only fires PaymentClaimable for hashes we registered via
-    // `receive_for_hash` in `create_bolt11_invoice`, which commits the
+    // `receive_for_hash` in `AppState::receive`, which commits the
     // IncomingContract row before returning the invoice.
     let row = dbtx
         .get(&IncomingContractTable, &operation)

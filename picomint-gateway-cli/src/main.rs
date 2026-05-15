@@ -118,7 +118,7 @@ enum FederationCommands {
     /// Join a federation
     Join(FederationJoinRequest),
     /// Disable a federation's public client API (gateway_info,
-    /// create_bolt11_invoice). In-flight contracts continue to settle.
+    /// receive). In-flight contracts continue to settle.
     Disable(FederationDisableRequest),
     /// Re-enable a previously disabled federation
     Enable(FederationEnableRequest),

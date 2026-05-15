@@ -14,8 +14,8 @@ use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::ln::gateway::{GatewayInfo, GatewayPk};
 use picomint_core::ln::methods::{
-    CreateInvoiceRequest, CreateInvoiceResponse, GatewayMethod, InfoRequest, InfoResponse,
-    SendPaymentRequest, SendPaymentResponse,
+    GatewayMethod, InfoRequest, InfoResponse, ReceiveRequest, ReceiveResponse, SendRequest,
+    SendResponse,
 };
 
 pub async fn gateway_info(
@@ -32,16 +32,16 @@ pub async fn gateway_info(
     .map(|r| r.info)
 }
 
-pub async fn create_bolt11_invoice(
+pub async fn receive(
     endpoint: &Endpoint,
     gateway_pk: GatewayPk,
     federation: FederationId,
     contract: IncomingContract,
 ) -> anyhow::Result<Bolt11Invoice> {
-    picomint_rpc::request::<_, CreateInvoiceResponse>(
+    picomint_rpc::request::<_, ReceiveResponse>(
         endpoint,
         gateway_pk.0,
-        GatewayMethod::CreateInvoice(CreateInvoiceRequest {
+        GatewayMethod::Receive(ReceiveRequest {
             federation,
             contract,
         }),
@@ -50,7 +50,7 @@ pub async fn create_bolt11_invoice(
     .map(|r| r.invoice)
 }
 
-pub async fn send_payment(
+pub async fn send(
     endpoint: &Endpoint,
     gateway_pk: GatewayPk,
     federation: FederationId,
@@ -59,10 +59,10 @@ pub async fn send_payment(
     invoice: LightningInvoice,
     auth: Signature,
 ) -> anyhow::Result<Result<[u8; 32], Signature>> {
-    picomint_rpc::request::<_, SendPaymentResponse>(
+    picomint_rpc::request::<_, SendResponse>(
         endpoint,
         gateway_pk.0,
-        GatewayMethod::SendPayment(SendPaymentRequest {
+        GatewayMethod::Send(SendRequest {
             federation,
             outpoint,
             contract,
