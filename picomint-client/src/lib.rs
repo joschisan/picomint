@@ -47,8 +47,6 @@ macro_rules! client_table {
 pub mod api;
 /// Core [`Client`]
 mod client;
-/// Environment variables
-pub mod envs;
 /// Per-module typed state machine executor
 pub mod executor;
 /// Federation expiry-status cache + refresh.
