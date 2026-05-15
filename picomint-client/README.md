@@ -101,7 +101,7 @@ SendEvent ── TxCreateEvent
 
 ## Lightning
 
-Both `ln().send` and `ln().receive` take a caller-selected gateway as their first two arguments: a `gateway_api: String` (the HTTP endpoint) and a `gateway_info: GatewayInfo` (its routing info, including all fees and the outgoing-contract expiration delta). Callers pick a gateway via `ln().select_gateway(invoice_for_direct_swap_match)` — or, for full manual control, `ln().list_gateways()` + `ln().gateway_info(api)` — and inspect `gateway_info` to preview the cost before committing. The library still enforces `PaymentFee::SEND_FEE_LIMIT` / `LN_FEE_LIMIT` / `RECEIVE_FEE_LIMIT` and `EXPIRATION_DELTA_LIMIT` on the supplied `gateway_info` as a backstop against an abusive gateway.
+Both `ln().send` and `ln().receive` take a caller-selected gateway as their first two arguments: a `gateway_api: String` (the HTTP endpoint) and a `gateway_info: GatewayInfo` (its routing info, including all fees and the outgoing-contract expiry delta). Callers pick a gateway via `ln().select_gateway(invoice_for_direct_swap_match)` — or, for full manual control, `ln().list_gateways()` + `ln().gateway_info(api)` — and inspect `gateway_info` to preview the cost before committing. The library still enforces `PaymentFee::SEND_FEE_LIMIT` / `LN_FEE_LIMIT` / `RECEIVE_FEE_LIMIT` and `EXPIRY_DELTA_LIMIT` on the supplied `gateway_info` as a backstop against an abusive gateway.
 
 ### `ln().receive(gateway_api, gateway_info, amount, expiry, description)` — receive over Lightning
 

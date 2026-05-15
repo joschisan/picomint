@@ -614,7 +614,7 @@ async fn test_unilateral_refund(env: &TestEnv, client: &Arc<Client>) -> anyhow::
 
     wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
 
-    // Contract expiration = consensus_block_count + expiration_delta +
+    // Contract expiry = consensus_block_count + expiry_delta +
     // CONTRACT_CONFIRMATION_BUFFER = +62 blocks with the mock's settings.
     // Mine 100 so the consensus block count comfortably crosses it.
     env.mine_blocks(100);
@@ -804,9 +804,9 @@ async fn spawn_mock_gateway() -> anyhow::Result<GatewayPk> {
 async fn mock_handler(method: GatewayMethod) -> Result<Vec<u8>, String> {
     match method {
         GatewayMethod::Info(_) => {
-            // Short expiration deltas keep the unilateral-refund test
+            // Short expiry deltas keep the unilateral-refund test
             // fast — the federation's consensus block count must advance
-            // past the contract's expiration for `await_preimage` to
+            // past the contract's expiry for `await_preimage` to
             // return `None`.
             let tx_fee = PaymentFee {
                 base: picomint_core::Amount::from_sat(2),
@@ -819,7 +819,7 @@ async fn mock_handler(method: GatewayMethod) -> Result<Vec<u8>, String> {
                     send_fee: tx_fee,
                     receive_fee: tx_fee,
                     ln_fee: tx_fee,
-                    expiration_delta: 50,
+                    expiry_delta: 50,
                 }),
             }
             .consensus_encode_to_vec())

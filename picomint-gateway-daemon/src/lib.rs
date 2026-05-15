@@ -134,7 +134,7 @@ impl AppState {
             send_fee: self.send_fee,
             receive_fee: self.receive_fee,
             ln_fee: self.ln_fee,
-            expiration_delta: self.cltv_expiry_delta as u64 + 144,
+            expiry_delta: self.cltv_expiry_delta as u64 + 144,
         })
     }
 
@@ -166,9 +166,9 @@ impl AppState {
             "Invalid auth signature for the invoice data"
         );
 
-        let (contract_id, expiration) = f1_client
+        let (contract_id, expiry) = f1_client
             .api()
-            .gw_outgoing_contract_expiration(payload.outpoint)
+            .gw_outgoing_contract_expiry(payload.outpoint)
             .await
             .map_err(|_| anyhow!("The gateway cannot reach the federation"))?
             .ok_or(anyhow!("The outgoing contract has not yet been confirmed"))?;
@@ -207,8 +207,8 @@ impl AppState {
         );
 
         ensure!(
-            expiration >= self.cltv_expiry_delta as u64 + 144,
-            "Contract expiration does not leave enough room for routing"
+            expiry >= self.cltv_expiry_delta as u64 + 144,
+            "Contract expiry does not leave enough room for routing"
         );
 
         // --- Insert outgoing_contract row + log SendEvent on F1 (one tx) ---
@@ -333,7 +333,7 @@ impl AppState {
             .as_secs();
 
         ensure!(
-            payload.contract.commitment.expiration > now_secs,
+            payload.contract.commitment.expiry > now_secs,
             "The contract has already expired"
         );
 

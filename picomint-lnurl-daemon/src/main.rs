@@ -226,7 +226,7 @@ async fn create_contract_and_fetch_invoice(
         "Amount too small"
     );
 
-    let expiration = SystemTime::now()
+    let expiry = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("System time before Unix epoch")
         .as_secs()
@@ -239,7 +239,7 @@ async fn create_contract_and_fetch_invoice(
         preimage.consensus_hash(),
         Amount::from_msat(amount),
         fee,
-        expiration,
+        expiry,
         claim_pk,
         gateway_info.module_public_key,
         ephemeral_keypair.public_key(),

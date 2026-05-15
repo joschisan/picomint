@@ -26,7 +26,7 @@ pub struct ConsensusBlockCountResponse {
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct AwaitPreimageRequest {
     pub outpoint: OutPoint,
-    pub expiration: u64,
+    pub expiry: u64,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
@@ -46,15 +46,15 @@ pub struct DecryptionKeyShareResponse {
     pub share: DecryptionKeyShare,
 }
 
-// ── outgoing-contract-expiration ────────────────────────────────────────────
+// ── outgoing-contract-expiry ────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct OutgoingContractExpirationRequest {
+pub struct OutgoingContractExpiryRequest {
     pub outpoint: OutPoint,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct OutgoingContractExpirationResponse {
+pub struct OutgoingContractExpiryResponse {
     pub contract: Option<(ContractId, u64)>,
 }
 
@@ -89,7 +89,7 @@ pub enum LnMethod {
     ConsensusBlockCount(ConsensusBlockCountRequest),
     AwaitPreimage(AwaitPreimageRequest),
     DecryptionKeyShare(DecryptionKeyShareRequest),
-    OutgoingContractExpiration(OutgoingContractExpirationRequest),
+    OutgoingContractExpiry(OutgoingContractExpiryRequest),
     AwaitIncomingContracts(AwaitIncomingContractsRequest),
     Gateways(GatewaysRequest),
 }

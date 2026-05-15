@@ -129,10 +129,7 @@ impl StateMachine for SendStateMachine {
                         let p = ctx
                             .client_ctx
                             .api()
-                            .ln_await_preimage(
-                                self.common.outpoint,
-                                self.common.contract.expiration,
-                            )
+                            .ln_await_preimage(self.common.outpoint, self.common.contract.expiry)
                             .await
                             .filter(|p| self.common.contract.verify_preimage(p));
                         match p {
@@ -267,7 +264,7 @@ async fn await_preimage_sm(
     let preimage = ctx
         .client_ctx
         .api()
-        .ln_await_preimage(outpoint, contract.expiration)
+        .ln_await_preimage(outpoint, contract.expiry)
         .await?;
 
     if contract.verify_preimage(&preimage) {

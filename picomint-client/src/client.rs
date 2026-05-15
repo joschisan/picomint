@@ -183,9 +183,7 @@ impl Client {
             tg,
         });
 
-        client
-            .tg
-            .spawn(Self::refresh_expiration_status(client.clone()));
+        client.tg.spawn(Self::refresh_expiry_status(client.clone()));
 
         Ok(client)
     }
@@ -215,7 +213,7 @@ impl Client {
         crate::ln::wipe_tables(dbtx, self.federation);
         crate::gw::wipe_tables(dbtx, self.federation);
         crate::tx::wipe_tables(dbtx, self.federation);
-        crate::expiration::wipe_tables(dbtx, self.federation);
+        crate::expiry::wipe_tables(dbtx, self.federation);
     }
 
     pub fn api(&self) -> &FederationApi {

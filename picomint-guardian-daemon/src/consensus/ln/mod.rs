@@ -149,7 +149,7 @@ impl Lightning {
 
                 let pub_key = match outgoing_witness {
                     OutgoingWitness::Claim(preimage) => {
-                        if contract.expiration <= self.consensus_block_count(dbtx) {
+                        if contract.expiry <= self.consensus_block_count(dbtx) {
                             return Err(LightningInputError::Expired);
                         }
 
@@ -162,7 +162,7 @@ impl Lightning {
                         contract.claim_pk
                     }
                     OutgoingWitness::Refund => {
-                        if contract.expiration > self.consensus_block_count(dbtx) {
+                        if contract.expiry > self.consensus_block_count(dbtx) {
                             return Err(LightningInputError::NotExpired);
                         }
 
@@ -247,7 +247,7 @@ impl Lightning {
                     return Err(LightningOutputError::InvalidContract);
                 }
 
-                if contract.commitment.expiration <= self.consensus_unix_time(dbtx) {
+                if contract.commitment.expiry <= self.consensus_unix_time(dbtx) {
                     return Err(LightningOutputError::ContractExpired);
                 }
 
@@ -314,8 +314,8 @@ impl Lightning {
             LnMethod::ConsensusBlockCount(req) => handler!(consensus_block_count, self, req).await,
             LnMethod::AwaitPreimage(req) => handler_async!(await_preimage, self, req).await,
             LnMethod::DecryptionKeyShare(req) => handler!(decryption_key_share, self, req).await,
-            LnMethod::OutgoingContractExpiration(req) => {
-                handler!(outgoing_contract_expiration, self, req).await
+            LnMethod::OutgoingContractExpiry(req) => {
+                handler!(outgoing_contract_expiry, self, req).await
             }
             LnMethod::AwaitIncomingContracts(req) => {
                 handler_async!(await_incoming_contracts, self, req).await

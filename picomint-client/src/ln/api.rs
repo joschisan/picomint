@@ -17,12 +17,9 @@ impl FederationApi {
         .map(|resp| resp.count)
     }
 
-    pub async fn ln_await_preimage(&self, outpoint: OutPoint, expiration: u64) -> Option<[u8; 32]> {
+    pub async fn ln_await_preimage(&self, outpoint: OutPoint, expiry: u64) -> Option<[u8; 32]> {
         self.request_current_consensus_retry::<AwaitPreimageResponse>(Method::Ln(
-            LnMethod::AwaitPreimage(AwaitPreimageRequest {
-                outpoint,
-                expiration,
-            }),
+            LnMethod::AwaitPreimage(AwaitPreimageRequest { outpoint, expiry }),
         ))
         .await
         .preimage

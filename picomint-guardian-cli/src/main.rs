@@ -12,8 +12,8 @@ use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_guardian_cli_core::{
-    CLI_SOCKET_FILENAME, ExpirationSetRequest, LnGatewayRequest, ROUTE_AUDIT, ROUTE_CONFIG,
-    ROUTE_EXPIRATION_CLEAR, ROUTE_EXPIRATION_SET, ROUTE_EXPIRATION_STATUS, ROUTE_INVITE,
+    CLI_SOCKET_FILENAME, ExpirySetRequest, LnGatewayRequest, ROUTE_AUDIT, ROUTE_CONFIG,
+    ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
     ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
     ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
     ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
@@ -52,21 +52,21 @@ enum Commands {
     Config,
     /// Number of consensus sessions this guardian has finalized
     SessionCount,
-    /// Federation expiration announcement
+    /// Federation expiry announcement
     #[command(subcommand)]
-    Expiration(ExpirationCommands),
+    Expiry(ExpiryCommands),
     /// Module admin commands
     #[command(subcommand)]
     Module(ModuleCommands),
 }
 
 #[derive(Subcommand)]
-enum ExpirationCommands {
-    /// Announce a federation expiration
-    Set(ExpirationSetRequest),
-    /// Clear the announced expiration
+enum ExpiryCommands {
+    /// Announce a federation expiry
+    Set(ExpirySetRequest),
+    /// Clear the announced expiry
     Clear,
-    /// Show the announced expiration (this guardian's local view)
+    /// Show the announced expiry (this guardian's local view)
     Status,
 }
 
@@ -206,10 +206,10 @@ async fn main() -> Result<()> {
         Commands::Config => request(d, ROUTE_CONFIG, ()).await?,
         Commands::SessionCount => request(d, ROUTE_SESSION_COUNT, ()).await?,
 
-        Commands::Expiration(cmd) => match cmd {
-            ExpirationCommands::Set(req) => request(d, ROUTE_EXPIRATION_SET, req).await?,
-            ExpirationCommands::Clear => request(d, ROUTE_EXPIRATION_CLEAR, ()).await?,
-            ExpirationCommands::Status => request(d, ROUTE_EXPIRATION_STATUS, ()).await?,
+        Commands::Expiry(cmd) => match cmd {
+            ExpiryCommands::Set(req) => request(d, ROUTE_EXPIRY_SET, req).await?,
+            ExpiryCommands::Clear => request(d, ROUTE_EXPIRY_CLEAR, ()).await?,
+            ExpiryCommands::Status => request(d, ROUTE_EXPIRY_STATUS, ()).await?,
         },
 
         Commands::Setup(cmd) => match cmd {

@@ -5,10 +5,10 @@ use std::future::pending;
 use anyhow::{Context, anyhow};
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{Retryable, networking_backoff};
-use picomint_core::expiration::ExpirationStatus;
+use picomint_core::expiry::ExpiryStatus;
 use picomint_core::methods::{
-    CoreMethod, ExpirationStatusRequest, ExpirationStatusResponse, LivenessRequest,
-    LivenessResponse, SubmitTxRequest, SubmitTxResponse,
+    CoreMethod, ExpiryStatusRequest, ExpiryStatusResponse, LivenessRequest, LivenessResponse,
+    SubmitTxRequest, SubmitTxResponse,
 };
 use picomint_core::module::Method;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
@@ -228,13 +228,13 @@ impl FederationApi {
             .await
     }
 
-    /// Fetch the federation's announced expiration status, threshold-
+    /// Fetch the federation's announced expiry status, threshold-
     /// consensus verified. Returns `Some(_)` only if a threshold of
     /// guardians return the byte-equal value, `None` if all guardians
-    /// agree no expiration has been announced.
-    pub async fn expiration_status(&self) -> anyhow::Result<Option<ExpirationStatus>> {
-        self.request_current_consensus::<ExpirationStatusResponse>(Method::Core(
-            CoreMethod::ExpirationStatus(ExpirationStatusRequest),
+    /// agree no expiry has been announced.
+    pub async fn expiry_status(&self) -> anyhow::Result<Option<ExpiryStatus>> {
+        self.request_current_consensus::<ExpiryStatusResponse>(Method::Core(
+            CoreMethod::ExpiryStatus(ExpiryStatusRequest),
         ))
         .await
         .map(|r| r.status)

@@ -138,10 +138,10 @@ pub struct GatewayInfo {
     /// `max_total_routing_fee_msat` cap and charged to the sender on top of
     /// `send_fee`.
     pub ln_fee: PaymentFee,
-    /// Expiration delta in blocks for outgoing contracts. Sized for
+    /// Expiry delta in blocks for outgoing contracts. Sized for
     /// external LN sends (accounts for intermediate LN hops) and used for
     /// direct swaps as well.
-    pub expiration_delta: u64,
+    pub expiry_delta: u64,
 }
 
 picomint_redb::consensus_value!(GatewayInfo);

@@ -28,9 +28,9 @@ pub const ROUTE_INVITE: &str = "/invite";
 pub const ROUTE_AUDIT: &str = "/audit";
 pub const ROUTE_CONFIG: &str = "/config";
 pub const ROUTE_SESSION_COUNT: &str = "/session-count";
-pub const ROUTE_EXPIRATION_SET: &str = "/expiration/set";
-pub const ROUTE_EXPIRATION_CLEAR: &str = "/expiration/clear";
-pub const ROUTE_EXPIRATION_STATUS: &str = "/expiration/status";
+pub const ROUTE_EXPIRY_SET: &str = "/expiry/set";
+pub const ROUTE_EXPIRY_CLEAR: &str = "/expiry/clear";
+pub const ROUTE_EXPIRY_STATUS: &str = "/expiry/status";
 
 // Module routes
 pub const ROUTE_MODULE_WALLET_TOTAL_VALUE: &str = "/module/wallet/total-value";
@@ -123,11 +123,11 @@ pub struct LnGatewayRequest {
     pub gateway_pk: picomint_core::ln::gateway_api::GatewayPk,
 }
 
-// --- /expiration/set ---
+// --- /expiry/set ---
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
-pub struct ExpirationSetRequest {
-    /// Expiration date as a unix timestamp in seconds (midnight UTC).
+pub struct ExpirySetRequest {
+    /// Expiry date as a unix timestamp in seconds (midnight UTC).
     #[arg(long)]
     pub timestamp: u64,
     /// Optional successor-federation invite code (base32-encoded).

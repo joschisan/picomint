@@ -1,7 +1,7 @@
 pub mod audit;
 pub mod bitcoin;
 pub mod config;
-pub mod expiration;
+pub mod expiry;
 pub mod general;
 pub mod invite;
 pub mod modules;
@@ -21,8 +21,8 @@ use crate::ui::dashboard::modules::{ln, mint, wallet};
 use crate::ui::{ROOT_ROUTE, dashboard_layout};
 
 pub const BACKUP_CONFIG_ROUTE: &str = "/backup-config";
-pub const SET_EXPIRATION_ROUTE: &str = "/expiration/set";
-pub const CLEAR_EXPIRATION_ROUTE: &str = "/expiration/clear";
+pub const SET_EXPIRY_ROUTE: &str = "/expiry/set";
+pub const CLEAR_EXPIRY_ROUTE: &str = "/expiry/clear";
 
 async fn backup_config(State(state): State<Arc<ConsensusApi>>) -> impl IntoResponse {
     let body = serde_json::to_vec_pretty(&state.cfg).expect("ServerConfig is serializable");
@@ -59,7 +59,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
     let invite_code = picomint_base32::encode(&api.cfg.get_invite_code());
     let audit_summary = api.federation_audit().await;
     let bitcoin_rpc_status = api.bitcoin_rpc_connection.status();
-    let expiration_status = api.expiration_status_ui();
+    let expiry_status = api.expiry_status_ui();
 
     let content = html! {
         div class="row gy-4" {
@@ -88,7 +88,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
             }
 
             div class="col-lg-6" {
-                (expiration::render(expiration_status.as_ref()))
+                (expiry::render(expiry_status.as_ref()))
             }
         }
 
@@ -120,8 +120,8 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
     Router::new()
         .route(ROOT_ROUTE, get(dashboard_view))
         .route(BACKUP_CONFIG_ROUTE, get(backup_config))
-        .route(SET_EXPIRATION_ROUTE, post(expiration::post_set))
-        .route(CLEAR_EXPIRATION_ROUTE, post(expiration::post_clear))
+        .route(SET_EXPIRY_ROUTE, post(expiry::post_set))
+        .route(CLEAR_EXPIRY_ROUTE, post(expiry::post_clear))
         .route(ln::LN_ADD_ROUTE, post(ln::post_add))
         .route(ln::LN_REMOVE_ROUTE, post(ln::post_remove))
         .with_static_routes()

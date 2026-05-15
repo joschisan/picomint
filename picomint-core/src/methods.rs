@@ -7,7 +7,7 @@
 use picomint_encoding::{Decodable, Encodable};
 
 use crate::config::ConsensusConfig;
-use crate::expiration::ExpirationStatus;
+use crate::expiry::ExpiryStatus;
 use crate::tx::{Transaction, TxError};
 
 // ── config ──────────────────────────────────────────────────────────────────
@@ -40,14 +40,14 @@ pub struct LivenessRequest;
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct LivenessResponse;
 
-// ── expiration-status ───────────────────────────────────────────────────────
+// ── expiry-status ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct ExpirationStatusRequest;
+pub struct ExpiryStatusRequest;
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct ExpirationStatusResponse {
-    pub status: Option<ExpirationStatus>,
+pub struct ExpiryStatusResponse {
+    pub status: Option<ExpiryStatus>,
 }
 
 // ── dispatch enum ───────────────────────────────────────────────────────────
@@ -57,5 +57,5 @@ pub enum CoreMethod {
     Config(ConfigRequest),
     SubmitTx(SubmitTxRequest),
     Liveness(LivenessRequest),
-    ExpirationStatus(ExpirationStatusRequest),
+    ExpiryStatus(ExpiryStatusRequest),
 }
