@@ -20,7 +20,7 @@ use clap::{ArgGroup, Parser};
 use lightning::types::payment::PaymentHash;
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
-use picomint_core::ln::gateway_api::PaymentFee;
+use picomint_core::ln::gateway::PaymentFee;
 use picomint_eventlog::EventLogger;
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::db::{
@@ -213,15 +213,15 @@ fn main() -> anyhow::Result<()> {
         data_dir: opts.data_dir.clone(),
         network: opts.network,
         send_fee: PaymentFee {
-            base: Amount::from_msats(opts.send_fee_base_msat),
+            base: Amount::from_msat(opts.send_fee_base_msat),
             ppm: opts.send_fee_ppm,
         },
         receive_fee: PaymentFee {
-            base: Amount::from_msats(opts.receive_fee_base_msat),
+            base: Amount::from_msat(opts.receive_fee_base_msat),
             ppm: opts.receive_fee_ppm,
         },
         ln_fee: PaymentFee {
-            base: Amount::from_msats(opts.ln_fee_base_msat),
+            base: Amount::from_msat(opts.ln_fee_base_msat),
             ppm: opts.ln_fee_ppm,
         },
         invoice_expiry_secs: opts.invoice_expiry_secs,
@@ -298,7 +298,7 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
             &dbtx,
             payment_hash.0,
             preimage.0,
-            Amount::from_msats(fee_paid_msat.unwrap_or(0)),
+            Amount::from_msat(fee_paid_msat.unwrap_or(0)),
         ),
         ldk_node::Event::PaymentFailed {
             payment_hash: Some(ph),
@@ -336,9 +336,9 @@ fn handle_payment_claimable(
         .get(&IncomingContractTable, &operation)
         .expect("PaymentClaimable for an unregistered payment_hash");
 
-    if row.contract.commitment.amount.msats != amount_msat {
+    if row.contract.commitment.amount.msat != amount_msat {
         warn!(
-            expected = row.contract.commitment.amount.msats,
+            expected = row.contract.commitment.amount.msat,
             got = amount_msat,
             "Incoming HTLC amount mismatch",
         );

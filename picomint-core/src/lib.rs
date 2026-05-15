@@ -27,8 +27,8 @@ pub mod backoff;
 pub mod config;
 /// Fundamental types
 pub mod core;
-/// Guardian-announced federation expiration date.
-pub mod expiration;
+/// Guardian-announced federation expiry date.
+pub mod expiry;
 /// Federation invite code
 pub mod invite;
 /// Lightning module wire types / helpers (shared between client and server).

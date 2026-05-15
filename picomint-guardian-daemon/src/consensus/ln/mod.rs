@@ -11,7 +11,7 @@ use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::ln::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
-use picomint_core::ln::gateway_api::GatewayPk;
+use picomint_core::ln::gateway::GatewayPk;
 use picomint_core::ln::methods::LnMethod;
 use picomint_core::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
@@ -46,8 +46,8 @@ pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<LightningC
                 .peer_ids()
                 .map(|peer| (peer, PublicKeyShare(eval_poly_g1(&polynomial, &peer))))
                 .collect(),
-            input_fee: Amount::from_sats(1),
-            output_fee: Amount::from_sats(1),
+            input_fee: Amount::from_sat(1),
+            output_fee: Amount::from_sat(1),
         },
         private: LightningConfigPrivate {
             sk: SecretKeyShare(sks),
@@ -149,7 +149,7 @@ impl Lightning {
 
                 let pub_key = match outgoing_witness {
                     OutgoingWitness::Claim(preimage) => {
-                        if contract.expiration <= self.consensus_block_count(dbtx) {
+                        if contract.expiry <= self.consensus_block_count(dbtx) {
                             return Err(LightningInputError::Expired);
                         }
 
@@ -162,7 +162,7 @@ impl Lightning {
                         contract.claim_pk
                     }
                     OutgoingWitness::Refund => {
-                        if contract.expiration > self.consensus_block_count(dbtx) {
+                        if contract.expiry > self.consensus_block_count(dbtx) {
                             return Err(LightningInputError::NotExpired);
                         }
 
@@ -247,7 +247,7 @@ impl Lightning {
                     return Err(LightningOutputError::InvalidContract);
                 }
 
-                if contract.commitment.expiration <= self.consensus_unix_time(dbtx) {
+                if contract.commitment.expiry <= self.consensus_unix_time(dbtx) {
                     return Err(LightningOutputError::ContractExpired);
                 }
 
@@ -295,13 +295,13 @@ impl Lightning {
     /// federation as implicit revenue).
     pub async fn audit(&self, dbtx: &WriteTx) -> i64 {
         let outgoing: i64 = dbtx.iter(&OutgoingContractTable, |r| {
-            r.map(|(_, contract)| -((contract.amount.msats + contract.fee.msats) as i64))
+            r.map(|(_, contract)| -((contract.amount.msat + contract.fee.msat) as i64))
                 .sum()
         });
 
         let incoming: i64 = dbtx.iter(&IncomingContractTable, |r| {
             r.map(|(_, contract)| {
-                -((contract.commitment.amount.msats - contract.commitment.fee.msats) as i64)
+                -((contract.commitment.amount.msat - contract.commitment.fee.msat) as i64)
             })
             .sum()
         });
@@ -314,8 +314,8 @@ impl Lightning {
             LnMethod::ConsensusBlockCount(req) => handler!(consensus_block_count, self, req).await,
             LnMethod::AwaitPreimage(req) => handler_async!(await_preimage, self, req).await,
             LnMethod::DecryptionKeyShare(req) => handler!(decryption_key_share, self, req).await,
-            LnMethod::OutgoingContractExpiration(req) => {
-                handler!(outgoing_contract_expiration, self, req).await
+            LnMethod::OutgoingContractExpiry(req) => {
+                handler!(outgoing_contract_expiry, self, req).await
             }
             LnMethod::AwaitIncomingContracts(req) => {
                 handler_async!(await_incoming_contracts, self, req).await

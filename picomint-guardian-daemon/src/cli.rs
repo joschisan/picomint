@@ -85,15 +85,15 @@ pub async fn run_cli(data_dir: &Path, state: CliState) {
 pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     use axum::Json;
     use axum::routing::post;
-    use picomint_core::expiration::ExpirationStatus;
+    use picomint_core::expiry::ExpiryStatus;
     use picomint_guardian_cli_core::{
-        AuditResponse, ExpirationSetRequest, InviteResponse, LnGatewayRequest, ROUTE_AUDIT,
-        ROUTE_CONFIG, ROUTE_EXPIRATION_CLEAR, ROUTE_EXPIRATION_SET, ROUTE_EXPIRATION_STATUS,
-        ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST,
-        ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_WALLET_BLOCK_COUNT,
-        ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
-        ROUTE_MODULE_WALLET_TOTAL_VALUE, ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT,
-        WalletBlockCountResponse, WalletFeerateResponse, WalletTotalValueResponse,
+        AuditResponse, ExpirySetRequest, InviteResponse, LnGatewayRequest, ROUTE_AUDIT,
+        ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
+        ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
+        ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
+        ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
+        ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT, WalletBlockCountResponse,
+        WalletFeerateResponse, WalletTotalValueResponse,
     };
 
     async fn config(
@@ -128,7 +128,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<WalletTotalValueResponse>, CliError> {
         Ok(Json(WalletTotalValueResponse {
-            total_value_sats: api
+            total_value_sat: api
                 .server
                 .wallet
                 .federation_wallet_ui()
@@ -148,7 +148,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<WalletFeerateResponse>, CliError> {
         Ok(Json(WalletFeerateResponse {
-            sats_per_vbyte: api.server.wallet.consensus_feerate_ui(),
+            sat_per_vbyte: api.server.wallet.consensus_feerate_ui(),
         }))
     }
 
@@ -182,32 +182,32 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
 
     async fn ln_gateway_list(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<Vec<picomint_core::ln::gateway_api::GatewayPk>>, CliError> {
+    ) -> Result<Json<Vec<picomint_core::ln::gateway::GatewayPk>>, CliError> {
         Ok(Json(api.server.ln.gateways_ui()))
     }
 
-    async fn expiration_set(
+    async fn expiry_set(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-        Json(payload): Json<ExpirationSetRequest>,
+        Json(payload): Json<ExpirySetRequest>,
     ) -> Result<Json<()>, CliError> {
-        api.set_expiration_status_ui(Some(ExpirationStatus {
+        api.set_expiry_status_ui(Some(ExpiryStatus {
             timestamp: payload.timestamp,
             successor: payload.successor,
         }));
         Ok(Json(()))
     }
 
-    async fn expiration_clear(
+    async fn expiry_clear(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<()>, CliError> {
-        api.set_expiration_status_ui(None);
+        api.set_expiry_status_ui(None);
         Ok(Json(()))
     }
 
-    async fn expiration_status(
+    async fn expiry_status(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<Option<ExpirationStatus>>, CliError> {
-        Ok(Json(api.expiration_status_ui()))
+    ) -> Result<Json<Option<ExpiryStatus>>, CliError> {
+        Ok(Json(api.expiry_status_ui()))
     }
 
     Router::new()
@@ -226,9 +226,9 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         .route(ROUTE_MODULE_LN_GATEWAY_ADD, post(ln_gateway_add))
         .route(ROUTE_MODULE_LN_GATEWAY_REMOVE, post(ln_gateway_remove))
         .route(ROUTE_MODULE_LN_GATEWAY_LIST, post(ln_gateway_list))
-        .route(ROUTE_EXPIRATION_SET, post(expiration_set))
-        .route(ROUTE_EXPIRATION_CLEAR, post(expiration_clear))
-        .route(ROUTE_EXPIRATION_STATUS, post(expiration_status))
+        .route(ROUTE_EXPIRY_SET, post(expiry_set))
+        .route(ROUTE_EXPIRY_CLEAR, post(expiry_clear))
+        .route(ROUTE_EXPIRY_STATUS, post(expiry_status))
         .with_state(api)
 }
 

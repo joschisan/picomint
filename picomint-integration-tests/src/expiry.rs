@@ -1,17 +1,17 @@
-//! Integration test for the federation expiration announcement: each
+//! Integration test for the federation expiry announcement: each
 //! guardian sets the same `(date, successor)` pair via the admin CLI; a
 //! fresh client then fetches the announcement via threshold consensus
-//! and surfaces it through `Client::expiration_status`.
+//! and surfaces it through `Client::expiry_status`.
 
 use anyhow::ensure;
-use picomint_core::expiration::ExpirationStatus;
+use picomint_core::expiry::ExpiryStatus;
 use tracing::info;
 
 use crate::cli;
 use crate::env::{NUM_GUARDIANS, TestEnv};
 
 pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
-    info!("expiration: announce + client refresh");
+    info!("expiry: announce + client refresh");
 
     // Use the federation's own invite code as the successor — this is just
     // a value the guardians have to agree on byte-for-byte. A real
@@ -19,18 +19,18 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     // successor field exercised end-to-end.
     let timestamp = 4_102_444_800; // 2100-01-01 UTC
 
-    info!("Setting expiration on all {NUM_GUARDIANS} guardians");
-    let expected = ExpirationStatus {
+    info!("Setting expiry on all {NUM_GUARDIANS} guardians");
+    let expected = ExpiryStatus {
         timestamp,
         successor: Some(env.invite.clone()),
     };
     for peer in 0..NUM_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        cli::guardian_expiration_set(&data_dir, timestamp, Some(&env.invite))?;
-        let stored = cli::guardian_expiration_status(&data_dir)?;
+        cli::guardian_expiry_set(&data_dir, timestamp, Some(&env.invite))?;
+        let stored = cli::guardian_expiry_status(&data_dir)?;
         ensure!(
             stored.as_ref() == Some(&expected),
-            "guardian {peer} stored expiration mismatch: got {stored:?}"
+            "guardian {peer} stored expiry mismatch: got {stored:?}"
         );
     }
 
@@ -39,34 +39,34 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
 
     // The startup refresh task races with us; force a sync read so the
     // cache is settled before we assert.
-    picomint_client::Client::refresh_expiration_status(client.clone())
+    picomint_client::Client::refresh_expiry_status(client.clone())
         .await
-        .map_err(|e| anyhow::anyhow!("refresh_expiration_status: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("refresh_expiry_status: {e}"))?;
 
     let cached = client
-        .expiration_status()
+        .expiry_status()
         .ok_or_else(|| anyhow::anyhow!("expected client cache to hold the announcement"))?;
 
     ensure!(
         cached == expected,
-        "client expiration mismatch: got {cached:?}, want {expected:?}"
+        "client expiry mismatch: got {cached:?}, want {expected:?}"
     );
 
-    info!("Clearing expiration on all guardians");
+    info!("Clearing expiry on all guardians");
     for peer in 0..NUM_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        cli::guardian_expiration_clear(&data_dir)?;
+        cli::guardian_expiry_clear(&data_dir)?;
     }
 
-    picomint_client::Client::refresh_expiration_status(client.clone())
+    picomint_client::Client::refresh_expiry_status(client.clone())
         .await
-        .map_err(|e| anyhow::anyhow!("refresh_expiration_status (clear): {e}"))?;
+        .map_err(|e| anyhow::anyhow!("refresh_expiry_status (clear): {e}"))?;
 
     ensure!(
-        client.expiration_status().is_none(),
+        client.expiry_status().is_none(),
         "client cache should be empty after a federation-wide clear"
     );
 
-    info!("expiration: passed");
+    info!("expiry: passed");
     Ok(())
 }

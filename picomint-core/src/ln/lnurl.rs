@@ -2,7 +2,7 @@ use bitcoin::secp256k1;
 use picomint_encoding::{Decodable, Encodable};
 
 use crate::config::FederationId;
-use crate::ln::gateway_api::GatewayPk;
+use crate::ln::gateway::GatewayPk;
 use serde::{Deserialize, Serialize};
 use tpe::AggregatePublicKey;
 

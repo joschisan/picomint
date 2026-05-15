@@ -706,7 +706,7 @@ impl MintClientModule {
     }
 
     /// Send `ECash` for the given amount. The
-    /// amount will be rounded up to a multiple of 512 msats which is the
+    /// amount will be rounded up to a multiple of 512 msat which is the
     /// smallest denomination used throughout the client. If the rounded
     /// amount cannot be covered with the ecash notes in the client's
     /// database the client will create a transaction to reissue the
@@ -1047,7 +1047,7 @@ pub enum ReceiveECashError {
 }
 
 fn round_to_multiple(amount: Amount, min_denomiation: Amount) -> Amount {
-    Amount::from_msats(amount.msats.next_multiple_of(min_denomiation.msats))
+    Amount::from_msat(amount.msat.next_multiple_of(min_denomiation.msat))
 }
 
 fn represent_amount(mut remaining_amount: Amount) -> Vec<Denomination> {

@@ -1,5 +1,5 @@
 use picomint_bft::{Cosig, Round, Unit};
-use picomint_core::expiration;
+use picomint_core::expiry;
 use picomint_core::session;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::{PeerId, TransactionId};
@@ -46,12 +46,12 @@ table!(
     "signed-session-outcome",
 );
 
-// This guardian's locally-announced expiration status. Mutated by the admin
-// dashboard; read by [`crate::consensus::rpc::expiration_status`] and
+// This guardian's locally-announced expiry status. Mutated by the admin
+// dashboard; read by [`crate::consensus::rpc::expiry_status`] and
 // returned over the wire so a threshold of guardians must agree on the
 // byte-equal value before clients trust it.
 table!(
-    ExpirationStatusTable,
-    () => expiration::ExpirationStatus,
-    "expiration-status",
+    ExpiryStatusTable,
+    () => expiry::ExpiryStatus,
+    "expiry-status",
 );

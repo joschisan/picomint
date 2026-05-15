@@ -131,7 +131,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     for i in 0..10 {
         info!("Sending ecash payment {} of 10", i + 1);
 
-        let ecash = client_send.mint().send(Amount::from_sats(1_000)).await?;
+        let ecash = client_send.mint().send(Amount::from_sat(1_000)).await?;
 
         let Some((_, MintEvent::Send(_))) = send_events.next().await else {
             panic!("Expected Send event");
@@ -165,7 +165,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     info!("mint: double_spend_is_rejected");
 
-    let ecash = client_send.mint().send(Amount::from_sats(1_000)).await?;
+    let ecash = client_send.mint().send(Amount::from_sat(1_000)).await?;
 
     let Some((_, MintEvent::Send(_))) = send_events.next().await else {
         panic!("Expected Send event");
@@ -238,7 +238,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
         let loss = expected.checked_sub(bal).expect("bal <= expected");
         ensure!(
-            loss < Amount::from_sats(50),
+            loss < Amount::from_sat(50),
             "recovery lost more than expected to fees: {expected} -> {bal} (loss {loss})"
         );
 

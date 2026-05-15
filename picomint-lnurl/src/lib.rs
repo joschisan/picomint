@@ -111,14 +111,14 @@ pub async fn get_invoice(
 ) -> Result<InvoiceResponse, String> {
     if amount_msat < response.min_sendable {
         return Err(format!(
-            "Minimum amount is {} sats",
+            "Minimum amount is {} sat",
             response.min_sendable / 1000
         ));
     }
 
     if amount_msat > response.max_sendable {
         return Err(format!(
-            "Maximum amount is {} sats",
+            "Maximum amount is {} sat",
             response.max_sendable / 1000
         ));
     }

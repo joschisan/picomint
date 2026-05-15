@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
-use picomint_core::expiration::ExpirationStatus;
+use picomint_core::expiry::ExpiryStatus;
 use picomint_core::methods::CoreMethod;
 use picomint_core::module::audit::AuditSummary;
 use picomint_core::tx::{ConsensusItem, Transaction, TxError};
@@ -15,7 +15,7 @@ use tracing::warn;
 
 use crate::config::ServerConfig;
 use crate::consensus::db::{
-    AcceptedItemTable, AcceptedTxTable, ExpirationStatusTable, SignedSessionOutcomeTable,
+    AcceptedItemTable, AcceptedTxTable, ExpiryStatusTable, SignedSessionOutcomeTable,
 };
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::server::{Server, process_tx_with_server};
@@ -108,25 +108,25 @@ impl ConsensusApi {
         self.server.audit(&dbtx).await
     }
 
-    /// Read this guardian's announced expiration status from the local
-    /// `ExpirationStatus` table. Returned over the wire by the
-    /// `ExpirationStatus` RPC and surfaced on the dashboard.
+    /// Read this guardian's announced expiry status from the local
+    /// `ExpiryStatus` table. Returned over the wire by the
+    /// `ExpiryStatus` RPC and surfaced on the dashboard.
     #[must_use]
-    pub fn expiration_status_ui(&self) -> Option<ExpirationStatus> {
-        self.db.begin_read().get(&ExpirationStatusTable, &())
+    pub fn expiry_status_ui(&self) -> Option<ExpiryStatus> {
+        self.db.begin_read().get(&ExpiryStatusTable, &())
     }
 
-    /// Set or clear this guardian's announced expiration status. All
+    /// Set or clear this guardian's announced expiry status. All
     /// guardians must announce byte-equal values for clients to accept the
     /// announcement (threshold-consensus read).
-    pub fn set_expiration_status_ui(&self, status: Option<ExpirationStatus>) {
+    pub fn set_expiry_status_ui(&self, status: Option<ExpiryStatus>) {
         let dbtx = self.db.begin_write();
         match status {
             Some(s) => {
-                dbtx.insert(&ExpirationStatusTable, &(), &s);
+                dbtx.insert(&ExpiryStatusTable, &(), &s);
             }
             None => {
-                dbtx.remove(&ExpirationStatusTable, &());
+                dbtx.remove(&ExpiryStatusTable, &());
             }
         }
         dbtx.commit();
@@ -139,7 +139,7 @@ impl ConsensusApi {
             CoreMethod::SubmitTx(req) => handler_async!(submit_tx, self, req).await,
             CoreMethod::Config(req) => handler!(config, self, req).await,
             CoreMethod::Liveness(req) => handler!(liveness, self, req).await,
-            CoreMethod::ExpirationStatus(req) => handler!(expiration_status, self, req).await,
+            CoreMethod::ExpiryStatus(req) => handler!(expiry_status, self, req).await,
         }
     }
 }

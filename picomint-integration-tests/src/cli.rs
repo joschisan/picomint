@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use picomint_core::expiration::ExpirationStatus;
+use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
-use picomint_core::ln::gateway_api::GatewayPk;
+use picomint_core::ln::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
     FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkInvoiceCreateResponse,
     LdkOnchainReceiveResponse,
@@ -90,8 +90,8 @@ pub fn gateway_ldk_channel_open(
     gw_data_dir: &Path,
     node_id: &str,
     ln_addr: &str,
-    channel_sats: u64,
-    push_sats: u64,
+    channel_sat: u64,
+    push_sat: u64,
 ) -> Result<Value> {
     gateway_cmd(gw_data_dir)
         .arg("ldk")
@@ -99,9 +99,9 @@ pub fn gateway_ldk_channel_open(
         .arg("open")
         .arg(node_id)
         .arg(ln_addr)
-        .arg(channel_sats.to_string())
-        .arg("--push-amount-sats")
-        .arg(push_sats.to_string())
+        .arg(channel_sat.to_string())
+        .arg("--push-amount-sat")
+        .arg(push_sat.to_string())
         .run_cli::<Value>()
 }
 
@@ -217,13 +217,13 @@ pub fn guardian_ln_gateway_remove(data_dir: &Path, gateway_pk: &GatewayPk) -> Re
         .run_cli::<bool>()
 }
 
-pub fn guardian_expiration_set(
+pub fn guardian_expiry_set(
     data_dir: &Path,
     timestamp: u64,
     successor: Option<&InviteCode>,
 ) -> Result<Value> {
     let mut cmd = guardian_cmd(data_dir);
-    cmd.arg("expiration")
+    cmd.arg("expiry")
         .arg("set")
         .arg("--timestamp")
         .arg(timestamp.to_string());
@@ -233,16 +233,16 @@ pub fn guardian_expiration_set(
     cmd.run_cli::<Value>()
 }
 
-pub fn guardian_expiration_clear(data_dir: &Path) -> Result<Value> {
+pub fn guardian_expiry_clear(data_dir: &Path) -> Result<Value> {
     guardian_cmd(data_dir)
-        .arg("expiration")
+        .arg("expiry")
         .arg("clear")
         .run_cli::<Value>()
 }
 
-pub fn guardian_expiration_status(data_dir: &Path) -> Result<Option<ExpirationStatus>> {
+pub fn guardian_expiry_status(data_dir: &Path) -> Result<Option<ExpiryStatus>> {
     guardian_cmd(data_dir)
-        .arg("expiration")
+        .arg("expiry")
         .arg("status")
-        .run_cli::<Option<ExpirationStatus>>()
+        .run_cli::<Option<ExpiryStatus>>()
 }

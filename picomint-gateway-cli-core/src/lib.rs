@@ -56,7 +56,7 @@ pub struct InfoResponse {
     pub lightning_pk: secp256k1::PublicKey,
     /// Iroh public key the gateway accepts on for the picomint API.
     /// Federation guardians register this via `module ln gateway add`.
-    pub gateway_pk: picomint_core::ln::gateway_api::GatewayPk,
+    pub gateway_pk: picomint_core::ln::gateway::GatewayPk,
     pub alias: String,
     pub network: String,
     pub block_height: u64,
@@ -75,7 +75,7 @@ pub struct MnemonicResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LdkBalancesResponse {
     /// The total balance in the on-chain wallet
-    pub total_onchain_balance_sats: u64,
+    pub total_onchain_balance_sat: u64,
     /// The total inbound capacity across all channels
     pub total_inbound_capacity_msat: u64,
     /// The total outbound capacity across all channels
@@ -88,9 +88,9 @@ pub struct LdkBalancesResponse {
 pub struct LdkChannelOpenRequest {
     pub pubkey: secp256k1::PublicKey,
     pub host: String,
-    pub channel_size_sats: u64,
+    pub channel_size_sat: u64,
     #[arg(long, default_value_t = 0)]
-    pub push_amount_sats: u64,
+    pub push_amount_sat: u64,
 }
 
 // --- /ldk/channel/close ---
@@ -102,7 +102,7 @@ pub struct LdkChannelCloseRequest {
     #[serde(default)]
     pub force: bool,
     #[arg(long, required_unless_present = "force")]
-    pub sats_per_vbyte: Option<u64>,
+    pub sat_per_vbyte: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -122,9 +122,9 @@ pub struct ChannelInfo {
     pub remote_pubkey: secp256k1::PublicKey,
     pub remote_alias: Option<String>,
     pub remote_address: Option<String>,
-    pub channel_size_sats: u64,
-    pub outbound_liquidity_sats: u64,
-    pub inbound_liquidity_sats: u64,
+    pub channel_size_sat: u64,
+    pub outbound_liquidity_sat: u64,
+    pub inbound_liquidity_sat: u64,
     pub is_usable: bool,
     pub is_outbound: bool,
     pub funding_txid: Option<bitcoin::Txid>,
@@ -144,7 +144,7 @@ pub struct LdkOnchainSendRequest {
     pub address: bitcoin::Address<NetworkUnchecked>,
     pub amount: bitcoin::Amount,
     #[arg(long)]
-    pub sats_per_vbyte: u64,
+    pub sat_per_vbyte: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -156,7 +156,7 @@ pub struct LdkOnchainSendResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkInvoiceCreateRequest {
-    pub amount_msats: u64,
+    pub amount_msat: u64,
     #[arg(long)]
     pub expiry_secs: Option<u32>,
     #[arg(long)]

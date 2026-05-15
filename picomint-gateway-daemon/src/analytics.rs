@@ -268,9 +268,9 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
                     operation,
                     ts,
                     format!("{}:{}", e.outpoint.txid, e.outpoint.out_idx),
-                    e.amount.msats as i64,
-                    e.ln_fee.msats as i64,
-                    e.fee.msats as i64,
+                    e.amount.msat as i64,
+                    e.ln_fee.msat as i64,
+                    e.fee.msat as i64,
                 ],
             )?;
         } else if let Some(e) = entry.to_event::<SendSuccessEvent>() {
@@ -284,7 +284,7 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
                     ts,
                     hex::encode(e.preimage),
                     e.txid.to_string(),
-                    e.ln_fee.msats as i64,
+                    e.ln_fee.msat as i64,
                 ],
             )?;
         } else if let Some(e) = entry.to_event::<SendCancelEvent>() {
@@ -303,8 +303,8 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
                     operation,
                     ts,
                     e.txid.to_string(),
-                    e.amount.msats as i64,
-                    e.fee.msats as i64,
+                    e.amount.msat as i64,
+                    e.fee.msat as i64,
                 ],
             )?;
         } else if let Some(e) = entry.to_event::<ReceiveSuccessEvent>() {
@@ -335,8 +335,8 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
                     operation,
                     ts,
                     e.txid.to_string(),
-                    e.remint.msats as i64,
-                    e.fee.msats as i64,
+                    e.remint.msat as i64,
+                    e.fee.msat as i64,
                 ],
             )?;
         }

@@ -23,7 +23,7 @@ use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
-use picomint_core::ln::gateway_api::{GatewayInfo, GatewayPk, PaymentFee};
+use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::ln::lnurl::MAX_GATEWAYS_PER_LNURL;
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_core::ln::{
@@ -46,7 +46,7 @@ use self::send_sm::{SendSMCommon, SendSMState, SendStateMachine, SendStateMachin
 /// Maximum total contract lock, in blocks, the client is willing to accept
 /// from a gateway. Backstop against an abusive gateway tying funds up before
 /// the unilateral refund path opens.
-const EXPIRATION_DELTA_LIMIT: u64 = 1000;
+const EXPIRY_DELTA_LIMIT: u64 = 1000;
 
 /// A two hour buffer in case either the client or gateway go offline
 const CONTRACT_CONFIRMATION_BUFFER: u64 = 12;
@@ -215,7 +215,7 @@ impl LightningClientModule {
     /// [`Self::select_gateway`] and inspects `gateway_info` to preview the
     /// cost before passing both back here. The library still enforces
     /// `PaymentFee::SEND_FEE_LIMIT` / `LN_FEE_LIMIT` and
-    /// `EXPIRATION_DELTA_LIMIT` on the supplied `gateway_info` as a
+    /// `EXPIRY_DELTA_LIMIT` on the supplied `gateway_info` as a
     /// backstop against an abusive gateway.
     #[allow(clippy::too_many_lines)]
     pub async fn send(
@@ -255,8 +255,8 @@ impl LightningClientModule {
             return Err(SendPaymentError::GatewayFeeExceedsLimit);
         }
 
-        if EXPIRATION_DELTA_LIMIT < gateway_info.expiration_delta {
-            return Err(SendPaymentError::GatewayExpirationExceedsLimit);
+        if EXPIRY_DELTA_LIMIT < gateway_info.expiry_delta {
+            return Err(SendPaymentError::GatewayExpiryExceedsLimit);
         }
 
         let ln_fee = if is_direct_swap {
@@ -266,7 +266,7 @@ impl LightningClientModule {
         };
 
         let send_fee = gateway_info.send_fee.fee(amount);
-        let amount = Amount::from_msats(amount);
+        let amount = Amount::from_msat(amount);
         let fee = ln_fee + send_fee;
 
         let consensus_block_count = self
@@ -280,8 +280,8 @@ impl LightningClientModule {
             payment_hash: *invoice.payment_hash(),
             amount,
             fee,
-            expiration: consensus_block_count
-                + gateway_info.expiration_delta
+            expiry: consensus_block_count
+                + gateway_info.expiry_delta
                 + CONTRACT_CONFIRMATION_BUFFER,
             claim_pk: gateway_info.module_public_key,
             refund_pk: refund_keypair.x_only_public_key().0,
@@ -382,7 +382,7 @@ impl LightningClientModule {
             return Err(ReceiveError::GatewayFeeExceedsLimit);
         }
 
-        let fee = gateway_info.receive_fee.fee(amount.msats);
+        let fee = gateway_info.receive_fee.fee(amount.msat);
 
         if amount
             .checked_sub(fee)
@@ -391,7 +391,7 @@ impl LightningClientModule {
             return Err(ReceiveError::AmountTooSmall);
         }
 
-        let expiration = SystemTime::now()
+        let expiry = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("System time before Unix epoch")
             .as_secs()
@@ -410,7 +410,7 @@ impl LightningClientModule {
             preimage.consensus_hash(),
             amount,
             fee,
-            expiration,
+            expiry,
             claim_pk,
             gateway_info.module_public_key,
             ephemeral_kp.public_key(),
@@ -429,7 +429,7 @@ impl LightningClientModule {
             return Err(ReceiveError::InvalidInvoice);
         }
 
-        if invoice.amount_milli_satoshis() != Some(amount.msats) {
+        if invoice.amount_milli_satoshis() != Some(amount.msat) {
             return Err(ReceiveError::IncorrectInvoiceAmount);
         }
 
@@ -588,8 +588,8 @@ pub enum SendPaymentError {
     InvoiceAlreadyAttempted(OperationId),
     #[error("Gateway fee exceeds the allowed limit")]
     GatewayFeeExceedsLimit,
-    #[error("Gateway expiration time exceeds the allowed limit")]
-    GatewayExpirationExceedsLimit,
+    #[error("Gateway expiry time exceeds the allowed limit")]
+    GatewayExpiryExceedsLimit,
     #[error("Failed to request block count")]
     FailedToRequestBlockCount,
     #[error("Failed to fund the payment")]

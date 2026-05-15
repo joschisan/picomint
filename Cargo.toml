@@ -51,22 +51,22 @@ readme = "README.md"
 repository = "https://github.com/joschisan/picomint"
 
 [workspace.dependencies]
-anyhow = "1.0.98"
+anyhow = "1.0.102"
 async-channel = "2.5.0"
 async-stream = "0.3.6"
-async-trait = "0.1.88"
-axum = "0.8.8"
-axum-extra = "0.12.5"
-backon = { version = "1.5.1", default-features = false }
+async-trait = "0.1.89"
+axum = "0.8.9"
+axum-extra = "0.12.6"
+backon = { version = "1.6.0", default-features = false }
 bech32 = "0.11.1"
 bip39 = "2.2.2"
-bitcoin = { version = "0.32.6", features = ["serde"] }
-bitcoin-io = "0.1.2"
-bitcoin_hashes = "0.14.0"
+bitcoin = { version = "0.32.9", features = ["serde"] }
+bitcoin-io = "0.1.4"
+bitcoin_hashes = "0.14.1"
 bitcoincore-rpc = "0.19.0"
 bls12_381 = "0.8.0"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-clap = { version = "4.5.60", features = ["derive", "env"] }
+clap = { version = "4.6.1", features = ["derive", "env"] }
 derive_more = { version = "2.1.1", features = ["display", "from_str"] }
 esplora-client = { version = "0.12.3", default-features = false, features = [
     "async-https-rustls",
@@ -76,16 +76,16 @@ esplora-client = { version = "0.12.3", default-features = false, features = [
 futures = "0.3.32"
 group = "0.13.0"
 hex = "0.4.3"
-hyper = "1.6"
+hyper = "1.9"
 iroh = { version = "=1.0.0-rc.0", default-features = false, features = ["tls-ring"] }
 iroh-base = { version = "=1.0.0-rc.0", default-features = false }
 iroh-mdns-address-lookup = "=0.2.0"
 ldk-node = "0.7.0"
-lightning = "0.2.0"
+lightning = "0.2.2"
 lightning-invoice = { version = "0.34.0", features = ["serde", "std"] }
-lightning-types = "0.3.0"
+lightning-types = "0.3.1"
 maud = "0.27.0"
-miniscript = "12.3.4"
+miniscript = "12.3.6"
 picomint-base32 = { path = "./picomint-base32", version = "=0.1.0" }
 picomint-bft = { path = "./picomint-bft", version = "=0.1.0" }
 picomint-bitcoin-rpc = { path = "./picomint-bitcoin-rpc", version = "=0.1.0" }
@@ -106,37 +106,37 @@ picomint-rpc = { path = "./picomint-rpc", version = "=0.1.0" }
 proc-macro2 = "1.0"
 qrcode = "0.14"
 quote = "1.0"
-rand = "0.8.5"
+rand = "0.8.6"
 rand_chacha = "0.3.1"
-redb = "3"
-reqwest = { version = "0.12.22", features = [
+redb = "4"
+reqwest = { version = "0.13.3", features = [
     "json",
-    "rustls-tls-no-provider",
+    "rustls-no-provider",
     "charset",
     "http2",
     "stream",
 ], default-features = false }
 rusqlite = { version = "0.31", features = ["bundled"] }
-secp256k1 = { version = "0.29.0", default-features = false }
-serde = { version = "1.0.219", features = ["derive"] }
+secp256k1 = { version = "0.29.1", default-features = false }
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
 serde_with = { version = "3", features = ["hex"] }
-serdect = "0.2.0"
+serdect = "0.4.3"
 subtle = "2.6.1"
 syn = "2.0"
 tbs = { package = "picomint-tbs", path = "./crypto/picomint-tbs", version = "=0.1.0" }
-tempfile = "3.20.0"
+tempfile = "3.27.0"
 test-log = { version = "0.2", features = ["trace"], default-features = false }
 thiserror = "2.0.18"
-tokio = "1.48.0"
+tokio = "1.52.3"
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12", "logging"] }
 tokio-stream = "0.1.18"
 tokio-util = "0.7.18"
-tower-http = { version = "0.6.8", features = ["cors"] }
+tower-http = { version = "0.6.10", features = ["cors"] }
 tpe = { package = "picomint-tpe", path = "./crypto/picomint-tpe", version = "=0.1.0" }
 tracing = "0.1.44"
-tracing-subscriber = "0.3.22"
-url = "2.5.4"
+tracing-subscriber = "0.3.23"
+url = "2.5.8"
 
 # Thin LTO is a measurable perf win for the federation guardian's
 # crypto-heavy hot paths and worth the modest extra release-build time.

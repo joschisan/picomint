@@ -6,7 +6,7 @@ use picomint_core::ln::methods::{
     AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitPreimageRequest,
     AwaitPreimageResponse, ConsensusBlockCountRequest, ConsensusBlockCountResponse,
     DecryptionKeyShareRequest, DecryptionKeyShareResponse, GatewaysRequest, GatewaysResponse,
-    OutgoingContractExpirationRequest, OutgoingContractExpirationResponse,
+    OutgoingContractExpiryRequest, OutgoingContractExpiryResponse,
 };
 use tokio::time::timeout;
 
@@ -49,7 +49,7 @@ pub async fn await_preimage(
             });
         }
 
-        if req.expiration <= ln.consensus_block_count(&dbtx) {
+        if req.expiry <= ln.consensus_block_count(&dbtx) {
             return Ok(AwaitPreimageResponse { preimage: None });
         }
     }
@@ -66,22 +66,22 @@ pub fn decryption_key_share(
         .ok_or_else(|| "No decryption key share found".to_string())
 }
 
-pub fn outgoing_contract_expiration(
+pub fn outgoing_contract_expiry(
     ln: &Lightning,
-    req: OutgoingContractExpirationRequest,
-) -> Result<OutgoingContractExpirationResponse, String> {
+    req: OutgoingContractExpiryRequest,
+) -> Result<OutgoingContractExpiryResponse, String> {
     let dbtx = ln.db.begin_read();
 
     let Some(contract) = dbtx.get(&OutgoingContractTable, &req.outpoint) else {
-        return Ok(OutgoingContractExpirationResponse { contract: None });
+        return Ok(OutgoingContractExpiryResponse { contract: None });
     };
 
-    let expiration = contract
-        .expiration
+    let expiry = contract
+        .expiry
         .saturating_sub(ln.consensus_block_count(&dbtx));
 
-    Ok(OutgoingContractExpirationResponse {
-        contract: Some((contract.contract_id(), expiration)),
+    Ok(OutgoingContractExpiryResponse {
+        contract: Some((contract.contract_id(), expiry)),
     })
 }
 

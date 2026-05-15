@@ -59,20 +59,20 @@ mod tests {
         let mut v = super::FundingVerifier::default();
 
         v.add_input(TxItemAmounts {
-            amount: Amount::from_msats(3),
-            fee: Amount::from_msats(1),
+            amount: Amount::from_msat(3),
+            fee: Amount::from_msat(1),
         })
         .unwrap()
         .add_output(TxItemAmounts {
-            amount: Amount::from_msats(1),
-            fee: Amount::from_msats(1),
+            amount: Amount::from_msat(1),
+            fee: Amount::from_msat(1),
         })
         .unwrap();
 
         assert!(v.clone().verify_funding().is_ok());
 
         v.add_output(TxItemAmounts {
-            amount: Amount::from_msats(1),
+            amount: Amount::from_msat(1),
             fee: Amount::ZERO,
         })
         .unwrap();
@@ -80,7 +80,7 @@ mod tests {
         assert!(v.clone().verify_funding().is_err());
 
         v.add_input(TxItemAmounts {
-            amount: Amount::from_msats(10),
+            amount: Amount::from_msat(10),
             fee: Amount::ZERO,
         })
         .unwrap();

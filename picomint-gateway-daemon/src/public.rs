@@ -7,7 +7,7 @@
 //! client-driven close.
 
 use iroh::Endpoint;
-use picomint_core::ln::gateway_api::{
+use picomint_core::ln::methods::{
     CreateInvoiceResponse, GatewayMethod, InfoResponse, SendPaymentResponse,
 };
 use picomint_encoding::Encodable as _;

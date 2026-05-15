@@ -4,31 +4,31 @@ use axum::extract::{Form, State};
 use axum::response::{Html, IntoResponse, Redirect};
 use chrono::{Datelike, Months, Utc};
 use maud::{Markup, html};
-use picomint_core::expiration::ExpirationStatus;
+use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use serde::Deserialize;
 
 use crate::consensus::api::ConsensusApi;
-use crate::ui::dashboard::{CLEAR_EXPIRATION_ROUTE, SET_EXPIRATION_ROUTE};
+use crate::ui::dashboard::{CLEAR_EXPIRY_ROUTE, SET_EXPIRY_ROUTE};
 use crate::ui::{ROOT_ROUTE, dashboard_layout};
 
 /// Form payload for [`post_set`]. The timestamp is a unix-seconds value
 /// generated server-side by [`render`]; the successor is an optional
 /// invite-code string that we parse via [`picomint_base32`].
 #[derive(Debug, Deserialize)]
-pub struct ExpirationForm {
-    pub expiration_timestamp: String,
+pub struct ExpiryForm {
+    pub expiry_timestamp: String,
     pub successor_invite_code: Option<String>,
 }
 
-pub fn render(status: Option<&ExpirationStatus>) -> Markup {
+pub fn render(status: Option<&ExpiryStatus>) -> Markup {
     html! {
         div class="card h-100" {
-            div class="card-header dashboard-header" { "Federation Expiration" }
+            div class="card-header dashboard-header" { "Federation Expiry" }
             div class="card-body" {
                 @if let Some(status) = status {
                     div class="alert alert-info" {
-                        strong { "Expiration Announced" }
+                        strong { "Expiry Announced" }
                         @if let Some(date) = chrono::DateTime::from_timestamp(status.timestamp as i64, 0) {
                             strong { " - " (date.format("%B %-d, %Y")) }
                         }
@@ -38,19 +38,19 @@ pub fn render(status: Option<&ExpirationStatus>) -> Markup {
                             }
                         }
                     }
-                    form method="post" action=(CLEAR_EXPIRATION_ROUTE) {
+                    form method="post" action=(CLEAR_EXPIRY_ROUTE) {
                         button type="submit" class="btn btn-primary" {
-                            "Clear Expiration Announcement"
+                            "Clear Expiry Announcement"
                         }
                     }
                 } @else {
                     div class="alert alert-warning" {
-                        "All guardians have to enter the exact same values for an expiration status."
+                        "All guardians have to enter the exact same values for an expiry status."
                     }
-                    form method="post" action=(SET_EXPIRATION_ROUTE) {
+                    form method="post" action=(SET_EXPIRY_ROUTE) {
                         div class="form-group mb-3" {
-                            select class="form-select" id="expiration_timestamp" name="expiration_timestamp" required {
-                                option value="" selected disabled { "Select Expiration Date" }
+                            select class="form-select" id="expiry_timestamp" name="expiry_timestamp" required {
+                                option value="" selected disabled { "Select Expiry Date" }
                                 @let now = Utc::now();
                                 @for i in 1..=12u32 {
                                     @let last_day = now.date_naive()
@@ -78,7 +78,7 @@ pub fn render(status: Option<&ExpirationStatus>) -> Markup {
                                 placeholder="Enter Optional Invite Code";
                         }
                         button type="submit" class="btn btn-primary" {
-                            "Announce Expiration"
+                            "Announce Expiry"
                         }
                     }
                 }
@@ -89,10 +89,10 @@ pub fn render(status: Option<&ExpirationStatus>) -> Markup {
 
 pub async fn post_set(
     State(state): State<Arc<ConsensusApi>>,
-    Form(form): Form<ExpirationForm>,
+    Form(form): Form<ExpiryForm>,
 ) -> impl IntoResponse {
     let timestamp = form
-        .expiration_timestamp
+        .expiry_timestamp
         .parse::<u64>()
         .expect("timestamp values are generated server-side");
 
@@ -115,7 +115,7 @@ pub async fn post_set(
         None => None,
     };
 
-    state.set_expiration_status_ui(Some(ExpirationStatus {
+    state.set_expiry_status_ui(Some(ExpiryStatus {
         timestamp,
         successor,
     }));
@@ -124,7 +124,7 @@ pub async fn post_set(
 }
 
 pub async fn post_clear(State(state): State<Arc<ConsensusApi>>) -> impl IntoResponse {
-    state.set_expiration_status_ui(None);
+    state.set_expiry_status_ui(None);
 
     Redirect::to(ROOT_ROUTE)
 }

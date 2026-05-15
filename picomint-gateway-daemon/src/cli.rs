@@ -16,7 +16,7 @@ use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription,
 use picomint_client::wallet::events::{SendFailureEvent, SendSuccessEvent};
 use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
-use picomint_core::ln::gateway_api::GatewayPk;
+use picomint_core::ln::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, ChannelInfo, FederationBalanceRequest, FederationBalanceResponse,
     FederationConfigRequest, FederationConfigResponse, FederationDisableRequest,
@@ -219,7 +219,7 @@ async fn ldk_balances(
         .sum();
 
     Ok(Json(LdkBalancesResponse {
-        total_onchain_balance_sats: node_balances.total_onchain_balance_sats,
+        total_onchain_balance_sat: node_balances.total_onchain_balance_sats,
         total_inbound_capacity_msat,
         total_outbound_capacity_msat,
     }))
@@ -231,10 +231,10 @@ async fn ldk_channel_open(
     State(state): State<AppState>,
     Json(payload): Json<LdkChannelOpenRequest>,
 ) -> Result<Json<()>, CliError> {
-    let push_amount_msats = if payload.push_amount_sats == 0 {
+    let push_amount_msat = if payload.push_amount_sat == 0 {
         None
     } else {
-        Some(payload.push_amount_sats * 1000)
+        Some(payload.push_amount_sat * 1000)
     };
 
     state
@@ -243,8 +243,8 @@ async fn ldk_channel_open(
             payload.pubkey,
             SocketAddress::from_str(&payload.host)
                 .map_err(|e| CliError::internal(format!("Invalid address: {e}")))?,
-            payload.channel_size_sats,
-            push_amount_msats,
+            payload.channel_size_sat,
+            push_amount_msat,
             None,
         )
         .map_err(|e| CliError::internal(format!("Failed to open channel: {e}")))?;
@@ -339,9 +339,9 @@ async fn ldk_channel_list(
             remote_pubkey: channel_details.counterparty_node_id,
             remote_alias: remote_node_alias,
             remote_address,
-            channel_size_sats: channel_details.channel_value_sats,
-            outbound_liquidity_sats: channel_details.outbound_capacity_msat / 1000,
-            inbound_liquidity_sats: channel_details.inbound_capacity_msat / 1000,
+            channel_size_sat: channel_details.channel_value_sats,
+            outbound_liquidity_sat: channel_details.outbound_capacity_msat / 1000,
+            inbound_liquidity_sat: channel_details.inbound_capacity_msat / 1000,
             is_usable: channel_details.is_usable,
             is_outbound: channel_details.is_outbound,
             funding_txid: channel_details.funding_txo.map(|txo| txo.txid),
@@ -379,7 +379,7 @@ async fn ldk_onchain_send(
         .send_to_address(
             &checked_address,
             payload.amount.to_sat(),
-            FeeRate::from_sat_per_vb(payload.sats_per_vbyte),
+            FeeRate::from_sat_per_vb(payload.sat_per_vbyte),
         )
         .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?;
     info!(txid = %txid, "Sent onchain transaction");
@@ -404,7 +404,7 @@ async fn ldk_invoice_create(
     let invoice = state
         .node
         .bolt11_payment()
-        .receive(payload.amount_msats, &description, expiry_secs)
+        .receive(payload.amount_msat, &description, expiry_secs)
         .map_err(|e| CliError::internal(format!("Failed to get invoice: {e}")))?;
 
     Ok(Json(LdkInvoiceCreateResponse {
@@ -664,7 +664,7 @@ async fn federation_module_mint_send(
 
     let ecash = client
         .mint()
-        .send(picomint_core::Amount::from_sats(payload.amount.to_sat()))
+        .send(picomint_core::Amount::from_sat(payload.amount.to_sat()))
         .await
         .map_err(CliError::internal)?;
 

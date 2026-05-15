@@ -15,9 +15,8 @@ use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, Send
 use picomint_client::ln::{LightningClientModule, SendPaymentError};
 use picomint_client::tx::{Input, TxBuilder};
 use picomint_client::{Client, OperationId};
-use picomint_core::ln::gateway_api::{
-    GatewayInfo, GatewayMethod, GatewayPk, InfoResponse, PaymentFee, SendPaymentResponse,
-};
+use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
+use picomint_core::ln::methods::{GatewayMethod, InfoResponse, SendPaymentResponse};
 use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::{Amount, OutPoint, wire};
 use picomint_encoding::Encodable as _;
@@ -252,7 +251,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
             .receive(
                 gateway_pk,
                 gateway_info.clone(),
-                Amount::from_msats(500_000),
+                Amount::from_msat(500_000),
                 300,
             )
             .await?;
@@ -336,7 +335,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
         async move {
             let balance =
                 cli::gateway_federation_balance(&env.gw_data_dir, &federation)?.balance_msat;
-            ensure!(balance.msats > 0, "gateway federation balance is zero");
+            ensure!(balance.msat > 0, "gateway federation balance is zero");
             Ok(())
         }
     })
@@ -347,7 +346,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     {
         let (gateway_pk, gateway_info) = ln.select_gateway(None)?;
         let invoice = ln
-            .receive(gateway_pk, gateway_info, Amount::from_msats(500_000), 300)
+            .receive(gateway_pk, gateway_info, Amount::from_msat(500_000), 300)
             .await?;
 
         env.ldk_node.bolt11_payment().send(&invoice, None)?;
@@ -614,7 +613,7 @@ async fn test_unilateral_refund(env: &TestEnv, client: &Arc<Client>) -> anyhow::
 
     wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
 
-    // Contract expiration = consensus_block_count + expiration_delta +
+    // Contract expiry = consensus_block_count + expiry_delta +
     // CONTRACT_CONFIRMATION_BUFFER = +62 blocks with the mock's settings.
     // Mine 100 so the consensus block count comfortably crosses it.
     env.mine_blocks(100);
@@ -804,12 +803,12 @@ async fn spawn_mock_gateway() -> anyhow::Result<GatewayPk> {
 async fn mock_handler(method: GatewayMethod) -> Result<Vec<u8>, String> {
     match method {
         GatewayMethod::Info(_) => {
-            // Short expiration deltas keep the unilateral-refund test
+            // Short expiry deltas keep the unilateral-refund test
             // fast — the federation's consensus block count must advance
-            // past the contract's expiration for `await_preimage` to
+            // past the contract's expiry for `await_preimage` to
             // return `None`.
             let tx_fee = PaymentFee {
-                base: picomint_core::Amount::from_sats(2),
+                base: picomint_core::Amount::from_sat(2),
                 ppm: 3000,
             };
             Ok(InfoResponse {
@@ -819,7 +818,7 @@ async fn mock_handler(method: GatewayMethod) -> Result<Vec<u8>, String> {
                     send_fee: tx_fee,
                     receive_fee: tx_fee,
                     ln_fee: tx_fee,
-                    expiration_delta: 50,
+                    expiry_delta: 50,
                 }),
             }
             .consensus_encode_to_vec())

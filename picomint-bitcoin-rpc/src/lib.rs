@@ -25,7 +25,7 @@ const MUTINYNET: &str = "000002855893a0a9b24eaffc5efc770558a326fee4fc10c9da22fc1
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Feerate {
-    pub sats_per_kvb: u64,
+    pub sat_per_kvb: u64,
 }
 
 /// Status of the Bitcoin RPC backend as reported by the monitor.
@@ -137,7 +137,7 @@ impl BitcoinRpcMonitor {
         let sync_progress = rpc.get_sync_progress().await?;
 
         let fee_rate = if network == Network::Regtest {
-            Feerate { sats_per_kvb: 1000 }
+            Feerate { sat_per_kvb: 1000 }
         } else {
             rpc.get_feerate()
                 .await?

@@ -117,8 +117,8 @@ impl WalletConfigConsensus {
             // doubling kicks in.
             feerate_base: 250,
             dust_limit: bitcoin::Amount::from_sat(10_000),
-            input_fee: crate::Amount::from_sats(10),
-            output_fee: crate::Amount::from_sats(10),
+            input_fee: crate::Amount::from_sat(10),
+            output_fee: crate::Amount::from_sat(10),
         }
     }
 }

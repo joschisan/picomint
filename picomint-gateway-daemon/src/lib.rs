@@ -25,8 +25,9 @@ use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInvoice;
-use picomint_core::ln::gateway_api::{
-    CreateInvoiceRequest, GatewayInfo, PaymentFee, SendPaymentRequest, VerifyResponse,
+use picomint_core::ln::gateway::{GatewayInfo, PaymentFee};
+use picomint_core::ln::methods::{
+    CreateInvoiceRequest, SendPaymentRequest, VerifyPreimageResponse,
 };
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
@@ -134,7 +135,7 @@ impl AppState {
             send_fee: self.send_fee,
             receive_fee: self.receive_fee,
             ln_fee: self.ln_fee,
-            expiration_delta: self.cltv_expiry_delta as u64 + 144,
+            expiry_delta: self.cltv_expiry_delta as u64 + 144,
         })
     }
 
@@ -166,9 +167,9 @@ impl AppState {
             "Invalid auth signature for the invoice data"
         );
 
-        let (contract_id, expiration) = f1_client
+        let (contract_id, expiry) = f1_client
             .api()
-            .gw_outgoing_contract_expiration(payload.outpoint)
+            .gw_outgoing_contract_expiry(payload.outpoint)
             .await
             .map_err(|_| anyhow!("The gateway cannot reach the federation"))?
             .ok_or(anyhow!("The outgoing contract has not yet been confirmed"))?;
@@ -190,7 +191,7 @@ impl AppState {
         );
 
         ensure!(
-            payload.contract.amount == Amount::from_msats(amount),
+            payload.contract.amount == Amount::from_msat(amount),
             "Contract amount does not match invoice amount"
         );
 
@@ -207,8 +208,8 @@ impl AppState {
         );
 
         ensure!(
-            expiration >= self.cltv_expiry_delta as u64 + 144,
-            "Contract expiration does not leave enough room for routing"
+            expiry >= self.cltv_expiry_delta as u64 + 144,
+            "Contract expiry does not leave enough room for routing"
         );
 
         // --- Insert outgoing_contract row + log SendEvent on F1 (one tx) ---
@@ -237,7 +238,7 @@ impl AppState {
             &dbtx,
             operation,
             payload.outpoint,
-            Amount::from_msats(amount),
+            Amount::from_msat(amount),
             ln_fee,
             fee,
         );
@@ -245,7 +246,7 @@ impl AppState {
         // --- Direct-swap vs external LN -------------------------------------
         if self.node.node_id() != payload.invoice.bolt11().get_payee_pub_key() {
             let rpc = RouteParametersConfig::default()
-                .with_max_total_routing_fee_msat(ln_fee.msats)
+                .with_max_total_routing_fee_msat(ln_fee.msat)
                 .with_max_total_cltv_expiry_delta(self.cltv_expiry_delta);
 
             if self
@@ -269,7 +270,7 @@ impl AppState {
                 .expect("Direct-swap target not registered for this payment hash");
 
             ensure!(
-                incoming_row.contract.commitment.amount.msats == amount,
+                incoming_row.contract.commitment.amount.msat == amount,
                 "Direct-swap amount mismatch"
             );
 
@@ -320,7 +321,7 @@ impl AppState {
 
         let receive_fee = self
             .receive_fee
-            .fee(payload.contract.commitment.amount.msats);
+            .fee(payload.contract.commitment.amount.msat);
 
         ensure!(
             payload.contract.commitment.fee == receive_fee,
@@ -333,7 +334,7 @@ impl AppState {
             .as_secs();
 
         ensure!(
-            payload.contract.commitment.expiration > now_secs,
+            payload.contract.commitment.expiry > now_secs,
             "The contract has already expired"
         );
 
@@ -341,7 +342,7 @@ impl AppState {
             .node
             .bolt11_payment()
             .receive_for_hash(
-                payload.contract.commitment.amount.msats,
+                payload.contract.commitment.amount.msat,
                 &LdkBolt11InvoiceDescription::Direct(Description::empty()),
                 self.invoice_expiry_secs,
                 PaymentHash(payload.contract.commitment.payment_hash.to_byte_array()),
@@ -374,7 +375,7 @@ impl AppState {
         &self,
         payment_hash: sha256::Hash,
         wait: bool,
-    ) -> anyhow::Result<VerifyResponse> {
+    ) -> anyhow::Result<VerifyPreimageResponse> {
         let operation = OperationId::from_encodable(&payment_hash);
 
         let row = self
@@ -393,13 +394,13 @@ impl AppState {
                 .into_iter()
                 .find_map(|entry| entry.to_event::<ReceiveSuccessEvent>().map(|e| e.preimage))
             {
-                return Ok(VerifyResponse {
+                return Ok(VerifyPreimageResponse {
                     settled: true,
                     preimage: Some(preimage),
                 });
             }
 
-            return Ok(VerifyResponse {
+            return Ok(VerifyPreimageResponse {
                 settled: false,
                 preimage: None,
             });
@@ -414,7 +415,7 @@ impl AppState {
                 .expect("subscribe_operation_events only ends at client shutdown");
 
             if let Some(ev) = entry.to_event::<ReceiveSuccessEvent>() {
-                return Ok(VerifyResponse {
+                return Ok(VerifyPreimageResponse {
                     settled: true,
                     preimage: Some(ev.preimage),
                 });

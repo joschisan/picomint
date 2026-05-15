@@ -17,12 +17,9 @@ impl FederationApi {
         .map(|resp| resp.count)
     }
 
-    pub async fn ln_await_preimage(&self, outpoint: OutPoint, expiration: u64) -> Option<[u8; 32]> {
+    pub async fn ln_await_preimage(&self, outpoint: OutPoint, expiry: u64) -> Option<[u8; 32]> {
         self.request_current_consensus_retry::<AwaitPreimageResponse>(Method::Ln(
-            LnMethod::AwaitPreimage(AwaitPreimageRequest {
-                outpoint,
-                expiration,
-            }),
+            LnMethod::AwaitPreimage(AwaitPreimageRequest { outpoint, expiry }),
         ))
         .await
         .preimage
@@ -45,9 +42,7 @@ impl FederationApi {
     /// guardians. Each guardian maintains their own vetted-gateway list
     /// via the admin CLI; the response is byte-canonical (sorted via redb
     /// iteration) so threshold equality is deterministic.
-    pub async fn ln_gateways(
-        &self,
-    ) -> anyhow::Result<Vec<picomint_core::ln::gateway_api::GatewayPk>> {
+    pub async fn ln_gateways(&self) -> anyhow::Result<Vec<picomint_core::ln::gateway::GatewayPk>> {
         self.request_current_consensus::<GatewaysResponse>(Method::Ln(LnMethod::Gateways(
             GatewaysRequest,
         )))

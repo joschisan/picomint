@@ -1,24 +1,14 @@
-//! Wire types shared between picomint clients and the gateway daemon.
-//! All requests/responses ride the same iroh ALPN as the federation API
-//! (`picomint_rpc::ALPN`), framed by [`GatewayMethod`] / [`GatewayResponse`]
-//! enums. The dispatch happens at the method-enum layer; `GatewayMethod`
-//! and `picomint_core::module::Method` (federation API) don't byte-overlap.
+//! Gateway identity and pricing types — shared between clients and the
+//! gateway daemon. Wire methods live in [`crate::ln::methods`].
 
 use std::ops::Add;
 use std::str::FromStr;
 
-use bitcoin::hashes::sha256;
-use bitcoin::secp256k1::schnorr::Signature;
 use bitcoin::secp256k1::{PublicKey, XOnlyPublicKey};
-use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
 use crate::Amount;
-use crate::OutPoint;
-use crate::config::FederationId;
-use crate::ln::LightningInvoice;
-use crate::ln::contracts::{IncomingContract, OutgoingContract};
 
 /// A gateway's identity — its iroh public key. `Serialize`, `Deserialize`,
 /// and `FromStr` round-trip via [`picomint_base32`]; render with
@@ -55,68 +45,6 @@ impl FromStr for GatewayPk {
     }
 }
 
-/// Wire request — every gateway-API call is one of these. Each variant's
-/// response is its own typed struct, sent on the wire as
-/// `Result<Vec<u8>, String>` where the bytes are the response struct
-/// consensus-encoded — same envelope shape as the federation API.
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub enum GatewayMethod {
-    Info(InfoRequest),
-    SendPayment(SendPaymentRequest),
-    CreateInvoice(CreateInvoiceRequest),
-    VerifyPreimage(VerifyPreimageRequest),
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct InfoRequest {
-    pub federation: FederationId,
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct InfoResponse {
-    pub info: Option<GatewayInfo>,
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SendPaymentRequest {
-    pub federation: FederationId,
-    pub outpoint: OutPoint,
-    pub contract: OutgoingContract,
-    pub invoice: LightningInvoice,
-    pub auth: Signature,
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SendPaymentResponse {
-    pub result: Result<[u8; 32], Signature>,
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct CreateInvoiceRequest {
-    pub federation: FederationId,
-    pub contract: IncomingContract,
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct CreateInvoiceResponse {
-    pub invoice: Bolt11Invoice,
-}
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct VerifyPreimageRequest {
-    pub hash: sha256::Hash,
-    pub wait: bool,
-}
-
-/// LUD-21 verify response — gateway-internal iroh wire shape. Recurringd
-/// translates this to [`picomint_lnurl::VerifyResponse`] at the JSON
-/// boundary it serves to external LNURL wallets.
-#[derive(Debug, Clone, Encodable, Decodable, PartialEq, Eq)]
-pub struct VerifyResponse {
-    pub settled: bool,
-    pub preimage: Option<[u8; 32]>,
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct GatewayInfo {
     /// The public key of the gateway's lightning node. Signs the gateway's
@@ -138,10 +66,10 @@ pub struct GatewayInfo {
     /// `max_total_routing_fee_msat` cap and charged to the sender on top of
     /// `send_fee`.
     pub ln_fee: PaymentFee,
-    /// Expiration delta in blocks for outgoing contracts. Sized for
+    /// Expiry delta in blocks for outgoing contracts. Sized for
     /// external LN sends (accounts for intermediate LN hops) and used for
     /// direct swaps as well.
-    pub expiration_delta: u64,
+    pub expiry_delta: u64,
 }
 
 picomint_redb::consensus_value!(GatewayInfo);
@@ -169,40 +97,39 @@ impl PaymentFee {
     /// sender against an abusive gateway's configured tx cut on outgoing
     /// payments.
     pub const SEND_FEE_LIMIT: Self = Self {
-        base: Amount::from_sats(50),
+        base: Amount::from_sat(50),
         ppm: 5_000,
     };
 
     /// Upper bound a client accepts on `GatewayInfo::receive_fee`.
     pub const RECEIVE_FEE_LIMIT: Self = Self {
-        base: Amount::from_sats(50),
+        base: Amount::from_sat(50),
         ppm: 5_000,
     };
 
     /// Upper bound a client accepts on `GatewayInfo::ln_fee` — the LN
     /// routing headroom the gateway is allowed to charge.
     pub const LN_FEE_LIMIT: Self = Self {
-        base: Amount::from_sats(100),
+        base: Amount::from_sat(100),
         ppm: 15_000,
     };
 
-    pub fn add_to(&self, msats: u64) -> Amount {
-        Amount::from_msats(msats.saturating_add(self.absolute_fee(msats)))
+    pub fn add_to(&self, msat: u64) -> Amount {
+        Amount::from_msat(msat.saturating_add(self.absolute_fee(msat)))
     }
 
-    pub fn subtract_from(&self, msats: u64) -> Amount {
-        Amount::from_msats(msats.saturating_sub(self.absolute_fee(msats)))
+    pub fn subtract_from(&self, msat: u64) -> Amount {
+        Amount::from_msat(msat.saturating_sub(self.absolute_fee(msat)))
     }
 
-    pub fn fee(&self, msats: u64) -> Amount {
-        Amount::from_msats(self.absolute_fee(msats))
+    pub fn fee(&self, msat: u64) -> Amount {
+        Amount::from_msat(self.absolute_fee(msat))
     }
 
-    fn absolute_fee(&self, msats: u64) -> u64 {
-        msats
-            .saturating_mul(self.ppm)
+    fn absolute_fee(&self, msat: u64) -> u64 {
+        msat.saturating_mul(self.ppm)
             .saturating_div(1_000_000)
-            .checked_add(self.base.msats)
+            .checked_add(self.base.msat)
             .expect("The division creates sufficient headroom to add the base fee")
     }
 }

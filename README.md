@@ -250,7 +250,7 @@ picomint-gateway-cli ldk balances
 Once the onchain balance is available connect to a node and open a channel with
 
 ```bash
-picomint-gateway-cli ldk channel open <pubkey> <host> <channel-size-sats>
+picomint-gateway-cli ldk channel open <pubkey> <host> <channel-size-sat>
 ```
 
 Running a second outbound channel alongside the LSP's inbound one is worthwhile: with only one channel, outgoing payments can fail once user balances drain toward the counterparty's channel reserve. Monitor channel state with:
@@ -355,12 +355,12 @@ sudo docker exec -it picomint-gateway-daemon \
     "SELECT status, COUNT(*) FROM payments GROUP BY status;"
 ```
 
-Total processed volume per federation, in sats:
+Total processed volume per federation, in sat:
 
 ```bash
 sudo docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
-    "SELECT federation_id, SUM(amount_msat)/1000 AS sats FROM payments WHERE status='success' GROUP BY federation_id;"
+    "SELECT federation_id, SUM(amount_msat)/1000 AS sat FROM payments WHERE status='success' GROUP BY federation_id;"
 ```
 
 Each row in `payments` is one incoming or outgoing operation.

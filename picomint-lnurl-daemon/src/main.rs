@@ -18,12 +18,12 @@ use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::ln::MINIMUM_INCOMING_CONTRACT_AMOUNT;
 use picomint_core::ln::contracts::IncomingContract;
-use picomint_core::ln::gateway_api::{
-    CreateInvoiceRequest, CreateInvoiceResponse, GatewayInfo, GatewayMethod, GatewayPk,
-    InfoRequest, InfoResponse, PaymentFee, VerifyPreimageRequest,
-    VerifyResponse as GatewayVerifyResponse,
-};
+use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::ln::lnurl::{LnurlRequest, MAX_GATEWAYS_PER_LNURL};
+use picomint_core::ln::methods::{
+    CreateInvoiceRequest, CreateInvoiceResponse, GatewayMethod, InfoRequest, InfoResponse,
+    VerifyPreimageRequest, VerifyPreimageResponse,
+};
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_lnurl::{
@@ -221,12 +221,12 @@ async fn create_contract_and_fetch_invoice(
 
     ensure!(
         amount
-            .checked_sub(fee.msats)
-            .is_some_and(|net| Amount::from_msats(net) >= MINIMUM_INCOMING_CONTRACT_AMOUNT),
+            .checked_sub(fee.msat)
+            .is_some_and(|net| Amount::from_msat(net) >= MINIMUM_INCOMING_CONTRACT_AMOUNT),
         "Amount too small"
     );
 
-    let expiration = SystemTime::now()
+    let expiry = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("System time before Unix epoch")
         .as_secs()
@@ -237,9 +237,9 @@ async fn create_contract_and_fetch_invoice(
         encryption_seed,
         preimage,
         preimage.consensus_hash(),
-        Amount::from_msats(amount),
+        Amount::from_msat(amount),
         fee,
-        expiration,
+        expiry,
         claim_pk,
         gateway_info.module_public_key,
         ephemeral_keypair.public_key(),
@@ -317,7 +317,7 @@ async fn verify(
 ) -> Result<Json<LnurlResponse<VerifyResponse>>, StatusCode> {
     let wait = query.contains_key("wait");
 
-    let response = gateway_request::<GatewayVerifyResponse>(
+    let response = gateway_request::<VerifyPreimageResponse>(
         &endpoint,
         gateway_pk,
         GatewayMethod::VerifyPreimage(VerifyPreimageRequest { hash, wait }),
