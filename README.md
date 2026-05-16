@@ -42,9 +42,11 @@ The script targets amd64 and aborts if a deployment already exists at `~/picomin
 
 ### Bitcoin Backend
 
-The bundled compose runs a local Bitcoin Core node alongside the guardian, pruned to roughly 30 days of recent blocks (`-prune=10000`, ~10 GiB on disk). Initial block download still pulls the full chain over the network before pruning takes effect, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth; the guardian will sit idle until bitcoind catches up.
+The guardian runs as a lightweight daemon on top of a local **unpruned** Bitcoin Core node. The bundled compose starts one for you alongside the guardian. Any machine that can comfortably run Bitcoin Core can run the picomint guardian on top — picomint's own resource footprint is negligible compared to Core's.
 
-To use a remote esplora instance instead (lower resources, but requires trusting the third party), edit `docker-compose.yml` and toggle which line is commented in the guardian's `environment` block — keep exactly one of `ESPLORA_URL` / `BITCOIND_URL` active. You can also drop the `bitcoind` service entirely in that case.
+Pruning is not supported: a halted federation must be able to resume from blocks that may pre-date a rolling prune window.
+
+Initial block download pulls the full chain over the network, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth and disk. The guardian will sit idle until bitcoind catches up.
 
 ### Accessing the CLI
 
@@ -166,12 +168,9 @@ picomint-guardian-cli …`.
 |------------------------------|----------|-------------------|--------------------------------------------|
 | `DATA_DIR`                   | yes      |                   | Directory for the redb database file       |
 | `BITCOIN_NETWORK`            | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`  |
-| `ESPLORA_URL`                | one of   |                   | Esplora HTTP URL, e.g. `https://mempool.space/api` |
-| `BITCOIND_URL`               | one of   |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |
+| `BITCOIND_URL`               | yes      |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332`. Must point at an **unpruned** node — see [Bitcoin Backend](#bitcoin-backend) above. |
 | `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
 | `UI_ADDR`                    | no       |                   | Web UI listen address — unset disables UI  |
-
-*Either `ESPLORA_URL` or `BITCOIND_URL` must be set, but not both. The bundled compose sets `BITCOIND_URL` and runs a local pruned Bitcoin Core node — see [Bitcoin Backend](#bitcoin-backend) above to switch to esplora.*
 
 ## Deploy Gateway
 

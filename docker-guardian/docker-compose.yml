@@ -15,9 +15,6 @@ services:
       - picomint_guardian_data:/data
     environment:
       - DATA_DIR=/data
-      # Bitcoin backend — toggle which line is commented to switch between
-      # the local pruned bitcoind service and a remote esplora instance.
-      # - ESPLORA_URL=https://mempool.space/api
       - BITCOIND_URL=http://bitcoin:bitcoin@bitcoind:8332
       - UI_ADDR=0.0.0.0:3000
 
@@ -31,7 +28,6 @@ services:
       - bitcoind
       - -datadir=/data
       - -server=1
-      - -prune=10000
       - -rpcbind=0.0.0.0
       - -rpcallowip=172.16.0.0/12
       - -rpcuser=bitcoin

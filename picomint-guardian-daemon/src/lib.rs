@@ -19,7 +19,7 @@ use std::sync::Arc;
 pub const DB_FILE: &str = "database.redb";
 
 use config::ServerConfig;
-use picomint_bitcoin_rpc::BitcoinBackend;
+use picomint_bitcoin_rpc::BitcoindClient;
 use picomint_redb::Database;
 use tokio::net::TcpListener;
 use tracing::info;
@@ -65,7 +65,7 @@ use crate::p2p::{
 pub async fn run_server(
     settings: ConfigGenSettings,
     db: Database,
-    bitcoin_rpc: Arc<BitcoinBackend>,
+    bitcoin_rpc: Arc<BitcoindClient>,
     data_dir: PathBuf,
 ) -> anyhow::Result<()> {
     // Single channel for foreign (non-peer) iroh connections — fed by the

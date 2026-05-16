@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bitcoin::Network;
-use clap::{ArgGroup, Parser};
-use picomint_bitcoin_rpc::{BitcoinBackend, BitcoindClient, EsploraClient};
+use clap::Parser;
+use picomint_bitcoin_rpc::BitcoindClient;
 use picomint_guardian_daemon::config::ConfigGenSettings;
 use picomint_guardian_daemon::{DB_FILE, run_server};
 use tracing::info;
@@ -21,14 +21,6 @@ use url::Url;
 
 #[derive(Parser)]
 #[command(version)]
-#[command(
-    group(
-        ArgGroup::new("bitcoin_rpc")
-            .required(true)
-            .multiple(false)
-            .args(["bitcoind_url", "esplora_url"])
-    )
-)]
 struct ServerOpts {
     /// Path to folder containing federation config files
     #[arg(long = "data-dir", env = "DATA_DIR")]
@@ -38,14 +30,12 @@ struct ServerOpts {
     #[arg(long, env = "BITCOIN_NETWORK", default_value = "bitcoin")]
     bitcoin_network: Network,
 
-    /// Esplora HTTP base URL, e.g. <https://mempool.space/api>
-    #[arg(long, env = "ESPLORA_URL")]
-    esplora_url: Option<Url>,
-
     /// Bitcoind RPC URL with embedded credentials, e.g.
-    /// `http://user:pass@127.0.0.1:8332`.
+    /// `http://user:pass@127.0.0.1:8332`. The node must be unpruned —
+    /// the guardian needs random access to any block from federation
+    /// start onward to make consensus progress.
     #[arg(long, env = "BITCOIND_URL")]
-    bitcoind_url: Option<Url>,
+    bitcoind_url: Url,
 
     /// Address we bind to for iroh (p2p consensus + client API)
     #[arg(long = "p2p-addr", env = "P2P_ADDR", default_value = "0.0.0.0:8080")]
@@ -84,14 +74,7 @@ async fn main() -> anyhow::Result<()> {
     let db = picomint_redb::Database::open(server_opts.data_dir.join(DB_FILE))
         .expect("Failed to open picomint-guardian-daemon database");
 
-    let bitcoin_backend = match (
-        server_opts.bitcoind_url.as_ref(),
-        server_opts.esplora_url.as_ref(),
-    ) {
-        (Some(url), None) => Arc::new(BitcoinBackend::Bitcoind(BitcoindClient::new(url)?)),
-        (None, Some(url)) => Arc::new(BitcoinBackend::Esplora(EsploraClient::new(url)?)),
-        _ => unreachable!("ArgGroup enforces exactly one of BITCOIND_URL or ESPLORA_URL"),
-    };
+    let bitcoind = Arc::new(BitcoindClient::new(&server_opts.bitcoind_url)?);
 
     tokio_rustls::rustls::crypto::ring::default_provider()
         .install_default()
@@ -102,5 +85,5 @@ async fn main() -> anyhow::Result<()> {
     // are atomic and BFT sessions resume from disk on next boot. The only
     // graceful return path is the federation-shutdown-via-API mechanism, which
     // unwinds the engine cleanly.
-    run_server(settings, db, bitcoin_backend, server_opts.data_dir).await
+    run_server(settings, db, bitcoind, server_opts.data_dir).await
 }
