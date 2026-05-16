@@ -1,5 +1,4 @@
 pub mod bitcoind;
-pub mod esplora;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,7 +9,6 @@ use tokio::sync::watch;
 use tracing::{debug, warn};
 
 pub use crate::bitcoind::BitcoindClient;
-pub use crate::esplora::EsploraClient;
 
 // Well-known block-hash-at-height-1 values for the Bitcoin networks we
 // recognize. Anything else is assumed to be a regtest / custom chain.
@@ -37,65 +35,14 @@ pub struct BitcoinRpcStatus {
     pub sync_progress: Option<f64>,
 }
 
-/// Match-dispatched backend over the two concrete RPC clients.
-#[derive(Debug)]
-pub enum BitcoinBackend {
-    Bitcoind(BitcoindClient),
-    Esplora(EsploraClient),
-}
-
-impl BitcoinBackend {
-    pub async fn get_block_count(&self) -> Result<u64> {
-        match self {
-            BitcoinBackend::Bitcoind(c) => c.get_block_count().await,
-            BitcoinBackend::Esplora(c) => c.get_block_count().await,
-        }
-    }
-
-    pub async fn get_block_hash(&self, height: u64) -> Result<BlockHash> {
-        match self {
-            BitcoinBackend::Bitcoind(c) => c.get_block_hash(height).await,
-            BitcoinBackend::Esplora(c) => c.get_block_hash(height).await,
-        }
-    }
-
-    pub async fn get_block(&self, hash: &BlockHash) -> Result<Block> {
-        match self {
-            BitcoinBackend::Bitcoind(c) => c.get_block(hash).await,
-            BitcoinBackend::Esplora(c) => c.get_block(hash).await,
-        }
-    }
-
-    pub async fn get_feerate(&self) -> Result<Option<Feerate>> {
-        match self {
-            BitcoinBackend::Bitcoind(c) => c.get_feerate().await,
-            BitcoinBackend::Esplora(c) => c.get_feerate().await,
-        }
-    }
-
-    pub async fn submit_tx(&self, tx: Transaction) {
-        match self {
-            BitcoinBackend::Bitcoind(c) => c.submit_tx(tx).await,
-            BitcoinBackend::Esplora(c) => c.submit_tx(tx).await,
-        }
-    }
-
-    pub async fn get_sync_progress(&self) -> Result<Option<f64>> {
-        match self {
-            BitcoinBackend::Bitcoind(c) => c.get_sync_progress().await,
-            BitcoinBackend::Esplora(c) => c.get_sync_progress().await,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct BitcoinRpcMonitor {
-    rpc: Arc<BitcoinBackend>,
+    rpc: Arc<BitcoindClient>,
     status_rx: watch::Receiver<Option<BitcoinRpcStatus>>,
 }
 
 impl BitcoinRpcMonitor {
-    pub fn new(rpc: Arc<BitcoinBackend>, update_interval: Duration) -> Self {
+    pub fn new(rpc: Arc<BitcoindClient>, update_interval: Duration) -> Self {
         let (status_tx, status_rx) = watch::channel(None);
 
         let rpc_clone = rpc.clone();
@@ -126,7 +73,7 @@ impl BitcoinRpcMonitor {
         Self { rpc, status_rx }
     }
 
-    async fn fetch_status(rpc: &BitcoinBackend) -> Result<BitcoinRpcStatus> {
+    async fn fetch_status(rpc: &BitcoindClient) -> Result<BitcoinRpcStatus> {
         let network = match rpc.get_block_hash(1).await?.to_string().as_str() {
             MAINNET => Network::Bitcoin,
             TESTNET => Network::Testnet,

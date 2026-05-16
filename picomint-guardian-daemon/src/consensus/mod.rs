@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use bitcoin::Network;
 use futures::TryFutureExt;
-use picomint_bitcoin_rpc::{BitcoinBackend, BitcoinRpcMonitor};
+use picomint_bitcoin_rpc::{BitcoinRpcMonitor, BitcoindClient};
 use picomint_core::NumPeers;
 use picomint_core::module::Method;
 use picomint_core::tx::ConsensusItem;
@@ -47,7 +47,7 @@ pub async fn run(
     foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
     cfg: ServerConfig,
     db: Database,
-    bitcoin_backend: Arc<BitcoinBackend>,
+    bitcoin_backend: Arc<BitcoindClient>,
     ui_addr: Option<SocketAddr>,
     data_dir: &Path,
 ) -> anyhow::Result<()> {
