@@ -14,7 +14,7 @@ use picomint_core::module::Method;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_encoding::Decodable;
 use tokio::task::JoinSet;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 use crate::tx::{Transaction, TxError};
@@ -137,9 +137,9 @@ impl FederationApi {
             }
 
             if peer_errors.len() == peer_error_threshold {
-                return Err(anyhow!(
-                    "Federation request {method:?} failed: {peer_errors:?}"
-                ));
+                let err = anyhow!("Federation request {method:?} failed: {peer_errors:?}");
+                warn!(err = %format_args!("{err:#}"), "federation request failed");
+                return Err(err);
             }
         }
     }
@@ -180,7 +180,7 @@ impl FederationApi {
                 }
                 QueryStep::Success(response) => return response,
                 QueryStep::Failure(e) => {
-                    debug!(error = %e, "Query strategy returned non-retryable failure");
+                    warn!(error = %e, "Query strategy returned non-retryable failure");
                 }
                 QueryStep::Continue => {}
             }
