@@ -94,7 +94,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     info!(addr = %pegin_addr, "Pegin Receive Event");
 
     retry("pegin balance", || async {
-        let balance = client_send.get_balance().await?;
+        let balance = client_send.get_balance();
         ensure!(balance > Amount::ZERO, "Balance is zero");
         Ok(())
     })

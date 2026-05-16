@@ -1,10 +1,10 @@
 use crate::executor::{SmId, StateMachine};
+use crate::module::ClientContext;
 use picomint_core::OutPoint;
 use picomint_core::core::OperationId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTx;
 
-use super::WalletClientContext;
 use super::events::{SendFailureEvent, SendSuccessEvent};
 
 crate::client_table!(
@@ -31,19 +31,18 @@ pub enum AwaitFundingResult {
 }
 
 impl StateMachine for SendStateMachine {
-    type Context = WalletClientContext;
+    type Context = ClientContext;
     type Outcome = AwaitFundingResult;
 
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
         if let Err(error) = ctx
-            .client_ctx
             .await_tx_accepted(self.operation, self.outpoint.txid)
             .await
         {
             return AwaitFundingResult::Aborted(error);
         }
 
-        match ctx.client_ctx.api().wallet_tx_id(self.outpoint).await {
+        match ctx.api().wallet_tx_id(self.outpoint).await {
             Some(txid) => AwaitFundingResult::Success(txid),
             None => AwaitFundingResult::Failure,
         }
@@ -57,13 +56,11 @@ impl StateMachine for SendStateMachine {
     ) -> Option<Self> {
         match outcome {
             AwaitFundingResult::Success(txid) => {
-                ctx.client_ctx
-                    .log_event(dbtx, self.operation, SendSuccessEvent { txid });
+                ctx.log_event(dbtx, self.operation, SendSuccessEvent { txid });
             }
             AwaitFundingResult::Aborted(_) => {}
             AwaitFundingResult::Failure => {
-                ctx.client_ctx
-                    .log_event(dbtx, self.operation, SendFailureEvent);
+                ctx.log_event(dbtx, self.operation, SendFailureEvent);
             }
         }
 

@@ -47,8 +47,6 @@ macro_rules! client_table {
 pub mod api;
 /// Core [`Client`]
 mod client;
-/// Environment variables
-pub mod envs;
 /// Per-module typed state machine executor
 pub mod executor;
 /// Federation expiry-status cache + refresh.
@@ -128,11 +126,6 @@ pub struct TxRejectEvent {
 impl Event for TxRejectEvent {
     const SOURCE: EventSource = EventSource::Core;
     const KIND: EventKind = EventKind::from_static("tx-reject");
-}
-
-#[derive(Deserialize)]
-pub struct GetInviteCodeRequest {
-    pub peer: PeerId,
 }
 
 /// Downloads the [`ConsensusConfig`] using the peers advertised in the invite

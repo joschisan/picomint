@@ -46,7 +46,7 @@ pub(crate) enum LnFlavor {
 /// (best-effort, non-blocking); call [`Client::shutdown`] explicitly to wait
 /// for them to finish.
 pub struct Client {
-    config: tokio::sync::RwLock<ConsensusConfig>,
+    config: ConsensusConfig,
     db: Database,
     federation: FederationId,
     logger: EventLogger,
@@ -172,7 +172,7 @@ impl Client {
         };
 
         let client = Arc::new(Client {
-            config: tokio::sync::RwLock::new(config),
+            config,
             db,
             federation,
             logger,
@@ -224,8 +224,8 @@ impl Client {
         self.federation
     }
 
-    pub async fn config(&self) -> ConsensusConfig {
-        self.config.read().await.clone()
+    pub fn config(&self) -> &ConsensusConfig {
+        &self.config
     }
 
     pub fn mint(&self) -> &MintClientModule {
@@ -268,15 +268,15 @@ impl Client {
         crate::mint::init_recovery(dbtx, federation)
     }
 
-    pub async fn get_balance(&self) -> anyhow::Result<Amount> {
-        Ok(self.mint.get_balance(&self.db().begin_read()))
+    pub fn get_balance(&self) -> Amount {
+        self.mint.get_balance(&self.db().begin_read())
     }
 
     /// Returns a stream that yields the current client balance every time it
     /// changes.
     pub async fn subscribe_balance_changes(&self) -> BoxStream<'static, Amount> {
         let notify = self.mint.balance_notify();
-        let initial_balance = self.get_balance().await.expect("Primary is present");
+        let initial_balance = self.get_balance();
         let mint = self.mint.clone();
         let db = self.db().clone();
 
@@ -298,9 +298,8 @@ impl Client {
     }
 
     /// Returns a list of guardian iroh API node ids
-    pub async fn get_peer_node_ids(&self) -> BTreeMap<PeerId, iroh_base::PublicKey> {
+    pub fn get_peer_node_ids(&self) -> BTreeMap<PeerId, iroh_base::PublicKey> {
         self.config()
-            .await
             .peers
             .iter()
             .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
@@ -309,20 +308,18 @@ impl Client {
 
     /// Create an invite code with the api endpoint of the given peer which can
     /// be used to download this client config
-    pub async fn invite_code(&self, peer: PeerId) -> Option<InviteCode> {
+    pub fn invite_code(&self, peer: PeerId) -> Option<InviteCode> {
         self.get_peer_node_ids()
-            .await
             .into_iter()
             .find_map(|(p, node_id)| (peer == p).then_some(node_id))
             .map(|node_id| InviteCode::new(node_id, self.federation()))
     }
 
     /// Returns the guardian public key set from the client config.
-    pub async fn get_guardian_public_keys_blocking(
+    pub fn get_guardian_public_keys_blocking(
         &self,
     ) -> BTreeMap<PeerId, picomint_core::secp256k1::XOnlyPublicKey> {
         self.config()
-            .await
             .peers
             .iter()
             .map(|(peer, endpoint)| (*peer, endpoint.broadcast_pk))
