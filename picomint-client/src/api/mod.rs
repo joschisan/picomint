@@ -137,9 +137,10 @@ impl FederationApi {
             }
 
             if peer_errors.len() == peer_error_threshold {
-                let err = anyhow!("Federation request {method:?} failed: {peer_errors:?}");
-                warn!(err = %format_args!("{err:#}"), "federation request failed");
-                return Err(err);
+                return Err(anyhow!("Federation request {method:?} failed: {peer_errors:?}"))
+                    .inspect_err(|err| {
+                        warn!(err = %format_args!("{err:#}"), "federation request failed")
+                    });
             }
         }
     }
