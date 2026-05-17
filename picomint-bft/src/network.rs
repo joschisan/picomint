@@ -41,6 +41,11 @@ pub enum Message<D: UnitData> {
     /// Targeted backfill. The recipient replies with `SignedUnit` if
     /// the slot is locally confirmed; otherwise no reply.
     Request { round: Round, creator: PeerId },
+    /// Anti-entropy probe sent to a single peer when the sender holds
+    /// nothing of the recipient's column. The recipient is the implicit
+    /// creator the probe refers to. Receivers respond by pushing their
+    /// own highest unit back to the sender if they have one.
+    NoUnit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
