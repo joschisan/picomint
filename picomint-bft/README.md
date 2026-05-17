@@ -64,15 +64,17 @@ enum Message<D> {
     Cosig { round, creator, signer, sig: Signature },
     SignedUnit { unit, sig, cosigs: BTreeMap<PeerId, Signature> },
     Request { round, creator },
+    NoUnit,
 }
 ```
 
 | Message | Bytes (n=4 / n=10) | Emission rule |
 |---|---|---|
-| `Unit` | `~70 + |D|` | Creator's broadcast at unit-creation; creator's anti-entropy push of own highest slot. |
+| `Unit` | `~70 + |D|` | Creator's broadcast at unit-creation; creator's anti-entropy push of own highest slot; targeted anti-entropy push of the recipient's highest slot. |
 | `Cosig` | `~70` | First-time-cosign fan-out by each cosigner. |
 | `SignedUnit` | `~70 + |D| + 65·2f` | Sole `Request` response, *only* when the responder holds the slot at threshold. |
 | `Request` | `~3` | On-receive demand-pull when a parent isn't yet extended; on receipt of a `Cosig` for a slot whose body we don't hold. |
+| `NoUnit` | `~1` | Targeted anti-entropy probe: sent in place of the recipient's own highest unit when the sender holds nothing of the recipient's column. |
 
 Every broadcast (`Recipient::Everyone`) carries content authored by
 the sender: their own newly-created unit, their own anti-entropy push
@@ -155,8 +157,34 @@ Two propagation mechanisms, each with a narrow role:
 
 **Anti-entropy push (1 Hz)**: each peer sends its *own* highest
 entry to everyone. Each peer is canonical for its own column of the
-DAG; pushing only the own slot gives laggards a reentry point. Other
-peers' columns flow only on demand-pull.
+DAG; pushing only the own slot gives laggards a reentry point. Each
+peer also unicasts every *other* peer's highest column entry back to
+that peer — or a `NoUnit` probe if it holds nothing of that column —
+so a peer that wiped its data learns its own canonical highest from
+its neighbours. Other peers' columns flow only on demand-pull.
+
+## Bootstrap fork-safety gate
+
+A peer that lost its data would otherwise restart with an empty column
+and create a fresh round-0 unit, forking the round-0 slot against an
+already-confirmed predecessor. To prevent this, each peer refuses to
+author own units until it has observed `threshold` distinct peers'
+views of its column this session — counting:
+
+- *self* as one responder iff own units survived on disk through
+  replay (the on-disk evidence is what lets us safely resume from
+  `highest + 1` instead of forking at round 0), and
+- each remote peer the first time they echo back our column via
+  `Unit { creator = us, sig }` with a verifying creator sig, or send
+  a `NoUnit` probe.
+
+The byzantine adversary can lie freely with `NoUnit`, but cannot
+forge a `Unit` of our column (no access to our key) and cannot stop
+the `f + 1` honest cosigners of any confirmed unit of ours from
+honestly echoing it back. So any `threshold` responder set must
+contain at least one honest cosigner of every confirmed unit we
+ever signed — the gate clearing implies we know our true highest,
+so the next slot we author is genuinely unused.
 
 **Demand-pull (event-driven)**: on every receive of `Unit`,
 `SignedUnit`, or `Cosig`, the receiver checks the message's parent

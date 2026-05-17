@@ -129,9 +129,8 @@ impl DataProvider {
     }
 }
 
-#[async_trait]
 impl BftDataProvider<ConsensusItem> for DataProvider {
-    async fn get_data(&mut self) -> Vec<ConsensusItem> {
+    fn get_data(&mut self) -> Vec<ConsensusItem> {
         // `Vec<T>` consensus encoding is a `u32` length prefix followed
         // by the concatenated item encodings — start the budget at 4 to
         // account for the prefix.
