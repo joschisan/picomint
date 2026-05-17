@@ -140,9 +140,8 @@ fn now_ms() -> u64 {
 
 struct TimestampDataProvider;
 
-#[async_trait]
 impl DataProvider<u64> for TimestampDataProvider {
-    async fn get_data(&mut self) -> Vec<u64> {
+    fn get_data(&mut self) -> Vec<u64> {
         vec![now_ms()]
     }
 }
