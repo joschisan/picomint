@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Router;
@@ -60,7 +60,7 @@ impl From<anyhow::Error> for CliError {
 /// Setup CLI server — runs during DKG phase. Binds a Unix socket at
 /// `{data_dir}/{CLI_SOCKET_FILENAME}`; a stale socket from a previous
 /// (crashed) run is unlinked before we bind.
-pub async fn run_cli(data_dir: &Path, state: CliState) {
+pub async fn run_cli(data_dir: PathBuf, state: CliState) {
     let socket_path = data_dir.join(CLI_SOCKET_FILENAME);
     std::fs::remove_file(&socket_path).ok();
 

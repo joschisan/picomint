@@ -6,7 +6,6 @@ use axum::response::{Html, IntoResponse, Redirect};
 use axum::routing::{get, post};
 use axum_extra::extract::Form;
 use maud::{Markup, PreEscaped, html};
-use qrcode::QrCode;
 use serde::Deserialize;
 
 use crate::config::ServerConfig;
@@ -177,11 +176,16 @@ fn setup_form_content(error: Option<&str>) -> Markup {
                         }
                         @for size in [4u32, 7, 10, 13, 16, 19] {
                             div class="form-check form-check-inline" {
+                                // `required` is intentionally omitted: the
+                                // radios are hidden when `is_lead` is off, and
+                                // browsers refuse to focus a hidden required
+                                // control — they silently block submit even
+                                // for non-leader guardians. The server
+                                // re-validates that a leader supplied a size.
                                 input type="radio" class="form-check-input"
                                     id=(format!("federation_size_{size}"))
                                     name="federation_size"
-                                    value=(size.to_string())
-                                    required;
+                                    value=(size.to_string());
                                 label class="form-check-label" for=(format!("federation_size_{size}")) {
                                     (size.to_string())
                                 }
@@ -272,9 +276,11 @@ async fn setup_submit(
 async fn federation_setup(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
     // If the user lands here too early (before local parameters have been
     // set), send them back to /setup to fill in their guardian params first.
-    let Some(our_connection_info) = state.setup_code().await else {
+    let Some(our_setup_code) = state.setup_code().await else {
         return Redirect::to(ROOT_ROUTE).into_response();
     };
+
+    let our_connection_info = picomint_base32::encode(&our_setup_code);
 
     let connected_peers = state.connected_peers().await;
     let federation_size = state.federation_size().await;
@@ -282,22 +288,6 @@ async fn federation_setup(State(state): State<Arc<SetupApi>>) -> impl IntoRespon
 
     let content = html! {
         p { "Share this with your fellow guardians." }
-
-        @let qr_svg = QrCode::new(&our_connection_info)
-            .expect("Failed to generate QR code")
-            .render::<qrcode::render::svg::Color>()
-            .build();
-
-        div class="text-center mb-3" {
-            div class="border rounded p-2 bg-white d-inline-block" style="width: 250px; max-width: 100%;" {
-                div style="width: 100%; height: auto; overflow: hidden;" {
-                    (PreEscaped(format!(r#"<div style="width: 100%; height: auto;">{}</div>"#,
-                        qr_svg.replace("width=", "data-width=")
-                              .replace("height=", "data-height=")
-                              .replace("<svg", r#"<svg style="width: 100%; height: auto; display: block;""#))))
-                }
-            }
-        }
 
         div class="mb-4" {
             (copiable_text(&our_connection_info))
@@ -426,43 +416,16 @@ async fn post_add_setup_code(
 }
 
 async fn post_start_dkg(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
-    let our_connection_info = state.setup_code().await;
-
     match state.start_dkg().await {
         Ok(()) => {
-            let content = html! {
-                @if let Some(ref info) = our_connection_info {
-                    p { "Share with guardians who still need it." }
-                    div class="mb-4" {
-                        (copiable_text(info))
-                    }
-                }
-
-                div class="alert alert-info mb-3" {
-                    "All guardians need to confirm their settings. Once completed you will be redirected to the Dashboard."
-                }
-
-                div
-                    hx-get=(ROOT_ROUTE)
-                    hx-trigger="every 2s"
-                    hx-swap="none"
-                    hx-on--after-request={
-                        "if (event.detail.xhr.status === 200) { window.location.href = '" (ROOT_ROUTE) "'; }"
-                    }
-                    style="display: none;"
-                {}
-
-                div class="text-center mt-4" {
-                    div class="spinner-border text-primary" role="status" {
-                        span class="visually-hidden" { "Loading..." }
-                    }
-                    p class="mt-2 text-muted" { "Waiting for federation setup to complete..." }
-                }
-            };
+            let code = state
+                .setup_code()
+                .await
+                .expect("setup_code is always set once start_dkg has succeeded");
 
             (
                 [("HX-Retarget", "body"), ("HX-Reswap", "innerHTML")],
-                Html(single_card_layout("DKG Started", content).into_string()),
+                Html(crate::ui::dkg::loading_card(&code).into_string()),
             )
                 .into_response()
         }

@@ -12,7 +12,7 @@ pub mod consensus;
 pub mod p2p;
 pub mod ui;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Name of the server daemon's database file on disk.
@@ -55,14 +55,136 @@ macro_rules! handler_async {
     };
 }
 
-use crate::config::db::{load_server_config, store_server_config};
+use crate::config::db::{ConfigGenParamsTable, load_server_config, store_server_config};
 use crate::config::setup::SetupApi;
-use crate::config::{ConfigGenSettings, SetupResult};
-use crate::p2p::{
-    P2PConnector, P2PMessage, P2PStatusReceivers, ReconnectP2PConnections, p2p_status_channels,
-};
+use crate::config::{ConfigGenParams, ConfigGenSettings, SetupResult};
+use crate::p2p::{P2PConnector, ReconnectP2PConnections, p2p_status_channels};
 
 pub async fn run_server(
+    settings: ConfigGenSettings,
+    db: Database,
+    bitcoin: Arc<BitcoindClient>,
+    data: PathBuf,
+) -> anyhow::Result<()> {
+    if let Some(cfg) = load_server_config(&db).await {
+        return run_consensus(cfg, settings, db, bitcoin, data).await;
+    }
+
+    if let Some(cgp) = db.begin_read().get(&ConfigGenParamsTable, &()) {
+        return run_dkg_then_consensus(cgp, settings, db, bitcoin, data).await;
+    }
+
+    info!("Starting setup UI...");
+
+    let (setup_tx, mut setup_rx) = tokio::sync::mpsc::channel(1);
+
+    let setup_api = Arc::new(SetupApi::new(settings.clone(), setup_tx, db.clone()));
+
+    let ui_service = ui::setup::router(setup_api.clone()).into_make_service();
+
+    let ui_listener = TcpListener::bind(settings.ui_addr)
+        .await
+        .expect("Failed to bind setup UI");
+
+    let setup_ui_handle = tokio::spawn(async move {
+        axum::serve(ui_listener, ui_service)
+            .await
+            .expect("Failed to serve setup UI");
+    });
+
+    info!("Setup UI running at http://{} 🚀", settings.ui_addr);
+
+    let cli_state = cli::CliState {
+        setup_api: setup_api.clone(),
+    };
+
+    let setup_cli_handle = tokio::spawn(cli::run_cli(data.clone(), cli_state));
+
+    let setup_result = setup_rx
+        .recv()
+        .await
+        .expect("Setup result receiver closed unexpectedly");
+
+    // Tear down the setup UI/CLI listeners before the DKG phase rebinds
+    // the same TCP port and Unix socket. Aborting drops the listener at
+    // the next await; awaiting the handle confirms the bind is released.
+    setup_ui_handle.abort();
+
+    setup_ui_handle.await.ok();
+
+    setup_cli_handle.abort();
+
+    setup_cli_handle.await.ok();
+
+    match setup_result {
+        SetupResult::Dkg(cgp) => run_dkg_then_consensus(*cgp, settings, db, bitcoin, data).await,
+        SetupResult::Recovered(cfg) => run_consensus(*cfg, settings, db, bitcoin, data).await,
+    }
+}
+
+async fn run_dkg_then_consensus(
+    cgp: ConfigGenParams,
+    settings: ConfigGenSettings,
+    db: Database,
+    bitcoin_rpc: Arc<BitcoindClient>,
+    data_dir: PathBuf,
+) -> anyhow::Result<()> {
+    info!("Starting DKG...");
+
+    // Single channel for foreign (non-peer) iroh connections — fed by the
+    // p2p accept loop's demux, drained by the consensus-phase api task.
+    // Small bound: pre-DKG there's no consumer, so incoming api attempts
+    // overflow and are dropped (no valid client should be talking to a
+    // not-yet-bootstrapped federation).
+    let (conn_tx, conn_rx) = async_channel::bounded(128);
+
+    let cnt = P2PConnector::new(cgp.iroh_sk.clone(), cgp.iroh_pks(), settings.p2p_addr).await?;
+
+    let (status_txs, status_rxs) = p2p_status_channels(cnt.peers());
+
+    let connections = ReconnectP2PConnections::new(cgp.identity, cnt, status_txs, conn_tx);
+
+    // Serve a stateless loading page on UI_ADDR while DKG runs.
+    // Operators reloading the page during DKG — or opening it
+    // for the first time after an auto-resume restart — get a
+    // coherent waiting screen instead of a connection error.
+    let ui_service = ui::dkg::router(db.clone()).into_make_service();
+
+    let ui_listener = TcpListener::bind(settings.ui_addr)
+        .await
+        .expect("Failed to bind DKG UI");
+
+    let dkg_ui_handle = tokio::spawn(async move {
+        axum::serve(ui_listener, ui_service)
+            .await
+            .expect("Failed to serve DKG UI");
+    });
+
+    let cfg = ServerConfig::generate(&cgp, connections.clone(), status_rxs.clone()).await?;
+
+    store_server_config(&db, &cfg).await;
+
+    dkg_ui_handle.abort();
+
+    dkg_ui_handle.await.ok();
+
+    info!("Starting consensus...");
+
+    Box::pin(consensus::run(
+        connections,
+        status_rxs,
+        conn_rx,
+        cfg,
+        db,
+        bitcoin_rpc,
+        settings.ui_addr,
+        &data_dir,
+    ))
+    .await
+}
+
+async fn run_consensus(
+    cfg: ServerConfig,
     settings: ConfigGenSettings,
     db: Database,
     bitcoin_rpc: Arc<BitcoindClient>,
@@ -73,49 +195,29 @@ pub async fn run_server(
     // Small bound: pre-DKG there's no consumer, so incoming api attempts
     // overflow and are dropped (no valid client should be talking to a
     // not-yet-bootstrapped federation).
-    let (foreign_conn_tx, foreign_conn_rx) = async_channel::bounded(128);
+    let (conn_tx, conn_rx) = async_channel::bounded(128);
 
-    let (cfg, connections, p2p_status_receivers) = match load_server_config(&db).await {
-        Some(cfg) => {
-            let connector = P2PConnector::new(
-                cfg.private.iroh_sk.clone(),
-                settings.p2p_addr,
-                cfg.consensus
-                    .peers
-                    .iter()
-                    .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
-                    .collect(),
-            )
-            .await?;
+    let cnt = P2PConnector::new(
+        cfg.private.iroh_sk.clone(),
+        cfg.consensus
+            .peers
+            .iter()
+            .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
+            .collect(),
+        settings.p2p_addr,
+    )
+    .await?;
 
-            let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
+    let (status_txs, status_rxs) = p2p_status_channels(cnt.peers());
 
-            let connections = ReconnectP2PConnections::<P2PMessage>::new(
-                cfg.private.identity,
-                connector,
-                p2p_status_senders,
-                foreign_conn_tx,
-            );
-
-            (cfg, connections, p2p_status_receivers)
-        }
-        None => {
-            Box::pin(run_config_gen(
-                db.clone(),
-                settings.clone(),
-                &data_dir,
-                foreign_conn_tx,
-            ))
-            .await?
-        }
-    };
+    let connections = ReconnectP2PConnections::new(cfg.private.identity, cnt, status_txs, conn_tx);
 
     info!("Starting consensus...");
 
     Box::pin(consensus::run(
         connections,
-        p2p_status_receivers,
-        foreign_conn_rx,
+        status_rxs,
+        conn_rx,
         cfg,
         db,
         bitcoin_rpc,
@@ -125,117 +227,4 @@ pub async fn run_server(
     .await?;
 
     Ok(())
-}
-
-pub async fn run_config_gen(
-    db: Database,
-    settings: ConfigGenSettings,
-    data_dir: &Path,
-    foreign_conn_tx: async_channel::Sender<iroh::endpoint::Connection>,
-) -> anyhow::Result<(
-    ServerConfig,
-    ReconnectP2PConnections<P2PMessage>,
-    P2PStatusReceivers,
-)> {
-    info!("Starting config gen");
-
-    let (setup_tx, mut setup_rx) = tokio::sync::mpsc::channel(1);
-
-    let setup_api = Arc::new(SetupApi::new(settings.clone(), setup_tx));
-
-    let setup_ui_handle = if let Some(ui_addr) = settings.ui_addr {
-        let ui_service = ui::setup::router(setup_api.clone()).into_make_service();
-        let ui_listener = TcpListener::bind(ui_addr)
-            .await
-            .expect("Failed to bind setup UI");
-        let handle = tokio::spawn(async move {
-            axum::serve(ui_listener, ui_service)
-                .await
-                .expect("Failed to serve setup UI");
-        });
-        info!("Setup UI running at http://{ui_addr} 🚀");
-        Some(handle)
-    } else {
-        info!("UI disabled (UI_ADDR unset); driving setup via CLI only");
-        None
-    };
-
-    let cli_state = cli::CliState {
-        setup_api: setup_api.clone(),
-    };
-    let cli_data_dir = data_dir.to_owned();
-    let setup_cli_handle = tokio::spawn(async move {
-        cli::run_cli(&cli_data_dir, cli_state).await;
-    });
-
-    let setup_result = setup_rx
-        .recv()
-        .await
-        .expect("Setup result receiver closed unexpectedly");
-
-    // Stop the setup UI/CLI listeners before consensus tries to bind the
-    // same TCP port and Unix socket. Aborting drops the listener at the
-    // next await; awaiting the handle confirms the bind is released.
-    if let Some(handle) = setup_ui_handle {
-        handle.abort();
-        handle.await.ok();
-    }
-    setup_cli_handle.abort();
-    setup_cli_handle.await.ok();
-
-    match setup_result {
-        SetupResult::Dkg(cg_params) => {
-            let connector = P2PConnector::new(
-                cg_params.iroh_sk.clone(),
-                settings.p2p_addr,
-                cg_params.iroh_pks(),
-            )
-            .await?;
-
-            let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
-
-            let connections = ReconnectP2PConnections::<P2PMessage>::new(
-                cg_params.identity,
-                connector,
-                p2p_status_senders,
-                foreign_conn_tx,
-            );
-
-            let cfg = ServerConfig::distributed_gen(
-                &cg_params,
-                connections.clone(),
-                p2p_status_receivers.clone(),
-            )
-            .await?;
-
-            store_server_config(&db, &cfg).await;
-
-            Ok((cfg, connections, p2p_status_receivers))
-        }
-        SetupResult::Recovered(cfg) => {
-            let connector = P2PConnector::new(
-                cfg.private.iroh_sk.clone(),
-                settings.p2p_addr,
-                cfg.consensus
-                    .peers
-                    .iter()
-                    .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
-                    .collect(),
-            )
-            .await?;
-
-            let (p2p_status_senders, p2p_status_receivers) = p2p_status_channels(connector.peers());
-
-            let connections = ReconnectP2PConnections::<P2PMessage>::new(
-                cfg.private.identity,
-                connector,
-                p2p_status_senders,
-                foreign_conn_tx,
-            );
-
-            store_server_config(&db, &cfg).await;
-
-            Ok((*cfg, connections, p2p_status_receivers))
-        }
-    }
 }

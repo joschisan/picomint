@@ -5,10 +5,12 @@ use anyhow::{Context, ensure};
 use iroh::SecretKey;
 use picomint_core::PeerId;
 use picomint_encoding::{Decodable, Encodable};
+use picomint_redb::Database;
 use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
+use crate::config::db::{ConfigGenParamsTable, LocalParamsTable, store_server_config};
 use crate::config::{ConfigGenParams, ConfigGenSettings, ServerConfig, SetupResult};
 
 /// Connection information sent between peers in order to start config gen.
@@ -46,7 +48,7 @@ pub struct SetupState {
     setup_codes: std::collections::BTreeSet<PeerSetupCode>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Encodable, Decodable)]
 /// Connection information sent between peers in order to start config gen
 pub struct LocalParams {
     /// Secret key for our single iroh endpoint (p2p + api)
@@ -76,28 +78,38 @@ impl LocalParams {
 pub struct SetupApi {
     /// Our config gen settings configured locally
     settings: ConfigGenSettings,
-    /// In-memory state machine
+    /// In-memory state machine, mirroring the on-disk setup tables.
     state: Arc<Mutex<SetupState>>,
     /// Signals the setup loop with either DKG params or a recovered config
     sender: Sender<SetupResult>,
+    /// Backing store; setup mutations write through here so a daemon restart
+    /// mid-setup keeps the iroh identity and the already-collected peer
+    /// codes.
+    db: Database,
 }
 
 impl SetupApi {
-    pub fn new(settings: ConfigGenSettings, sender: Sender<SetupResult>) -> Self {
+    pub fn new(settings: ConfigGenSettings, sender: Sender<SetupResult>, db: Database) -> Self {
+        let state = SetupState {
+            local_params: db.begin_read().get(&LocalParamsTable, &()),
+            setup_codes: std::collections::BTreeSet::new(),
+        };
+
         Self {
             settings,
-            state: Arc::new(Mutex::new(SetupState::default())),
+            state: Arc::new(Mutex::new(state)),
             sender,
+            db,
         }
     }
 
-    pub async fn setup_code(&self) -> Option<String> {
+    pub async fn setup_code(&self) -> Option<PeerSetupCode> {
         self.state
             .lock()
             .await
             .local_params
             .as_ref()
-            .map(|lp| picomint_base32::encode(&lp.setup_code()))
+            .map(LocalParams::setup_code)
     }
 
     pub async fn guardian_name(&self) -> Option<String> {
@@ -179,6 +191,12 @@ impl SetupApi {
             federation_name,
             federation_size,
         };
+
+        let dbtx = self.db.begin_write();
+
+        dbtx.insert(&LocalParamsTable, &(), &lp);
+
+        dbtx.commit();
 
         state.local_params = Some(lp.clone());
 
@@ -285,6 +303,18 @@ impl SetupApi {
             network: self.settings.network,
         };
 
+        // Atomically transition out of the code-exchange phase: drop the
+        // `LocalParams` (its iroh secret key is now inside `params`) and
+        // persist `ConfigGenParams` so a daemon restart auto-resumes DKG
+        // without operator interaction.
+        let dbtx = self.db.begin_write();
+
+        dbtx.delete_table(&LocalParamsTable);
+
+        dbtx.insert(&ConfigGenParamsTable, &(), &params);
+
+        dbtx.commit();
+
         self.sender
             .send(SetupResult::Dkg(Box::new(params)))
             .await
@@ -296,6 +326,8 @@ impl SetupApi {
     pub async fn recover_config(&self, cfg: ServerConfig) -> anyhow::Result<()> {
         cfg.validate_config(&cfg.private.identity)
             .context("Recovered config failed validation")?;
+
+        store_server_config(&self.db, &cfg).await;
 
         self.sender
             .send(SetupResult::Recovered(Box::new(cfg)))
