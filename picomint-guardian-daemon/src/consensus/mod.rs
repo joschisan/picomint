@@ -48,7 +48,7 @@ pub async fn run(
     cfg: ServerConfig,
     db: Database,
     bitcoin_backend: Arc<BitcoindClient>,
-    ui_addr: Option<SocketAddr>,
+    ui_addr: SocketAddr,
     data_dir: &Path,
 ) -> anyhow::Result<()> {
     cfg.validate_config(&cfg.private.identity)?;
@@ -142,20 +142,19 @@ pub async fn run(
         }
     });
 
-    if let Some(ui_addr) = ui_addr {
-        let ui_service = crate::ui::dashboard::router(consensus_api.clone()).into_make_service();
-        let ui_listener = TcpListener::bind(ui_addr)
+    let ui_service = crate::ui::dashboard::router(consensus_api.clone()).into_make_service();
+
+    let ui_listener = TcpListener::bind(ui_addr)
+        .await
+        .expect("Failed to bind dashboard UI");
+
+    tokio::spawn(async move {
+        axum::serve(ui_listener, ui_service)
             .await
-            .expect("Failed to bind dashboard UI");
-        tokio::spawn(async move {
-            axum::serve(ui_listener, ui_service)
-                .await
-                .expect("Failed to serve dashboard UI");
-        });
-        info!("Dashboard UI running at http://{ui_addr} 🚀");
-    } else {
-        info!("UI disabled (UI_ADDR unset); dashboard available via CLI only");
-    }
+            .expect("Failed to serve dashboard UI");
+    });
+
+    info!("Dashboard UI running at http://{ui_addr} 🚀");
 
     {
         let data_dir = data_dir.to_owned();

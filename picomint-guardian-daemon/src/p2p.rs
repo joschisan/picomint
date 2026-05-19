@@ -136,8 +136,8 @@ pub struct P2PConnector {
 impl P2PConnector {
     pub async fn new(
         secret_key: SecretKey,
-        p2p_addr: SocketAddr,
         node_ids: BTreeMap<PeerId, PublicKey>,
+        p2p_addr: SocketAddr,
     ) -> anyhow::Result<Self> {
         let identity = *node_ids
             .iter()

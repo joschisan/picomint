@@ -28,8 +28,6 @@ The Web UI is enabled by default and bound to host loopback at <http://127.0.0.1
 ssh -NL 3000:127.0.0.1:3000 <your_server>
 ```
 
-To disable the UI (CLI-only deployment), remove `UI_ADDR` and the `127.0.0.1:3000:3000` port mapping from `docker-compose.yml`.
-
 ### Bootstrap on a fresh Ubuntu 26.04 LTS desktop
 
 For a fresh **Ubuntu 26.04 LTS desktop** with a screen and keyboard, the manual steps above are bundled into a single script. It installs Docker (if missing), brings up the guardian + bundled bitcoind compose in `~/picomint-guardian-daemon`, and optionally installs Signal Desktop for exchanging setup codes with co-guardians:
@@ -170,7 +168,7 @@ picomint-guardian-cli …`.
 | `BITCOIN_NETWORK`            | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`  |
 | `BITCOIND_URL`               | yes      |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332`. Must point at an **unpruned** node — see [Bitcoin Backend](#bitcoin-backend) above. |
 | `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
-| `UI_ADDR`                    | no       |                   | Web UI listen address — unset disables UI  |
+| `UI_ADDR`                    | no       | `127.0.0.1:3000`  | Web UI listen address                      |
 
 ## Deploy Gateway
 

@@ -76,9 +76,8 @@ pub struct ServerConfigPrivate {
 pub struct ConfigGenSettings {
     /// Bind address for our P2P connection
     pub p2p_addr: SocketAddr,
-    /// Web UI bind address. `None` disables the UI and requires all admin
-    /// actions (including DKG setup) to go through the CLI.
-    pub ui_addr: Option<SocketAddr>,
+    /// Web UI bind address.
+    pub ui_addr: SocketAddr,
     /// Bitcoin network for the federation
     pub network: bitcoin::Network,
 }
@@ -91,7 +90,7 @@ pub enum SetupResult {
     Recovered(Box<ServerConfig>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Encodable, Decodable)]
 /// All the parameters necessary for generating the `ServerConfig` during setup
 ///
 /// * Guardians can create the parameters using a setup UI or CLI tool
@@ -216,7 +215,7 @@ impl ServerConfig {
     }
 
     /// Runs the distributed key gen algorithm
-    pub async fn distributed_gen(
+    pub async fn generate(
         params: &ConfigGenParams,
         connections: ReconnectP2PConnections<P2PMessage>,
         p2p_status_receivers: P2PStatusReceivers,

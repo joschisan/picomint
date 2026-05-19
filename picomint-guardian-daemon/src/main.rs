@@ -41,11 +41,11 @@ struct ServerOpts {
     #[arg(long = "p2p-addr", env = "P2P_ADDR", default_value = "0.0.0.0:8080")]
     p2p_addr: SocketAddr,
 
-    /// Optional listen address for the Web UI. When unset the UI is
-    /// disabled and all admin actions (including DKG setup) must go
-    /// through the CLI.
-    #[arg(long = "ui-addr", env = "UI_ADDR")]
-    ui_addr: Option<SocketAddr>,
+    /// Listen address for the Web UI. The UI is unauthenticated; bind it
+    /// to loopback (the default) or expose it via SSH tunnel / VPN. See
+    /// README.md.
+    #[arg(long = "ui-addr", env = "UI_ADDR", default_value = "127.0.0.1:3000")]
+    ui_addr: SocketAddr,
 }
 
 #[tokio::main]
