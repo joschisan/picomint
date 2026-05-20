@@ -15,6 +15,8 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     sqlite3 \
+    jq \
+    curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -u 1000 picomint \
     && mkdir -p /data \
@@ -22,6 +24,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /app/target/release/picomint-gateway-daemon /usr/local/bin/picomint-gateway-daemon
 COPY --from=builder /app/target/release/picomint-gateway-cli /usr/local/bin/picomint-gateway-cli
+COPY docker-gateway/report.sh                     /usr/local/bin/report.sh
+COPY docker-gateway/alert-federation-liquidity.sh /usr/local/bin/alert-federation-liquidity.sh
+COPY docker-gateway/alert-ldk-liquidity.sh        /usr/local/bin/alert-ldk-liquidity.sh
+COPY docker-gateway/ntfy.sh                       /usr/local/bin/ntfy.sh
 
 USER picomint
 
