@@ -72,9 +72,9 @@ futures = "0.3.32"
 group = "0.13.0"
 hex = "0.4.3"
 hyper = "1.9"
-iroh = { version = "=1.0.0-rc.0", default-features = false, features = ["tls-ring"] }
-iroh-base = { version = "=1.0.0-rc.0", default-features = false }
-iroh-mdns-address-lookup = "=0.2.0"
+iroh = { version = "=1.0.0-rc.1", default-features = false, features = ["tls-ring"] }
+iroh-base = { version = "=1.0.0-rc.1", default-features = false }
+iroh-mdns-address-lookup = "=0.3.0"
 ldk-node = "0.7.0"
 lightning = "0.2.2"
 lightning-invoice = { version = "0.34.0", features = ["serde", "std"] }
