@@ -2,9 +2,10 @@
 //!
 //! A single daemon-wide trailer task reads from the global event log and
 //! `INSERT`s rows into `{DATA_DIR}/analytics.sqlite`. One table per event
-//! kind plus a `payments` view that stitches sends/receives into a single
-//! row per op. Federation_id is read directly off each event entry — every
-//! event is federation-scoped at log time.
+//! kind plus `outgoing_payments` and `incoming_payments` views that each
+//! stitch the relevant event tables into a single row per op. Federation
+//! id is read directly off each event entry — every event is
+//! federation-scoped at log time.
 //!
 //! The file is **wiped on every gateway startup** — analytics state is
 //! derived, not authoritative. The event log in the gateway redb is the
@@ -48,9 +49,10 @@ pub struct Analytics {
 
 impl Analytics {
     /// Wipe `{DATA_DIR}/analytics/`, recreate it, and open a fresh SQLite
-    /// DB with the schema + `payments` view installed. Analytics state is
-    /// always rebuilt from the redb event log on startup, so we don't
-    /// preserve anything across restarts.
+    /// DB with the schema + `outgoing_payments` / `incoming_payments`
+    /// views installed. Analytics state is always rebuilt from the redb
+    /// event log on startup, so we don't preserve anything across
+    /// restarts.
     pub fn wipe_and_init(data_dir: &Path) -> anyhow::Result<Self> {
         let dir: PathBuf = data_dir.join(ANALYTICS_DIR);
         // A full directory wipe handles the db file and its WAL/SHM sidecars
@@ -75,8 +77,11 @@ impl Analytics {
     }
 }
 
-/// Schema + `payments` view. Column naming matches the previous DataFusion
-/// layout so operator-written queries and scripts keep working.
+/// Schema + the two per-direction payment views. Outgoing and incoming
+/// are split because the fee model is asymmetric — only the outgoing
+/// side has an LN routing-fee budget that can differ from the realized
+/// paid amount, and forcing those columns into a unified view would
+/// mean carrying three permanent NULL columns on every incoming row.
 const SCHEMA_SQL: &str = r#"
 CREATE TABLE send (
     operation  TEXT NOT NULL,
@@ -156,11 +161,10 @@ CREATE INDEX idx_receive_ts          ON receive(ts);
 CREATE INDEX idx_receive_success_ts  ON receive_success(ts);
 CREATE INDEX idx_tx_create_ts        ON tx_create(ts);
 
-CREATE VIEW payments AS
+CREATE VIEW outgoing_payments AS
 SELECT
     s.federation,
     s.operation,
-    'outgoing' AS direction,
     s.ts AS started_at,
     COALESCE(succ.ts, canc.ts) AS completed_at,
     CASE
@@ -169,6 +173,18 @@ SELECT
         ELSE 'pending'
     END AS status,
     s.amount_msat,
+    s.fee_msat       AS gw_fee_msat,
+    s.ln_fee_msat    AS ln_fee_budget_msat,
+    CASE
+        WHEN succ.operation IS NOT NULL THEN succ.ln_fee_msat
+        WHEN canc.operation IS NOT NULL THEN 0
+        ELSE NULL
+    END AS ln_fee_paid_msat,
+    CASE
+        WHEN succ.operation IS NOT NULL THEN s.ln_fee_msat - succ.ln_fee_msat
+        WHEN canc.operation IS NOT NULL THEN 0
+        ELSE NULL
+    END AS ln_fee_kept_msat,
     succ.preimage,
     tx.txid          AS tx_txid,
     tx.remint_msat   AS tx_remint_msat,
@@ -179,12 +195,12 @@ LEFT JOIN send_success succ
 LEFT JOIN send_cancel  canc
        ON canc.federation = s.federation AND canc.operation = s.operation
 LEFT JOIN tx_create    tx
-       ON tx.federation = s.federation AND tx.operation = s.operation
-UNION ALL
+       ON tx.federation = s.federation AND tx.operation = s.operation;
+
+CREATE VIEW incoming_payments AS
 SELECT
     r.federation,
     r.operation,
-    'incoming' AS direction,
     r.ts AS started_at,
     COALESCE(succ.ts, fail.ts, refund.ts) AS completed_at,
     CASE
@@ -194,6 +210,7 @@ SELECT
         ELSE 'pending'
     END AS status,
     r.amount_msat,
+    r.fee_msat       AS gw_fee_msat,
     succ.preimage,
     tx.txid          AS tx_txid,
     tx.remint_msat   AS tx_remint_msat,

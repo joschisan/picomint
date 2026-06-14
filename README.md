@@ -333,49 +333,73 @@ The gateway mirrors every gw-module event into a SQLite database at
 startup** and rebuilt by replaying the event log — analytics are derived,
 not authoritative, so it's safe to delete and let it rebuild.
 
-Inspect the DB with `sqlite3` directly (the gateway container already has
-it installed). Pass `-header -column` for human-readable, column-aligned
-output — without it `sqlite3` prints unlabeled pipe-delimited rows. See
-the ten most recent payments:
+Activity is exposed through two per-direction views,
+`outgoing_payments` and `incoming_payments`. Each row is one operation,
+joined across the underlying event tables. They are kept separate
+because the outgoing side carries an LN-routing-fee budget that doesn't
+exist on the incoming side — a single unified view would mean three
+permanent NULL columns on every incoming row.
+
+Inspect the DB with `sqlite3` directly (the gateway container already
+has it installed). Pass `-header -column` for human-readable,
+column-aligned output — without it `sqlite3` prints unlabeled
+pipe-delimited rows. Ten most recent outgoing payments:
 
 ```bash
 sudo docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
-    "SELECT * FROM payments ORDER BY started_at DESC LIMIT 10;"
+    "SELECT * FROM outgoing_payments ORDER BY started_at DESC LIMIT 10;"
 ```
 
-Breakdown by status:
+Status breakdown for outgoing:
 
 ```bash
 sudo docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
-    "SELECT status, COUNT(*) FROM payments GROUP BY status;"
+    "SELECT status, COUNT(*) FROM outgoing_payments GROUP BY status;"
 ```
 
-Total processed volume per federation, in sat:
+Total outgoing volume per federation, in sat:
 
 ```bash
 sudo docker exec -it picomint-gateway-daemon \
     sqlite3 -header -column /data/analytics/analytics.sqlite \
-    "SELECT federation_id, SUM(amount_msat)/1000 AS sat FROM payments WHERE status='success' GROUP BY federation_id;"
+    "SELECT federation, SUM(amount_msat)/1000 AS sat \
+     FROM outgoing_payments WHERE status='success' GROUP BY federation;"
 ```
 
-Each row in `payments` is one incoming or outgoing operation.
+**Columns common to both views:**
 
-| Column          | Type           | Notes                                                                                                    |
-|-----------------|----------------|----------------------------------------------------------------------------------------------------------|
-| `federation_id` | TEXT           | Hex-encoded federation id                                                                                |
-| `operation`     | TEXT           | Hex-encoded operation id; unique within `(federation_id, direction)`                                     |
-| `direction`     | TEXT           | `incoming` or `outgoing`                                                                                 |
-| `status`        | TEXT           | `pending`, `success`, `cancelled` (outgoing only), `failure` (incoming only), `refunded` (incoming only) |
-| `started_at`    | INTEGER        | When the operation was initiated (µs since epoch)                                                        |
-| `completed_at`  | INTEGER        | NULL while `status = 'pending'`                                                                          |
-| `amount_msat`   | INTEGER        | Millisatoshis; NULL on outgoing rows that pay an amountless bolt11 invoice                               |
-| `preimage`      | TEXT           | Hex-encoded; NULL unless `status = 'success'`                                                            |
+| Column           | Type    | Notes                                                                  |
+|------------------|---------|------------------------------------------------------------------------|
+| `federation`     | TEXT    | Hex-encoded federation id                                              |
+| `operation`      | TEXT    | Hex-encoded operation id; unique within the view                       |
+| `status`         | TEXT    | See below                                                              |
+| `started_at`     | INTEGER | When the operation was initiated (ms since epoch)                      |
+| `completed_at`   | INTEGER | NULL while `status = 'pending'`                                        |
+| `amount_msat`    | INTEGER | Payment amount, msat                                                   |
+| `gw_fee_msat`    | INTEGER | The gateway's fee cut                                                  |
+| `tx_fee_msat`    | INTEGER | Federation consensus tx fee (NULL until the tx lands)                  |
+| `tx_remint_msat` | INTEGER | Federation tx remint amount                                            |
+| `tx_txid`        | TEXT    | Federation tx id (NULL until the tx lands)                             |
+| `preimage`       | TEXT    | Hex-encoded; NULL unless `status = 'success'`                          |
+
+**Additional columns on `outgoing_payments`:**
+
+| Column               | Type    | Notes                                                                |
+|----------------------|---------|----------------------------------------------------------------------|
+| `ln_fee_budget_msat` | INTEGER | Maximum LN routing fee the gateway committed to pay                  |
+| `ln_fee_paid_msat`   | INTEGER | Realized LN routing fee (NULL while pending; 0 if cancelled)         |
+| `ln_fee_kept_msat`   | INTEGER | `ln_fee_budget_msat - ln_fee_paid_msat` (NULL while pending)         |
+
+**Status values:**
+
+- `outgoing_payments`: `pending`, `success`, `cancelled`
+- `incoming_payments`: `pending`, `success`, `failure`, `refunded`
 
 The raw event tables (`send`, `send_success`, `send_cancel`, `receive`,
-`receive_success`, `receive_failure`, `receive_refund`) are also queryable
-if you need a view more granular than `payments`.
+`receive_success`, `receive_failure`, `receive_refund`, `tx_create`) are
+also queryable if you need a finer view.
 
 ### Interfaces
 

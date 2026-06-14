@@ -154,18 +154,20 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     assert_eq!(count("SELECT COUNT(*) FROM receive_failure")?, 0);
     assert_eq!(count("SELECT COUNT(*) FROM receive_refund")?, 0);
 
-    // `payments` view stitches sends/receives into one row per operation
-    assert_eq!(count("SELECT COUNT(*) FROM payments")?, 6);
+    // outgoing_payments / incoming_payments split sends/receives into
+    // per-direction views with one row per operation
+    assert_eq!(count("SELECT COUNT(*) FROM outgoing_payments")?, 4);
+    assert_eq!(count("SELECT COUNT(*) FROM incoming_payments")?, 2);
     assert_eq!(
-        count("SELECT COUNT(*) FROM payments WHERE direction='outgoing' AND status='success'")?,
+        count("SELECT COUNT(*) FROM outgoing_payments WHERE status='success'")?,
         1
     );
     assert_eq!(
-        count("SELECT COUNT(*) FROM payments WHERE direction='outgoing' AND status='cancelled'")?,
+        count("SELECT COUNT(*) FROM outgoing_payments WHERE status='cancelled'")?,
         3
     );
     assert_eq!(
-        count("SELECT COUNT(*) FROM payments WHERE direction='incoming' AND status='success'")?,
+        count("SELECT COUNT(*) FROM incoming_payments WHERE status='success'")?,
         2
     );
 
@@ -180,8 +182,7 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
 
     // Amount extraction
     let sum: i64 = conn.query_row(
-        "SELECT SUM(amount_msat) FROM payments \
-         WHERE direction='outgoing' AND status='success'",
+        "SELECT SUM(amount_msat) FROM outgoing_payments WHERE status='success'",
         [],
         |r| r.get(0),
     )?;
