@@ -19,6 +19,12 @@ use crate::unit::{Cosig, Round, Unit, UnitData};
 /// Periodic own-slot push interval. Pull is demand-driven, not periodic.
 const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Minimum interval between successive `Request` sends for the same
+/// `(round, creator)` slot. Caps the parent-walk fan-out so anti-entropy
+/// retransmits of the same top-of-chain unit don't keep re-firing the
+/// whole tree of requests every second.
+const REQUEST_DEDUP_INTERVAL: Duration = Duration::from_secs(1);
+
 /// Drives a single peer's growth indefinitely. The caller constructs
 /// the engine, then awaits `run()` (typically in a spawned task) and
 /// keeps the receiving end of `ordered_tx` for items as they commit.
@@ -34,7 +40,7 @@ where
     D: UnitData,
     P: DataProvider<D>,
 {
-    own_id: PeerId,
+    id: PeerId,
     session: u64,
     pub(crate) n: NumPeers,
     db: Database,
@@ -61,6 +67,10 @@ where
     pub(crate) emitted: BTreeSet<(Round, PeerId)>,
     /// Extender cursor: the next leader round to attempt deciding.
     pub(crate) next_decide_round: Round,
+    /// Last time we sent `Message::Request` for a given slot. Used to
+    /// throttle re-asks so anti-entropy retransmits don't fan out
+    /// duplicate parent-walks every tick.
+    request_sent_at: BTreeMap<(Round, PeerId), Instant>,
 }
 
 impl<P, D> Engine<P, D>
@@ -70,7 +80,7 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new<TU, TC>(
-        own_id: PeerId,
+        id: PeerId,
         session: u64,
         n: NumPeers,
         db: Database,
@@ -87,7 +97,7 @@ where
         TC: Table<Key = (Round, PeerId, PeerId), Value = Cosig>,
     {
         Self {
-            own_id,
+            id,
             session,
             n,
             db,
@@ -101,6 +111,7 @@ where
             extended: BTreeSet::new(),
             emitted: BTreeSet::new(),
             next_decide_round: 0,
+            request_sent_at: BTreeMap::new(),
         }
     }
 
@@ -123,8 +134,9 @@ where
                 _ = sleep_until(next_create_at) => {
                     self.try_create_unit().await;
 
-                    next_create_at = Instant::now()
-                        + (self.unit_delay)(self.next_create_round());
+                    let round = self.highest_unit(&self.db.begin_read(), self.id).map_or(0, |u| u.round);
+
+                    next_create_at = Instant::now() + (self.unit_delay)(round);
                 }
 
                 _ = sleep_until(next_anti_entropy_at) => {
@@ -214,16 +226,80 @@ where
     fn broadcast_anti_entropy(&self) {
         let dbtx = self.db.begin_read();
 
-        let Some(unit) = self.highest_unit(&dbtx, self.own_id) else {
+        let Some(unit) = self.highest_unit(&dbtx, self.id) else {
             return;
         };
 
         let sig = *self
-            .cosigs(&dbtx, unit.round, self.own_id)
-            .get(&self.own_id)
+            .cosigs(&dbtx, unit.round, self.id)
+            .get(&self.id)
             .expect("we always have our own signature for our own unit");
 
         self.send_unit(Recipient::Everyone, &unit, &sig);
+    }
+
+    /// Send `Message::Request` for `(round, creator)` to `peer`, but
+    /// only if we haven't asked for the same slot within the past
+    /// [`REQUEST_DEDUP_INTERVAL`]. Anti-entropy retransmits the same
+    /// top-of-chain unit every second, and every receipt would
+    /// otherwise refire the entire ancestor walk — so we throttle the
+    /// outgoing request rate per slot to one per cache window.
+    fn try_send_request(&mut self, peer: PeerId, round: Round, creator: PeerId) {
+        let now = Instant::now();
+
+        if self
+            .request_sent_at
+            .get(&(round, creator))
+            .filter(|prev| now.duration_since(**prev) < REQUEST_DEDUP_INTERVAL)
+            .is_some()
+        {
+            return;
+        }
+
+        self.request_sent_at.insert((round, creator), now);
+
+        self.network
+            .send(Recipient::Peer(peer), Message::Request { round, creator });
+    }
+
+    /// Walk ancestors of `top` locally and `Request` only the
+    /// unconfirmed frontier from `sender`. We descend through every
+    /// confirmed-but-not-extended ancestor because we already hold
+    /// their bodies (and therefore their parent sets); their *parents*
+    /// are the slots whose threshold proof we still need. Extended
+    /// slots and slots we've already requested recently (via
+    /// `try_send_request`) terminate the walk.
+    fn cascade_parents(&mut self, dbtx: &impl DbRead, sender: PeerId, top: &Unit<D>) {
+        let mut visited: BTreeSet<(Round, PeerId)> = BTreeSet::new();
+        let mut stack: Vec<(Round, PeerId)> = Vec::new();
+
+        if let Some(parent_round) = top.round.checked_sub(1) {
+            stack.extend(top.parents.iter().map(|c| (parent_round, *c)));
+        }
+
+        while let Some((round, creator)) = stack.pop() {
+            if !visited.insert((round, creator)) {
+                continue;
+            }
+
+            if self.is_extended(round, creator) {
+                continue;
+            }
+
+            if !self.is_confirmed(dbtx, round, creator) {
+                self.try_send_request(sender, round, creator);
+            }
+
+            let Some(parent_round) = round.checked_sub(1) else {
+                continue;
+            };
+
+            let Some(unit) = dbtx.get(&self.units_table, &(round, creator)) else {
+                continue;
+            };
+
+            stack.extend(unit.parents.iter().map(|c| (parent_round, *c)));
+        }
     }
 
     /// Reply with `SignedUnit` only when the slot is locally confirmed.
@@ -258,38 +334,25 @@ where
         unit: &Unit<D>,
         sig: schnorr::Signature,
     ) -> Result<()> {
-        if let Some(cosig) = dbtx.get(&self.cosigs_table, &(unit.round, unit.creator, self.own_id))
-        {
+        if let Some(c) = dbtx.get(&self.cosigs_table, &(unit.round, unit.creator, self.id)) {
             self.network.send(
                 Recipient::Everyone,
                 Message::Cosig {
                     round: unit.round,
                     creator: unit.creator,
-                    signer: self.own_id,
-                    cosig: cosig.0,
+                    signer: self.id,
+                    cosig: c.0,
                 },
             );
         }
 
-        if let Some(parent_round) = unit.round.checked_sub(1) {
-            for parent_creator in unit.parents.iter().copied() {
-                if !self.is_extended(parent_round, parent_creator) {
-                    self.network.send(
-                        Recipient::Peer(sender),
-                        Message::Request {
-                            round: parent_round,
-                            creator: parent_creator,
-                        },
-                    );
-                }
-            }
-        }
+        self.cascade_parents(dbtx, sender, unit);
 
         self.insert_unit(dbtx, unit, sig)?;
 
         let cosig = self.keychain.sign(self.session, unit);
 
-        self.record_cosig(dbtx, unit.round, unit.creator, self.own_id, cosig)
+        self.record_cosig(dbtx, unit.round, unit.creator, self.id, cosig)
             .expect("own cosig over freshly inserted body must succeed");
 
         self.network.send(
@@ -297,7 +360,7 @@ where
             Message::Cosig {
                 round: unit.round,
                 creator: unit.creator,
-                signer: self.own_id,
+                signer: self.id,
                 cosig,
             },
         );
@@ -317,19 +380,7 @@ where
     ) -> Result<()> {
         self.insert_signed_unit(dbtx, unit, cosigs)?;
 
-        if let Some(parent_round) = unit.round.checked_sub(1) {
-            for parent_creator in unit.parents.iter().copied() {
-                if !self.is_extended(parent_round, parent_creator) {
-                    self.network.send(
-                        Recipient::Peer(sender),
-                        Message::Request {
-                            round: parent_round,
-                            creator: parent_creator,
-                        },
-                    );
-                }
-            }
-        }
+        self.cascade_parents(dbtx, sender, unit);
 
         Ok(())
     }
@@ -466,35 +517,25 @@ where
         Ok(())
     }
 
-    /// Derive the next round to attempt creation at from our highest
-    /// own-slot. After wipe-and-recover, peers may have refilled our
-    /// slot via anti-entropy; `highest_unit` accounts for that, so
-    /// we resume at `highest + 1` rather than re-forking it.
-    fn next_create_round(&self) -> Round {
-        let dbtx = self.db.begin_read();
-        self.highest_unit(&dbtx, self.own_id)
-            .map_or(0, |u| u.round + 1)
-    }
-
     async fn try_create_unit(&mut self) {
-        let round = self.next_create_round();
+        let dbtx = self.db.begin_write();
+
+        let round = self.highest_unit(&dbtx, self.id).map_or(0, |u| u.round + 1);
 
         let Some(parents) = self.parents_for(round) else {
             return;
         };
 
-        let data: Vec<D> = self.data_provider.get_data().await;
+        let data: Vec<D> = self.data_provider.get_data();
 
         let unit = Unit {
             round,
-            creator: self.own_id,
+            creator: self.id,
             parents,
             data,
         };
 
         let sig = self.keychain.sign(self.session, &unit);
-
-        let dbtx = self.db.begin_write();
 
         // Crash barrier: persist before broadcasting, otherwise a
         // restart would let us build a *different* unit at this slot
@@ -503,7 +544,7 @@ where
         self.insert_unit(&dbtx, &unit, sig)
             .expect("newly built unit must insert");
 
-        self.try_extend(&dbtx, round, self.own_id);
+        self.try_extend(&dbtx, round, self.id);
 
         self.run_extender(&dbtx).await;
 
