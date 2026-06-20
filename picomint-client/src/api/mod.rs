@@ -5,9 +5,8 @@ use std::future::pending;
 use anyhow::{Context, anyhow};
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use iroh::endpoint::Connection;
 use iroh::{Endpoint, PublicKey};
-use picomint_core::backoff::{BackoffBuilder, Retryable, networking_backoff};
+use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::methods::{
     CoreMethod, ExpiryStatusRequest, ExpiryStatusResponse, LivenessRequest, LivenessResponse,
@@ -18,34 +17,25 @@ use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_encoding::Decodable;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
-use tokio::time::sleep;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, instrument};
 
+use crate::connection::{ConnState, ConnStatus, connection_task, request_on_state};
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 use crate::tx::{Transaction, TxError};
-
-/// Live connection state for one peer, published on a watch channel by its
-/// [`connection_task`]. `None` (the channel's initial value) means the task
-/// has started but not yet produced a first result.
-#[derive(Debug, Clone)]
-enum PeerState {
-    Connected(Connection),
-    Disconnected,
-}
 
 /// Federation API client.
 ///
 /// Spawns one background [`connection_task`] per peer at construction that
 /// eagerly opens — and reconnects — a single kept-alive iroh connection,
-/// publishing its [`PeerState`] on a watch channel. Every per-peer request
+/// publishing its [`ConnState`] on a watch channel. Every per-peer request
 /// is multiplexed as a fresh bi stream over that pooled connection, so the
 /// QUIC handshake and hole-punched path are paid once and reused, not per
 /// request. Each task's status feeds [`Self::connection_status_stream`].
 #[derive(Clone, Debug)]
 pub struct FederationApi {
     peer_node_ids: BTreeMap<PeerId, PublicKey>,
-    states: BTreeMap<PeerId, watch::Receiver<Option<PeerState>>>,
+    states: BTreeMap<PeerId, watch::Receiver<Option<ConnState>>>,
     endpoint: Endpoint,
 }
 
@@ -83,20 +73,25 @@ impl FederationApi {
         &self.endpoint
     }
 
-    /// Stream of per-peer reachability. Emits a fresh `peer -> connected`
-    /// map whenever any peer's connection comes up or goes down, starting
-    /// with the current state. Backed by the same kept-alive connections
-    /// requests use, so it reflects real reachability, not a probe.
-    pub fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>> {
+    /// Stream of per-peer reachability. Emits a fresh `peer -> status` map
+    /// whenever any peer's connection comes up or goes down, starting with the
+    /// current state. Backed by the same kept-alive connections requests use,
+    /// so it reflects real reachability, not a probe; the `Connected` status
+    /// carries the RTT sampled at connect.
+    pub fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, ConnStatus>> {
         let streams = self.states.iter().map(|(&peer, rx)| {
-            WatchStream::new(rx.clone())
-                .map(move |s| (peer, matches!(s, Some(PeerState::Connected(_)))))
+            WatchStream::new(rx.clone()).map(move |s| {
+                (
+                    peer,
+                    s.map_or(ConnStatus::Disconnected, |state| state.status()),
+                )
+            })
         });
 
         let mut current = BTreeMap::new();
         futures::stream::select_all(streams)
-            .map(move |(peer, connected)| {
-                current.insert(peer, connected);
+            .map(move |(peer, status)| {
+                current.insert(peer, status);
                 current.clone()
             })
             .boxed()
@@ -112,18 +107,7 @@ impl FederationApi {
     {
         let mut rx = self.states.get(&peer).context("Invalid peer id")?.clone();
 
-        let state = rx
-            .wait_for(Option::is_some)
-            .await
-            .expect("connection task outlives the api")
-            .clone()
-            .expect("wait_for guarantees Some");
-
-        let PeerState::Connected(conn) = state else {
-            return Err(anyhow!("Peer {peer} not connected"));
-        };
-
-        picomint_rpc::request_on_connection(&conn, method).await
+        request_on_state(&mut rx, method).await
     }
 
     /// As [`Self::request_single_peer`] but retries forever on transport /
@@ -295,37 +279,5 @@ impl FederationApi {
         ))
         .await
         .map(|r| r.status)
-    }
-}
-
-/// Keep one iroh connection to `node_id` alive forever, publishing each
-/// transition on `state`. Connect, announce `Connected`, block on
-/// `Connection::closed`, announce `Disconnected`, then reconnect. Connect
-/// failures back off via `networking_backoff` (reset on success); the loop
-/// never terminates — it ends only when the watch receiver (i.e. the owning
-/// `FederationApi`) is dropped, which makes `send_replace` a no-op the next
-/// time around and the task is then cancelled with its runtime.
-async fn connection_task(
-    node_id: PublicKey,
-    endpoint: Endpoint,
-    state: watch::Sender<Option<PeerState>>,
-) {
-    let mut backoff = networking_backoff().build();
-
-    loop {
-        match endpoint.connect(node_id, picomint_rpc::ALPN).await {
-            Ok(conn) => {
-                backoff = networking_backoff().build();
-
-                state.send_replace(Some(PeerState::Connected(conn.clone())));
-
-                conn.closed().await;
-
-                state.send_replace(Some(PeerState::Disconnected));
-            }
-            Err(_) => {
-                sleep(backoff.next().expect("networking_backoff retries forever")).await;
-            }
-        }
     }
 }

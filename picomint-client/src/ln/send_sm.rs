@@ -1,9 +1,9 @@
+use super::gateway::Gateways;
 use crate::executor::{SmId, StateMachine};
 use crate::tx::{Input, TxBuilder};
 use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use futures::future::pending;
-use iroh::Endpoint;
 use picomint_core::TransactionId;
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::config::FederationId;
@@ -96,7 +96,7 @@ impl StateMachine for SendStateMachine {
                 let invoice = self.common.invoice.clone().unwrap();
                 tokio::select! {
                     response = gateway_send_sm(
-                        ctx.client_ctx.api().endpoint().clone(),
+                        ctx.gateways.clone(),
                         gateway_pk,
                         ctx.federation,
                         self.common.outpoint,
@@ -219,9 +219,9 @@ fn submit_refund(
         .expect("Cannot claim input, additional funding needed")
 }
 
-#[instrument(skip(refund_keypair, endpoint))]
+#[instrument(skip(refund_keypair, gateways))]
 async fn gateway_send_sm(
-    endpoint: Endpoint,
+    gateways: Gateways,
     gateway_pk: GatewayPk,
     federation: FederationId,
     outpoint: OutPoint,
@@ -230,18 +230,18 @@ async fn gateway_send_sm(
     refund_keypair: Keypair,
 ) -> Result<[u8; 32], Signature> {
     (|| async {
-        let payment_result = crate::ln::gateway::send(
-            &endpoint,
-            gateway_pk,
-            federation,
-            outpoint,
-            contract.clone(),
-            invoice.clone(),
-            refund_keypair.sign_schnorr(secp256k1::Message::from_digest(
-                *invoice.consensus_hash::<sha256::Hash>().as_ref(),
-            )),
-        )
-        .await?;
+        let payment_result = gateways
+            .send(
+                gateway_pk,
+                federation,
+                outpoint,
+                contract.clone(),
+                invoice.clone(),
+                refund_keypair.sign_schnorr(secp256k1::Message::from_digest(
+                    *invoice.consensus_hash::<sha256::Hash>().as_ref(),
+                )),
+            )
+            .await?;
 
         ensure!(
             contract.verify_gateway_response(&payment_result),

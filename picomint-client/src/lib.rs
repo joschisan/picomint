@@ -47,6 +47,8 @@ macro_rules! client_table {
 pub mod api;
 /// Core [`Client`]
 mod client;
+/// Shared kept-alive iroh connection primitive (federation peers + gateways).
+mod connection;
 /// Per-module typed state machine executor
 pub mod executor;
 /// Federation expiry-status cache + refresh.
