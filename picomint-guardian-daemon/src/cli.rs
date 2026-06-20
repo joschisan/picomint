@@ -87,13 +87,13 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     use axum::routing::post;
     use picomint_core::expiry::ExpiryStatus;
     use picomint_guardian_cli_core::{
-        AuditResponse, ExpirySetRequest, InviteResponse, LnGatewayRequest, ROUTE_AUDIT,
-        ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
-        ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
-        ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
-        ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
-        ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT, WalletBlockCountResponse,
-        WalletFeerateResponse, WalletTotalValueResponse,
+        AuditResponse, ExpirySetRequest, InviteRequest, InviteResponse, LnGatewayRequest,
+        ROUTE_AUDIT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
+        ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST,
+        ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_WALLET_BLOCK_COUNT,
+        ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
+        ROUTE_MODULE_WALLET_TOTAL_VALUE, ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT,
+        WalletBlockCountResponse, WalletFeerateResponse, WalletTotalValueResponse,
     };
 
     async fn config(
@@ -110,9 +110,10 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
 
     async fn invite(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+        Json(req): Json<InviteRequest>,
     ) -> Result<Json<InviteResponse>, CliError> {
         Ok(Json(InviteResponse {
-            invite: api.cfg.get_invite_code(),
+            invite: api.create_invite_code(req.expiry_days, req.user_limit).0,
         }))
     }
 

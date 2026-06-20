@@ -120,14 +120,12 @@ impl GatewayClientFactory {
             anyhow::bail!("Unsupported network {}", config.network);
         }
 
+        let federation_id = config.calculate_federation_id();
+
         let dbtx = self.db.begin_write();
 
         if dbtx
-            .insert(
-                &ClientConfigTable,
-                &config.calculate_federation_id(),
-                &config,
-            )
+            .insert(&ClientConfigTable, &federation_id, &config)
             .is_some()
         {
             anyhow::bail!("Federation is already joined");

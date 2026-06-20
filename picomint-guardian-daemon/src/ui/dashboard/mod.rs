@@ -56,7 +56,6 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
         .iter()
         .map(|(peer, receiver)| (*peer, receiver.borrow().clone()))
         .collect();
-    let invite_code = picomint_base32::encode(&api.cfg.get_invite_code());
     let audit_summary = api.federation_audit().await;
     let bitcoin_rpc_status = api.bitcoin_rpc_connection.status();
     let expiry_status = api.expiry_status_ui();
@@ -68,7 +67,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
             }
 
             div class="col-lg-6" {
-                (invite::render(&invite_code, session_count))
+                (invite::render(session_count))
             }
         }
 
@@ -122,6 +121,10 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         .route(BACKUP_CONFIG_ROUTE, get(backup_config))
         .route(SET_EXPIRY_ROUTE, post(expiry::post_set))
         .route(CLEAR_EXPIRY_ROUTE, post(expiry::post_clear))
+        .route(
+            invite::INVITE_CREATE_ROUTE,
+            post(invite::post_create_invite),
+        )
         .route(ln::LN_ADD_ROUTE, post(ln::post_add))
         .route(ln::LN_REMOVE_ROUTE, post(ln::post_remove))
         .with_static_routes()

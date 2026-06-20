@@ -20,18 +20,17 @@ use picomint_core::ln::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, ChannelInfo, FederationBalanceRequest, FederationBalanceResponse,
     FederationConfigRequest, FederationConfigResponse, FederationDisableRequest,
-    FederationEnableRequest, FederationInviteRequest, FederationInviteResponse,
-    FederationJoinRequest, FederationListResponse, FederationMintCountRequest,
-    FederationMintCountResponse, FederationMintReceiveRequest, FederationMintReceiveResponse,
-    FederationMintSendRequest, FederationMintSendResponse, FederationWalletReceiveRequest,
-    FederationWalletReceiveResponse, FederationWalletSendFeeRequest,
-    FederationWalletSendFeeResponse, FederationWalletSendRequest, FederationWalletSendResponse,
-    InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelCloseResponse,
-    LdkChannelListResponse, LdkChannelOpenRequest, LdkLnReceiveRequest, LdkLnReceiveResponse,
-    LdkLnSendRequest, LdkLnSendResponse, LdkOnchainReceiveResponse, LdkOnchainSendRequest,
-    LdkOnchainSendResponse, LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse,
-    MnemonicResponse, PeerInfo, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
-    ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_INVITE,
+    FederationEnableRequest, FederationJoinRequest, FederationListResponse,
+    FederationMintCountRequest, FederationMintCountResponse, FederationMintReceiveRequest,
+    FederationMintReceiveResponse, FederationMintSendRequest, FederationMintSendResponse,
+    FederationWalletReceiveRequest, FederationWalletReceiveResponse,
+    FederationWalletSendFeeRequest, FederationWalletSendFeeResponse, FederationWalletSendRequest,
+    FederationWalletSendResponse, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
+    LdkChannelCloseResponse, LdkChannelListResponse, LdkChannelOpenRequest, LdkLnReceiveRequest,
+    LdkLnReceiveResponse, LdkLnSendRequest, LdkLnSendResponse, LdkOnchainReceiveResponse,
+    LdkOnchainSendRequest, LdkOnchainSendResponse, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
+    LdkPeerListResponse, MnemonicResponse, PeerInfo, ROUTE_FEDERATION_BALANCE,
+    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE,
     ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
     ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
     ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
@@ -129,7 +128,6 @@ fn router() -> Router<AppState> {
         .route(ROUTE_FEDERATION_ENABLE, post(federation_enable))
         .route(ROUTE_FEDERATION_LIST, post(federation_list))
         .route(ROUTE_FEDERATION_CONFIG, post(federation_config))
-        .route(ROUTE_FEDERATION_INVITE, post(federation_invite))
         .route(ROUTE_FEDERATION_BALANCE, post(federation_balance))
         // Per-federation module commands
         .route(
@@ -586,22 +584,6 @@ async fn federation_balance(
     let balance_msat = client.get_balance();
 
     Ok(Json(FederationBalanceResponse { balance_msat }))
-}
-
-/// Generate an invite code that points new clients at one specific guardian
-/// of one specific connected federation.
-#[instrument(skip_all, err)]
-async fn federation_invite(
-    State(state): State<AppState>,
-    Json(payload): Json<FederationInviteRequest>,
-) -> Result<Json<FederationInviteResponse>, CliError> {
-    let client = resolve_client(&state, payload.federation).await?;
-    let invite_code = client
-        .invite_code(payload.peer)
-        .ok_or_else(|| CliError::bad_request("Unknown peer id for this federation"))?;
-    Ok(Json(FederationInviteResponse {
-        invite: invite_code,
-    }))
 }
 
 // ---------------------------------------------------------------------------

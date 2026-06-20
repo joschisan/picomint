@@ -7,7 +7,7 @@ use picomint_client::mint::ECash;
 use picomint_core::config::FederationId;
 use picomint_core::invite::InviteCode;
 use picomint_core::mint::Denomination;
-use picomint_core::{Amount, PeerId, secp256k1};
+use picomint_core::{Amount, secp256k1};
 use serde::{Deserialize, Serialize};
 
 /// Filename of the gateway's admin CLI Unix socket, inside `DATA_DIR`.
@@ -35,7 +35,6 @@ pub const ROUTE_LDK_PEER_LIST: &str = "/ldk/peer/list";
 pub const ROUTE_FEDERATION_JOIN: &str = "/federation/join";
 pub const ROUTE_FEDERATION_LIST: &str = "/federation/list";
 pub const ROUTE_FEDERATION_CONFIG: &str = "/federation/config";
-pub const ROUTE_FEDERATION_INVITE: &str = "/federation/invite";
 pub const ROUTE_FEDERATION_BALANCE: &str = "/federation/balance";
 pub const ROUTE_FEDERATION_DISABLE: &str = "/federation/disable";
 pub const ROUTE_FEDERATION_ENABLE: &str = "/federation/enable";
@@ -265,22 +264,6 @@ pub struct FederationConfigRequest {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct FederationConfigResponse {
     pub config: serde_json::Value,
-}
-
-// --- /federation/invite ---
-
-/// Generate an invite code that points new clients at the given guardian
-/// `peer` of the chosen federation.
-#[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationInviteRequest {
-    pub peer: PeerId,
-    #[arg(long = "id")]
-    pub federation: Option<FederationId>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FederationInviteResponse {
-    pub invite: InviteCode,
 }
 
 // --- /federation/module/mint/count ---

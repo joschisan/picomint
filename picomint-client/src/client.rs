@@ -15,7 +15,6 @@ use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::invite::InviteCode;
 use picomint_eventlog::{EventLogEntry, EventLogId, EventLogger};
 use picomint_redb::Database;
 use tracing::debug;
@@ -304,15 +303,6 @@ impl Client {
             .iter()
             .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
             .collect()
-    }
-
-    /// Create an invite code with the api endpoint of the given peer which can
-    /// be used to download this client config
-    pub fn invite_code(&self, peer: PeerId) -> Option<InviteCode> {
-        self.get_peer_node_ids()
-            .into_iter()
-            .find_map(|(p, node_id)| (peer == p).then_some(node_id))
-            .map(|node_id| InviteCode::new(node_id, self.federation()))
     }
 
     /// Returns the guardian public key set from the client config.

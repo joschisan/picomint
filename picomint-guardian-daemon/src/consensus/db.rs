@@ -3,6 +3,7 @@ use picomint_core::expiry;
 use picomint_core::session;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::{PeerId, TransactionId};
+use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{DbWrite, table};
 
 table!(
@@ -54,4 +55,33 @@ table!(
     ExpiryStatusTable,
     () => expiry::ExpiryStatus,
     "expiry-status",
+);
+
+/// Metadata an invite code's issuer keeps for it, keyed by the opaque invite
+/// id embedded in the invite code.
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub struct InviteMeta {
+    /// Unix timestamp in seconds after which the invite code is expired.
+    pub expires_at: u64,
+    /// Maximum number of users that may download the config via this invite.
+    pub user_limit: u64,
+}
+
+picomint_redb::consensus_value!(InviteMeta);
+
+// Expiration date and user limit for each invite code this guardian issued,
+// keyed by invite id. Written by the dashboard / CLI create flow, read when
+// serving the config to enforce the invite code's limits.
+table!(
+    InviteMetaTable,
+    [u8; 16] => InviteMeta,
+    "invite-meta",
+);
+
+// Number of config downloads counted against each invite id so far; a missing
+// entry means zero. Incremented in the same transaction that serves the config.
+table!(
+    InviteUserCountTable,
+    [u8; 16] => u64,
+    "invite-user-count",
 );

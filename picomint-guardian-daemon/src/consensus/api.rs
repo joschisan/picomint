@@ -1,8 +1,12 @@
 //! Implements the client API through which users interact with the federation
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use anyhow::Result;
+use chrono::{Days, Utc};
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::expiry::ExpiryStatus;
+use picomint_core::invite::InviteCode;
 use picomint_core::methods::CoreMethod;
 use picomint_core::module::audit::AuditSummary;
 use picomint_core::tx::{ConsensusItem, Transaction, TxError};
@@ -15,7 +19,8 @@ use tracing::warn;
 
 use crate::config::ServerConfig;
 use crate::consensus::db::{
-    AcceptedItemTable, AcceptedTxTable, ExpiryStatusTable, SignedSessionOutcomeTable,
+    AcceptedItemTable, AcceptedTxTable, ExpiryStatusTable, InviteMeta, InviteMetaTable,
+    InviteUserCountTable, SignedSessionOutcomeTable,
 };
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::server::{Server, process_tx_with_server};
@@ -99,6 +104,71 @@ impl ConsensusApi {
 
     pub async fn session_count(&self) -> u64 {
         get_finished_session_count_static(&self.db.begin_read()).await
+    }
+
+    /// Generate a fresh invite code expiring `expiry_days` from now and
+    /// onboarding up to `user_limit` users, registering its [`InviteMeta`] in
+    /// the local database so this guardian can enforce both when serving the
+    /// config. Returns the code together with that metadata for display.
+    pub fn create_invite_code(
+        &self,
+        expiry_days: u64,
+        user_limit: u64,
+    ) -> (InviteCode, InviteMeta) {
+        let expires_at = Utc::now()
+            .checked_add_days(Days::new(expiry_days))
+            .expect("adding the expiry to the current date cannot overflow")
+            .timestamp()
+            .try_into()
+            .expect("a future timestamp is positive");
+
+        let meta = InviteMeta {
+            expires_at,
+            user_limit,
+        };
+
+        let invite_id = rand::random::<[u8; 16]>();
+
+        let dbtx = self.db.begin_write();
+
+        dbtx.insert(&InviteMetaTable, &invite_id, &meta);
+
+        dbtx.commit();
+
+        (self.cfg.get_invite_code(invite_id), meta)
+    }
+
+    /// Check the expiration date and user limit of the invite code with this
+    /// invite id and count the download towards its user limit. Returns an
+    /// error string (surfaced to the client) for unknown, expired, or
+    /// exhausted invite codes.
+    pub fn register_config_download(&self, invite_id: [u8; 16]) -> Result<(), String> {
+        let dbtx = self.db.begin_write();
+
+        let meta = dbtx
+            .get(&InviteMetaTable, &invite_id)
+            .ok_or_else(|| "Unknown invite id".to_string())?;
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after the unix epoch")
+            .as_secs();
+
+        if meta.expires_at <= now {
+            return Err("Invite code is expired".to_string());
+        }
+
+        let users = dbtx.get(&InviteUserCountTable, &invite_id).unwrap_or(0);
+
+        if users >= meta.user_limit {
+            return Err("Invite code has reached its user limit".to_string());
+        }
+
+        dbtx.insert(&InviteUserCountTable, &invite_id, &(users + 1));
+
+        dbtx.commit();
+
+        Ok(())
     }
 
     pub async fn federation_audit(&self) -> AuditSummary {

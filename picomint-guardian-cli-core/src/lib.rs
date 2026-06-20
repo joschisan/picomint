@@ -82,6 +82,22 @@ pub struct SetupAddPeerResponse {
 
 // --- /invite ---
 
+/// Default invite-code expiration, in days.
+pub const DEFAULT_INVITE_EXPIRY_DAYS: u64 = 30;
+
+/// Default number of users an invite code may onboard.
+pub const DEFAULT_INVITE_USER_LIMIT: u64 = 50;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct InviteRequest {
+    /// Days until the invite code expires.
+    #[arg(long = "days", default_value_t = DEFAULT_INVITE_EXPIRY_DAYS)]
+    pub expiry_days: u64,
+    /// Maximum number of users that may onboard with this invite code.
+    #[arg(long = "users", default_value_t = DEFAULT_INVITE_USER_LIMIT)]
+    pub user_limit: u64,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InviteResponse {
     pub invite: InviteCode,

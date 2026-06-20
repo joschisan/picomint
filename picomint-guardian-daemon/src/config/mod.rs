@@ -158,10 +158,11 @@ impl ServerConfig {
         Self { consensus, private }
     }
 
-    pub fn get_invite_code(&self) -> InviteCode {
+    pub fn get_invite_code(&self, invite_id: [u8; 16]) -> InviteCode {
         InviteCode::new(
             self.private.iroh_sk.public(),
             self.consensus.calculate_federation_id(),
+            invite_id,
         )
     }
 
