@@ -81,6 +81,7 @@ use picomint_core::module::Method;
 use tracing::debug;
 
 pub use client::Client;
+pub use connection::ConnStatus;
 pub use picomint_core::core::OperationId;
 pub use secret::{Mnemonic, random as random_mnemonic};
 
