@@ -1,15 +1,16 @@
-//! One-shot iroh RPC primitives shared by picomint client and server.
+//! iroh RPC primitives shared by picomint client and server.
 //!
-//! Each request opens a fresh iroh [`Connection`], sends one bidirectional
-//! stream, then drops the connection. iroh's [`Endpoint`] caches per-remote
-//! address + path state across calls (60s actor idle timeout), so warm
-//! reconnects skip discovery and pay only the QUIC handshake.
+//! One request = one bidirectional stream. Connections are kept alive and
+//! reused: the federation client holds a pooled connection per peer (see
+//! `picomint-client`'s `FederationApi`) and multiplexes every request as a
+//! fresh bi stream over it via [`request_on_connection`], paying the QUIC
+//! handshake and hole-punched path once rather than per request. [`request`]
+//! remains a one-shot convenience (connect → one request → close) for
+//! callers without a pool, e.g. fetching the config from an invite code.
 //!
-//! Server-side, [`handle_request`] drives one connection through the one-shot
-//! lifecycle: accept_bi → decode → handler → encode → finish → wait for the
-//! peer to close. Closing before the peer has consumed application data
-//! risks the QUIC stack dropping bytes (per `Connection::close` docs); the
-//! receiver-driven close mirrors iroh's `examples/echo-no-router.rs`.
+//! Server-side, [`handle_request`] serves a connection by accepting bi
+//! streams in a loop until the peer closes, handling each as one request
+//! (accept_bi → decode → handler → encode → finish) on its own task.
 //!
 //! The wire envelope is `Result<Vec<u8>, String>` — server-side `Ok` is the
 //! consensus-encoded response, `Err` is a description string. Both
@@ -49,6 +50,22 @@ pub async fn request<Req: Encodable, Resp: Decodable>(
         .await
         .context("Connection failed")?;
 
+    let response = request_on_connection(&connection, request).await;
+
+    connection.close(0u32.into(), b"");
+
+    response
+}
+
+/// Send one request over an existing, kept-alive [`Connection`] by opening a
+/// fresh bi stream on it. The connection is left open for reuse — the caller
+/// owns its lifecycle. The federation client multiplexes every per-peer
+/// request over a single pooled connection this way; the server's
+/// [`handle_request`] accept loop serves them as independent streams.
+pub async fn request_on_connection<Req: Encodable, Resp: Decodable>(
+    connection: &Connection,
+    request: Req,
+) -> anyhow::Result<Resp> {
     let request_bytes = request.consensus_encode_to_vec();
 
     let (mut sink, mut stream) = connection.open_bi().await.context("Failed to open bi")?;
@@ -64,8 +81,6 @@ pub async fn request<Req: Encodable, Resp: Decodable>(
         .await
         .context("Failed to read response")?;
 
-    connection.close(0u32.into(), b"");
-
     let envelope = <Result<Vec<u8>, String>>::consensus_decode(&response)
         .context("Failed to decode response envelope")?;
 
@@ -80,7 +95,7 @@ pub async fn request<Req: Encodable, Resp: Decodable>(
 /// stops accepting (clean shutdown).
 pub async fn run_accept_loop<R, F, T>(endpoint: Endpoint, request_limit: usize, handler: F)
 where
-    R: Decodable + 'static,
+    R: Decodable + Send + 'static,
     F: Fn(R) -> T + Clone + Send + 'static,
     T: Future<Output = Result<Vec<u8>, String>> + Send + 'static,
 {
@@ -100,9 +115,9 @@ async fn handle_incoming<R, F, T>(
     handler: F,
 ) -> anyhow::Result<()>
 where
-    R: Decodable,
-    F: FnOnce(R) -> T,
-    T: Future<Output = Result<Vec<u8>, String>>,
+    R: Decodable + Send + 'static,
+    F: Fn(R) -> T + Clone + Send + 'static,
+    T: Future<Output = Result<Vec<u8>, String>> + Send + 'static,
 {
     let connection = incoming
         .accept()
@@ -112,9 +127,13 @@ where
     handle_request(connection, request_limit, handler).await
 }
 
-/// Drive one accepted iroh connection through the one-shot RPC lifecycle.
+/// Serve a kept-alive iroh connection: accept bi streams in a loop, handling
+/// each as one independent request, until the peer closes the connection.
+/// Connections are pooled and reused by clients, so a single connection may
+/// carry many requests over its lifetime. `request_limit` caps in-flight
+/// requests across all connections; each stream is handled on its own task.
 /// The handler returns `Result<Vec<u8>, String>` — bytes are the
-/// consensus-encoded response, error is a description string. The wire
+/// consensus-encoded response, error is a description string; the wire
 /// envelope wrap is handled here.
 pub async fn handle_request<Req, F, Fut>(
     connection: Connection,
@@ -122,30 +141,48 @@ pub async fn handle_request<Req, F, Fut>(
     handler: F,
 ) -> anyhow::Result<()>
 where
-    Req: Decodable,
-    F: FnOnce(Req) -> Fut,
-    Fut: Future<Output = Result<Vec<u8>, String>>,
+    Req: Decodable + Send + 'static,
+    F: Fn(Req) -> Fut + Clone + Send + 'static,
+    Fut: Future<Output = Result<Vec<u8>, String>> + Send + 'static,
 {
-    let _permit = request_limit
-        .acquire_owned()
-        .await
-        .expect("semaphore should not be closed");
+    loop {
+        // `accept_bi` errors once the peer closes (or the connection drops) —
+        // a normal end-of-life for a pooled connection, not a failure.
+        let Ok((mut send_stream, mut recv_stream)) = connection.accept_bi().await else {
+            return Ok(());
+        };
 
-    let (mut send_stream, mut recv_stream) = connection.accept_bi().await?;
+        let permit = request_limit
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore should not be closed");
 
-    let request_bytes = recv_stream.read_to_end(MAX_BYTES).await?;
+        let handler = handler.clone();
 
-    let request = Req::consensus_decode(&request_bytes)?;
+        tokio::spawn(async move {
+            let _permit = permit;
 
-    let response = handler(request).await;
+            let result: anyhow::Result<()> = async move {
+                let request_bytes = recv_stream.read_to_end(MAX_BYTES).await?;
 
-    let response_bytes = response.consensus_encode_to_vec();
+                let request = Req::consensus_decode(&request_bytes)?;
 
-    send_stream.write_all(&response_bytes).await?;
+                let response = handler(request).await;
 
-    send_stream.finish()?;
+                let response_bytes = response.consensus_encode_to_vec();
 
-    connection.closed().await;
+                send_stream.write_all(&response_bytes).await?;
 
-    Ok(())
+                send_stream.finish()?;
+
+                Ok(())
+            }
+            .await;
+
+            if let Err(e) = result {
+                warn!(?e, "iroh request stream failed");
+            }
+        });
+    }
 }

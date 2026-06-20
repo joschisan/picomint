@@ -217,8 +217,8 @@ async fn run_iroh_api(
     while let Ok(connection) = foreign_conn_rx.recv().await {
         let consensus_api = consensus_api.clone();
         tokio::spawn(
-            picomint_rpc::handle_request(connection, request_limit.clone(), |method| {
-                dispatch(consensus_api, method)
+            picomint_rpc::handle_request(connection, request_limit.clone(), move |method| {
+                dispatch(consensus_api.clone(), method)
             })
             .inspect_err(|e| {
                 warn!(?e, "Failed to handle iroh request");

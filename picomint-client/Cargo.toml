@@ -39,7 +39,8 @@ secp256k1 = { workspace = true }
 serde = { workspace = true }
 tbs = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["time", "macros", "rt"] }
+tokio = { workspace = true, features = ["time", "macros", "rt", "sync"] }
+tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
 tpe = { workspace = true }
 tracing = { workspace = true }
