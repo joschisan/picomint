@@ -13,7 +13,13 @@ use crate::tx::{Transaction, TxError};
 // ── config ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct ConfigRequest;
+pub struct ConfigRequest {
+    /// Invite id of the invite code this download is for. The issuing guardian
+    /// checks the registered expiration date and user limit and counts the
+    /// download towards the limit; there is no way to fetch the config without
+    /// a recognized invite.
+    pub invite_id: [u8; 16],
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct ConfigResponse {

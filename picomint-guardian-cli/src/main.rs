@@ -12,8 +12,8 @@ use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_guardian_cli_core::{
-    CLI_SOCKET_FILENAME, ExpirySetRequest, LnGatewayRequest, ROUTE_AUDIT, ROUTE_CONFIG,
-    ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
+    CLI_SOCKET_FILENAME, ExpirySetRequest, InviteRequest, LnGatewayRequest, ROUTE_AUDIT,
+    ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
     ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
     ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
     ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
@@ -44,8 +44,8 @@ enum Commands {
     /// Setup commands (DKG)
     #[command(subcommand)]
     Setup(SetupCommands),
-    /// Get federation invite code
-    Invite,
+    /// Generate a federation invite code
+    Invite(InviteRequest),
     /// Show federation audit summary
     Audit,
     /// Dump full server config as JSON (use `> config.json` to save)
@@ -201,7 +201,7 @@ async fn main() -> Result<()> {
     let d = &cli.data_dir;
 
     let result = match cli.command {
-        Commands::Invite => request(d, ROUTE_INVITE, ()).await?,
+        Commands::Invite(req) => request(d, ROUTE_INVITE, req).await?,
         Commands::Audit => request(d, ROUTE_AUDIT, ()).await?,
         Commands::Config => request(d, ROUTE_CONFIG, ()).await?,
         Commands::SessionCount => request(d, ROUTE_SESSION_COUNT, ()).await?,

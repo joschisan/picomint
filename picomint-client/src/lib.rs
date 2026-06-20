@@ -70,12 +70,8 @@ pub mod tx;
 /// Wallet module client.
 pub mod wallet;
 
-use std::collections::BTreeMap;
-
 use anyhow::bail;
-use api::FederationApi;
 pub use iroh::Endpoint;
-use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::invite::InviteCode;
 use picomint_core::methods::{ConfigRequest, ConfigResponse, CoreMethod};
@@ -128,8 +124,10 @@ impl Event for TxRejectEvent {
     const KIND: EventKind = EventKind::from_static("tx-reject");
 }
 
-/// Downloads the [`ConsensusConfig`] using the peers advertised in the invite
-/// code, then re-verifies it with the full peer set from the config itself.
+/// Downloads the [`ConsensusConfig`] from the issuing guardian named in the
+/// invite code. The guardian enforces the invite's expiration and user limit
+/// before serving; integrity is guaranteed because the config's computed
+/// federation id must match the one committed in the invite code.
 pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<ConsensusConfig> {
     debug!(
         invite = %picomint_base32::encode(invite),
@@ -137,41 +135,19 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
         "Downloading client config via invite code"
     );
 
-    let federation = invite.federation;
-
     let invite_resp: ConfigResponse = picomint_rpc::request(
         endpoint,
         invite.node_id,
-        Method::Core(CoreMethod::Config(ConfigRequest)),
+        Method::Core(CoreMethod::Config(ConfigRequest {
+            invite_id: invite.invite_id,
+        })),
     )
     .await
     .map_err(|_| anyhow::anyhow!("Failed to download client config from invite peer"))?;
 
-    if invite_resp.config.calculate_federation_id() != federation {
+    if invite_resp.config.calculate_federation_id() != invite.federation {
         bail!("FederationId in invite code does not match client config");
     }
 
-    let api_endpoints: BTreeMap<PeerId, iroh_base::PublicKey> = invite_resp
-        .config
-        .peers
-        .iter()
-        .map(|(peer, ep)| (*peer, ep.iroh_pk))
-        .collect();
-
-    debug!("Verifying client config with all peers");
-
-    let api_full = FederationApi::new(endpoint.clone(), api_endpoints);
-    let client_config = api_full
-        .request_current_consensus::<ConfigResponse>(Method::Core(CoreMethod::Config(
-            ConfigRequest,
-        )))
-        .await
-        .map_err(|_| anyhow::anyhow!("Failed to download client config from all peers"))?
-        .config;
-
-    if client_config.calculate_federation_id() != federation {
-        bail!("Obtained client config has different federation id");
-    }
-
-    Ok(client_config)
+    Ok(invite_resp.config)
 }

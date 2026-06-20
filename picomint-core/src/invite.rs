@@ -5,19 +5,23 @@ use crate::config::FederationId;
 use picomint_encoding::{Decodable, Encodable};
 
 /// Everything a client needs to download the federation config and bootstrap.
-/// Carries the federation id (cross-checked against the downloaded config)
-/// and the iroh public key of one bootstrap peer.
+/// Carries the federation id (cross-checked against the downloaded config),
+/// the iroh public key of the issuing guardian, and the opaque invite id the
+/// issuer registered in its database. The issuer enforces the invite code's
+/// expiration date and user limit against that id when serving the config.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct InviteCode {
     pub federation: FederationId,
     pub node_id: PublicKey,
+    pub invite_id: [u8; 16],
 }
 
 impl InviteCode {
-    pub fn new(node_id: PublicKey, federation: FederationId) -> Self {
+    pub fn new(node_id: PublicKey, federation: FederationId, invite_id: [u8; 16]) -> Self {
         Self {
             federation,
             node_id,
+            invite_id,
         }
     }
 }

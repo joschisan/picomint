@@ -16,7 +16,9 @@ pub async fn submit_tx(
     })
 }
 
-pub fn config(api: &ConsensusApi, _: ConfigRequest) -> Result<ConfigResponse, String> {
+pub fn config(api: &ConsensusApi, req: ConfigRequest) -> Result<ConfigResponse, String> {
+    api.register_config_download(req.invite_id)?;
+
     Ok(ConfigResponse {
         config: api.cfg.consensus.clone(),
     })
