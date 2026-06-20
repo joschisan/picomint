@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::Endpoint;
 use crate::api::FederationApi;
+use crate::connection::ConnStatus;
 use crate::gw::GatewayClientModule;
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
@@ -220,10 +221,10 @@ impl Client {
     }
 
     /// Stream of per-peer guardian reachability, emitting a fresh
-    /// `peer -> connected` map on every change (current state first).
-    /// Backed by the client's pooled connections, so it reflects the same
-    /// links requests travel over.
-    pub fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>> {
+    /// `peer -> status` map on every change (current state first). Backed by
+    /// the client's pooled connections, so it reflects the same links requests
+    /// travel over; the `Connected` status carries the RTT sampled at connect.
+    pub fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, ConnStatus>> {
         self.api.connection_status_stream()
     }
 

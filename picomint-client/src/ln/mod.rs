@@ -8,8 +8,7 @@ mod secret;
 mod send_sm;
 
 use picomint_redb::WriteTx;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::executor::ModuleExecutor;
@@ -18,6 +17,7 @@ use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
 use db::{GatewayPkTable, IncomingContractStreamIndexTable, SendOperationTable};
+use gateway::Gateways;
 use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -37,7 +37,6 @@ use picomint_encoding::Encodable;
 use rand::seq::IteratorRandom;
 use secp256k1::{Keypair, PublicKey, SecretKey, ecdh};
 use thiserror::Error;
-use tokio::task::JoinSet;
 use tpe::{AggregateDecryptionKey, derive_agg_dk};
 
 use self::events::{ReceiveEvent, SendEvent};
@@ -59,6 +58,7 @@ pub struct LightningClientContext {
     pub(crate) client_ctx: ClientContext,
     pub(crate) mint: Arc<crate::mint::MintClientModule>,
     pub(crate) input_fee: Amount,
+    pub(crate) gateways: Gateways,
 }
 
 #[derive(Clone)]
@@ -69,11 +69,12 @@ pub struct LightningClientModule {
     mint: Arc<crate::mint::MintClientModule>,
     secret: LnSecret,
     executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
-    // Probed gateway info, held in memory only and rebuilt by
-    // `refresh_gateways`. The announced pk set is persisted to
-    // [`GatewayPkTable`] so a cold start can repopulate this map without
-    // first re-running the threshold-consensus gateway query.
-    gateway_info: Arc<RwLock<HashMap<GatewayPk, GatewayInfo>>>,
+    // Pool of announced gateways, each holding its kept-alive connection and
+    // latest probed info together. Membership is reconciled by
+    // `update_gateway_pks` and info by `update_gateway_info`; the announced pk
+    // set is persisted to [`GatewayPkTable`] so a cold start can warm the pool
+    // without first re-running the threshold-consensus gateway query.
+    gateways: Gateways,
 }
 
 impl LightningClientModule {
@@ -93,11 +94,14 @@ impl LightningClientModule {
         secret: LnSecret,
         tg: &TaskGroup,
     ) -> anyhow::Result<Self> {
+        let gateways = Gateways::new(client_ctx.api().endpoint().clone());
+
         let sm_context = LightningClientContext {
             federation,
             client_ctx: client_ctx.clone(),
             mint: mint.clone(),
             input_fee: cfg.input_fee,
+            gateways: gateways.clone(),
         };
 
         let executor = ModuleExecutor::new(
@@ -114,7 +118,7 @@ impl LightningClientModule {
             mint,
             secret,
             executor,
-            gateway_info: Arc::new(RwLock::new(HashMap::new())),
+            gateways,
         };
 
         tg.spawn(Self::receive_scan(module.clone()));
@@ -129,8 +133,10 @@ impl LightningClientModule {
     }
 
     /// Fetch the federation's announced gateway pk list via threshold
-    /// consensus and persist it to [`GatewayPkTable`], replacing the
-    /// previous set.
+    /// consensus, persist it to [`GatewayPkTable`] (replacing the previous
+    /// set), and reconcile the connection pool to match — a deregistered
+    /// gateway is dropped here, its connection aborted. Info is filled in
+    /// separately by [`Self::update_gateway_info`].
     pub async fn update_gateway_pks(
         module: LightningClientModule,
     ) -> Result<(), RefreshGatewaysError> {
@@ -151,14 +157,17 @@ impl LightningClientModule {
 
         dbtx.commit();
 
+        module.gateways.reconcile(&list, true);
+
         Ok(())
     }
 
-    /// Probe every gateway in [`GatewayPkTable`] concurrently and atomically
-    /// replace the in-memory info map with the successful responses — no
-    /// stale info survives.
+    /// Probe every gateway in [`GatewayPkTable`] and refresh its info. Ensures
+    /// a connection to each (add-only — never removing a gateway, so it can run
+    /// concurrently with [`Self::update_gateway_pks`]) and probes over it; a
+    /// gateway that fails to answer is left unselectable.
     pub async fn update_gateway_info(module: LightningClientModule) {
-        let gateways: Vec<GatewayPk> = module
+        let list: Vec<GatewayPk> = module
             .client_ctx
             .db()
             .begin_read()
@@ -166,69 +175,22 @@ impl LightningClientModule {
                 it.map(|(pk, ())| pk).collect()
             });
 
-        let mut probes: JoinSet<Option<(GatewayPk, GatewayInfo)>> = JoinSet::new();
+        module.gateways.reconcile(&list, false);
 
-        for gateway_pk in gateways {
-            let module = module.clone();
-            probes.spawn(async move {
-                let info = gateway::gateway_info(
-                    module.client_ctx.api().endpoint(),
-                    gateway_pk,
-                    module.federation,
-                )
-                .await
-                .ok()
-                .flatten()?;
-                Some((gateway_pk, info))
-            });
-        }
-
-        let mut fresh = HashMap::new();
-
-        while let Some(result) = probes.join_next().await {
-            if let Ok(Some((gateway_pk, info))) = result {
-                fresh.insert(gateway_pk, info);
-            }
-        }
-
-        *module
-            .gateway_info
-            .write()
-            .expect("gateway_info RwLock poisoned") = fresh;
+        module.gateways.probe(&list, module.federation).await;
     }
 
-    /// Pick a gateway from the in-memory cache. With `invoice = Some(_)`,
-    /// prefer a gateway whose lightning public key matches the invoice's
-    /// recovered payee — that's a direct ecash swap, no LN routing.
-    /// Otherwise return any cached gateway, picked at random for load
-    /// distribution. Synchronous: holds the read lock briefly.
+    /// Pick a gateway from the pool. With `invoice = Some(_)`, prefer a gateway
+    /// whose lightning public key matches the invoice's recovered payee —
+    /// that's a direct ecash swap, no LN routing. Otherwise return any gateway
+    /// that has info, picked at random for load distribution.
     pub fn select_gateway(
         &self,
         invoice: Option<&Bolt11Invoice>,
     ) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
-        let guard = self
-            .gateway_info
-            .read()
-            .expect("gateway_info RwLock poisoned");
-
-        if guard.is_empty() {
-            return Err(SelectGatewayError::NoGatewaysAvailable);
-        }
-
-        if let Some(invoice) = invoice {
-            for (gateway_pk, info) in guard.iter() {
-                if info.lightning_public_key == invoice.recover_payee_pub_key() {
-                    return Ok((*gateway_pk, info.clone()));
-                }
-            }
-        }
-
-        guard
-            .iter()
-            .choose(&mut rand::thread_rng())
-            .map(|(pk, info)| (*pk, info.clone()))
-            .map(Ok)
-            .expect("entries is non-empty")
+        self.gateways
+            .select(invoice)
+            .ok_or(SelectGatewayError::NoGatewaysAvailable)
     }
 
     /// Pay an invoice through a caller-selected gateway.
@@ -438,14 +400,11 @@ impl LightningClientModule {
             ephemeral_kp.public_key(),
         );
 
-        let invoice = gateway::receive(
-            self.client_ctx.api().endpoint(),
-            gateway_pk,
-            self.federation,
-            contract.clone(),
-        )
-        .await
-        .map_err(|e| ReceiveError::FailedToConnectToGateway(e.to_string()))?;
+        let invoice = self
+            .gateways
+            .receive(gateway_pk, self.federation, contract.clone())
+            .await
+            .map_err(|e| ReceiveError::FailedToConnectToGateway(e.to_string()))?;
 
         if invoice.payment_hash() != &preimage.consensus_hash() {
             return Err(ReceiveError::InvalidInvoice);
