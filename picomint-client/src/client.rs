@@ -219,6 +219,14 @@ impl Client {
         &self.api
     }
 
+    /// Stream of per-peer guardian reachability, emitting a fresh
+    /// `peer -> connected` map on every change (current state first).
+    /// Backed by the client's pooled connections, so it reflects the same
+    /// links requests travel over.
+    pub fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, bool>> {
+        self.api.connection_status_stream()
+    }
+
     pub fn federation(&self) -> FederationId {
         self.federation
     }

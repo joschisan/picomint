@@ -1,10 +1,10 @@
 //! Iroh accept loop for the gateway's public API.
 //!
-//! Each accepted connection runs through the one-shot RPC lifecycle from
-//! [`picomint_rpc::handle_request`]: accept one bi stream, decode a
-//! [`GatewayMethod`], dispatch to the matching `AppState` method,
-//! consensus-encode the response, finish the stream, await the
-//! client-driven close.
+//! Each accepted connection is served by [`picomint_rpc::handle_request`],
+//! which accepts bi streams in a loop (clients keep connections alive and
+//! reuse them) and handles each as one request: decode a [`GatewayMethod`],
+//! dispatch to the matching `AppState` method, consensus-encode the
+//! response, finish the stream.
 
 use iroh::Endpoint;
 use picomint_core::ln::methods::{GatewayMethod, InfoResponse, ReceiveResponse, SendResponse};
