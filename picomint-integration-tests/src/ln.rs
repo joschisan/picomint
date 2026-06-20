@@ -82,7 +82,8 @@ fn try_parse_ln_event(
 
 pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
     register_gateway(env, &env.gw_pk)?;
-    LightningClientModule::refresh_gateways(client_send.ln().clone()).await?;
+    LightningClientModule::update_gateway_pks(client_send.ln().clone()).await?;
+    LightningClientModule::update_gateway_info(client_send.ln().clone()).await;
     test_payments(env, client_send).await?;
     test_lnurl_daemon_roundtrip(env).await?;
     deregister_gateway(env, &env.gw_pk)?;
@@ -90,7 +91,8 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     let mock_gw_pk = spawn_mock_gateway().await?;
 
     register_gateway(env, &mock_gw_pk)?;
-    LightningClientModule::refresh_gateways(client_send.ln().clone()).await?;
+    LightningClientModule::update_gateway_pks(client_send.ln().clone()).await?;
+    LightningClientModule::update_gateway_info(client_send.ln().clone()).await;
     test_mock_send_exactly_once(client_send).await?;
     test_mock_send_refund_forfeit(client_send).await?;
     test_mock_wrong_network(client_send).await?;

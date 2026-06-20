@@ -17,7 +17,7 @@ use crate::module::ClientContext;
 use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
-use db::{IncomingContractStreamIndexTable, SendOperationTable};
+use db::{GatewayPkTable, IncomingContractStreamIndexTable, SendOperationTable};
 use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -69,9 +69,10 @@ pub struct LightningClientModule {
     mint: Arc<crate::mint::MintClientModule>,
     secret: LnSecret,
     executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
-    // In-memory only: populated by `refresh_gateways` at module startup.
-    // Lost on restart — every cold start has to re-probe the federation's
-    // gateway list before `select_gateway` can return anything.
+    // Probed gateway info, held in memory only and rebuilt by
+    // `refresh_gateways`. The announced pk set is persisted to
+    // [`GatewayPkTable`] so a cold start can repopulate this map without
+    // first re-running the threshold-consensus gateway query.
     gateway_info: Arc<RwLock<HashMap<GatewayPk, GatewayInfo>>>,
 }
 
@@ -118,21 +119,19 @@ impl LightningClientModule {
 
         tg.spawn(Self::receive_scan(module.clone()));
 
-        tg.spawn(Self::refresh_gateways(module.clone()));
+        // Cold-start gateway warmup, run concurrently: the info probe reads
+        // whatever pks the previous session persisted, so `select_gateway`
+        // becomes usable without waiting on the threshold-consensus pk query.
+        tg.spawn(Self::update_gateway_pks(module.clone()));
+        tg.spawn(Self::update_gateway_info(module.clone()));
 
         Ok(module)
     }
 
-    /// Rebuild the in-memory `gateway_info` map from the federation's
-    /// announced gateway list:
-    ///
-    /// 1. Fetch the announced list via threshold consensus.
-    /// 2. Probe every gateway concurrently; collect the successful responses.
-    /// 3. Atomically replace the map — no stale info survives a refresh.
-    ///
-    /// Called once at module startup; exposed publicly so integration tests
-    /// can force a refresh after registering gateways with the guardians.
-    pub async fn refresh_gateways(
+    /// Fetch the federation's announced gateway pk list via threshold
+    /// consensus and persist it to [`GatewayPkTable`], replacing the
+    /// previous set.
+    pub async fn update_gateway_pks(
         module: LightningClientModule,
     ) -> Result<(), RefreshGatewaysError> {
         let list = module
@@ -142,9 +141,34 @@ impl LightningClientModule {
             .await
             .map_err(|_| RefreshGatewaysError::FailedToRequestGateways)?;
 
+        let dbtx = module.client_ctx.db().begin_write();
+
+        dbtx.delete_table(&GatewayPkTable(module.federation));
+
+        for gateway_pk in &list {
+            dbtx.insert(&GatewayPkTable(module.federation), gateway_pk, &());
+        }
+
+        dbtx.commit();
+
+        Ok(())
+    }
+
+    /// Probe every gateway in [`GatewayPkTable`] concurrently and atomically
+    /// replace the in-memory info map with the successful responses — no
+    /// stale info survives.
+    pub async fn update_gateway_info(module: LightningClientModule) {
+        let gateways: Vec<GatewayPk> = module
+            .client_ctx
+            .db()
+            .begin_read()
+            .iter(&GatewayPkTable(module.federation), |it| {
+                it.map(|(pk, ())| pk).collect()
+            });
+
         let mut probes: JoinSet<Option<(GatewayPk, GatewayInfo)>> = JoinSet::new();
 
-        for gateway_pk in list {
+        for gateway_pk in gateways {
             let module = module.clone();
             probes.spawn(async move {
                 let info = gateway::gateway_info(
@@ -171,8 +195,6 @@ impl LightningClientModule {
             .gateway_info
             .write()
             .expect("gateway_info RwLock poisoned") = fresh;
-
-        Ok(())
     }
 
     /// Pick a gateway from the in-memory cache. With `invoice = Some(_)`,
@@ -634,5 +656,6 @@ pub enum RefreshGatewaysError {
 pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTx, federation: FederationId) {
     dbtx.delete_table(&IncomingContractStreamIndexTable(federation));
     dbtx.delete_table(&SendOperationTable(federation));
+    dbtx.delete_table(&GatewayPkTable(federation));
     dbtx.delete_table(&SendStateMachineTable(federation));
 }
