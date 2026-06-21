@@ -56,7 +56,7 @@ impl ConsensusApi {
         let mut notified_item = Box::pin(notify_item.notified());
         let mut notified_session = Box::pin(notify_session.notified());
 
-        let dbtx = self.db.begin_write();
+        let dbtx = self.db.begin_write_relaxed();
 
         if dbtx.get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
             return Ok(());
@@ -78,7 +78,7 @@ impl ConsensusApi {
         loop {
             tokio::select! {
                 _ = &mut notified_item => {
-                    let dbtx = self.db.begin_write();
+                    let dbtx = self.db.begin_write_relaxed();
 
                     if dbtx.get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
                         info!(
@@ -139,7 +139,7 @@ impl ConsensusApi {
 
         let invite_id = rand::random::<[u8; 16]>();
 
-        let dbtx = self.db.begin_write();
+        let dbtx = self.db.begin_write_relaxed();
 
         dbtx.insert(&InviteMetaTable, &invite_id, &meta);
 
@@ -153,7 +153,7 @@ impl ConsensusApi {
     /// error string (surfaced to the client) for unknown, expired, or
     /// exhausted invite codes.
     pub fn register_config_download(&self, invite_id: [u8; 16]) -> Result<(), String> {
-        let dbtx = self.db.begin_write();
+        let dbtx = self.db.begin_write_relaxed();
 
         let meta = dbtx
             .get(&InviteMetaTable, &invite_id)
@@ -184,7 +184,7 @@ impl ConsensusApi {
     pub async fn federation_audit(&self) -> AuditSummary {
         // Modules read their own tables during `audit`; we open a write tx and
         // drop it without commit after building the audit view.
-        let dbtx = self.db.begin_write();
+        let dbtx = self.db.begin_write_relaxed();
         self.server.audit(&dbtx).await
     }
 
@@ -200,7 +200,7 @@ impl ConsensusApi {
     /// guardians must announce byte-equal values for clients to accept the
     /// announcement (threshold-consensus read).
     pub fn set_expiry_status_ui(&self, status: Option<ExpiryStatus>) {
-        let dbtx = self.db.begin_write();
+        let dbtx = self.db.begin_write_relaxed();
         match status {
             Some(s) => {
                 dbtx.insert(&ExpiryStatusTable, &(), &s);

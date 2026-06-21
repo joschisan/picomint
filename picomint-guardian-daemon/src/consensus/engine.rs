@@ -216,7 +216,7 @@ impl ConsensusEngine {
                         break;
                     }
 
-                    let dbtx = self.db.begin_write();
+                    let dbtx = self.db.begin_write_relaxed();
 
                     if self.process_consensus_item(&dbtx, index as u64, creator, item).await.is_ok() {
                         dbtx.commit();
@@ -253,7 +253,7 @@ impl ConsensusEngine {
                             "Consensus Failure: pending accepted items disagree with federation consensus"
                         );
 
-                        let dbtx = self.db.begin_write();
+                        let dbtx = self.db.begin_write_relaxed();
 
                         for accepted_item in unprocessed {
                             self.process_consensus_item(
@@ -406,7 +406,7 @@ impl ConsensusEngine {
         session_index: u64,
         signed_session_outcome: SignedSessionOutcome,
     ) {
-        let dbtx = self.db.begin_write();
+        let dbtx = self.db.begin_write_relaxed();
 
         dbtx.delete_table(&AcceptedItemTable);
 

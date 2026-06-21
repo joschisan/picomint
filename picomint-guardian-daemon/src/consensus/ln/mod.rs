@@ -380,14 +380,14 @@ impl Lightning {
     }
 
     pub async fn add_gateway_ui(&self, gateway_pk: GatewayPk) -> bool {
-        let dbtx = self.db.begin_write();
+        let dbtx = self.db.begin_write_relaxed();
         let is_new_entry = dbtx.insert(&GatewayTable, &gateway_pk, &()).is_none();
         dbtx.commit();
         is_new_entry
     }
 
     pub async fn remove_gateway_ui(&self, gateway_pk: GatewayPk) -> bool {
-        let dbtx = self.db.begin_write();
+        let dbtx = self.db.begin_write_relaxed();
         let entry_existed = dbtx.remove(&GatewayTable, &gateway_pk).is_some();
         dbtx.commit();
         entry_existed
