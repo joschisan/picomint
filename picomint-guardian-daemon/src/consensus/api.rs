@@ -1,6 +1,6 @@
 //! Implements the client API through which users interact with the federation
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use chrono::{Days, Utc};
@@ -15,7 +15,7 @@ use crate::consensus::rpc;
 use crate::{handler, handler_async};
 use picomint_redb::Database;
 use tokio::sync::watch::{Receiver, Sender};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::config::ServerConfig;
 use crate::consensus::db::{
@@ -44,8 +44,12 @@ pub struct ConsensusApi {
 
 impl ConsensusApi {
     /// Submit a transaction and long-poll until it is either accepted by
-    /// consensus or becomes invalid.
+    /// consensus or becomes invalid. On acceptance, logs the wall-clock from
+    /// submission to confirmation, so the server side of client-observed
+    /// latency can be profiled straight from the guardian's `info` logs.
     pub async fn submit_tx(&self, tx: Transaction) -> Result<(), TxError> {
+        let start = Instant::now();
+
         let notify_item = self.db.notify_for_table(&AcceptedItemTable);
         let notify_session = self.db.notify_for_table(&SignedSessionOutcomeTable);
 
@@ -77,6 +81,12 @@ impl ConsensusApi {
                     let dbtx = self.db.begin_write();
 
                     if dbtx.get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
+                        info!(
+                            txid = %tx.compute_txid(),
+                            elapsed_ms = start.elapsed().as_millis() as u64,
+                            "Submission RPC confirmed tx",
+                        );
+
                         return Ok(());
                     }
 
