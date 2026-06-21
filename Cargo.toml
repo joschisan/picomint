@@ -19,6 +19,7 @@ members = [
     "picomint-integration-tests",
     "picomint-lnurl",
     "picomint-lnurl-daemon",
+    "picomint-profiler",
     "picomint-redb",
     "picomint-rpc",
     "picomint-tbs",

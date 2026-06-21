@@ -193,6 +193,16 @@ impl LightningClientModule {
             .ok_or(SelectGatewayError::NoGatewaysAvailable)
     }
 
+    /// Round-trip a consensus-free `Info` request to `gateway_pk` over its
+    /// pooled connection, returning once the gateway answers. Carries no state;
+    /// the latency profiler uses it to sample live gateway RTT during a run.
+    pub async fn ping_gateway(&self, gateway_pk: GatewayPk) -> anyhow::Result<()> {
+        self.gateways
+            .gateway_info(gateway_pk, self.federation)
+            .await
+            .map(|_| ())
+    }
+
     /// Pay an invoice through a caller-selected gateway.
     ///
     /// The caller obtains `(gateway_pk, gateway_info)` via

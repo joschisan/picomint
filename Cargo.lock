@@ -3772,6 +3772,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-profiler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "iroh",
+ "iroh-mdns-address-lookup",
+ "lightning-invoice",
+ "picomint-client",
+ "picomint-core",
+ "picomint-eventlog",
+ "picomint-redb",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "picomint-redb"
 version = "0.1.0"
 dependencies = [
@@ -5286,6 +5306,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2 0.6.3",
