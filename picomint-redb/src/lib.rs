@@ -262,6 +262,29 @@ impl Database {
         }
     }
 
+    /// Begin a write transaction whose commit does **not** fsync. The writes
+    /// become durable only when a later [`Self::begin_write`] commit flushes
+    /// them, and a crash rolls back to that last durable commit. Use only for
+    /// state a node can reconstruct after a crash (e.g. BFT units re-fetched
+    /// from peers) — never for money-bearing or safety-critical writes.
+    pub fn begin_write_relaxed(&self) -> WriteTx {
+        let mut tx = self
+            .inner
+            .env
+            .begin_write()
+            .expect("redb begin_write failed");
+
+        tx.set_durability(redb::Durability::None)
+            .expect("set_durability only fails with a persistent savepoint, which we never create");
+
+        WriteTx {
+            tx,
+            db: self.inner.clone(),
+            touched: Mutex::new(BTreeSet::new()),
+            on_commit: Mutex::new(Vec::new()),
+        }
+    }
+
     pub fn begin_read(&self) -> ReadTx {
         let tx = self.inner.env.begin_read().expect("redb begin_read failed");
 
