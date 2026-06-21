@@ -181,10 +181,16 @@ where
     /// not rolled back on Err — only the persistent `BFT_UNITS` /
     /// `BFT_COSIGS` writes are. The mutators only run after the dbtx
     /// writes succeed via `?`.
+    ///
+    /// These commits use **relaxed** (non-fsync) durability: inbound units and
+    /// cosigs are peer-originated and re-fetched via anti-entropy after a
+    /// crash, so they need not be individually durable. The fsync barrier is
+    /// [`Self::try_create_unit`], whose durable commit before broadcast both
+    /// prevents our own equivocation and flushes this relaxed backlog.
     async fn handle_message(&mut self, sender: PeerId, msg: Message<D>) -> Result<()> {
         match msg {
             Message::Unit { unit, sig } => {
-                let dbtx = self.db.begin_write();
+                let dbtx = self.db.begin_write_relaxed();
 
                 self.handle_unit(&dbtx, sender, &unit, sig)?;
                 self.try_extend(&dbtx, unit.round, unit.creator);
@@ -198,7 +204,7 @@ where
                 signer,
                 cosig,
             } => {
-                let dbtx = self.db.begin_write();
+                let dbtx = self.db.begin_write_relaxed();
 
                 self.record_cosig(&dbtx, round, creator, signer, cosig)?;
                 self.try_extend(&dbtx, round, creator);
@@ -207,7 +213,7 @@ where
                 dbtx.commit();
             }
             Message::SignedUnit { unit, cosigs } => {
-                let dbtx = self.db.begin_write();
+                let dbtx = self.db.begin_write_relaxed();
 
                 self.handle_signed_unit(&dbtx, sender, &unit, cosigs)?;
                 self.try_extend(&dbtx, unit.round, unit.creator);
