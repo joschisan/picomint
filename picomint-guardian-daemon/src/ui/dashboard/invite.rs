@@ -127,15 +127,6 @@ pub async fn post_create_invite(
                 (meta.user_limit)
                 " users."
             }
-
-            button
-                class="btn btn-outline-primary w-100 py-2 mt-2"
-                hx-post=(INVITE_CREATE_ROUTE)
-                hx-target="#invite-container"
-                hx-swap="innerHTML"
-            {
-                "Generate Another Invite Code"
-            }
         }
         .into_string(),
     )
