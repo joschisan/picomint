@@ -99,18 +99,22 @@ impl ConsensusEngine {
         //      * (broadcast_rounds_per_session + 1000)
         //      * BFT_UNIT_BYTE_LIMIT
 
-        /// BFT round delay (ms). Byzantine-fault-only; the ordering floor is
-        /// dominated by network latency in practice.
+        /// Base amplitude (ms) for the post-`rounds_per_session` exponential
+        /// backoff. Inside a session the per-round delay is zero — the ordering
+        /// floor is dominated by network latency, not pacing, so units are
+        /// created as fast as new parents arrive. Only past `rounds_per_session`
+        /// does the delay grow exponentially to bound RAM under a stalling
+        /// attack (see above).
         const ROUND_DELAY_MS: f64 = 50.0;
         const BASE: f64 = 1.02;
 
         let rounds_per_session = self.cfg.consensus.bft_rounds_per_session;
 
         let unit_delay = Box::new(move |round_index: u16| {
-            let delay = if round_index == 0 {
+            let delay = if round_index < rounds_per_session {
                 0.0
             } else {
-                ROUND_DELAY_MS * BASE.powf(round_index.saturating_sub(rounds_per_session) as f64)
+                ROUND_DELAY_MS * BASE.powf((round_index - rounds_per_session) as f64)
             };
 
             Duration::from_millis(delay.round() as u64)
