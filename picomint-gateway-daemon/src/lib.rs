@@ -7,7 +7,6 @@ pub mod trailer;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context as _, anyhow, bail, ensure};
 use bitcoin::Network;
@@ -321,16 +320,6 @@ impl AppState {
         ensure!(
             payload.contract.commitment.fee == receive_fee,
             "Contract fee does not match the gateway receive fee"
-        );
-
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("System time before Unix epoch")
-            .as_secs();
-
-        ensure!(
-            payload.contract.commitment.expiry > now_secs,
-            "The contract has already expired"
         );
 
         let invoice = self

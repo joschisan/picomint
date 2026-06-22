@@ -3,8 +3,6 @@ pub use picomint_core::ln as common;
 mod db;
 mod rpc;
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use anyhow::{Context, ensure};
 use group::Curve;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
@@ -30,7 +28,7 @@ use crate::{handler, handler_async};
 use self::db::{
     BlockCountVoteTable, DecryptionKeyShareTable, GatewayTable, IncomingContractIndexTable,
     IncomingContractStreamIndexTable, IncomingContractStreamTable, IncomingContractTable,
-    OutgoingContractTable, PreimageTable, UnixTimeVoteTable,
+    OutgoingContractTable, PreimageTable,
 };
 
 /// Run DKG for the lightning module, producing a fresh `LightningConfig` for
@@ -94,13 +92,7 @@ impl Lightning {
 
 impl Lightning {
     pub async fn consensus_proposal(&self, _dbtx: &ReadTx) -> Vec<LightningConsensusItem> {
-        // We reduce the time granularity to deduplicate votes more often and not save
-        // one consensus item every second.
-        let unix_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("System time before Unix epoch")
-            .as_secs();
-        let mut items = vec![LightningConsensusItem::UnixTimeVote(60 * (unix_secs / 60))];
+        let mut items = Vec::new();
 
         if let Ok(block_count) = self.get_block_count() {
             trace!(?block_count, "Proposing block count");
@@ -123,13 +115,6 @@ impl Lightning {
                 let current_vote = dbtx.insert(&BlockCountVoteTable, &peer, &vote).unwrap_or(0);
 
                 ensure!(current_vote < vote, "Block count vote is redundant");
-
-                Ok(())
-            }
-            LightningConsensusItem::UnixTimeVote(vote) => {
-                let current_vote = dbtx.insert(&UnixTimeVoteTable, &peer, &vote).unwrap_or(0);
-
-                ensure!(current_vote < vote, "Unix time vote is redundant");
 
                 Ok(())
             }
@@ -247,10 +232,6 @@ impl Lightning {
                     return Err(LightningOutputError::InvalidContract);
                 }
 
-                if contract.commitment.expiry <= self.consensus_unix_time(dbtx) {
-                    return Err(LightningOutputError::ContractExpired);
-                }
-
                 dbtx.insert(&IncomingContractTable, &outpoint, contract);
 
                 let stream_index = dbtx
@@ -353,30 +334,9 @@ impl Lightning {
         counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
-    pub(crate) fn consensus_unix_time(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
-        let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
-
-        let mut times = dbtx.iter(&UnixTimeVoteTable, |r| {
-            r.map(|(_, v)| v).collect::<Vec<u64>>()
-        });
-
-        times.sort_unstable();
-
-        times.reverse();
-
-        assert!(times.last() <= times.first());
-
-        times.get(num_peers.threshold() - 1).copied().unwrap_or(0)
-    }
-
     #[must_use]
     pub fn consensus_block_count_ui(&self) -> u64 {
         self.consensus_block_count(&self.db.begin_read())
-    }
-
-    #[must_use]
-    pub fn consensus_unix_time_ui(&self) -> u64 {
-        self.consensus_unix_time(&self.db.begin_read())
     }
 
     pub async fn add_gateway_ui(&self, gateway_pk: GatewayPk) -> bool {

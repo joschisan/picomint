@@ -11,12 +11,6 @@ table!(
 );
 
 table!(
-    UnixTimeVoteTable,
-    PeerId => u64,
-    "ln-unix-time-vote",
-);
-
-table!(
     IncomingContractTable,
     OutPoint => contracts::IncomingContract,
     "ln-incoming-contract",
