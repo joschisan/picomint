@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Pass --keep-alive to leave the federation running (skipping the test flows)
+# for hands-on / phone testing instead of running the suite and exiting.
+KEEP_ALIVE=
+if [[ "${1:-}" == "--keep-alive" ]]; then
+    KEEP_ALIVE=1
+fi
+
 CONTAINER_NAME="picomint-integration-bitcoind"
 
 cleanup() {
@@ -52,5 +59,10 @@ docker exec "$CONTAINER_NAME" bitcoin-cli \
     -regtest -rpcuser=bitcoin -rpcpassword=bitcoin \
     createwallet default > /dev/null
 
-echo "Running integration tests..."
-RUST_LOG="${RUST_LOG:-info}" ./target/release/picomint-integration-tests
+if [[ -n "$KEEP_ALIVE" ]]; then
+    echo "Bringing up federation (stays up until Ctrl-C)..."
+    KEEP_ALIVE=1 RUST_LOG="${RUST_LOG:-info}" ./target/release/picomint-integration-tests
+else
+    echo "Running integration tests..."
+    RUST_LOG="${RUST_LOG:-info}" ./target/release/picomint-integration-tests
+fi
