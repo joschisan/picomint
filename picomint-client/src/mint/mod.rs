@@ -645,22 +645,26 @@ impl MintClientModule {
             return Some(selected_notes);
         }
 
+        let mut last_note = None;
+
         for note in target_notes {
             let note_value = note
                 .amount()
                 .checked_sub(self.cfg.input_fee)
                 .expect("All our notes are economical");
 
-            excess_output = excess_output.saturating_sub(note_value);
+            if note_value <= excess_output {
+                excess_output = excess_output.saturating_sub(note_value);
 
-            selected_notes.push(note);
-
-            if excess_output == Amount::ZERO {
-                return Some(selected_notes);
+                selected_notes.push(note);
+            } else {
+                last_note = Some(note);
             }
         }
 
-        None
+        selected_notes.push(last_note?);
+
+        Some(selected_notes)
     }
 
     fn select_output_denominations(
