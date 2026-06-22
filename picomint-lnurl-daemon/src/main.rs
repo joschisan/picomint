@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, ensure};
 use axum::extract::{Path, Query, State};
@@ -156,7 +155,6 @@ async fn invoice(
         request.aggregate_pk,
         request.gateways,
         params.amount,
-        3600, // standard expiry time of one hour
     )
     .await
     {
@@ -191,7 +189,6 @@ async fn create_contract_and_fetch_invoice(
     aggregate_pk: AggregatePublicKey,
     gateways: Vec<GatewayPk>,
     amount: u64,
-    expiry_secs: u32,
 ) -> anyhow::Result<(GatewayPk, Bolt11Invoice)> {
     let ephemeral_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
@@ -226,12 +223,6 @@ async fn create_contract_and_fetch_invoice(
         "Amount too small"
     );
 
-    let expiry = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("System time before Unix epoch")
-        .as_secs()
-        .saturating_add(u64::from(expiry_secs));
-
     let contract = IncomingContract::new(
         aggregate_pk,
         encryption_seed,
@@ -239,7 +230,6 @@ async fn create_contract_and_fetch_invoice(
         preimage.consensus_hash(),
         Amount::from_msat(amount),
         fee,
-        expiry,
         claim_pk,
         gateway_info.module_public_key,
         ephemeral_keypair.public_key(),

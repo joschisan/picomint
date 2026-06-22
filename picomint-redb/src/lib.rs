@@ -162,9 +162,9 @@ where
 ///
 /// ```ignore
 /// table!(
-///     UnixTimeVoteTable,
+///     BlockCountVoteTable,
 ///     PeerId => u64,
-///     "unix-time-vote",
+///     "block-count-vote",
 /// );
 /// ```
 #[macro_export]

@@ -29,7 +29,6 @@ pub struct Commitment {
     /// Gateway's combined cut (LN routing + tx fee). The federation will
     /// credit the recipient `amount - fee` ecash on claim.
     pub fee: Amount,
-    pub expiry: u64,
     pub claim_pk: XOnlyPublicKey,
     pub refund_pk: XOnlyPublicKey,
     pub ephemeral_pk: PublicKey,
@@ -44,7 +43,6 @@ impl IncomingContract {
         payment_hash: sha256::Hash,
         amount: Amount,
         fee: Amount,
-        expiry: u64,
         claim_pk: XOnlyPublicKey,
         refund_pk: XOnlyPublicKey,
         ephemeral_pk: PublicKey,
@@ -53,7 +51,6 @@ impl IncomingContract {
             payment_hash,
             amount,
             fee,
-            expiry,
             claim_pk,
             refund_pk,
             ephemeral_pk,

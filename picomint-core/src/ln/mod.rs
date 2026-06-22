@@ -87,8 +87,6 @@ pub enum LightningInputError {
 pub enum LightningOutputError {
     #[error("The contract is invalid")]
     InvalidContract,
-    #[error("The contract is expired")]
-    ContractExpired,
     #[error("Amount arithmetic overflowed u64 msat")]
     ArithmeticOverflow,
 }
@@ -96,5 +94,4 @@ pub enum LightningOutputError {
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub enum LightningConsensusItem {
     BlockCountVote(u64),
-    UnixTimeVote(u64),
 }

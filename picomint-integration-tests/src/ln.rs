@@ -251,12 +251,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     {
         let (gateway_pk, gateway_info) = ln.select_gateway(None)?;
         let invoice = ln
-            .receive(
-                gateway_pk,
-                gateway_info.clone(),
-                Amount::from_msat(500_000),
-                300,
-            )
+            .receive(gateway_pk, gateway_info.clone(), Amount::from_msat(500_000))
             .await?;
 
         let send_op = ln.send(gateway_pk, gateway_info, invoice).await?;
@@ -349,7 +344,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     {
         let (gateway_pk, gateway_info) = ln.select_gateway(None)?;
         let invoice = ln
-            .receive(gateway_pk, gateway_info, Amount::from_msat(500_000), 300)
+            .receive(gateway_pk, gateway_info, Amount::from_msat(500_000))
             .await?;
 
         env.ldk_node.bolt11_payment().send(&invoice, None)?;

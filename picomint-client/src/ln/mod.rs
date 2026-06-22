@@ -9,7 +9,6 @@ mod send_sm;
 
 use picomint_redb::WriteTx;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
@@ -327,7 +326,6 @@ impl LightningClientModule {
         gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
         amount: Amount,
-        expiry_secs: u32,
     ) -> Result<Bolt11Invoice, ReceiveError> {
         let receive_keypair = self.secret.receive_keypair();
 
@@ -336,7 +334,6 @@ impl LightningClientModule {
             gateway_info,
             receive_keypair.public_key(),
             amount,
-            expiry_secs,
         )
         .await
     }
@@ -350,7 +347,6 @@ impl LightningClientModule {
         gateway_info: GatewayInfo,
         recipient_pk: PublicKey,
         amount: Amount,
-        expiry_secs: u32,
     ) -> Result<Bolt11Invoice, ReceiveError> {
         let ephemeral_kp = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
@@ -375,12 +371,6 @@ impl LightningClientModule {
             return Err(ReceiveError::AmountTooSmall);
         }
 
-        let expiry = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("System time before Unix epoch")
-            .as_secs()
-            .saturating_add(u64::from(expiry_secs));
-
         let claim_pk = recipient_pk
             .mul_tweak(secp256k1::SECP256K1, &claim_tweak)
             .expect("Tweak is valid")
@@ -394,7 +384,6 @@ impl LightningClientModule {
             preimage.consensus_hash(),
             amount,
             fee,
-            expiry,
             claim_pk,
             gateway_info.module_public_key,
             ephemeral_kp.public_key(),
