@@ -619,9 +619,17 @@ impl MintClientModule {
                 .cloned()
                 .collect();
 
-            target_notes.extend(notes_amount.iter().take(TARGET_PER_DENOMINATION).cloned());
+            // Keep up to twice the target per denomination in reserve; only sweep
+            // what is beyond that, so an ordinary spend doesn't drag a denomination's
+            // surplus along until it is genuinely bloated.
+            target_notes.extend(
+                notes_amount
+                    .iter()
+                    .take(2 * TARGET_PER_DENOMINATION)
+                    .cloned(),
+            );
 
-            for note in notes_amount.into_iter().skip(TARGET_PER_DENOMINATION) {
+            for note in notes_amount.into_iter().skip(2 * TARGET_PER_DENOMINATION) {
                 let note_value = note
                     .amount()
                     .checked_sub(self.cfg.input_fee)
