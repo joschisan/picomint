@@ -603,9 +603,9 @@ impl MintClientModule {
     fn select_funding_input(
         &self,
         dbtx: &WriteTx,
-        mut excess_output: Amount,
+        excess_output: Amount,
     ) -> Option<Vec<SpendableNote>> {
-        let mut selected_notes = Vec::new();
+        let mut selected = Vec::new();
         let mut target_notes = Vec::new();
 
         let all_notes: Vec<SpendableNote> = dbtx.iter(&NoteTable(self.federation), |r| {
@@ -630,37 +630,37 @@ impl MintClientModule {
             );
 
             for note in notes_amount.into_iter().skip(2 * TARGET_PER_DENOMINATION) {
-                let note_value = note
-                    .amount()
-                    .checked_sub(self.cfg.input_fee)
-                    .expect("All our notes are economical");
-
-                excess_output = excess_output.saturating_sub(note_value);
-
-                selected_notes.push(note);
+                selected.push(note);
             }
         }
 
-        if excess_output == Amount::ZERO {
-            return Some(selected_notes);
+        let selected_value = selected.iter().map(|n| self.note_value(n)).sum();
+
+        if excess_output <= selected_value {
+            return Some(selected);
         }
+
+        let mut last_note = None;
 
         for note in target_notes {
-            let note_value = note
-                .amount()
-                .checked_sub(self.cfg.input_fee)
-                .expect("All our notes are economical");
+            let selected_value = selected.iter().map(|n| self.note_value(n)).sum();
 
-            excess_output = excess_output.saturating_sub(note_value);
-
-            selected_notes.push(note);
-
-            if excess_output == Amount::ZERO {
-                return Some(selected_notes);
+            if self.note_value(&note) + selected_value <= excess_output {
+                selected.push(note);
+            } else {
+                last_note = Some(note);
             }
         }
 
-        None
+        selected.push(last_note?);
+
+        Some(selected)
+    }
+
+    fn note_value(&self, note: &SpendableNote) -> Amount {
+        note.amount()
+            .checked_sub(self.cfg.input_fee)
+            .expect("All our notes are economical")
     }
 
     fn select_output_denominations(
