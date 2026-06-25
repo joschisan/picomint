@@ -73,7 +73,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
 
         div class="row gy-4 mt-2" {
             div class="col-lg-6" {
-                (config::render())
+                (peers::render(&p2p_connection_status))
             }
 
             div class="col-lg-6" {
@@ -82,18 +82,18 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
         }
 
         div class="row gy-4 mt-2" {
-            div class="col-lg-6" {
-                (peers::render(&p2p_connection_status))
-            }
-
-            div class="col-lg-6" {
-                (expiry::render(expiry_status.as_ref()))
+            div class="col-12" {
+                (bitcoin::render(&bitcoin_rpc_status))
             }
         }
 
         div class="row gy-4 mt-2" {
-            div class="col-12" {
-                (bitcoin::render(&bitcoin_rpc_status))
+            div class="col-lg-6" {
+                (config::render())
+            }
+
+            div class="col-lg-6" {
+                (expiry::render(expiry_status.as_ref()))
             }
         }
 

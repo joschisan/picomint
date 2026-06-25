@@ -53,7 +53,6 @@ pub fn loading_card(setup_code: &PeerSetupCode) -> Markup {
             div class="spinner-border text-primary" role="status" {
                 span class="visually-hidden" { "Loading..." }
             }
-            p class="mt-2 text-muted" { "Waiting for federation setup to complete..." }
         }
     };
 
