@@ -39,7 +39,7 @@ pub fn render(status: Option<&ExpiryStatus>) -> Markup {
                         }
                     }
                     form method="post" action=(CLEAR_EXPIRY_ROUTE) {
-                        button type="submit" class="btn btn-primary" {
+                        button type="submit" class="btn btn-primary w-100" {
                             "Clear Expiry Announcement"
                         }
                     }
@@ -77,7 +77,7 @@ pub fn render(status: Option<&ExpiryStatus>) -> Markup {
                                 name="successor_invite_code"
                                 placeholder="Enter Optional Invite Code";
                         }
-                        button type="submit" class="btn btn-primary" {
+                        button type="submit" class="btn btn-primary w-100" {
                             "Announce Expiry"
                         }
                     }

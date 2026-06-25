@@ -16,7 +16,7 @@ pub fn render() -> Markup {
 
                 a href=(BACKUP_CONFIG_ROUTE)
                     download="config.json"
-                    class="btn btn-outline-primary w-100 py-2 mt-auto" {
+                    class="btn btn-primary w-100 py-2 mt-auto" {
                     "Download Config"
                 }
             }
