@@ -26,12 +26,41 @@ use tokio::sync::watch;
 use tokio::time::sleep;
 use tracing::{Instrument, debug, info, info_span, warn};
 
-/// P2P connection status for a peer. `None` in a status channel means the peer
-/// is currently disconnected.
+/// Transport of a connection's selected network path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct P2PConnectionStatus {
-    /// Round-trip time (only available for iroh connections)
-    pub rtt: Option<std::time::Duration>,
+pub enum Transport {
+    /// Direct, hole-punched UDP path to the peer.
+    Direct,
+    /// Relayed path through an iroh relay server.
+    Relay,
+}
+
+/// Details of a connection's selected network path.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathInfo {
+    /// Transport of the selected path: direct vs relayed.
+    pub transport: Transport,
+    /// Remote address of the selected path — a socket address (direct)
+    /// or a relay URL.
+    pub remote_addr: String,
+    /// Round-trip time of the selected path.
+    pub rtt: Duration,
+}
+
+/// P2P connection status for a peer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum P2PConnectionStatus {
+    /// No live connection to the peer.
+    Disconnected,
+    /// A live connection, described by its selected network path.
+    Connected(PathInfo),
+}
+
+impl P2PConnectionStatus {
+    /// Whether the peer is currently disconnected.
+    pub fn is_disconnected(&self) -> bool {
+        matches!(self, P2PConnectionStatus::Disconnected)
+    }
 }
 
 // ── P2P message types ───────────────────────────────────────────────────────
@@ -116,12 +145,27 @@ impl P2PConnection {
         Ok(M::consensus_decode(&bytes)?)
     }
 
-    pub fn rtt(&self) -> Option<Duration> {
+    /// Snapshot the connection's selected network path: its transport
+    /// (direct vs relay), remote address, and RTT. `None` when no path is
+    /// currently selected.
+    pub fn selected_path(&self) -> Option<PathInfo> {
         self.connection
             .paths()
             .iter()
             .find(|p| p.is_selected())
-            .map(|p| p.rtt())
+            .map(|p| {
+                let transport = if p.is_relay() {
+                    Transport::Relay
+                } else {
+                    Transport::Direct
+                };
+
+                PathInfo {
+                    transport,
+                    remote_addr: p.remote_addr().to_string(),
+                    rtt: p.rtt(),
+                }
+            })
     }
 }
 
@@ -209,8 +253,8 @@ pub enum Accepted {
 
 // ── Connection manager ──────────────────────────────────────────────────────
 
-pub type P2PStatusSenders = BTreeMap<PeerId, watch::Sender<Option<P2PConnectionStatus>>>;
-pub type P2PStatusReceivers = BTreeMap<PeerId, watch::Receiver<Option<P2PConnectionStatus>>>;
+pub type P2PStatusSenders = BTreeMap<PeerId, watch::Sender<P2PConnectionStatus>>;
+pub type P2PStatusReceivers = BTreeMap<PeerId, watch::Receiver<P2PConnectionStatus>>;
 
 /// This enum defines the intended recipient of a p2p message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -224,7 +268,7 @@ pub fn p2p_status_channels(peers: Vec<PeerId>) -> (P2PStatusSenders, P2PStatusRe
     let mut receivers = BTreeMap::new();
 
     for peer in peers {
-        let (sender, receiver) = watch::channel(None);
+        let (sender, receiver) = watch::channel(P2PConnectionStatus::Disconnected);
 
         senders.insert(peer, sender);
         receivers.insert(peer, receiver);
@@ -359,7 +403,7 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
         peer: PeerId,
         connector: P2PConnector,
         incoming_connections: Receiver<P2PConnection>,
-        status_tx: watch::Sender<Option<P2PConnectionStatus>>,
+        status_tx: watch::Sender<P2PConnectionStatus>,
     ) -> Self {
         // Per-peer message queues. Sized for the BFT engine's anti-entropy
         // bursts (push + reactive pull at unit-creation cadence) plus
@@ -424,7 +468,7 @@ struct P2PConnectionSMCommon<M> {
     peer: PeerId,
     connector: P2PConnector,
     incoming_connections: Receiver<P2PConnection>,
-    status_tx: watch::Sender<Option<P2PConnectionStatus>>,
+    status_tx: watch::Sender<P2PConnectionStatus>,
 }
 
 enum P2PConnectionSMState {
@@ -436,16 +480,22 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionStateMachine<M> {
     async fn state_transition(mut self) -> Option<Self> {
         match self.state {
             P2PConnectionSMState::Disconnected(backoff) => {
-                self.common.status_tx.send_replace(None);
+                self.common
+                    .status_tx
+                    .send_replace(P2PConnectionStatus::Disconnected);
 
                 self.common.transition_disconnected(backoff).await
             }
             P2PConnectionSMState::Connected(connection) => {
-                let status = P2PConnectionStatus {
-                    rtt: connection.rtt(),
+                // A live connection essentially always has a selected path; if
+                // iroh hasn't surfaced one yet, report disconnected until the
+                // next transition picks it up.
+                let status = match connection.selected_path() {
+                    Some(path) => P2PConnectionStatus::Connected(path),
+                    None => P2PConnectionStatus::Disconnected,
                 };
 
-                self.common.status_tx.send_replace(Some(status));
+                self.common.status_tx.send_replace(status);
 
                 self.common.transition_connected(connection).await
             }

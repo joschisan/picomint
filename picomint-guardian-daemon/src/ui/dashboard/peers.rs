@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
-use crate::p2p::P2PConnectionStatus;
+use crate::p2p::{P2PConnectionStatus, Transport};
 use maud::{Markup, html};
 use picomint_core::PeerId;
 
-pub fn render(p2p_connection_status: &BTreeMap<PeerId, Option<P2PConnectionStatus>>) -> Markup {
+pub fn render(p2p_connection_status: &BTreeMap<PeerId, P2PConnectionStatus>) -> Markup {
     html! {
         div class="card h-100" id="peer-connections" {
             div class="card-header dashboard-header" { "Peer Connections" }
@@ -17,15 +17,20 @@ pub fn render(p2p_connection_status: &BTreeMap<PeerId, Option<P2PConnectionStatu
                             tr {
                                 th { "ID" }
                                 th { "Status" }
+                                th { "Transport" }
                                 th { "Round Trip" }
                             }
                         }
                         tbody {
                             @for (peer, status) in p2p_connection_status {
+                                @let path = match status {
+                                    P2PConnectionStatus::Connected(path) => Some(path),
+                                    P2PConnectionStatus::Disconnected => None,
+                                };
                                 tr {
                                     td { (peer.to_string()) }
                                     td {
-                                        @match status {
+                                        @match path {
                                             Some(_) => {
                                                 span class="badge bg-success" { "Connected" }
                                             }
@@ -35,9 +40,26 @@ pub fn render(p2p_connection_status: &BTreeMap<PeerId, Option<P2PConnectionStatu
                                         }
                                     }
                                     td {
-                                        @match status.as_ref().and_then(|s| s.rtt) {
-                                            Some(duration) => {
-                                                (format!("{} ms", duration.as_millis()))
+                                        @match path {
+                                            Some(path) => {
+                                                @match path.transport {
+                                                    Transport::Direct => {
+                                                        span class="badge bg-success" title=(path.remote_addr) { "Direct" }
+                                                    }
+                                                    Transport::Relay => {
+                                                        span class="badge bg-warning text-dark" title=(path.remote_addr) { "Relay" }
+                                                    }
+                                                }
+                                            }
+                                            None => {
+                                                span class="text-muted" { "—" }
+                                            }
+                                        }
+                                    }
+                                    td {
+                                        @match path {
+                                            Some(path) => {
+                                                (format!("{} ms", path.rtt.as_millis()))
                                             }
                                             None => {
                                                 span class="text-muted" { "N/A" }

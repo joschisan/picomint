@@ -226,7 +226,7 @@ impl ServerConfig {
         loop {
             let disconnected_peers: BTreeSet<PeerId> = p2p_status_receivers
                 .iter()
-                .filter_map(|(p, r)| r.borrow().is_none().then_some(*p))
+                .filter_map(|(p, r)| r.borrow().is_disconnected().then_some(*p))
                 .collect();
 
             if disconnected_peers.is_empty() {
