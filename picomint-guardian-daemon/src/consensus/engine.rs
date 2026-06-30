@@ -82,44 +82,13 @@ impl ConsensusEngine {
         connections: ReconnectP2PConnections<P2PMessage>,
         session_index: u64,
     ) -> Option<()> {
-        // In order to bound a sessions RAM consumption we need to bound its number of
-        // units and therefore its number of rounds. Since we use a session to
-        // create a naive secp256k1 threshold signature for the header of session
-        // outcome we have to guarantee that an attacker cannot exhaust our
-        // memory by preventing the creation of a threshold signature, thereby
-        // keeping the session open indefinitely. Hence, after a certain round
-        // index, we increase the delay between rounds exponentially such that
-        // the end of the bft session would only be reached after a minimum
-        // of 10 years. In case of such an attack the broadcast stops ordering any
-        // items until the attack subsides as no items are ordered while the
-        // signatures are collected. The maximum RAM consumption of the bft
-        // broadcast instance is therefore bound by:
+        // The bft engine creates units with no pacing — as fast as new
+        // parents arrive. The session stops ordering items once it reaches
+        // `bft_rounds_per_session` rounds (see the ordering loop below).
         //
-        // self.keychain.peer_count()
-        //      * (broadcast_rounds_per_session + 1000)
-        //      * BFT_UNIT_BYTE_LIMIT
-
-        /// Base amplitude (ms) for the post-`rounds_per_session` exponential
-        /// backoff. Inside a session the per-round delay is zero — the ordering
-        /// floor is dominated by network latency, not pacing, so units are
-        /// created as fast as new parents arrive. Only past `rounds_per_session`
-        /// does the delay grow exponentially to bound RAM under a stalling
-        /// attack (see above).
-        const ROUND_DELAY_MS: f64 = 50.0;
-        const BASE: f64 = 1.02;
-
-        let rounds_per_session = self.cfg.consensus.bft_rounds_per_session;
-
-        let unit_delay = Box::new(move |round_index: u16| {
-            let delay = if round_index < rounds_per_session {
-                0.0
-            } else {
-                ROUND_DELAY_MS * BASE.powf((round_index - rounds_per_session) as f64)
-            };
-
-            Duration::from_millis(delay.round() as u64)
-        });
-
+        // Note: there is no longer a delay-based RAM bound on a stalling
+        // session. If an attacker prevents a threshold signature on the
+        // session outcome, the bft engine keeps creating units unbounded.
         let (signed_outcomes_tx, signed_outcomes_rx) = async_channel::unbounded();
         let (signatures_tx, signatures_rx) = async_channel::unbounded();
         let (ordered_tx, ordered_rx) = async_channel::unbounded();
@@ -140,7 +109,6 @@ impl ConsensusEngine {
             build_keychain(&self.cfg),
             network,
             DataProvider::new(self.submission_rx.clone()),
-            unit_delay,
             ordered_tx,
             BftUnitsTable,
             BftCosigsTable,

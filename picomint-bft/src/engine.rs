@@ -47,7 +47,6 @@ where
     keychain: Keychain,
     network: DynNetwork<D>,
     data_provider: P,
-    unit_delay: Box<dyn Fn(Round) -> Duration + Send + 'static>,
     pub(crate) ordered_tx: Sender<(Round, PeerId, D)>,
 
     /// Daemon-declared units table (`(Round, PeerId) => Unit<D>`).
@@ -87,7 +86,6 @@ where
         keychain: Keychain,
         network: DynNetwork<D>,
         data_provider: P,
-        unit_delay: Box<dyn Fn(Round) -> Duration + Send + 'static>,
         ordered_tx: Sender<(Round, PeerId, D)>,
         units_table: TU,
         cosigs_table: TC,
@@ -104,7 +102,6 @@ where
             keychain,
             network,
             data_provider,
-            unit_delay,
             ordered_tx,
             units_table: TableDef::from(units_table),
             cosigs_table: TableDef::from(cosigs_table),
@@ -118,7 +115,8 @@ where
     pub async fn run(mut self) {
         self.replay().await;
 
-        let mut next_create_at = Instant::now();
+        self.create_units().await;
+
         let mut next_anti_entropy_at = Instant::now();
 
         loop {
@@ -126,17 +124,12 @@ where
                 maybe_msg = self.network.receive() => {
                     let Some((sender, msg)) = maybe_msg else { return };
 
-                    if let Err(err) = self.handle_message(sender, msg).await {
-                        warn!(%sender, err = %format_args!("{err:#}"), "rejected bft message");
+                    match self.handle_message(sender, msg).await {
+                        Ok(()) => self.create_units().await,
+                        Err(err) => {
+                            warn!(%sender, err = %format_args!("{err:#}"), "rejected bft message");
+                        }
                     }
-                }
-
-                _ = sleep_until(next_create_at) => {
-                    self.try_create_unit().await;
-
-                    let round = self.highest_unit(&self.db.begin_read(), self.id).map_or(0, |u| u.round);
-
-                    next_create_at = Instant::now() + (self.unit_delay)(round);
                 }
 
                 _ = sleep_until(next_anti_entropy_at) => {
@@ -146,6 +139,15 @@ where
                 }
             }
         }
+    }
+
+    /// Create our own units for every round that has become creatable,
+    /// stopping when the next round lacks a threshold of extended
+    /// parents. Unit creation is unpaced — a fresh parent set is the
+    /// only gate. Called after replay and after each inbound message,
+    /// the two events that can extend new parent slots.
+    async fn create_units(&mut self) {
+        while self.try_create_unit().await {}
     }
 
     /// Rebuild the in-memory `extended` / `emitted` / `next_decide_round`
@@ -523,14 +525,16 @@ where
         Ok(())
     }
 
-    async fn try_create_unit(&mut self) {
-        let dbtx = self.db.begin_write();
-
-        let round = self.highest_unit(&dbtx, self.id).map_or(0, |u| u.round + 1);
+    async fn try_create_unit(&mut self) -> bool {
+        let round = self
+            .highest_unit(&self.db.begin_read(), self.id)
+            .map_or(0, |u| u.round + 1);
 
         let Some(parents) = self.parents_for(round) else {
-            return;
+            return false;
         };
+
+        let dbtx = self.db.begin_write();
 
         let data: Vec<D> = self.data_provider.get_data();
 
@@ -557,6 +561,8 @@ where
         dbtx.commit();
 
         self.send_unit(Recipient::Everyone, &unit, &sig);
+
+        true
     }
 
     fn send_unit(&self, recipient: Recipient, unit: &Unit<D>, sig: &schnorr::Signature) {
