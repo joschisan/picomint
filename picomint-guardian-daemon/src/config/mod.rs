@@ -32,10 +32,9 @@ pub mod setup;
 /// How many concurrent Iroh API connections the server will accept.
 pub const MAX_CLIENT_CONNECTIONS: u32 = 1000;
 
-/// BFT rounds per session. Controls session duration (3 min prod / 10 s
-/// regtest).
-const DEFAULT_BFT_ROUNDS_PER_SESSION: u16 = 3600;
-const REGTEST_BFT_ROUNDS_PER_SESSION: u16 = 200;
+/// BFT rounds per session. Controls session duration.
+const DEFAULT_BFT_ROUNDS_PER_SESSION: u16 = 10000;
+const REGTEST_BFT_ROUNDS_PER_SESSION: u16 = 100;
 
 fn bft_rounds_per_session(network: Network) -> u16 {
     if network == Network::Regtest {
