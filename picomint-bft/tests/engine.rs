@@ -148,8 +148,6 @@ impl DataProvider<u64> for TimestampDataProvider {
 
 const N_PEERS: usize = 4;
 const ROUND_LIMIT: Round = 100;
-/// Same default as `picomint-guardian-daemon::config::BFT_ROUND_DELAY_MS`.
-const UNIT_DELAY: Duration = Duration::from_millis(50);
 const SESSION: u64 = 0;
 
 fn build_keychains(n: NumPeers) -> BTreeMap<PeerId, Keychain> {
@@ -193,7 +191,6 @@ async fn engines_agree_on_ordered_data() {
             keychains.remove(&peer).expect("built above"),
             network,
             TimestampDataProvider,
-            Box::new(|_round| UNIT_DELAY),
             ordered_tx,
             BftUnits,
             BftCosigs,
