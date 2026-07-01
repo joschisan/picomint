@@ -33,10 +33,10 @@ pub mod setup;
 pub const MAX_CLIENT_CONNECTIONS: u32 = 1000;
 
 /// BFT rounds per session. Controls session duration.
-const DEFAULT_BFT_ROUNDS_PER_SESSION: u16 = 10000;
-const REGTEST_BFT_ROUNDS_PER_SESSION: u16 = 100;
+const DEFAULT_BFT_ROUNDS_PER_SESSION: u32 = 10000;
+const REGTEST_BFT_ROUNDS_PER_SESSION: u32 = 100;
 
-fn bft_rounds_per_session(network: Network) -> u16 {
+fn bft_rounds_per_session(network: Network) -> u32 {
     if network == Network::Regtest {
         REGTEST_BFT_ROUNDS_PER_SESSION
     } else {
