@@ -8,7 +8,7 @@ use picomint_encoding::{Decodable, Encodable};
 /// Round number within a session. Round 0 is the first row of the DAG;
 /// its units carry empty parent sets and are otherwise created and
 /// disseminated like every other unit.
-pub type Round = u16;
+pub type Round = u32;
 
 /// Type alias for the trait bound every consumer of `D` ends up
 /// repeating. Anything that round-trips on the wire, can be moved

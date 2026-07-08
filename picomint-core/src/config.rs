@@ -67,7 +67,7 @@ pub struct ConsensusConfig {
     /// Per-peer endpoint info (iroh pk, broadcast pk, name).
     pub peers: BTreeMap<PeerId, PeerEndpoint>,
     /// Number of BFT rounds per session.
-    pub bft_rounds_per_session: u16,
+    pub bft_rounds_per_session: u32,
     /// Bitcoin network this federation operates on.
     pub network: Network,
     /// Federation name, chosen by the lead guardian during setup.
