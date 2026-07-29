@@ -201,7 +201,7 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
                             }
                         }
 
-                        @if let Some((recovery_public_keys, recovery_private_key)) = &recovery_keys {
+                        @if let Some((tweaked_agg_pk, tweaked_sks)) = &recovery_keys {
                             // Federation Shutdown accordion
                             div class="accordion mt-4" id="shutdownAccordion" {
                                 div class="accordion-item" {
@@ -215,32 +215,20 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
                                             div class="alert alert-warning mb-3" {
                                                 "To recover your remaining funds after decommissioning the federation, please go to the "
                                                 a href="https://recovery.picomint.org" target="_blank" { "recovery tool" }
-                                                " and follow the instructions. The recovery keys change with every transaction. All guardians must be fully synced before extracting keys, otherwise the keys will not match the current federation UTXO."
+                                                " and follow the instructions. It interpolates a threshold of tweaked guardian key shares into the secret key of the current federation UTXO, verifies it against the tweaked aggregate key and sweeps the UTXO with the resulting taproot key. The keys change with every transaction. All guardians must be fully synced before extracting their shares, otherwise the shares will not match the current federation UTXO."
                                             }
 
                                             div class="mb-3" {
-                                                table class="table table-sm" {
-                                                    thead {
-                                                        tr {
-                                                            th { "Guardian" }
-                                                            th { "Public Key (hex)" }
-                                                        }
-                                                    }
-                                                    tbody {
-                                                        @for (peer, pk) in recovery_public_keys {
-                                                            tr {
-                                                                td { (peer) }
-                                                                td class="text-break" style="word-break: break-all; font-family: monospace;" { (pk) }
-                                                            }
-                                                        }
-                                                    }
+                                                p class="mb-2" { strong { "Tweaked Aggregate Public Key (hex)" } }
+                                                div class="alert alert-info text-break" style="word-break: break-all; font-family: monospace;" {
+                                                    (tweaked_agg_pk)
                                                 }
                                             }
 
                                             div class="mb-3" {
-                                                p class="mb-2" { strong { "Your Private Key (WIF)" } }
-                                                div class="alert alert-danger text-break" style="word-break: break-all;" {
-                                                    (recovery_private_key)
+                                                p class="mb-2" { strong { "Your Tweaked Secret Key Share (hex)" } }
+                                                div class="alert alert-danger text-break" style="word-break: break-all; font-family: monospace;" {
+                                                    (tweaked_sks)
                                                 }
                                             }
                                         }

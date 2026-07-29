@@ -5,42 +5,45 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use self::db::{
-    BlockCountVoteTable, FederationWalletTable, FeeRateVoteTable, Output, OutputTable, Signatures,
-    SignaturesTable, SpentOutputTable, TxInfoIndexTable, TxInfoTable, TxidKey, UnconfirmedTxTable,
-    UnsignedTxTable,
+    BlockCountVoteTable, FederationWalletTable, FeeRateVoteTable, NonceEntry, NonceLogTable,
+    Output, OutputTable, Signatures, SignaturesTable, SpentOutputTable, TxInfoIndexTable,
+    TxInfoTable, TxidKey, UnconfirmedTxTable, UnsignedTxTable,
 };
-use anyhow::{Context, anyhow, bail, ensure};
+use anyhow::{Context, anyhow, ensure};
 use bitcoin::absolute::LockTime;
 use bitcoin::hashes::{Hash, sha256};
-use bitcoin::secp256k1::Secp256k1;
-use bitcoin::sighash::{EcdsaSighashType, SighashCache};
+use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::Version;
-use bitcoin::{Amount, Network, Sequence, Transaction, TxIn, TxOut, Txid};
+use bitcoin::{Amount, Network, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
 use common::config::WalletConfigConsensus;
 use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletOutput};
-use miniscript::descriptor::Wsh;
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::wallet as common;
-use picomint_core::{NumPeersExt, OutPoint, PeerId, peer_range};
+use picomint_core::{NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, ReadTx, WriteTx};
 use tokio::time::sleep;
 
 use crate::config::dkg::DkgHandle;
+use crate::config::dkg_secp::eval_poly;
 use crate::handler;
+use picomint_core::secret::Secret;
 use picomint_core::wallet::config::{WalletConfig, WalletConfigPrivate};
 use picomint_core::wallet::methods::WalletMethod;
 use picomint_core::wallet::{
-    FederationWallet, TxInfo, WalletInputError, WalletOutputError, descriptor,
-    is_potential_receive, tweak_public_key,
+    FederationWallet, TxInfo, WalletInputError, WalletOutputError, is_potential_receive,
+    tweak_public_key, tweaked_script_pubkey,
 };
-use rand::rngs::OsRng;
-use secp256k1::ecdsa::Signature;
-use secp256k1::{PublicKey, Scalar};
+use secp256k1::Scalar;
 use serde::{Deserialize, Serialize};
 use tracing::info;
+use tss::{
+    AggregatePublicKey, PublicKeyShare, PublicNonce, SecretKeyShare, SecretNonce, SignatureShare,
+    aggregate_signature_shares, derive_nonce, derive_pk_share, derive_public_nonce, sign_share,
+    verify_signature_share,
+};
 
 /// Number of confirmations required for a transaction to be considered as
 /// final by the federation. The block that mines the transaction does
@@ -72,7 +75,7 @@ pub struct SpentTxOut {
 }
 
 fn pending_txs_unordered(dbtx: &impl picomint_redb::DbRead) -> Vec<FederationTx> {
-    let unsigned: Vec<FederationTx> = dbtx.iter(&UnsignedTxTable, |r| r.map(|(_, v)| v).collect());
+    let unsigned: Option<FederationTx> = dbtx.get(&UnsignedTxTable, &());
 
     let unconfirmed: Vec<FederationTx> =
         dbtx.iter(&UnconfirmedTxTable, |r| r.map(|(_, v)| v).collect());
@@ -83,30 +86,32 @@ fn pending_txs_unordered(dbtx: &impl picomint_redb::DbRead) -> Vec<FederationTx>
 /// Run DKG for the wallet module, producing a fresh `WalletConfig` for this
 /// peer.
 pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<WalletConfig> {
-    let (bitcoin_sk, bitcoin_pk) = secp256k1::generate_keypair(&mut OsRng);
+    let (polynomial, sks) = peers.run_dkg_secp().await?;
 
-    let bitcoin_pks: BTreeMap<PeerId, PublicKey> = peers
-        .exchange_encodable(bitcoin_pk)
-        .await?
-        .into_iter()
-        .collect();
+    let pks = peers
+        .num_peers()
+        .peer_ids()
+        .map(|peer| Ok((peer, PublicKeyShare(eval_poly(&polynomial, &peer)?))))
+        .collect::<anyhow::Result<BTreeMap<PeerId, PublicKeyShare>>>()?;
 
     Ok(WalletConfig {
-        private: WalletConfigPrivate { bitcoin_sk },
-        consensus: WalletConfigConsensus::new(bitcoin_pks),
+        private: WalletConfigPrivate {
+            sks: SecretKeyShare(sks),
+        },
+        consensus: WalletConfigConsensus::new(AggregatePublicKey(polynomial[0]), pks),
     })
 }
 
-/// Verify our private bitcoin secret key matches the corresponding public key
-/// in the multisig set.
+/// Verify our wallet secret key share matches the corresponding public key
+/// share in the consensus config.
 pub fn validate_config(identity: &PeerId, cfg: &WalletConfig) -> anyhow::Result<()> {
     ensure!(
         cfg.consensus
-            .bitcoin_pks
+            .pks
             .get(identity)
-            .ok_or(anyhow::anyhow!("No public key for our identity"))?
-            == &cfg.private.bitcoin_sk.public_key(secp256k1::SECP256K1),
-        "Bitcoin wallet private key doesn't match multisig pubkey"
+            .context("Public key share set has no key for our identity")?
+            == &derive_pk_share(&cfg.private.sks),
+        "Wallet secret key share does not match our public key share"
     );
 
     Ok(())
@@ -114,23 +119,10 @@ pub fn validate_config(identity: &PeerId, cfg: &WalletConfig) -> anyhow::Result<
 
 impl Wallet {
     pub async fn consensus_proposal(&self, dbtx: &ReadTx) -> Vec<WalletConsensusItem> {
-        let unsigned_txs: Vec<(TxidKey, FederationTx)> =
-            dbtx.iter(&UnsignedTxTable, |r| r.collect());
-
-        let mut items: Vec<WalletConsensusItem> = unsigned_txs
+        let mut items: Vec<WalletConsensusItem> = dbtx
+            .get(&UnsignedTxTable, &())
+            .and_then(|unsigned_tx| self.signing_session_proposal(dbtx, &unsigned_tx))
             .into_iter()
-            .map(|(txid, unsigned_tx)| {
-                let signatures = self.sign_tx(&unsigned_tx);
-
-                self.verify_signatures(
-                    &unsigned_tx,
-                    &signatures,
-                    self.cfg.private.bitcoin_sk.public_key(secp256k1::SECP256K1),
-                )
-                .expect("Our signatures failed verification against our private key");
-
-                WalletConsensusItem::Signatures(txid.0, signatures)
-            })
             .collect();
 
         let feerate_vote = self.btc_rpc.status().map(|status| {
@@ -165,6 +157,82 @@ impl Wallet {
         items
     }
 
+    /// Determines the next item to propose for an unsigned transaction: our
+    /// signature shares plus a fresh replacement nonce entry if we are a
+    /// member of a signing session we have not signed yet, or our initial
+    /// nonce entry if we have never entered the log. Items are re-proposed
+    /// until they are accepted; the handlers reject duplicates.
+    fn signing_session_proposal(
+        &self,
+        dbtx: &ReadTx,
+        unsigned_tx: &FederationTx,
+    ) -> Option<WalletConsensusItem> {
+        let txid = unsigned_tx.tx.compute_txid();
+
+        let inputs = unsigned_tx.spent_tx_outs.len();
+
+        let log: Vec<NonceEntry> =
+            dbtx.iter(&NonceLogTable, |r| r.map(|(_, entry)| entry).collect());
+
+        let my_entries: Vec<usize> = log
+            .iter()
+            .enumerate()
+            .filter(|(_, NonceEntry(peer, _))| *peer == self.identity)
+            .map(|(index, _)| index)
+            .collect();
+
+        let Some(&latest) = my_entries.last() else {
+            let nonces = self.derive_secret_nonces(txid, 0, inputs);
+
+            let public_nonces = nonces.iter().map(derive_public_nonce).collect();
+
+            return Some(WalletConsensusItem::Nonces(txid, public_nonces));
+        };
+
+        let session = latest / self.threshold();
+
+        // Our latest entry's session is always unsigned by us, since our
+        // shares are stored in the same atomic step that appends our next
+        // entry. If its chunk is still incomplete we idle; once it completes
+        // we re-propose our deterministic shares until they are accepted.
+        let chunk = log.get(session * self.threshold()..(session + 1) * self.threshold())?;
+
+        let sighashes = self.sighashes(unsigned_tx);
+
+        let generation = my_entries.len() as u64 - 1;
+
+        let nonces = self.derive_secret_nonces(txid, generation, inputs);
+
+        let shares = self.sign_tx(unsigned_tx, &sighashes, nonces, chunk);
+
+        let fresh_nonces = self.derive_secret_nonces(txid, generation + 1, inputs);
+
+        let public_nonces = fresh_nonces.iter().map(derive_public_nonce).collect();
+
+        Some(WalletConsensusItem::Signatures(txid, shares, public_nonces))
+    }
+
+    /// Derives the secret nonces for our nonce entry of the given generation,
+    /// where generation n is our n-th entry in the transaction's log.
+    /// Deterministic derivation is safe here because the log's total order
+    /// fixes each entry's signing session before any share is computed, the
+    /// message is fixed by the txid and a txid is never signed as a fresh
+    /// transaction twice - so every nonce meets exactly one signing context,
+    /// even across crash recovery.
+    fn derive_secret_nonces(&self, txid: Txid, generation: u64, inputs: usize) -> Vec<SecretNonce> {
+        let secret = Secret::new_root(&self.cfg.private.sks)
+            .child(&txid)
+            .child(&generation);
+
+        (0..inputs as u64)
+            .map(|input| derive_nonce(&secret.child(&input).to_byte_array()))
+            .collect()
+    }
+
+    fn threshold(&self) -> usize {
+        self.cfg.consensus.pks.to_num_peers().threshold()
+    }
+
     pub async fn process_consensus_item(
         &self,
         dbtx: &WriteTx,
@@ -182,8 +250,12 @@ impl Wallet {
 
                 Ok(())
             }
-            WalletConsensusItem::Signatures(txid, signatures) => {
-                self.process_signatures(dbtx, txid, signatures, peer).await
+            WalletConsensusItem::Nonces(txid, nonces) => {
+                self.process_nonces(dbtx, txid, nonces, peer)
+            }
+            WalletConsensusItem::Signatures(txid, shares, nonces) => {
+                self.process_signatures(dbtx, txid, shares, nonces, peer)
+                    .await
             }
         }
     }
@@ -204,11 +276,9 @@ impl Wallet {
             .get(&OutputTable, &input.output_index)
             .ok_or(WalletInputError::UnknownOutputIndex)?;
 
-        let tweaked_pubkey = self
-            .descriptor(&input.tweak.consensus_hash())
-            .script_pubkey();
+        let tweaked_script = self.script_pubkey(&input.tweak.consensus_hash());
 
-        if tracked_output.script_pubkey != tweaked_pubkey {
+        if tracked_output.script_pubkey != tweaked_script {
             return Err(WalletInputError::WrongTweak);
         }
 
@@ -231,8 +301,8 @@ impl Wallet {
 
         if let Some(wallet) = dbtx.remove(&FederationWalletTable, &()) {
             // Assuming the first receive into the federation is made through a
-            // standard transaction, its output value is over the P2WSH dust
-            // limit. By induction so is this change value.
+            // standard transaction, its output value is over the dust limit.
+            // By induction so is this change value.
             let change_value = wallet
                 .value
                 .checked_add(output_value)
@@ -257,7 +327,7 @@ impl Wallet {
                 ],
                 output: vec![TxOut {
                     value: change_value,
-                    script_pubkey: self.descriptor(&wallet.consensus_hash()).script_pubkey(),
+                    script_pubkey: self.script_pubkey(&wallet.consensus_hash()),
                 }],
             };
 
@@ -292,25 +362,25 @@ impl Wallet {
                 },
             );
 
-            dbtx.insert(
-                &UnsignedTxTable,
-                &TxidKey(tx.compute_txid()),
-                &FederationTx {
-                    tx: tx.clone(),
-                    spent_tx_outs: vec![
-                        SpentTxOut {
-                            value: wallet.value,
-                            tweak: wallet.tweak,
-                        },
-                        SpentTxOut {
-                            value: tracked_output.value,
-                            tweak: input.tweak.consensus_hash(),
-                        },
-                    ],
-                    vbytes: self.cfg.consensus.receive_tx_vbytes,
-                    fee: input.fee,
-                },
-            );
+            let unsigned_tx = FederationTx {
+                tx: tx.clone(),
+                spent_tx_outs: vec![
+                    SpentTxOut {
+                        value: wallet.value,
+                        tweak: wallet.tweak,
+                    },
+                    SpentTxOut {
+                        value: tracked_output.value,
+                        tweak: input.tweak.consensus_hash(),
+                    },
+                ],
+                vbytes: self.cfg.consensus.receive_tx_vbytes,
+                fee: input.fee,
+            };
+
+            if dbtx.insert(&UnsignedTxTable, &(), &unsigned_tx).is_some() {
+                return Err(WalletInputError::PendingTransaction);
+            }
         } else {
             dbtx.insert(
                 &FederationWalletTable,
@@ -392,7 +462,7 @@ impl Wallet {
             output: vec![
                 TxOut {
                     value: change_value,
-                    script_pubkey: self.descriptor(&wallet.consensus_hash()).script_pubkey(),
+                    script_pubkey: self.script_pubkey(&wallet.consensus_hash()),
                 },
                 TxOut {
                     value: output.value,
@@ -434,19 +504,19 @@ impl Wallet {
 
         dbtx.insert(&TxInfoIndexTable, &outpoint, &tx_index);
 
-        dbtx.insert(
-            &UnsignedTxTable,
-            &TxidKey(tx.compute_txid()),
-            &FederationTx {
-                tx: tx.clone(),
-                spent_tx_outs: vec![SpentTxOut {
-                    value: wallet.value,
-                    tweak: wallet.tweak,
-                }],
-                vbytes: self.cfg.consensus.send_tx_vbytes,
-                fee: output.fee,
-            },
-        );
+        let unsigned_tx = FederationTx {
+            tx: tx.clone(),
+            spent_tx_outs: vec![SpentTxOut {
+                value: wallet.value,
+                tweak: wallet.tweak,
+            }],
+            vbytes: self.cfg.consensus.send_tx_vbytes,
+            fee: output.fee,
+        };
+
+        if dbtx.insert(&UnsignedTxTable, &(), &unsigned_tx).is_some() {
+            return Err(WalletOutputError::PendingTransaction);
+        }
 
         let amount = output_value
             .to_sat()
@@ -589,7 +659,7 @@ impl Wallet {
 
             assert_eq!(block.block_hash(), block_hash, "Block hash mismatch");
 
-            let pks_hash = self.cfg.consensus.bitcoin_pks.consensus_hash();
+            let pks_hash = self.cfg.consensus.agg_pk.consensus_hash();
 
             for tx in block.txdata {
                 dbtx.remove(&UnconfirmedTxTable, &TxidKey(tx.compute_txid()));
@@ -619,50 +689,137 @@ impl Wallet {
         Ok(())
     }
 
+    fn process_nonces(
+        &self,
+        dbtx: &WriteTx,
+        txid: Txid,
+        nonces: Vec<PublicNonce>,
+        peer: PeerId,
+    ) -> anyhow::Result<()> {
+        let unsigned = dbtx
+            .get(&UnsignedTxTable, &())
+            .context("No unsigned transaction exists")?;
+
+        ensure!(
+            unsigned.tx.compute_txid() == txid,
+            "Txid does not match the unsigned transaction"
+        );
+
+        ensure!(
+            nonces.len() == unsigned.spent_tx_outs.len(),
+            "Incorrect number of nonces"
+        );
+
+        let log: Vec<NonceEntry> =
+            dbtx.iter(&NonceLogTable, |r| r.map(|(_, entry)| entry).collect());
+
+        ensure!(
+            !log.iter().any(|NonceEntry(p, _)| *p == peer),
+            "Peer has already entered the nonce log"
+        );
+
+        dbtx.insert(
+            &NonceLogTable,
+            &(log.len() as u64),
+            &NonceEntry(peer, nonces),
+        );
+
+        Ok(())
+    }
+
     async fn process_signatures(
         &self,
         dbtx: &WriteTx,
-        txid: bitcoin::Txid,
-        signatures: Vec<Signature>,
+        txid: Txid,
+        shares: Vec<SignatureShare>,
+        fresh_nonces: Vec<PublicNonce>,
         peer: PeerId,
     ) -> anyhow::Result<()> {
         let mut unsigned = dbtx
-            .get(&UnsignedTxTable, &TxidKey(txid))
-            .context("Unsigned transaction does not exist")?;
+            .get(&UnsignedTxTable, &())
+            .context("No unsigned transaction exists")?;
 
-        let pk = self
-            .cfg
-            .consensus
-            .bitcoin_pks
-            .get(&peer)
-            .expect("Failed to get public key of peer from config");
+        ensure!(
+            unsigned.tx.compute_txid() == txid,
+            "Txid does not match the unsigned transaction"
+        );
 
-        self.verify_signatures(&unsigned, &signatures, *pk)?;
+        ensure!(
+            shares.len() == unsigned.spent_tx_outs.len(),
+            "Incorrect number of signature shares"
+        );
 
-        if dbtx
-            .insert(
-                &SignaturesTable,
-                &(TxidKey(txid), peer),
-                &Signatures(signatures.clone()),
-            )
-            .is_some()
+        ensure!(
+            fresh_nonces.len() == unsigned.spent_tx_outs.len(),
+            "Incorrect number of replacement nonces"
+        );
+
+        let log: Vec<NonceEntry> =
+            dbtx.iter(&NonceLogTable, |r| r.map(|(_, entry)| entry).collect());
+
+        // The session of the peer's latest entry is the only one it might
+        // not have signed yet, since appending an entry requires signing the
+        // session of the previous one.
+        let latest = log
+            .iter()
+            .rposition(|NonceEntry(p, _)| *p == peer)
+            .context("Peer has no nonce entry")?;
+
+        let session = latest / self.threshold();
+
+        let chunk = log
+            .get(session * self.threshold()..(session + 1) * self.threshold())
+            .context("The signing session of the peer's latest entry is still forming")?;
+
+        let sighashes = self.sighashes(&unsigned);
+
+        for (index, ((utxo, msg), share)) in unsigned
+            .spent_tx_outs
+            .iter()
+            .zip(&sighashes)
+            .zip(&shares)
+            .enumerate()
         {
-            bail!("Already received valid signatures from this peer")
+            ensure!(
+                verify_signature_share(
+                    *msg,
+                    peer.to_u64(),
+                    &self.tweaked_pks(&peer, &utxo.tweak),
+                    share,
+                    &nonce_column(chunk, index),
+                    &self.tweaked_agg_pk(&utxo.tweak),
+                ),
+                "Invalid signature share"
+            );
         }
 
-        let signatures_by_peer: BTreeMap<PeerId, Vec<Signature>> =
-            dbtx.range(&SignaturesTable, peer_range!(TxidKey(txid)), |r| {
-                r.map(|((_, peer), sigs)| (peer, sigs.0)).collect()
-            });
+        ensure!(
+            dbtx.insert(&SignaturesTable, &(latest as u64), &Signatures(shares))
+                .is_none(),
+            "Already received signature shares for this entry"
+        );
 
-        if signatures_by_peer.len() == self.cfg.consensus.bitcoin_pks.to_num_peers().threshold() {
-            dbtx.remove(&UnsignedTxTable, &TxidKey(txid));
+        dbtx.insert(
+            &NonceLogTable,
+            &(log.len() as u64),
+            &NonceEntry(peer, fresh_nonces),
+        );
 
-            for peer in signatures_by_peer.keys() {
-                dbtx.remove(&SignaturesTable, &(TxidKey(txid), *peer));
-            }
+        let chunk_range =
+            (session * self.threshold()) as u64..((session + 1) * self.threshold()) as u64;
 
-            self.finalize_tx(&mut unsigned, &signatures_by_peer);
+        let responses: Vec<Signatures> = dbtx.range(&SignaturesTable, chunk_range, |r| {
+            r.map(|(_, shares)| shares).collect()
+        });
+
+        if responses.len() == self.threshold() {
+            self.finalize_tx(&mut unsigned, &sighashes, chunk, &responses);
+
+            dbtx.remove(&UnsignedTxTable, &());
+
+            dbtx.delete_table(&NonceLogTable);
+
+            dbtx.delete_table(&SignaturesTable);
 
             dbtx.insert(&UnconfirmedTxTable, &TxidKey(txid), &unsigned);
 
@@ -693,7 +850,7 @@ impl Wallet {
     }
 
     pub fn consensus_block_count(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
-        let num_peers = self.cfg.consensus.bitcoin_pks.to_num_peers();
+        let num_peers = self.cfg.consensus.pks.to_num_peers();
 
         let mut counts: Vec<u64> = dbtx.iter(&BlockCountVoteTable, |r| r.map(|(_, v)| v).collect());
 
@@ -713,7 +870,7 @@ impl Wallet {
     }
 
     pub fn consensus_feerate(&self, dbtx: &impl picomint_redb::DbRead) -> Option<u64> {
-        let num_peers = self.cfg.consensus.bitcoin_pks.to_num_peers();
+        let num_peers = self.cfg.consensus.pks.to_num_peers();
 
         let mut rates: Vec<u64> =
             dbtx.iter(&FeeRateVoteTable, |r| r.filter_map(|(_, v)| v).collect());
@@ -770,104 +927,134 @@ impl Wallet {
         self.consensus_fee(dbtx, self.cfg.consensus.receive_tx_vbytes)
     }
 
-    fn descriptor(&self, tweak: &sha256::Hash) -> Wsh<secp256k1::PublicKey> {
-        descriptor(&self.cfg.consensus.bitcoin_pks, tweak)
+    fn script_pubkey(&self, tweak: &sha256::Hash) -> ScriptBuf {
+        tweaked_script_pubkey(&self.cfg.consensus.agg_pk, tweak)
     }
 
-    fn sign_tx(&self, unsigned_tx: &FederationTx) -> Vec<Signature> {
-        let mut sighash_cache = SighashCache::new(unsigned_tx.tx.clone());
+    fn tweak_scalar(tweak: &sha256::Hash) -> Scalar {
+        Scalar::from_be_bytes(tweak.to_byte_array()).expect("Hash is within field order")
+    }
 
-        unsigned_tx
+    fn tweaked_sks(&self, tweak: &sha256::Hash) -> SecretKeyShare {
+        SecretKeyShare(
+            self.cfg
+                .private
+                .sks
+                .0
+                .add_tweak(&Self::tweak_scalar(tweak))
+                .expect("Failed to tweak wallet secret key share"),
+        )
+    }
+
+    fn tweaked_pks(&self, peer: &PeerId, tweak: &sha256::Hash) -> PublicKeyShare {
+        let pks = self
+            .cfg
+            .consensus
+            .pks
+            .get(peer)
+            .expect("Failed to get public key share of peer from config");
+
+        PublicKeyShare(tweak_public_key(&pks.0, tweak))
+    }
+
+    fn tweaked_agg_pk(&self, tweak: &sha256::Hash) -> AggregatePublicKey {
+        AggregatePublicKey(tweak_public_key(&self.cfg.consensus.agg_pk.0, tweak))
+    }
+
+    /// The BIP341 keyspend sighash of every input of the transaction.
+    fn sighashes(&self, unsigned_tx: &FederationTx) -> Vec<[u8; 32]> {
+        let prevouts: Vec<TxOut> = unsigned_tx
             .spent_tx_outs
             .iter()
-            .enumerate()
-            .map(|(index, utxo)| {
-                let descriptor = self.descriptor(&utxo.tweak).ecdsa_sighash_script_code();
+            .map(|utxo| TxOut {
+                value: utxo.value,
+                script_pubkey: self.script_pubkey(&utxo.tweak),
+            })
+            .collect();
 
-                let p2wsh_sighash = sighash_cache
-                    .p2wsh_signature_hash(index, &descriptor, utxo.value, EcdsaSighashType::All)
-                    .expect("Failed to compute P2WSH segwit sighash");
+        let mut sighash_cache = SighashCache::new(unsigned_tx.tx.clone());
 
-                let scalar = &Scalar::from_be_bytes(utxo.tweak.to_byte_array())
-                    .expect("Hash is within field order");
-
-                let sk = self
-                    .cfg
-                    .private
-                    .bitcoin_sk
-                    .add_tweak(scalar)
-                    .expect("Failed to tweak bitcoin secret key");
-
-                Secp256k1::new().sign_ecdsa(&p2wsh_sighash.into(), &sk)
+        (0..unsigned_tx.spent_tx_outs.len())
+            .map(|index| {
+                sighash_cache
+                    .taproot_key_spend_signature_hash(
+                        index,
+                        &Prevouts::All(&prevouts),
+                        TapSighashType::Default,
+                    )
+                    .expect("Failed to compute taproot keyspend sighash")
+                    .to_byte_array()
             })
             .collect()
     }
 
-    fn verify_signatures(
+    fn sign_tx(
         &self,
         unsigned_tx: &FederationTx,
-        signatures: &[Signature],
-        pk: PublicKey,
-    ) -> anyhow::Result<()> {
-        ensure!(
-            unsigned_tx.spent_tx_outs.len() == signatures.len(),
-            "Incorrect number of signatures"
-        );
-
-        let mut sighash_cache = SighashCache::new(unsigned_tx.tx.clone());
-
-        for ((index, utxo), signature) in unsigned_tx
+        sighashes: &[[u8; 32]],
+        secret_nonces: Vec<SecretNonce>,
+        chunk: &[NonceEntry],
+    ) -> Vec<SignatureShare> {
+        unsigned_tx
             .spent_tx_outs
             .iter()
+            .zip(sighashes)
+            .zip(secret_nonces)
             .enumerate()
-            .zip(signatures.iter())
-        {
-            let code = self.descriptor(&utxo.tweak).ecdsa_sighash_script_code();
-
-            let p2wsh_sighash = sighash_cache
-                .p2wsh_signature_hash(index, &code, utxo.value, EcdsaSighashType::All)
-                .expect("Failed to compute P2WSH segwit sighash");
-
-            let pk = tweak_public_key(&pk, &utxo.tweak);
-
-            secp256k1::SECP256K1.verify_ecdsa(&p2wsh_sighash.into(), signature, &pk)?;
-        }
-
-        Ok(())
+            .map(|(index, ((utxo, msg), nonce))| {
+                sign_share(
+                    *msg,
+                    &self.tweaked_sks(&utxo.tweak),
+                    nonce,
+                    &nonce_column(chunk, index),
+                    self.identity.to_u64(),
+                    &self.tweaked_agg_pk(&utxo.tweak),
+                )
+            })
+            .collect()
     }
 
     fn finalize_tx(
         &self,
         federation_tx: &mut FederationTx,
-        signatures: &BTreeMap<PeerId, Vec<Signature>>,
+        sighashes: &[[u8; 32]],
+        chunk: &[NonceEntry],
+        responses: &[Signatures],
     ) {
         assert_eq!(
             federation_tx.spent_tx_outs.len(),
             federation_tx.tx.input.len()
         );
 
-        for (index, utxo) in federation_tx.spent_tx_outs.iter().enumerate() {
-            let satisfier: BTreeMap<PublicKey, bitcoin::ecdsa::Signature> = signatures
+        for (index, (utxo, msg)) in federation_tx
+            .spent_tx_outs
+            .iter()
+            .zip(sighashes)
+            .enumerate()
+        {
+            let shares: BTreeMap<u64, SignatureShare> = chunk
                 .iter()
-                .map(|(peer, sigs)| {
-                    assert_eq!(sigs.len(), federation_tx.tx.input.len());
-
-                    let pk = *self
-                        .cfg
-                        .consensus
-                        .bitcoin_pks
-                        .get(peer)
-                        .expect("Failed to get public key of peer from config");
-
-                    let pk = tweak_public_key(&pk, &utxo.tweak);
-
-                    (pk, bitcoin::ecdsa::Signature::sighash_all(sigs[index]))
-                })
+                .zip(responses)
+                .map(|(NonceEntry(peer, _), shares)| (peer.to_u64(), shares.0[index]))
                 .collect();
 
-            miniscript::Descriptor::Wsh(self.descriptor(&utxo.tweak))
-                .satisfy(&mut federation_tx.tx.input[index], satisfier)
-                .expect("Failed to satisfy descriptor");
+            let signature = aggregate_signature_shares(
+                *msg,
+                &nonce_column(chunk, index),
+                &shares,
+                &self.tweaked_agg_pk(&utxo.tweak),
+            );
+
+            assert!(
+                tss::verify(*msg, &signature, &self.tweaked_agg_pk(&utxo.tweak)),
+                "Aggregated signature failed verification"
+            );
+
+            federation_tx.tx.input[index].witness =
+                Witness::p2tr_key_spend(&bitcoin::taproot::Signature {
+                    signature,
+                    sighash_type: TapSighashType::Default,
+                });
         }
     }
 
@@ -888,7 +1075,7 @@ impl Wallet {
 
         dbtx.range(&OutputTable, start_index..end_index, |r| {
             r.filter_map(|(idx, Output(_, tx_out))| {
-                tx_out.script_pubkey.is_p2wsh().then(|| OutputInfo {
+                tx_out.script_pubkey.is_p2tr().then(|| OutputInfo {
                     index: idx,
                     script: tx_out.script_pubkey,
                     value: tx_out.value,
@@ -958,31 +1145,32 @@ impl Wallet {
         Self::tx_chain(&self.db.begin_read())
     }
 
-    /// Export recovery keys for federation shutdown. Returns None if the
-    /// federation wallet has not been initialized yet.
-    pub fn recovery_keys_ui(&self) -> Option<(BTreeMap<PeerId, String>, String)> {
+    /// Export recovery material for federation shutdown: the tweaked
+    /// aggregate public key and this guardian's tweaked secret key share.
+    /// Additive tweaks commute with Lagrange interpolation, so an offline
+    /// tool can interpolate any threshold of tweaked key shares directly
+    /// into the secret key of the current federation UTXO, verify it
+    /// against the tweaked aggregate key and sweep the UTXO with a
+    /// single-key taproot wallet. Returns None if the federation wallet has
+    /// not been initialized yet.
+    pub fn recovery_keys_ui(&self) -> Option<(String, String)> {
         let wallet = self.federation_wallet_ui()?;
 
-        let pks = self
-            .cfg
-            .consensus
-            .bitcoin_pks
-            .iter()
-            .map(|(peer, pk)| (*peer, tweak_public_key(pk, &wallet.tweak).to_string()))
-            .collect();
-
-        let tweak = &Scalar::from_be_bytes(wallet.tweak.to_byte_array())
-            .expect("Hash is within field order");
-
-        let sk = self
-            .cfg
-            .private
-            .bitcoin_sk
-            .add_tweak(tweak)
-            .expect("Failed to tweak bitcoin secret key");
-
-        let sk = bitcoin::PrivateKey::new(sk, self.network).to_wif();
-
-        Some((pks, sk))
+        Some((
+            self.tweaked_agg_pk(&wallet.tweak).0.to_string(),
+            self.tweaked_sks(&wallet.tweak)
+                .0
+                .display_secret()
+                .to_string(),
+        ))
     }
+}
+
+/// The nonces of a signing session for a single tx input, keyed by the
+/// signer indices the tss crate interpolates over.
+fn nonce_column(chunk: &[NonceEntry], index: usize) -> BTreeMap<u64, PublicNonce> {
+    chunk
+        .iter()
+        .map(|NonceEntry(peer, nonces)| (peer.to_u64(), nonces[index]))
+        .collect()
 }

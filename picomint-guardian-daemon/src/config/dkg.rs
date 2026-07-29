@@ -4,10 +4,12 @@ use anyhow::Context;
 use bls12_381::{G1Projective, G2Projective, Scalar};
 use picomint_core::{NumPeers, PeerId};
 use picomint_encoding::{Decodable, Encodable};
+use secp256k1::{PublicKey, SecretKey};
 use tracing::info;
 
 use super::dkg_g1::run_dkg_g1;
 use super::dkg_g2::run_dkg_g2;
+use super::dkg_secp::run_dkg_secp;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
 /// A handle passed to DKG routines. Encapsulates the peer id + p2p connection
@@ -50,6 +52,12 @@ impl<'a> DkgHandle<'a> {
         info!("Running distributed key generation for group G2...");
 
         run_dkg_g2(self.num_peers, self.identity, self.connections).await
+    }
+
+    pub async fn run_dkg_secp(&self) -> anyhow::Result<(Vec<PublicKey>, SecretKey)> {
+        info!("Running distributed key generation for secp256k1...");
+
+        run_dkg_secp(self.num_peers, self.identity, self.connections).await
     }
 
     /// Exchange a `DkgPeerMsg::Module(Vec<u8>)` with all peers. All peers must

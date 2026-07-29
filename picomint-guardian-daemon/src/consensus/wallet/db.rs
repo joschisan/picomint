@@ -3,7 +3,6 @@ use picomint_core::PeerId;
 use picomint_core::wallet::TxInfo;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::table;
-use secp256k1::ecdsa::Signature;
 use serde::Serialize;
 
 use super::{FederationTx, FederationWallet};
@@ -20,9 +19,17 @@ pub struct TxidKey(pub Txid);
 
 picomint_redb::consensus_key!(TxidKey);
 
-/// Vec of ecdsa signatures — wrapped so we can impl `redb::Value` locally.
+/// One peer's entry in a transaction's nonce log — one public nonce pair
+/// per tx input.
 #[derive(Clone, Debug, Encodable, Decodable)]
-pub struct Signatures(pub Vec<Signature>);
+pub struct NonceEntry(pub PeerId, pub Vec<tss::PublicNonce>);
+
+picomint_redb::consensus_value!(NonceEntry);
+
+/// One signature share per tx input — wrapped so we can impl `redb::Value`
+/// locally.
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub struct Signatures(pub Vec<tss::SignatureShare>);
 
 picomint_redb::consensus_value!(Signatures);
 
@@ -56,15 +63,30 @@ table!(
     "wallet-tx-info-index",
 );
 
+// The single unsigned transaction the federation is currently signing.
+// Further pegins and pegouts are rejected until it completes.
 table!(
     UnsignedTxTable,
-    TxidKey => FederationTx,
+    () => FederationTx,
     "wallet-unsigned-tx",
 );
 
+// Append-only log of the accepted nonce entries for the unsigned
+// transaction. Consecutive chunks of threshold entries form the signing
+// sessions: session s consists of the entries [s * t, (s + 1) * t). The
+// incomplete tail chunk holds the peers available for the next session.
+table!(
+    NonceLogTable,
+    u64 => NonceEntry,
+    "wallet-nonce-log",
+);
+
+// The signature shares responding to a nonce entry, stored under the same
+// index as the entry in the nonce log. Session s is complete once every
+// index of its chunk has a response.
 table!(
     SignaturesTable,
-    (TxidKey, PeerId) => Signatures,
+    u64 => Signatures,
     "wallet-signatures",
 );
 
