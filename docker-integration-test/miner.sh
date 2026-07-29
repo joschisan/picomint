@@ -21,7 +21,7 @@ if [ "$HEIGHT" -lt 101 ]; then
     echo "miner: bootstrapped to height 101"
 fi
 
-# Mine one block per second forever.
+# Mine one block every ten seconds forever.
 while true; do
     $RPC generatetoaddress 1 "$ADDR" >/dev/null 2>&1 || echo "miner: generate failed, retrying"
     sleep 10

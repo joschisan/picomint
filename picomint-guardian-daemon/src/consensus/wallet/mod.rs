@@ -133,6 +133,18 @@ impl Wallet {
             })
             .collect();
 
+        let feerate_vote = self.btc_rpc.status().map(|status| {
+            status
+                .fee_rate
+                .sat_per_kvb
+                .max(MIN_FEERATE_VOTE_SATS_PER_KVB)
+        });
+
+        // `None` retracts our vote while the bitcoin backend is down.
+        if dbtx.get(&FeeRateVoteTable, &self.identity) != Some(feerate_vote) {
+            items.push(WalletConsensusItem::Feerate(feerate_vote));
+        }
+
         if let Some(status) = self.btc_rpc.status() {
             let block_count_vote = status
                 .block_count
@@ -145,17 +157,9 @@ impl Wallet {
                 _ => block_count_vote.min(consensus_block_count + MAX_BLOCK_COUNT_INCREMENT),
             };
 
-            items.push(WalletConsensusItem::BlockCount(block_count_vote));
-
-            let feerate_vote = status
-                .fee_rate
-                .sat_per_kvb
-                .max(MIN_FEERATE_VOTE_SATS_PER_KVB);
-
-            items.push(WalletConsensusItem::Feerate(Some(feerate_vote)));
-        } else {
-            // Bitcoin backend not connected, retract fee rate vote
-            items.push(WalletConsensusItem::Feerate(None));
+            if block_count_vote > dbtx.get(&BlockCountVoteTable, &self.identity).unwrap_or(0) {
+                items.push(WalletConsensusItem::BlockCount(block_count_vote));
+            }
         }
 
         items
@@ -479,6 +483,7 @@ impl Wallet {
 }
 
 pub struct Wallet {
+    identity: PeerId,
     cfg: WalletConfig,
     db: Database,
     btc_rpc: BitcoinRpcMonitor,
@@ -487,6 +492,7 @@ pub struct Wallet {
 
 impl Wallet {
     pub fn new(
+        identity: PeerId,
         cfg: WalletConfig,
         db: Database,
         btc_rpc: BitcoinRpcMonitor,
@@ -495,6 +501,7 @@ impl Wallet {
         Self::spawn_broadcast_unconfirmed_txs_task(btc_rpc.clone(), db.clone(), network);
 
         Wallet {
+            identity,
             cfg,
             db,
             btc_rpc,

@@ -80,6 +80,8 @@ impl TestEnv {
             .require_network(bitcoin::Network::Regtest)?;
         bitcoind.generate_to_address(101, &funding_addr)?;
 
+        Self::spawn_miner_thread()?;
+
         let mut guardian_processes = Vec::with_capacity(NUM_GUARDIANS);
         for i in 0..NUM_GUARDIANS {
             let child = runtime.block_on(start_guardian(base, i))?;
@@ -186,6 +188,26 @@ impl TestEnv {
     pub async fn restart_guardian(&self, peer: usize) -> anyhow::Result<()> {
         let child = start_guardian(&self.data_dir, peer).await?;
         self.guardian_processes.lock().await[peer] = Some(child);
+        Ok(())
+    }
+
+    /// Mine one regtest block per second for the lifetime of the test.
+    /// Guardians only propose block-count votes when the height changes,
+    /// so without steadily arriving blocks an idle federation orders
+    /// nothing and session-advance waits would starve.
+    fn spawn_miner_thread() -> anyhow::Result<()> {
+        let url = format!("http://127.0.0.1:{BTC_RPC_PORT}/wallet/default");
+        let auth =
+            bitcoincore_rpc::Auth::UserPass(BTC_RPC_USER.to_string(), BTC_RPC_PASS.to_string());
+        let client = bitcoincore_rpc::Client::new(&url, auth)?;
+
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_secs(1));
+                client.generate_to_address(1, &dummy_address()).ok();
+            }
+        });
+
         Ok(())
     }
 

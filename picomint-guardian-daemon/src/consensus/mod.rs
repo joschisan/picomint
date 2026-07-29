@@ -74,6 +74,7 @@ pub async fn run(
 
     info!("Initialise module wallet...");
     let wallet = Arc::new(crate::consensus::wallet::Wallet::new(
+        cfg.private.identity,
         cfg.wallet_config(),
         db.clone(),
         bitcoin_rpc_connection.clone(),
@@ -82,6 +83,7 @@ pub async fn run(
 
     info!("Initialise module ln...");
     let ln = Arc::new(crate::consensus::ln::Lightning::new(
+        cfg.private.identity,
         cfg.ln_config(),
         db.clone(),
         bitcoin_rpc_connection.clone(),

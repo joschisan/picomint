@@ -93,5 +93,5 @@ pub enum LightningOutputError {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub enum LightningConsensusItem {
-    BlockCountVote(u64),
+    BlockCount(u64),
 }
