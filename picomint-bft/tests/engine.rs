@@ -11,6 +11,7 @@
 //! item)` pairs.
 
 use std::collections::BTreeMap;
+use std::future::pending;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -140,9 +141,16 @@ fn now_ms() -> u64 {
 
 struct TimestampDataProvider;
 
+#[async_trait]
 impl DataProvider<u64> for TimestampDataProvider {
     fn get_data(&mut self) -> Vec<u64> {
         vec![now_ms()]
+    }
+
+    async fn wait_for_data(&mut self) {
+        // Data is always available, so every message-driven `get_data`
+        // returns items and the wake arm never needs to fire.
+        pending().await
     }
 }
 

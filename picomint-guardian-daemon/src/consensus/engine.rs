@@ -11,8 +11,6 @@ use picomint_core::tx::ConsensusItem;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_redb::{Database, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
-use tokio::sync::watch;
-use tokio::time::sleep;
 use tracing::{info, instrument};
 
 use crate::config::ServerConfig;
@@ -30,7 +28,6 @@ pub struct ConsensusEngine {
     pub db: Database,
     pub cfg: ServerConfig,
     pub submission_rx: Receiver<ConsensusItem>,
-    pub shutdown_rx: watch::Receiver<Option<u64>>,
     pub connections: ReconnectP2PConnections<P2PMessage>,
 }
 
@@ -62,19 +59,7 @@ impl ConsensusEngine {
             }
 
             info!(?session_index, "Completed consensus session");
-
-            if Some(session_index) == self.shutdown_rx.borrow().to_owned() {
-                info!("Initiating shutdown, waiting for peers to complete the session...");
-
-                sleep(Duration::from_mins(1)).await;
-
-                break;
-            }
         }
-
-        info!("Consensus task shut down");
-
-        Ok(())
     }
 
     pub async fn run_session(
@@ -82,13 +67,12 @@ impl ConsensusEngine {
         connections: ReconnectP2PConnections<P2PMessage>,
         session_index: u64,
     ) -> Option<()> {
-        // The bft engine creates units with no pacing — as fast as new
-        // parents arrive. The session stops ordering items once it reaches
-        // `bft_rounds_per_session` rounds (see the ordering loop below).
-        //
-        // Note: there is no longer a delay-based RAM bound on a stalling
-        // session. If an attacker prevents a threshold signature on the
-        // session outcome, the bft engine keeps creating units unbounded.
+        // The bft engine creates units unpaced but work-gated: as fast as
+        // new parents arrive while items await ordering, not at all while
+        // idle. The session stops ordering items once it reaches
+        // `bft_rounds_per_session` rounds (see the ordering loop below),
+        // which on a quiet federation can take arbitrarily long in wall
+        // clock.
         let (signed_outcomes_tx, signed_outcomes_rx) = async_channel::unbounded();
         let (signatures_tx, signatures_rx) = async_channel::unbounded();
         let (ordered_tx, ordered_rx) = async_channel::unbounded();
