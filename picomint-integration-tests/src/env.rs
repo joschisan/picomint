@@ -511,11 +511,26 @@ async fn open_channel(
     })
     .await?;
 
-    // Wait for the funding tx to enter the mempool
-    retry("funding tx in mempool", || async {
-        block_in_place(|| bitcoind.get_mempool_entry(&funding_txid))
-            .map(|_| ())
-            .context("funding tx not in mempool")
+    // Wait for the funding tx to be broadcast. The background miner may
+    // confirm it out of the mempool between polls, and bitcoind runs
+    // without txindex — so probe the (certainly unspent) funding outputs
+    // for the confirmed case.
+    retry("funding tx broadcast", || async {
+        let in_mempool = block_in_place(|| bitcoind.get_mempool_entry(&funding_txid)).is_ok();
+
+        let confirmed = (0..2).any(|vout| {
+            block_in_place(|| bitcoind.get_tx_out(&funding_txid, vout, Some(false)))
+                .ok()
+                .flatten()
+                .is_some()
+        });
+
+        ensure!(
+            in_mempool || confirmed,
+            "funding tx neither in mempool nor confirmed"
+        );
+
+        Ok(())
     })
     .await?;
 
