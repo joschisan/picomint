@@ -127,12 +127,28 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     assert_eq!(op, operation);
     let txid = ev.txid;
 
-    info!(%txid, "Send confirmed, waiting for tx in mempool");
+    info!(%txid, "Send confirmed, waiting for tx broadcast");
 
-    retry("send tx in mempool", || async {
-        block_in_place(|| env.bitcoind.get_mempool_entry(&txid))
-            .map(|_| ())
-            .context("send tx not in mempool yet")
+    // The background miner may confirm the peg-out out of the mempool
+    // between polls, and bitcoind runs without txindex — so probe the
+    // (still-unspent right after broadcast) peg-out outputs for the
+    // confirmed case.
+    retry("send tx broadcast", || async {
+        let in_mempool = block_in_place(|| env.bitcoind.get_mempool_entry(&txid)).is_ok();
+
+        let confirmed = (0..2).any(|vout| {
+            block_in_place(|| env.bitcoind.get_tx_out(&txid, vout, Some(false)))
+                .ok()
+                .flatten()
+                .is_some()
+        });
+
+        ensure!(
+            in_mempool || confirmed,
+            "send tx neither in mempool nor confirmed"
+        );
+
+        Ok(())
     })
     .await?;
 
