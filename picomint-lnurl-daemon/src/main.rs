@@ -210,7 +210,9 @@ async fn create_contract_and_fetch_invoice(
     let (gateway_info, gateway_pk) = select_gateway(endpoint, gateways, federation).await?;
 
     ensure!(
-        gateway_info.receive_fee.le(&PaymentFee::RECEIVE_FEE_LIMIT),
+        gateway_info
+            .receive_fee
+            .is_within(&PaymentFee::RECEIVE_FEE_LIMIT),
         "Payment fee exceeds limit"
     );
 
