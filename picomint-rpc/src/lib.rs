@@ -18,14 +18,11 @@
 //! supply/return the typed response struct, the helpers handle the
 //! envelope wrap/unwrap.
 
-use std::sync::Arc;
-
 use anyhow::{Context, anyhow};
 use futures::TryFutureExt;
 use iroh::endpoint::Connection;
 use iroh::{Endpoint, PublicKey};
 use picomint_encoding::{Decodable, Encodable};
-use tokio::sync::Semaphore;
 use tracing::warn;
 
 /// ALPN identifier for picomint RPC. All picomint nodes — guardians and
@@ -90,20 +87,17 @@ pub async fn request_on_connection<Req: Encodable, Resp: Decodable>(
 }
 
 /// Run the accept loop for an iroh [`Endpoint`], spawning one task per
-/// connection that drives [`handle_request`] with `handler`. `request_limit`
-/// caps in-flight requests across all connections. Returns when the endpoint
-/// stops accepting (clean shutdown).
-pub async fn run_accept_loop<R, F, T>(endpoint: Endpoint, request_limit: usize, handler: F)
+/// connection that drives [`handle_request`] with `handler`. Returns when
+/// the endpoint stops accepting (clean shutdown).
+pub async fn run_accept_loop<R, F, T>(endpoint: Endpoint, handler: F)
 where
     R: Decodable + Send + 'static,
     F: Fn(R) -> T + Clone + Send + 'static,
     T: Future<Output = Result<Vec<u8>, String>> + Send + 'static,
 {
-    let request_limit = Arc::new(Semaphore::new(request_limit));
-
     while let Some(incoming) = endpoint.accept().await {
         tokio::spawn(
-            handle_incoming(incoming, request_limit.clone(), handler.clone())
+            handle_incoming(incoming, handler.clone())
                 .inspect_err(|e| warn!(?e, "iroh request failed")),
         );
     }
@@ -111,7 +105,6 @@ where
 
 async fn handle_incoming<R, F, T>(
     incoming: iroh::endpoint::Incoming,
-    request_limit: Arc<Semaphore>,
     handler: F,
 ) -> anyhow::Result<()>
 where
@@ -124,22 +117,16 @@ where
         .context("Failed to accept incoming")?
         .await?;
 
-    handle_request(connection, request_limit, handler).await
+    handle_request(connection, handler).await
 }
 
 /// Serve a kept-alive iroh connection: accept bi streams in a loop, handling
-/// each as one independent request, until the peer closes the connection.
-/// Connections are pooled and reused by clients, so a single connection may
-/// carry many requests over its lifetime. `request_limit` caps in-flight
-/// requests across all connections; each stream is handled on its own task.
-/// The handler returns `Result<Vec<u8>, String>` — bytes are the
-/// consensus-encoded response, error is a description string; the wire
-/// envelope wrap is handled here.
-pub async fn handle_request<Req, F, Fut>(
-    connection: Connection,
-    request_limit: Arc<Semaphore>,
-    handler: F,
-) -> anyhow::Result<()>
+/// each as one independent request on its own task, until the peer closes
+/// the connection. Connections are pooled and reused by clients, so a single
+/// connection may carry many requests over its lifetime. The handler returns
+/// `Result<Vec<u8>, String>` — bytes are the consensus-encoded response,
+/// error is a description string; the wire envelope wrap is handled here.
+pub async fn handle_request<Req, F, Fut>(connection: Connection, handler: F) -> anyhow::Result<()>
 where
     Req: Decodable + Send + 'static,
     F: Fn(Req) -> Fut + Clone + Send + 'static,
@@ -152,17 +139,9 @@ where
             return Ok(());
         };
 
-        let permit = request_limit
-            .clone()
-            .acquire_owned()
-            .await
-            .expect("semaphore should not be closed");
-
         let handler = handler.clone();
 
         tokio::spawn(async move {
-            let _permit = permit;
-
             let result: anyhow::Result<()> = async move {
                 let request_bytes = recv_stream.read_to_end(MAX_BYTES).await?;
 
