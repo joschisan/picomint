@@ -230,11 +230,11 @@ impl LightningClientModule {
 
         let is_direct_swap = invoice.recover_payee_pub_key() == gateway_info.lightning_public_key;
 
-        if !gateway_info.send_fee.le(&PaymentFee::SEND_FEE_LIMIT) {
+        if !gateway_info.send_fee.is_within(&PaymentFee::SEND_FEE_LIMIT) {
             return Err(SendPaymentError::GatewayFeeExceedsLimit);
         }
 
-        if !is_direct_swap && !gateway_info.ln_fee.le(&PaymentFee::LN_FEE_LIMIT) {
+        if !is_direct_swap && !gateway_info.ln_fee.is_within(&PaymentFee::LN_FEE_LIMIT) {
             return Err(SendPaymentError::GatewayFeeExceedsLimit);
         }
 
@@ -358,7 +358,10 @@ impl LightningClientModule {
         let preimage = contract_secret.preimage();
         let claim_tweak = contract_secret.claim_tweak();
 
-        if !gateway_info.receive_fee.le(&PaymentFee::RECEIVE_FEE_LIMIT) {
+        if !gateway_info
+            .receive_fee
+            .is_within(&PaymentFee::RECEIVE_FEE_LIMIT)
+        {
             return Err(ReceiveError::GatewayFeeExceedsLimit);
         }
 

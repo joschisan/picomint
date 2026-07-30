@@ -74,19 +74,7 @@ pub struct GatewayInfo {
 
 picomint_redb::consensus_value!(GatewayInfo);
 
-#[derive(
-    Debug,
-    Clone,
-    Eq,
-    PartialEq,
-    PartialOrd,
-    Hash,
-    Serialize,
-    Deserialize,
-    Encodable,
-    Decodable,
-    Copy,
-)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable, Copy)]
 pub struct PaymentFee {
     pub base: Amount,
     pub ppm: u64,
@@ -113,6 +101,13 @@ impl PaymentFee {
         base: Amount::from_sat(100),
         ppm: 15_000,
     };
+
+    /// Whether both components are within `limit`. A derived `PartialOrd`
+    /// would compare lexicographically — deciding on `base` alone unless the
+    /// bases are equal — and wave through an over-limit `ppm`.
+    pub fn is_within(&self, limit: &Self) -> bool {
+        self.base <= limit.base && self.ppm <= limit.ppm
+    }
 
     pub fn add_to(&self, msat: u64) -> Amount {
         Amount::from_msat(msat.saturating_add(self.absolute_fee(msat)))

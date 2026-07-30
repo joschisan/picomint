@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock;
 
-use anyhow::Context;
+use anyhow::{Context, ensure};
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
 use lightning::types::payment::PaymentHash;
@@ -124,6 +124,42 @@ fn main() -> anyhow::Result<()> {
     // 1. Parse CLI args
     let opts = GatewayOpts::parse();
 
+    // Clients enforce these limits on every payment, so a gateway
+    // configured above them would be rejected by every client; fail
+    // fast at startup instead.
+    let send_fee = PaymentFee {
+        base: Amount::from_msat(opts.send_fee_base_msat),
+        ppm: opts.send_fee_ppm,
+    };
+
+    ensure!(
+        send_fee.is_within(&PaymentFee::SEND_FEE_LIMIT),
+        "Configured send fee {send_fee:?} exceeds the limit clients accept {:?}",
+        PaymentFee::SEND_FEE_LIMIT,
+    );
+
+    let receive_fee = PaymentFee {
+        base: Amount::from_msat(opts.receive_fee_base_msat),
+        ppm: opts.receive_fee_ppm,
+    };
+
+    ensure!(
+        receive_fee.is_within(&PaymentFee::RECEIVE_FEE_LIMIT),
+        "Configured receive fee {receive_fee:?} exceeds the limit clients accept {:?}",
+        PaymentFee::RECEIVE_FEE_LIMIT,
+    );
+
+    let ln_fee = PaymentFee {
+        base: Amount::from_msat(opts.ln_fee_base_msat),
+        ppm: opts.ln_fee_ppm,
+    };
+
+    ensure!(
+        ln_fee.is_within(&PaymentFee::LN_FEE_LIMIT),
+        "Configured ln fee {ln_fee:?} exceeds the limit clients accept {:?}",
+        PaymentFee::LN_FEE_LIMIT,
+    );
+
     let runtime = Arc::new(tokio::runtime::Runtime::new()?);
 
     // 2. Open database
@@ -212,18 +248,9 @@ fn main() -> anyhow::Result<()> {
         logger,
         data_dir: opts.data_dir.clone(),
         network: opts.network,
-        send_fee: PaymentFee {
-            base: Amount::from_msat(opts.send_fee_base_msat),
-            ppm: opts.send_fee_ppm,
-        },
-        receive_fee: PaymentFee {
-            base: Amount::from_msat(opts.receive_fee_base_msat),
-            ppm: opts.receive_fee_ppm,
-        },
-        ln_fee: PaymentFee {
-            base: Amount::from_msat(opts.ln_fee_base_msat),
-            ppm: opts.ln_fee_ppm,
-        },
+        send_fee,
+        receive_fee,
+        ln_fee,
         invoice_expiry_secs: opts.invoice_expiry_secs,
         cltv_expiry_delta: opts.cltv_expiry_delta,
         analytics: picomint_gateway_daemon::analytics::Analytics::wipe_and_init(&opts.data_dir)?,
