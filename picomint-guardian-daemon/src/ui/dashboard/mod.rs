@@ -67,7 +67,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
             }
 
             div class="col-lg-6" {
-                (invite::render(session_count))
+                (invite::render(api.server.wallet.consensus_block_count_ui()))
             }
         }
 

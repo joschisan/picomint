@@ -16,14 +16,14 @@ pub const INVITE_CREATE_ROUTE: &str = "/invite/create";
 // Card with a button that generates an invite code with the default
 // expiration date and user limit. The generated code replaces the button via
 // htmx.
-pub fn render(session_count: u64) -> Markup {
+pub fn render(consensus_block_count: u64) -> Markup {
     html! {
         div class="card h-100" {
             div class="card-header dashboard-header" { "Invite Code" }
             div class="card-body" {
-                @if session_count == 0 {
+                @if consensus_block_count == 0 {
                     div class="alert alert-warning" {
-                        "Invite codes will be available once the federation has completed its first consensus session."
+                        "Invite codes will be available once the federation has reached consensus on a block count."
                     }
                 } @else {
                     div id="invite-container" {
