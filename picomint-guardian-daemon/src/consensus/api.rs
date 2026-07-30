@@ -14,7 +14,6 @@ use picomint_core::tx::{ConsensusItem, Transaction, TxError};
 use crate::consensus::rpc;
 use crate::{handler, handler_async};
 use picomint_redb::Database;
-use tokio::sync::watch::{Receiver, Sender};
 use tracing::{info, warn};
 
 use crate::config::ServerConfig;
@@ -36,8 +35,6 @@ pub struct ConsensusApi {
     pub server: Server,
     /// For sending API events to consensus such as transactions
     pub submission_tx: async_channel::Sender<ConsensusItem>,
-    pub shutdown_rx: Receiver<Option<u64>>,
-    pub shutdown_tx: Sender<Option<u64>>,
     pub p2p_status_receivers: P2PStatusReceivers,
     pub bitcoin_rpc_connection: BitcoinRpcMonitor,
 }

@@ -70,6 +70,7 @@ pub fn validate_config(identity: &PeerId, cfg: &LightningConfig) -> anyhow::Resu
 }
 
 pub struct Lightning {
+    identity: PeerId,
     cfg: LightningConfig,
     db: Database,
     server_bitcoin_rpc_monitor: BitcoinRpcMonitor,
@@ -78,11 +79,13 @@ pub struct Lightning {
 impl Lightning {
     #[must_use]
     pub fn new(
+        identity: PeerId,
         cfg: LightningConfig,
         db: Database,
         server_bitcoin_rpc_monitor: BitcoinRpcMonitor,
     ) -> Self {
         Self {
+            identity,
             cfg,
             db,
             server_bitcoin_rpc_monitor,
@@ -91,12 +94,14 @@ impl Lightning {
 }
 
 impl Lightning {
-    pub async fn consensus_proposal(&self, _dbtx: &ReadTx) -> Vec<LightningConsensusItem> {
+    pub async fn consensus_proposal(&self, dbtx: &ReadTx) -> Vec<LightningConsensusItem> {
         let mut items = Vec::new();
 
-        if let Ok(block_count) = self.get_block_count() {
+        if let Ok(block_count) = self.get_block_count()
+            && block_count > dbtx.get(&BlockCountVoteTable, &self.identity).unwrap_or(0)
+        {
             trace!(?block_count, "Proposing block count");
-            items.push(LightningConsensusItem::BlockCountVote(block_count));
+            items.push(LightningConsensusItem::BlockCount(block_count));
         }
 
         items
@@ -111,7 +116,7 @@ impl Lightning {
         trace!(?consensus_item, "Processing consensus item proposal");
 
         match consensus_item {
-            LightningConsensusItem::BlockCountVote(vote) => {
+            LightningConsensusItem::BlockCount(vote) => {
                 let current_vote = dbtx.insert(&BlockCountVoteTable, &peer, &vote).unwrap_or(0);
 
                 ensure!(current_vote < vote, "Block count vote is redundant");

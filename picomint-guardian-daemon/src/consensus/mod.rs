@@ -23,7 +23,7 @@ use picomint_core::tx::ConsensusItem;
 use picomint_core::wire;
 use picomint_redb::Database;
 use tokio::net::TcpListener;
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
@@ -74,6 +74,7 @@ pub async fn run(
 
     info!("Initialise module wallet...");
     let wallet = Arc::new(crate::consensus::wallet::Wallet::new(
+        cfg.private.identity,
         cfg.wallet_config(),
         db.clone(),
         bitcoin_rpc_connection.clone(),
@@ -82,6 +83,7 @@ pub async fn run(
 
     info!("Initialise module ln...");
     let ln = Arc::new(crate::consensus::ln::Lightning::new(
+        cfg.private.identity,
         cfg.ln_config(),
         db.clone(),
         bitcoin_rpc_connection.clone(),
@@ -90,15 +92,12 @@ pub async fn run(
     let server = Server { mint, wallet, ln };
 
     let (submission_tx, submission_rx) = async_channel::bounded(TX_BUFFER);
-    let (shutdown_tx, shutdown_rx) = watch::channel(None);
 
     let consensus_api = Arc::new(ConsensusApi {
         cfg: cfg.clone(),
         db: db.clone(),
         server: server.clone(),
         submission_tx: submission_tx.clone(),
-        shutdown_tx,
-        shutdown_rx: shutdown_rx.clone(),
         p2p_status_receivers,
         bitcoin_rpc_connection: bitcoin_rpc_connection.clone(),
     });
@@ -199,7 +198,6 @@ pub async fn run(
         cfg: cfg.clone(),
         connections,
         submission_rx,
-        shutdown_rx,
         server: consensus_api.server.clone(),
     }
     .run()

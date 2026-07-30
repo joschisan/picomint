@@ -40,7 +40,7 @@ where
     D: UnitData,
     P: DataProvider<D>,
 {
-    id: PeerId,
+    pub(crate) id: PeerId,
     session: u64,
     pub(crate) n: NumPeers,
     db: Database,
@@ -66,6 +66,10 @@ where
     pub(crate) emitted: BTreeSet<(Round, PeerId)>,
     /// Extender cursor: the next leader round to attempt deciding.
     pub(crate) next_decide_round: Round,
+    /// Rounds of our own units that carry items and whose slot is not
+    /// yet in `emitted`. Seeded from disk on startup; drained by the
+    /// extender as slots emit.
+    pub(crate) unordered_own_data: BTreeSet<Round>,
     /// Last time we sent `Message::Request` for a given slot. Used to
     /// throttle re-asks so anti-entropy retransmits don't fan out
     /// duplicate parent-walks every tick.
@@ -108,6 +112,7 @@ where
             extended: BTreeSet::new(),
             emitted: BTreeSet::new(),
             next_decide_round: 0,
+            unordered_own_data: BTreeSet::new(),
             request_sent_at: BTreeMap::new(),
         }
     }
@@ -132,6 +137,10 @@ where
                     }
                 }
 
+                _ = self.data_provider.wait_for_data() => {
+                    self.create_units().await;
+                }
+
                 _ = sleep_until(next_anti_entropy_at) => {
                     self.broadcast_anti_entropy();
 
@@ -143,9 +152,11 @@ where
 
     /// Create our own units for every round that has become creatable,
     /// stopping when the next round lacks a threshold of extended
-    /// parents. Unit creation is unpaced — a fresh parent set is the
-    /// only gate. Called after replay and after each inbound message,
-    /// the two events that can extend new parent slots.
+    /// parents. Within that window creation is gated on having work: a
+    /// unit is only built if it would carry items or an earlier unit of
+    /// ours still awaits ordering. With no work pending the engine goes
+    /// quiescent until `wait_for_data` resolves or an inbound message
+    /// arrives.
     async fn create_units(&mut self) {
         while self.try_create_unit().await {}
     }
@@ -163,6 +174,13 @@ where
     /// live unit-by-unit growth did before the restart.
     async fn replay(&mut self) {
         let dbtx = self.db.begin_read();
+
+        self.unordered_own_data = dbtx.iter(&self.units_table, |it| {
+            it.filter(|((_, creator), unit)| *creator == self.id && !unit.data.is_empty())
+                .map(|((round, _), _)| round)
+                .collect()
+        });
+
         let round_zero: Vec<PeerId> = self
             .round_units(&dbtx, 0)
             .into_iter()
@@ -534,9 +552,15 @@ where
             return false;
         };
 
-        let dbtx = self.db.begin_write();
-
         let data: Vec<D> = self.data_provider.get_data();
+
+        // Quiescence gate: only build a unit that carries items or keeps
+        // the DAG growing while an earlier unit of ours awaits ordering.
+        if data.is_empty() && !self.has_unordered_own_data() {
+            return false;
+        }
+
+        let dbtx = self.db.begin_write();
 
         let unit = Unit {
             round,
@@ -553,6 +577,10 @@ where
         // original would consider us a forker.
         self.insert_unit(&dbtx, &unit, sig)
             .expect("newly built unit must insert");
+
+        if !unit.data.is_empty() {
+            self.unordered_own_data.insert(round);
+        }
 
         self.try_extend(&dbtx, round, self.id);
 
@@ -576,6 +604,12 @@ where
     }
 
     // --- in-memory extension state ---
+
+    /// True while any of our own units carries items that have not yet
+    /// been emitted through `ordered_tx`.
+    pub fn has_unordered_own_data(&self) -> bool {
+        !self.unordered_own_data.is_empty()
+    }
 
     /// Confirmed *and* every parent slot is extended.
     pub(crate) fn is_extended(&self, round: Round, creator: PeerId) -> bool {
@@ -644,22 +678,37 @@ where
         true
     }
 
-    /// Lowest-`PeerId`-keyed `threshold` extended slots at `round-1`,
-    /// or `None` if fewer than `threshold` slots there are extended.
-    /// Empty set for round 0. Filtering by `extended` (not `confirmed`)
+    /// Our own slot at `round-1` plus the lowest-`PeerId`-keyed
+    /// `threshold - 1` other extended slots, or `None` if our own slot
+    /// isn't extended yet or fewer than `threshold` slots are. Empty
+    /// set for round 0. Filtering by `extended` (not `confirmed`)
     /// guarantees any unit we author is itself extendable on receivers.
+    ///
+    /// The self-parent is a creation-side rule only — receivers don't
+    /// verify it. It chains our column: every unit of ours is an
+    /// ancestor of all our later units, so one downstream reference of
+    /// our column emits our whole backlog.
     fn parents_for(&self, round: Round) -> Option<BTreeSet<PeerId>> {
         let Some(parent_round) = round.checked_sub(1) else {
             return Some(BTreeSet::new());
         };
 
+        if !self.is_extended(parent_round, self.id) {
+            return None;
+        }
+
         let t = self.n.threshold();
 
-        let parents: BTreeSet<PeerId> = self
-            .extended
-            .range((parent_round, PeerId::from(0u8))..=(parent_round, PeerId::from(u8::MAX)))
+        let parents: BTreeSet<PeerId> = std::iter::once(self.id)
+            .chain(
+                self.extended
+                    .range(
+                        (parent_round, PeerId::from(0u8))..=(parent_round, PeerId::from(u8::MAX)),
+                    )
+                    .map(|(_, c)| *c)
+                    .filter(|c| *c != self.id),
+            )
             .take(t)
-            .map(|(_, c)| *c)
             .collect();
 
         (parents.len() == t).then_some(parents)

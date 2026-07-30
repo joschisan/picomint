@@ -78,6 +78,10 @@ where
                     }
 
                     self.emitted.insert((u.round, u.creator));
+
+                    if u.creator == self.id {
+                        self.unordered_own_data.remove(&u.round);
+                    }
                 }
             }
 

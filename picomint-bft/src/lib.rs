@@ -8,6 +8,11 @@
 //! `threshold` confirmed round-R units. Round 0 is the DAG's root row: each
 //! peer creates its own round-0 unit with an empty parent set, disseminates
 //! and co-signs it like any other.
+//!
+//! Unit creation is work-gated: a peer only builds a unit that carries
+//! items, or that keeps the DAG growing while an earlier unit of its own
+//! still awaits ordering. A peer with no items inflight creates nothing
+//! and idles until its `DataProvider` yields a fresh item.
 
 mod data;
 mod engine;

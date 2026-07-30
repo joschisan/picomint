@@ -7,6 +7,9 @@
 //! committed items lives in [`crate::consensus::engine`] and receives
 //! through the `ordered_tx` channel passed to `BftEngine::new`.
 
+use std::collections::VecDeque;
+use std::future::pending;
+
 use async_channel::{Receiver, Sender};
 use async_trait::async_trait;
 use picomint_bft::{
@@ -112,23 +115,31 @@ impl INetwork<ConsensusItem> for Network {
 
 /// `DataProvider` impl draining the daemon's submission channel into the
 /// next unit's payload, capped at [`BFT_UNIT_BYTE_LIMIT`] bytes of
-/// encoded payload per unit. The first item that would push the payload
-/// past the cap is stashed in `leftover_item` and tried again on the
-/// next call.
+/// encoded payload per unit. `pending_items` holds items observed but
+/// not yet returned: the item that would push a payload past the cap,
+/// and items pulled off the channel by `wait_for_data` to wake the
+/// engine out of quiescence.
 pub struct DataProvider {
     submission_rx: Receiver<ConsensusItem>,
-    leftover_item: Option<ConsensusItem>,
+    pending_items: VecDeque<ConsensusItem>,
 }
 
 impl DataProvider {
     pub fn new(submission_rx: Receiver<ConsensusItem>) -> Self {
         Self {
             submission_rx,
-            leftover_item: None,
+            pending_items: VecDeque::new(),
         }
+    }
+
+    fn next_item(&mut self) -> Option<ConsensusItem> {
+        self.pending_items
+            .pop_front()
+            .or_else(|| self.submission_rx.try_recv().ok())
     }
 }
 
+#[async_trait]
 impl BftDataProvider<ConsensusItem> for DataProvider {
     fn get_data(&mut self) -> Vec<ConsensusItem> {
         // `Vec<T>` consensus encoding is a `u32` length prefix followed
@@ -137,29 +148,32 @@ impl BftDataProvider<ConsensusItem> for DataProvider {
         let mut n_bytes: usize = 4;
         let mut items = Vec::new();
 
-        if let Some(item) = self.leftover_item.take() {
+        while let Some(item) = self.next_item() {
             let item_bytes = item.consensus_encode_to_vec().len();
 
-            if n_bytes + item_bytes <= BFT_UNIT_BYTE_LIMIT {
-                n_bytes += item_bytes;
-                items.push(item);
-            } else {
-                warn!(?item, "Consensus item exceeds BFT_UNIT_BYTE_LIMIT; dropped");
-            }
-        }
+            if n_bytes + item_bytes > BFT_UNIT_BYTE_LIMIT {
+                if items.is_empty() {
+                    warn!(?item, "Consensus item exceeds BFT_UNIT_BYTE_LIMIT; dropped");
+                    continue;
+                }
 
-        while let Ok(item) = self.submission_rx.try_recv() {
-            let item_bytes = item.consensus_encode_to_vec().len();
-
-            if n_bytes + item_bytes <= BFT_UNIT_BYTE_LIMIT {
-                n_bytes += item_bytes;
-                items.push(item);
-            } else {
-                self.leftover_item = Some(item);
+                self.pending_items.push_front(item);
                 break;
             }
+
+            n_bytes += item_bytes;
+            items.push(item);
         }
 
         items
+    }
+
+    async fn wait_for_data(&mut self) {
+        match self.submission_rx.recv().await {
+            Ok(item) => self.pending_items.push_back(item),
+            // A closed channel means the daemon is shutting down; park
+            // instead of busy-waking the engine.
+            Err(_) => pending().await,
+        }
     }
 }
