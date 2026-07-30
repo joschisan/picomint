@@ -793,7 +793,7 @@ async fn spawn_mock_gateway() -> anyhow::Result<GatewayPk> {
 
     let pk = GatewayPk(endpoint.id());
 
-    tokio::spawn(picomint_rpc::run_accept_loop(endpoint, 1000, mock_handler));
+    tokio::spawn(picomint_rpc::run_accept_loop(endpoint, mock_handler));
 
     Ok(pk)
 }

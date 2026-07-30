@@ -29,9 +29,6 @@ pub mod dkg_g2;
 pub mod poly;
 pub mod setup;
 
-/// How many concurrent Iroh API connections the server will accept.
-pub const MAX_CLIENT_CONNECTIONS: u32 = 1000;
-
 /// BFT rounds per session. Controls session duration.
 const DEFAULT_BFT_ROUNDS_PER_SESSION: u32 = 10000;
 const REGTEST_BFT_ROUNDS_PER_SESSION: u32 = 100;

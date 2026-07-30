@@ -12,15 +12,8 @@ use picomint_encoding::Encodable as _;
 
 use crate::AppState;
 
-/// Maximum number of concurrent in-flight gateway API requests, summed
-/// across every accepted connection.
-pub const MAX_CONCURRENT_REQUESTS: usize = 1000;
-
 pub async fn run_public(state: AppState, endpoint: Endpoint) {
-    picomint_rpc::run_accept_loop(endpoint, MAX_CONCURRENT_REQUESTS, move |method| {
-        dispatch(state.clone(), method)
-    })
-    .await;
+    picomint_rpc::run_accept_loop(endpoint, move |method| dispatch(state.clone(), method)).await;
 }
 
 async fn dispatch(state: AppState, method: GatewayMethod) -> Result<Vec<u8>, String> {

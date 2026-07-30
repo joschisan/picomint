@@ -23,7 +23,6 @@ use picomint_core::tx::ConsensusItem;
 use picomint_core::wire;
 use picomint_redb::Database;
 use tokio::net::TcpListener;
-use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
@@ -35,10 +34,6 @@ use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
 
 /// How many txs can be stored in memory before blocking the API
 const TX_BUFFER: usize = 1000;
-
-/// Maximum number of concurrent in-flight iroh API requests, summed
-/// across every accepted connection.
-const MAX_CONCURRENT_REQUESTS: usize = 1000;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
@@ -210,12 +205,10 @@ async fn run_iroh_api(
     consensus_api: Arc<ConsensusApi>,
     foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
 ) {
-    let request_limit = Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS));
-
     while let Ok(connection) = foreign_conn_rx.recv().await {
         let consensus_api = consensus_api.clone();
         tokio::spawn(
-            picomint_rpc::handle_request(connection, request_limit.clone(), move |method| {
+            picomint_rpc::handle_request(connection, move |method| {
                 dispatch(consensus_api.clone(), method)
             })
             .inspect_err(|e| {
