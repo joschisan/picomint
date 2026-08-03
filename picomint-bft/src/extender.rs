@@ -185,6 +185,7 @@ where
         self.extended
             .range((round, PeerId::from(0u8))..=(round, PeerId::from(u8::MAX)))
             .filter_map(|(r, c)| dbtx.get(&self.units_table, &(*r, *c)))
+            .map(|signed| signed.unit)
             .collect()
     }
 
@@ -199,11 +200,11 @@ where
             return batch;
         }
 
-        let head: Unit<D> = dbtx
+        let head = dbtx
             .get(&self.units_table, &(round, creator))
             .expect("commit head must exist");
 
-        queue.push_back(head);
+        queue.push_back(head.unit);
 
         while let Some(unit) = queue.pop_front() {
             if let Some(parent_round) = unit.round.checked_sub(1) {
@@ -214,7 +215,7 @@ where
                     if let Some(p) = dbtx.get(&self.units_table, &(parent_round, *parent_creator)) {
                         // Tentatively mark so the deeper BFS doesn't enqueue twice.
                         self.emitted.insert((parent_round, *parent_creator));
-                        queue.push_back(p);
+                        queue.push_back(p.unit);
                     }
                 }
             }

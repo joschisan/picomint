@@ -1,10 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use async_channel::Sender;
 use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
-use picomint_core::secp256k1::schnorr;
 use picomint_core::{NumPeers, PeerId, peer_range};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, DbRead, Table, TableDef, WriteTx};
@@ -14,7 +13,7 @@ use tracing::warn;
 use crate::data::DataProvider;
 use crate::keychain::Keychain;
 use crate::network::{DynNetwork, Message, Recipient};
-use crate::unit::{Cosig, Round, Unit, UnitData};
+use crate::unit::{Round, SignedUnit, Unit, UnitData};
 
 /// Periodic own-slot push interval. Pull is demand-driven, not periodic.
 const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
@@ -49,16 +48,12 @@ where
     data_provider: P,
     pub(crate) ordered_tx: Sender<(Round, PeerId, D)>,
 
-    /// Daemon-declared units table (`(Round, PeerId) => Unit<D>`).
+    /// Daemon-declared units table (`(Round, PeerId) => SignedUnit<D>`).
     /// Bft only reads/writes it.
-    pub(crate) units_table: TableDef<(Round, PeerId), Unit<D>>,
-    /// Daemon-declared cosigs table
-    /// (`(Round, PeerId, PeerId) => Cosig`). The creator's own
-    /// signature lives here at `(round, creator, creator)`.
-    pub(crate) cosigs_table: TableDef<(Round, PeerId, PeerId), Cosig>,
+    pub(crate) units_table: TableDef<(Round, PeerId), SignedUnit<D>>,
 
-    /// Slots whose row count in `cosigs_table` meets threshold *and*
-    /// every parent slot is itself in this set. Rebuilt from disk on
+    /// Slots whose body is present in `units_table` *and* whose every
+    /// parent slot is itself in this set. Rebuilt from disk on
     /// startup; never persisted.
     pub(crate) extended: BTreeSet<(Round, PeerId)>,
     /// Slots whose payload has been sent through `ordered_tx`.
@@ -82,7 +77,7 @@ where
     P: DataProvider<D>,
 {
     #[allow(clippy::too_many_arguments)]
-    pub fn new<TU, TC>(
+    pub fn new<TU>(
         id: PeerId,
         session: u64,
         n: NumPeers,
@@ -92,11 +87,9 @@ where
         data_provider: P,
         ordered_tx: Sender<(Round, PeerId, D)>,
         units_table: TU,
-        cosigs_table: TC,
     ) -> Self
     where
-        TU: Table<Key = (Round, PeerId), Value = Unit<D>>,
-        TC: Table<Key = (Round, PeerId, PeerId), Value = Cosig>,
+        TU: Table<Key = (Round, PeerId), Value = SignedUnit<D>>,
     {
         Self {
             id,
@@ -108,7 +101,6 @@ where
             data_provider,
             ordered_tx,
             units_table: TableDef::from(units_table),
-            cosigs_table: TableDef::from(cosigs_table),
             extended: BTreeSet::new(),
             emitted: BTreeSet::new(),
             next_decide_round: 0,
@@ -162,12 +154,12 @@ where
     }
 
     /// Rebuild the in-memory `extended` / `emitted` / `next_decide_round`
-    /// from persisted `BFT_UNITS` + `BFT_COSIGS`, and re-emit every
-    /// committed item through `ordered_tx`.
+    /// from persisted `BFT_UNITS`, and re-emit every committed item
+    /// through `ordered_tx`.
     ///
     /// Correctness rests on determinism: `try_extend` is a fixpoint over
     /// the parent-extended predicate, and the extender's vote tally +
-    /// `bfs_batch` are both deterministic over the final unit/cosig set.
+    /// `bfs_batch` are both deterministic over the final unit set.
     /// So calling `try_extend(0, c)` for every round-zero creator (the
     /// cascade root) and then `run_extender` once produces the same
     /// `extended` set and the same channel emission sequence as the
@@ -176,7 +168,7 @@ where
         let dbtx = self.db.begin_read();
 
         self.unordered_own_data = dbtx.iter(&self.units_table, |it| {
-            it.filter(|((_, creator), unit)| *creator == self.id && !unit.data.is_empty())
+            it.filter(|((_, creator), signed)| *creator == self.id && !signed.unit.data.is_empty())
                 .map(|((round, _), _)| round)
                 .collect()
         });
@@ -198,45 +190,28 @@ where
     /// it (any partial writes roll back). All reads in handlers see
     /// their own writes via redb's read-your-own-writes on `WriteTx`.
     /// In-memory mutations (`extended`, `emitted`, channel sends) are
-    /// not rolled back on Err — only the persistent `BFT_UNITS` /
-    /// `BFT_COSIGS` writes are. The mutators only run after the dbtx
-    /// writes succeed via `?`.
+    /// not rolled back on Err — only the persistent `BFT_UNITS`
+    /// writes are. The mutators only run after the dbtx writes
+    /// succeed via `?`.
     ///
-    /// These commits use **relaxed** (non-fsync) durability: inbound units and
-    /// cosigs are peer-originated and re-fetched via anti-entropy after a
-    /// crash, so they need not be individually durable. The fsync barrier is
+    /// These commits use **relaxed** (non-fsync) durability: inbound units
+    /// are peer-originated and re-fetched via anti-entropy after a crash, so
+    /// they need not be individually durable. The fsync barrier is
     /// [`Self::try_create_unit`], whose durable commit before broadcast both
     /// prevents our own equivocation and flushes this relaxed backlog.
     async fn handle_message(&mut self, sender: PeerId, msg: Message<D>) -> Result<()> {
         match msg {
-            Message::Unit { unit, sig } => {
+            Message::Unit(signed) => {
                 let dbtx = self.db.begin_write_relaxed();
 
-                self.handle_unit(&dbtx, sender, &unit, sig)?;
-                self.try_extend(&dbtx, unit.round, unit.creator);
-                self.run_extender(&dbtx).await;
+                // Pull missing ancestors before the install attempt so
+                // a duplicate unit (rejected below) still re-fires the
+                // walk — that retry is what heals dropped Requests.
+                self.cascade_parents(&dbtx, sender, &signed.unit);
 
-                dbtx.commit();
-            }
-            Message::Cosig {
-                round,
-                creator,
-                signer,
-                cosig,
-            } => {
-                let dbtx = self.db.begin_write_relaxed();
+                self.insert_unit(&dbtx, &signed)?;
 
-                self.record_cosig(&dbtx, round, creator, signer, cosig)?;
-                self.try_extend(&dbtx, round, creator);
-                self.run_extender(&dbtx).await;
-
-                dbtx.commit();
-            }
-            Message::SignedUnit { unit, cosigs } => {
-                let dbtx = self.db.begin_write_relaxed();
-
-                self.handle_signed_unit(&dbtx, sender, &unit, cosigs)?;
-                self.try_extend(&dbtx, unit.round, unit.creator);
+                self.try_extend(&dbtx, signed.unit.round, signed.unit.creator);
                 self.run_extender(&dbtx).await;
 
                 dbtx.commit();
@@ -252,16 +227,12 @@ where
     fn broadcast_anti_entropy(&self) {
         let dbtx = self.db.begin_read();
 
-        let Some(unit) = self.highest_unit(&dbtx, self.id) else {
+        let Some(signed) = self.highest_unit(&dbtx, self.id) else {
             return;
         };
 
-        let sig = *self
-            .cosigs(&dbtx, unit.round, self.id)
-            .get(&self.id)
-            .expect("we always have our own signature for our own unit");
-
-        self.send_unit(Recipient::Everyone, &unit, &sig);
+        self.network
+            .send(Recipient::Everyone, Message::Unit(signed));
     }
 
     /// Send `Message::Request` for `(round, creator)` to `peer`, but
@@ -288,13 +259,12 @@ where
             .send(Recipient::Peer(peer), Message::Request { round, creator });
     }
 
-    /// Walk ancestors of `top` locally and `Request` only the
-    /// unconfirmed frontier from `sender`. We descend through every
-    /// confirmed-but-not-extended ancestor because we already hold
-    /// their bodies (and therefore their parent sets); their *parents*
-    /// are the slots whose threshold proof we still need. Extended
-    /// slots and slots we've already requested recently (via
-    /// `try_send_request`) terminate the walk.
+    /// Walk ancestors of `top` locally and `Request` only the missing
+    /// frontier from `sender`. We descend through every
+    /// present-but-not-extended ancestor because we already hold its
+    /// parent set; slots whose bodies we lack are requested and
+    /// terminate the walk, as do extended slots and slots we've
+    /// already requested recently (via `try_send_request`).
     fn cascade_parents(&mut self, dbtx: &impl DbRead, sender: PeerId, top: &Unit<D>) {
         let mut visited: BTreeSet<(Round, PeerId)> = BTreeSet::new();
         let mut stack: Vec<(Round, PeerId)> = Vec::new();
@@ -312,109 +282,35 @@ where
                 continue;
             }
 
-            if !self.is_confirmed(dbtx, round, creator) {
+            let Some(signed) = dbtx.get(&self.units_table, &(round, creator)) else {
                 self.try_send_request(sender, round, creator);
-            }
+                continue;
+            };
 
             let Some(parent_round) = round.checked_sub(1) else {
                 continue;
             };
 
-            let Some(unit) = dbtx.get(&self.units_table, &(round, creator)) else {
-                continue;
-            };
-
-            stack.extend(unit.parents.iter().map(|c| (parent_round, *c)));
+            stack.extend(signed.unit.parents.iter().map(|c| (parent_round, *c)));
         }
     }
 
-    /// Reply with `SignedUnit` only when the slot is locally confirmed.
-    /// A sub-threshold bundle would be unsafe — the receiver overwrites
-    /// its entry on the strength of the threshold proof.
+    /// Reply with the stored body and its creator sig; no reply if we
+    /// don't hold the slot.
     fn handle_request(&self, dbtx: &impl DbRead, requester: PeerId, round: Round, creator: PeerId) {
-        let Some(unit) = dbtx.get(&self.units_table, &(round, creator)) else {
+        let Some(signed) = dbtx.get(&self.units_table, &(round, creator)) else {
             return;
         };
 
-        if !self.is_confirmed(dbtx, round, creator) {
-            return;
-        }
-
-        let cosigs = self.cosigs(dbtx, round, creator);
-
-        self.network.send(
-            Recipient::Peer(requester),
-            Message::SignedUnit { unit, cosigs },
-        );
+        self.network
+            .send(Recipient::Peer(requester), Message::Unit(signed));
     }
 
-    /// Rebroadcast our existing cosig (retry for dropped Cosig msgs),
-    /// demand-pull any not-yet-extended parents (retry for dropped
-    /// Request msgs), then attempt fresh install + own cosign. A
-    /// duplicate-slot insert errors via `?` and rolls back; the
-    /// network sends above are fire-and-forget and persist.
-    fn handle_unit(
-        &mut self,
-        dbtx: &WriteTx,
-        sender: PeerId,
-        unit: &Unit<D>,
-        sig: schnorr::Signature,
-    ) -> Result<()> {
-        if let Some(c) = dbtx.get(&self.cosigs_table, &(unit.round, unit.creator, self.id)) {
-            self.network.send(
-                Recipient::Everyone,
-                Message::Cosig {
-                    round: unit.round,
-                    creator: unit.creator,
-                    signer: self.id,
-                    cosig: c.0,
-                },
-            );
-        }
+    /// Validate and install a fresh `(round, creator)` slot in
+    /// `BFT_UNITS`. An occupied slot errors — first body seen wins.
+    fn insert_unit(&self, dbtx: &WriteTx, signed: &SignedUnit<D>) -> Result<()> {
+        let unit = &signed.unit;
 
-        self.cascade_parents(dbtx, sender, unit);
-
-        self.insert_unit(dbtx, unit, sig)?;
-
-        let cosig = self.keychain.sign(self.session, unit);
-
-        self.record_cosig(dbtx, unit.round, unit.creator, self.id, cosig)
-            .expect("own cosig over freshly inserted body must succeed");
-
-        self.network.send(
-            Recipient::Everyone,
-            Message::Cosig {
-                round: unit.round,
-                creator: unit.creator,
-                signer: self.id,
-                cosig,
-            },
-        );
-
-        Ok(())
-    }
-
-    /// Atomically install/overwrite from the threshold proof, then
-    /// demand-pull any not-yet-extended parents from the sender. No
-    /// rebroadcast, no cosig fan-out — this is a pull-driven event.
-    fn handle_signed_unit(
-        &mut self,
-        dbtx: &WriteTx,
-        sender: PeerId,
-        unit: &Unit<D>,
-        cosigs: BTreeMap<PeerId, schnorr::Signature>,
-    ) -> Result<()> {
-        self.insert_signed_unit(dbtx, unit, cosigs)?;
-
-        self.cascade_parents(dbtx, sender, unit);
-
-        Ok(())
-    }
-
-    /// Validate and install a fresh `(round, creator)` slot — body in
-    /// `BFT_UNITS`, creator's sig in `BFT_COSIGS` at `(_, _, creator)`.
-    /// Caller must check absence beforehand: this is a one-shot install.
-    fn insert_unit(&self, dbtx: &WriteTx, unit: &Unit<D>, sig: schnorr::Signature) -> Result<()> {
         ensure!(
             unit.data.consensus_encode_to_vec().len() <= BFT_UNIT_BYTE_LIMIT,
             "unit body exceeds size limit",
@@ -437,107 +333,15 @@ where
         }
 
         ensure!(
-            self.keychain.verify(self.session, unit, &sig, unit.creator),
+            self.keychain
+                .verify(self.session, unit, &signed.sig, unit.creator),
             "invalid creator signature",
         );
 
         ensure!(
-            dbtx.insert(&self.units_table, &(unit.round, unit.creator), unit)
+            dbtx.insert(&self.units_table, &(unit.round, unit.creator), signed)
                 .is_none(),
             "unit slot already occupied",
-        );
-
-        dbtx.insert(
-            &self.cosigs_table,
-            &(unit.round, unit.creator, unit.creator),
-            &Cosig(sig),
-        );
-
-        Ok(())
-    }
-
-    /// Install (or overwrite) a slot from a threshold-proven bundle.
-    /// A valid `SignedUnit` proves canonical body — quorum math forbids
-    /// two distinct bodies reaching threshold — so overwrite is safe.
-    /// Stale cosigs over a divergent body are cleared as a side effect.
-    fn insert_signed_unit(
-        &self,
-        dbtx: &WriteTx,
-        unit: &Unit<D>,
-        cosigs: BTreeMap<PeerId, schnorr::Signature>,
-    ) -> Result<()> {
-        ensure!(
-            unit.data.consensus_encode_to_vec().len() <= BFT_UNIT_BYTE_LIMIT,
-            "unit body exceeds size limit",
-        );
-
-        ensure!(cosigs.len() == self.n.threshold(), "wrong number of cosigs");
-
-        ensure!(
-            cosigs.contains_key(&unit.creator),
-            "creator signature missing",
-        );
-
-        for (signer, c) in &cosigs {
-            ensure!(
-                self.keychain.verify(self.session, unit, c, *signer),
-                "invalid cosig signature",
-            );
-        }
-
-        dbtx.insert(&self.units_table, &(unit.round, unit.creator), unit);
-
-        // Overwrite the slot's full cosig set; signers absent from the
-        // bundle have any stale sig (over a divergent body) removed.
-        for signer in self.n.peer_ids() {
-            if let Some(c) = cosigs.get(&signer) {
-                dbtx.insert(
-                    &self.cosigs_table,
-                    &(unit.round, unit.creator, signer),
-                    &Cosig(*c),
-                );
-            } else {
-                dbtx.remove(&self.cosigs_table, &(unit.round, unit.creator, signer));
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Verify and merge `signer`'s cosig over the body we hold for
-    /// `(round, creator)`. Errors on missing body, already-confirmed
-    /// slot, invalid sig, or duplicate; the per-message dbtx rollback
-    /// handles cleanup.
-    ///
-    /// Verifying against the *locally-held* body is the consistent-
-    /// broadcast check: a forker's cosigs over a different body don't
-    /// verify against ours, so neither side reaches threshold.
-    fn record_cosig(
-        &self,
-        dbtx: &WriteTx,
-        round: Round,
-        creator: PeerId,
-        signer: PeerId,
-        sig: schnorr::Signature,
-    ) -> Result<()> {
-        let unit: Unit<D> = dbtx
-            .get(&self.units_table, &(round, creator))
-            .context("no unit for signature")?;
-
-        ensure!(
-            !self.is_confirmed(dbtx, round, creator),
-            "unit already confirmed",
-        );
-
-        ensure!(
-            self.keychain.verify(self.session, &unit, &sig, signer),
-            "invalid cosig signature",
-        );
-
-        ensure!(
-            dbtx.insert(&self.cosigs_table, &(round, creator, signer), &Cosig(sig))
-                .is_none(),
-            "duplicate cosig",
         );
 
         Ok(())
@@ -546,7 +350,7 @@ where
     async fn try_create_unit(&mut self) -> bool {
         let round = self
             .highest_unit(&self.db.begin_read(), self.id)
-            .map_or(0, |u| u.round + 1);
+            .map_or(0, |signed| signed.unit.round + 1);
 
         let Some(parents) = self.parents_for(round) else {
             return false;
@@ -569,16 +373,19 @@ where
             data,
         };
 
-        let sig = self.keychain.sign(self.session, &unit);
+        let signed = SignedUnit {
+            sig: self.keychain.sign(self.session, &unit),
+            unit,
+        };
 
         // Crash barrier: persist before broadcasting, otherwise a
         // restart would let us build a *different* unit at this slot
         // from a fresh data_provider draw — peers that saw the
         // original would consider us a forker.
-        self.insert_unit(&dbtx, &unit, sig)
+        self.insert_unit(&dbtx, &signed)
             .expect("newly built unit must insert");
 
-        if !unit.data.is_empty() {
+        if !signed.unit.data.is_empty() {
             self.unordered_own_data.insert(round);
         }
 
@@ -588,19 +395,10 @@ where
 
         dbtx.commit();
 
-        self.send_unit(Recipient::Everyone, &unit, &sig);
+        self.network
+            .send(Recipient::Everyone, Message::Unit(signed));
 
         true
-    }
-
-    fn send_unit(&self, recipient: Recipient, unit: &Unit<D>, sig: &schnorr::Signature) {
-        self.network.send(
-            recipient,
-            Message::Unit {
-                unit: unit.clone(),
-                sig: *sig,
-            },
-        );
     }
 
     // --- in-memory extension state ---
@@ -611,7 +409,7 @@ where
         !self.unordered_own_data.is_empty()
     }
 
-    /// Confirmed *and* every parent slot is extended.
+    /// Body present *and* every parent slot is extended.
     pub(crate) fn is_extended(&self, round: Round, creator: PeerId) -> bool {
         self.extended.contains(&(round, creator))
     }
@@ -655,16 +453,13 @@ where
             return false;
         }
 
-        let Some(unit) = dbtx.get(&self.units_table, &(round, creator)) else {
+        let Some(signed) = dbtx.get(&self.units_table, &(round, creator)) else {
             return false;
         };
 
-        if !self.is_confirmed(dbtx, round, creator) {
-            return false;
-        }
-
         if let Some(parent_round) = round.checked_sub(1) {
-            let parents_fed = unit
+            let parents_fed = signed
+                .unit
                 .parents
                 .iter()
                 .all(|p| self.is_extended(parent_round, *p));
@@ -681,7 +476,7 @@ where
     /// Our own slot at `round-1` plus the lowest-`PeerId`-keyed
     /// `threshold - 1` other extended slots, or `None` if our own slot
     /// isn't extended yet or fewer than `threshold` slots are. Empty
-    /// set for round 0. Filtering by `extended` (not `confirmed`)
+    /// set for round 0. Filtering by `extended` (not mere presence)
     /// guarantees any unit we author is itself extendable on receivers.
     ///
     /// The self-parent is a creation-side rule only — receivers don't
@@ -714,43 +509,21 @@ where
         (parents.len() == t).then_some(parents)
     }
 
-    // --- db-read helpers over `units_table` / `cosigs_table` ---
-
-    /// All signatures collected for `(round, creator)`, including the
-    /// creator's own signature at `signer == creator`.
-    pub(crate) fn cosigs(
-        &self,
-        dbtx: &impl DbRead,
-        round: Round,
-        creator: PeerId,
-    ) -> BTreeMap<PeerId, schnorr::Signature> {
-        dbtx.range(&self.cosigs_table, peer_range!(round, creator), |it| {
-            it.map(|((_, _, signer), Cosig(sig))| (signer, sig))
-                .collect()
-        })
-    }
-
-    fn sig_count(&self, dbtx: &impl DbRead, round: Round, creator: PeerId) -> usize {
-        dbtx.range(&self.cosigs_table, peer_range!(round, creator), |it| {
-            it.count()
-        })
-    }
-
-    /// At least `threshold` signatures collected. Does *not* imply
-    /// ancestors are ready.
-    pub(crate) fn is_confirmed(&self, dbtx: &impl DbRead, round: Round, creator: PeerId) -> bool {
-        self.sig_count(dbtx, round, creator) >= self.n.threshold()
-    }
+    // --- db-read helpers over `units_table` ---
 
     pub(crate) fn round_units(&self, dbtx: &impl DbRead, round: Round) -> Vec<Unit<D>> {
         dbtx.range(&self.units_table, peer_range!(round), |it| {
-            it.map(|(_, u)| u).collect()
+            it.map(|(_, signed)| signed.unit).collect()
         })
     }
 
-    pub(crate) fn highest_unit(&self, dbtx: &impl DbRead, creator: PeerId) -> Option<Unit<D>> {
+    pub(crate) fn highest_unit(
+        &self,
+        dbtx: &impl DbRead,
+        creator: PeerId,
+    ) -> Option<SignedUnit<D>> {
         dbtx.iter(&self.units_table, |it| {
-            it.rev().find_map(|((_, c), u)| (c == creator).then_some(u))
+            it.rev().find_map(|((_, c), s)| (c == creator).then_some(s))
         })
     }
 }

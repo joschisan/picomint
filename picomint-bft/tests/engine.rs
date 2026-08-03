@@ -18,15 +18,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_channel::{Receiver, Sender};
 use async_trait::async_trait;
 use picomint_bft::{
-    Cosig, DataProvider, Engine, INetwork, Keychain, Message, Recipient, Round, Unit,
+    DataProvider, Engine, INetwork, Keychain, Message, Recipient, Round, SignedUnit,
 };
 use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
 use picomint_core::{NumPeers, PeerId};
 use picomint_redb::{Database, table};
 use rand::Rng;
 
-table!(BftUnits, (Round, PeerId) => Unit<u64>, "bft-units");
-table!(BftCosigs, (Round, PeerId, PeerId) => Cosig, "bft-cosigs");
+table!(BftUnits, (Round, PeerId) => SignedUnit<u64>, "bft-units");
 
 /// Per-recipient probability of silently dropping a message in the mock
 /// network. Each unicast send and each fan-out leg of a broadcast rolls
@@ -201,7 +200,6 @@ async fn engines_agree_on_ordered_data() {
             TimestampDataProvider,
             ordered_tx,
             BftUnits,
-            BftCosigs,
         );
 
         handles.push(tokio::spawn(engine.run()));
