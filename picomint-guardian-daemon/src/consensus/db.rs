@@ -1,8 +1,8 @@
-use picomint_bft::{Round, SignedUnit};
+use picomint_bft::{SignedUnit, Slot};
+use picomint_core::TransactionId;
 use picomint_core::expiry;
 use picomint_core::session;
 use picomint_core::tx::ConsensusItem;
-use picomint_core::{PeerId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::table;
 
@@ -18,7 +18,7 @@ table!(
 
 table!(
     BftUnitsTable,
-    (Round, PeerId) => SignedUnit<ConsensusItem>,
+    Slot => SignedUnit<ConsensusItem>,
     "bft-units",
 );
 

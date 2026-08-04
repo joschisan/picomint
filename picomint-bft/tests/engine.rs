@@ -1,14 +1,17 @@
-//! End-to-end test of the per-peer engine driving DAG growth, order
+//! End-to-end tests of the per-peer engine driving DAG growth, order
 //! extraction, and emission of ordered items through the bft engine's
 //! `ordered_tx` channel over a mock channel-based network. N engines
 //! spawn as tasks, each owns a per-peer in-memory `Database`, a
 //! `Keychain`, a `MockChannel`, and the receiving end of its own
 //! `ordered_tx`. Each peer feeds its own per-unit payload of one
-//! `u64` carrying a monotonic timestamp. The engines never stop on
-//! their own — the test drains each peer's `ordered_rx` until
-//! `ROUND_LIMIT` is reached, then aborts the engine tasks. We then
-//! assert every peer observed the same total order of `(creator,
-//! item)` pairs.
+//! `u64`. The engines never stop on their own — each test drains the
+//! peers' `ordered_rx` until `ROUND_LIMIT` is reached, then aborts the
+//! engine tasks and asserts every peer observed the same total order
+//! of `(creator, item)` pairs. The Byzantine tests replace peer 0 with
+//! hand-built forked units covering the three fork outcomes: split
+//! votes (skip), unanimous votes (commit), and a forked voter one
+//! round up; the replay test restarts an engine on its persisted units
+//! and asserts the emission sequence reproduces exactly.
 
 use std::collections::BTreeMap;
 use std::future::pending;
@@ -18,18 +21,21 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_channel::{Receiver, Sender};
 use async_trait::async_trait;
 use picomint_bft::{
-    DataProvider, Engine, INetwork, Keychain, Message, Recipient, Round, SignedUnit,
+    DataProvider, Engine, INetwork, Keychain, Message, Recipient, Round, SignedUnit, Slot, Unit,
+    UnitHash,
 };
 use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
 use picomint_core::{NumPeers, PeerId};
 use picomint_redb::{Database, table};
 use rand::Rng;
+use tokio::task::JoinHandle;
+use tokio::time::timeout;
 
-table!(BftUnits, (Round, PeerId) => SignedUnit<u64>, "bft-units");
+table!(BftUnits, Slot => SignedUnit<u64>, "bft-units");
 
 /// Per-recipient probability of silently dropping a message in the mock
-/// network. Each unicast send and each fan-out leg of a broadcast rolls
-/// independently.
+/// network, used by the 4-peer tests. Each unicast send and each
+/// fan-out leg of a broadcast rolls independently.
 const DROP_RATE: f64 = 0.10;
 
 /// Base one-way latency applied to every delivered message in the mock
@@ -44,13 +50,15 @@ const JITTER: Duration = Duration::from_millis(15);
 /// an unreliable network. Implements [`INetwork`].
 struct MockChannel {
     own_id: PeerId,
+    drop_rate: f64,
     senders: BTreeMap<PeerId, Sender<(PeerId, Message<u64>)>>,
     rx: Receiver<(PeerId, Message<u64>)>,
 }
 
 impl MockChannel {
-    /// Build a fully-connected mesh of channels, one per peer in `n`.
-    fn mesh(n: NumPeers) -> BTreeMap<PeerId, MockChannel> {
+    /// Build a fully-connected mesh of channels, one per peer in `n`,
+    /// each dropping sends with probability `drop_rate` per leg.
+    fn mesh(n: NumPeers, drop_rate: f64) -> BTreeMap<PeerId, MockChannel> {
         let mut receivers = BTreeMap::new();
         let mut senders = BTreeMap::new();
 
@@ -65,12 +73,24 @@ impl MockChannel {
                 let rx = receivers.remove(&own_id).expect("inserted above");
                 let channel = MockChannel {
                     own_id,
+                    drop_rate,
                     senders: senders.clone(),
                     rx,
                 };
                 (own_id, channel)
             })
             .collect()
+    }
+
+    /// Deliver `msg` to `recipient` directly, bypassing the drop roll
+    /// and latency of [`INetwork::send`]. The Byzantine tests use this
+    /// to place forged units in chosen inboxes deterministically.
+    fn deliver(&self, recipient: PeerId, msg: Message<u64>) {
+        self.senders
+            .get(&recipient)
+            .expect("mesh built above")
+            .try_send((self.own_id, msg))
+            .expect("mock channels are unbounded");
     }
 }
 
@@ -94,7 +114,7 @@ impl INetwork<u64> for MockChannel {
                         continue;
                     }
 
-                    if rand::random::<f64>() < DROP_RATE {
+                    if rand::random::<f64>() < self.drop_rate {
                         continue;
                     }
 
@@ -109,7 +129,7 @@ impl INetwork<u64> for MockChannel {
                     .get(&to)
                     .expect("recipient must be a known peer");
 
-                if rand::random::<f64>() < DROP_RATE {
+                if rand::random::<f64>() < self.drop_rate {
                     return;
                 }
 
@@ -128,6 +148,23 @@ impl INetwork<u64> for MockChannel {
              per-peer reads are only meaningful for round-robin DKG, which \
              picomint-bft doesn't have"
         )
+    }
+}
+
+/// Sink network for an engine replaying from disk in isolation: sends
+/// vanish and no message ever arrives.
+struct NullNetwork;
+
+#[async_trait]
+impl INetwork<u64> for NullNetwork {
+    fn send(&self, _recipient: Recipient, _msg: Message<u64>) {}
+
+    async fn receive(&self) -> Option<(PeerId, Message<u64>)> {
+        pending().await
+    }
+
+    async fn receive_from_peer(&self, _peer: PeerId) -> Option<Message<u64>> {
+        pending().await
     }
 }
 
@@ -174,39 +211,132 @@ fn build_keychains(n: NumPeers) -> BTreeMap<PeerId, Keychain> {
         .collect()
 }
 
-#[tokio::test]
-async fn engines_agree_on_ordered_data() {
-    let n = NumPeers::from(N_PEERS);
-    let mut keychains = build_keychains(n);
-    let mut channels = MockChannel::mesh(n);
+/// Engines spawned by [`spawn_engines`], plus the handles a test needs
+/// to observe and later restart them.
+struct Engines {
+    handles: Vec<JoinHandle<()>>,
+    ordered_rxs: BTreeMap<PeerId, Receiver<(Round, PeerId, u64)>>,
+    dbs: BTreeMap<PeerId, Database>,
+}
 
-    let mut handles = Vec::new();
-    let mut ordered_rxs: BTreeMap<PeerId, Receiver<(Round, PeerId, u64)>> = BTreeMap::new();
+/// Spawn one engine per remaining entry of `channels`, each on a fresh
+/// in-memory database. Byzantine tests remove the forker's channel
+/// from the mesh beforehand.
+fn spawn_engines(
+    n: NumPeers,
+    keychains: &BTreeMap<PeerId, Keychain>,
+    channels: BTreeMap<PeerId, MockChannel>,
+) -> Engines {
+    let mut engines = Engines {
+        handles: Vec::new(),
+        ordered_rxs: BTreeMap::new(),
+        dbs: BTreeMap::new(),
+    };
 
-    for peer in n.peer_ids() {
+    for (peer, channel) in channels {
         let db = Database::open_in_memory();
-        let (ordered_tx, ordered_rx) = async_channel::unbounded();
-        ordered_rxs.insert(peer, ordered_rx);
+        engines.dbs.insert(peer, db.clone());
 
-        let network = Arc::new(channels.remove(&peer).expect("mesh built above"));
+        let (ordered_tx, ordered_rx) = async_channel::unbounded();
+        engines.ordered_rxs.insert(peer, ordered_rx);
 
         let engine = Engine::new(
             peer,
             SESSION,
             n,
             db,
-            keychains.remove(&peer).expect("built above"),
-            network,
+            keychains.get(&peer).expect("built above").clone(),
+            Arc::new(channel),
             TimestampDataProvider,
             ordered_tx,
             BftUnits,
         );
 
-        handles.push(tokio::spawn(engine.run()));
+        engines.handles.push(tokio::spawn(engine.run()));
     }
 
+    engines
+}
+
+/// Drain every peer's ordered stream until the first item above
+/// `ROUND_LIMIT`, and return the observed `(creator, item)` sequences.
+async fn collect_sequences(
+    ordered_rxs: BTreeMap<PeerId, Receiver<(Round, PeerId, u64)>>,
+) -> BTreeMap<PeerId, Vec<(PeerId, u64)>> {
     let mut reader_handles = Vec::new();
+
     for (peer, ordered_rx) in ordered_rxs {
+        reader_handles.push(tokio::spawn(async move {
+            let mut sequence: Vec<(PeerId, u64)> = Vec::new();
+
+            while let Ok((round, creator, datum)) = ordered_rx.recv().await {
+                if round > ROUND_LIMIT {
+                    break;
+                }
+                sequence.push((creator, datum));
+            }
+
+            (peer, sequence)
+        }));
+    }
+
+    let mut sequences = BTreeMap::new();
+
+    for h in reader_handles {
+        let (peer, seq) = h.await.expect("reader task panicked");
+        sequences.insert(peer, seq);
+    }
+
+    sequences
+}
+
+/// Assert all sequences are non-empty and identical; return the shared
+/// order.
+fn assert_agreement(sequences: &BTreeMap<PeerId, Vec<(PeerId, u64)>>) -> Vec<(PeerId, u64)> {
+    let reference = sequences
+        .values()
+        .next()
+        .expect("at least one peer")
+        .clone();
+    assert!(!reference.is_empty(), "expected at least one ordered item");
+
+    for (peer, seq) in sequences {
+        assert_eq!(seq, &reference, "peer {peer} disagrees on total order");
+    }
+
+    reference
+}
+
+fn build_signed_unit(
+    keychain: &Keychain,
+    round: Round,
+    creator: PeerId,
+    parents: BTreeMap<PeerId, UnitHash>,
+    data: u64,
+) -> SignedUnit<u64> {
+    let unit = Unit {
+        round,
+        creator,
+        parents,
+        data: vec![data],
+    };
+
+    SignedUnit {
+        sig: keychain.sign(SESSION, &unit),
+        unit,
+    }
+}
+
+#[tokio::test]
+async fn engines_agree_on_ordered_data() {
+    let n = NumPeers::from(N_PEERS);
+    let keychains = build_keychains(n);
+    let channels = MockChannel::mesh(n, DROP_RATE);
+
+    let engines = spawn_engines(n, &keychains, channels);
+
+    let mut reader_handles = Vec::new();
+    for (peer, ordered_rx) in engines.ordered_rxs {
         reader_handles.push(tokio::spawn(async move {
             let mut sequence: Vec<(PeerId, u64)> = Vec::new();
             let mut delays: Vec<u64> = Vec::new();
@@ -224,32 +354,247 @@ async fn engines_agree_on_ordered_data() {
     }
 
     let mut sequences: BTreeMap<PeerId, Vec<(PeerId, u64)>> = BTreeMap::new();
-    let mut delays_by_observer: BTreeMap<PeerId, Vec<u64>> = BTreeMap::new();
     for h in reader_handles {
         let (peer, seq, delays) = h.await.expect("reader task panicked");
-        sequences.insert(peer, seq);
-        delays_by_observer.insert(peer, delays);
-    }
 
-    for (peer, delays) in &delays_by_observer {
         let n_items = delays.len();
         let avg = delays.iter().sum::<u64>() as f64 / n_items as f64;
         let max = delays.iter().copied().max().unwrap_or(0);
         println!("peer {peer}: items={n_items} avg_delay={avg:.1}ms max_delay={max}ms");
+
+        sequences.insert(peer, seq);
     }
 
-    for h in handles {
+    for h in engines.handles {
         h.abort();
     }
 
-    let reference = sequences
-        .values()
-        .next()
-        .expect("at least one peer")
-        .clone();
-    assert!(!reference.is_empty(), "expected at least one ordered item");
+    assert_agreement(&sequences);
+}
 
-    for (peer, seq) in &sequences {
-        assert_eq!(seq, &reference, "peer {peer} disagrees on total order");
+/// Peer 0 is Byzantine: it signs two different round-0 units (a fork)
+/// and shows one branch to peers 1 and 2 and the other to peer 3, then
+/// goes silent. The three honest engines must still agree on one total
+/// order — the forked slot splits votes, so no branch can be certified
+/// and the candidate resolves to skip through the anchor rule, while
+/// the branches themselves may still be swept as ancestry of honest
+/// heads.
+#[tokio::test]
+async fn engines_agree_under_forking_peer() {
+    let n = NumPeers::from(N_PEERS);
+    let keychains = build_keychains(n);
+    let mut channels = MockChannel::mesh(n, DROP_RATE);
+
+    let forker = PeerId::from(0u8);
+    let forker_channel = channels.remove(&forker).expect("mesh built above");
+
+    let engines = spawn_engines(n, &keychains, channels);
+
+    for (data, recipients) in [(1u64, vec![1u8, 2u8]), (2u64, vec![3u8])] {
+        let signed = build_signed_unit(&keychains[&forker], 0, forker, BTreeMap::new(), data);
+
+        for recipient in recipients {
+            forker_channel.deliver(PeerId::from(recipient), Message::Unit(signed.clone()));
+        }
     }
+
+    let sequences = collect_sequences(engines.ordered_rxs).await;
+
+    for h in engines.handles {
+        h.abort();
+    }
+
+    assert_agreement(&sequences);
+}
+
+/// Peer 0 forks its round-0 slot again, but this time shows *both*
+/// branches to every honest peer before their engines start. All
+/// honest peers extend both branches and deterministically reference —
+/// and thus vote for — the lowest-hash one, so that branch gathers
+/// certificates and the forked slot *commits*: the complementary
+/// outcome to `engines_agree_under_forking_peer`, where split votes
+/// force a skip. The unreferenced branch is never swept as ancestry,
+/// so exactly one of the two forked payloads appears in the order.
+#[tokio::test]
+async fn engines_agree_when_fork_branch_commits() {
+    let n = NumPeers::from(N_PEERS);
+    let keychains = build_keychains(n);
+    let mut channels = MockChannel::mesh(n, DROP_RATE);
+
+    let forker = PeerId::from(0u8);
+    let forker_channel = channels.remove(&forker).expect("mesh built above");
+
+    for data in [1u64, 2u64] {
+        let signed = build_signed_unit(&keychains[&forker], 0, forker, BTreeMap::new(), data);
+
+        for recipient in [1u8, 2u8, 3u8] {
+            forker_channel.deliver(PeerId::from(recipient), Message::Unit(signed.clone()));
+        }
+    }
+
+    let engines = spawn_engines(n, &keychains, channels);
+
+    let sequences = collect_sequences(engines.ordered_rxs).await;
+
+    for h in engines.handles {
+        h.abort();
+    }
+
+    let reference = assert_agreement(&sequences);
+
+    let emitted_branches = [1u64, 2u64]
+        .into_iter()
+        .filter(|data| reference.contains(&(forker, *data)))
+        .count();
+
+    assert_eq!(emitted_branches, 1, "exactly one fork branch must commit");
+}
+
+/// Peer 0 turns Byzantine one round up: it publishes an honest-looking
+/// round-0 unit to everyone, then signs two round-1 units over the
+/// same parent set (differing payloads) and shows them to disjoint
+/// halves of the federation — a forked *voter*. The vote and
+/// certificate tallies over round 1 must handle the forker appearing
+/// once per branch without double-counting its creator, and the honest
+/// engines must still agree. The forker's round-0 unit is referenced
+/// by every honest round-1 unit, so its payload must appear in the
+/// order.
+#[tokio::test]
+async fn engines_agree_under_forking_voter() {
+    let n = NumPeers::from(N_PEERS);
+    let keychains = build_keychains(n);
+    let mut channels = MockChannel::mesh(n, DROP_RATE);
+
+    let forker = PeerId::from(0u8);
+    let forker_channel = channels.remove(&forker).expect("mesh built above");
+
+    let round_zero = build_signed_unit(&keychains[&forker], 0, forker, BTreeMap::new(), 0);
+
+    for recipient in [1u8, 2u8, 3u8] {
+        forker_channel.deliver(PeerId::from(recipient), Message::Unit(round_zero.clone()));
+    }
+
+    let engines = spawn_engines(n, &keychains, channels);
+
+    // Harvest two honest round-0 hashes from the forker's inbox — from
+    // honest round-0 broadcasts directly, or from the parent maps of
+    // honest round-1 broadcasts when the originals were dropped.
+    let mut harvested: BTreeMap<PeerId, UnitHash> = BTreeMap::new();
+
+    while harvested.len() < 2 {
+        let (_, msg) = forker_channel.rx.recv().await.expect("mesh alive");
+
+        let Message::Unit(signed) = msg else { continue };
+
+        match signed.unit.round {
+            0 => {
+                harvested.insert(signed.unit.creator, signed.unit.hash());
+            }
+            1 => {
+                harvested.extend(
+                    signed
+                        .unit
+                        .parents
+                        .iter()
+                        .filter(|(creator, _)| **creator != forker)
+                        .map(|(creator, hash)| (*creator, *hash)),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    let parents: BTreeMap<PeerId, UnitHash> = std::iter::once((forker, round_zero.unit.hash()))
+        .chain(harvested.into_iter().take(n.threshold() - 1))
+        .collect();
+
+    for (data, recipients) in [(1u64, vec![1u8, 2u8]), (2u64, vec![3u8])] {
+        let signed = build_signed_unit(&keychains[&forker], 1, forker, parents.clone(), data);
+
+        for recipient in recipients {
+            forker_channel.deliver(PeerId::from(recipient), Message::Unit(signed.clone()));
+        }
+    }
+
+    let sequences = collect_sequences(engines.ordered_rxs).await;
+
+    for h in engines.handles {
+        h.abort();
+    }
+
+    let reference = assert_agreement(&sequences);
+
+    assert!(
+        reference.contains(&(forker, 0)),
+        "the forker's round-0 payload must be swept as ancestry",
+    );
+}
+
+/// Restarting an engine on its persisted unit table must reproduce the
+/// exact live emission sequence — including under forks. Runs the
+/// forking-peer scenario, then replays peer 1's engine on a clone of
+/// its database behind a sink network and compares the streams under
+/// the same `ROUND_LIMIT` cut.
+#[tokio::test]
+async fn replay_reproduces_order_under_forks() {
+    let n = NumPeers::from(N_PEERS);
+    let keychains = build_keychains(n);
+    let mut channels = MockChannel::mesh(n, DROP_RATE);
+
+    let forker = PeerId::from(0u8);
+    let forker_channel = channels.remove(&forker).expect("mesh built above");
+
+    let mut engines = spawn_engines(n, &keychains, channels);
+
+    for (data, recipients) in [(1u64, vec![1u8, 2u8]), (2u64, vec![3u8])] {
+        let signed = build_signed_unit(&keychains[&forker], 0, forker, BTreeMap::new(), data);
+
+        for recipient in recipients {
+            forker_channel.deliver(PeerId::from(recipient), Message::Unit(signed.clone()));
+        }
+    }
+
+    let sequences = collect_sequences(engines.ordered_rxs).await;
+
+    for h in engines.handles {
+        h.abort();
+    }
+
+    assert_agreement(&sequences);
+
+    let replayer = PeerId::from(1u8);
+
+    let (ordered_tx, ordered_rx) = async_channel::unbounded();
+
+    let engine = Engine::new(
+        replayer,
+        SESSION,
+        n,
+        engines.dbs.remove(&replayer).expect("spawned above"),
+        keychains[&replayer].clone(),
+        Arc::new(NullNetwork),
+        TimestampDataProvider,
+        ordered_tx,
+        BftUnits,
+    );
+
+    let handle = tokio::spawn(engine.run());
+
+    let mut replayed: Vec<(PeerId, u64)> = Vec::new();
+
+    while let Ok(Ok((round, creator, datum))) =
+        timeout(Duration::from_secs(2), ordered_rx.recv()).await
+    {
+        if round > ROUND_LIMIT {
+            break;
+        }
+        replayed.push((creator, datum));
+    }
+
+    handle.abort();
+
+    assert_eq!(
+        replayed, sequences[&replayer],
+        "replay must reproduce the live emission sequence",
+    );
 }
