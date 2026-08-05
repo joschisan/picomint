@@ -2,8 +2,8 @@
 //! mempool — an `INetwork` impl over `ReconnectP2PConnections<P2PMessage>`
 //! and a `DataProvider` impl pulling from the submission channel.
 //!
-//! Storage is owned by `picomint-bft` directly via redb tables
-//! (`BFT_UNITS` + `BFT_COSIGS`). The application consumer that drains
+//! Storage is owned by `picomint-bft` directly via the redb table
+//! `BFT_UNITS`. The application consumer that drains
 //! committed items lives in [`crate::consensus::engine`] and receives
 //! through the `ordered_tx` channel passed to `BftEngine::new`.
 

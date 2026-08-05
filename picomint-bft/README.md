@@ -1,9 +1,12 @@
 # picomint-bft
 
 Byzantine-tolerant atomic broadcast over a DAG. Each peer publishes
-one *unit* per round, accumulates threshold cosignatures, and a
-deterministic leader-vote rule extracts a total order over the
-confirmed units' payloads.
+one creator-signed *unit* per round, parents pin exact bodies by
+hash, and a deterministic QuickAleph-style virtual-voting rule
+(arXiv:1908.05156) extracts a total order over the extended units'
+payloads. Equivocation by up to `f` creators per round is tolerated
+in the graph itself — no cosigning, no certification round trips, no
+coin.
 
 ## Scope and threat model
 
@@ -19,113 +22,116 @@ picomint-bft is engineered for one specific operating point:
 - **Goal**: deliver low ordering latency under varying network
   conditions while remaining safe against the Byzantine peers.
 
-
 The most concrete consequence: **picomint-bft has no timeouts
-anywhere**. Lax insert, demand-pull, and `SignedUnit` overwrite
-together replace what other DAG protocols would solve with timeouts.
-This is the load-bearing principle behind many of the design choices
-documented below.
+anywhere**. Lax insert and demand-pull replace what other DAG
+protocols would solve with timeouts. This is the load-bearing
+principle behind many of the design choices documented below.
 
 ## Performance
 
-Items reach the total order in roughly `3 × avg_RTT` between peers.
-For a 50 ms inter-peer RTT, that's ~150 ms commit latency.
+A DAG round costs one message delay (units are broadcast once, no
+cosign wave), and a well-referenced candidate decides at round
+`R+2` — three message delays end to end. Candidates the fast path
+misses resolve through the common-vote schedule within an expected
+one to two extra rounds under random network behavior, with
+geometrically decaying tails and no absorbing undecided state at any
+federation size. Dropping the cosign wave cuts messages per round
+from Θ(n³) to Θ(n²) and per-peer signature verifications per round
+from Θ(n²) to Θ(n).
+
+Measured in the mock at n = 22 (f = 7) without drops: agreement over
+a 24k-item order, head decisions at mean depth 4.1 rounds under iid
+latency jitter (median item delay 6.4 round-periods including the
+ancestry sweep), and mean depth 2.25 with 92% three-delay decisions
+under a stable per-peer latency ladder. In the lossy 4-peer mock
+(25 ms ± 15 ms, 10% drop), item delay averages ~1 s — set by loss
+recovery at the 1 Hz anti-entropy cadence, not by decision depth.
 
 ## Glossary
 
 - **Session** — an instance of consensus, identified by a `u64`. All
   signatures bind to the session via the keychain API; a stale message
   from a previous session fails verification.
-- **Round** — a row of the DAG, `u16`. Round 0 is the root row; its
-  units carry no parents.
-- **Slot** — a `(round, creator)` coordinate. At most one *body* per
-  slot can ever reach threshold (see *consistent broadcast* below).
+- **Round** — a row of the DAG. Round 0 is the root row; its units
+  carry no parents.
+- **UnitHash** — the sha256 consensus-hash of a unit body. Parent
+  references pin the exact parent body via this hash.
+- **Slot** — a `(round, creator, hash)` coordinate: the storage key of
+  a unit body. The `(round, creator)` prefix names the position the
+  body claims; the hash disambiguates fork branches within it. An
+  honest creator has exactly one branch per position; a Byzantine
+  creator may have several, stored side by side.
 - **Unit** — the body at a slot: the creator's payload (`Vec<D>`),
-  parent set, and identifying metadata. Defined in [`unit.rs`].
-- **Creator sig** (`sig`) — the schnorr signature of the unit body by
-  its claimed creator. Carried as the `sig` field of a `Unit` message
-  and stored at `(round, creator, creator)` in `cosigs_table`.
-- **Cosig** — a non-creator peer's schnorr signature on the same body.
-  Up to `2f` accumulate per slot in `cosigs_table`; with the creator's
-  own sig that's `2f+1` = threshold.
-- **Threshold** — `2f + 1` total sigs (1 creator + 2f cosigs).
-- **Confirmed** — a slot's local sig count has reached threshold.
-- **Extended** — a slot is confirmed *and* every parent slot is also
-  extended. Equivalent to "this slot is in the in-memory `extended`
-  set the extender scans". A slot must be extended (not just
-  confirmed) before it can be used as a parent for a future own unit.
+  parent map, and identifying metadata. Defined in [`unit.rs`].
+- **SignedUnit** — a unit plus its creator's schnorr signature over
+  `(session, unit)`. The one shape units travel on the wire and
+  persist in storage.
+- **Extended** — a slot's body is stored *and* every parent slot is
+  also extended. Equivalent to "this slot is in the in-memory
+  `extended` set the extender scans". A slot must be extended before
+  it can be used as a parent for a future own unit.
 
 ## Wire protocol
 
-Three message types. The sender's `PeerId` is attached by the network
+Two message types. The sender's `PeerId` is attached by the network
 layer; never carried in the payload.
 
 ```rust
 enum Message<D> {
-    Unit { unit: Unit<D>, sig: Signature },
-    Cosig { round, creator, signer, cosig: Signature },
-    SignedUnit { unit, cosigs: BTreeMap<PeerId, Signature> },
-    Request { round, creator },
+    Unit(SignedUnit<D>),
+    Request(Slot),
 }
 ```
 
-`SignedUnit` carries no separate creator sig — the creator's signature
-is one entry of the `cosigs` map (keyed by the creator), which holds
-the full `threshold` set.
-
-| Message | Bytes (n=4 / n=10) | Emission rule |
+| Message | Bytes | Emission rule |
 |---|---|---|
-| `Unit` | `~70 + |D|` | Creator's broadcast at unit-creation; creator's anti-entropy push of own highest slot. |
-| `Cosig` | `~70` | First-time-cosign fan-out by each cosigner; rebroadcast of our own existing cosig when we re-receive the body. |
-| `SignedUnit` | `~70 + |D| + 64·(2f+1)` | Sole `Request` response, *only* when the responder holds the slot at threshold. |
-| `Request` | `~3` | On-receive demand-pull of a not-yet-extended parent, on receipt of a `Unit` or `SignedUnit`. |
+| `Unit` | `~70 + 32·|parents| + |D|` | Creator's broadcast at unit-creation; creator's anti-entropy push of own highest slot; sole `Request` response. |
+| `Request` | `~37` | On-receive demand-pull of a missing ancestor, on receipt of a `Unit`. |
 
 Every broadcast (`Recipient::Everyone`) carries content authored by
-the sender: their own newly-created unit, their own anti-entropy push
-of their column, or their own first cosig. **No peer ever relays
-another peer's authored content.** Other peers' bodies flow only on
-explicit `Request`.
+the sender: their own newly-created unit or their own anti-entropy
+push of their column. Other peers' bodies flow only on explicit
+`Request`, answered by whoever holds them.
 
 ## Storage
 
-All persisted state lives in two redb tables. They are *declared by
-the daemon* and passed into `Engine::new`; bft only reads and writes
-them:
+All persisted state lives in one redb table. It is *declared by the
+daemon* and passed into `Engine::new`; bft only reads and writes it:
 
 ```rust
-units_table:  (Round, PeerId)         => Unit<D>   // BFT_UNITS
-cosigs_table: (Round, PeerId, PeerId) => Cosig     // BFT_COSIGS
+units_table: Slot => SignedUnit<D>   // BFT_UNITS, Slot = (Round, PeerId, UnitHash)
 ```
-
-A unit's body sits at `(round, creator)` in `units_table`. Every
-signature over that body sits in `cosigs_table` keyed by signer,
-including the creator's own sig at `(round, creator, creator)`. A slot
-is *confirmed* once its cosig-row count reaches `threshold`.
 
 Everything else is in-memory state on `Engine<P, D>`, rebuilt on
 startup and never persisted:
 
 ```rust
-extended:          BTreeSet<(Round, PeerId)>,          // confirmed + all parents extended
-emitted:           BTreeSet<(Round, PeerId)>,          // already sent through ordered_tx
-next_decide_round: Round,                              // extender cursor
-request_sent_at:   BTreeMap<(Round, PeerId), Instant>, // demand-pull throttle
+extended:          BTreeMap<Slot, Parents>,     // stored + all parents extended, mapped to parent maps
+emitted:           BTreeSet<Slot>,              // already sent through ordered_tx
+next_decide_round: Round,                       // extender cursor
+decided:           BTreeMap<Slot, bool>,        // candidate decisions, pruned below the cursor
+votes:             BTreeMap<(Slot, Slot), bool>, // memoized virtual votes, pruned with decided
+request_sent_at:   BTreeMap<Slot, Instant>,     // demand-pull throttle
 ```
 
-Persistence is just the per-message redb commit. Inbound `Unit` /
-`Cosig` / `SignedUnit` commits are **relaxed** (non-fsync): they are
-peer-originated and re-fetched via anti-entropy after a crash. The
-fsync barrier is own-unit creation, whose durable commit before
-broadcast both prevents our own equivocation and flushes the relaxed
-backlog.
+The `extended` map carries each extended unit's parent map, which is
+the complete evidence the decision rule needs — virtual votes are
+computed from parent maps alone, so the extender never touches the
+db except to read payloads at emission time.
+
+Persistence is just the per-message redb commit. Inbound `Unit`
+commits are **relaxed** (non-fsync): they are peer-originated and
+re-fetched via anti-entropy after a crash. The fsync barrier is
+own-unit creation, whose durable commit before broadcast both
+prevents our own equivocation and flushes the relaxed backlog.
 
 On restart `replay` re-runs `try_extend` from every round-0 creator
 and then `run_extender` once. Because `try_extend` is a fixpoint over
 the parent-extended predicate and the extender is deterministic over
-the stored unit/cosig set, this reconstructs the exact same
-`extended` / `emitted` / `next_decide_round` and re-emits every
-previously-committed item through `ordered_tx`; the caller's
-idempotency check absorbs the redelivery.
+the stored unit set, this reconstructs the exact same `extended` /
+`emitted` / `next_decide_round` and re-emits every previously-committed
+item through `ordered_tx`; the caller's idempotency check absorbs the
+redelivery.
 
 ## Lifecycle of a slot
 
@@ -133,24 +139,20 @@ The protocol is split into two gates with distinct semantics.
 
 ### Admission (lax)
 
-`insert_unit(dbtx, unit, sig)` installs a fresh slot from a `Unit`
-message. A `Unit` carries only the body and the creator's own sig —
-cosigs never ride along; they arrive separately as `Cosig` messages
-and accumulate in `cosigs_table` via `record_cosig`. Admission checks:
+`insert_unit(dbtx, signed)` installs a fresh slot from a `Unit`
+message. Admission checks:
 
 - The encoded body is within `BFT_UNIT_BYTE_LIMIT` (50 KB).
-- Structural validity: round 0 has empty parents; round R>0 has
-  exactly `threshold` parent creators, all drawn from the federation.
+- Structural validity: round 0 has an empty parent map; round R>0 has
+  exactly `threshold` parent entries, all keyed by federation members.
 - The creator sig verifies against the body under the session.
-- Whether parents are *locally present, confirmed, or extended* is
-  **not** checked. An out-of-order arrival lands in `units_table`
-  anyway, so it's ready the moment its parents catch up rather than
-  being dropped and refetched.
+- Whether parents are *locally present or extended* is **not**
+  checked. An out-of-order arrival lands in `units_table` anyway, so
+  it's ready the moment its parents catch up rather than being
+  dropped and refetched.
 
-A duplicate body at an occupied slot is rejected — `insert_unit`
-errors and the per-message write rolls back; first body seen wins. The
-only path that overwrites a stored body is `insert_signed_unit` (see
-*Forker recovery*), authorized by a full threshold proof.
+A duplicate body hits its own key and is rejected — `insert_unit`
+errors and the per-message write rolls back.
 
 ### Promotion (strict, ancestrally complete)
 
@@ -158,7 +160,7 @@ only path that overwrites a stored body is `insert_signed_unit` (see
 that satisfy:
 
 1. Not already in `extended`.
-2. Confirmed (cosig-row count `≥ threshold`).
+2. Body stored in `units_table`.
 3. Round 0, *or* every parent slot is already in `extended`.
 
 Extension inserts `(round, creator)` into `extended` — the slot set
@@ -167,10 +169,9 @@ the extender scans when extracting the total order. The cascade sweeps
 extensions, which by induction means no higher round can have new
 extensions either.
 
-A slot must be `extended` (not just `confirmed`) to be used as a
-parent in own-unit construction (`parents_for`). This guarantees every
-unit we author is itself extendable on receivers that hold those
-parents extended.
+A slot must be `extended` to be used as a parent in own-unit
+construction (`parents_for`). This guarantees every unit we author is
+itself extendable on receivers that hold those parents extended.
 
 ## Anti-entropy and demand-pull
 
@@ -181,93 +182,120 @@ to everyone. Each peer is canonical for its own column of the DAG;
 pushing only the own slot gives laggards a reentry point. Other peers'
 columns flow only on demand-pull.
 
-**Demand-pull (event-driven)**: on every receive of a `Unit` or
-`SignedUnit`, the receiver walks back through the message's
-not-yet-`extended` ancestors and unicasts `Request { round, creator }`
-to the immediate sender for any slot it does not yet hold confirmed.
-This single walk triggers three recovery cases:
+**Demand-pull (event-driven)**: on every receive of a `Unit`, the
+receiver walks back through the message's not-yet-`extended` ancestors
+and unicasts `Request(slot)` to the immediate sender for any slot
+whose body it does not yet hold. Present-but-not-extended ancestors
+are descended through (we already hold their parent maps); missing
+bodies are requested and terminate the walk.
 
-- **Body missing** — the response delivers it.
-- **Below threshold** — the responder's `SignedUnit` reply carries the
-  canonical body plus the full `threshold` cosig set, fixing any sig
-  deficit.
-- **Confirmed but ancestrally not extended** — receiving the body
-  re-fires the deeper walk-back via the same parent-pull loop.
-
-A `Cosig` for a slot whose body we don't hold triggers no request — it
-simply fails to record and is dropped; the missing body arrives on the
-creator's next anti-entropy push. Re-issuing on every receive (fresh
-or duplicate) makes the mechanism self-healing against dropped
-requests: the next time the pushing peer ships the same child, we
-re-ask for the still-not-extended parents. A per-slot
-`REQUEST_DEDUP_INTERVAL` throttle keeps those re-asks from re-firing
-the whole ancestor walk every second.
-
-## Forker recovery via `SignedUnit`
-
-A Byzantine creator can fork its own slot — sending body `B₁` to one
-half of the federation and body `B₂` to the other half. Each subset
-can collect cosigs only on the body it saw, so neither side reaches
-threshold on its own.
-
-Quorum math saves us:
-
-> At most one body per slot can ever assemble `1 + 2f` valid sigs,
-> since honest peers cosign exactly one body. So among the two
-> halves, at most one body reaches threshold.
-
-The peer holding the canonical (`B₂`) confirmed body responds to a
-`Request` with `SignedUnit { unit, cosigs }` — a bundle carrying the
-full `threshold` (`2f+1`) sig set over the canonical body, the
-creator's sig included. The receiver verifies the bundle and
-*atomically replaces* its prior `B₁` entry with `B₂`, clearing any
-stale cosigs over `B₁` as a side effect. That's the only place in the
-protocol where overwrite happens, and it's authorized exclusively by
-the threshold proof.
-
-Sub-threshold slots get no `Request` response — the responder only
-emits `SignedUnit` when their entry is locally confirmed.
+Re-issuing on every receive (fresh or duplicate) makes the mechanism
+self-healing against dropped requests: the next time the pushing peer
+ships the same child, we re-ask for the still-not-extended parents. A
+per-slot `REQUEST_DEDUP_INTERVAL` throttle keeps those re-asks from
+re-firing the whole ancestor walk every second.
 
 ## Total ordering
 
-Confirmed-and-extended units enter the extender, which runs a leader-vote
-rule per round to extract a total order:
+Extended units enter the extender, which runs a deterministic
+QuickAleph-style virtual-voting rule per round. Every extended
+round-`R` branch is a *candidate*, walked in a priority order seeded
+by the round; each candidate resolves to a binary include/exclude
+decision:
 
-- For each round `R`, candidates are walked in a deterministic random
-  permutation seeded by the round number.
-- A round-`R+1` unit votes **yes** for candidate `c` iff `c` appears
-  in its parent set, otherwise **no**.
-- A round-`K` unit (`K > R+1`) votes **yes** iff a strict majority of
-  its `2f+1` parents voted yes.
-- If some round above `R` has `≥ 2f+1` yes-voters, `c` is **elected**
-  the round head. If `≥ 2f+1` no-voters, `c` is **eliminated** and we
-  move to the next candidate. Otherwise, **undecided** — wait for
-  more units.
-- If every candidate eliminates, the round is **skipped**.
+- A round-`R+1` unit **votes** 1 for branch `B` iff its parent entry
+  for `B`'s creator is exactly `B`'s hash.
+- A unit above `R+1` adopts its parents' votes if they are
+  **unanimous**, otherwise it votes the round's **common vote** —
+  fixed 1 at `R+2`, fixed 0 at `R+3`, seeded pseudo-random bits
+  above. The bits are plain hashes of `(round, candidate)`: every
+  peer computes the same value, and commonness — not
+  unpredictability — is all safety needs under a benign network.
+- A unit at round `R+2` or above **decides** the common-vote value
+  `v` of its round iff at least `2f+1` of its parents vote `v`. One
+  deciding unit anywhere suffices — the decision propagates
+  structurally (see Safety).
+- The round **head** is the first candidate in priority order decided
+  1, once every earlier candidate is decided 0. Candidates outside
+  the ancestry of a held `R+3` unit are skipped without waiting:
+  they are globally doomed to decide 0 (the coverage lemma below),
+  which is what makes walking a deterministic rather than secret
+  permutation safe. If every candidate excludes, the round is
+  **skipped**.
+
+The fixed 1 at `R+2` gives well-referenced candidates a
+three-message-delay include; the fixed 0 at `R+3` excludes invisible
+candidates fast, keeping the walk moving past crashed peers; the
+seeded bits break middle-band ties within an expected extra round.
+Decisions are stable once reached, so they are cached in `decided`
+for the engine's lifetime, and startup replay reproduces the exact
+live emission sequence.
 
 On commit, the head's not-yet-emitted causal ancestors are extracted
-BFS-style and emitted as the round's batch (oldest-first).
+BFS-style and emitted as the round's batch (oldest-first). An
+equivocator's sibling branches may both be swept as ancestry — the
+guarantee is one identical order on every peer, not single-branch
+emission; item processing downstream validates each item on its own
+terms.
 
 ## Safety
 
-The full proof is straightforward by induction: once any honest peer
-has decided a candidate verdict at round `R`, all honest peers will
-eventually reach the same verdict for that candidate.
+Fork tolerance rests on four facts:
 
-Sketch:
-1. *Fork safety*: at most one body per slot reaches threshold, by
-   the quorum argument above. So all honest peers that hold a
-   confirmed slot at `(R, c)` hold the same body.
-2. *Vote determinism*: voting at round `K` depends only on which
-   confirmed units exist at rounds `R..K` and on their parent sets.
-   Both are immutable once a unit is confirmed.
-3. *Eventual delivery*: anti-entropy + demand-pull + `SignedUnit`
-   overwrite together guarantee every honest peer eventually sees the
-   same set of confirmed units.
+1. **Evidence is per-unit and hash-pinned.** A vote is a pure
+   function of one specific unit's fixed ancestry — a forker can
+   create units that vote differently, but never ambiguity about
+   what a given unit voted.
+2. **Honest creators are single-voiced per round** (self-parent
+   chain plus the fsync-before-broadcast barrier), so any `f+1`
+   distinct creators include one with exactly one unit that round.
+3. **Quorum intersection lands on a concrete unit**: two parent sets
+   of `2f+1` distinct creators share `f+1` creators, hence an honest
+   one, hence one common actual unit — not merely a common creator
+   whose testimony might be forked.
+4. **Unanimity-else-default aggregation.** Two same-round units can
+   only vote differently if *both* had unanimous parent sets, which
+   by (3) would force their common honest parent unit to have voted
+   both ways — impossible. Mixed views don't get to choose: they are
+   forced onto the common vote, identical everywhere. (Strict
+   *majority* aggregation lacks this property — the common unit can
+   sit in one side's minority, which is the classic fork
+   counterexample and the reason this rule aggregates by unanimity.)
 
-Combine and the verdict at round `K` for candidate `c` is a function
-of state that all honest peers eventually share, so all reach the
-same conclusion.
+From these: if any unit decides `v`, every unit of its round votes
+`v` — unanimous ones by (3)+(4), mixed ones because the deciding
+round's default *is* `v` — so every round above inherits `v`
+unanimously and no contrary decision can ever form. Decisions are
+exclusive and stable, which also makes the engine-lifetime `decided`
+and `votes` caches and startup replay sound.
+
+The **coverage lemma** closes head choice: a round-`R+3` vote-1 for a
+branch requires a unanimous parent set, and every vote-1 implies
+causal containment of the branch, so an `R+3` unit voting 1 shares a
+common above-the-branch unit with every other `R+3` unit — including
+one we hold. Contrapositive: a branch outside our held `R+3`
+ancestry is never voted 1 at `R+3` anywhere, every higher round
+inherits 0, and no peer can ever decide it 1 — skipping it without
+waiting is safe.
+
+Votes are tallied over *extended* units only, which makes the
+evidence self-contained: an extended unit's parents are extended, so
+every referenced branch is one we hold.
+
+## Liveness under quiescence
+
+Unit creation is work-gated: a peer only builds a unit that carries
+items or keeps the DAG growing while an earlier unit of its own awaits
+ordering. A head at round `R` decides once rounds `R+1` and `R+2` (or
+a few more, on the common-vote path) exist, and those evidence rounds
+are built while at least `2f+1` peers
+still await ordering of their own units — guaranteed for client work
+because submissions fan out to every guardian, so all peers propose
+(and keep building until they order) their own copy. A tail unit that
+no committed head happened to sweep before the federation went
+quiescent waits for the next burst of work: its items were also
+proposed and ordered through the other guardians' units, and the
+self-parent chain sweeps the whole backlog on the next commit.
 
 Session binding via the sig prefix `(session, &unit)` ensures stale
 messages from prior sessions can never be confused with the current
@@ -292,21 +320,21 @@ Per individual link it's a `1/(n−1)` slice of each column — e.g. at
 n=4, ~1.05 MB/s egress and ~1.05 MB/s ingress on each of the 3
 connections.
 
-Unit body fan-out dominates (~99%). Cosig and anti-entropy are two
+Unit body fan-out is the only sustained traffic; anti-entropy is two
 orders of magnitude smaller. Catch-up under loss is O(n × R) Request
-/ SignedUnit pairs for a peer R rounds behind — paid one-shot.
+/ Unit pairs for a peer R rounds behind — paid one-shot.
 
 ## Layout
 
 - [`lib.rs`] — crate root; re-exports the public surface (`Engine`,
-  `Keychain`, `Message`, `Unit`, `DataProvider`, …).
-- [`unit.rs`] — `Unit<D>`, `UnitData`, `Cosig`, `Round` type alias.
+  `Keychain`, `Message`, `Unit`, `SignedUnit`, `DataProvider`, …).
+- [`unit.rs`] — `Unit<D>`, `SignedUnit<D>`, `UnitData`, `Round` type
+  alias.
 - [`engine.rs`] — `Engine<P, D>`: the `run` loop (anti-entropy push,
   inbound message handling, unit creation), lax insert, the extension
-  cascade, `record_cosig`, `insert_signed_unit`, and all graph state
-  over the two redb tables.
-- [`extender.rs`] — leader-vote ordering and BFS batch extraction (an
-  `impl Engine` block).
+  cascade, and all graph state over the units table.
+- [`extender.rs`] — the virtual-voting decision rule and BFS batch
+  extraction (an `impl Engine` block).
 - [`network.rs`] — `Message<D>`, `Recipient`, `INetwork` trait.
 - [`keychain.rs`] — schnorr `sign(session, value)` / `verify(session,
   value, sig, peer)` with session-binding hash prefix.

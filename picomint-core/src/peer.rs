@@ -47,7 +47,7 @@ impl From<PeerId> for u8 {
 
 /// Allowed federation sizes — every entry is `3f + 1` for some f ≥ 1.
 /// `From<usize>` rejects anything outside this list.
-pub const ALLOWED_FEDERATION_SIZES: &[usize] = &[4, 7, 10, 13, 16, 19];
+pub const ALLOWED_FEDERATION_SIZES: &[usize] = &[4, 7, 10, 13, 16, 19, 22];
 
 /// The size of a federation, parameterized by `f` (the maximum tolerated
 /// number of byzantine peers). picomint only supports federations of

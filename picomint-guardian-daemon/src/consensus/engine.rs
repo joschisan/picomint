@@ -16,8 +16,7 @@ use tracing::{info, instrument};
 use crate::config::ServerConfig;
 use crate::consensus::bft::{DataProvider, Network};
 use crate::consensus::db::{
-    AcceptedItemTable, AcceptedTxTable, BftCosigsTable, BftUnitsTable, SignedSessionOutcomeTable,
-    drop_bft_tables,
+    AcceptedItemTable, AcceptedTxTable, BftUnitsTable, SignedSessionOutcomeTable,
 };
 use crate::consensus::server::process_tx_with_server;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
@@ -95,7 +94,6 @@ impl ConsensusEngine {
             DataProvider::new(self.submission_rx.clone()),
             ordered_tx,
             BftUnitsTable,
-            BftCosigsTable,
         );
 
         let bft_handle = tokio::spawn(bft_engine.run());
@@ -366,7 +364,7 @@ impl ConsensusEngine {
 
         dbtx.delete_table(&AcceptedItemTable);
 
-        drop_bft_tables(&dbtx);
+        dbtx.delete_table(&BftUnitsTable);
 
         assert!(
             dbtx.insert(

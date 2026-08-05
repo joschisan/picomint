@@ -1,46 +1,23 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use picomint_core::PeerId;
-use picomint_core::secp256k1::schnorr;
 use picomint_encoding::{Decodable, Encodable};
 
-use crate::unit::{Round, Unit, UnitData};
+use crate::unit::{SignedUnit, Slot, UnitData};
 
 /// Wire messages between peers. See `README.md` for the protocol;
 /// the sender's `PeerId` is attached by the network layer.
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
 pub enum Message<D: UnitData> {
     /// Body + creator sig. Emitted by the creator on creation, by the
-    /// creator's anti-entropy push of its own column, and never as a
+    /// creator's anti-entropy push of its own column, and as the sole
     /// `Request` response.
-    Unit {
-        unit: Unit<D>,
-        sig: schnorr::Signature,
-    },
-    /// One cosignature, broadcast by the signer the first time they
-    /// cosign the slot. Receivers without the body demand-pull it from
-    /// the signer.
-    Cosig {
-        round: Round,
-        creator: PeerId,
-        signer: PeerId,
-        cosig: schnorr::Signature,
-    },
-    /// Threshold-proven slot view: body + exactly `threshold` cosigs
-    /// keyed by signer (creator's sig included). Sole `Request`
-    /// response, and only emitted when the responder holds the slot
-    /// at threshold locally. Receivers atomically install or overwrite
-    /// their entry — quorum math forbids two distinct bodies reaching
-    /// threshold, so a valid `SignedUnit` proves canonical body.
-    SignedUnit {
-        unit: Unit<D>,
-        cosigs: BTreeMap<PeerId, schnorr::Signature>,
-    },
-    /// Targeted backfill. The recipient replies with `SignedUnit` if
-    /// the slot is locally confirmed; otherwise no reply.
-    Request { round: Round, creator: PeerId },
+    Unit(SignedUnit<D>),
+    /// Targeted backfill of the exact body pinned by the slot's hash.
+    /// The recipient replies with `Unit` if it holds the body;
+    /// otherwise no reply.
+    Request(Slot),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
