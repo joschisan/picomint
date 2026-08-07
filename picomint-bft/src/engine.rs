@@ -13,24 +13,34 @@ use tracing::warn;
 use crate::data::DataProvider;
 use crate::keychain::Keychain;
 use crate::network::{DynNetwork, Message, Recipient};
-use crate::unit::{Round, SignedUnit, Slot, Unit, UnitData, UnitHash, round_range};
+use crate::unit::{Round, SignedUnit, Unit, UnitData, UnitHash};
 
-/// Periodic own-slot push interval. Pull is demand-driven, not periodic.
+/// Periodic own-unit push interval. Pull is demand-driven, not periodic.
 const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Minimum interval between successive `Request` sends for the same
-/// `(round, creator)` slot. Caps the parent-walk fan-out so anti-entropy
-/// retransmits of the same top-of-chain unit don't keep re-firing the
-/// whole tree of requests every second.
+/// unit. Caps the parent-walk fan-out so anti-entropy retransmits of
+/// the same top-of-chain unit don't keep re-firing the whole tree of
+/// requests every second.
 const REQUEST_DEDUP_INTERVAL: Duration = Duration::from_secs(1);
+
+/// In-memory record of an extended unit: its claimed position plus its
+/// parent map — the complete evidence the commit rule tallies over, so
+/// the extender never touches the db except to read payloads at
+/// emission.
+pub(crate) struct Extended {
+    pub(crate) round: Round,
+    pub(crate) creator: PeerId,
+    pub(crate) parents: BTreeMap<PeerId, UnitHash>,
+}
 
 /// Drives a single peer's growth indefinitely. The caller constructs
 /// the engine, then awaits `run()` (typically in a spawned task) and
 /// keeps the receiving end of `ordered_tx` for items as they commit.
 ///
-/// On startup `run()` replays `BFT_UNITS` (in `(round, peer)` order)
-/// through `try_extend` + `run_extender` to rebuild the in-memory
-/// `extended` / `emitted` / `next_decide_round` and re-emit every
+/// On startup `run()` replays `BFT_UNITS` through `try_extend` +
+/// `run_extender` to rebuild the in-memory `rounds` / `extended` /
+/// `emitted` / `next_decide_round` and re-emit every
 /// previously-committed item through `ordered_tx`. The caller-side
 /// idempotency check (e.g. the daemon's `item_index` probe against
 /// `ACCEPTED_ITEM`) absorbs the redelivery.
@@ -48,42 +58,48 @@ where
     data_provider: P,
     pub(crate) ordered_tx: Sender<(Round, PeerId, D)>,
 
-    /// Daemon-declared units table
-    /// (`(Round, PeerId, UnitHash) => SignedUnit<D>`). Bft only
-    /// reads/writes it.
-    pub(crate) units_table: TableDef<Slot, SignedUnit<D>>,
+    /// Daemon-declared units table (`UnitHash => SignedUnit<D>`). Bft
+    /// only reads/writes it.
+    pub(crate) units_table: TableDef<UnitHash, SignedUnit<D>>,
 
-    /// Slots whose body is present in `units_table` *and* whose every
-    /// parent slot is itself in this map, each mapped to its parent
-    /// map. The parent maps are the complete evidence the commit rule
-    /// tallies over, so the extender never touches the db except to
-    /// read payloads at emission. Rebuilt from disk on startup; never
-    /// persisted.
-    pub(crate) extended: BTreeMap<Slot, BTreeMap<PeerId, UnitHash>>,
-    /// Slots whose payload has been sent through `ordered_tx`.
+    /// Hashes of every stored unit keyed by round — the round index
+    /// over `units_table`. Drives the extension cascade and, filtered
+    /// by `extended` membership, the extender's per-round scans.
+    /// Rebuilt from disk on startup; appended in `insert_unit`.
+    pub(crate) rounds: BTreeMap<Round, BTreeSet<UnitHash>>,
+    /// Units whose body is present in `units_table` *and* whose every
+    /// parent is itself in this map, each mapped to its position and
+    /// parent map. The parent maps are the complete evidence the
+    /// commit rule tallies over, so the extender never touches the db
+    /// except to read payloads at emission. Rebuilt from disk on
+    /// startup; never persisted.
+    pub(crate) extended: BTreeMap<UnitHash, Extended>,
+    /// Units whose payload has been sent through `ordered_tx`.
     /// Prevents re-emission across batches and within one BFS.
-    pub(crate) emitted: BTreeSet<Slot>,
+    pub(crate) emitted: BTreeSet<UnitHash>,
     /// Extender cursor: the next leader round to attempt deciding.
     pub(crate) next_decide_round: Round,
-    /// Include/exclude decisions already reached per candidate slot,
-    /// kept for the engine's lifetime and pruned below
-    /// `next_decide_round`. Sound because decisions propagate: one
-    /// deciding unit forces its whole round and every round above to
-    /// vote its value (see [`crate::extender`]).
-    pub(crate) decided: BTreeMap<Slot, bool>,
-    /// Memoized virtual votes, keyed by `(candidate, voter)` slot and
-    /// pruned below `next_decide_round` with `decided`. A vote is a
-    /// pure function of the voter's fixed ancestry, so caching never
-    /// goes stale.
-    pub(crate) votes: BTreeMap<(Slot, Slot), bool>,
-    /// Rounds of our own units that carry items and whose slot is not
+    /// Include/exclude decisions already reached per candidate, kept
+    /// for the engine's lifetime. Sound because decisions propagate:
+    /// one deciding unit forces its whole round and every round above
+    /// to vote its value (see [`crate::extender`]).
+    pub(crate) decided: BTreeMap<UnitHash, bool>,
+    /// Memoized virtual votes, keyed by `(candidate, voter)` and kept
+    /// for the engine's lifetime. A vote is a pure function of the
+    /// voter's fixed ancestry, so caching never goes stale.
+    pub(crate) votes: BTreeMap<(UnitHash, UnitHash), bool>,
+    /// Rounds of our own units that carry items and whose unit is not
     /// yet in `emitted`. Seeded from disk on startup; drained by the
-    /// extender as slots emit.
+    /// extender as units emit.
     pub(crate) unordered_own_data: BTreeSet<Round>,
-    /// Last time we sent `Message::Request` for a given slot. Used to
+    /// Round and hash of our own highest unit; the base for next-round
+    /// creation and the anti-entropy push. Seeded from disk on
+    /// startup; advanced in `insert_unit`.
+    own_top: Option<(Round, UnitHash)>,
+    /// Last time we sent `Message::Request` for a given unit. Used to
     /// throttle re-asks so anti-entropy retransmits don't fan out
     /// duplicate parent-walks every tick.
-    request_sent_at: BTreeMap<Slot, Instant>,
+    request_sent_at: BTreeMap<UnitHash, Instant>,
 }
 
 impl<P, D> Engine<P, D>
@@ -104,7 +120,7 @@ where
         units_table: TU,
     ) -> Self
     where
-        TU: Table<Key = Slot, Value = SignedUnit<D>>,
+        TU: Table<Key = UnitHash, Value = SignedUnit<D>>,
     {
         Self {
             id,
@@ -116,12 +132,14 @@ where
             data_provider,
             ordered_tx,
             units_table: TableDef::from(units_table),
+            rounds: BTreeMap::new(),
             extended: BTreeMap::new(),
             emitted: BTreeSet::new(),
             next_decide_round: 0,
             decided: BTreeMap::new(),
             votes: BTreeMap::new(),
             unordered_own_data: BTreeSet::new(),
+            own_top: None,
             request_sent_at: BTreeMap::new(),
         }
     }
@@ -170,32 +188,48 @@ where
         while self.try_create_unit().await {}
     }
 
-    /// Rebuild the in-memory `extended` / `emitted` / `next_decide_round`
-    /// from persisted `BFT_UNITS`, and re-emit every committed item
-    /// through `ordered_tx`.
+    /// Rebuild the in-memory `rounds` / `extended` / `emitted` /
+    /// `next_decide_round` / `own_top` from persisted `BFT_UNITS`, and
+    /// re-emit every committed item through `ordered_tx`.
     ///
     /// Correctness rests on determinism: `try_extend` is a fixpoint over
     /// the parent-extended predicate, and the extender's vote tally +
     /// `bfs_batch` are both deterministic over the final unit set.
-    /// So calling `try_extend(0, c)` for every round-zero creator (the
-    /// cascade root) and then `run_extender` once produces the same
-    /// `extended` set and the same channel emission sequence as the
-    /// live unit-by-unit growth did before the restart.
+    /// So calling `try_extend` for every round-zero unit (the cascade
+    /// root) and then `run_extender` once produces the same `extended`
+    /// set and the same channel emission sequence as the live
+    /// unit-by-unit growth did before the restart.
     async fn replay(&mut self) {
         let dbtx = self.db.begin_read();
 
-        self.unordered_own_data = dbtx.iter(&self.units_table, |it| {
-            it.filter(|((_, creator, _), signed)| {
-                *creator == self.id && !signed.unit.data.is_empty()
+        let units: Vec<(UnitHash, Round, PeerId, bool)> = dbtx.iter(&self.units_table, |it| {
+            it.map(|(hash, signed)| {
+                (
+                    hash,
+                    signed.unit.round,
+                    signed.unit.creator,
+                    signed.unit.data.is_empty(),
+                )
             })
-            .map(|((round, _, _), _)| round)
             .collect()
         });
 
-        let round_zero = self.round_slots(&dbtx, 0);
+        for (hash, round, creator, data_is_empty) in units {
+            self.rounds.entry(round).or_default().insert(hash);
 
-        for slot in round_zero {
-            self.try_extend(&dbtx, slot);
+            if creator == self.id {
+                if !data_is_empty {
+                    self.unordered_own_data.insert(round);
+                }
+
+                if self.own_top.is_none_or(|(top, _)| round > top) {
+                    self.own_top = Some((round, hash));
+                }
+            }
+        }
+
+        for hash in self.round_units(0) {
+            self.try_extend(&dbtx, hash);
         }
 
         self.run_extender(&dbtx).await;
@@ -204,10 +238,10 @@ where
     /// One write tx per inbound message; on Ok commit it, on Err drop
     /// it (any partial writes roll back). All reads in handlers see
     /// their own writes via redb's read-your-own-writes on `WriteTx`.
-    /// In-memory mutations (`extended`, `emitted`, channel sends) are
-    /// not rolled back on Err — only the persistent `BFT_UNITS`
-    /// writes are. The mutators only run after the dbtx writes
-    /// succeed via `?`.
+    /// In-memory mutations (`rounds`, `extended`, `emitted`, channel
+    /// sends) are not rolled back on Err — only the persistent
+    /// `BFT_UNITS` writes are. The mutators only run after the dbtx
+    /// writes succeed via `?`.
     ///
     /// These commits use **relaxed** (non-fsync) durability: inbound units
     /// are peer-originated and re-fetched via anti-entropy after a crash, so
@@ -224,17 +258,17 @@ where
                 // walk — that retry is what heals dropped Requests.
                 self.cascade_parents(&dbtx, sender, &signed.unit);
 
-                let slot = signed.unit.slot();
+                let hash = signed.unit.hash();
 
-                self.insert_unit(&dbtx, &signed, slot)?;
+                self.insert_unit(&dbtx, &signed, hash)?;
 
-                self.try_extend(&dbtx, slot);
+                self.try_extend(&dbtx, hash);
                 self.run_extender(&dbtx).await;
 
                 dbtx.commit();
             }
-            Message::Request(slot) => {
-                self.handle_request(&self.db.begin_read(), sender, slot);
+            Message::Request(hash) => {
+                self.handle_request(&self.db.begin_read(), sender, hash);
             }
         }
 
@@ -242,86 +276,76 @@ where
     }
 
     fn broadcast_anti_entropy(&self) {
-        let dbtx = self.db.begin_read();
-
-        let Some(signed) = self.highest_unit(&dbtx, self.id) else {
+        let Some((_, hash)) = self.own_top else {
             return;
         };
+
+        let signed = self
+            .db
+            .begin_read()
+            .get(&self.units_table, &hash)
+            .expect("own top unit is stored");
 
         self.network
             .send(Recipient::Everyone, Message::Unit(signed));
     }
 
-    /// Send `Message::Request` for `(round, creator)` to `peer`, but
-    /// only if we haven't asked for the same slot within the past
+    /// Send `Message::Request` for `hash` to `peer`, but only if we
+    /// haven't asked for the same unit within the past
     /// [`REQUEST_DEDUP_INTERVAL`]. Anti-entropy retransmits the same
     /// top-of-chain unit every second, and every receipt would
     /// otherwise refire the entire ancestor walk — so we throttle the
-    /// outgoing request rate per slot to one per cache window.
-    fn try_send_request(&mut self, peer: PeerId, slot: Slot) {
+    /// outgoing request rate per unit to one per cache window.
+    fn try_send_request(&mut self, peer: PeerId, hash: UnitHash) {
         let now = Instant::now();
 
         if self
             .request_sent_at
-            .get(&slot)
+            .get(&hash)
             .filter(|prev| now.duration_since(**prev) < REQUEST_DEDUP_INTERVAL)
             .is_some()
         {
             return;
         }
 
-        self.request_sent_at.insert(slot, now);
+        self.request_sent_at.insert(hash, now);
 
         self.network
-            .send(Recipient::Peer(peer), Message::Request(slot));
+            .send(Recipient::Peer(peer), Message::Request(hash));
     }
 
     /// Walk ancestors of `top` locally and `Request` only the missing
     /// frontier from `sender`. We descend through every
     /// present-but-not-extended ancestor because we already hold its
-    /// parent set; slots whose bodies we lack are requested and
-    /// terminate the walk, as do extended slots and slots we've
+    /// parent set; units whose bodies we lack are requested and
+    /// terminate the walk, as do extended units and units we've
     /// already requested recently (via `try_send_request`).
     fn cascade_parents(&mut self, dbtx: &impl DbRead, sender: PeerId, top: &Unit<D>) {
-        let mut visited: BTreeSet<Slot> = BTreeSet::new();
-        let mut stack: Vec<Slot> = Vec::new();
+        let mut visited: BTreeSet<UnitHash> = BTreeSet::new();
+        let mut stack: Vec<UnitHash> = top.parents.values().copied().collect();
 
-        if let Some(parent_round) = top.round.checked_sub(1) {
-            stack.extend(top.parents.iter().map(|(c, h)| (parent_round, *c, *h)));
-        }
-
-        while let Some(slot) = stack.pop() {
-            if !visited.insert(slot) {
+        while let Some(hash) = stack.pop() {
+            if !visited.insert(hash) {
                 continue;
             }
 
-            if self.is_extended(slot) {
+            if self.is_extended(hash) {
                 continue;
             }
 
-            let Some(signed) = dbtx.get(&self.units_table, &slot) else {
-                self.try_send_request(sender, slot);
+            let Some(signed) = dbtx.get(&self.units_table, &hash) else {
+                self.try_send_request(sender, hash);
                 continue;
             };
 
-            let Some(parent_round) = slot.0.checked_sub(1) else {
-                continue;
-            };
-
-            stack.extend(
-                signed
-                    .unit
-                    .parents
-                    .iter()
-                    .map(|(c, h)| (parent_round, *c, *h)),
-            );
+            stack.extend(signed.unit.parents.values().copied());
         }
     }
 
     /// Reply with the stored body and its creator sig; no reply if we
-    /// don't hold the slot.
-    fn handle_request(&self, dbtx: &impl DbRead, requester: PeerId, slot: Slot) {
-        let Some(signed) = dbtx.get(&self.units_table, &slot) else {
+    /// don't hold the unit.
+    fn handle_request(&self, dbtx: &impl DbRead, requester: PeerId, hash: UnitHash) {
+        let Some(signed) = dbtx.get(&self.units_table, &hash) else {
             return;
         };
 
@@ -330,9 +354,15 @@ where
     }
 
     /// Validate and install a fresh unit body in `BFT_UNITS` under
-    /// `slot` (its `(round, creator, hash)` coordinate, computed by
-    /// the caller). A duplicate body hits the same key and errors.
-    fn insert_unit(&self, dbtx: &WriteTx, signed: &SignedUnit<D>, slot: Slot) -> Result<()> {
+    /// `hash` (its body hash, computed by the caller), then index it
+    /// in `rounds` and advance `own_top` for our own units. A
+    /// duplicate body hits the same key and errors.
+    fn insert_unit(
+        &mut self,
+        dbtx: &WriteTx,
+        signed: &SignedUnit<D>,
+        hash: UnitHash,
+    ) -> Result<()> {
         let unit = &signed.unit;
 
         ensure!(
@@ -363,17 +393,21 @@ where
         );
 
         ensure!(
-            dbtx.insert(&self.units_table, &slot, signed).is_none(),
+            dbtx.insert(&self.units_table, &hash, signed).is_none(),
             "unit already stored",
         );
+
+        self.rounds.entry(unit.round).or_default().insert(hash);
+
+        if unit.creator == self.id && self.own_top.is_none_or(|(top, _)| unit.round > top) {
+            self.own_top = Some((unit.round, hash));
+        }
 
         Ok(())
     }
 
     async fn try_create_unit(&mut self) -> bool {
-        let round = self
-            .highest_unit(&self.db.begin_read(), self.id)
-            .map_or(0, |signed| signed.unit.round + 1);
+        let round = self.own_top.map_or(0, |(top, _)| top + 1);
 
         let Some(parents) = self.parents_for(round) else {
             return false;
@@ -396,7 +430,7 @@ where
             data,
         };
 
-        let slot = unit.slot();
+        let hash = unit.hash();
 
         let signed = SignedUnit {
             sig: self.keychain.sign(self.session, &unit),
@@ -404,17 +438,17 @@ where
         };
 
         // Crash barrier: persist before broadcasting, otherwise a
-        // restart would let us build a *different* unit at this slot
+        // restart would let us build a *different* unit at this round
         // from a fresh data_provider draw — peers that saw the
         // original would consider us a forker.
-        self.insert_unit(&dbtx, &signed, slot)
+        self.insert_unit(&dbtx, &signed, hash)
             .expect("newly built unit must insert");
 
         if !signed.unit.data.is_empty() {
             self.unordered_own_data.insert(round);
         }
 
-        self.try_extend(&dbtx, slot);
+        self.try_extend(&dbtx, hash);
 
         self.run_extender(&dbtx).await;
 
@@ -434,28 +468,44 @@ where
         !self.unordered_own_data.is_empty()
     }
 
-    /// Body present *and* every parent slot is extended.
-    pub(crate) fn is_extended(&self, slot: Slot) -> bool {
-        self.extended.contains_key(&slot)
+    /// Body present *and* every parent is extended.
+    pub(crate) fn is_extended(&self, hash: UnitHash) -> bool {
+        self.extended.contains_key(&hash)
     }
 
-    /// Extend `slot` if eligible, then sweep ascending rounds while
+    /// The stored units of `round`.
+    pub(crate) fn round_units(&self, round: Round) -> BTreeSet<UnitHash> {
+        self.rounds.get(&round).cloned().unwrap_or_default()
+    }
+
+    /// The extended units of `round`.
+    pub(crate) fn extended_at(&self, round: Round) -> BTreeSet<UnitHash> {
+        self.rounds
+            .get(&round)
+            .into_iter()
+            .flatten()
+            .filter(|hash| self.is_extended(**hash))
+            .copied()
+            .collect()
+    }
+
+    /// Extend `hash` if eligible, then sweep ascending rounds while
     /// each sweep produces at least one new extension. Termination is
     /// by induction — a round can only gain extensions when the
     /// previous one did.
-    pub(crate) fn try_extend(&mut self, dbtx: &impl DbRead, slot: Slot) {
-        if !self.maybe_extend(dbtx, slot) {
+    pub(crate) fn try_extend(&mut self, dbtx: &impl DbRead, hash: UnitHash) {
+        let Some(round) = self.maybe_extend(dbtx, hash) else {
             return;
-        }
+        };
 
-        let mut next_round = slot.0.saturating_add(1);
+        let mut next_round = round.saturating_add(1);
 
         loop {
-            let candidates = self.round_slots(dbtx, next_round);
+            let candidates = self.round_units(next_round);
 
             let mut any_extended = false;
             for candidate in candidates {
-                if self.maybe_extend(dbtx, candidate) {
+                if self.maybe_extend(dbtx, candidate).is_some() {
                     any_extended = true;
                 }
             }
@@ -468,37 +518,49 @@ where
         }
     }
 
-    /// Returns `true` iff this call transitioned the slot to extended.
-    fn maybe_extend(&mut self, dbtx: &impl DbRead, slot: Slot) -> bool {
-        if self.is_extended(slot) {
-            return false;
+    /// Returns the unit's round iff this call transitioned it to
+    /// extended. Every parent must be an extended unit created by the
+    /// peer it is keyed under at exactly `round - 1` — this pins each
+    /// unit's claimed position to its parents' (inductively, down to
+    /// round 0), so extended rounds are gap-free and a forker cannot
+    /// key its own branches under other creators to fake the
+    /// distinct-creator quorums the decision rule tallies. Round-0
+    /// units have empty parent maps (enforced at insert), so their
+    /// parent check is vacuously true.
+    fn maybe_extend(&mut self, dbtx: &impl DbRead, hash: UnitHash) -> Option<Round> {
+        if self.is_extended(hash) {
+            return None;
         }
 
-        let Some(signed) = dbtx.get(&self.units_table, &slot) else {
-            return false;
-        };
+        let signed = dbtx.get(&self.units_table, &hash)?;
 
-        if let Some(parent_round) = slot.0.checked_sub(1) {
-            let parents_fed = signed
-                .unit
-                .parents
-                .iter()
-                .all(|(c, h)| self.is_extended((parent_round, *c, *h)));
-            if !parents_fed {
-                return false;
-            }
+        let parents_fed = signed.unit.parents.iter().all(|(creator, parent)| {
+            self.extended
+                .get(parent)
+                .is_some_and(|p| p.creator == *creator && p.round + 1 == signed.unit.round)
+        });
+
+        if !parents_fed {
+            return None;
         }
 
-        self.extended.insert(slot, signed.unit.parents);
+        self.extended.insert(
+            hash,
+            Extended {
+                round: signed.unit.round,
+                creator: signed.unit.creator,
+                parents: signed.unit.parents,
+            },
+        );
 
-        true
+        Some(signed.unit.round)
     }
 
-    /// Our own slot at `round-1` plus the lowest-`PeerId`-keyed
-    /// `threshold - 1` other extended slots, or `None` if our own slot
-    /// isn't extended yet or fewer than `threshold` slots are. Empty
-    /// map for round 0. Filtering by `extended` (not mere presence)
-    /// guarantees any unit we author is itself extendable on receivers.
+    /// Our own unit at `round-1` plus the lowest-`UnitHash`-keyed
+    /// `threshold - 1` other extended units, or `None` if our own unit
+    /// isn't extended yet or fewer than `threshold` are. Empty map for
+    /// round 0. Filtering by `extended` (not mere presence) guarantees
+    /// any unit we author is itself extendable on receivers.
     ///
     /// The self-parent is a creation-side rule only — receivers don't
     /// verify it. It chains our column: every unit of ours is an
@@ -514,8 +576,10 @@ where
         // don't verify which branch we picked.
         let mut extended_row: BTreeMap<PeerId, UnitHash> = BTreeMap::new();
 
-        for ((_, creator, hash), _) in self.extended.range(round_range(parent_round)) {
-            extended_row.entry(*creator).or_insert(*hash);
+        for hash in self.extended_at(parent_round) {
+            let extended = self.extended.get(&hash).expect("filtered on extended");
+
+            extended_row.entry(extended.creator).or_insert(hash);
         }
 
         let own = *extended_row.get(&self.id)?;
@@ -528,24 +592,5 @@ where
             .collect();
 
         (parents.len() == t).then_some(parents)
-    }
-
-    // --- db-read helpers over `units_table` ---
-
-    pub(crate) fn round_slots(&self, dbtx: &impl DbRead, round: Round) -> Vec<Slot> {
-        dbtx.range(&self.units_table, round_range(round), |it| {
-            it.map(|(slot, _)| slot).collect()
-        })
-    }
-
-    pub(crate) fn highest_unit(
-        &self,
-        dbtx: &impl DbRead,
-        creator: PeerId,
-    ) -> Option<SignedUnit<D>> {
-        dbtx.iter(&self.units_table, |it| {
-            it.rev()
-                .find_map(|((_, c, _), s)| (c == creator).then_some(s))
-        })
     }
 }

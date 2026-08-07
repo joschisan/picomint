@@ -8,10 +8,12 @@
 //! peers' `ordered_rx` until `ROUND_LIMIT` is reached, then aborts the
 //! engine tasks and asserts every peer observed the same total order
 //! of `(creator, item)` pairs. The Byzantine tests replace peer 0 with
-//! hand-built forked units covering the three fork outcomes: split
-//! votes (skip), unanimous votes (commit), and a forked voter one
-//! round up; the replay test restarts an engine on its persisted units
-//! and asserts the emission sequence reproduces exactly.
+//! hand-built forked units covering the three fork outcomes — split
+//! votes (both branches decide 0), unanimous votes (commit), and a
+//! forked voter one round up — plus units with spoofed parent
+//! positions; the replay
+//! test restarts an engine on its persisted units and asserts the
+//! emission sequence reproduces exactly.
 
 use std::collections::BTreeMap;
 use std::future::pending;
@@ -21,8 +23,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_channel::{Receiver, Sender};
 use async_trait::async_trait;
 use picomint_bft::{
-    DataProvider, Engine, INetwork, Keychain, Message, Recipient, Round, SignedUnit, Slot, Unit,
-    UnitHash,
+    DataProvider, Engine, INetwork, Keychain, Message, Recipient, Round, SignedUnit, Unit, UnitHash,
 };
 use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
 use picomint_core::{NumPeers, PeerId};
@@ -31,7 +32,7 @@ use rand::Rng;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-table!(BftUnits, Slot => SignedUnit<u64>, "bft-units");
+table!(BftUnits, UnitHash => SignedUnit<u64>, "bft-units");
 
 /// Per-recipient probability of silently dropping a message in the mock
 /// network, used by the 4-peer tests. Each unicast send and each
@@ -375,10 +376,9 @@ async fn engines_agree_on_ordered_data() {
 /// Peer 0 is Byzantine: it signs two different round-0 units (a fork)
 /// and shows one branch to peers 1 and 2 and the other to peer 3, then
 /// goes silent. The three honest engines must still agree on one total
-/// order — the forked slot splits votes, so no branch can be certified
-/// and the candidate resolves to skip through the anchor rule, while
-/// the branches themselves may still be swept as ancestry of honest
-/// heads.
+/// order — the fork splits votes, so neither branch gathers a
+/// 1-certificate and both decide 0, while the branches themselves may
+/// still be swept as ancestry of honest heads.
 #[tokio::test]
 async fn engines_agree_under_forking_peer() {
     let n = NumPeers::from(N_PEERS);
@@ -528,6 +528,106 @@ async fn engines_agree_under_forking_voter() {
         reference.contains(&(forker, 0)),
         "the forker's round-0 payload must be swept as ancestry",
     );
+}
+
+/// Peer 0 attacks the parent position check: it publishes two round-0
+/// branches to everyone, then two structurally malformed units — a
+/// round-1 unit keying its own second branch under an honest peer's id
+/// (creator spoof, a fabricated distinct-creator quorum), and a unit
+/// claiming round 2 directly over round-0 parents (round skip, a
+/// gap in extended rounds). Both pass admission (size, key set, sig)
+/// but must never extend, so their payloads can never be referenced by
+/// honest units nor swept into the order.
+#[tokio::test]
+async fn engines_ignore_spoofed_parent_positions() {
+    let n = NumPeers::from(N_PEERS);
+    let keychains = build_keychains(n);
+    let mut channels = MockChannel::mesh(n, DROP_RATE);
+
+    let forker = PeerId::from(0u8);
+    let forker_channel = channels.remove(&forker).expect("mesh built above");
+
+    let branch_a = build_signed_unit(&keychains[&forker], 0, forker, BTreeMap::new(), 0);
+    let branch_b = build_signed_unit(&keychains[&forker], 0, forker, BTreeMap::new(), 1);
+
+    for recipient in [1u8, 2u8, 3u8] {
+        forker_channel.deliver(PeerId::from(recipient), Message::Unit(branch_a.clone()));
+        forker_channel.deliver(PeerId::from(recipient), Message::Unit(branch_b.clone()));
+    }
+
+    let engines = spawn_engines(n, &keychains, channels);
+
+    // Harvest two honest round-0 hashes from the forker's inbox — from
+    // honest round-0 broadcasts directly, or from the parent maps of
+    // honest round-1 broadcasts when the originals were dropped.
+    let mut harvested: BTreeMap<PeerId, UnitHash> = BTreeMap::new();
+
+    while harvested.len() < 2 {
+        let (_, msg) = forker_channel.rx.recv().await.expect("mesh alive");
+
+        let Message::Unit(signed) = msg else { continue };
+
+        match signed.unit.round {
+            0 => {
+                harvested.insert(signed.unit.creator, signed.unit.hash());
+            }
+            1 => {
+                harvested.extend(
+                    signed
+                        .unit
+                        .parents
+                        .iter()
+                        .filter(|(creator, _)| **creator != forker)
+                        .map(|(creator, hash)| (*creator, *hash)),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    let (honest_x, honest_y) = {
+        let mut it = harvested.into_iter();
+        (
+            it.next().expect("harvested two"),
+            it.next().expect("harvested two"),
+        )
+    };
+
+    let spoofed_parents: BTreeMap<PeerId, UnitHash> = BTreeMap::from([
+        (forker, branch_a.unit.hash()),
+        (honest_x.0, branch_b.unit.hash()),
+        (honest_y.0, honest_y.1),
+    ]);
+
+    let creator_spoof = build_signed_unit(&keychains[&forker], 1, forker, spoofed_parents, 42);
+
+    let skip_parents: BTreeMap<PeerId, UnitHash> =
+        BTreeMap::from([(forker, branch_a.unit.hash()), honest_x, honest_y]);
+
+    let round_skip = build_signed_unit(&keychains[&forker], 2, forker, skip_parents, 43);
+
+    for recipient in [1u8, 2u8, 3u8] {
+        forker_channel.deliver(
+            PeerId::from(recipient),
+            Message::Unit(creator_spoof.clone()),
+        );
+        forker_channel.deliver(PeerId::from(recipient), Message::Unit(round_skip.clone()));
+    }
+
+    let sequences = collect_sequences(engines.ordered_rxs).await;
+
+    for h in engines.handles {
+        h.abort();
+    }
+
+    let reference = assert_agreement(&sequences);
+
+    for spoofed in [42u64, 43u64] {
+        assert!(
+            !reference.contains(&(forker, spoofed)),
+            "a unit with spoofed parent positions must never be ordered",
+        );
+    }
 }
 
 /// Restarting an engine on its persisted unit table must reproduce the

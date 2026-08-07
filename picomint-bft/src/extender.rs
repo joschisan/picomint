@@ -5,8 +5,8 @@
 //! not unpredictable.
 //!
 //! For each round R, every extended round-R branch is a *candidate*,
-//! walked in a deterministic priority order seeded by the round. Each
-//! candidate resolves to a binary include/exclude decision:
+//! walked in ascending hash order. Each candidate resolves to a
+//! binary include/exclude decision:
 //!
 //! - A round-`R+1` unit **votes** 1 for candidate `B` iff its parent
 //!   entry for `B`'s creator is exactly `B`'s hash.
@@ -28,16 +28,22 @@
 //! candidates fast; the seeded bits from `R+4` break middle-band ties
 //! within expected one extra round under random network behavior.
 //!
-//! The round head is the first candidate in priority order decided 1,
-//! after every earlier candidate is decided 0. Walking a deterministic
-//! (rather than secret) priority order is safe because of the coverage
-//! lemma (C.10): a round-R candidate outside the ancestry of *any*
-//! round-`R+3` unit can never gather a round-`R+3` yes-vote — the
-//! voter's unanimous parents would intersect that unit's parents in an
-//! honest creator above the candidate — so it is globally doomed to
-//! decide 0 and may be skipped without waiting. In particular every
-//! round-R unit we have never even heard of is outside our held
-//! `R+3` ancestry, so no unknown candidate can outrank a chosen head.
+//! The round head is the first candidate in hash order decided 1,
+//! after every earlier candidate is decided 0; an undecided candidate
+//! blocks the round until later rounds decide it. The walk order only
+//! needs to be *common* across peers, not unpredictable — the paper's
+//! secret permutation defends latency against an adaptive network
+//! adversary the benign model excludes, and a creator can grind its
+//! body hash for early position under any public order. Head election
+//! waits for an extended round-`R+3` unit, which is what makes
+//! walking a deterministic (rather than secret) order over the
+//! *local* candidate set safe — the coverage lemma (C.10): a round-R candidate
+//! outside the ancestry of any round-`R+3` unit can never gather a
+//! round-`R+3` yes-vote, because the voter's unanimous parents would
+//! intersect that unit's parents in an honest creator above the
+//! candidate — so it is globally doomed to decide 0. Every round-R
+//! unit we have never even heard of is outside our held `R+3` unit's
+//! ancestry, so no unknown candidate can outrank a chosen head.
 //!
 //! On commit, the head's not-yet-emitted causal ancestors are
 //! extracted BFS-style and sent through the ordered-item channel in
@@ -46,42 +52,31 @@
 //! peer, not single-branch emission; item processing downstream
 //! validates each item on its own terms.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::VecDeque;
 
 use bitcoin::hashes::Hash as _;
-use bitcoin::hashes::sha256;
-use picomint_core::PeerId;
 use picomint_encoding::Encodable;
 use picomint_redb::DbRead;
 
 use crate::data::DataProvider;
 use crate::engine::Engine;
-use crate::unit::{Round, Slot, Unit, UnitData, UnitHash, round_range};
+use crate::unit::{Round, Unit, UnitData, UnitHash};
 
-enum Decision {
-    Commit(Slot),
-    Skip,
-}
-
-/// The common-vote bit for a candidate at round `candidate.0` as seen
-/// from round `round`: fixed 1 two rounds up (fast include), fixed 0
-/// three rounds up (fast exclusion of invisible candidates), seeded
-/// pseudo-random above (tie-breaking). Identical at every peer by
-/// construction — commonness, not unpredictability, is what safety
-/// needs under a benign network.
-fn common_vote(candidate: Slot, round: Round) -> bool {
-    match round - candidate.0 {
+/// The common-vote bit for a candidate of round `candidate_round` as
+/// seen from round `round`: fixed 1 two rounds up (fast include),
+/// fixed 0 three rounds up (fast exclusion of invisible candidates),
+/// seeded pseudo-random above (tie-breaking). Identical at every peer
+/// by construction — commonness, not unpredictability, is what safety
+/// needs under a benign network. The round input is load-bearing: the
+/// same candidate is re-evaluated at successive rounds and needs a
+/// fresh bit each time, or a middle-band candidate could never
+/// resolve.
+fn common_vote(candidate: UnitHash, candidate_round: Round, round: Round) -> bool {
+    match round - candidate_round {
         2 => true,
         3 => false,
-        _ => (round, candidate.2).consensus_hash_sha256().to_byte_array()[0] & 1 == 1,
+        _ => (round, candidate).consensus_hash_sha256().to_byte_array()[0] & 1 == 1,
     }
-}
-
-/// The deterministic priority by which round-`round` candidates are
-/// walked; seeded by the round number so every peer computes the same
-/// order.
-fn priority(round: Round, candidate: Slot) -> sha256::Hash {
-    (round, candidate.2).consensus_hash_sha256()
 }
 
 impl<P, D> Engine<P, D>
@@ -89,110 +84,60 @@ where
     D: UnitData,
     P: DataProvider<D>,
 {
-    /// Drain round decisions from `self.next_decide_round` upward
-    /// while each one resolves to `Commit` or `Skip`. For every
-    /// committed head, BFS-extract the not-yet-emitted causal
-    /// ancestors (oldest-first) and send each item through
-    /// `self.ordered_tx`.
+    /// Drain round heads from `self.next_decide_round` upward while
+    /// each round resolves. For every head, BFS-extract the
+    /// not-yet-emitted causal ancestors (oldest-first) and send each
+    /// item through `self.ordered_tx`.
     pub(crate) async fn run_extender(&mut self, dbtx: &impl DbRead) {
-        while let Some(decision) = self.choose_head(self.next_decide_round) {
-            if let Decision::Commit(head) = decision {
-                let batch = self.bfs_batch(dbtx, head);
+        while let Some(head) = self.choose_head(self.next_decide_round) {
+            let batch = self.bfs_batch(dbtx, head);
 
-                for u in batch {
-                    for item in u.data {
-                        // Unbounded channel; send() returns Err only
-                        // when the receiver is dropped — which means
-                        // the daemon is gone and we'd be shutting
-                        // down anyway.
-                        let _ = self.ordered_tx.send((u.round, u.creator, item)).await;
-                    }
+            for u in batch {
+                for item in u.data {
+                    // Unbounded channel; send() returns Err only
+                    // when the receiver is dropped — which means
+                    // the daemon is gone and we'd be shutting
+                    // down anyway.
+                    let _ = self.ordered_tx.send((u.round, u.creator, item)).await;
+                }
 
-                    if u.creator == self.id {
-                        self.unordered_own_data.remove(&u.round);
-                    }
+                if u.creator == self.id {
+                    self.unordered_own_data.remove(&u.round);
                 }
             }
 
             self.next_decide_round += 1;
-
-            // Decisions only ever concern candidates at or above the
-            // cursor, so cached verdicts and votes below it are dead
-            // weight.
-            let bound = (self.next_decide_round, PeerId::from(0u8), UnitHash::min());
-
-            self.decided = self.decided.split_off(&bound);
-
-            self.votes = self
-                .votes
-                .split_off(&(bound, (0, PeerId::from(0u8), UnitHash::min())));
         }
     }
 
-    fn highest_extended_round(&self) -> Round {
-        self.extended
-            .iter()
-            .next_back()
-            .map_or(0, |((r, _, _), _)| *r)
-    }
-
     /// Resolve `round`'s head: walk the extended round candidates in
-    /// priority order, skipping candidates decided 0 and candidates
-    /// outside our `round + 3` coverage (globally doomed to 0 by the
-    /// coverage lemma). The first candidate decided 1 is the head; an
+    /// ascending hash order. The first candidate decided 1 is the head; an
     /// undecided candidate means wait for more rounds. Requires at
-    /// least one extended `round + 3` unit — before that, no coverage
-    /// statement about unknown candidates is possible.
-    fn choose_head(&mut self, round: Round) -> Option<Decision> {
-        let cover = *self.extended.range(round_range(round + 3)).next()?.0;
+    /// least one extended `round + 3` unit — before that, an unknown
+    /// candidate could still be decided 1 elsewhere and outrank any
+    /// head chosen from the local candidate set.
+    ///
+    /// A full walk with every candidate decided 0 also waits — the
+    /// paper's trailing `output ⊥`, dead under its Lemma C.13 (some
+    /// candidate is referenced by `f+1` honest next-round units, so
+    /// every unit two rounds up votes 1 on it and it can never gather
+    /// a 0-certificate) whenever every honest peer eventually holds a
+    /// unit in the next round, which submission fan-out and sequential
+    /// own-round backfill provide.
+    fn choose_head(&mut self, round: Round) -> Option<UnitHash> {
+        if self.extended_at(round + 3).is_empty() {
+            return None;
+        }
 
-        let covered = self.ancestors_at(cover, round);
-
-        let mut candidates: Vec<Slot> = self
-            .extended
-            .range(round_range(round))
-            .map(|(slot, _)| *slot)
-            .collect();
-
-        candidates.sort_by_key(|slot| priority(round, *slot));
-
-        for candidate in candidates {
-            if !covered.contains(&candidate) {
-                continue;
-            }
-
+        for candidate in self.extended_at(round) {
             match self.decide(candidate) {
-                Some(true) => return Some(Decision::Commit(candidate)),
+                Some(true) => return Some(candidate),
                 Some(false) => continue,
                 None => return None,
             }
         }
 
-        Some(Decision::Skip)
-    }
-
-    /// The round-`round` slots in the causal history of `top`,
-    /// collected by a level walk over the in-memory parent maps.
-    fn ancestors_at(&self, top: Slot, round: Round) -> BTreeSet<Slot> {
-        let mut level: BTreeSet<Slot> = BTreeSet::from([top]);
-
-        for _ in round..top.0 {
-            level = level
-                .iter()
-                .flat_map(|slot| {
-                    let parents = self
-                        .extended
-                        .get(slot)
-                        .expect("extended unit's ancestry is extended");
-
-                    parents
-                        .iter()
-                        .map(move |(creator, hash)| (slot.0 - 1, *creator, *hash))
-                })
-                .collect();
-        }
-
-        level
+        None
     }
 
     /// The candidate's include/exclude decision, or `None` while
@@ -200,33 +145,36 @@ where
     /// candidate for one whose parents carry `2f+1` votes matching the
     /// round's common vote. Decisions are stable — they propagate to
     /// every later round's votes — so they are cached for the engine's
-    /// lifetime and pruned below the cursor.
-    fn decide(&mut self, candidate: Slot) -> Option<bool> {
+    /// lifetime.
+    fn decide(&mut self, candidate: UnitHash) -> Option<bool> {
         if let Some(bit) = self.decided.get(&candidate) {
             return Some(*bit);
         }
 
-        for round in (candidate.0 + 2)..=self.highest_extended_round() {
-            let v = common_vote(candidate, round);
+        let candidate_round = self
+            .extended
+            .get(&candidate)
+            .expect("candidates are extended")
+            .round;
 
-            let deciders: Vec<Slot> = self
-                .extended
-                .range(round_range(round))
-                .map(|(slot, _)| *slot)
-                .collect();
+        for round in (candidate_round + 2).. {
+            if self.extended_at(round).is_empty() {
+                return None;
+            }
 
-            for unit in deciders {
+            let v = common_vote(candidate, candidate_round, round);
+
+            for unit in self.extended_at(round) {
                 let parents = self
                     .extended
                     .get(&unit)
                     .expect("iterated over extended units")
+                    .parents
                     .clone();
 
                 let matching = parents
-                    .iter()
-                    .filter(|(creator, hash)| {
-                        self.vote(candidate, (unit.0 - 1, **creator, **hash)) == v
-                    })
+                    .values()
+                    .filter(|parent| self.vote(candidate, **parent) == v)
                     .count();
 
                 if matching >= self.n.threshold() {
@@ -244,25 +192,31 @@ where
     /// membership one round up, unanimity-else-common-vote above,
     /// memoized in `self.votes` (votes are pure functions of the
     /// unit's fixed ancestry).
-    fn vote(&mut self, candidate: Slot, unit: Slot) -> bool {
-        if unit.0 == candidate.0 + 1 {
-            return self
-                .extended
-                .get(&unit)
-                .expect("voter is extended")
-                .get(&candidate.1)
-                == Some(&candidate.2);
+    fn vote(&mut self, candidate: UnitHash, unit: UnitHash) -> bool {
+        let cand = self
+            .extended
+            .get(&candidate)
+            .expect("candidate is extended");
+
+        let voter = self.extended.get(&unit).expect("voter is extended");
+
+        if voter.round == cand.round + 1 {
+            return voter.parents.get(&cand.creator) == Some(&candidate);
         }
 
         if let Some(bit) = self.votes.get(&(candidate, unit)) {
             return *bit;
         }
 
-        let parents = self.extended.get(&unit).expect("voter is extended").clone();
+        let default = common_vote(candidate, cand.round, voter.round);
 
-        let parent_votes: Vec<bool> = parents
-            .iter()
-            .map(|(creator, hash)| self.vote(candidate, (unit.0 - 1, *creator, *hash)))
+        let parent_votes: Vec<bool> = voter
+            .parents
+            .values()
+            .copied()
+            .collect::<Vec<UnitHash>>()
+            .into_iter()
+            .map(|parent| self.vote(candidate, parent))
             .collect();
 
         let bit = if parent_votes.iter().all(|vote| *vote) {
@@ -270,7 +224,7 @@ where
         } else if parent_votes.iter().all(|vote| !*vote) {
             false
         } else {
-            common_vote(candidate, unit.0)
+            default
         };
 
         self.votes.insert((candidate, unit), bit);
@@ -279,15 +233,18 @@ where
     }
 
     /// BFS over the head's not-yet-emitted ancestors, marking each
-    /// visited slot in `self.emitted` as we enqueue it. Returns the
-    /// units oldest-first so the caller emits them in that order.
-    fn bfs_batch(&mut self, dbtx: &impl DbRead, head: Slot) -> Vec<Unit<D>> {
+    /// visited unit in `self.emitted` as we enqueue it. Returns the
+    /// units oldest-first (reversed BFS): rounds ascend since parents
+    /// sit exactly one round down, so every peer's own units emit in
+    /// submission order. Within a round the order is BFS discovery — a
+    /// deterministic function of the head and the emitted set, hence
+    /// identical on every peer, which is all the ordering needs; the
+    /// paper's hash tie-break within rounds is not load-bearing.
+    fn bfs_batch(&mut self, dbtx: &impl DbRead, head: UnitHash) -> Vec<Unit<D>> {
         let mut batch = Vec::new();
         let mut queue = VecDeque::new();
 
-        if !self.emitted.insert(head) {
-            return batch;
-        }
+        assert!(self.emitted.insert(head));
 
         let signed = dbtx
             .get(&self.units_table, &head)
@@ -296,21 +253,19 @@ where
         queue.push_back(signed.unit);
 
         while let Some(unit) = queue.pop_front() {
-            if let Some(parent_round) = unit.round.checked_sub(1) {
-                for (parent_creator, parent_hash) in &unit.parents {
-                    let slot = (parent_round, *parent_creator, *parent_hash);
-
-                    if self.emitted.contains(&slot) {
-                        continue;
-                    }
-
-                    if let Some(p) = dbtx.get(&self.units_table, &slot) {
-                        // Tentatively mark so the deeper BFS doesn't enqueue twice.
-                        self.emitted.insert(slot);
-
-                        queue.push_back(p.unit);
-                    }
+            for parent in unit.parents.values() {
+                if self.emitted.contains(parent) {
+                    continue;
                 }
+
+                let p = dbtx
+                    .get(&self.units_table, parent)
+                    .expect("ancestors of an extended head are stored");
+
+                // Tentatively mark so the deeper BFS doesn't enqueue twice.
+                self.emitted.insert(*parent);
+
+                queue.push_back(p.unit);
             }
 
             batch.push(unit);
