@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use picomint_core::PeerId;
 use picomint_encoding::{Decodable, Encodable};
 
-use crate::unit::{SignedUnit, Slot, UnitData};
+use crate::unit::{SignedUnit, UnitData, UnitHash};
 
 /// Wire messages between peers. See `README.md` for the protocol;
 /// the sender's `PeerId` is attached by the network layer.
@@ -14,10 +14,10 @@ pub enum Message<D: UnitData> {
     /// creator's anti-entropy push of its own column, and as the sole
     /// `Request` response.
     Unit(SignedUnit<D>),
-    /// Targeted backfill of the exact body pinned by the slot's hash.
-    /// The recipient replies with `Unit` if it holds the body;
-    /// otherwise no reply.
-    Request(Slot),
+    /// Targeted backfill of the exact body pinned by the hash. The
+    /// recipient replies with `Unit` if it holds the body; otherwise
+    /// no reply.
+    Request(UnitHash),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

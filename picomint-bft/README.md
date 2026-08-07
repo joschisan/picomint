@@ -54,22 +54,22 @@ recovery at the 1 Hz anti-entropy cadence, not by decision depth.
   from a previous session fails verification.
 - **Round** — a row of the DAG. Round 0 is the root row; its units
   carry no parents.
-- **UnitHash** — the sha256 consensus-hash of a unit body. Parent
-  references pin the exact parent body via this hash.
-- **Slot** — a `(round, creator, hash)` coordinate: the storage key of
-  a unit body. The `(round, creator)` prefix names the position the
-  body claims; the hash disambiguates fork branches within it. An
-  honest creator has exactly one branch per position; a Byzantine
-  creator may have several, stored side by side.
-- **Unit** — the body at a slot: the creator's payload (`Vec<D>`),
-  parent map, and identifying metadata. Defined in [`unit.rs`].
+- **UnitHash** — the sha256 consensus-hash of a unit body; the unit's
+  identity everywhere: storage key of `BFT_UNITS`, element of the
+  in-memory sets, and how parents pin the exact parent body.
+- **Position** — the `(round, creator)` pair a body claims, carried
+  inside the body as an annotation. An honest creator has exactly one
+  body per position; a Byzantine creator may have several — fork
+  branches, stored side by side under their own hashes.
+- **Unit** — a DAG node's body: the creator's payload (`Vec<D>`),
+  parent map, and position. Defined in [`unit.rs`].
 - **SignedUnit** — a unit plus its creator's schnorr signature over
   `(session, unit)`. The one shape units travel on the wire and
   persist in storage.
-- **Extended** — a slot's body is stored *and* every parent slot is
-  also extended. Equivalent to "this slot is in the in-memory
-  `extended` set the extender scans". A slot must be extended before
-  it can be used as a parent for a future own unit.
+- **Extended** — a unit's body is stored *and* every parent is also
+  extended. Equivalent to "this hash is in the in-memory `extended`
+  map the extender scans". A unit must be extended before it can be
+  used as a parent for a future own unit.
 
 ## Wire protocol
 
@@ -79,14 +79,14 @@ layer; never carried in the payload.
 ```rust
 enum Message<D> {
     Unit(SignedUnit<D>),
-    Request(Slot),
+    Request(UnitHash),
 }
 ```
 
 | Message | Bytes | Emission rule |
 |---|---|---|
-| `Unit` | `~70 + 32·|parents| + |D|` | Creator's broadcast at unit-creation; creator's anti-entropy push of own highest slot; sole `Request` response. |
-| `Request` | `~37` | On-receive demand-pull of a missing ancestor, on receipt of a `Unit`. |
+| `Unit` | `~70 + 32·|parents| + |D|` | Creator's broadcast at unit-creation; creator's anti-entropy push of own highest unit; sole `Request` response. |
+| `Request` | `~33` | On-receive demand-pull of a missing ancestor, on receipt of a `Unit`. |
 
 Every broadcast (`Recipient::Everyone`) carries content authored by
 the sender: their own newly-created unit or their own anti-entropy
@@ -99,25 +99,32 @@ All persisted state lives in one redb table. It is *declared by the
 daemon* and passed into `Engine::new`; bft only reads and writes it:
 
 ```rust
-units_table: Slot => SignedUnit<D>   // BFT_UNITS, Slot = (Round, PeerId, UnitHash)
+units_table: UnitHash => SignedUnit<D>   // BFT_UNITS
 ```
 
 Everything else is in-memory state on `Engine<P, D>`, rebuilt on
 startup and never persisted:
 
 ```rust
-extended:          BTreeMap<Slot, Parents>,     // stored + all parents extended, mapped to parent maps
-emitted:           BTreeSet<Slot>,              // already sent through ordered_tx
-next_decide_round: Round,                       // extender cursor
-decided:           BTreeMap<Slot, bool>,        // candidate decisions, pruned below the cursor
-votes:             BTreeMap<(Slot, Slot), bool>, // memoized virtual votes, pruned with decided
-request_sent_at:   BTreeMap<Slot, Instant>,     // demand-pull throttle
+rounds:             BTreeMap<Round, BTreeSet<UnitHash>>,  // round index over units_table
+extended:           BTreeMap<UnitHash, Extended>,   // stored + all parents extended; Extended = position + parent map
+emitted:            BTreeSet<UnitHash>,             // already sent through ordered_tx
+next_decide_round:  Round,                          // extender cursor
+decided:            BTreeMap<UnitHash, bool>,       // candidate decisions, kept for the engine's lifetime
+votes:              BTreeMap<(UnitHash, UnitHash), bool>, // memoized virtual votes, kept with decided
+unordered_own_data: BTreeSet<Round>,                // own rounds with unemitted items (work gate)
+own_top:            Option<(Round, UnitHash)>,      // own column top: next-round base + anti-entropy push
+request_sent_at:    BTreeMap<UnitHash, Instant>,    // demand-pull throttle
 ```
 
-The `extended` map carries each extended unit's parent map, which is
-the complete evidence the decision rule needs — virtual votes are
-computed from parent maps alone, so the extender never touches the
-db except to read payloads at emission time.
+The `rounds` index is written at exactly one point (`insert_unit`)
+and provides every per-round scan: the extension cascade over stored
+units, and — filtered by `extended` membership — the extender's
+candidate and decider walks. The `extended` map carries each
+extended unit's position and parent map, which is the complete
+evidence the decision rule needs — virtual votes are computed from
+parent maps alone, so the extender never touches the db except to
+read payloads at emission time.
 
 Persistence is just the per-message redb commit. Inbound `Unit`
 commits are **relaxed** (non-fsync): they are peer-originated and
@@ -125,22 +132,23 @@ re-fetched via anti-entropy after a crash. The fsync barrier is
 own-unit creation, whose durable commit before broadcast both
 prevents our own equivocation and flushes the relaxed backlog.
 
-On restart `replay` re-runs `try_extend` from every round-0 creator
-and then `run_extender` once. Because `try_extend` is a fixpoint over
-the parent-extended predicate and the extender is deterministic over
-the stored unit set, this reconstructs the exact same `extended` /
-`emitted` / `next_decide_round` and re-emits every previously-committed
-item through `ordered_tx`; the caller's idempotency check absorbs the
+On restart `replay` rebuilds the indexes with one table scan, re-runs
+`try_extend` from every round-0 unit, and then `run_extender` once.
+Because `try_extend` is a fixpoint over the parent-extended predicate
+and the extender is deterministic over the stored unit set, this
+reconstructs the exact same `extended` / `emitted` /
+`next_decide_round` and re-emits every previously-committed item
+through `ordered_tx`; the caller's idempotency check absorbs the
 redelivery.
 
-## Lifecycle of a slot
+## Lifecycle of a unit
 
 The protocol is split into two gates with distinct semantics.
 
 ### Admission (lax)
 
-`insert_unit(dbtx, signed)` installs a fresh slot from a `Unit`
-message. Admission checks:
+`insert_unit(dbtx, signed, hash)` installs a fresh body from a `Unit`
+message and indexes it in `rounds`. Admission checks:
 
 - The encoded body is within `BFT_UNIT_BYTE_LIMIT` (50 KB).
 - Structural validity: round 0 has an empty parent map; round R>0 has
@@ -156,20 +164,28 @@ errors and the per-message write rolls back.
 
 ### Promotion (strict, ancestrally complete)
 
-`try_extend(round, creator)` walks ascending rounds extending slots
-that satisfy:
+`try_extend(hash)` walks ascending rounds of the `rounds` index
+extending units that satisfy:
 
 1. Not already in `extended`.
 2. Body stored in `units_table`.
-3. Round 0, *or* every parent slot is already in `extended`.
+3. Every parent is already in `extended`, was created by the peer it
+   is keyed under, and sits at exactly `round − 1` (round-0 parent
+   maps are empty, so vacuously true).
 
-Extension inserts `(round, creator)` into `extended` — the slot set
-the extender scans when extracting the total order. The cascade sweeps
-`round + 1`, `round + 2`, … until a sweep produces zero new
-extensions, which by induction means no higher round can have new
-extensions either.
+The parent position check pins each unit's claimed position to its
+parents' — inductively down to round 0 — so extended rounds are
+gap-free and a forker cannot key its own branches under other
+creators to fake the distinct-creator quorums the decision rule
+tallies.
 
-A slot must be `extended` to be used as a parent in own-unit
+Extension records the unit's position and parent map in `extended` —
+the unit set the extender scans when extracting the total order. The
+cascade sweeps `round + 1`, `round + 2`, … until a sweep produces
+zero new extensions, which by induction means no higher round can
+have new extensions either.
+
+A unit must be `extended` to be used as a parent in own-unit
 construction (`parents_for`). This guarantees every unit we author is
 itself extendable on receivers that hold those parents extended.
 
@@ -179,12 +195,12 @@ Two propagation mechanisms, each with a narrow role:
 
 **Anti-entropy push (1 Hz)**: each peer sends its *own* highest unit
 to everyone. Each peer is canonical for its own column of the DAG;
-pushing only the own slot gives laggards a reentry point. Other peers'
+pushing only the own unit gives laggards a reentry point. Other peers'
 columns flow only on demand-pull.
 
 **Demand-pull (event-driven)**: on every receive of a `Unit`, the
 receiver walks back through the message's not-yet-`extended` ancestors
-and unicasts `Request(slot)` to the immediate sender for any slot
+and unicasts `Request(hash)` to the immediate sender for any ancestor
 whose body it does not yet hold. Present-but-not-extended ancestors
 are descended through (we already hold their parent maps); missing
 bodies are requested and terminate the walk.
@@ -192,16 +208,18 @@ bodies are requested and terminate the walk.
 Re-issuing on every receive (fresh or duplicate) makes the mechanism
 self-healing against dropped requests: the next time the pushing peer
 ships the same child, we re-ask for the still-not-extended parents. A
-per-slot `REQUEST_DEDUP_INTERVAL` throttle keeps those re-asks from
+per-unit `REQUEST_DEDUP_INTERVAL` throttle keeps those re-asks from
 re-firing the whole ancestor walk every second.
 
 ## Total ordering
 
 Extended units enter the extender, which runs a deterministic
 QuickAleph-style virtual-voting rule per round. Every extended
-round-`R` branch is a *candidate*, walked in a priority order seeded
-by the round; each candidate resolves to a binary include/exclude
-decision:
+round-`R` branch is a *candidate*, walked in ascending hash order —
+the walk order only needs to be *common* across peers, and a creator
+can grind its body hash for early position under any public order,
+so re-hashing with the round would buy nothing. Each candidate
+resolves to a binary include/exclude decision:
 
 - A round-`R+1` unit **votes** 1 for branch `B` iff its parent entry
   for `B`'s creator is exactly `B`'s hash.
@@ -215,13 +233,16 @@ decision:
   `v` of its round iff at least `2f+1` of its parents vote `v`. One
   deciding unit anywhere suffices — the decision propagates
   structurally (see Safety).
-- The round **head** is the first candidate in priority order decided
-  1, once every earlier candidate is decided 0. Candidates outside
-  the ancestry of a held `R+3` unit are skipped without waiting:
-  they are globally doomed to decide 0 (the coverage lemma below),
-  which is what makes walking a deterministic rather than secret
-  permutation safe. If every candidate excludes, the round is
-  **skipped**.
+- The round **head** is the first candidate in hash order decided
+  1, once every earlier candidate is decided 0; an undecided
+  candidate blocks the round until later rounds decide it. Head
+  election waits for an extended `R+3` unit — that is what makes
+  walking a deterministic rather than secret order over the local
+  candidate set safe (the coverage lemma below). A full walk with
+  every candidate decided 0 also waits — the paper's trailing
+  `output ⊥`, which its Lemma C.13 makes dead code: some candidate
+  is always referenced by `f+1` honest next-round units, so every
+  unit two rounds up votes 1 on it and it can never be decided 0.
 
 The fixed 1 at `R+2` gives well-referenced candidates a
 three-message-delay include; the fixed 0 at `R+3` excludes invisible
@@ -232,7 +253,11 @@ for the engine's lifetime, and startup replay reproduces the exact
 live emission sequence.
 
 On commit, the head's not-yet-emitted causal ancestors are extracted
-BFS-style and emitted as the round's batch (oldest-first). An
+BFS-style and emitted as the round's batch (oldest-first): rounds
+ascend, so every peer's own units emit in submission order; within a
+round the BFS discovery order is a deterministic function of the head
+and the emitted set, hence identical on every peer — the paper's hash
+tie-break within rounds is not load-bearing. An
 equivocator's sibling branches may both be swept as ancestry — the
 guarantee is one identical order on every peer, not single-branch
 emission; item processing downstream validates each item on its own
@@ -275,8 +300,11 @@ causal containment of the branch, so an `R+3` unit voting 1 shares a
 common above-the-branch unit with every other `R+3` unit — including
 one we hold. Contrapositive: a branch outside our held `R+3`
 ancestry is never voted 1 at `R+3` anywhere, every higher round
-inherits 0, and no peer can ever decide it 1 — skipping it without
-waiting is safe.
+inherits 0, and no peer can ever decide it 1. A branch we have never
+even heard of is outside that ancestry (extended ancestry is
+complete), so once an `R+3` unit is extended, no unknown candidate
+can outrank a head chosen from the local candidate set — which is
+why head election waits for one.
 
 Votes are tallied over *extended* units only, which makes the
 evidence self-contained: an extended unit's parents are extended, so
@@ -299,7 +327,7 @@ self-parent chain sweeps the whole backlog on the next commit.
 
 Session binding via the sig prefix `(session, &unit)` ensures stale
 messages from prior sessions can never be confused with the current
-session's slot — verification fails on the receiver side without any
+session's units — verification fails on the receiver side without any
 explicit session check on the body.
 
 ## Network complexity
@@ -328,8 +356,8 @@ orders of magnitude smaller. Catch-up under loss is O(n × R) Request
 
 - [`lib.rs`] — crate root; re-exports the public surface (`Engine`,
   `Keychain`, `Message`, `Unit`, `SignedUnit`, `DataProvider`, …).
-- [`unit.rs`] — `Unit<D>`, `SignedUnit<D>`, `UnitData`, `Round` type
-  alias.
+- [`unit.rs`] — `Unit<D>`, `SignedUnit<D>`, `UnitHash`, `UnitData`,
+  `Round` type alias.
 - [`engine.rs`] — `Engine<P, D>`: the `run` loop (anti-entropy push,
   inbound message handling, unit creation), lax insert, the extension
   cascade, and all graph state over the units table.

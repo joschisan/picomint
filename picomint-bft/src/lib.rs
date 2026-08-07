@@ -9,11 +9,11 @@
 //! other.
 //!
 //! Equivocation is tolerated: a Byzantine creator may sign several
-//! bodies for one slot, and every valid body received is stored under
-//! its own hash-keyed [`Slot`]. Parents pin exact bodies by hash, and
-//! the extender's fork-tolerant commit rule (votes, certificates, and
-//! anchor-based indirect decisions — see `extender.rs`) guarantees an
-//! identical total order on every honest peer regardless of forks.
+//! bodies for one position, and every valid body received is stored
+//! under its own [`UnitHash`]. Parents pin exact bodies by hash, and
+//! the extender's fork-tolerant commit rule (virtual votes and
+//! decision certificates — see `extender.rs`) guarantees an identical
+//! total order on every honest peer regardless of forks.
 //!
 //! Unit creation is work-gated: a peer only builds a unit that carries
 //! items, or that keeps the DAG growing while an earlier unit of its own
@@ -31,4 +31,4 @@ pub use data::DataProvider;
 pub use engine::Engine;
 pub use keychain::Keychain;
 pub use network::{DynNetwork, INetwork, Message, Recipient};
-pub use unit::{Round, SignedUnit, Slot, Unit, UnitHash};
+pub use unit::{Round, SignedUnit, Unit, UnitHash};
