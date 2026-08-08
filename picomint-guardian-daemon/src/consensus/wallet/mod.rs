@@ -177,8 +177,8 @@ impl Wallet {
         let my_entries: Vec<usize> = log
             .iter()
             .enumerate()
-            .filter(|(_, NonceEntry(peer, _))| *peer == self.identity)
-            .map(|(index, _)| index)
+            .filter(|entry| entry.1.0 == self.identity)
+            .map(|entry| entry.0)
             .collect();
 
         let Some(&latest) = my_entries.last() else {
@@ -710,19 +710,16 @@ impl Wallet {
             "Incorrect number of nonces"
         );
 
-        let log: Vec<NonceEntry> =
-            dbtx.iter(&NonceLogTable, |r| r.map(|(_, entry)| entry).collect());
-
         ensure!(
-            !log.iter().any(|NonceEntry(p, _)| *p == peer),
-            "Peer has already entered the nonce log"
+            dbtx.iter(&NonceLogTable, |r| r.all(|entry| entry.1.0 != peer)),
+            "Nonce entry is redundant"
         );
 
-        dbtx.insert(
-            &NonceLogTable,
-            &(log.len() as u64),
-            &NonceEntry(peer, nonces),
-        );
+        let next_index = dbtx.iter(&NonceLogTable, |r| {
+            r.next_back().map_or(0, |entry| entry.0 + 1)
+        });
+
+        dbtx.insert(&NonceLogTable, &next_index, &NonceEntry(peer, nonces));
 
         Ok(())
     }
@@ -762,7 +759,7 @@ impl Wallet {
         // session of the previous one.
         let latest = log
             .iter()
-            .rposition(|NonceEntry(p, _)| *p == peer)
+            .rposition(|entry| entry.0 == peer)
             .context("Peer has no nonce entry")?;
 
         let session = latest / self.threshold();
@@ -1035,7 +1032,15 @@ impl Wallet {
             let shares: BTreeMap<u64, SignatureShare> = chunk
                 .iter()
                 .zip(responses)
-                .map(|(NonceEntry(peer, _), shares)| (peer.to_u64(), shares.0[index]))
+                .map(|entry| {
+                    let share = entry
+                        .1
+                        .0
+                        .get(index)
+                        .expect("Signature shares are validated to have one share per input");
+
+                    (entry.0.0.to_u64(), *share)
+                })
                 .collect();
 
             let signature = aggregate_signature_shares(
@@ -1171,6 +1176,13 @@ impl Wallet {
 fn nonce_column(chunk: &[NonceEntry], index: usize) -> BTreeMap<u64, PublicNonce> {
     chunk
         .iter()
-        .map(|NonceEntry(peer, nonces)| (peer.to_u64(), nonces[index]))
+        .map(|entry| {
+            let nonce = entry
+                .1
+                .get(index)
+                .expect("Nonce entries are validated to have one nonce per input");
+
+            (entry.0.to_u64(), *nonce)
+        })
         .collect()
 }
