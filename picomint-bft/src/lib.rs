@@ -9,7 +9,7 @@
 //! other.
 //!
 //! Equivocation is tolerated: a Byzantine creator may sign several
-//! bodies for one position, and every valid body received is stored
+//! units for one position, and every valid unit received is stored
 //! under its own [`UnitHash`]. Parents pin exact bodies by hash, and
 //! the extender's fork-tolerant commit rule (virtual votes and
 //! decision certificates — see `extender.rs`) guarantees an identical
@@ -31,4 +31,4 @@ pub use data::DataProvider;
 pub use engine::Engine;
 pub use keychain::Keychain;
 pub use network::{DynNetwork, INetwork, Message, Recipient};
-pub use unit::{Round, SignedUnit, Unit, UnitHash};
+pub use unit::{Round, Unit, UnitEnvelope, UnitHash};

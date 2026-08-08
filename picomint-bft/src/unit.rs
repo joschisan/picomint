@@ -24,70 +24,75 @@ impl<T> UnitData for T where
 {
 }
 
-/// Hash identifying a unit body: the sha256 consensus-hash of the
-/// encoded [`Unit`]. The unit's identity everywhere — storage key of
+/// Hash identifying a unit: the sha256 consensus-hash of the encoded
+/// [`Unit`]. The unit's identity everywhere — storage key of
 /// `BFT_UNITS`, element of the in-memory `extended` / `emitted` sets,
-/// and how parents pin the exact parent body, so a forked position's
+/// and how parents pin the exact parent unit, so a forked position's
 /// branches are distinguishable — the prerequisite for the
-/// fork-tolerant commit rule.
+/// fork-tolerant commit rule. Covers the payload transitively through
+/// [`Unit::data`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable)]
 pub struct UnitHash(pub sha256::Hash);
 
 picomint_redb::consensus_key!(UnitHash);
 
-/// One node in the consensus DAG, parameterized by the application
-/// payload type `D`.
+/// One node in the consensus DAG: position, parent map, and payload
+/// commitment — everything the ordering engine tallies over, and the
+/// exact record the in-memory `extended` map holds. The payload
+/// itself rides next to it in [`UnitEnvelope`].
 ///
-/// A unit is identified by the hash of its body ([`Unit::hash`]);
+/// A unit is identified by the hash of its encoding ([`Unit::hash`]);
 /// its `(round, creator)` coordinate is an annotation that names the
-/// position the body claims. A Byzantine creator may sign several
-/// bodies for one position — each is stored under its own hash and
-/// the commit rule elects at most one branch per candidate. The
-/// session is *not* carried in the unit body —
-/// instead, signatures are produced over the tuple `(session, unit)`,
-/// so a stale unit from a previous session arriving at a peer in the
-/// current session fails signature verification and is discarded.
-/// This saves 8 bytes per unit on the wire vs. embedding the session
-/// in the body.
+/// position the unit claims. A Byzantine creator may sign several
+/// units for one position — each is stored under its own hash and the
+/// commit rule elects at most one branch per candidate. The session
+/// is *not* carried in the unit — instead, signatures are produced
+/// over the tuple `(session, unit)`, so a stale unit from a previous
+/// session arriving at a peer in the current session fails signature
+/// verification and is discarded. This saves 8 bytes per unit on the
+/// wire vs. embedding the session in the unit.
 ///
-/// `parents` maps each parent's creator to the hash of its body at
+/// `parents` maps each parent's creator to the hash of its unit at
 /// `round - 1`; for `round > 0` it must contain *exactly* `threshold`
 /// entries. The map shape structurally enforces one parent per
-/// creator. Round-0 units carry an empty parent map. `data` is the
-/// creator's payload; once the total order is extracted, each unit's
-/// `data` items are emitted in order keyed by the unit's creator.
+/// creator. Round-0 units carry an empty parent map.
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
-pub struct Unit<D: UnitData> {
+pub struct Unit {
     /// The round this unit belongs to.
     pub round: Round,
     /// `PeerId` of this unit's creator.
     pub creator: PeerId,
-    /// Creator and body hash of this unit's parents at `round - 1`.
+    /// Creator and unit hash of this unit's parents at `round - 1`.
     pub parents: BTreeMap<PeerId, UnitHash>,
-    /// Creator's payload for this unit.
-    pub data: Vec<D>,
+    /// The sha256 consensus-hash of the payload carried in this
+    /// unit's envelope; `None` iff the payload is empty.
+    pub data: Option<sha256::Hash>,
 }
 
-picomint_redb::consensus_value!([D: UnitData] Unit<D>);
+picomint_redb::consensus_value!(Unit);
 
-impl<D: UnitData> Unit<D> {
-    /// The body hash identifying this unit; what parents reference and
+impl Unit {
+    /// The hash identifying this unit; what parents reference and
     /// what keys the unit's row in `BFT_UNITS`.
     pub fn hash(&self) -> UnitHash {
         UnitHash(self.consensus_hash_sha256())
     }
 }
 
-/// A unit together with its creator's schnorr signature over
-/// `(session, unit)`. The signature must live outside [`Unit`] — it
-/// cannot cover itself — so this wrapper is the one shape units travel
-/// on the wire and persist in storage.
+/// The wire and storage envelope: the identity-bearing unit, the
+/// payload its `data` commitment pins, and the creator's schnorr
+/// signature over `(session, unit)`. The signature must live outside
+/// [`Unit`] — it cannot cover itself — and the payload is freight the
+/// ordering engine only reads at emission, so both ride alongside.
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
-pub struct SignedUnit<D: UnitData> {
-    /// The signed body.
-    pub unit: Unit<D>,
+pub struct UnitEnvelope<D: UnitData> {
+    /// The signed unit.
+    pub unit: Unit,
+    /// The creator's payload; once the total order is extracted, each
+    /// unit's items are emitted in order keyed by the unit's creator.
+    pub data: Vec<D>,
     /// The creator's signature over `(session, unit)`.
     pub sig: schnorr::Signature,
 }
 
-picomint_redb::consensus_value!([D: UnitData] SignedUnit<D>);
+picomint_redb::consensus_value!([D: UnitData] UnitEnvelope<D>);

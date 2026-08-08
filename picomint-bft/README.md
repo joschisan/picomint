@@ -54,22 +54,27 @@ recovery at the 1 Hz anti-entropy cadence, not by decision depth.
   from a previous session fails verification.
 - **Round** — a row of the DAG. Round 0 is the root row; its units
   carry no parents.
-- **UnitHash** — the sha256 consensus-hash of a unit body; the unit's
-  identity everywhere: storage key of `BFT_UNITS`, element of the
-  in-memory sets, and how parents pin the exact parent body.
-- **Position** — the `(round, creator)` pair a body claims, carried
-  inside the body as an annotation. An honest creator has exactly one
-  body per position; a Byzantine creator may have several — fork
+- **UnitHash** — the sha256 consensus-hash of an encoded unit; the
+  unit's identity everywhere: storage key of `BFT_UNITS`, element of
+  the in-memory sets, and how parents pin the exact parent unit. It
+  covers the payload transitively through the unit's `data`
+  commitment.
+- **Position** — the `(round, creator)` pair a unit claims, carried
+  inside the unit as an annotation. An honest creator has exactly one
+  unit per position; a Byzantine creator may have several — fork
   branches, stored side by side under their own hashes.
-- **Unit** — a DAG node's body: the creator's payload (`Vec<D>`),
-  parent map, and position. Defined in [`unit.rs`].
-- **SignedUnit** — a unit plus its creator's schnorr signature over
-  `(session, unit)`. The one shape units travel on the wire and
-  persist in storage.
-- **Extended** — a unit's body is stored *and* every parent is also
-  extended. Equivalent to "this hash is in the in-memory `extended`
-  map the extender scans". A unit must be extended before it can be
-  used as a parent for a future own unit.
+- **Unit** — a DAG node: position, parent map, and payload
+  commitment (`data: Option<sha256::Hash>`, `None` iff the payload is
+  empty) — everything the ordering engine tallies over, and exactly
+  the record the in-memory `extended` map holds. Defined in
+  [`unit.rs`].
+- **UnitEnvelope** — the unit, its payload (`Vec<D>`), and the
+  creator's schnorr signature over `(session, unit)`. The one shape
+  units travel on the wire and persist in storage.
+- **Extended** — a unit's envelope is stored *and* every parent is
+  also extended. Equivalent to "this hash is in the in-memory
+  `extended` map the extender scans". A unit must be extended before
+  it can be used as a parent for a future own unit.
 
 ## Wire protocol
 
@@ -78,19 +83,19 @@ layer; never carried in the payload.
 
 ```rust
 enum Message<D> {
-    Unit(SignedUnit<D>),
+    Unit(UnitEnvelope<D>),
     Request(UnitHash),
 }
 ```
 
 | Message | Bytes | Emission rule |
 |---|---|---|
-| `Unit` | `~70 + 32·|parents| + |D|` | Creator's broadcast at unit-creation; creator's anti-entropy push of own highest unit; sole `Request` response. |
+| `Unit` | `~103 + 32·|parents| + |D|` | Creator's broadcast at unit-creation; creator's anti-entropy push of own highest unit; sole `Request` response. |
 | `Request` | `~33` | On-receive demand-pull of a missing ancestor, on receipt of a `Unit`. |
 
 Every broadcast (`Recipient::Everyone`) carries content authored by
 the sender: their own newly-created unit or their own anti-entropy
-push of their column. Other peers' bodies flow only on explicit
+push of their column. Other peers' envelopes flow only on explicit
 `Request`, answered by whoever holds them.
 
 ## Storage
@@ -99,7 +104,7 @@ All persisted state lives in one redb table. It is *declared by the
 daemon* and passed into `Engine::new`; bft only reads and writes it:
 
 ```rust
-units_table: UnitHash => SignedUnit<D>   // BFT_UNITS
+units_table: UnitHash => UnitEnvelope<D>   // BFT_UNITS
 ```
 
 Everything else is in-memory state on `Engine<P, D>`, rebuilt on
@@ -107,7 +112,7 @@ startup and never persisted:
 
 ```rust
 rounds:             BTreeMap<Round, BTreeSet<UnitHash>>,  // round index over units_table
-extended:           BTreeMap<UnitHash, Extended>,   // stored + all parents extended; Extended = position + parent map
+extended:           BTreeMap<UnitHash, Unit>,       // stored + all parents extended; the bare units
 emitted:            BTreeSet<UnitHash>,             // already sent through ordered_tx
 next_decide_round:  Round,                          // extender cursor
 decided:            BTreeMap<UnitHash, bool>,       // candidate decisions, kept for the engine's lifetime
@@ -147,19 +152,18 @@ The protocol is split into two gates with distinct semantics.
 
 ### Admission (lax)
 
-`insert_unit(dbtx, signed, hash)` installs a fresh body from a `Unit`
-message and indexes it in `rounds`. Admission checks:
+`insert_unit(dbtx, envelope, hash)` installs a fresh envelope from a
+`Unit` message and indexes it in `rounds`. Admission checks:
 
-- The encoded body is within `BFT_UNIT_BYTE_LIMIT` (50 KB).
 - Structural validity: round 0 has an empty parent map; round R>0 has
   exactly `threshold` parent entries, all keyed by federation members.
-- The creator sig verifies against the body under the session.
+- The creator sig verifies against the unit under the session.
 - Whether parents are *locally present or extended* is **not**
   checked. An out-of-order arrival lands in `units_table` anyway, so
   it's ready the moment its parents catch up rather than being
   dropped and refetched.
 
-A duplicate body hits its own key and is rejected — `insert_unit`
+A duplicate unit hits its own key and is rejected — `insert_unit`
 errors and the per-message write rolls back.
 
 ### Promotion (strict, ancestrally complete)
@@ -168,7 +172,7 @@ errors and the per-message write rolls back.
 extending units that satisfy:
 
 1. Not already in `extended`.
-2. Body stored in `units_table`.
+2. Envelope stored in `units_table`.
 3. Every parent is already in `extended`, was created by the peer it
    is keyed under, and sits at exactly `round − 1` (round-0 parent
    maps are empty, so vacuously true).
@@ -179,8 +183,8 @@ gap-free and a forker cannot key its own branches under other
 creators to fake the distinct-creator quorums the decision rule
 tallies.
 
-Extension records the unit's position and parent map in `extended` —
-the unit set the extender scans when extracting the total order. The
+Extension records the bare unit in `extended` — the unit set the
+extender scans when extracting the total order. The
 cascade sweeps `round + 1`, `round + 2`, … until a sweep produces
 zero new extensions, which by induction means no higher round can
 have new extensions either.
@@ -348,15 +352,15 @@ Per individual link it's a `1/(n−1)` slice of each column — e.g. at
 n=4, ~1.05 MB/s egress and ~1.05 MB/s ingress on each of the 3
 connections.
 
-Unit body fan-out is the only sustained traffic; anti-entropy is two
+Unit envelope fan-out is the only sustained traffic; anti-entropy is two
 orders of magnitude smaller. Catch-up under loss is O(n × R) Request
 / Unit pairs for a peer R rounds behind — paid one-shot.
 
 ## Layout
 
 - [`lib.rs`] — crate root; re-exports the public surface (`Engine`,
-  `Keychain`, `Message`, `Unit`, `SignedUnit`, `DataProvider`, …).
-- [`unit.rs`] — `Unit<D>`, `SignedUnit<D>`, `UnitHash`, `UnitData`,
+  `Keychain`, `Message`, `Unit`, `UnitEnvelope`, `DataProvider`, …).
+- [`unit.rs`] — `Unit`, `UnitEnvelope<D>`, `UnitHash`, `UnitData`,
   `Round` type alias.
 - [`engine.rs`] — `Engine<P, D>`: the `run` loop (anti-entropy push,
   inbound message handling, unit creation), lax insert, the extension

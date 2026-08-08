@@ -41,16 +41,12 @@ pub struct SessionOutcome {
 }
 
 impl SessionOutcome {
-    /// A block header pairs its index with the merkle root built from the
-    /// consensus hashes of its [`AcceptedItem`]s. The merkle tree allows for
-    /// efficient inclusion proofs of accepted consensus items for clients.
-    /// Empty sessions have no root.
-    pub fn header(&self, index: u64) -> (u64, Option<sha256::Hash>) {
-        let leaves = self
-            .items
-            .iter()
-            .map(Encodable::consensus_hash::<sha256::Hash>);
-        (index, bitcoin::merkle_tree::calculate_root(leaves))
+    /// A block header pairs its index with the consensus hash of its
+    /// [`AcceptedItem`]s. Headers are only ever generated for signing
+    /// and verification — never persisted or sent — so the empty
+    /// session needs no special case.
+    pub fn header(&self, index: u64) -> (u64, sha256::Hash) {
+        (index, self.items.consensus_hash())
     }
 }
 

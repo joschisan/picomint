@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use async_channel::Sender;
-use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
 use picomint_core::{NumPeers, PeerId};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, DbRead, Table, TableDef, WriteTx};
@@ -13,7 +12,7 @@ use tracing::warn;
 use crate::data::DataProvider;
 use crate::keychain::Keychain;
 use crate::network::{DynNetwork, Message, Recipient};
-use crate::unit::{Round, SignedUnit, Unit, UnitData, UnitHash};
+use crate::unit::{Round, Unit, UnitData, UnitEnvelope, UnitHash};
 
 /// Periodic own-unit push interval. Pull is demand-driven, not periodic.
 const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
@@ -23,16 +22,6 @@ const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
 /// the same top-of-chain unit don't keep re-firing the whole tree of
 /// requests every second.
 const REQUEST_DEDUP_INTERVAL: Duration = Duration::from_secs(1);
-
-/// In-memory record of an extended unit: its claimed position plus its
-/// parent map — the complete evidence the commit rule tallies over, so
-/// the extender never touches the db except to read payloads at
-/// emission.
-pub(crate) struct Extended {
-    pub(crate) round: Round,
-    pub(crate) creator: PeerId,
-    pub(crate) parents: BTreeMap<PeerId, UnitHash>,
-}
 
 /// Drives a single peer's growth indefinitely. The caller constructs
 /// the engine, then awaits `run()` (typically in a spawned task) and
@@ -58,22 +47,22 @@ where
     data_provider: P,
     pub(crate) ordered_tx: Sender<(Round, PeerId, D)>,
 
-    /// Daemon-declared units table (`UnitHash => SignedUnit<D>`). Bft
-    /// only reads/writes it.
-    pub(crate) units_table: TableDef<UnitHash, SignedUnit<D>>,
+    /// Daemon-declared units table (`UnitHash => UnitEnvelope<D>`).
+    /// Bft only reads/writes it.
+    pub(crate) units_table: TableDef<UnitHash, UnitEnvelope<D>>,
 
     /// Hashes of every stored unit keyed by round — the round index
     /// over `units_table`. Drives the extension cascade and, filtered
     /// by `extended` membership, the extender's per-round scans.
     /// Rebuilt from disk on startup; appended in `insert_unit`.
     pub(crate) rounds: BTreeMap<Round, BTreeSet<UnitHash>>,
-    /// Units whose body is present in `units_table` *and* whose every
-    /// parent is itself in this map, each mapped to its position and
-    /// parent map. The parent maps are the complete evidence the
-    /// commit rule tallies over, so the extender never touches the db
-    /// except to read payloads at emission. Rebuilt from disk on
-    /// startup; never persisted.
-    pub(crate) extended: BTreeMap<UnitHash, Extended>,
+    /// Units whose envelope is present in `units_table` *and* whose
+    /// every parent is itself in this map, each holding its bare
+    /// [`Unit`]. The units are the complete evidence the commit rule
+    /// tallies over, so the extender never touches the db except to
+    /// read payloads at emission. Rebuilt from disk on startup; never
+    /// persisted.
+    pub(crate) extended: BTreeMap<UnitHash, Unit>,
     /// Units whose payload has been sent through `ordered_tx`.
     /// Prevents re-emission across batches and within one BFS.
     pub(crate) emitted: BTreeSet<UnitHash>,
@@ -120,7 +109,7 @@ where
         units_table: TU,
     ) -> Self
     where
-        TU: Table<Key = UnitHash, Value = SignedUnit<D>>,
+        TU: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
     {
         Self {
             id,
@@ -202,28 +191,20 @@ where
     async fn replay(&mut self) {
         let dbtx = self.db.begin_read();
 
-        let units: Vec<(UnitHash, Round, PeerId, bool)> = dbtx.iter(&self.units_table, |it| {
-            it.map(|(hash, signed)| {
-                (
-                    hash,
-                    signed.unit.round,
-                    signed.unit.creator,
-                    signed.unit.data.is_empty(),
-                )
-            })
-            .collect()
+        let units: Vec<(UnitHash, Unit)> = dbtx.iter(&self.units_table, |it| {
+            it.map(|(hash, ev)| (hash, ev.unit)).collect()
         });
 
-        for (hash, round, creator, data_is_empty) in units {
-            self.rounds.entry(round).or_default().insert(hash);
+        for (hash, unit) in units {
+            self.rounds.entry(unit.round).or_default().insert(hash);
 
-            if creator == self.id {
-                if !data_is_empty {
-                    self.unordered_own_data.insert(round);
+            if unit.creator == self.id {
+                if unit.data.is_some() {
+                    self.unordered_own_data.insert(unit.round);
                 }
 
-                if self.own_top.is_none_or(|(top, _)| round > top) {
-                    self.own_top = Some((round, hash));
+                if self.own_top.is_none_or(|(top, _)| unit.round > top) {
+                    self.own_top = Some((unit.round, hash));
                 }
             }
         }
@@ -250,17 +231,17 @@ where
     /// prevents our own equivocation and flushes this relaxed backlog.
     async fn handle_message(&mut self, sender: PeerId, msg: Message<D>) -> Result<()> {
         match msg {
-            Message::Unit(signed) => {
+            Message::Unit(ev) => {
                 let dbtx = self.db.begin_write_relaxed();
 
                 // Pull missing ancestors before the install attempt so
                 // a duplicate unit (rejected below) still re-fires the
                 // walk — that retry is what heals dropped Requests.
-                self.cascade_parents(&dbtx, sender, &signed.unit);
+                self.cascade_parents(&dbtx, sender, &ev.unit);
 
-                let hash = signed.unit.hash();
+                let hash = ev.unit.hash();
 
-                self.insert_unit(&dbtx, &signed, hash)?;
+                self.insert_unit(&dbtx, &ev, hash)?;
 
                 self.try_extend(&dbtx, hash);
                 self.run_extender(&dbtx).await;
@@ -280,14 +261,13 @@ where
             return;
         };
 
-        let signed = self
+        let ev = self
             .db
             .begin_read()
             .get(&self.units_table, &hash)
             .expect("own top unit is stored");
 
-        self.network
-            .send(Recipient::Everyone, Message::Unit(signed));
+        self.network.send(Recipient::Everyone, Message::Unit(ev));
     }
 
     /// Send `Message::Request` for `hash` to `peer`, but only if we
@@ -320,7 +300,7 @@ where
     /// parent set; units whose bodies we lack are requested and
     /// terminate the walk, as do extended units and units we've
     /// already requested recently (via `try_send_request`).
-    fn cascade_parents(&mut self, dbtx: &impl DbRead, sender: PeerId, top: &Unit<D>) {
+    fn cascade_parents(&mut self, dbtx: &impl DbRead, sender: PeerId, top: &Unit) {
         let mut visited: BTreeSet<UnitHash> = BTreeSet::new();
         let mut stack: Vec<UnitHash> = top.parents.values().copied().collect();
 
@@ -333,52 +313,43 @@ where
                 continue;
             }
 
-            let Some(signed) = dbtx.get(&self.units_table, &hash) else {
+            let Some(ev) = dbtx.get(&self.units_table, &hash) else {
                 self.try_send_request(sender, hash);
                 continue;
             };
 
-            stack.extend(signed.unit.parents.values().copied());
+            stack.extend(ev.unit.parents.values().copied());
         }
     }
 
-    /// Reply with the stored body and its creator sig; no reply if we
-    /// don't hold the unit.
+    /// Reply with the stored envelope; no reply if we don't hold the
+    /// unit.
     fn handle_request(&self, dbtx: &impl DbRead, requester: PeerId, hash: UnitHash) {
-        let Some(signed) = dbtx.get(&self.units_table, &hash) else {
+        let Some(ev) = dbtx.get(&self.units_table, &hash) else {
             return;
         };
 
         self.network
-            .send(Recipient::Peer(requester), Message::Unit(signed));
+            .send(Recipient::Peer(requester), Message::Unit(ev));
     }
 
-    /// Validate and install a fresh unit body in `BFT_UNITS` under
-    /// `hash` (its body hash, computed by the caller), then index it
+    /// Validate and install a fresh unit envelope in `BFT_UNITS` under
+    /// `hash` (its unit hash, computed by the caller), then index it
     /// in `rounds` and advance `own_top` for our own units. A
-    /// duplicate body hits the same key and errors.
-    fn insert_unit(
-        &mut self,
-        dbtx: &WriteTx,
-        signed: &SignedUnit<D>,
-        hash: UnitHash,
-    ) -> Result<()> {
-        let unit = &signed.unit;
-
-        ensure!(
-            unit.data.consensus_encode_to_vec().len() <= BFT_UNIT_BYTE_LIMIT,
-            "unit body exceeds size limit",
-        );
-
-        if unit.round == 0 {
-            ensure!(unit.parents.is_empty(), "round 0 unit must have no parents");
+    /// duplicate unit hits the same key and errors.
+    fn insert_unit(&mut self, dbtx: &WriteTx, ev: &UnitEnvelope<D>, hash: UnitHash) -> Result<()> {
+        if ev.unit.round == 0 {
+            ensure!(
+                ev.unit.parents.is_empty(),
+                "round 0 unit must have no parents",
+            );
         } else {
             ensure!(
-                unit.parents.len() == self.n.threshold(),
+                ev.unit.parents.len() == self.n.threshold(),
                 "non-zero round unit must have threshold parents",
             );
 
-            for p in unit.parents.keys() {
+            for p in ev.unit.parents.keys() {
                 ensure!(
                     self.n.peer_ids().any(|x| x == *p),
                     "parent creator not in federation",
@@ -388,19 +359,19 @@ where
 
         ensure!(
             self.keychain
-                .verify(self.session, unit, &signed.sig, unit.creator),
+                .verify(self.session, &ev.unit, &ev.sig, ev.unit.creator),
             "invalid creator signature",
         );
 
         ensure!(
-            dbtx.insert(&self.units_table, &hash, signed).is_none(),
+            dbtx.insert(&self.units_table, &hash, ev).is_none(),
             "unit already stored",
         );
 
-        self.rounds.entry(unit.round).or_default().insert(hash);
+        self.rounds.entry(ev.unit.round).or_default().insert(hash);
 
-        if unit.creator == self.id && self.own_top.is_none_or(|(top, _)| unit.round > top) {
-            self.own_top = Some((unit.round, hash));
+        if ev.unit.creator == self.id && self.own_top.is_none_or(|(top, _)| ev.unit.round > top) {
+            self.own_top = Some((ev.unit.round, hash));
         }
 
         Ok(())
@@ -427,24 +398,25 @@ where
             round,
             creator: self.id,
             parents,
-            data,
+            data: (!data.is_empty()).then(|| data.consensus_hash_sha256()),
         };
 
         let hash = unit.hash();
 
-        let signed = SignedUnit {
+        let ev = UnitEnvelope {
             sig: self.keychain.sign(self.session, &unit),
             unit,
+            data,
         };
 
         // Crash barrier: persist before broadcasting, otherwise a
         // restart would let us build a *different* unit at this round
         // from a fresh data_provider draw — peers that saw the
         // original would consider us a forker.
-        self.insert_unit(&dbtx, &signed, hash)
+        self.insert_unit(&dbtx, &ev, hash)
             .expect("newly built unit must insert");
 
-        if !signed.unit.data.is_empty() {
+        if ev.unit.data.is_some() {
             self.unordered_own_data.insert(round);
         }
 
@@ -454,8 +426,7 @@ where
 
         dbtx.commit();
 
-        self.network
-            .send(Recipient::Everyone, Message::Unit(signed));
+        self.network.send(Recipient::Everyone, Message::Unit(ev));
 
         true
     }
@@ -532,28 +503,19 @@ where
             return None;
         }
 
-        let signed = dbtx.get(&self.units_table, &hash)?;
+        let ev = dbtx.get(&self.units_table, &hash)?;
 
-        let parents_fed = signed.unit.parents.iter().all(|(creator, parent)| {
+        let parents_fed = ev.unit.parents.iter().all(|(creator, parent)| {
             self.extended
                 .get(parent)
-                .is_some_and(|p| p.creator == *creator && p.round + 1 == signed.unit.round)
+                .is_some_and(|p| p.creator == *creator && p.round + 1 == ev.unit.round)
         });
 
         if !parents_fed {
             return None;
         }
 
-        self.extended.insert(
-            hash,
-            Extended {
-                round: signed.unit.round,
-                creator: signed.unit.creator,
-                parents: signed.unit.parents,
-            },
-        );
-
-        Some(signed.unit.round)
+        Some(self.extended.entry(hash).or_insert(ev.unit).round)
     }
 
     /// Our own unit at `round-1` plus the lowest-`UnitHash`-keyed
