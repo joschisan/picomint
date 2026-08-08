@@ -1,5 +1,6 @@
 //! Tests against the BIP 445 test vectors, vendored from
-//! <https://github.com/siv2r/bip-frost-signing> (python/vectors).
+//! <https://github.com/siv2r/bip-frost-signing> (python/vectors) at
+//! commit 4b566d5.
 //!
 //! The nonce generation and deterministic signing vectors are not applicable:
 //! we generate nonces from the operating system RNG instead of the spec's

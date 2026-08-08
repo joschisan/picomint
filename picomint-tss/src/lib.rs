@@ -255,9 +255,12 @@ fn session_values_from(
 ) -> (Scalar, PublicKey, Scalar) {
     let pk_xonly = pk.0.x_only_public_key().0;
 
+    let signers = u32::try_from(ids.len() / 4).expect("The signing set size fits four bytes");
+
     let binding = scalar_mod_order(tagged_hash(
         TAG_NONCECOEF,
         &[
+            &signers.to_be_bytes(),
             ids,
             &serialize_point(&halves.0),
             &serialize_point(&halves.1),
