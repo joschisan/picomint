@@ -23,7 +23,6 @@ group = { workspace = true }
 hex = { workspace = true, features = ["serde"] }
 iroh-base = { workspace = true, default-features = false }
 lightning-invoice = { workspace = true }
-miniscript = { workspace = true, features = ["serde"] }
 picomint-base32 = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-redb = { workspace = true }
@@ -35,6 +34,7 @@ subtle = { workspace = true }
 tbs = { workspace = true }
 thiserror = { workspace = true }
 tpe = { workspace = true }
+tss = { workspace = true }
 
 [dev-dependencies]
 test-log = { workspace = true }
