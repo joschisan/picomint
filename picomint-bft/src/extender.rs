@@ -34,7 +34,7 @@
 //! needs to be *common* across peers, not unpredictable — the paper's
 //! secret permutation defends latency against an adaptive network
 //! adversary the benign model excludes, and a creator can grind its
-//! body hash for early position under any public order. Head election
+//! unit hash for early position under any public order. Head election
 //! waits for an extended round-`R+3` unit, which is what makes
 //! walking a deterministic (rather than secret) order over the
 //! *local* candidate set safe — the coverage lemma (C.10): a round-R candidate
@@ -60,7 +60,7 @@ use picomint_redb::DbRead;
 
 use crate::data::DataProvider;
 use crate::engine::Engine;
-use crate::unit::{Round, Unit, UnitData, UnitHash};
+use crate::unit::{Round, UnitData, UnitEnvelope, UnitHash};
 
 /// The common-vote bit for a candidate of round `candidate_round` as
 /// seen from round `round`: fixed 1 two rounds up (fast include),
@@ -92,17 +92,20 @@ where
         while let Some(head) = self.choose_head(self.next_decide_round) {
             let batch = self.bfs_batch(dbtx, head);
 
-            for u in batch {
-                for item in u.data {
+            for ev in batch {
+                for item in ev.data {
                     // Unbounded channel; send() returns Err only
                     // when the receiver is dropped — which means
                     // the daemon is gone and we'd be shutting
                     // down anyway.
-                    let _ = self.ordered_tx.send((u.round, u.creator, item)).await;
+                    let _ = self
+                        .ordered_tx
+                        .send((ev.unit.round, ev.unit.creator, item))
+                        .await;
                 }
 
-                if u.creator == self.id {
-                    self.unordered_own_data.remove(&u.round);
+                if ev.unit.creator == self.id {
+                    self.unordered_own_data.remove(&ev.unit.round);
                 }
             }
 
@@ -234,26 +237,27 @@ where
 
     /// BFS over the head's not-yet-emitted ancestors, marking each
     /// visited unit in `self.emitted` as we enqueue it. Returns the
-    /// units oldest-first (reversed BFS): rounds ascend since parents
-    /// sit exactly one round down, so every peer's own units emit in
-    /// submission order. Within a round the order is BFS discovery — a
-    /// deterministic function of the head and the emitted set, hence
-    /// identical on every peer, which is all the ordering needs; the
-    /// paper's hash tie-break within rounds is not load-bearing.
-    fn bfs_batch(&mut self, dbtx: &impl DbRead, head: UnitHash) -> Vec<Unit<D>> {
+    /// envelopes oldest-first (reversed BFS): rounds ascend since
+    /// parents sit exactly one round down, so every peer's own units
+    /// emit in submission order. Within a round the order is BFS
+    /// discovery — a deterministic function of the head and the
+    /// emitted set, hence identical on every peer, which is all the
+    /// ordering needs; the paper's hash tie-break within rounds is
+    /// not load-bearing.
+    fn bfs_batch(&mut self, dbtx: &impl DbRead, head: UnitHash) -> Vec<UnitEnvelope<D>> {
         let mut batch = Vec::new();
         let mut queue = VecDeque::new();
 
         assert!(self.emitted.insert(head));
 
-        let signed = dbtx
+        let ev = dbtx
             .get(&self.units_table, &head)
             .expect("commit head is stored");
 
-        queue.push_back(signed.unit);
+        queue.push_back(ev);
 
-        while let Some(unit) = queue.pop_front() {
-            for parent in unit.parents.values() {
+        while let Some(ev) = queue.pop_front() {
+            for parent in ev.unit.parents.values() {
                 if self.emitted.contains(parent) {
                     continue;
                 }
@@ -265,10 +269,10 @@ where
                 // Tentatively mark so the deeper BFS doesn't enqueue twice.
                 self.emitted.insert(*parent);
 
-                queue.push_back(p.unit);
+                queue.push_back(p);
             }
 
-            batch.push(unit);
+            batch.push(ev);
         }
 
         batch.reverse();

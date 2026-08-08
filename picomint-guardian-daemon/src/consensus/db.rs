@@ -1,4 +1,4 @@
-use picomint_bft::{SignedUnit, UnitHash};
+use picomint_bft::{UnitEnvelope, UnitHash};
 use picomint_core::TransactionId;
 use picomint_core::expiry;
 use picomint_core::session;
@@ -18,7 +18,7 @@ table!(
 
 table!(
     BftUnitsTable,
-    UnitHash => SignedUnit<ConsensusItem>,
+    UnitHash => UnitEnvelope<ConsensusItem>,
     "bft-units",
 );
 

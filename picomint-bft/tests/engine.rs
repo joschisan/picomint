@@ -23,16 +23,18 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_channel::{Receiver, Sender};
 use async_trait::async_trait;
 use picomint_bft::{
-    DataProvider, Engine, INetwork, Keychain, Message, Recipient, Round, SignedUnit, Unit, UnitHash,
+    DataProvider, Engine, INetwork, Keychain, Message, Recipient, Round, Unit, UnitEnvelope,
+    UnitHash,
 };
 use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
 use picomint_core::{NumPeers, PeerId};
+use picomint_encoding::Encodable;
 use picomint_redb::{Database, table};
 use rand::Rng;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-table!(BftUnits, UnitHash => SignedUnit<u64>, "bft-units");
+table!(BftUnits, UnitHash => UnitEnvelope<u64>, "bft-units");
 
 /// Per-recipient probability of silently dropping a message in the mock
 /// network, used by the 4-peer tests. Each unicast send and each
@@ -308,23 +310,26 @@ fn assert_agreement(sequences: &BTreeMap<PeerId, Vec<(PeerId, u64)>>) -> Vec<(Pe
     reference
 }
 
-fn build_signed_unit(
+fn build_envelope(
     keychain: &Keychain,
     round: Round,
     creator: PeerId,
     parents: BTreeMap<PeerId, UnitHash>,
     data: u64,
-) -> SignedUnit<u64> {
+) -> UnitEnvelope<u64> {
+    let data = vec![data];
+
     let unit = Unit {
         round,
         creator,
         parents,
-        data: vec![data],
+        data: Some(data.consensus_hash_sha256()),
     };
 
-    SignedUnit {
+    UnitEnvelope {
         sig: keychain.sign(SESSION, &unit),
         unit,
+        data,
     }
 }
 
@@ -391,7 +396,7 @@ async fn engines_agree_under_forking_peer() {
     let engines = spawn_engines(n, &keychains, channels);
 
     for (data, recipients) in [(1u64, vec![1u8, 2u8]), (2u64, vec![3u8])] {
-        let signed = build_signed_unit(&keychains[&forker], 0, forker, BTreeMap::new(), data);
+        let signed = build_envelope(&keychains[&forker], 0, forker, BTreeMap::new(), data);
 
         for recipient in recipients {
             forker_channel.deliver(PeerId::from(recipient), Message::Unit(signed.clone()));
@@ -425,7 +430,7 @@ async fn engines_agree_when_fork_branch_commits() {
     let forker_channel = channels.remove(&forker).expect("mesh built above");
 
     for data in [1u64, 2u64] {
-        let signed = build_signed_unit(&keychains[&forker], 0, forker, BTreeMap::new(), data);
+        let signed = build_envelope(&keychains[&forker], 0, forker, BTreeMap::new(), data);
 
         for recipient in [1u8, 2u8, 3u8] {
             forker_channel.deliver(PeerId::from(recipient), Message::Unit(signed.clone()));
@@ -468,7 +473,7 @@ async fn engines_agree_under_forking_voter() {
     let forker = PeerId::from(0u8);
     let forker_channel = channels.remove(&forker).expect("mesh built above");
 
-    let round_zero = build_signed_unit(&keychains[&forker], 0, forker, BTreeMap::new(), 0);
+    let round_zero = build_envelope(&keychains[&forker], 0, forker, BTreeMap::new(), 0);
 
     for recipient in [1u8, 2u8, 3u8] {
         forker_channel.deliver(PeerId::from(recipient), Message::Unit(round_zero.clone()));
@@ -484,16 +489,17 @@ async fn engines_agree_under_forking_voter() {
     while harvested.len() < 2 {
         let (_, msg) = forker_channel.rx.recv().await.expect("mesh alive");
 
-        let Message::Unit(signed) = msg else { continue };
+        let Message::Unit(ev) = msg else {
+            continue;
+        };
 
-        match signed.unit.round {
+        match ev.unit.round {
             0 => {
-                harvested.insert(signed.unit.creator, signed.unit.hash());
+                harvested.insert(ev.unit.creator, ev.unit.hash());
             }
             1 => {
                 harvested.extend(
-                    signed
-                        .unit
+                    ev.unit
                         .parents
                         .iter()
                         .filter(|(creator, _)| **creator != forker)
@@ -509,7 +515,7 @@ async fn engines_agree_under_forking_voter() {
         .collect();
 
     for (data, recipients) in [(1u64, vec![1u8, 2u8]), (2u64, vec![3u8])] {
-        let signed = build_signed_unit(&keychains[&forker], 1, forker, parents.clone(), data);
+        let signed = build_envelope(&keychains[&forker], 1, forker, parents.clone(), data);
 
         for recipient in recipients {
             forker_channel.deliver(PeerId::from(recipient), Message::Unit(signed.clone()));
@@ -547,8 +553,8 @@ async fn engines_ignore_spoofed_parent_positions() {
     let forker = PeerId::from(0u8);
     let forker_channel = channels.remove(&forker).expect("mesh built above");
 
-    let branch_a = build_signed_unit(&keychains[&forker], 0, forker, BTreeMap::new(), 0);
-    let branch_b = build_signed_unit(&keychains[&forker], 0, forker, BTreeMap::new(), 1);
+    let branch_a = build_envelope(&keychains[&forker], 0, forker, BTreeMap::new(), 0);
+    let branch_b = build_envelope(&keychains[&forker], 0, forker, BTreeMap::new(), 1);
 
     for recipient in [1u8, 2u8, 3u8] {
         forker_channel.deliver(PeerId::from(recipient), Message::Unit(branch_a.clone()));
@@ -565,16 +571,17 @@ async fn engines_ignore_spoofed_parent_positions() {
     while harvested.len() < 2 {
         let (_, msg) = forker_channel.rx.recv().await.expect("mesh alive");
 
-        let Message::Unit(signed) = msg else { continue };
+        let Message::Unit(ev) = msg else {
+            continue;
+        };
 
-        match signed.unit.round {
+        match ev.unit.round {
             0 => {
-                harvested.insert(signed.unit.creator, signed.unit.hash());
+                harvested.insert(ev.unit.creator, ev.unit.hash());
             }
             1 => {
                 harvested.extend(
-                    signed
-                        .unit
+                    ev.unit
                         .parents
                         .iter()
                         .filter(|(creator, _)| **creator != forker)
@@ -599,12 +606,12 @@ async fn engines_ignore_spoofed_parent_positions() {
         (honest_y.0, honest_y.1),
     ]);
 
-    let creator_spoof = build_signed_unit(&keychains[&forker], 1, forker, spoofed_parents, 42);
+    let creator_spoof = build_envelope(&keychains[&forker], 1, forker, spoofed_parents, 42);
 
     let skip_parents: BTreeMap<PeerId, UnitHash> =
         BTreeMap::from([(forker, branch_a.unit.hash()), honest_x, honest_y]);
 
-    let round_skip = build_signed_unit(&keychains[&forker], 2, forker, skip_parents, 43);
+    let round_skip = build_envelope(&keychains[&forker], 2, forker, skip_parents, 43);
 
     for recipient in [1u8, 2u8, 3u8] {
         forker_channel.deliver(
@@ -647,7 +654,7 @@ async fn replay_reproduces_order_under_forks() {
     let mut engines = spawn_engines(n, &keychains, channels);
 
     for (data, recipients) in [(1u64, vec![1u8, 2u8]), (2u64, vec![3u8])] {
-        let signed = build_signed_unit(&keychains[&forker], 0, forker, BTreeMap::new(), data);
+        let signed = build_envelope(&keychains[&forker], 0, forker, BTreeMap::new(), data);
 
         for recipient in recipients {
             forker_channel.deliver(PeerId::from(recipient), Message::Unit(signed.clone()));
