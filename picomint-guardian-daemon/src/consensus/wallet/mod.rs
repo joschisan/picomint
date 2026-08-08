@@ -758,22 +758,30 @@ impl Wallet {
             "Incorrect number of replacement nonces"
         );
 
-        let log: Vec<NonceEntry> =
-            dbtx.iter(&NonceLogTable, |r| r.map(|(_, entry)| entry).collect());
-
         // The session of the peer's latest entry is the only one it might
         // not have signed yet, since appending an entry requires signing the
         // session of the previous one.
-        let latest = log
-            .iter()
-            .rposition(|entry| entry.0 == peer)
+        let latest = dbtx
+            .iter(&NonceLogTable, |r| {
+                r.rev()
+                    .find(|entry| entry.1.0 == peer)
+                    .map(|entry| entry.0 as usize)
+            })
             .context("Peer has no nonce entry")?;
 
         let session = latest / self.threshold();
 
-        let chunk = log
-            .get(session * self.threshold()..(session + 1) * self.threshold())
-            .context("The signing session of the peer's latest entry is still forming")?;
+        let chunk_range =
+            (session * self.threshold()) as u64..((session + 1) * self.threshold()) as u64;
+
+        let chunk: Vec<NonceEntry> = dbtx.range(&NonceLogTable, chunk_range.clone(), |r| {
+            r.map(|entry| entry.1).collect()
+        });
+
+        ensure!(
+            chunk.len() == self.threshold(),
+            "The signing session of the peer's latest entry is still forming"
+        );
 
         let sighashes = self.sighashes(&unsigned);
 
@@ -790,7 +798,7 @@ impl Wallet {
                     peer.to_u64(),
                     &self.tweaked_pks(&peer, &utxo.tweak),
                     share,
-                    &nonce_column(chunk, index),
+                    &nonce_column(&chunk, index),
                     &self.tweaked_agg_pk(&utxo.tweak),
                 ),
                 "Invalid signature share"
@@ -803,21 +811,18 @@ impl Wallet {
             "Already received signature shares for this entry"
         );
 
-        dbtx.insert(
-            &NonceLogTable,
-            &(log.len() as u64),
-            &NonceEntry(peer, fresh_nonces),
-        );
+        let next_index = dbtx.iter(&NonceLogTable, |r| {
+            r.next_back().map_or(0, |entry| entry.0 + 1)
+        });
 
-        let chunk_range =
-            (session * self.threshold()) as u64..((session + 1) * self.threshold()) as u64;
+        dbtx.insert(&NonceLogTable, &next_index, &NonceEntry(peer, fresh_nonces));
 
         let responses: Vec<Signatures> = dbtx.range(&SignaturesTable, chunk_range, |r| {
             r.map(|(_, shares)| shares).collect()
         });
 
         if responses.len() == self.threshold() {
-            self.finalize_tx(&mut unsigned, &sighashes, chunk, &responses);
+            self.finalize_tx(&mut unsigned, &sighashes, &chunk, &responses);
 
             dbtx.remove(&UnsignedTxTable, &());
 
