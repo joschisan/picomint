@@ -171,17 +171,13 @@ impl Wallet {
 
         let inputs = unsigned_tx.spent_tx_outs.len();
 
-        let log: Vec<NonceEntry> =
-            dbtx.iter(&NonceLogTable, |r| r.map(|(_, entry)| entry).collect());
+        let latest = dbtx.iter(&NonceLogTable, |r| {
+            r.rev()
+                .find(|entry| entry.1.0 == self.identity)
+                .map(|entry| entry.0 as usize)
+        });
 
-        let my_entries: Vec<usize> = log
-            .iter()
-            .enumerate()
-            .filter(|entry| entry.1.0 == self.identity)
-            .map(|entry| entry.0)
-            .collect();
-
-        let Some(&latest) = my_entries.last() else {
+        let Some(latest) = latest else {
             let nonces = self.derive_secret_nonces(txid, 0, inputs);
 
             let public_nonces = nonces.iter().map(derive_public_nonce).collect();
@@ -195,15 +191,26 @@ impl Wallet {
         // shares are stored in the same atomic step that appends our next
         // entry. If its chunk is still incomplete we idle; once it completes
         // we re-propose our deterministic shares until they are accepted.
-        let chunk = log.get(session * self.threshold()..(session + 1) * self.threshold())?;
+        let chunk: Vec<NonceEntry> = dbtx.iter(&NonceLogTable, |r| {
+            r.skip(session * self.threshold())
+                .take(self.threshold())
+                .map(|entry| entry.1)
+                .collect()
+        });
+
+        if chunk.len() < self.threshold() {
+            return None;
+        }
 
         let sighashes = self.sighashes(unsigned_tx);
 
-        let generation = my_entries.len() as u64 - 1;
+        let generation = dbtx.iter(&NonceLogTable, |r| {
+            r.filter(|entry| entry.1.0 == self.identity).count() as u64 - 1
+        });
 
         let nonces = self.derive_secret_nonces(txid, generation, inputs);
 
-        let shares = self.sign_tx(unsigned_tx, &sighashes, nonces, chunk);
+        let shares = self.sign_tx(unsigned_tx, &sighashes, nonces, &chunk);
 
         let fresh_nonces = self.derive_secret_nonces(txid, generation + 1, inputs);
 
