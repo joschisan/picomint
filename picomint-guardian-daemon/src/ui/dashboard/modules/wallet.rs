@@ -1,4 +1,4 @@
-use maud::{Markup, PreEscaped, html};
+use maud::{Markup, html};
 
 // Function to render the Wallet module UI section
 pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
@@ -9,7 +9,7 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
     let send_fee = wallet.send_fee_ui();
     let receive_fee = wallet.receive_fee_ui();
     let pending_tx_chain = wallet.pending_tx_chain_ui();
-    let tx_chain = wallet.tx_chain_ui();
+    let transaction_count = wallet.transaction_count_ui();
     let recovery_keys = wallet.recovery_keys_ui();
 
     let total_pending_vbytes = pending_tx_chain.iter().map(|info| info.vbytes).sum::<u64>();
@@ -18,16 +18,6 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
         .iter()
         .map(|info| info.fee.to_sat())
         .sum::<u64>();
-
-    let custody_chart_data = if let Some(last) = tx_chain.last() {
-        let mut heights: Vec<u64> = tx_chain.iter().map(|tx| tx.created).collect();
-        let mut values: Vec<f64> = tx_chain.iter().map(|tx| tx.output.to_btc()).collect();
-        heights.push(consensus_block_count);
-        values.push(last.output.to_btc());
-        Some((heights, values))
-    } else {
-        None
-    };
 
     html! {
         div class="row gy-4 mt-2" {
@@ -53,6 +43,10 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
                                                 "mempool.space"
                                             }
                                         }
+                                    }
+                                    tr {
+                                        th { "Transaction Count" }
+                                        td { (transaction_count) }
                                     }
                                 }
                                 tr {
@@ -146,61 +140,6 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
                         }
 
 
-                        @if let Some((heights, values)) = &custody_chart_data {
-                            div class="mb-4" {
-                                h5 { "Value in Custody" }
-                                canvas id="wallet-custody-chart" {}
-                                script src="/assets/chart.umd.min.js" {}
-                                (PreEscaped(format!(
-                                    r"<script>
-                                    document.addEventListener('DOMContentLoaded', function() {{
-                                        var heights = {heights:?};
-                                        var values = {values:?};
-                                        var data = heights.map(function(h, i) {{ return {{x: h, y: values[i]}}; }});
-                                        new Chart(document.getElementById('wallet-custody-chart'), {{
-                                            type: 'line',
-                                            data: {{
-                                                datasets: [{{
-                                                    label: 'Value in Custody (BTC)',
-                                                    data: data,
-                                                    borderWidth: 2,
-                                                    fill: true,
-                                                    stepped: true,
-                                                    pointRadius: 0
-                                                }}]
-                                            }},
-                                            options: {{
-                                                responsive: true,
-                                                plugins: {{
-                                                    legend: {{ display: false }},
-                                                    tooltip: {{ enabled: false }}
-                                                }},
-                                                scales: {{
-                                                    x: {{
-                                                        type: 'linear',
-                                                        min: heights[0],
-                                                        max: heights[heights.length - 1],
-                                                        title: {{
-                                                            display: true,
-                                                            text: 'Block Height'
-                                                        }}
-                                                    }},
-                                                    y: {{
-                                                        beginAtZero: true,
-                                                        title: {{
-                                                            display: true,
-                                                            text: 'BTC'
-                                                        }}
-                                                    }}
-                                                }}
-                                            }}
-                                        }});
-                                    }});
-                                    </script>",
-                                )))
-                            }
-                        }
-
                         @if let Some((tweaked_agg_pk, tweaked_sks)) = &recovery_keys {
                             // Federation Shutdown accordion
                             div class="accordion mt-4" id="shutdownAccordion" {
@@ -219,14 +158,14 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
                                             }
 
                                             div class="mb-3" {
-                                                p class="mb-2" { strong { "Tweaked Aggregate Public Key (hex)" } }
+                                                p class="mb-2" { strong { "Aggregate Public Key (hex)" } }
                                                 div class="alert alert-info text-break" style="word-break: break-all; font-family: monospace;" {
                                                     (tweaked_agg_pk)
                                                 }
                                             }
 
                                             div class="mb-3" {
-                                                p class="mb-2" { strong { "Your Tweaked Secret Key Share (hex)" } }
+                                                p class="mb-2" { strong { "Your Secret Key Share (hex)" } }
                                                 div class="alert alert-danger text-break" style="word-break: break-all; font-family: monospace;" {
                                                     (tweaked_sks)
                                                 }
