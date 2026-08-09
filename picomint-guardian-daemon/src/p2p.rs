@@ -80,6 +80,7 @@ pub enum P2PMessage {
     Checksum(sha256::Hash),
     DkgG1(DkgMessageG1),
     DkgG2(DkgMessageG2),
+    DkgSecp(DkgMessageSecp),
     Encodable(Vec<u8>),
 }
 
@@ -95,6 +96,13 @@ pub enum DkgMessageG2 {
     Hash(sha256::Hash),
     Commitment(Vec<G2Projective>),
     Share(Scalar),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]
+pub enum DkgMessageSecp {
+    Hash(sha256::Hash),
+    Commitment(Vec<secp256k1::PublicKey>),
+    Share(secp256k1::SecretKey),
 }
 
 // ── Connection primitives ───────────────────────────────────────────────────

@@ -3414,12 +3414,12 @@ dependencies = [
  "hex",
  "iroh-base",
  "lightning-invoice",
- "miniscript",
  "picomint-base32",
  "picomint-encoding",
  "picomint-redb",
  "picomint-tbs",
  "picomint-tpe",
+ "picomint-tss",
  "rand 0.8.6",
  "rand_chacha 0.3.1",
  "secp256k1",
@@ -3589,7 +3589,6 @@ dependencies = [
  "iroh-base",
  "iroh-mdns-address-lookup",
  "maud",
- "miniscript",
  "picomint-base32",
  "picomint-bft",
  "picomint-bitcoin-rpc",
@@ -3600,6 +3599,7 @@ dependencies = [
  "picomint-rpc",
  "picomint-tbs",
  "picomint-tpe",
+ "picomint-tss",
  "qrcode",
  "rand 0.8.6",
  "secp256k1",
@@ -3734,6 +3734,20 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "serdect",
+]
+
+[[package]]
+name = "picomint-tss"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "hex",
+ "picomint-encoding",
+ "rand 0.8.6",
+ "rand_chacha 0.3.1",
+ "secp256k1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

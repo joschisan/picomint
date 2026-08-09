@@ -21,7 +21,7 @@ use events::{ReceiveEvent, SendEvent};
 use picomint_core::core::OperationId;
 use picomint_core::wallet::config::WalletConfigConsensus;
 use picomint_core::wallet::{
-    StandardScript, WalletInput, WalletOutput, descriptor, is_potential_receive,
+    StandardScript, WalletInput, WalletOutput, is_potential_receive, tweaked_address,
 };
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, TransactionId};
@@ -210,15 +210,15 @@ impl WalletClientModule {
     }
 
     fn derive_address(&self, index: u64) -> Address {
-        descriptor(
-            &self.cfg.bitcoin_pks,
+        tweaked_address(
+            &self.cfg.agg_pk,
             &self
                 .derive_tweak(index)
                 .x_only_public_key()
                 .0
                 .consensus_hash(),
+            self.client_ctx.network(),
         )
-        .address(self.client_ctx.network())
     }
 
     fn derive_tweak(&self, index: u64) -> Keypair {
@@ -228,7 +228,7 @@ impl WalletClientModule {
     /// Find the next valid index starting from (and including) `start_index`.
     #[allow(clippy::maybe_infinite_iter)]
     fn next_valid_index(&self, start_index: u64) -> u64 {
-        let pks_hash = self.cfg.bitcoin_pks.consensus_hash();
+        let pks_hash = self.cfg.agg_pk.consensus_hash();
 
         block_in_place(|| {
             (start_index..)
