@@ -7,10 +7,11 @@ use futures::StreamExt;
 use picomint_bft::{Engine as BftEngine, INetwork, Keychain as BftKeychain, Round as BftRound};
 use picomint_core::secp256k1::{SECP256K1, schnorr};
 use picomint_core::session::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
-use picomint_core::tx::ConsensusItem;
-use picomint_core::{NumPeers, NumPeersExt, PeerId};
+use picomint_core::tx::{ConsensusItem, TxError};
+use picomint_core::{NumPeers, NumPeersExt, PeerId, TransactionId};
 use picomint_redb::{Database, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
+use tokio::sync::broadcast;
 use tracing::{info, instrument};
 
 use crate::config::ServerConfig;
@@ -28,6 +29,7 @@ pub struct ConsensusEngine {
     pub cfg: ServerConfig,
     pub submission_rx: Receiver<ConsensusItem>,
     pub connections: ReconnectP2PConnections<P2PMessage>,
+    pub tx_reject_tx: broadcast::Sender<(TransactionId, TxError)>,
 }
 
 impl ConsensusEngine {
@@ -399,9 +401,17 @@ impl ConsensusEngine {
                     "Transaction is already accepted"
                 );
 
-                process_tx_with_server(&self.server, dbtx, &tx)
-                    .await
-                    .map_err(|error| anyhow!(error.to_string()))?;
+                if let Err(error) = process_tx_with_server(&self.server, dbtx, &tx).await {
+                    // Only our own submission has a submission RPC waiting on
+                    // it, and copies of an already accepted transaction bail at
+                    // the check above - so every rejection we broadcast is
+                    // final and has a caller to fail.
+                    if peer == self.identity() {
+                        self.tx_reject_tx.send((txid, error.clone())).ok();
+                    }
+
+                    return Err(anyhow!(error.to_string()));
+                }
 
                 dbtx.insert(&AcceptedTxTable, &txid, &());
 
