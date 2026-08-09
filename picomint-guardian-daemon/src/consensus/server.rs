@@ -4,6 +4,7 @@
 //! on the wire enum variant directly — no trait indirection.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use picomint_core::module::InputMeta;
 use picomint_core::module::audit::AuditSummary;
@@ -11,6 +12,7 @@ use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
 use picomint_core::{OutPoint, PeerId};
 use picomint_redb::WriteTx;
+use tracing::info;
 
 use crate::consensus::ln::Lightning;
 use crate::consensus::mint::Mint;
@@ -115,6 +117,8 @@ pub async fn process_tx_with_server(
         return Err(TxError::EmptyOutputs);
     }
 
+    let start = Instant::now();
+
     let mut funding_verifier = FundingVerifier::default();
     let mut public_keys = Vec::new();
 
@@ -142,6 +146,14 @@ pub async fn process_tx_with_server(
     }
 
     funding_verifier.verify_funding()?;
+
+    info!(
+        %txid,
+        inputs = tx.inputs.len(),
+        outputs = tx.outputs.len(),
+        elapsed_us = start.elapsed().as_micros() as u64,
+        "Verified tx",
+    );
 
     Ok(())
 }
