@@ -31,6 +31,10 @@ impl PeerId {
     pub fn to_usize(self) -> usize {
         self.0 as usize
     }
+
+    pub fn to_u64(self) -> u64 {
+        self.0 as u64
+    }
 }
 
 impl From<u8> for PeerId {
