@@ -35,6 +35,11 @@ use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
 /// How many txs can be stored in memory before blocking the API
 const TX_BUFFER: usize = 1000;
 
+/// How many rejected txs a waiting submission RPC can fall behind before it
+/// misses one. Only finally rejected txs are broadcast, so the steady-state
+/// rate is zero and the buffer only has to absorb bursts of invalid txs.
+const TX_REJECT_BUFFER: usize = 1000;
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     connections: ReconnectP2PConnections<P2PMessage>,
@@ -88,11 +93,14 @@ pub async fn run(
 
     let (submission_tx, submission_rx) = async_channel::bounded(TX_BUFFER);
 
+    let (tx_reject_tx, _) = tokio::sync::broadcast::channel(TX_REJECT_BUFFER);
+
     let consensus_api = Arc::new(ConsensusApi {
         cfg: cfg.clone(),
         db: db.clone(),
         server: server.clone(),
         submission_tx: submission_tx.clone(),
+        tx_reject_tx: tx_reject_tx.clone(),
         p2p_status_receivers,
         bitcoin_rpc_connection: bitcoin_rpc_connection.clone(),
     });
@@ -194,6 +202,7 @@ pub async fn run(
         connections,
         submission_rx,
         server: consensus_api.server.clone(),
+        tx_reject_tx,
     }
     .run()
     .await?;

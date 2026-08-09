@@ -5,6 +5,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use chrono::{Days, Utc};
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
+use picomint_core::TransactionId;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::methods::CoreMethod;
@@ -14,6 +15,7 @@ use picomint_core::tx::{ConsensusItem, Transaction, TxError};
 use crate::consensus::rpc;
 use crate::{handler, handler_async};
 use picomint_redb::Database;
+use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 use crate::config::ServerConfig;
@@ -22,7 +24,7 @@ use crate::consensus::db::{
     InviteUserCountTable, SignedSessionOutcomeTable,
 };
 use crate::consensus::engine::get_finished_session_count_static;
-use crate::consensus::server::{Server, process_tx_with_server};
+use crate::consensus::server::Server;
 use crate::p2p::P2PStatusReceivers;
 
 #[derive(Clone)]
@@ -35,6 +37,7 @@ pub struct ConsensusApi {
     pub server: Server,
     /// For sending API events to consensus such as transactions
     pub submission_tx: async_channel::Sender<ConsensusItem>,
+    pub tx_reject_tx: broadcast::Sender<(TransactionId, TxError)>,
     pub p2p_status_receivers: P2PStatusReceivers,
     pub bitcoin_rpc_connection: BitcoinRpcMonitor,
 }
@@ -47,21 +50,23 @@ impl ConsensusApi {
     pub async fn submit_tx(&self, tx: Transaction) -> Result<(), TxError> {
         let start = Instant::now();
 
+        // Subscribe before submitting so a rejection cannot land in the gap.
+        let mut rejections = self.tx_reject_tx.subscribe();
+
         let notify_item = self.db.notify_for_table(&AcceptedItemTable);
         let notify_session = self.db.notify_for_table(&SignedSessionOutcomeTable);
 
         let mut notified_item = Box::pin(notify_item.notified());
         let mut notified_session = Box::pin(notify_session.notified());
 
-        let dbtx = self.db.begin_write();
-
-        if dbtx.get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
+        if self
+            .db
+            .begin_read()
+            .get(&AcceptedTxTable, &tx.compute_txid())
+            .is_some()
+        {
             return Ok(());
         }
-
-        process_tx_with_server(&self.server, &dbtx, &tx).await?;
-
-        drop(dbtx);
 
         if self
             .submission_tx
@@ -75,9 +80,7 @@ impl ConsensusApi {
         loop {
             tokio::select! {
                 _ = &mut notified_item => {
-                    let dbtx = self.db.begin_write();
-
-                    if dbtx.get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
+                    if self.db.begin_read().get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
                         info!(
                             txid = %tx.compute_txid(),
                             elapsed_ms = start.elapsed().as_millis() as u64,
@@ -87,11 +90,15 @@ impl ConsensusApi {
                         return Ok(());
                     }
 
-                    process_tx_with_server(&self.server, &dbtx, &tx).await?;
-
-                    drop(dbtx);
-
                     notified_item = Box::pin(notify_item.notified());
+                }
+                rejection = rejections.recv() => {
+                    let (rejected, error) =
+                        rejection.expect("The tx rejection broadcast failed");
+
+                    if rejected == tx.compute_txid() {
+                        return Err(error);
+                    }
                 }
                 _ = &mut notified_session => {
                     if self
