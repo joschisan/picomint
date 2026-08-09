@@ -1117,7 +1117,7 @@ impl Wallet {
         dbtx.iter(&TxInfoTable, |r| r.map(|(_, v)| v).collect())
     }
 
-    fn total_txs(dbtx: &WriteTx) -> u64 {
+    fn total_txs(dbtx: &impl picomint_redb::DbRead) -> u64 {
         dbtx.iter(&TxInfoTable, |r| r.next_back().map_or(0, |(k, _)| k + 1))
     }
 
@@ -1160,6 +1160,11 @@ impl Wallet {
     /// Get the current transaction log for UI display
     pub fn tx_chain_ui(&self) -> Vec<TxInfo> {
         Self::tx_chain(&self.db.begin_read())
+    }
+
+    /// Get the total number of transactions in the chain for UI display
+    pub fn transaction_count_ui(&self) -> u64 {
+        Self::total_txs(&self.db.begin_read())
     }
 
     /// Export recovery material for federation shutdown: the tweaked
