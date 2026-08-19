@@ -11,11 +11,10 @@ use picomint_core::mint::config::{
 use picomint_core::mint::methods::MintMethod;
 use picomint_core::mint::{
     Denomination, MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError,
-    RecoveryItem, verify_note,
+    verify_note,
 };
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, OutPoint, PeerId};
-use picomint_encoding::Encodable;
 use picomint_redb::{Database, ReadTx, WriteTx};
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
 
@@ -24,8 +23,8 @@ use crate::config::poly::eval_poly_g2;
 use crate::{handler, handler_async};
 
 use self::db::{
-    BlindedSignatureShareRecoveryTable, BlindedSignatureShareTable, IssuanceCounterTable,
-    NoteNonceKey, NoteNonceTable, RecoveryItemTable,
+    BlindedNonceTable, BlindedSignatureShareRecoveryTable, BlindedSignatureShareTable,
+    IssuanceCounterTable, NoteNonceKey, NoteNonceTable,
 };
 
 /// Run DKG for the mint module, producing a fresh `MintConfig` for this peer.
@@ -112,6 +111,13 @@ impl Mint {
         dbtx: &WriteTx,
         input: &MintInput,
     ) -> Result<InputMeta, MintInputError> {
+        if dbtx
+            .insert(&NoteNonceTable, &NoteNonceKey(input.note.nonce), &())
+            .is_some()
+        {
+            return Err(MintInputError::SpentCoin);
+        }
+
         let pk = self
             .cfg
             .consensus
@@ -123,13 +129,6 @@ impl Mint {
             return Err(MintInputError::InvalidSignature);
         }
 
-        if dbtx
-            .insert(&NoteNonceTable, &NoteNonceKey(input.note.nonce), &())
-            .is_some()
-        {
-            return Err(MintInputError::SpentCoin);
-        }
-
         let new_count = dbtx
             .remove(&IssuanceCounterTable, &input.note.denomination)
             .unwrap_or(0)
@@ -137,16 +136,6 @@ impl Mint {
             .expect("Failed to decrement issuance counter");
 
         dbtx.insert(&IssuanceCounterTable, &input.note.denomination, &new_count);
-
-        let next_index = get_recovery_count(dbtx);
-
-        dbtx.insert(
-            &RecoveryItemTable,
-            &next_index,
-            &RecoveryItem::Input {
-                nonce_hash: input.note.nonce.consensus_hash(),
-            },
-        );
 
         let amount = input.note.amount();
 
@@ -165,6 +154,19 @@ impl Mint {
         output: &MintOutput,
         outpoint: OutPoint,
     ) -> Result<TxItemAmounts, MintOutputError> {
+        // Signing a blinded nonce twice mints two notes that share a nonce, so
+        // spending either strands the other. A client derives nonces from a
+        // per-denomination counter, so a wallet restored without running
+        // recovery would replay counters it has already used — this turns that
+        // into a rejected transaction instead of destroyed funds, and keeps
+        // the issuance counter from crediting a note that can never be spent.
+        if dbtx
+            .insert(&BlindedNonceTable, &output.nonce, &())
+            .is_some()
+        {
+            return Err(MintOutputError::ReusedNonce);
+        }
+
         let signature = self
             .cfg
             .private
@@ -189,18 +191,6 @@ impl Mint {
 
         dbtx.insert(&IssuanceCounterTable, &output.denomination, &new_count);
 
-        let next_index = get_recovery_count(dbtx);
-
-        dbtx.insert(
-            &RecoveryItemTable,
-            &next_index,
-            &RecoveryItem::Output {
-                denomination: output.denomination,
-                nonce_hash: output.nonce.consensus_hash(),
-                tweak: output.tweak,
-            },
-        );
-
         let amount = output.amount();
 
         Ok(TxItemAmounts {
@@ -222,15 +212,8 @@ impl Mint {
             MintMethod::SignatureSharesRecovery(req) => {
                 handler!(signature_shares_recovery, self, req).await
             }
-            MintMethod::RecoverySlice(req) => handler!(recovery_slice, self, req).await,
-            MintMethod::RecoverySliceHash(req) => handler!(recovery_slice_hash, self, req).await,
-            MintMethod::RecoveryCount(req) => handler!(recovery_count, self, req).await,
+            MintMethod::SpendState(req) => handler!(spend_state, self, req).await,
+            MintMethod::IssuanceState(req) => handler!(issuance_state, self, req).await,
         }
     }
-}
-
-pub(crate) fn get_recovery_count(dbtx: &impl picomint_redb::DbRead) -> u64 {
-    dbtx.iter(&RecoveryItemTable, |r| {
-        r.next_back().map_or(0, |(k, _)| k + 1)
-    })
 }

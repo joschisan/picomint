@@ -10,9 +10,8 @@ mod secret;
 mod send_sm;
 
 use picomint_redb::WriteTx;
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
@@ -22,20 +21,17 @@ use crate::tx::{Input, Output, TxBuilder};
 use crate::tx::{
     Transaction, TxSubmissionSmContext, TxSubmissionStateMachine, TxSubmissionStateMachineTable,
 };
-use anyhow::Context as _;
-use bitcoin_hashes::sha256;
-use client_db::{NoteTable, ReceiveOperationTable, Recovery, RecoveryTable};
+use anyhow::ensure;
+use client_db::{CounterTable, NoteTable, ReceiveOperationTable};
 pub use events::*;
 use futures::StreamExt;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::mint::config::{MintConfigConsensus, client_denominations};
-use picomint_core::mint::{Denomination, MintInput, Note, RecoveryItem};
-use picomint_core::secp256k1::rand::{Rng, thread_rng};
+use picomint_core::mint::{Denomination, MintInput, Note};
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_core::{Amount, PeerId, TransactionId, wire};
 use picomint_encoding::{Decodable, Encodable};
-use rand::seq::IteratorRandom;
 use tbs::{AggregatePublicKey, aggregate_signature_shares};
 use thiserror::Error;
 
@@ -46,9 +42,16 @@ pub use self::secret::MintSecret;
 use self::send_sm::{SendStateMachine, SendStateMachineTable};
 
 const TARGET_PER_DENOMINATION: usize = 3;
-const SLICE_SIZE: u64 = 10000;
-const PARALLEL_HASH_REQUESTS: usize = 10;
-const PARALLEL_SLICE_REQUESTS: usize = 10;
+
+/// Counters probed per round trip, per denomination — and, since a scan stops
+/// on its first fully empty batch, the gap limit itself.
+///
+/// A transaction emits at most two outputs of any one denomination
+/// (`represent_amount` leaves a remainder below the next tier down, and
+/// `select_output_denominations` is one-per-tier), so a batch this size
+/// tolerates thirty-odd consecutive failed transactions burning counters
+/// before a live note could be stranded beyond the gap.
+const RECOVERY_BATCH: u64 = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct SpendableNote {
@@ -79,227 +82,244 @@ impl SpendableNote {
     }
 }
 
-/// Seed the mint recovery state. Caller writes this in the same tx that
-/// persists their `ClientConfigTable` row, so "join + start recovery" is one
-/// atomic commit. The driver picks the row up the next time
-/// [`MintClientModule::new`] runs and finally emits a single terminal
-/// `RecoveryEvent` under the returned operation id (also persisted in
-/// the row, so a restart's driver completes under the same op id).
+/// Everything a seed-only scan of the federation turned up: the notes the
+/// wallet still owns, and how far each denomination's counter space was
+/// walked.
 ///
-/// `total_items` is left as `None` — the driver fills it in via
-/// `module_api.recovery_count()` on its first awakening, so this entry
-/// point doesn't have to hit the network.
-///
-/// Live progress is observable via
-/// [`crate::Client::subscribe_recovery_progress`] (no events are
-/// emitted on each batch).
-///
-/// Panics if a recovery is already in progress.
-pub fn init_recovery(dbtx: &WriteTx, federation: FederationId) -> OperationId {
-    let operation = OperationId::new_random();
-
-    let state = Recovery {
-        operation,
-        next_index: 0,
-        total_items: None,
-        requests: BTreeMap::new(),
-        nonces: BTreeSet::new(),
-    };
-
-    assert!(
-        dbtx.insert(&RecoveryTable(federation), &(), &state)
-            .is_none(),
-        "init_recovery called when a recovery is already in progress"
-    );
-
-    operation
+/// Produced by [`crate::recover`], which touches no database at all, and
+/// applied by [`MintClientModule::commit_recovery`] inside a dbtx the caller
+/// owns. Keeping the two apart is what makes joining atomic: an integrator
+/// commits the recovered wallet alongside their own bookkeeping in one write,
+/// and a crash before that write leaves nothing half-restored to detect.
+#[derive(Debug, Clone)]
+pub struct Recovery {
+    federation: FederationId,
+    notes: Vec<SpendableNote>,
+    counters: BTreeMap<Denomination, u64>,
 }
 
-impl MintClientModule {
-    /// Drive recovery to completion: fill in `total_items` if missing,
-    /// download slices, checkpoint on each batch, and on the final
-    /// batch hand off to `finalize_recovery`, which submits a
-    /// reissuance tx that re-mints the recovered notes under fresh
-    /// blinded outputs. From `TxAcceptEvent` on, the op rides the
-    /// standard mint state machines.
-    async fn run_recovery(self, mut state: Recovery) -> anyhow::Result<()> {
-        let module_api = self.client_ctx.api();
-        let db = self.client_ctx.db().clone();
+impl Recovery {
+    /// Gross value recovered, before the reissuance's fees.
+    pub fn amount(&self) -> Amount {
+        self.notes.iter().map(SpendableNote::amount).sum()
+    }
 
-        // First awakening of a freshly-init'd recovery: fetch the count
-        // from the federation and persist it. The RecoveryTable-table commit
-        // wakes any subscribers of `subscribe_recovery_progress`.
-        let total_items = match state.total_items {
-            Some(t) => t,
-            None => {
-                let total = module_api.recovery_count().await?;
+    pub fn federation(&self) -> FederationId {
+        self.federation
+    }
+}
 
-                state.total_items = Some(total);
+/// Rebuild a wallet's notes from its seed, without touching a database.
+///
+/// Runs in two phases. Every denomination owns an independent counter space,
+/// so all of them are scanned concurrently, each stopping as soon as one full
+/// batch of counters turns up nothing at all — neither a nonce the federation
+/// has seen spent nor a blinded message it ever signed. Only once the live set
+/// has settled are the signature shares fetched, in a single request.
+///
+/// Splitting membership from retrieval is what keeps a note from going
+/// missing: both probes answer under threshold consensus, so peers must agree
+/// before a counter is written off, and the fetch then asks only for messages
+/// already known to resolve — a share the federation fails to produce is an
+/// error rather than a candidate quietly dropped for want of a full column to
+/// interpolate over.
+pub(crate) async fn scan(
+    api: &FederationApi,
+    secret: &MintSecret,
+    cfg: &MintConfigConsensus,
+    federation: FederationId,
+) -> anyhow::Result<Recovery> {
+    // Each scan carries its own denomination back out rather than relying on
+    // `join_all` order: writing one denomination's counter into another's slot
+    // would hand out counters the federation has already signed.
+    let scans = client_denominations().map(|denomination| async move {
+        (
+            denomination,
+            scan_denomination(api, secret, denomination).await,
+        )
+    });
 
-                let dbtx = db.begin_write();
+    let scanned = futures::future::join_all(scans).await;
 
-                dbtx.insert(&RecoveryTable(self.federation), &(), &state);
+    let counters = scanned
+        .iter()
+        .map(|(denomination, (counter, _))| (*denomination, *counter))
+        .collect();
 
-                dbtx.commit();
+    let requests: Vec<NoteIssuanceRequest> = scanned
+        .iter()
+        .flat_map(|(_, (_, found))| found)
+        .cloned()
+        .collect();
 
-                total
-            }
-        };
+    let mut notes = Vec::with_capacity(requests.len());
 
-        // Re-entry case: scan was already complete on disk, jump to
-        // finalisation directly.
-        if state.next_index == total_items {
-            return self.finalize_recovery(state).await;
-        }
+    if !requests.is_empty() {
+        let shares = api
+            .signature_shares_recovery(requests.clone(), cfg.tbs_pks.clone())
+            .await;
 
-        let peer_selector = PeerSelector::new(module_api.all_peers());
+        for (i, request) in requests.iter().enumerate() {
+            let shares = shares
+                .iter()
+                .map(|(peer, peer_shares)| (peer.to_usize() as u64, peer_shares[i]))
+                .collect();
 
-        let mut recovery_stream =
-            futures::stream::iter((state.next_index..total_items).step_by(SLICE_SIZE as usize))
-                .map(|start| {
-                    let api = module_api.clone();
-                    let end = std::cmp::min(start + SLICE_SIZE, total_items);
+            let note = request.finalize(aggregate_signature_shares(&shares));
 
-                    async move { (start, end, api.recovery_slice_hash(start, end).await) }
-                })
-                .buffered(PARALLEL_HASH_REQUESTS)
-                .map(|(start, end, hash)| {
-                    download_slice_with_hash(
-                        module_api.clone(),
-                        peer_selector.clone(),
-                        start,
-                        end,
-                        hash,
-                    )
-                })
-                .buffered(PARALLEL_SLICE_REQUESTS);
+            let pk = cfg
+                .tbs_agg_pks
+                .get(&note.denomination)
+                .expect("No aggregated pk found for denomination");
 
-        let tweak_filter = self.secret.tweak_filter();
+            ensure!(
+                picomint_core::mint::verify_note(note.note(), *pk),
+                "Recovered note failed verification against the aggregate public key"
+            );
 
-        loop {
-            let items = recovery_stream
-                .next()
-                .await
-                .context("Recovery stream finished before recovery is complete")?;
-
-            for item in &items {
-                match item {
-                    RecoveryItem::Output {
-                        denomination,
-                        nonce_hash,
-                        tweak,
-                    } => {
-                        if !issuance::check_tweak(tweak_filter, *tweak) {
-                            continue;
-                        }
-
-                        let output_secret =
-                            issuance::output_secret(*denomination, *tweak, &self.secret);
-
-                        if !issuance::check_nonce(&output_secret, *nonce_hash) {
-                            continue;
-                        }
-
-                        let computed_nonce_hash = issuance::nonce(&output_secret).consensus_hash();
-
-                        // Ignore possible duplicate nonces
-                        if !state.nonces.insert(computed_nonce_hash) {
-                            continue;
-                        }
-
-                        state.requests.insert(
-                            computed_nonce_hash,
-                            NoteIssuanceRequest::new(*denomination, *tweak, &self.secret),
-                        );
-                    }
-                    RecoveryItem::Input { nonce_hash } => {
-                        state.requests.remove(nonce_hash);
-                        state.nonces.remove(nonce_hash);
-                    }
-                }
-            }
-
-            state.next_index += items.len() as u64;
-
-            // Final batch: skip the per-batch checkpoint and let
-            // `finalize_recovery` commit the reissuance-tx submission
-            // and the terminal `RecoveryEvent` in one atomic dbtx.
-            if state.next_index == total_items {
-                return self.finalize_recovery(state).await;
-            }
-
-            let dbtx = db.begin_write();
-
-            dbtx.insert(&RecoveryTable(self.federation), &(), &state);
-
-            dbtx.commit();
+            notes.push(note);
         }
     }
 
-    /// Final phase of recovery: fetch shares for the recovered nonces,
-    /// materialise `SpendableNote`s, and submit a single reissuance tx
-    /// — atomically with deletion of the `RecoveryTable` row and emission
-    /// of the terminal `RecoveryEvent`.
-    async fn finalize_recovery(self, state: Recovery) -> anyhow::Result<()> {
-        let module_api = self.client_ctx.api();
-        let db = self.client_ctx.db().clone();
+    Ok(Recovery {
+        federation,
+        notes,
+        counters,
+    })
+}
 
-        let issuance_requests: Vec<NoteIssuanceRequest> = state.requests.into_values().collect();
+/// Walk one denomination's counter space. Returns the counter the scan reached
+/// and the candidates the federation both signed and has not seen spent — the
+/// notes still live, whose shares the caller fetches in bulk.
+async fn scan_denomination(
+    api: &FederationApi,
+    secret: &MintSecret,
+    denomination: Denomination,
+) -> (u64, Vec<NoteIssuanceRequest>) {
+    let mut found = Vec::new();
+    let mut counter = 0;
 
-        let mut spendable_notes = Vec::with_capacity(issuance_requests.len());
+    loop {
+        let candidates: Vec<NoteIssuanceRequest> = (counter..counter + RECOVERY_BATCH)
+            .map(|c| NoteIssuanceRequest::new(denomination, c, secret))
+            .collect();
 
-        if !issuance_requests.is_empty() {
-            let shares = module_api
-                .signature_shares_recovery(issuance_requests.clone(), self.cfg.tbs_pks.clone())
-                .await;
+        let spent = api
+            .spend_state(candidates.iter().map(NoteIssuanceRequest::nonce).collect())
+            .await;
 
-            for (i, request) in issuance_requests.iter().enumerate() {
-                let shares = shares
+        // Deriving a blinded message costs some twenty times what the nonce
+        // did, so it is paid only for counters that survived the spend check.
+        let unspent: Vec<NoteIssuanceRequest> = candidates
+            .into_iter()
+            .zip(&spent)
+            .filter(|(_, spent)| !**spent)
+            .map(|(candidate, _)| candidate)
+            .collect();
+
+        let messages = tokio::task::spawn_blocking({
+            let unspent = unspent.clone();
+
+            move || {
+                unspent
                     .iter()
-                    .map(|(peer, peer_shares)| (peer.to_usize() as u64, peer_shares[i]))
-                    .collect();
-
-                let note = request.finalize(aggregate_signature_shares(&shares));
-
-                spendable_notes.push(note);
+                    .map(NoteIssuanceRequest::blinded_message)
+                    .collect()
             }
+        })
+        .await
+        .expect("Blinded message derivation cannot panic");
+
+        let issued = api.issuance_state(messages).await;
+
+        counter += RECOVERY_BATCH;
+
+        if !issued.contains(&true) && !spent.contains(&true) {
+            return (counter, found);
         }
 
-        let amount: Amount = spendable_notes.iter().map(|n| n.amount()).sum();
+        found.extend(
+            unspent
+                .into_iter()
+                .zip(&issued)
+                .filter(|(_, issued)| **issued)
+                .map(|(candidate, _)| candidate),
+        );
+    }
+}
 
-        let dbtx = db.begin_write();
+impl MintClientModule {
+    /// Apply a [`Recovery`] in the caller's dbtx: persist the counters the
+    /// scan reached, then sweep the recovered notes into a single reissuance
+    /// transaction and log the terminal [`RecoveryEvent`] under the returned
+    /// operation id.
+    ///
+    /// Nothing is written until the caller commits, so this belongs in the
+    /// same dbtx as whatever marks the federation as joined. From
+    /// `TxAcceptEvent` on, the operation rides the standard mint state
+    /// machines.
+    ///
+    /// The counters matter as much as the notes: a restored wallet resuming
+    /// from zero would re-derive nonces the federation has already signed.
+    pub fn commit_recovery(&self, dbtx: &WriteTx, recovery: &Recovery) -> OperationId {
+        assert_eq!(
+            recovery.federation, self.federation,
+            "Recovery belongs to a different federation",
+        );
 
-        let operation = state.operation;
+        let operation = OperationId::new_random();
+        let amount = recovery.amount();
 
-        dbtx.remove(&RecoveryTable(self.federation), &());
+        // Ahead of the sweep below, which allocates change counters of its own.
+        for (denomination, counter) in &recovery.counters {
+            dbtx.insert(&CounterTable(self.federation), denomination, counter);
+        }
 
-        if !spendable_notes.is_empty() {
-            let mut builder = TxBuilder::new();
-            for note in &spendable_notes {
-                builder.add_input(Input {
-                    input: wire::Input::Mint(MintInput { note: note.note() }),
-                    keypair: note.keypair,
-                    amount: note.amount(),
-                    fee: self.cfg.input_fee,
-                });
-            }
-
-            self.finalize_and_submit_tx(&dbtx, operation, builder, |txid| events::RecoveryEvent {
-                amount,
-                txid: Some(txid),
-            })
-            .expect("Recovery sweep must fund from the recovered notes themselves");
-        } else {
+        if recovery.notes.is_empty() {
             self.client_ctx.log_event(
-                &dbtx,
+                dbtx,
                 operation,
                 events::RecoveryEvent { amount, txid: None },
             );
+
+            return operation;
         }
 
-        dbtx.commit();
+        let mut builder = TxBuilder::new();
 
-        Ok(())
+        for note in &recovery.notes {
+            builder.add_input(Input {
+                input: wire::Input::Mint(MintInput { note: note.note() }),
+                keypair: note.keypair,
+                amount: note.amount(),
+                fee: self.cfg.input_fee,
+            });
+        }
+
+        self.finalize_and_submit_tx(dbtx, operation, builder, |txid| events::RecoveryEvent {
+            amount,
+            txid: Some(txid),
+        })
+        .expect("Recovery sweep must fund from the recovered notes themselves");
+
+        operation
+    }
+
+    /// Hand out the next counter for `denomination` and persist the bump in
+    /// the caller's dbtx, so a counter is only spent once the transaction
+    /// carrying its blinded message is committed to.
+    fn next_counter(&self, dbtx: &WriteTx, denomination: Denomination) -> u64 {
+        let counter = dbtx
+            .get(&CounterTable(self.federation), &denomination)
+            .unwrap_or(0);
+
+        dbtx.insert(
+            &CounterTable(self.federation),
+            &denomination,
+            &(counter + 1),
+        );
+
+        counter
     }
 }
 
@@ -311,24 +331,6 @@ impl MintClientModule {
         secret: MintSecret,
         tg: &TaskGroup,
     ) -> anyhow::Result<MintClientModule> {
-        let (tweak_tx, tweak_rx) = async_channel::bounded(50);
-
-        let filter = secret.tweak_filter();
-
-        tokio::task::spawn_blocking(move || {
-            loop {
-                let tweak: [u8; 16] = thread_rng().r#gen();
-
-                if !issuance::check_tweak(filter, tweak) {
-                    continue;
-                }
-
-                if tweak_tx.send_blocking(tweak).is_err() {
-                    return;
-                }
-            }
-        });
-
         let sm_context = MintSmContext {
             client_ctx: context.clone(),
             federation,
@@ -361,32 +363,15 @@ impl MintClientModule {
             tg.clone(),
         );
 
-        let module = MintClientModule {
+        Ok(MintClientModule {
             federation,
             cfg,
             secret,
             client_ctx: context,
-            tweak_rx,
             tx_submission_executor,
             mint_executor,
             send_executor,
-        };
-
-        // If a recovery row was seeded (by `Client::init_recovery`) and
-        // hasn't been cleaned up yet, drive it to completion in the
-        // background. The driver wipes the row when done, so a clean
-        // shutdown mid-recovery just resumes on the next boot.
-        if let Some(state) = module
-            .client_ctx
-            .db()
-            .begin_read()
-            .get(&RecoveryTable(federation), &())
-        {
-            let module = module.clone();
-            tg.spawn(module.run_recovery(state));
-        }
-
-        Ok(module)
+        })
     }
 }
 
@@ -396,7 +381,6 @@ pub struct MintClientModule {
     cfg: MintConfigConsensus,
     secret: MintSecret,
     client_ctx: ClientContext,
-    tweak_rx: async_channel::Receiver<[u8; 16]>,
     tx_submission_executor: ModuleExecutor<TxSubmissionStateMachine, TxSubmissionStateMachineTable>,
     mint_executor: ModuleExecutor<MintStateMachine, MintStateMachineTable>,
     send_executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
@@ -500,12 +484,9 @@ impl MintClientModule {
         let mut issuance_requests = Vec::new();
 
         for d in denoms {
-            let tweak = self
-                .tweak_rx
-                .recv_blocking()
-                .expect("Tweak generator task dropped its sender");
+            let counter = self.next_counter(dbtx, d);
 
-            issuance_requests.push(NoteIssuanceRequest::new(d, tweak, &self.secret));
+            issuance_requests.push(NoteIssuanceRequest::new(d, counter, &self.secret));
         }
 
         for request in &issuance_requests {
@@ -565,39 +546,6 @@ impl MintClientModule {
         self.client_ctx
             .db()
             .notify_for_table(&NoteTable(self.federation))
-    }
-
-    /// Yields the in-flight recovery's progress as a percentage
-    /// (0.0..=100.0) on every commit touching the `RecoveryTable` row.
-    /// Returns immediately if no recovery is active at subscribe time;
-    /// ends when `finalize_recovery` removes the row. Mirrors the shape
-    /// of [`crate::Client::subscribe_balance_changes`] — UIs typically
-    /// pair the live percentage with the terminal `RecoveryEvent` on
-    /// the same operation id.
-    pub fn subscribe_recovery_progress(&self) -> futures::stream::BoxStream<'static, f64> {
-        let notify = self
-            .client_ctx
-            .db()
-            .notify_for_table(&RecoveryTable(self.federation));
-        let db = self.client_ctx.db().clone();
-        let federation = self.federation;
-
-        Box::pin(async_stream::stream! {
-            loop {
-                let notified = notify.notified();
-                match db.begin_read().get(&RecoveryTable(federation), &()) {
-                    Some(state) => {
-                        let percent = state
-                            .total_items
-                            .map(|total| (state.next_index as f64 / total as f64) * 100.0)
-                            .unwrap_or(0.0);
-                        yield percent;
-                    }
-                    None => return,
-                }
-                notified.await;
-            }
-        })
     }
 
     fn select_funding_input(
@@ -756,7 +704,7 @@ impl MintClientModule {
             .await
             .map_err(|_| SendECashError::Offline)?;
 
-        let target_denominations = represent_amount(amount);
+        let dbtx = self.client_ctx.db().begin_write();
 
         // Build target issuance requests up-front. Their outputs go into the
         // builder first; the balance loop then pulls funding from the wallet
@@ -764,12 +712,10 @@ impl MintClientModule {
         // change requests after balance so the order matches the transaction's
         // outputs and a single `MintStateMachine` can process both.
         let mut issuance_requests: Vec<NoteIssuanceRequest> = Vec::new();
-        for d in target_denominations {
-            let tweak = self
-                .tweak_rx
-                .recv_blocking()
-                .expect("Tweak generator task dropped its sender");
-            issuance_requests.push(NoteIssuanceRequest::new(d, tweak, &self.secret));
+        for d in represent_amount(amount) {
+            let counter = self.next_counter(&dbtx, d);
+
+            issuance_requests.push(NoteIssuanceRequest::new(d, counter, &self.secret));
         }
 
         let mut builder = TxBuilder::new();
@@ -780,8 +726,6 @@ impl MintClientModule {
                 fee: self.cfg.output_fee,
             });
         }
-
-        let dbtx = self.client_ctx.db().begin_write();
 
         let deficit = builder.deficit();
 
@@ -951,87 +895,9 @@ fn send_ecash_dbtx(
 pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
     dbtx.delete_table(&NoteTable(federation));
     dbtx.delete_table(&ReceiveOperationTable(federation));
-    dbtx.delete_table(&RecoveryTable(federation));
+    dbtx.delete_table(&CounterTable(federation));
     dbtx.delete_table(&MintStateMachineTable(federation));
     dbtx.delete_table(&SendStateMachineTable(federation));
-}
-
-#[derive(Clone)]
-struct PeerSelector {
-    latency: Arc<RwLock<BTreeMap<PeerId, Duration>>>,
-}
-
-impl PeerSelector {
-    fn new(peers: BTreeSet<PeerId>) -> Self {
-        let latency = peers
-            .into_iter()
-            .map(|peer| (peer, Duration::ZERO))
-            .collect();
-
-        Self {
-            latency: Arc::new(RwLock::new(latency)),
-        }
-    }
-
-    /// Pick 2 peers at random, return the one with lower latency
-    fn choose_peer(&self) -> PeerId {
-        let latency = self.latency.read().unwrap();
-
-        let peer_a = latency.iter().choose(&mut thread_rng()).unwrap();
-        let peer_b = latency.iter().choose(&mut thread_rng()).unwrap();
-
-        if peer_a.1 <= peer_b.1 {
-            *peer_a.0
-        } else {
-            *peer_b.0
-        }
-    }
-
-    // Update with exponential moving average (α = 0.1)
-    fn report(&self, peer: PeerId, duration: Duration) {
-        self.latency
-            .write()
-            .unwrap()
-            .entry(peer)
-            .and_modify(|latency| *latency = *latency * 9 / 10 + duration * 1 / 10)
-            .or_insert(duration);
-    }
-
-    fn remove(&self, peer: PeerId) {
-        self.latency.write().unwrap().remove(&peer);
-    }
-}
-
-/// Download a slice with hash verification and peer selection
-async fn download_slice_with_hash(
-    module_api: FederationApi,
-    peer_selector: PeerSelector,
-    start: u64,
-    end: u64,
-    expected_hash: sha256::Hash,
-) -> Vec<RecoveryItem> {
-    const TIMEOUT: Duration = Duration::from_secs(30);
-
-    loop {
-        let peer = peer_selector.choose_peer();
-        let start_time = SystemTime::now();
-
-        if let Ok(data) = module_api.recovery_slice(peer, TIMEOUT, start, end).await {
-            let elapsed = SystemTime::now()
-                .duration_since(start_time)
-                .unwrap_or_default();
-
-            peer_selector.report(peer, elapsed);
-
-            if data.consensus_hash::<sha256::Hash>() == expected_hash {
-                return data;
-            }
-
-            peer_selector.remove(peer);
-        } else {
-            peer_selector.report(peer, TIMEOUT);
-        }
-    }
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]

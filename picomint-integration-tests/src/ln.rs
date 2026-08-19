@@ -630,7 +630,7 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
     info!("ln: test_lnurl_daemon_roundtrip");
 
     // Fresh client so the receive-event stream starts empty.
-    let client = env.new_client(None, false).await?;
+    let client = env.new_client(None).await?;
 
     let lnurl_daemon: String = env.lnurl_daemon_url.parse()?;
 

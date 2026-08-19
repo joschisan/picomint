@@ -3371,7 +3371,6 @@ name = "picomint-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-channel",
  "async-stream",
  "bip39",
  "bitcoin",
@@ -3407,7 +3406,6 @@ dependencies = [
  "anyhow",
  "backon",
  "bitcoin",
- "bitcoin_hashes",
  "bls12_381",
  "derive_more",
  "group",

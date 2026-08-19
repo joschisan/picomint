@@ -1,5 +1,5 @@
 use picomint_core::OutPoint;
-use picomint_core::mint::{Denomination, RecoveryItem};
+use picomint_core::mint::Denomination;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::table;
@@ -19,6 +19,17 @@ table!(
 );
 
 table!(
+    /// Every blinded nonce the mint has ever signed. Membership only — the
+    /// shares live in [`BlindedSignatureShareRecoveryTable`], and a recovery
+    /// probe has no use for them. Mirrors [`NoteNonceTable`] on the output
+    /// side: one guards against spending a note twice, the other against
+    /// signing a nonce twice.
+    BlindedNonceTable,
+    BlindedMessage => (),
+    "mint-blinded-nonce",
+);
+
+table!(
     BlindedSignatureShareTable,
     OutPoint => BlindedSignatureShare,
     "mint-blinded-signature-share",
@@ -34,10 +45,4 @@ table!(
     IssuanceCounterTable,
     Denomination => u64,
     "mint-issuance-counter",
-);
-
-table!(
-    RecoveryItemTable,
-    u64 => RecoveryItem,
-    "mint-recovery-item",
 );
