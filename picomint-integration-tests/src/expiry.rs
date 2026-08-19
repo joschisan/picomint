@@ -35,7 +35,7 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     }
 
     // Spin up a fresh client so the cache starts empty.
-    let client = env.new_client(None, false).await?;
+    let client = env.new_client(None).await?;
 
     // The startup refresh task races with us; force a sync read so the
     // cache is settled before we assert.

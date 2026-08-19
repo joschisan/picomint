@@ -1,17 +1,15 @@
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use crate::api::FederationApi;
 use crate::query::FilterMapThreshold;
-use bitcoin_hashes::sha256;
+use picomint_core::mint::Denomination;
 use picomint_core::mint::methods::{
-    MintMethod, RecoveryCountRequest, RecoveryCountResponse, RecoverySliceHashRequest,
-    RecoverySliceHashResponse, RecoverySliceRequest, RecoverySliceResponse,
-    SignatureSharesRecoveryRequest, SignatureSharesRecoveryResponse, SignatureSharesRequest,
-    SignatureSharesResponse,
+    IssuanceStateRequest, IssuanceStateResponse, MintMethod, SignatureSharesRecoveryRequest,
+    SignatureSharesRecoveryResponse, SignatureSharesRequest, SignatureSharesResponse,
+    SpendStateRequest, SpendStateResponse,
 };
-use picomint_core::mint::{Denomination, RecoveryItem};
 use picomint_core::module::Method;
+use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{PeerId, TransactionId};
 use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 
@@ -37,12 +35,16 @@ impl FederationApi {
         .await
     }
 
+    /// Fetch shares for notes a recovery scan has already established the
+    /// federation signed. Every message must resolve on every peer, so a
+    /// candidate can never be silently dropped for want of a full column of
+    /// shares to interpolate over.
     pub async fn signature_shares_recovery(
         &self,
         issuance_requests: Vec<NoteIssuanceRequest>,
         tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
     ) -> BTreeMap<PeerId, Vec<BlindedSignatureShare>> {
-        let messages: Vec<BlindedMessage> = issuance_requests
+        let messages = issuance_requests
             .iter()
             .map(NoteIssuanceRequest::blinded_message)
             .collect();
@@ -61,42 +63,24 @@ impl FederationApi {
         .await
     }
 
-    pub async fn recovery_count(&self) -> anyhow::Result<u64> {
-        self.request_current_consensus::<RecoveryCountResponse>(Method::Mint(
-            MintMethod::RecoveryCount(RecoveryCountRequest),
+    /// Which of `nonces` the federation has already seen spent, and which of
+    /// `messages` it ever signed. Both go through threshold consensus rather
+    /// than a single peer: either answer coming back wrong in the negative
+    /// direction makes a recovering wallet abandon a live note, so a lone
+    /// peer must not be able to decide it.
+    pub async fn spend_state(&self, nonces: Vec<XOnlyPublicKey>) -> Vec<bool> {
+        self.request_current_consensus_retry::<SpendStateResponse>(Method::Mint(
+            MintMethod::SpendState(SpendStateRequest { nonces }),
         ))
         .await
-        .map(|resp| resp.count)
-        .map_err(|_| anyhow::anyhow!("Failed to request recovery count"))
+        .spent
     }
 
-    pub async fn recovery_slice_hash(&self, start: u64, end: u64) -> sha256::Hash {
-        self.request_current_consensus_retry::<RecoverySliceHashResponse>(Method::Mint(
-            MintMethod::RecoverySliceHash(RecoverySliceHashRequest { start, end }),
+    pub async fn issuance_state(&self, messages: Vec<BlindedMessage>) -> Vec<bool> {
+        self.request_current_consensus_retry::<IssuanceStateResponse>(Method::Mint(
+            MintMethod::IssuanceState(IssuanceStateRequest { messages }),
         ))
         .await
-        .hash
-    }
-
-    pub async fn recovery_slice(
-        &self,
-        peer: PeerId,
-        timeout: Duration,
-        start: u64,
-        end: u64,
-    ) -> anyhow::Result<Vec<RecoveryItem>> {
-        let result: RecoverySliceResponse = tokio::time::timeout(
-            timeout,
-            self.request_single_peer::<RecoverySliceResponse>(
-                Method::Mint(MintMethod::RecoverySlice(RecoverySliceRequest {
-                    start,
-                    end,
-                })),
-                peer,
-            ),
-        )
-        .await??;
-
-        Ok(result.items)
+        .issued
     }
 }

@@ -1,6 +1,5 @@
 use std::hash::Hash;
 
-use bitcoin_hashes::hash160;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use tbs::{BlindedMessage, Message};
@@ -77,7 +76,6 @@ pub struct MintInput {
 pub struct MintOutput {
     pub denomination: Denomination,
     pub nonce: BlindedMessage,
-    pub tweak: [u8; 16],
 }
 
 impl MintOutput {
@@ -85,21 +83,6 @@ impl MintOutput {
         self.denomination.amount()
     }
 }
-
-/// Recovery item for stateless ecash recovery
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub enum RecoveryItem {
-    Output {
-        denomination: Denomination,
-        nonce_hash: hash160::Hash,
-        tweak: [u8; 16],
-    },
-    Input {
-        nonce_hash: hash160::Hash,
-    },
-}
-
-picomint_redb::consensus_value!(RecoveryItem);
 
 pub fn verify_note(note: Note, pk: tbs::AggregatePublicKey) -> bool {
     tbs::verify(nonce_message(note.nonce), note.signature, pk)
@@ -121,6 +104,8 @@ pub enum MintInputError {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
 pub enum MintOutputError {
+    #[error("The blinded nonce has already been signed")]
+    ReusedNonce,
     #[error("The note has an invalid amount not issued by the mint")]
     InvalidDenomination,
 }

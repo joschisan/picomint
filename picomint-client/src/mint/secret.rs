@@ -1,6 +1,11 @@
 //! Mint-module derivation tree. Only constructible via
 //! [`ClientSecret::mint_secret`]; the path enum is private.
 //!
+//! Both leaves hang off a per-denomination issuance counter. Keeping the
+//! denomination in the path means a recovering wallet knows each candidate's
+//! denomination before it asks, so the federation never has to supply it and
+//! recovery verifies blind shares through the same path as normal issuance.
+//!
 //! [`ClientSecret::mint_secret`]: crate::secret::ClientSecret::mint_secret
 
 use picomint_core::mint::Denomination;
@@ -11,7 +16,6 @@ use tbs::BlindingKey;
 
 #[derive(Encodable)]
 enum Path {
-    TweakFilter,
     NoteNonce,
     NoteBlinding,
 }
@@ -24,24 +28,20 @@ impl MintSecret {
         Self(module_root)
     }
 
-    pub fn tweak_filter(&self) -> [u8; 32] {
-        self.0.child(&Path::TweakFilter).to_byte_array()
-    }
-
-    pub fn note_nonce_keypair(&self, denomination: Denomination, tweak: [u8; 16]) -> Keypair {
+    pub fn note_nonce_keypair(&self, denomination: Denomination, counter: u64) -> Keypair {
         self.0
             .child(&Path::NoteNonce)
             .child(&denomination)
-            .child(&tweak)
+            .child(&counter)
             .to_secp_keypair()
     }
 
-    pub fn note_blinding_key(&self, denomination: Denomination, tweak: [u8; 16]) -> BlindingKey {
+    pub fn note_blinding_key(&self, denomination: Denomination, counter: u64) -> BlindingKey {
         BlindingKey(
             self.0
                 .child(&Path::NoteBlinding)
                 .child(&denomination)
-                .child(&tweak)
+                .child(&counter)
                 .to_bls_scalar(),
         )
     }

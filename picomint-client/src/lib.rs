@@ -154,3 +154,29 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
 
     Ok(invite_resp.config)
 }
+
+/// Rebuild a wallet's notes from its seed by scanning the federation.
+///
+/// Reads nothing and writes nothing locally — hand the result to
+/// [`mint::MintClientModule::commit_recovery`] in whichever dbtx marks the
+/// federation as joined, so the restored wallet and the join land together or
+/// not at all.
+pub async fn recover(
+    endpoint: &Endpoint,
+    mnemonic: &Mnemonic,
+    config: &ConsensusConfig,
+) -> anyhow::Result<mint::Recovery> {
+    let federation = config.calculate_federation_id();
+
+    let peer_node_ids = config
+        .peers
+        .iter()
+        .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
+        .collect();
+
+    let api = api::FederationApi::new(endpoint.clone(), peer_node_ids);
+
+    let secret = secret::ClientSecret::new(mnemonic, federation).mint_secret();
+
+    mint::scan(&api, &secret, &config.mint, federation).await
+}

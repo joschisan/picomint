@@ -2,20 +2,18 @@
 
 use picomint_core::OutPoint;
 use picomint_core::TransactionId;
-use picomint_core::mint::RecoveryItem;
 use picomint_core::mint::methods::{
-    RecoveryCountRequest, RecoveryCountResponse, RecoverySliceHashRequest,
-    RecoverySliceHashResponse, RecoverySliceRequest, RecoverySliceResponse,
-    SignatureSharesRecoveryRequest, SignatureSharesRecoveryResponse, SignatureSharesRequest,
-    SignatureSharesResponse,
+    IssuanceStateRequest, IssuanceStateResponse, SignatureSharesRecoveryRequest,
+    SignatureSharesRecoveryResponse, SignatureSharesRequest, SignatureSharesResponse,
+    SpendStateRequest, SpendStateResponse,
 };
-use picomint_encoding::Encodable as _;
 use picomint_redb::ReadTx;
 use tbs::BlindedSignatureShare;
 
 use super::Mint;
 use super::db::{
-    BlindedSignatureShareRecoveryTable, BlindedSignatureShareTable, RecoveryItemTable,
+    BlindedNonceTable, BlindedSignatureShareRecoveryTable, BlindedSignatureShareTable,
+    NoteNonceKey, NoteNonceTable,
 };
 
 pub async fn signature_shares(
@@ -35,6 +33,8 @@ pub async fn signature_shares(
     Ok(SignatureSharesResponse { shares })
 }
 
+/// Callers establish membership through [`issuance_state`] first, so every
+/// message here is expected to resolve and a miss is an error.
 pub fn signature_shares_recovery(
     mint: &Mint,
     req: SignatureSharesRecoveryRequest,
@@ -54,34 +54,31 @@ pub fn signature_shares_recovery(
     Ok(SignatureSharesRecoveryResponse { shares })
 }
 
-pub fn recovery_slice(
+pub fn issuance_state(
     mint: &Mint,
-    req: RecoverySliceRequest,
-) -> Result<RecoverySliceResponse, String> {
+    req: IssuanceStateRequest,
+) -> Result<IssuanceStateResponse, String> {
     let dbtx = mint.db.begin_read();
-    Ok(RecoverySliceResponse {
-        items: collect_recovery_slice(&dbtx, req.start, req.end),
-    })
+
+    let issued = req
+        .messages
+        .iter()
+        .map(|message| dbtx.get(&BlindedNonceTable, message).is_some())
+        .collect();
+
+    Ok(IssuanceStateResponse { issued })
 }
 
-pub fn recovery_slice_hash(
-    mint: &Mint,
-    req: RecoverySliceHashRequest,
-) -> Result<RecoverySliceHashResponse, String> {
+pub fn spend_state(mint: &Mint, req: SpendStateRequest) -> Result<SpendStateResponse, String> {
     let dbtx = mint.db.begin_read();
-    Ok(RecoverySliceHashResponse {
-        hash: collect_recovery_slice(&dbtx, req.start, req.end).consensus_hash(),
-    })
-}
 
-pub fn recovery_count(
-    mint: &Mint,
-    _: RecoveryCountRequest,
-) -> Result<RecoveryCountResponse, String> {
-    let dbtx = mint.db.begin_read();
-    Ok(RecoveryCountResponse {
-        count: super::get_recovery_count(&dbtx),
-    })
+    let spent = req
+        .nonces
+        .iter()
+        .map(|nonce| dbtx.get(&NoteNonceTable, &NoteNonceKey(*nonce)).is_some())
+        .collect();
+
+    Ok(SpendStateResponse { spent })
 }
 
 fn collect_signature_shares(dbtx: &ReadTx, txid: TransactionId) -> Vec<BlindedSignatureShare> {
@@ -91,12 +88,6 @@ fn collect_signature_shares(dbtx: &ReadTx, txid: TransactionId) -> Vec<BlindedSi
     };
 
     dbtx.range(&BlindedSignatureShareTable, bounds, |r| {
-        r.map(|(_, v)| v).collect()
-    })
-}
-
-fn collect_recovery_slice(dbtx: &ReadTx, start: u64, end: u64) -> Vec<RecoveryItem> {
-    dbtx.range(&RecoveryItemTable, start..end, |r| {
         r.map(|(_, v)| v).collect()
     })
 }

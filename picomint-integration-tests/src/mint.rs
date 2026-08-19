@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::ensure;
 use async_stream::stream;
 use futures::StreamExt;
-use picomint_client::mint::{MintSuccessEvent, ReceiveEvent, RecoveryEvent, SendEvent};
+use picomint_client::mint::{MintSuccessEvent, ReceiveEvent, SendEvent};
 use picomint_client::{Client, Mnemonic, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
@@ -56,32 +56,6 @@ fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, MintEvent
     None
 }
 
-/// Tail the global event log and yield only `RecoveryEvent` entries, in
-/// log order. Used by the recovery test, which doesn't carry the
-/// recovery operation id back from `Client::init_recovery`.
-fn recovery_event_stream(client: &Arc<Client>) -> impl futures::Stream<Item = RecoveryEvent> {
-    let client = client.clone();
-    let notify = client.event_notify();
-    let mut next_id = EventLogId::LOG_START;
-
-    stream! {
-        loop {
-            let notified = notify.notified();
-            let events = client.get_event_log(next_id, 100).await;
-
-            for (id, entry) in events {
-                next_id = id.saturating_add(1);
-
-                if let Some(ev) = entry.to_event::<RecoveryEvent>() {
-                    yield ev;
-                }
-            }
-
-            notified.await;
-        }
-    }
-}
-
 /// Wait until a receive operation is fully settled. Returns:
 /// - `Ok` once both `TxAcceptEvent` AND `MintSuccessEvent` have been
 ///   observed — at that point the spendable notes have been written
@@ -121,9 +95,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // Capture the receive client's mnemonic so we can recover it at
     // the end of the suite, after it has accumulated a balance.
     let receive_mnemonic = Mnemonic::generate(12)?;
-    let client_receive = env
-        .new_client(Some(receive_mnemonic.clone()), false)
-        .await?;
+    let client_receive = env.new_client(Some(receive_mnemonic.clone())).await?;
 
     let mut send_events = pin!(mint_event_stream(client_send));
     let mut receive_events = pin!(mint_event_stream(&client_receive));
@@ -202,24 +174,11 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     info!("mint: recovery (expected balance {expected})");
 
-    // `init_recovery: true` seeds the recovery row in the same call
-    // that opens the db, BEFORE `Client::new` runs — so the
-    // constructor's presence check picks it up and spawns the driver.
-    let recovered = env.new_client(Some(receive_mnemonic), true).await?;
+    let (recovered, scanned) = env.new_recovered_client(receive_mnemonic).await?;
 
-    // Wait for the single terminal `RecoveryEvent` — fired in the same
-    // dbtx as the reissuance-tx submission. We tail the global event
-    // log rather than `subscribe_operation_events` because we don't
-    // carry the operation id back from `init_recovery`. Live progress
-    // is observable via `subscribe_recovery_progress`, but we only
-    // need terminal-completion here to gate the balance check.
-    let mut events = pin!(recovery_event_stream(&recovered));
-
-    let terminal = events.next().await.expect("terminal recovery event");
-
-    assert!(
-        terminal.txid.is_some(),
-        "recovery should have produced a reissuance tx"
+    ensure!(
+        scanned == expected,
+        "recovery scanned {scanned}, expected {expected}"
     );
 
     // The terminal recovery event commits in the same dbtx as the

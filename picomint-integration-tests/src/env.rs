@@ -119,7 +119,6 @@ impl TestEnv {
             data_dir.clone(),
             client_counter.fetch_add(1, Ordering::Relaxed),
             None,
-            false,
         ))?;
 
         runtime.block_on(start_gateway(base, "gw", GW_PORT, GW_LN_PORT))?;
@@ -231,15 +230,42 @@ impl TestEnv {
 
     /// Build a fresh client. Pass `Some(mnemonic)` to recover an
     /// existing client's keys (recovery tests); `None` generates one.
-    /// When `init_recovery` is true, [`Client::init_recovery`] is
-    /// called in the same tx that opens the db — so the constructor's
-    /// recovery-row check in [`Client::new`] picks it up and spawns
-    /// the driver.
-    pub async fn new_client(
+    /// Restore a client from `mnemonic` the way an integrator would: scan the
+    /// federation before opening anything, then commit the recovered wallet in
+    /// the same dbtx that would mark the federation as joined. Returns the
+    /// client and the gross recovered value.
+    pub async fn new_recovered_client(
         &self,
-        mnemonic: Option<Mnemonic>,
-        init_recovery: bool,
-    ) -> anyhow::Result<Arc<Client>> {
+        mnemonic: Mnemonic,
+    ) -> anyhow::Result<(Arc<Client>, picomint_core::Amount)> {
+        let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
+
+        let db_dir = self.data_dir.join(format!("client-{n}"));
+        tokio::fs::create_dir_all(&db_dir).await?;
+
+        let db = picomint_redb::Database::open(db_dir.join("database.redb"))?;
+
+        let config = picomint_client::download(&self.endpoint, &self.invite).await?;
+
+        let recovery = picomint_client::recover(&self.endpoint, &mnemonic, &config).await?;
+
+        let amount = recovery.amount();
+
+        let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
+        let client = Client::new(self.endpoint.clone(), db, logger, &mnemonic, config)?;
+
+        let dbtx = client.db().begin_write();
+
+        client.mint().commit_recovery(&dbtx, &recovery);
+
+        dbtx.commit();
+
+        info!("Recovered client-{n}");
+
+        Ok((client, amount))
+    }
+
+    pub async fn new_client(&self, mnemonic: Option<Mnemonic>) -> anyhow::Result<Arc<Client>> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
         build_client(
             self.endpoint.clone(),
@@ -247,7 +273,6 @@ impl TestEnv {
             self.data_dir.clone(),
             n,
             mnemonic,
-            init_recovery,
         )
         .await
     }
@@ -274,7 +299,6 @@ async fn build_client(
     data_dir: std::path::PathBuf,
     n: u64,
     mnemonic: Option<Mnemonic>,
-    init_recovery: bool,
 ) -> anyhow::Result<Arc<Client>> {
     let db_dir = data_dir.join(format!("client-{n}"));
     tokio::fs::create_dir_all(&db_dir).await?;
@@ -287,15 +311,6 @@ async fn build_client(
     };
 
     let config = picomint_client::download(&endpoint, &invite_code).await?;
-
-    // Seed the recovery row BEFORE `Client::new` so its constructor
-    // picks it up via `MintClientModule::new`'s presence check and
-    // spawns the driver.
-    if init_recovery {
-        let dbtx = db.begin_write();
-        Client::init_recovery(&dbtx, config.calculate_federation_id());
-        dbtx.commit();
-    }
 
     let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
     let client = Client::new(endpoint, db, logger, &mnemonic, config)?;

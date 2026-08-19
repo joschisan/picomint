@@ -102,10 +102,8 @@ impl Event for MintFailureEvent {
 /// path. `txid` is `None` only when the scan recovered no notes —
 /// nothing to reissue, the federation isn't asked anything.
 /// `amount` is the gross recovered note value (before the federation's
-/// reissuance fees).
-///
-/// Live progress is exposed separately as a stream via
-/// [`crate::mint::MintClientModule::subscribe_recovery_progress`].
+/// reissuance fees), the same figure
+/// [`crate::mint::MintClientModule::recover`] returns to its caller.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryEvent {
     pub amount: picomint_core::Amount,
