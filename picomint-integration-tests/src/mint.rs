@@ -174,7 +174,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     info!("mint: recovery (expected balance {expected})");
 
-    let (recovered, scanned) = env.new_recovered_client(receive_mnemonic).await?;
+    let (recovered, scanned) = env.new_recovered_client(receive_mnemonic.clone()).await?;
 
     ensure!(
         scanned == expected,
@@ -205,9 +205,29 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     })
     .await?;
 
+    let swept = recovered.get_balance();
+
     recovered.shutdown().await;
 
     info!("mint: recovery passed");
+
+    // Recovering a second time is the only phase that exercises the counter
+    // mark the first recovery persisted — the sweep re-mints the whole wallet
+    // under counters past that mark. A mark one batch too high opens a gap as
+    // wide as the one a scan refuses to cross, stranding every swept note
+    // behind it, and the wallet comes back empty rather than merely short.
+    info!("mint: second recovery (expected balance {swept})");
+
+    let (recovered, scanned) = env.new_recovered_client(receive_mnemonic).await?;
+
+    ensure!(
+        scanned == swept,
+        "second recovery scanned {scanned}, expected {swept}"
+    );
+
+    recovered.shutdown().await;
+
+    info!("mint: second recovery passed");
 
     Ok(())
 }
