@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::future::pending;
 
-use anyhow::{Context, anyhow};
+use anyhow::{Context, anyhow, bail};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use iroh::{Endpoint, PublicKey};
@@ -126,6 +126,9 @@ impl FederationApi {
 
     /// Make an aggregate request to federation, using `strategy` to logically
     /// merge the responses.
+    ///
+    /// A per-peer task that is cancelled rather than run to completion is
+    /// dropped from the round: see [`handle_join_error`].
     #[instrument(skip_all, fields(method = ?method))]
     pub async fn request_with_strategy<P: Decodable + Send + 'static, F: Debug>(
         &self,
@@ -147,11 +150,19 @@ impl FederationApi {
         let peer_error_threshold = self.num_peers().one_honest();
 
         loop {
-            let (peer, result) = tasks
-                .join_next()
-                .await
-                .expect("Query strategy ran out of peers to query without returning a result")
-                .expect("Per-peer request task panicked");
+            let joined = match tasks.join_next().await {
+                Some(joined) => joined,
+                None => {
+                    bail!("Federation request {method:?} failed: every peer task was cancelled")
+                }
+            };
+
+            let (peer, result) = match joined {
+                Ok(pair) => pair,
+                Err(e) => match handle_join_error(e) {
+                    Cancelled => continue,
+                },
+            };
 
             match result {
                 Ok(response) => match strategy.process(peer, response) {
@@ -204,7 +215,14 @@ impl FederationApi {
 
         loop {
             let (peer, response) = match tasks.join_next().await {
-                Some(joined) => joined.expect("Per-peer request task panicked"),
+                Some(Ok(pair)) => pair,
+                Some(Err(e)) => match handle_join_error(e) {
+                    Cancelled => continue,
+                },
+                // Every peer task has been consumed without the strategy
+                // reaching a verdict. This layer retries forever by contract,
+                // so there is nothing left to drive it — park instead of
+                // spinning, and let the caller's own cancellation end it.
                 None => pending().await,
             };
 
@@ -280,4 +298,28 @@ impl FederationApi {
         .await
         .map(|r| r.status)
     }
+}
+
+/// The one outcome of a [`JoinError`] this layer can carry on from.
+struct Cancelled;
+
+/// Split a [`JoinError`] into the two things it actually means.
+///
+/// A cancelled task is not a failure of the peer it was querying — the task
+/// never got to say anything, and the error carries no peer id to attribute it
+/// to, so the only honest thing is to drop it from the round. Tasks are
+/// cancelled when the runtime they were spawned on winds down, which happens
+/// routinely while a client is shutting down with requests still in flight.
+///
+/// A genuine panic is re-raised on this thread, preserving the original
+/// payload and backtrace. Treating the two alike is what turned an ordinary
+/// shutdown race into a process-killing `Per-peer request task panicked`.
+fn handle_join_error(error: tokio::task::JoinError) -> Cancelled {
+    if error.is_panic() {
+        std::panic::resume_unwind(error.into_panic());
+    }
+
+    debug!(%error, "Per-peer request task was cancelled");
+
+    Cancelled
 }
