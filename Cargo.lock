@@ -3735,6 +3735,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-tps-probe"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "iroh",
+ "picomint-base32",
+ "picomint-client",
+ "picomint-core",
+ "picomint-eventlog",
+ "picomint-redb",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "picomint-tss"
 version = "0.1.0"
 dependencies = [

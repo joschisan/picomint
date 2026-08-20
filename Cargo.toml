@@ -22,6 +22,7 @@ members = [
     "picomint-redb",
     "picomint-rpc",
     "picomint-tbs",
+    "picomint-tps-probe",
     "picomint-tpe",
     "picomint-tss",
 ]

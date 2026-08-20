@@ -1,0 +1,27 @@
+[package]
+authors = { workspace = true }
+description = "Measures sustained transaction throughput against a live federation"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-tps-probe"
+publish = false
+version = { workspace = true }
+
+[[bin]]
+name = "picomint-tps-probe"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+iroh = { workspace = true, default-features = false }
+picomint-base32 = { workspace = true }
+picomint-client = { workspace = true }
+picomint-core = { workspace = true }
+picomint-eventlog = { workspace = true }
+picomint-redb = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
