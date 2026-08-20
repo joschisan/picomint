@@ -634,11 +634,16 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
 
     let lnurl_daemon: String = env.lnurl_daemon_url.parse()?;
 
-    let lnurl = client
-        .ln()
-        .generate_lnurl(lnurl_daemon)
-        .await
-        .map_err(|e| anyhow::anyhow!("generate_lnurl: {e}"))?;
+    // `generate_lnurl` is an offline read of the mirrored gateway set, so a
+    // client this fresh has nothing to name until its startup gateway sync
+    // lands. Retry rather than race it.
+    let lnurl = retry("lnurl gateway mirror", || async {
+        client
+            .ln()
+            .generate_lnurl(lnurl_daemon.clone())
+            .map_err(|e| anyhow::anyhow!("generate_lnurl: {e}"))
+    })
+    .await?;
 
     let pay_url = parse_lnurl(&lnurl).ok_or_else(|| anyhow::anyhow!("parse_lnurl"))?;
 
