@@ -191,6 +191,13 @@ pub(crate) async fn scan(
 /// Walk one denomination's counter space. Returns the counter the scan reached
 /// and the candidates the federation both signed and has not seen spent — the
 /// notes still live, whose shares the caller fetches in bulk.
+///
+/// The counter returned is the *start* of the empty batch that ended the scan,
+/// never its end. Both are safe to issue from — the whole batch probed clean —
+/// but only the boundary keeps the wallet recoverable a second time: a later
+/// scan gives up on its first empty batch, so leaving a full batch of unused
+/// counters below the next issuance would strand it behind exactly the gap the
+/// scan refuses to cross.
 async fn scan_denomination(
     api: &FederationApi,
     secret: &MintSecret,
@@ -232,8 +239,6 @@ async fn scan_denomination(
 
         let issued = api.issuance_state(messages).await;
 
-        counter += RECOVERY_BATCH;
-
         if !issued.contains(&true) && !spent.contains(&true) {
             return (counter, found);
         }
@@ -245,6 +250,8 @@ async fn scan_denomination(
                 .filter(|(_, issued)| **issued)
                 .map(|(candidate, _)| candidate),
         );
+
+        counter += RECOVERY_BATCH;
     }
 }
 
