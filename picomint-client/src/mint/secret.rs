@@ -2,9 +2,9 @@
 //! [`ClientSecret::mint_secret`]; the path enum is private.
 //!
 //! Both leaves hang off a per-denomination issuance counter. Keeping the
-//! denomination in the path means a recovering wallet knows each candidate's
+//! denomination in the path means a restoring wallet knows each candidate's
 //! denomination before it asks, so the federation never has to supply it and
-//! recovery verifies blind shares through the same path as normal issuance.
+//! restore verifies blind shares through the same path as normal issuance.
 //!
 //! [`ClientSecret::mint_secret`]: crate::secret::ClientSecret::mint_secret
 

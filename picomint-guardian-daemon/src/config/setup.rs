@@ -80,7 +80,7 @@ pub struct SetupApi {
     settings: ConfigGenSettings,
     /// In-memory state machine, mirroring the on-disk setup tables.
     state: Arc<Mutex<SetupState>>,
-    /// Signals the setup loop with either DKG params or a recovered config
+    /// Signals the setup loop with either DKG params or a restored config
     sender: Sender<SetupResult>,
     /// Backing store; setup mutations write through here so a daemon restart
     /// mid-setup keeps the iroh identity and the already-collected peer
@@ -323,16 +323,16 @@ impl SetupApi {
         Ok(())
     }
 
-    pub async fn recover_config(&self, cfg: ServerConfig) -> anyhow::Result<()> {
+    pub async fn restore_config(&self, cfg: ServerConfig) -> anyhow::Result<()> {
         cfg.validate_config(&cfg.private.identity)
-            .context("Recovered config failed validation")?;
+            .context("Restored config failed validation")?;
 
         store_server_config(&self.db, &cfg).await;
 
         self.sender
-            .send(SetupResult::Recovered(Box::new(cfg)))
+            .send(SetupResult::Restored(Box::new(cfg)))
             .await
-            .context("Failed to send recovered config")?;
+            .context("Failed to send restored config")?;
 
         Ok(())
     }

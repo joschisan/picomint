@@ -82,7 +82,7 @@ use tracing::debug;
 
 pub use client::Client;
 pub use connection::ConnStatus;
-pub use mint::commit_recovery;
+pub use mint::commit_restore;
 pub use picomint_core::core::OperationId;
 pub use secret::{Mnemonic, random as random_mnemonic};
 
@@ -161,21 +161,21 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
 /// Reads nothing and writes nothing locally. Applying the result is two
 /// steps, in this order:
 ///
-/// 1. [`commit_recovery`] in whichever dbtx marks the federation as joined —
+/// 1. [`commit_restore`] in whichever dbtx marks the federation as added —
 ///    this persists the counter marks, and must land before the wallet issues
 ///    anything.
-/// 2. [`mint::MintClientModule::receive`] on [`mint::Recovery::ecash`], once
+/// 2. [`mint::MintClientModule::receive`] on [`mint::Restore::ecash`], once
 ///    the client is up, to reissue the restored notes under nonces the
 ///    federation cannot tie back to the scan.
 ///
 /// Neither step needs the other to have succeeded: the marks are safe to
 /// persist without the reissuance, and the reissuance is idempotent, so an
-/// interrupted recovery is simply run again.
-pub async fn recover(
+/// interrupted restore is simply run again.
+pub async fn restore(
     endpoint: &Endpoint,
     mnemonic: &Mnemonic,
     config: &ConsensusConfig,
-) -> anyhow::Result<mint::Recovery> {
+) -> anyhow::Result<mint::Restore> {
     let federation = config.calculate_federation_id();
 
     let peer_node_ids = config

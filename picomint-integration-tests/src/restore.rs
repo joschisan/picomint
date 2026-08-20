@@ -23,7 +23,7 @@ async fn retry_session_count_at_least(env: &TestEnv, peer: usize, target: u64) -
     .await
 }
 
-/// Wipe two guardians at once, recover both, and verify the federation
+/// Wipe two guardians at once, restore both, and verify the federation
 /// resumes ordering sessions past where it was. With 2-of-4 wiped, the
 /// surviving 2 can't reach threshold on their own, so this exercises
 /// the bft column-state quorum gate: both wiped peers must observe
@@ -79,7 +79,7 @@ pub async fn run_test(env: &TestEnv) -> Result<()> {
     info!("uploading saved configs");
     for (i, &peer) in peers.iter().enumerate() {
         info!("uploading config for guardian-{peer}");
-        cli::guardian_setup_recover(&data_dirs[i], &backup_paths[i])?;
+        cli::guardian_setup_restore(&data_dirs[i], &backup_paths[i])?;
     }
 
     let target = heights.iter().copied().max().unwrap() + 1;
@@ -88,15 +88,15 @@ pub async fn run_test(env: &TestEnv) -> Result<()> {
         retry_session_count_at_least(env, peer, target).await?;
     }
 
-    info!("verifying recovered configs match originals");
+    info!("verifying restored configs match originals");
     for (i, &peer) in peers.iter().enumerate() {
-        let recovered_cfg = cli::guardian_config(&data_dirs[i])?;
+        let restored_cfg = cli::guardian_config(&data_dirs[i])?;
         ensure!(
-            recovered_cfg == original_cfgs[i],
-            "guardian-{peer} recovered config does not match original"
+            restored_cfg == original_cfgs[i],
+            "guardian-{peer} restored config does not match original"
         );
     }
 
-    info!("recover test OK");
+    info!("restore test OK");
     Ok(())
 }

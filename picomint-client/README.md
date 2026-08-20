@@ -147,29 +147,30 @@ Every send terminates in exactly one of:
 
 The refund-rejection branch fires because the contract input has already been spent — and the only thing that can spend it is the gateway claiming with a preimage. The state machine re-polls the federation once more after refund rejection: if the preimage is now visible, the original send actually succeeded (`SendSuccessEvent`); if not, the operation is genuinely stuck (`SendFailureEvent`).
 
-## Recovery
+## Restore
 
-`Client::init_recovery` seeds a recovery row in the same dbtx that opens the database, so "join + start recovery" commits atomically. The recovery driver then walks the federation's history of issued notes and identifies every spendable note that derives from the wallet's mnemonic. When the scan completes, it submits a single reissuance transaction that consumes all recovered notes as inputs and re-mints them under fresh blinded outputs, all under the operation id returned by `init_recovery`.
+Restore rebuilds a wallet from its seed alone. It is two steps, and the client is built *between* them, against a database that is already consistent.
 
-Live progress isn't streamed through the event log; subscribe to `client.mint().subscribe_recovery_progress()` for a stream of `f64` percentages (0.0..=100.0) updated on every checkpoint. The stream ends as soon as the row is removed (i.e. `finalize_recovery` has fired the terminal event below). If no recovery is in progress at subscribe time the stream ends immediately.
+```rust
+let config  = download(&endpoint, &invite).await?;
+let restore = restore(&endpoint, &mnemonic, &config).await?;
 
-```
-[caller subscribes to subscribe_recovery_progress for live %]
-    │
-    ▼
-RecoveryEvent { amount, txid } ── TxCreateEvent       ← terminal; submits reissuance tx
-    │
-    ├── TxAcceptEvent ──┬── MintSuccessEvent          (reissued outputs landed)
-    │                   │
-    │                   └── MintFailureEvent          (TBS verify fails on a reissued output)
-    │
-    └── TxRejectEvent                                 (federation refused reissuance,
-                                                       e.g. an invalid recovered input)
+let dbtx = db.begin_write();
+dbtx.insert(&ClientConfig, &federation_id, &config);
+commit_restore(&dbtx, &restore);          // counter marks only
+dbtx.commit();
+
+let client = Client::new(endpoint, db, logger, &mnemonic, config);
+client.mint().receive(&restore.ecash())?;  // ordinary out-of-band receive
 ```
 
-`amount` is the gross recovered note value (before the federation's reissuance fees). `txid` is `None` only when the scan recovered no notes — there's nothing to reissue and the federation isn't asked anything. The terminal `RecoveryEvent` is emitted in the same dbtx that deletes the recovery state and (when there are notes) submits the reissuance tx, so observing it guarantees the tx is in flight. From there the operation follows the standard mint flow — `TxAcceptEvent` + `MintSuccessEvent` on success, `MintFailureEvent` only on the rare verification failure of a *reissued output*, and `TxRejectEvent` if the federation refuses the reissuance (which is also how a bad *recovered input* surfaces — the federation rejects the tx rather than client-side verification kicking in).
+`restore` touches no database at all. It walks each denomination's counter space concurrently, asking the federation two membership questions per batch — which nonces it has seen spent, and which blinded messages it ever signed — and stops on the first batch that turns up neither. Both probes answer under threshold consensus, so no single peer can write a counter off. It then fetches the signature shares for the live set in one request.
 
-Re-minting every recovered note keeps the recovery path uniform with the rest of the client: there is no special txid-less success case, and the recovered balance is provably spendable the moment `MintSuccessEvent` lands. An integrator restoring a wallet can wait for `MintSuccessEvent` under the recovery `OperationId` and treat that as full restore-complete.
+`commit_restore` persists the counter marks the scan reached, and nothing else. Put it in the same dbtx that marks the federation as added: a wallet resuming from zero would re-derive nonces the federation has already signed, stranding every note behind them.
+
+The restored notes come back as an ordinary `ECash` bundle via `Restore::ecash`, so reissuing them is just `receive`. Restore and an out-of-band receive are the same operation — notes someone else may know traded for notes only this wallet does, the someone else here being the federation, which was asked about every one of these nonces by name during the scan. The operation therefore emits `ReceiveEvent` and follows the standard mint flow; there is no restore-specific event.
+
+Neither step depends on the other having succeeded. The marks are safe to persist without the reissuance, and `receive` dedups on `OperationId::from_encodable`, so an interrupted restore is simply run again. A seed that never held anything scans to an empty bundle, which `receive` rejects with `ReceiveECashError::Empty` — check `Restore::amount` first if that is a case you expect.
 
 ## Event kinds
 
@@ -187,7 +188,6 @@ The complete `(source, kind)` set the client emits, for integrators wiring up an
 | `Mint` · `remint` |
 | `Mint` · `success` |
 | `Mint` · `failure` |
-| `Mint` · `recovery` |
 | `Wallet` · `receive` |
 | `Wallet` · `send` |
 | `Wallet` · `send-success` |

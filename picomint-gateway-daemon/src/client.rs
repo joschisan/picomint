@@ -113,7 +113,7 @@ impl GatewayClientFactory {
     /// `Client` itself is brought up lazily on first use via
     /// [`AppState::select_client`]. Errors if a config for this federation is
     /// already persisted.
-    pub async fn join(&self, invite: &InviteCode) -> anyhow::Result<()> {
+    pub async fn add(&self, invite: &InviteCode) -> anyhow::Result<()> {
         let config = picomint_client::download(&self.endpoint, invite).await?;
 
         if config.network != self.network {
@@ -128,7 +128,7 @@ impl GatewayClientFactory {
             .insert(&ClientConfigTable, &federation_id, &config)
             .is_some()
         {
-            anyhow::bail!("Federation is already joined");
+            anyhow::bail!("Federation is already added");
         }
 
         dbtx.commit();

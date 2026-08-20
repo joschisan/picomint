@@ -21,7 +21,7 @@ client_table!(
 // dbtx that builds the transaction carrying the outputs, so a counter is only
 // consumed once its blinded message is actually committed to.
 //
-// Recovery rewrites these to the high-water mark it scanned to; a restored
+// Restore rewrites these to the high-water mark it scanned to; a restored
 // wallet that resumed from zero would re-derive nonces the federation has
 // already signed.
 client_table!(

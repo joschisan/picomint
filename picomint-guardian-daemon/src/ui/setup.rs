@@ -18,8 +18,8 @@ pub const FEDERATION_SETUP_ROUTE: &str = "/federation-setup";
 pub const ADD_SETUP_CODE_ROUTE: &str = "/add-setup-code";
 pub const RESET_SETUP_CODES_ROUTE: &str = "/reset-setup-codes";
 pub const START_DKG_ROUTE: &str = "/start-dkg";
-pub const RECOVER_CONFIG_ROUTE: &str = "/recover-config";
-pub const RECOVER_PAGE_ROUTE: &str = "/recover";
+pub const RESTORE_CONFIG_ROUTE: &str = "/restore-config";
+pub const RESTORE_PAGE_ROUTE: &str = "/restore";
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct SetupInput {
@@ -111,16 +111,16 @@ fn peer_list_section(
     }
 }
 
-fn recover_form_content(error: Option<&str>) -> Markup {
+fn restore_form_content(error: Option<&str>) -> Markup {
     html! {
-        form id="recover-form"
-            hx-post=(RECOVER_CONFIG_ROUTE)
+        form id="restore-form"
+            hx-post=(RESTORE_CONFIG_ROUTE)
             hx-encoding="multipart/form-data"
-            hx-target="#recover-form"
+            hx-target="#restore-form"
             hx-swap="outerHTML"
         {
             div class="alert alert-info mb-3" {
-                "Upload your saved server config to recover."
+                "Upload your saved server config to restore."
             }
 
             div class="form-group mb-3" {
@@ -132,7 +132,7 @@ fn recover_form_content(error: Option<&str>) -> Markup {
                 div class="alert alert-danger mb-3" { (error) }
             }
 
-            button type="submit" class="btn btn-outline-primary w-100 py-2" { "Recover from Config" }
+            button type="submit" class="btn btn-outline-primary w-100 py-2" { "Restore from Config" }
         }
     }
 }
@@ -201,8 +201,8 @@ fn setup_form_content(error: Option<&str>) -> Markup {
             button type="submit" class="btn btn-primary w-100 py-2" { "Confirm" }
 
             div class="text-center mt-3" {
-                a href=(RECOVER_PAGE_ROUTE) class="text-decoration-none" {
-                    "Recover from Config"
+                a href=(RESTORE_PAGE_ROUTE) class="text-decoration-none" {
+                    "Restore from Config"
                 }
             }
         }
@@ -219,14 +219,14 @@ async fn setup_form(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
         .into_response()
 }
 
-// GET handler for the /recover route (dedicated page for recovering from a
+// GET handler for the /restore route (dedicated page for restoring from a
 // previously-saved server config).
-async fn recover_page(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
+async fn restore_page(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
     if state.setup_code().await.is_some() {
         return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
     }
 
-    Html(single_card_layout("Recover from Config", recover_form_content(None)).into_string())
+    Html(single_card_layout("Restore from Config", restore_form_content(None)).into_string())
         .into_response()
 }
 
@@ -448,7 +448,7 @@ async fn post_start_dkg(State(state): State<Arc<SetupApi>>) -> impl IntoResponse
     }
 }
 
-async fn post_recover_config(
+async fn post_restore_config(
     State(state): State<Arc<SetupApi>>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
@@ -457,17 +457,17 @@ async fn post_recover_config(
             Ok(b) => b,
             Err(e) => {
                 return Html(
-                    recover_form_content(Some(&format!("Read failed: {e}"))).into_string(),
+                    restore_form_content(Some(&format!("Read failed: {e}"))).into_string(),
                 )
                 .into_response();
             }
         },
         Ok(None) => {
-            return Html(recover_form_content(Some("No file uploaded")).into_string())
+            return Html(restore_form_content(Some("No file uploaded")).into_string())
                 .into_response();
         }
         Err(e) => {
-            return Html(recover_form_content(Some(&format!("Upload failed: {e}"))).into_string())
+            return Html(restore_form_content(Some(&format!("Upload failed: {e}"))).into_string())
                 .into_response();
         }
     };
@@ -476,19 +476,19 @@ async fn post_recover_config(
         Ok(c) => c,
         Err(e) => {
             return Html(
-                recover_form_content(Some(&format!("Invalid config JSON: {e}"))).into_string(),
+                restore_form_content(Some(&format!("Invalid config JSON: {e}"))).into_string(),
             )
             .into_response();
         }
     };
 
-    if let Err(e) = state.recover_config(cfg).await {
-        return Html(recover_form_content(Some(&e.to_string())).into_string()).into_response();
+    if let Err(e) = state.restore_config(cfg).await {
+        return Html(restore_form_content(Some(&e.to_string())).into_string()).into_response();
     }
 
     let waiting = html! {
         div class="alert alert-info mb-3" {
-            "Config recovered. The guardian is rejoining the federation — you'll be redirected once it's back online."
+            "Config restored. The guardian is rejoining the federation — you'll be redirected once it's back online."
         }
 
         div
@@ -511,7 +511,7 @@ async fn post_recover_config(
 
     (
         [("HX-Retarget", "body"), ("HX-Reswap", "innerHTML")],
-        Html(single_card_layout("Recovering Config", waiting).into_string()),
+        Html(single_card_layout("Restoring Config", waiting).into_string()),
     )
         .into_response()
 }
@@ -529,8 +529,8 @@ pub fn router(api: Arc<SetupApi>) -> Router {
         .route(ADD_SETUP_CODE_ROUTE, post(post_add_setup_code))
         .route(RESET_SETUP_CODES_ROUTE, post(post_reset_setup_codes))
         .route(START_DKG_ROUTE, post(post_start_dkg))
-        .route(RECOVER_CONFIG_ROUTE, post(post_recover_config))
-        .route(RECOVER_PAGE_ROUTE, get(recover_page))
+        .route(RESTORE_CONFIG_ROUTE, post(post_restore_config))
+        .route(RESTORE_PAGE_ROUTE, get(restore_page))
         .with_static_routes()
         .with_state(api)
 }

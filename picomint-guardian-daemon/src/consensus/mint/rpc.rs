@@ -3,17 +3,17 @@
 use picomint_core::OutPoint;
 use picomint_core::TransactionId;
 use picomint_core::mint::methods::{
-    IssuanceStateRequest, IssuanceStateResponse, SignatureSharesRecoveryRequest,
-    SignatureSharesRecoveryResponse, SignatureSharesRequest, SignatureSharesResponse,
-    SpendStateRequest, SpendStateResponse,
+    IssuanceStateRequest, IssuanceStateResponse, SignatureSharesRequest, SignatureSharesResponse,
+    SignatureSharesRestoreRequest, SignatureSharesRestoreResponse, SpendStateRequest,
+    SpendStateResponse,
 };
 use picomint_redb::ReadTx;
 use tbs::BlindedSignatureShare;
 
 use super::Mint;
 use super::db::{
-    BlindedNonceTable, BlindedSignatureShareRecoveryTable, BlindedSignatureShareTable,
-    NoteNonceKey, NoteNonceTable,
+    BlindedNonceTable, BlindedSignatureShareRestoreTable, BlindedSignatureShareTable, NoteNonceKey,
+    NoteNonceTable,
 };
 
 pub async fn signature_shares(
@@ -35,23 +35,23 @@ pub async fn signature_shares(
 
 /// Callers establish membership through [`issuance_state`] first, so every
 /// message here is expected to resolve and a miss is an error.
-pub fn signature_shares_recovery(
+pub fn signature_shares_restore(
     mint: &Mint,
-    req: SignatureSharesRecoveryRequest,
-) -> Result<SignatureSharesRecoveryResponse, String> {
+    req: SignatureSharesRestoreRequest,
+) -> Result<SignatureSharesRestoreResponse, String> {
     let mut shares = Vec::new();
 
     let dbtx = mint.db.begin_read();
 
     for message in req.messages {
         let share = dbtx
-            .get(&BlindedSignatureShareRecoveryTable, &message)
+            .get(&BlindedSignatureShareRestoreTable, &message)
             .ok_or_else(|| "No blinded signature share found".to_string())?;
 
         shares.push(share);
     }
 
-    Ok(SignatureSharesRecoveryResponse { shares })
+    Ok(SignatureSharesRestoreResponse { shares })
 }
 
 pub fn issuance_state(

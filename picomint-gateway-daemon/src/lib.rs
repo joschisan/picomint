@@ -64,7 +64,7 @@ pub struct AppState {
 impl AppState {
     /// Get a client for `federation`, lazily loading it from
     /// [`ClientConfigTable`] on cache miss. Returns `None` only if no config
-    /// is persisted for that federation — i.e. the gateway has never joined
+    /// is persisted for that federation — i.e. the gateway has never added
     /// it.
     ///
     /// Double-checked: read lock → cache hit returns immediately; cache miss
@@ -97,7 +97,7 @@ impl AppState {
         Some(client)
     }
 
-    /// List every federation the gateway has joined, with its config-declared
+    /// List every federation the gateway has added, with its config-declared
     /// name. Reads [`ClientConfigTable`] directly so dormant federations are
     /// not forced to lazy-load.
     pub fn federation_list(&self) -> Vec<FederationInfo> {

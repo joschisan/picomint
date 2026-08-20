@@ -18,9 +18,9 @@ use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
-    CLI_SOCKET_FILENAME, ChannelInfo, FederationBalanceRequest, FederationBalanceResponse,
-    FederationConfigRequest, FederationConfigResponse, FederationDisableRequest,
-    FederationEnableRequest, FederationJoinRequest, FederationListResponse,
+    CLI_SOCKET_FILENAME, ChannelInfo, FederationAddRequest, FederationBalanceRequest,
+    FederationBalanceResponse, FederationConfigRequest, FederationConfigResponse,
+    FederationDisableRequest, FederationEnableRequest, FederationListResponse,
     FederationMintCountRequest, FederationMintCountResponse, FederationMintReceiveRequest,
     FederationMintReceiveResponse, FederationMintSendRequest, FederationMintSendResponse,
     FederationWalletReceiveRequest, FederationWalletReceiveResponse,
@@ -29,9 +29,9 @@ use picomint_gateway_cli_core::{
     LdkChannelCloseResponse, LdkChannelListResponse, LdkChannelOpenRequest, LdkLnReceiveRequest,
     LdkLnReceiveResponse, LdkLnSendRequest, LdkLnSendResponse, LdkOnchainReceiveResponse,
     LdkOnchainSendRequest, LdkOnchainSendResponse, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
-    LdkPeerListResponse, MnemonicResponse, PeerInfo, ROUTE_FEDERATION_BALANCE,
-    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE,
-    ROUTE_FEDERATION_JOIN, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
+    LdkPeerListResponse, MnemonicResponse, PeerInfo, ROUTE_FEDERATION_ADD,
+    ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE,
+    ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
     ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
     ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
     ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
@@ -123,7 +123,7 @@ fn router() -> Router<AppState> {
         .route(ROUTE_LDK_PEER_DISCONNECT, post(ldk_peer_disconnect))
         .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
         // Federation management
-        .route(ROUTE_FEDERATION_JOIN, post(federation_join))
+        .route(ROUTE_FEDERATION_ADD, post(federation_add))
         .route(ROUTE_FEDERATION_DISABLE, post(federation_disable))
         .route(ROUTE_FEDERATION_ENABLE, post(federation_enable))
         .route(ROUTE_FEDERATION_LIST, post(federation_list))
@@ -505,20 +505,20 @@ async fn ldk_peer_list(
 // Federation management handlers
 // ---------------------------------------------------------------------------
 
-/// Join a new federation
+/// Add a new federation
 #[instrument(skip_all, err)]
-async fn federation_join(
+async fn federation_add(
     State(state): State<AppState>,
-    Json(payload): Json<FederationJoinRequest>,
+    Json(payload): Json<FederationAddRequest>,
 ) -> Result<Json<()>, CliError> {
-    state.client_factory.join(&payload.invite).await?;
+    state.client_factory.add(&payload.invite).await?;
 
     Ok(Json(()))
 }
 
 /// Disable a federation's public client API. Blind insert into
 /// `DisabledFederationTable` — no validation of whether the fed is even
-/// joined.
+/// added.
 #[instrument(skip_all, err)]
 async fn federation_disable(
     State(state): State<AppState>,
@@ -591,9 +591,9 @@ async fn federation_balance(
 // ---------------------------------------------------------------------------
 
 /// Resolve the target federation client. When `id` is `None` and the gateway
-/// has exactly one federation joined, that one is used; otherwise the caller
+/// has exactly one federation added, that one is used; otherwise the caller
 /// must supply `--id`. Resolves against persisted configs, not the in-memory
-/// client cache, so a joined-but-not-yet-warm federation works on first use.
+/// client cache, so an added-but-not-yet-warm federation works on first use.
 async fn resolve_client(
     state: &AppState,
     id: Option<FederationId>,

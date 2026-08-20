@@ -23,7 +23,7 @@ use crate::config::poly::eval_poly_g2;
 use crate::{handler, handler_async};
 
 use self::db::{
-    BlindedNonceTable, BlindedSignatureShareRecoveryTable, BlindedSignatureShareTable,
+    BlindedNonceTable, BlindedSignatureShareRestoreTable, BlindedSignatureShareTable,
     IssuanceCounterTable, NoteNonceKey, NoteNonceTable,
 };
 
@@ -157,7 +157,7 @@ impl Mint {
         // Signing a blinded nonce twice mints two notes that share a nonce, so
         // spending either strands the other. A client derives nonces from a
         // per-denomination counter, so a wallet restored without running
-        // recovery would replay counters it has already used — this turns that
+        // restore would replay counters it has already used — this turns that
         // into a rejected transaction instead of destroyed funds, and keeps
         // the issuance counter from crediting a note that can never be spent.
         if dbtx
@@ -178,7 +178,7 @@ impl Mint {
         dbtx.insert(&BlindedSignatureShareTable, &outpoint, &signature);
 
         dbtx.insert(
-            &BlindedSignatureShareRecoveryTable,
+            &BlindedSignatureShareRestoreTable,
             &output.nonce,
             &signature,
         );
@@ -209,8 +209,8 @@ impl Mint {
     pub async fn handle_api(&self, method: MintMethod) -> Result<Vec<u8>, String> {
         match method {
             MintMethod::SignatureShares(req) => handler_async!(signature_shares, self, req).await,
-            MintMethod::SignatureSharesRecovery(req) => {
-                handler!(signature_shares_recovery, self, req).await
+            MintMethod::SignatureSharesRestore(req) => {
+                handler!(signature_shares_restore, self, req).await
             }
             MintMethod::SpendState(req) => handler!(spend_state, self, req).await,
             MintMethod::IssuanceState(req) => handler!(issuance_state, self, req).await,
