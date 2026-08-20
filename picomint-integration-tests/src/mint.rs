@@ -11,7 +11,7 @@ use picomint_core::core::OperationId;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use tracing::info;
 
-use crate::env::{TestEnv, retry};
+use crate::env::TestEnv;
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -174,51 +174,53 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     info!("mint: recovery (expected balance {expected})");
 
-    let (recovered, scanned) = env.new_recovered_client(receive_mnemonic.clone()).await?;
+    let (recovered, recovery) = env.new_recovered_client(receive_mnemonic.clone()).await?;
+
+    let scanned = recovery.amount();
 
     ensure!(
         scanned == expected,
         "recovery scanned {scanned}, expected {expected}"
     );
 
-    // The terminal recovery event commits in the same dbtx as the
-    // reissuance-tx submission. The tx still has to round-trip through
-    // consensus and its mint state machine has to write fresh notes
-    // before the balance reflects the recovered funds. Recovery
-    // re-mints under fresh outputs, so the post-recovery balance is
-    // slightly below `expected` due to mint fees on the reissuance.
-    retry("recovery balance match", || async {
-        let bal = recovered.get_balance();
+    // Second half of the restore: the scanned notes go back through the
+    // ordinary out-of-band receive, so the wallet holds them only once that
+    // reissuance settles. It re-mints under fresh outputs, leaving the balance
+    // just below `expected` by the federation's fees.
+    let operation = recovered.mint().receive(&recovery.ecash())?;
 
-        ensure!(
-            bal > Amount::ZERO && bal <= expected,
-            "balance not yet positive: {bal} vs {expected}"
-        );
-
-        let loss = expected.checked_sub(bal).expect("bal <= expected");
-        ensure!(
-            loss < Amount::from_sat(50),
-            "recovery lost more than expected to fees: {expected} -> {bal} (loss {loss})"
-        );
-
-        Ok(())
-    })
-    .await?;
+    await_tx_outcome(&recovered, operation)
+        .await
+        .expect("recovery reissuance should be accepted");
 
     let swept = recovered.get_balance();
+
+    ensure!(
+        swept > Amount::ZERO && swept <= expected,
+        "recovered balance out of range: {swept} vs {expected}"
+    );
+
+    let loss = expected.checked_sub(swept).expect("swept <= expected");
+    ensure!(
+        loss < Amount::from_sat(50),
+        "recovery lost more than expected to fees: {expected} -> {swept} (loss {loss})"
+    );
 
     recovered.shutdown().await;
 
     info!("mint: recovery passed");
 
     // Recovering a second time is the only phase that exercises the counter
-    // mark the first recovery persisted — the sweep re-mints the whole wallet
-    // under counters past that mark. A mark one batch too high opens a gap as
-    // wide as the one a scan refuses to cross, stranding every swept note
-    // behind it, and the wallet comes back empty rather than merely short.
+    // mark the first recovery persisted — the reissuance above re-mints the
+    // whole wallet under counters past that mark. A mark one batch too high
+    // opens a gap as wide as the one a scan refuses to cross, stranding every
+    // reissued note behind it, and the wallet comes back empty rather than
+    // merely short.
     info!("mint: second recovery (expected balance {swept})");
 
-    let (recovered, scanned) = env.new_recovered_client(receive_mnemonic).await?;
+    let (recovered, recovery) = env.new_recovered_client(receive_mnemonic).await?;
+
+    let scanned = recovery.amount();
 
     ensure!(
         scanned == swept,

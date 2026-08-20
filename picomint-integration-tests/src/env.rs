@@ -11,6 +11,7 @@ use bitcoincore_rpc::RpcApi;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
+use picomint_client::mint::Recovery;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
@@ -228,16 +229,17 @@ impl TestEnv {
         Ok(client)
     }
 
-    /// Build a fresh client. Pass `Some(mnemonic)` to recover an
-    /// existing client's keys (recovery tests); `None` generates one.
     /// Restore a client from `mnemonic` the way an integrator would: scan the
-    /// federation before opening anything, then commit the recovered wallet in
-    /// the same dbtx that would mark the federation as joined. Returns the
-    /// client and the gross recovered value.
+    /// federation before opening anything, persist the counter marks in the
+    /// same dbtx that would mark the federation as joined, and only then bring
+    /// the client up on an already-consistent database.
+    ///
+    /// Returns the client and the scan. Reissuing the restored notes is the
+    /// caller's second step, via `mint().receive(&recovery.ecash())`.
     pub async fn new_recovered_client(
         &self,
         mnemonic: Mnemonic,
-    ) -> anyhow::Result<(Arc<Client>, picomint_core::Amount)> {
+    ) -> anyhow::Result<(Arc<Client>, Recovery)> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
 
         let db_dir = self.data_dir.join(format!("client-{n}"));
@@ -249,20 +251,18 @@ impl TestEnv {
 
         let recovery = picomint_client::recover(&self.endpoint, &mnemonic, &config).await?;
 
-        let amount = recovery.amount();
+        let dbtx = db.begin_write();
 
-        let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
-        let client = Client::new(self.endpoint.clone(), db, logger, &mnemonic, config)?;
-
-        let dbtx = client.db().begin_write();
-
-        client.mint().commit_recovery(&dbtx, &recovery);
+        picomint_client::commit_recovery(&dbtx, &recovery);
 
         dbtx.commit();
 
+        let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
+        let client = Client::new(self.endpoint.clone(), db, logger, &mnemonic, config);
+
         info!("Recovered client-{n}");
 
-        Ok((client, amount))
+        Ok((client, recovery))
     }
 
     pub async fn new_client(&self, mnemonic: Option<Mnemonic>) -> anyhow::Result<Arc<Client>> {
@@ -313,7 +313,7 @@ async fn build_client(
     let config = picomint_client::download(&endpoint, &invite_code).await?;
 
     let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
-    let client = Client::new(endpoint, db, logger, &mnemonic, config)?;
+    let client = Client::new(endpoint, db, logger, &mnemonic, config);
 
     info!("Created client-{n}");
     Ok(client)

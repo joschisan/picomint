@@ -82,6 +82,7 @@ use tracing::debug;
 
 pub use client::Client;
 pub use connection::ConnStatus;
+pub use mint::commit_recovery;
 pub use picomint_core::core::OperationId;
 pub use secret::{Mnemonic, random as random_mnemonic};
 
@@ -157,10 +158,19 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
 
 /// Rebuild a wallet's notes from its seed by scanning the federation.
 ///
-/// Reads nothing and writes nothing locally — hand the result to
-/// [`mint::MintClientModule::commit_recovery`] in whichever dbtx marks the
-/// federation as joined, so the restored wallet and the join land together or
-/// not at all.
+/// Reads nothing and writes nothing locally. Applying the result is two
+/// steps, in this order:
+///
+/// 1. [`commit_recovery`] in whichever dbtx marks the federation as joined —
+///    this persists the counter marks, and must land before the wallet issues
+///    anything.
+/// 2. [`mint::MintClientModule::receive`] on [`mint::Recovery::ecash`], once
+///    the client is up, to reissue the restored notes under nonces the
+///    federation cannot tie back to the scan.
+///
+/// Neither step needs the other to have succeeded: the marks are safe to
+/// persist without the reissuance, and the reissuance is idempotent, so an
+/// interrupted recovery is simply run again.
 pub async fn recover(
     endpoint: &Endpoint,
     mnemonic: &Mnemonic,

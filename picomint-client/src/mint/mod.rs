@@ -86,11 +86,10 @@ impl SpendableNote {
 /// wallet still owns, and how far each denomination's counter space was
 /// walked.
 ///
-/// Produced by [`crate::recover`], which touches no database at all, and
-/// applied by [`MintClientModule::commit_recovery`] inside a dbtx the caller
-/// owns. Keeping the two apart is what makes joining atomic: an integrator
-/// commits the recovered wallet alongside their own bookkeeping in one write,
-/// and a crash before that write leaves nothing half-restored to detect.
+/// Produced by [`crate::recover`], which touches no database at all. The
+/// counters go to [`commit_recovery`] in a dbtx the caller owns, alongside
+/// whatever marks the federation as joined; the notes go to
+/// [`MintClientModule::receive`] as an ordinary bundle once the client is up.
 #[derive(Debug, Clone)]
 pub struct Recovery {
     federation: FederationId,
@@ -106,6 +105,42 @@ impl Recovery {
 
     pub fn federation(&self) -> FederationId {
         self.federation
+    }
+
+    /// The restored notes as an out-of-band bundle, to hand straight to
+    /// [`MintClientModule::receive`].
+    ///
+    /// Recovery and an ordinary out-of-band receive are the same operation:
+    /// notes that someone else may know traded for notes only this wallet
+    /// does. Here the someone else is the federation, which was asked about
+    /// every one of these nonces by name during the scan. Reissuing is what
+    /// makes the balance the wallet's own, so it rides the existing path
+    /// rather than a recovery-shaped copy of it — including the dedup on
+    /// [`OperationId::from_encodable`], which makes receiving the same
+    /// restored bundle twice a no-op.
+    ///
+    /// Empty when the scan found nothing, which
+    /// [`MintClientModule::receive`] rejects with
+    /// [`ReceiveECashError::Empty`]; check [`Recovery::amount`] first if a
+    /// never-used seed is a case the caller expects.
+    pub fn ecash(&self) -> ECash {
+        ECash::new(self.federation, self.notes.clone())
+    }
+}
+
+/// Persist the counter marks a [`scan`] reached, in a dbtx the caller owns.
+///
+/// This is the whole of what recovery writes locally, and it must land before
+/// the wallet issues anything: a restored wallet resuming from zero would
+/// re-derive nonces the federation has already signed, and every note behind
+/// them would be stranded. The notes themselves are not written here — they
+/// arrive through [`MintClientModule::receive`] like any other bundle.
+///
+/// Belongs in the same dbtx as whatever marks the federation as joined, so a
+/// crash leaves either both or neither.
+pub fn commit_recovery(dbtx: &WriteTx, recovery: &Recovery) {
+    for (denomination, counter) in &recovery.counters {
+        dbtx.insert(&CounterTable(recovery.federation), denomination, counter);
     }
 }
 
@@ -256,62 +291,6 @@ async fn scan_denomination(
 }
 
 impl MintClientModule {
-    /// Apply a [`Recovery`] in the caller's dbtx: persist the counters the
-    /// scan reached, then sweep the recovered notes into a single reissuance
-    /// transaction and log the terminal [`RecoveryEvent`] under the returned
-    /// operation id.
-    ///
-    /// Nothing is written until the caller commits, so this belongs in the
-    /// same dbtx as whatever marks the federation as joined. From
-    /// `TxAcceptEvent` on, the operation rides the standard mint state
-    /// machines.
-    ///
-    /// The counters matter as much as the notes: a restored wallet resuming
-    /// from zero would re-derive nonces the federation has already signed.
-    pub fn commit_recovery(&self, dbtx: &WriteTx, recovery: &Recovery) -> OperationId {
-        assert_eq!(
-            recovery.federation, self.federation,
-            "Recovery belongs to a different federation",
-        );
-
-        let operation = OperationId::new_random();
-        let amount = recovery.amount();
-
-        // Ahead of the sweep below, which allocates change counters of its own.
-        for (denomination, counter) in &recovery.counters {
-            dbtx.insert(&CounterTable(self.federation), denomination, counter);
-        }
-
-        if recovery.notes.is_empty() {
-            self.client_ctx.log_event(
-                dbtx,
-                operation,
-                events::RecoveryEvent { amount, txid: None },
-            );
-
-            return operation;
-        }
-
-        let mut builder = TxBuilder::new();
-
-        for note in &recovery.notes {
-            builder.add_input(Input {
-                input: wire::Input::Mint(MintInput { note: note.note() }),
-                keypair: note.keypair,
-                amount: note.amount(),
-                fee: self.cfg.input_fee,
-            });
-        }
-
-        self.finalize_and_submit_tx(dbtx, operation, builder, |txid| events::RecoveryEvent {
-            amount,
-            txid: Some(txid),
-        })
-        .expect("Recovery sweep must fund from the recovered notes themselves");
-
-        operation
-    }
-
     /// Hand out the next counter for `denomination` and persist the bump in
     /// the caller's dbtx, so a counter is only spent once the transaction
     /// carrying its blinded message is committed to.
@@ -337,7 +316,7 @@ impl MintClientModule {
         context: ClientContext,
         secret: MintSecret,
         tg: &TaskGroup,
-    ) -> anyhow::Result<MintClientModule> {
+    ) -> MintClientModule {
         let sm_context = MintSmContext {
             client_ctx: context.clone(),
             federation,
@@ -370,7 +349,7 @@ impl MintClientModule {
             tg.clone(),
         );
 
-        Ok(MintClientModule {
+        MintClientModule {
             federation,
             cfg,
             secret,
@@ -378,7 +357,7 @@ impl MintClientModule {
             tx_submission_executor,
             mint_executor,
             send_executor,
-        })
+        }
     }
 }
 
@@ -805,6 +784,14 @@ impl MintClientModule {
     pub fn receive(&self, ecash: &ECash) -> Result<OperationId, ReceiveECashError> {
         let operation = OperationId::from_encodable(ecash);
 
+        // A scan of a seed that never held anything produces one of these, so
+        // this is the ordinary shape of an empty recovery — not an edge case.
+        // Without the guard it would balance to a transaction with no inputs
+        // and no outputs and submit it.
+        if ecash.notes.is_empty() {
+            return Err(ReceiveECashError::Empty);
+        }
+
         if ecash.mint != self.federation {
             return Err(ReceiveECashError::WrongFederation);
         }
@@ -919,6 +906,8 @@ pub enum SendECashError {
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
 pub enum ReceiveECashError {
+    #[error("The ECash bundle contains no notes")]
+    Empty,
     #[error("The ECash is from a different federation")]
     WrongFederation,
     #[error("ECash contains an uneconomical denomination")]

@@ -36,7 +36,7 @@ impl GatewayClientModule {
         mint: Arc<crate::mint::MintClientModule>,
         gw_secret: GwSecret,
         tg: &TaskGroup,
-    ) -> anyhow::Result<GatewayClientModule> {
+    ) -> GatewayClientModule {
         let keypair = gw_secret.contract_keypair();
 
         let sm_context = GwSmContext {
@@ -55,14 +55,14 @@ impl GatewayClientModule {
             tg.clone(),
         );
 
-        Ok(GatewayClientModule {
+        GatewayClientModule {
             federation,
             cfg,
             client_ctx: context,
             mint,
             keypair,
             receive_executor,
-        })
+        }
     }
 }
 

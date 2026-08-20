@@ -90,7 +90,7 @@ impl AppState {
             return Some(client);
         }
 
-        let client = self.client_factory.load(&federation).ok().flatten()?;
+        let client = self.client_factory.load(&federation)?;
 
         clients.insert(federation, client.clone());
 
