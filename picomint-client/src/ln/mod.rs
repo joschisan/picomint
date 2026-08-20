@@ -479,13 +479,29 @@ impl LightningClientModule {
     }
 
     /// Generate an lnurl for the client.
-    pub async fn generate_lnurl(&self, lnurl_daemon: String) -> Result<String, GenerateLnurlError> {
-        let gateways = self
+    ///
+    /// Offline: the gateway set is read from [`GatewayPkTable`], the local
+    /// mirror kept current by [`Self::update_gateway_pks`], so this never
+    /// touches the network and cannot fail on a federation that is
+    /// unreachable. An lnurl is a long-lived string a user hands out — making
+    /// it depend on a live threshold-consensus query meant it could not be
+    /// produced at all while offline, which is precisely when someone wants to
+    /// show one.
+    ///
+    /// The flip side is that a client which has never completed a gateway sync
+    /// has nothing to name: like [`crate::Client::expiry_status`], this reads
+    /// only what has already been mirrored, so a freshly built client returns
+    /// [`GenerateLnurlError::NoGatewaysAvailable`] until the startup
+    /// [`Self::update_gateway_pks`] lands. Callers that generate an lnurl
+    /// immediately after adding a federation should retry.
+    pub fn generate_lnurl(&self, lnurl_daemon: String) -> Result<String, GenerateLnurlError> {
+        let gateways: Vec<GatewayPk> = self
             .client_ctx
-            .api()
-            .ln_gateways()
-            .await
-            .map_err(|_| GenerateLnurlError::FailedToRequestGateways)?;
+            .db()
+            .begin_read()
+            .iter(&GatewayPkTable(self.federation), |it| {
+                it.map(|(pk, ())| pk).collect()
+            });
 
         if gateways.is_empty() {
             return Err(GenerateLnurlError::NoGatewaysAvailable);
@@ -592,8 +608,6 @@ pub enum ReceiveError {
 pub enum GenerateLnurlError {
     #[error("No gateways are available")]
     NoGatewaysAvailable,
-    #[error("Failed to request gateways")]
-    FailedToRequestGateways,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
