@@ -60,7 +60,11 @@ impl Event for RemintEvent {
     const KIND: EventKind = EventKind::from_static("remint");
 }
 
-/// Emitted when a receive (reissuance) operation is initiated.
+/// Emitted when a receive (reissuance) operation is initiated. Also covers
+/// recovery, which hands its restored notes to
+/// [`crate::mint::MintClientModule::receive`] as an ordinary bundle — the
+/// two are the same operation, notes someone else may know traded for notes
+/// only this wallet does.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReceiveEvent {
     pub txid: TransactionId,
@@ -93,24 +97,4 @@ pub struct MintFailureEvent;
 impl Event for MintFailureEvent {
     const SOURCE: EventSource = EventSource::Mint;
     const KIND: EventKind = EventKind::from_static("failure");
-}
-
-/// Emitted exactly once per recovery operation, in the same dbtx as
-/// the reissuance-tx submission. Presence under an op id signals
-/// "scan complete, reissuance in flight"; the rest of the op rides
-/// the standard `TxCreateEvent` / `TxAcceptEvent` / `MintSuccessEvent`
-/// path. `txid` is `None` only when the scan recovered no notes —
-/// nothing to reissue, the federation isn't asked anything.
-/// `amount` is the gross recovered note value (before the federation's
-/// reissuance fees), the same figure
-/// [`crate::mint::MintClientModule::recover`] returns to its caller.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct RecoveryEvent {
-    pub amount: picomint_core::Amount,
-    pub txid: Option<picomint_core::TransactionId>,
-}
-
-impl Event for RecoveryEvent {
-    const SOURCE: EventSource = EventSource::Mint;
-    const KIND: EventKind = EventKind::from_static("recovery");
 }
