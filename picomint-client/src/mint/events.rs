@@ -61,7 +61,7 @@ impl Event for RemintEvent {
 }
 
 /// Emitted when a receive (reissuance) operation is initiated. Also covers
-/// recovery, which hands its restored notes to
+/// restore, which hands its restored notes to
 /// [`crate::mint::MintClientModule::receive`] as an ordinary bundle — the
 /// two are the same operation, notes someone else may know traded for notes
 /// only this wallet does.

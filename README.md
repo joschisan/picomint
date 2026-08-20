@@ -92,7 +92,7 @@ picomint-guardian-cli setup status
 
 ### Invite Users
 
-Users join the federation with an invite code and any guardian can create one:
+Users add the federation with an invite code and any guardian can create one:
 
 ```bash
 picomint-guardian-cli invite
@@ -135,7 +135,7 @@ picomint-guardian-cli config > config.json
 This single file is the only state you need to keep. It contains your
 guardian's secret keys plus the federation's consensus config. The live
 `database.redb` is operational state (BFT sessions, block sync) which is
-reconstructed from peers when a recovered guardian rejoins.
+reconstructed from peers when a restored guardian rejoins.
 
 If your deployment is ever lost, copy the backup back into a fresh container:
 
@@ -143,10 +143,10 @@ If your deployment is ever lost, copy the backup back into a fresh container:
 sudo docker cp config.json picomint-guardian-daemon:/tmp/config.json
 ```
 
-And run `setup recover`:
+And run `setup restore`:
 
 ```bash
-picomint-guardian-cli setup recover /tmp/config.json
+picomint-guardian-cli setup restore /tmp/config.json
 ```
 
 ### Interfaces
@@ -256,15 +256,15 @@ Running a second outbound channel alongside the LSP's inbound one is worthwhile:
 picomint-gateway-cli ldk channel list
 ```
 
-### Join Federations
+### Add Federations
 
-The gateway can serve mutliple Federations simultanously. Join one with an invite code (see [Invite Users](#invite-users) above for how guardians produce these):
+The gateway can serve mutliple Federations simultanously. Add one with an invite code (see [Invite Users](#invite-users) above for how guardians produce these):
 
 ```bash
-picomint-gateway-cli federation join <invite>
+picomint-gateway-cli federation add <invite>
 ```
 
-List joined federations:
+List added federations:
 
 ```bash
 picomint-gateway-cli federation list
@@ -274,9 +274,9 @@ For the gateway to actually route payments on behalf of a federation, its guardi
 
 ### Manage Federation Liquidity
 
-Every command below accepts `--id <federation-id>` to target a specific federation. When exactly one federation is joined (the common case) the flag can be omitted and that federation is used.
+Every command below accepts `--id <federation-id>` to target a specific federation. When exactly one federation is added (the common case) the flag can be omitted and that federation is used.
 
-The gateway holds its own ecash balance in every federation it has joined. Check it with:
+The gateway holds its own ecash balance in every federation it has added. Check it with:
 
 ```bash
 picomint-gateway-cli federation balance
@@ -316,15 +316,15 @@ picomint-gateway-cli federation module mint send <amount>
 picomint-gateway-cli federation module mint receive <ecash>
 ```
 
-### Recovery
+### Restore
 
-If your gateway deployment is ever corrupted you can recover your onchain funds and ecash from your twelve word mnemonic:
+If your gateway deployment is ever corrupted you can restore your onchain funds and ecash from your twelve word mnemonic:
 
 ```bash
 picomint-gateway-cli mnemonic
 ```
 
-The mnemonic can be used with any Bip 39 compatible wallet to recover the onchain funds and with any Picomint wallet to recover the funds in the federations.  **The balance in your open lightning channels is lost.**
+The mnemonic can be used with any Bip 39 compatible wallet to restore the onchain funds and with any Picomint wallet to restore the funds in the federations.  **The balance in your open lightning channels is lost.**
 
 ### Analytics
 

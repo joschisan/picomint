@@ -8,7 +8,7 @@ Brings up:
 - `bitcoind` on regtest, with a sidecar that mines one block every ten
   seconds
 - 4 guardians for **Test Federation** (`picomint-guardian-daemon-0..3`)
-- 1 gateway (`picomint-gateway-daemon`) joined to the federation
+- 1 gateway (`picomint-gateway-daemon`) added to the federation
 - 1 LNURL daemon (`picomint-lnurl-daemon`)
 
 All services share a docker network. Resetting state is a single command:

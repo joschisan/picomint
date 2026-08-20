@@ -64,7 +64,7 @@ impl Client {
     /// Not inert: the modules spawn their state-machine executors — resuming
     /// whatever the database already holds — and the background refreshes
     /// commit writes of their own. So this goes last, after the dbtx that
-    /// persists `config` and marks the federation as joined. The caller gets
+    /// persists `config` and marks the federation as added. The caller gets
     /// the config from [`crate::download`] and owns persisting it.
     pub fn new(
         endpoint: Endpoint,

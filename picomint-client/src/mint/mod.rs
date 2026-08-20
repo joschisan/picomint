@@ -51,7 +51,7 @@ const TARGET_PER_DENOMINATION: usize = 3;
 /// `select_output_denominations` is one-per-tier), so a batch this size
 /// tolerates thirty-odd consecutive failed transactions burning counters
 /// before a live note could be stranded beyond the gap.
-const RECOVERY_BATCH: u64 = 64;
+const RESTORE_BATCH: u64 = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct SpendableNote {
@@ -86,19 +86,19 @@ impl SpendableNote {
 /// wallet still owns, and how far each denomination's counter space was
 /// walked.
 ///
-/// Produced by [`crate::recover`], which touches no database at all. The
-/// counters go to [`commit_recovery`] in a dbtx the caller owns, alongside
-/// whatever marks the federation as joined; the notes go to
+/// Produced by [`crate::restore`], which touches no database at all. The
+/// counters go to [`commit_restore`] in a dbtx the caller owns, alongside
+/// whatever marks the federation as added; the notes go to
 /// [`MintClientModule::receive`] as an ordinary bundle once the client is up.
 #[derive(Debug, Clone)]
-pub struct Recovery {
+pub struct Restore {
     federation: FederationId,
     notes: Vec<SpendableNote>,
     counters: BTreeMap<Denomination, u64>,
 }
 
-impl Recovery {
-    /// Gross value recovered, before the reissuance's fees.
+impl Restore {
+    /// Gross value restored, before the reissuance's fees.
     pub fn amount(&self) -> Amount {
         self.notes.iter().map(SpendableNote::amount).sum()
     }
@@ -110,18 +110,18 @@ impl Recovery {
     /// The restored notes as an out-of-band bundle, to hand straight to
     /// [`MintClientModule::receive`].
     ///
-    /// Recovery and an ordinary out-of-band receive are the same operation:
+    /// Restore and an ordinary out-of-band receive are the same operation:
     /// notes that someone else may know traded for notes only this wallet
     /// does. Here the someone else is the federation, which was asked about
     /// every one of these nonces by name during the scan. Reissuing is what
     /// makes the balance the wallet's own, so it rides the existing path
-    /// rather than a recovery-shaped copy of it — including the dedup on
+    /// rather than a restore-shaped copy of it — including the dedup on
     /// [`OperationId::from_encodable`], which makes receiving the same
     /// restored bundle twice a no-op.
     ///
     /// Empty when the scan found nothing, which
     /// [`MintClientModule::receive`] rejects with
-    /// [`ReceiveECashError::Empty`]; check [`Recovery::amount`] first if a
+    /// [`ReceiveECashError::Empty`]; check [`Restore::amount`] first if a
     /// never-used seed is a case the caller expects.
     pub fn ecash(&self) -> ECash {
         ECash::new(self.federation, self.notes.clone())
@@ -130,17 +130,17 @@ impl Recovery {
 
 /// Persist the counter marks a [`scan`] reached, in a dbtx the caller owns.
 ///
-/// This is the whole of what recovery writes locally, and it must land before
+/// This is the whole of what restore writes locally, and it must land before
 /// the wallet issues anything: a restored wallet resuming from zero would
 /// re-derive nonces the federation has already signed, and every note behind
 /// them would be stranded. The notes themselves are not written here — they
 /// arrive through [`MintClientModule::receive`] like any other bundle.
 ///
-/// Belongs in the same dbtx as whatever marks the federation as joined, so a
+/// Belongs in the same dbtx as whatever marks the federation as added, so a
 /// crash leaves either both or neither.
-pub fn commit_recovery(dbtx: &WriteTx, recovery: &Recovery) {
-    for (denomination, counter) in &recovery.counters {
-        dbtx.insert(&CounterTable(recovery.federation), denomination, counter);
+pub fn commit_restore(dbtx: &WriteTx, restore: &Restore) {
+    for (denomination, counter) in &restore.counters {
+        dbtx.insert(&CounterTable(restore.federation), denomination, counter);
     }
 }
 
@@ -163,7 +163,7 @@ pub(crate) async fn scan(
     secret: &MintSecret,
     cfg: &MintConfigConsensus,
     federation: FederationId,
-) -> anyhow::Result<Recovery> {
+) -> anyhow::Result<Restore> {
     // Each scan carries its own denomination back out rather than relying on
     // `join_all` order: writing one denomination's counter into another's slot
     // would hand out counters the federation has already signed.
@@ -191,7 +191,7 @@ pub(crate) async fn scan(
 
     if !requests.is_empty() {
         let shares = api
-            .signature_shares_recovery(requests.clone(), cfg.tbs_pks.clone())
+            .signature_shares_restore(requests.clone(), cfg.tbs_pks.clone())
             .await;
 
         for (i, request) in requests.iter().enumerate() {
@@ -209,14 +209,14 @@ pub(crate) async fn scan(
 
             ensure!(
                 picomint_core::mint::verify_note(note.note(), *pk),
-                "Recovered note failed verification against the aggregate public key"
+                "Restored note failed verification against the aggregate public key"
             );
 
             notes.push(note);
         }
     }
 
-    Ok(Recovery {
+    Ok(Restore {
         federation,
         notes,
         counters,
@@ -242,7 +242,7 @@ async fn scan_denomination(
     let mut counter = 0;
 
     loop {
-        let candidates: Vec<NoteIssuanceRequest> = (counter..counter + RECOVERY_BATCH)
+        let candidates: Vec<NoteIssuanceRequest> = (counter..counter + RESTORE_BATCH)
             .map(|c| NoteIssuanceRequest::new(denomination, c, secret))
             .collect();
 
@@ -286,7 +286,7 @@ async fn scan_denomination(
                 .map(|(candidate, _)| candidate),
         );
 
-        counter += RECOVERY_BATCH;
+        counter += RESTORE_BATCH;
     }
 }
 
@@ -785,7 +785,7 @@ impl MintClientModule {
         let operation = OperationId::from_encodable(ecash);
 
         // A scan of a seed that never held anything produces one of these, so
-        // this is the ordinary shape of an empty recovery — not an edge case.
+        // this is the ordinary shape of an empty restore — not an edge case.
         // Without the guard it would balance to a transaction with no inputs
         // and no outputs and submit it.
         if ecash.notes.is_empty() {

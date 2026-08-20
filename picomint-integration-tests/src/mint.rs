@@ -92,7 +92,7 @@ async fn await_tx_outcome(client: &Arc<Client>, operation: OperationId) -> Resul
 pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
     info!("mint: send_and_receive (10 iterations) + double_spend_is_rejected");
 
-    // Capture the receive client's mnemonic so we can recover it at
+    // Capture the receive client's mnemonic so we can restore it at
     // the end of the suite, after it has accumulated a balance.
     let receive_mnemonic = Mnemonic::generate(12)?;
     let client_receive = env.new_client(Some(receive_mnemonic.clone())).await?;
@@ -127,12 +127,12 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // double-spend phase. The rejected receive runs `balance()`, which
     // opportunistically pulls excess notes (>TARGET_PER_DENOMINATION) into
     // the IssuanceSM's `spendable_notes` and only recovers them once the SM
-    // transitions on Err. Capturing here avoids racing that recovery.
+    // transitions on Err. Capturing here avoids racing that reclaim.
     let expected = client_receive.get_balance();
 
     ensure!(
         expected != Amount::ZERO,
-        "client_receive should have a non-zero balance before recovery"
+        "client_receive should have a non-zero balance before restore"
     );
 
     info!("mint: double_spend_is_rejected");
@@ -172,64 +172,64 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     client_receive.shutdown().await;
 
-    info!("mint: recovery (expected balance {expected})");
+    info!("mint: restore (expected balance {expected})");
 
-    let (recovered, recovery) = env.new_recovered_client(receive_mnemonic.clone()).await?;
+    let (restored, restore) = env.new_restored_client(receive_mnemonic.clone()).await?;
 
-    let scanned = recovery.amount();
+    let scanned = restore.amount();
 
     ensure!(
         scanned == expected,
-        "recovery scanned {scanned}, expected {expected}"
+        "restore scanned {scanned}, expected {expected}"
     );
 
     // Second half of the restore: the scanned notes go back through the
     // ordinary out-of-band receive, so the wallet holds them only once that
     // reissuance settles. It re-mints under fresh outputs, leaving the balance
     // just below `expected` by the federation's fees.
-    let operation = recovered.mint().receive(&recovery.ecash())?;
+    let operation = restored.mint().receive(&restore.ecash())?;
 
-    await_tx_outcome(&recovered, operation)
+    await_tx_outcome(&restored, operation)
         .await
-        .expect("recovery reissuance should be accepted");
+        .expect("restore reissuance should be accepted");
 
-    let swept = recovered.get_balance();
+    let swept = restored.get_balance();
 
     ensure!(
         swept > Amount::ZERO && swept <= expected,
-        "recovered balance out of range: {swept} vs {expected}"
+        "restored balance out of range: {swept} vs {expected}"
     );
 
     let loss = expected.checked_sub(swept).expect("swept <= expected");
     ensure!(
         loss < Amount::from_sat(50),
-        "recovery lost more than expected to fees: {expected} -> {swept} (loss {loss})"
+        "restore lost more than expected to fees: {expected} -> {swept} (loss {loss})"
     );
 
-    recovered.shutdown().await;
+    restored.shutdown().await;
 
-    info!("mint: recovery passed");
+    info!("mint: restore passed");
 
-    // Recovering a second time is the only phase that exercises the counter
-    // mark the first recovery persisted — the reissuance above re-mints the
+    // Restoring a second time is the only phase that exercises the counter
+    // mark the first restore persisted — the reissuance above re-mints the
     // whole wallet under counters past that mark. A mark one batch too high
     // opens a gap as wide as the one a scan refuses to cross, stranding every
     // reissued note behind it, and the wallet comes back empty rather than
     // merely short.
-    info!("mint: second recovery (expected balance {swept})");
+    info!("mint: second restore (expected balance {swept})");
 
-    let (recovered, recovery) = env.new_recovered_client(receive_mnemonic).await?;
+    let (restored, restore) = env.new_restored_client(receive_mnemonic).await?;
 
-    let scanned = recovery.amount();
+    let scanned = restore.amount();
 
     ensure!(
         scanned == swept,
-        "second recovery scanned {scanned}, expected {swept}"
+        "second restore scanned {scanned}, expected {swept}"
     );
 
-    recovered.shutdown().await;
+    restored.shutdown().await;
 
-    info!("mint: second recovery passed");
+    info!("mint: second restore passed");
 
     Ok(())
 }

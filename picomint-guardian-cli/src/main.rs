@@ -17,7 +17,7 @@ use picomint_guardian_cli_core::{
     ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
     ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
     ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
-    ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_RECOVER,
+    ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_RESTORE,
     ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddPeerRequest,
     SetupSetLocalParamsRequest,
 };
@@ -80,8 +80,8 @@ enum SetupCommands {
     AddPeer(SetupAddPeerRequest),
     /// Start distributed key generation
     StartDkg,
-    /// Recover guardian config from a config file (skips DKG)
-    Recover {
+    /// Restore guardian config from a config file (skips DKG)
+    Restore {
         /// Path to a `config.json` previously produced by `config`
         path: PathBuf,
     },
@@ -219,10 +219,10 @@ async fn main() -> Result<()> {
             }
             SetupCommands::AddPeer(req) => request(d, ROUTE_SETUP_ADD_PEER, req).await?,
             SetupCommands::StartDkg => request(d, ROUTE_SETUP_START_DKG, ()).await?,
-            SetupCommands::Recover { path } => {
+            SetupCommands::Restore { path } => {
                 let bytes = std::fs::read(&path)?;
                 let cfg: Value = serde_json::from_slice(&bytes)?;
-                request(d, ROUTE_SETUP_RECOVER, cfg).await?
+                request(d, ROUTE_SETUP_RESTORE, cfg).await?
             }
         },
 

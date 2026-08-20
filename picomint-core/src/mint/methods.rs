@@ -21,18 +21,18 @@ pub struct SignatureSharesResponse {
     pub shares: Vec<BlindedSignatureShare>,
 }
 
-// ── recovery-signature-shares ───────────────────────────────────────────────
+// ── restore-signature-shares ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SignatureSharesRecoveryRequest {
+pub struct SignatureSharesRestoreRequest {
     pub messages: Vec<BlindedMessage>,
 }
 
-/// Errors if the mint never signed one of `messages`. Recovery only asks
+/// Errors if the mint never signed one of `messages`. Restore only asks
 /// once [`IssuanceStateResponse`] has already confirmed every message, so a
 /// miss here is a genuine fault rather than the expected outcome of probing.
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct SignatureSharesRecoveryResponse {
+pub struct SignatureSharesRestoreResponse {
     pub shares: Vec<BlindedSignatureShare>,
 }
 
@@ -43,7 +43,7 @@ pub struct IssuanceStateRequest {
     pub messages: Vec<BlindedMessage>,
 }
 
-/// `issued[i]` mirrors `messages[i]`. The membership half of a recovery scan:
+/// `issued[i]` mirrors `messages[i]`. The membership half of a restore scan:
 /// the shares themselves are fetched once at the end, for the messages that
 /// survived both this and [`SpendStateResponse`].
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
@@ -58,7 +58,7 @@ pub struct SpendStateRequest {
     pub nonces: Vec<XOnlyPublicKey>,
 }
 
-/// `spent[i]` mirrors `nonces[i]`. A recovery scan reads this first: a spent
+/// `spent[i]` mirrors `nonces[i]`. A restore scan reads this first: a spent
 /// nonce proves the counter was used without costing the client a blinded
 /// message, which is the expensive half of a candidate.
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
@@ -71,7 +71,7 @@ pub struct SpendStateResponse {
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum MintMethod {
     SignatureShares(SignatureSharesRequest),
-    SignatureSharesRecovery(SignatureSharesRecoveryRequest),
+    SignatureSharesRestore(SignatureSharesRestoreRequest),
     SpendState(SpendStateRequest),
     IssuanceState(IssuanceStateRequest),
 }

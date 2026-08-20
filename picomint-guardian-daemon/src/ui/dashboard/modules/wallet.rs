@@ -10,7 +10,7 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
     let receive_fee = wallet.receive_fee_ui();
     let pending_tx_chain = wallet.pending_tx_chain_ui();
     let transaction_count = wallet.transaction_count_ui();
-    let recovery_keys = wallet.recovery_keys_ui();
+    let restore_keys = wallet.restore_keys_ui();
 
     let total_pending_vbytes = pending_tx_chain.iter().map(|info| info.vbytes).sum::<u64>();
 
@@ -140,7 +140,7 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
                         }
 
 
-                        @if let Some((tweaked_agg_pk, tweaked_sks)) = &recovery_keys {
+                        @if let Some((tweaked_agg_pk, tweaked_sks)) = &restore_keys {
                             // Federation Shutdown accordion
                             div class="accordion mt-4" id="shutdownAccordion" {
                                 div class="accordion-item" {
@@ -152,8 +152,8 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
                                     div id="shutdownCollapse" class="accordion-collapse collapse" data-bs-parent="#shutdownAccordion" {
                                         div class="accordion-body" {
                                             div class="alert alert-warning mb-3" {
-                                                "To recover your remaining funds after decommissioning the federation, please go to the "
-                                                a href="https://recovery.picomint.org" target="_blank" { "recovery tool" }
+                                                "To restore your remaining funds after decommissioning the federation, please go to the "
+                                                a href="https://restore.picomint.org" target="_blank" { "restore tool" }
                                                 " and follow the instructions. It interpolates a threshold of tweaked guardian key shares into the secret key of the current federation UTXO, verifies it against the tweaked aggregate key and sweeps the UTXO with the resulting taproot key. The keys change with every transaction. All guardians must be fully synced before extracting their shares, otherwise the shares will not match the current federation UTXO."
                                             }
 

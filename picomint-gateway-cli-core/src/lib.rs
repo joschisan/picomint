@@ -32,7 +32,7 @@ pub const ROUTE_LDK_PEER_DISCONNECT: &str = "/ldk/peer/disconnect";
 pub const ROUTE_LDK_PEER_LIST: &str = "/ldk/peer/list";
 
 // Federation management
-pub const ROUTE_FEDERATION_JOIN: &str = "/federation/join";
+pub const ROUTE_FEDERATION_ADD: &str = "/federation/add";
 pub const ROUTE_FEDERATION_LIST: &str = "/federation/list";
 pub const ROUTE_FEDERATION_CONFIG: &str = "/federation/config";
 pub const ROUTE_FEDERATION_BALANCE: &str = "/federation/balance";
@@ -208,10 +208,10 @@ pub struct PeerInfo {
     pub is_connected: bool,
 }
 
-// --- /federation/join ---
+// --- /federation/add ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationJoinRequest {
+pub struct FederationAddRequest {
     pub invite: InviteCode,
 }
 

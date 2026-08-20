@@ -22,12 +22,13 @@ crate::client_table!(
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct MintStateMachine {
     pub operation: OperationId,
-    /// Notes consumed on the input side that originated from our own
-    /// wallet db (or, for recovery, were materialised from recovered
-    /// nonces). Re-inserted into `NoteTable` on tx rejection.
+    /// Notes consumed on the input side that came out of our own
+    /// `NoteTable`, and are re-inserted there on tx rejection. A restore's
+    /// notes do not travel here — they arrive as an ordinary bundle through
+    /// `receive`, and a rejected reissuance simply leaves them unspent for
+    /// the next scan to find.
     pub spendable_notes: Vec<SpendableNote>,
-    /// Tx the SM is tied to. Recovery now submits a real reissuance
-    /// tx, so this is always set.
+    /// Tx the SM is tied to.
     pub txid: TransactionId,
     /// Blinded outputs this tx issues. Finalized into `SpendableNote`s and
     /// inserted into `NoteTable` once the federation's blind-signature shares are

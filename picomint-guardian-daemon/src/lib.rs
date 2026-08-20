@@ -118,7 +118,7 @@ pub async fn run_server(
 
     match setup_result {
         SetupResult::Dkg(cgp) => run_dkg_then_consensus(*cgp, settings, db, bitcoin, data).await,
-        SetupResult::Recovered(cfg) => run_consensus(*cfg, settings, db, bitcoin, data).await,
+        SetupResult::Restored(cfg) => run_consensus(*cfg, settings, db, bitcoin, data).await,
     }
 }
 

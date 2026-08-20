@@ -4,8 +4,8 @@ use crate::api::FederationApi;
 use crate::query::FilterMapThreshold;
 use picomint_core::mint::Denomination;
 use picomint_core::mint::methods::{
-    IssuanceStateRequest, IssuanceStateResponse, MintMethod, SignatureSharesRecoveryRequest,
-    SignatureSharesRecoveryResponse, SignatureSharesRequest, SignatureSharesResponse,
+    IssuanceStateRequest, IssuanceStateResponse, MintMethod, SignatureSharesRequest,
+    SignatureSharesResponse, SignatureSharesRestoreRequest, SignatureSharesRestoreResponse,
     SpendStateRequest, SpendStateResponse,
 };
 use picomint_core::module::Method;
@@ -35,11 +35,11 @@ impl FederationApi {
         .await
     }
 
-    /// Fetch shares for notes a recovery scan has already established the
+    /// Fetch shares for notes a restore scan has already established the
     /// federation signed. Every message must resolve on every peer, so a
     /// candidate can never be silently dropped for want of a full column of
     /// shares to interpolate over.
-    pub async fn signature_shares_recovery(
+    pub async fn signature_shares_restore(
         &self,
         issuance_requests: Vec<NoteIssuanceRequest>,
         tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
@@ -51,13 +51,13 @@ impl FederationApi {
 
         self.request_with_strategy_retry(
             FilterMapThreshold::new(
-                move |peer, resp: SignatureSharesRecoveryResponse| {
+                move |peer, resp: SignatureSharesRestoreResponse| {
                     verify_blind_shares(peer, resp.shares, &issuance_requests, &tbs_pks)
                 },
                 self.num_peers(),
             ),
-            Method::Mint(MintMethod::SignatureSharesRecovery(
-                SignatureSharesRecoveryRequest { messages },
+            Method::Mint(MintMethod::SignatureSharesRestore(
+                SignatureSharesRestoreRequest { messages },
             )),
         )
         .await
@@ -66,7 +66,7 @@ impl FederationApi {
     /// Which of `nonces` the federation has already seen spent, and which of
     /// `messages` it ever signed. Both go through threshold consensus rather
     /// than a single peer: either answer coming back wrong in the negative
-    /// direction makes a recovering wallet abandon a live note, so a lone
+    /// direction makes a restoring wallet abandon a live note, so a lone
     /// peer must not be able to decide it.
     pub async fn spend_state(&self, nonces: Vec<XOnlyPublicKey>) -> Vec<bool> {
         self.request_current_consensus_retry::<SpendStateResponse>(Method::Mint(

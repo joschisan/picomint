@@ -58,10 +58,10 @@ pub fn gateway_info(gw_data_dir: &Path) -> Result<InfoResponse> {
         .run_cli::<InfoResponse>()
 }
 
-pub fn gateway_federation_join(gw_data_dir: &Path, invite: &InviteCode) -> Result<Value> {
+pub fn gateway_federation_add(gw_data_dir: &Path, invite: &InviteCode) -> Result<Value> {
     gateway_cmd(gw_data_dir)
         .arg("federation")
-        .arg("join")
+        .arg("add")
         .arg(picomint_base32::encode(invite))
         .run_cli::<Value>()
 }
@@ -181,10 +181,10 @@ pub fn guardian_setup_start_dkg(data_dir: &Path) -> Result<Value> {
         .run_cli::<Value>()
 }
 
-pub fn guardian_setup_recover(data_dir: &Path, config_path: &Path) -> Result<Value> {
+pub fn guardian_setup_restore(data_dir: &Path, config_path: &Path) -> Result<Value> {
     guardian_cmd(data_dir)
         .arg("setup")
-        .arg("recover")
+        .arg("restore")
         .arg(config_path)
         .run_cli::<Value>()
 }

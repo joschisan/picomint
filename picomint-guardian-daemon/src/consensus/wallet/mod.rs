@@ -1175,7 +1175,7 @@ impl Wallet {
     /// against the tweaked aggregate key and sweep the UTXO with a
     /// single-key taproot wallet. Returns None if the federation wallet has
     /// not been initialized yet.
-    pub fn recovery_keys_ui(&self) -> Option<(String, String)> {
+    pub fn restore_keys_ui(&self) -> Option<(String, String)> {
         let wallet = self.federation_wallet_ui()?;
 
         Some((

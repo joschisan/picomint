@@ -45,7 +45,7 @@ impl NoteIssuanceRequest {
 
     /// The expensive half of a candidate: two G1 scalar multiplications,
     /// roughly twenty times the cost of [`NoteIssuanceRequest::nonce`]. A
-    /// recovery scan derives it only for counters the federation has already
+    /// restore scan derives it only for counters the federation has already
     /// reported as unspent.
     pub fn blinded_message(&self) -> BlindedMessage {
         blind_message(nonce_message(self.nonce()), self.blinding_key)

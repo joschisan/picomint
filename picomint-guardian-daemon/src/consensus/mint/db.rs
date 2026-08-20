@@ -20,7 +20,7 @@ table!(
 
 table!(
     /// Every blinded nonce the mint has ever signed. Membership only — the
-    /// shares live in [`BlindedSignatureShareRecoveryTable`], and a recovery
+    /// shares live in [`BlindedSignatureShareRestoreTable`], and a restore
     /// probe has no use for them. Mirrors [`NoteNonceTable`] on the output
     /// side: one guards against spending a note twice, the other against
     /// signing a nonce twice.
@@ -36,9 +36,9 @@ table!(
 );
 
 table!(
-    BlindedSignatureShareRecoveryTable,
+    BlindedSignatureShareRestoreTable,
     BlindedMessage => BlindedSignatureShare,
-    "mint-blinded-signature-share-recovery",
+    "mint-blinded-signature-share-restore",
 );
 
 table!(
