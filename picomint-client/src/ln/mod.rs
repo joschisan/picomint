@@ -92,7 +92,7 @@ impl LightningClientModule {
         mint: Arc<crate::mint::MintClientModule>,
         secret: LnSecret,
         tg: &TaskGroup,
-    ) -> anyhow::Result<Self> {
+    ) -> Self {
         let gateways = Gateways::new(client_ctx.api().endpoint().clone());
 
         let sm_context = LightningClientContext {
@@ -128,7 +128,7 @@ impl LightningClientModule {
         tg.spawn(Self::update_gateway_pks(module.clone()));
         tg.spawn(Self::update_gateway_info(module.clone()));
 
-        Ok(module)
+        module
     }
 
     /// Fetch the federation's announced gateway pk list via threshold

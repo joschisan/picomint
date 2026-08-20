@@ -58,16 +58,21 @@ pub struct Client {
 }
 
 impl Client {
-    /// Join a federation for the first time using a regular lightning
-    /// flavor. Downloads the federation config via the invite, persists it,
-    /// and brings up the client.
+    /// Bring up a client against `config` and `db`, mounting the regular
+    /// lightning module.
+    ///
+    /// Not inert: the modules spawn their state-machine executors — resuming
+    /// whatever the database already holds — and the background refreshes
+    /// commit writes of their own. So this goes last, after the dbtx that
+    /// persists `config` and marks the federation as joined. The caller gets
+    /// the config from [`crate::download`] and owns persisting it.
     pub fn new(
         endpoint: Endpoint,
         db: Database,
         logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
-    ) -> anyhow::Result<Arc<Self>> {
+    ) -> Arc<Self> {
         Self::build(endpoint, db, logger, mnemonic, config, LnChoice::Regular)
     }
 
@@ -80,7 +85,7 @@ impl Client {
         logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
-    ) -> anyhow::Result<Arc<Self>> {
+    ) -> Arc<Self> {
         Self::build(endpoint, db, logger, mnemonic, config, LnChoice::Gateway)
     }
 
@@ -91,7 +96,7 @@ impl Client {
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
         ln_choice: LnChoice,
-    ) -> anyhow::Result<Arc<Self>> {
+    ) -> Arc<Self> {
         debug!(
             version = %env!("CARGO_PKG_VERSION"),
             "Building picomint client",
@@ -120,7 +125,7 @@ impl Client {
             mint_context,
             client_secret.mint_secret(),
             &tg,
-        )?);
+        ));
 
         let wallet_context = crate::module::ClientContext::new(
             api.clone(),
@@ -134,7 +139,7 @@ impl Client {
             mint.clone(),
             client_secret.wallet_secret(),
             &tg,
-        )?);
+        ));
 
         let ln = match ln_choice {
             LnChoice::Regular => {
@@ -151,7 +156,7 @@ impl Client {
                     mint.clone(),
                     client_secret.ln_secret(),
                     &tg,
-                )?))
+                )))
             }
             LnChoice::Gateway => {
                 let gw_context = crate::module::ClientContext::new(
@@ -167,7 +172,7 @@ impl Client {
                     mint.clone(),
                     client_secret.gw_secret(),
                     &tg,
-                )?))
+                )))
             }
         };
 
@@ -185,7 +190,7 @@ impl Client {
 
         client.tg.spawn(Self::refresh_expiry_status(client.clone()));
 
-        Ok(client)
+        client
     }
 
     /// Cancel all spawned tasks and wait for them to finish. No timeout —

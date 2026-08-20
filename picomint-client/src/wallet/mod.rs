@@ -64,7 +64,7 @@ impl WalletClientModule {
         mint: std::sync::Arc<crate::mint::MintClientModule>,
         secret: WalletSecret,
         tg: &TaskGroup,
-    ) -> anyhow::Result<WalletClientModule> {
+    ) -> WalletClientModule {
         let federation = context.federation();
         let send_executor = ModuleExecutor::new(
             context.db().clone(),
@@ -83,7 +83,7 @@ impl WalletClientModule {
 
         tg.spawn(Self::output_scanner(module.clone()));
 
-        Ok(module)
+        module
     }
 }
 

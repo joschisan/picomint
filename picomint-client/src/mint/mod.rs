@@ -86,11 +86,10 @@ impl SpendableNote {
 /// wallet still owns, and how far each denomination's counter space was
 /// walked.
 ///
-/// Produced by [`crate::recover`], which touches no database at all, and
-/// applied by [`MintClientModule::commit_recovery`] inside a dbtx the caller
-/// owns. Keeping the two apart is what makes joining atomic: an integrator
-/// commits the recovered wallet alongside their own bookkeeping in one write,
-/// and a crash before that write leaves nothing half-restored to detect.
+/// Produced by [`crate::recover`], which touches no database at all. The
+/// counters go to [`commit_recovery`] in a dbtx the caller owns, alongside
+/// whatever marks the federation as joined; the notes go to
+/// [`MintClientModule::receive`] as an ordinary bundle once the client is up.
 #[derive(Debug, Clone)]
 pub struct Recovery {
     federation: FederationId,
@@ -317,7 +316,7 @@ impl MintClientModule {
         context: ClientContext,
         secret: MintSecret,
         tg: &TaskGroup,
-    ) -> anyhow::Result<MintClientModule> {
+    ) -> MintClientModule {
         let sm_context = MintSmContext {
             client_ctx: context.clone(),
             federation,
@@ -350,7 +349,7 @@ impl MintClientModule {
             tg.clone(),
         );
 
-        Ok(MintClientModule {
+        MintClientModule {
             federation,
             cfg,
             secret,
@@ -358,7 +357,7 @@ impl MintClientModule {
             tx_submission_executor,
             mint_executor,
             send_executor,
-        })
+        }
     }
 }
 

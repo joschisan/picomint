@@ -138,24 +138,15 @@ impl GatewayClientFactory {
 
     /// Open the client for a federation whose config is already persisted.
     /// Returns `None` if no config is stored for `federation`.
-    pub fn load(
-        &self,
-        federation: &FederationId,
-    ) -> anyhow::Result<Option<Arc<picomint_client::Client>>> {
-        match self.read_config(federation) {
-            Some(config) => self.open(config).map(Some),
-            None => Ok(None),
-        }
-    }
+    pub fn load(&self, federation: &FederationId) -> Option<Arc<picomint_client::Client>> {
+        let config = self.read_config(federation)?;
 
-    fn open(&self, config: ConsensusConfig) -> anyhow::Result<Arc<picomint_client::Client>> {
-        Client::new_gateway(
+        Some(Client::new_gateway(
             self.endpoint.clone(),
             self.db.clone(),
             self.logger.clone(),
             &self.mnemonic,
             config,
-        )
-        .map_err(|e| anyhow::anyhow!("Client open error: {e}"))
+        ))
     }
 }
