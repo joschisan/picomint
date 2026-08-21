@@ -155,13 +155,13 @@ impl Mint {
         outpoint: OutPoint,
     ) -> Result<TxItemAmounts, MintOutputError> {
         // Signing a blinded nonce twice mints two notes that share a nonce, so
-        // spending either strands the other. A client derives nonces from a
-        // per-denomination counter, so a wallet restored without running
-        // restore would replay counters it has already used — this turns that
-        // into a rejected transaction instead of destroyed funds, and keeps
-        // the issuance counter from crediting a note that can never be spent.
+        // spending either strands the other. A client derives nonces from an
+        // issuance counter, so a wallet restored without running restore would
+        // replay counters it has already used — this turns that into a
+        // rejected transaction instead of destroyed funds, and keeps the
+        // issuance counter from crediting a note that can never be spent.
         if dbtx
-            .insert(&BlindedNonceTable, &output.nonce, &())
+            .insert(&BlindedNonceTable, &output.nonce, &output.denomination)
             .is_some()
         {
             return Err(MintOutputError::ReusedNonce);

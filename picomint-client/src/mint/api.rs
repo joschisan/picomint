@@ -76,7 +76,11 @@ impl FederationApi {
         .spent
     }
 
-    pub async fn issuance_state(&self, messages: Vec<BlindedMessage>) -> Vec<bool> {
+    /// For each message, the denomination the federation signed it under, or
+    /// `None` if it never did. The denomination is not derivable from the
+    /// seed under a single counter space, so the scan takes the federation's
+    /// word for it — and then checks that word when it aggregates the share.
+    pub async fn issuance_state(&self, messages: Vec<BlindedMessage>) -> Vec<Option<Denomination>> {
         self.request_current_consensus_retry::<IssuanceStateResponse>(Method::Mint(
             MintMethod::IssuanceState(IssuanceStateRequest { messages }),
         ))

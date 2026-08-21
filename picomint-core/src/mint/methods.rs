@@ -7,6 +7,7 @@ use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedMessage, BlindedSignatureShare};
 
 use crate::TransactionId;
+use crate::mint::Denomination;
 use crate::secp256k1::XOnlyPublicKey;
 
 // ── signature-shares ────────────────────────────────────────────────────────
@@ -43,12 +44,19 @@ pub struct IssuanceStateRequest {
     pub messages: Vec<BlindedMessage>,
 }
 
-/// `issued[i]` mirrors `messages[i]`. The membership half of a restore scan:
-/// the shares themselves are fetched once at the end, for the messages that
-/// survived both this and [`SpendStateResponse`].
+/// `issued[i]` mirrors `messages[i]`, carrying the denomination the mint
+/// signed the message under, or `None` if it never signed it. The membership
+/// half of a restore scan: the shares themselves are fetched once at the end,
+/// for the messages that survived both this and [`SpendStateResponse`].
+///
+/// A client derives its nonces from a counter alone, so the denomination is
+/// not recoverable from the seed and has to come back over the wire. It is
+/// only a hint — the restored share is checked against that denomination's
+/// aggregate public key, so a wrong answer fails verification rather than
+/// crediting the wallet.
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct IssuanceStateResponse {
-    pub issued: Vec<bool>,
+    pub issued: Vec<Option<Denomination>>,
 }
 
 // ── spend-state ─────────────────────────────────────────────────────────────

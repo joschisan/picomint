@@ -36,22 +36,22 @@ use tbs::{AggregatePublicKey, aggregate_signature_shares};
 use thiserror::Error;
 
 pub use self::ecash::ECash;
-use self::issuance::NoteIssuanceRequest;
+use self::issuance::{NoteIssuance, NoteIssuanceRequest};
 use self::mint_sm::{MintStateMachine, MintStateMachineTable};
 pub use self::secret::MintSecret;
 use self::send_sm::{SendStateMachine, SendStateMachineTable};
 
 const TARGET_PER_DENOMINATION: usize = 3;
 
-/// Counters probed per round trip, per denomination — and, since a scan stops
-/// on its first fully empty batch, the gap limit itself.
+/// Counters probed per round trip — and, since a scan stops on its first
+/// fully empty batch, the gap limit itself.
 ///
-/// A transaction emits at most two outputs of any one denomination
-/// (`represent_amount` leaves a remainder below the next tier down, and
-/// `select_output_denominations` is one-per-tier), so a batch this size
-/// tolerates thirty-odd consecutive failed transactions burning counters
-/// before a live note could be stranded beyond the gap.
-const RESTORE_BATCH: u64 = 64;
+/// One counter space serves every denomination, so a transaction burns one
+/// counter per output rather than one or two out of a space of its own. The
+/// gap a scan refuses to cross therefore has to absorb whole transactions'
+/// worth of counters at a time, which is why this sits well above both the
+/// number of denominations and the outputs any one transaction can carry.
+const RESTORE_BATCH: u64 = 500;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct SpendableNote {
@@ -83,18 +83,17 @@ impl SpendableNote {
 }
 
 /// Everything a seed-only scan of the federation turned up: the notes the
-/// wallet still owns, and how far each denomination's counter space was
-/// walked.
+/// wallet still owns, and how far the counter space was walked.
 ///
 /// Produced by [`crate::restore`], which touches no database at all. The
-/// counters go to [`commit_restore`] in a dbtx the caller owns, alongside
+/// counter goes to [`commit_restore`] in a dbtx the caller owns, alongside
 /// whatever marks the federation as added; the notes go to
 /// [`MintClientModule::receive`] as an ordinary bundle once the client is up.
 #[derive(Debug, Clone)]
 pub struct Restore {
     federation: FederationId,
     notes: Vec<SpendableNote>,
-    counters: BTreeMap<Denomination, u64>,
+    counter: u64,
 }
 
 impl Restore {
@@ -128,7 +127,7 @@ impl Restore {
     }
 }
 
-/// Persist the counter marks a [`scan`] reached, in a dbtx the caller owns.
+/// Persist the counter mark a [`scan`] reached, in a dbtx the caller owns.
 ///
 /// This is the whole of what restore writes locally, and it must land before
 /// the wallet issues anything: a restored wallet resuming from zero would
@@ -139,18 +138,16 @@ impl Restore {
 /// Belongs in the same dbtx as whatever marks the federation as added, so a
 /// crash leaves either both or neither.
 pub fn commit_restore(dbtx: &WriteTx, restore: &Restore) {
-    for (denomination, counter) in &restore.counters {
-        dbtx.insert(&CounterTable(restore.federation), denomination, counter);
-    }
+    dbtx.insert(&CounterTable(restore.federation), &(), &restore.counter);
 }
 
 /// Rebuild a wallet's notes from its seed, without touching a database.
 ///
-/// Runs in two phases. Every denomination owns an independent counter space,
-/// so all of them are scanned concurrently, each stopping as soon as one full
-/// batch of counters turns up nothing at all — neither a nonce the federation
-/// has seen spent nor a blinded message it ever signed. Only once the live set
-/// has settled are the signature shares fetched, in a single request.
+/// Runs in two phases. A single counter space serves every denomination, so
+/// the walk is one sequential chain of batches, stopping as soon as one full
+/// batch turns up nothing at all — neither a nonce the federation has seen
+/// spent nor a blinded message it ever signed. Only once the live set has
+/// settled are the signature shares fetched, in a single request.
 ///
 /// Splitting membership from retrieval is what keeps a note from going
 /// missing: both probes answer under threshold consensus, so peers must agree
@@ -164,28 +161,7 @@ pub(crate) async fn scan(
     cfg: &MintConfigConsensus,
     federation: FederationId,
 ) -> anyhow::Result<Restore> {
-    // Each scan carries its own denomination back out rather than relying on
-    // `join_all` order: writing one denomination's counter into another's slot
-    // would hand out counters the federation has already signed.
-    let scans = client_denominations().map(|denomination| async move {
-        (
-            denomination,
-            scan_denomination(api, secret, denomination).await,
-        )
-    });
-
-    let scanned = futures::future::join_all(scans).await;
-
-    let counters = scanned
-        .iter()
-        .map(|(denomination, (counter, _))| (*denomination, *counter))
-        .collect();
-
-    let requests: Vec<NoteIssuanceRequest> = scanned
-        .iter()
-        .flat_map(|(_, (_, found))| found)
-        .cloned()
-        .collect();
+    let (counter, requests) = scan_counters(api, secret).await;
 
     let mut notes = Vec::with_capacity(requests.len());
 
@@ -219,13 +195,19 @@ pub(crate) async fn scan(
     Ok(Restore {
         federation,
         notes,
-        counters,
+        counter,
     })
 }
 
-/// Walk one denomination's counter space. Returns the counter the scan reached
-/// and the candidates the federation both signed and has not seen spent — the
-/// notes still live, whose shares the caller fetches in bulk.
+/// Walk the counter space. Returns the counter the scan reached and the
+/// candidates the federation both signed and has not seen spent — the notes
+/// still live, whose shares the caller fetches in bulk.
+///
+/// A candidate's denomination comes back from [`FederationApi::issuance_state`]
+/// rather than from the seed, since nothing under a single counter depends on
+/// it. A peer that reports the wrong one cannot make the wallet credit itself
+/// anything: the share is aggregated and checked against that denomination's
+/// aggregate public key, which the real signature will not satisfy.
 ///
 /// The counter returned is the *start* of the empty batch that ended the scan,
 /// never its end. Both are safe to issue from — the whole batch probed clean —
@@ -233,26 +215,25 @@ pub(crate) async fn scan(
 /// scan gives up on its first empty batch, so leaving a full batch of unused
 /// counters below the next issuance would strand it behind exactly the gap the
 /// scan refuses to cross.
-async fn scan_denomination(
+async fn scan_counters(
     api: &FederationApi,
     secret: &MintSecret,
-    denomination: Denomination,
 ) -> (u64, Vec<NoteIssuanceRequest>) {
     let mut found = Vec::new();
     let mut counter = 0;
 
     loop {
-        let candidates: Vec<NoteIssuanceRequest> = (counter..counter + RESTORE_BATCH)
-            .map(|c| NoteIssuanceRequest::new(denomination, c, secret))
+        let candidates: Vec<NoteIssuance> = (counter..counter + RESTORE_BATCH)
+            .map(|c| NoteIssuance::new(c, secret))
             .collect();
 
         let spent = api
-            .spend_state(candidates.iter().map(NoteIssuanceRequest::nonce).collect())
+            .spend_state(candidates.iter().map(NoteIssuance::nonce).collect())
             .await;
 
         // Deriving a blinded message costs some twenty times what the nonce
         // did, so it is paid only for counters that survived the spend check.
-        let unspent: Vec<NoteIssuanceRequest> = candidates
+        let unspent: Vec<NoteIssuance> = candidates
             .into_iter()
             .zip(&spent)
             .filter(|(_, spent)| !**spent)
@@ -262,19 +243,14 @@ async fn scan_denomination(
         let messages = tokio::task::spawn_blocking({
             let unspent = unspent.clone();
 
-            move || {
-                unspent
-                    .iter()
-                    .map(NoteIssuanceRequest::blinded_message)
-                    .collect()
-            }
+            move || unspent.iter().map(NoteIssuance::blinded_message).collect()
         })
         .await
         .expect("Blinded message derivation cannot panic");
 
         let issued = api.issuance_state(messages).await;
 
-        if !issued.contains(&true) && !spent.contains(&true) {
+        if issued.iter().all(Option::is_none) && !spent.contains(&true) {
             return (counter, found);
         }
 
@@ -282,8 +258,7 @@ async fn scan_denomination(
             unspent
                 .into_iter()
                 .zip(&issued)
-                .filter(|(_, issued)| **issued)
-                .map(|(candidate, _)| candidate),
+                .filter_map(|(candidate, issued)| issued.map(|d| candidate.request(d))),
         );
 
         counter += RESTORE_BATCH;
@@ -291,19 +266,13 @@ async fn scan_denomination(
 }
 
 impl MintClientModule {
-    /// Hand out the next counter for `denomination` and persist the bump in
-    /// the caller's dbtx, so a counter is only spent once the transaction
-    /// carrying its blinded message is committed to.
-    fn next_counter(&self, dbtx: &WriteTx, denomination: Denomination) -> u64 {
-        let counter = dbtx
-            .get(&CounterTable(self.federation), &denomination)
-            .unwrap_or(0);
+    /// Hand out the next counter and persist the bump in the caller's dbtx, so
+    /// a counter is only spent once the transaction carrying its blinded
+    /// message is committed to.
+    fn next_counter(&self, dbtx: &WriteTx) -> u64 {
+        let counter = dbtx.get(&CounterTable(self.federation), &()).unwrap_or(0);
 
-        dbtx.insert(
-            &CounterTable(self.federation),
-            &denomination,
-            &(counter + 1),
-        );
+        dbtx.insert(&CounterTable(self.federation), &(), &(counter + 1));
 
         counter
     }
@@ -470,7 +439,7 @@ impl MintClientModule {
         let mut issuance_requests = Vec::new();
 
         for d in denoms {
-            let counter = self.next_counter(dbtx, d);
+            let counter = self.next_counter(dbtx);
 
             issuance_requests.push(NoteIssuanceRequest::new(d, counter, &self.secret));
         }
@@ -699,7 +668,7 @@ impl MintClientModule {
         // outputs and a single `MintStateMachine` can process both.
         let mut issuance_requests: Vec<NoteIssuanceRequest> = Vec::new();
         for d in represent_amount(amount) {
-            let counter = self.next_counter(&dbtx, d);
+            let counter = self.next_counter(&dbtx);
 
             issuance_requests.push(NoteIssuanceRequest::new(d, counter, &self.secret));
         }
