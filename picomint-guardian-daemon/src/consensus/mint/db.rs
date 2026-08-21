@@ -19,13 +19,20 @@ table!(
 );
 
 table!(
-    /// Every blinded nonce the mint has ever signed. Membership only — the
-    /// shares live in [`BlindedSignatureShareRestoreTable`], and a restore
-    /// probe has no use for them. Mirrors [`NoteNonceTable`] on the output
-    /// side: one guards against spending a note twice, the other against
-    /// signing a nonce twice.
+    /// Every blinded nonce the mint has ever signed, and the denomination it
+    /// signed it under. Mirrors [`NoteNonceTable`] on the output side: one
+    /// guards against spending a note twice, the other against signing a
+    /// nonce twice.
+    ///
+    /// That uniqueness is what makes the value well defined — a blinded
+    /// message is rejected on its second appearance regardless of
+    /// denomination, so it can never have been signed under two. A restoring
+    /// client derives nonces from a counter alone and cannot recover the
+    /// denomination from its seed, so this is where the answer comes from.
+    /// The share itself stays in [`BlindedSignatureShareRestoreTable`], which
+    /// a membership probe still has no reason to read.
     BlindedNonceTable,
-    BlindedMessage => (),
+    BlindedMessage => Denomination,
     "mint-blinded-nonce",
 );
 

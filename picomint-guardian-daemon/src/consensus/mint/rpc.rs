@@ -63,7 +63,7 @@ pub fn issuance_state(
     let issued = req
         .messages
         .iter()
-        .map(|message| dbtx.get(&BlindedNonceTable, message).is_some())
+        .map(|message| dbtx.get(&BlindedNonceTable, message))
         .collect();
 
     Ok(IssuanceStateResponse { issued })

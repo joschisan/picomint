@@ -6,22 +6,57 @@ use tbs::{BlindedMessage, BlindedSignature, BlindingKey, blind_message, unblind_
 use super::SpendableNote;
 use super::secret::MintSecret;
 
+/// One counter's key material, before a denomination is attached.
+///
+/// The two paths that produce notes disagree only on where the denomination
+/// comes from: issuance picks it up front, a restore scan learns it from the
+/// federation after probing. Both meet here, and neither can derive a nonce
+/// that depends on the answer.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
-pub struct NoteIssuanceRequest {
-    pub denomination: Denomination,
+pub struct NoteIssuance {
     pub counter: u64,
     pub keypair: Keypair,
     pub blinding_key: BlindingKey,
 }
 
+impl NoteIssuance {
+    pub fn new(counter: u64, mint_secret: &MintSecret) -> Self {
+        Self {
+            counter,
+            keypair: mint_secret.note_nonce_keypair(counter),
+            blinding_key: mint_secret.note_blinding_key(counter),
+        }
+    }
+
+    pub fn nonce(&self) -> XOnlyPublicKey {
+        self.keypair.x_only_public_key().0
+    }
+
+    /// The expensive half of a candidate: two G1 scalar multiplications,
+    /// roughly twenty times the cost of [`NoteIssuance::nonce`]. A restore
+    /// scan derives it only for counters the federation has already reported
+    /// as unspent.
+    pub fn blinded_message(&self) -> BlindedMessage {
+        blind_message(nonce_message(self.nonce()), self.blinding_key)
+    }
+
+    pub fn request(self, denomination: Denomination) -> NoteIssuanceRequest {
+        NoteIssuanceRequest {
+            denomination,
+            issuance: self,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
+pub struct NoteIssuanceRequest {
+    pub denomination: Denomination,
+    pub issuance: NoteIssuance,
+}
+
 impl NoteIssuanceRequest {
     pub fn new(denomination: Denomination, counter: u64, mint_secret: &MintSecret) -> Self {
-        Self {
-            denomination,
-            counter,
-            keypair: mint_secret.note_nonce_keypair(denomination, counter),
-            blinding_key: mint_secret.note_blinding_key(denomination, counter),
-        }
+        NoteIssuance::new(counter, mint_secret).request(denomination)
     }
 
     pub fn output(&self) -> MintOutput {
@@ -34,20 +69,16 @@ impl NoteIssuanceRequest {
     pub fn finalize(&self, signature: BlindedSignature) -> SpendableNote {
         SpendableNote {
             denomination: self.denomination,
-            keypair: self.keypair,
-            signature: unblind_signature(self.blinding_key, signature),
+            keypair: self.issuance.keypair,
+            signature: unblind_signature(self.issuance.blinding_key, signature),
         }
     }
 
     pub fn nonce(&self) -> XOnlyPublicKey {
-        self.keypair.x_only_public_key().0
+        self.issuance.nonce()
     }
 
-    /// The expensive half of a candidate: two G1 scalar multiplications,
-    /// roughly twenty times the cost of [`NoteIssuanceRequest::nonce`]. A
-    /// restore scan derives it only for counters the federation has already
-    /// reported as unspent.
     pub fn blinded_message(&self) -> BlindedMessage {
-        blind_message(nonce_message(self.nonce()), self.blinding_key)
+        self.issuance.blinded_message()
     }
 }
