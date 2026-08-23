@@ -792,6 +792,45 @@ impl MintClientModule {
         unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 
+    /// Send everything `account` holds. `None` when it holds nothing.
+    ///
+    /// Takes the notes as they are rather than naming an amount, so there is
+    /// no denomination to round to and no subset to find: always one dbtx,
+    /// no transaction, no fee — and so, unlike `send`, not async.
+    pub fn send_max(&self, account: Account) -> Option<ECash> {
+        let operation = OperationId::new_random();
+        let dbtx = self.client_ctx.db().begin_write();
+
+        let notes = account_notes(&dbtx, self.federation, account);
+
+        if notes.is_empty() {
+            return None;
+        }
+
+        for note in &notes {
+            dbtx.remove(&NoteTable(self.federation), &(account, note.clone()))
+                .expect("Must delete existing spendable note");
+        }
+
+        let ecash = ECash::new(self.federation, notes);
+        let amount = ecash.amount();
+
+        self.client_ctx
+            .log_event(&dbtx, account, operation, SendEvent { amount });
+        self.client_ctx.log_event(
+            &dbtx,
+            account,
+            operation,
+            SendSuccessEvent {
+                ecash: ecash.clone(),
+            },
+        );
+
+        dbtx.commit();
+
+        Some(ecash)
+    }
+
     /// Receive the `ECash` into `account` by reissuing the notes.
     ///
     /// The [`OperationId`] is derived from the ecash bytes alone, and the
