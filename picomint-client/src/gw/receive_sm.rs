@@ -88,8 +88,12 @@ impl StateMachine for ReceiveStateMachine {
     ) -> Option<Self> {
         let shares = match outcome {
             Err(_) => {
-                ctx.client_ctx
-                    .log_event(dbtx, self.operation, ReceiveFailureEvent);
+                ctx.client_ctx.log_event(
+                    dbtx,
+                    super::GATEWAY_ACCOUNT,
+                    self.operation,
+                    ReceiveFailureEvent,
+                );
                 return None;
             }
             Ok(shares) => shares,
@@ -106,14 +110,22 @@ impl StateMachine for ReceiveStateMachine {
             .verify_agg_decryption_key(&ctx.tpe_agg_pk, &agg_decryption_key)
         {
             warn!("Aggregate decryption key invalid — TPE config inconsistent");
-            ctx.client_ctx
-                .log_event(dbtx, self.operation, ReceiveFailureEvent);
+            ctx.client_ctx.log_event(
+                dbtx,
+                super::GATEWAY_ACCOUNT,
+                self.operation,
+                ReceiveFailureEvent,
+            );
             return None;
         }
 
         if let Some(preimage) = self.contract.decrypt_preimage(&agg_decryption_key) {
-            ctx.client_ctx
-                .log_event(dbtx, self.operation, ReceiveSuccessEvent { preimage });
+            ctx.client_ctx.log_event(
+                dbtx,
+                super::GATEWAY_ACCOUNT,
+                self.operation,
+                ReceiveSuccessEvent { preimage },
+            );
             return None;
         }
 
@@ -125,9 +137,13 @@ impl StateMachine for ReceiveStateMachine {
         });
 
         ctx.mint
-            .finalize_and_submit_tx(dbtx, self.operation, tx_builder, |txid| {
-                ReceiveRefundEvent { txid }
-            })
+            .finalize_and_submit_tx(
+                dbtx,
+                super::GATEWAY_ACCOUNT,
+                self.operation,
+                tx_builder,
+                |txid| ReceiveRefundEvent { txid },
+            )
             .expect("Cannot claim input, additional funding needed");
 
         None

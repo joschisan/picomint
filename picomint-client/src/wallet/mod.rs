@@ -18,7 +18,7 @@ use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
 use db::{NextOutputIndexTable, ValidAddressIndexTable};
 use events::{ReceiveEvent, SendEvent};
-use picomint_core::core::OperationId;
+use picomint_core::core::{Account, OperationId};
 use picomint_core::wallet::config::WalletConfigConsensus;
 use picomint_core::wallet::{
     StandardScript, WalletInput, WalletOutput, is_potential_receive, tweaked_address,
@@ -122,9 +122,10 @@ impl WalletClientModule {
             .ok_or(SendError::NoConsensusFeerateAvailable)
     }
 
-    /// Send an onchain payment with the given fee.
+    /// Send an onchain payment with the given fee, funded from `account`.
     pub async fn send(
         &self,
+        account: Account,
         address: Address<NetworkUnchecked>,
         amount: bitcoin::Amount,
         fee: Option<bitcoin::Amount>,
@@ -167,7 +168,7 @@ impl WalletClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx, operation, tx_builder, |txid| SendEvent {
+            .finalize_and_submit_tx(&dbtx, account, operation, tx_builder, |txid| SendEvent {
                 txid,
                 address,
                 amount,
@@ -176,6 +177,7 @@ impl WalletClientModule {
             .ok_or(SendError::InsufficientFunds)?;
 
         let sm = SendStateMachine {
+            account,
             operation,
             outpoint: OutPoint { txid, out_idx: 0 },
             amount,
@@ -189,31 +191,34 @@ impl WalletClientModule {
         Ok(operation)
     }
 
-    /// Returns the next unused receive address, polling until the initial
-    /// address derivation has completed.
-    pub async fn receive(&self) -> Address {
+    /// Returns `account`'s next unused receive address, polling until the
+    /// initial address derivation has completed.
+    pub async fn receive(&self, account: Account) -> Address {
         loop {
-            let idx = self
-                .client_ctx
-                .db()
-                .begin_read()
-                .iter(&ValidAddressIndexTable(self.client_ctx.federation()), |r| {
-                    r.next_back().map(|(k, ())| k)
-                });
-
-            if let Some(idx) = idx {
-                return self.derive_address(idx);
+            if let Some(idx) = self.highest_valid_index(account) {
+                return self.derive_address(account, idx);
             }
 
             sleep(Duration::from_secs(1)).await;
         }
     }
 
-    fn derive_address(&self, index: u64) -> Address {
+    /// The largest valid address index `account` has reached, or `None` before
+    /// the scanner has seeded it. All accounts share one table, so this reads
+    /// the tail of the account's own key range rather than the table's.
+    fn highest_valid_index(&self, account: Account) -> Option<u64> {
+        self.client_ctx.db().begin_read().range(
+            &ValidAddressIndexTable(self.client_ctx.federation()),
+            (account, u64::MIN)..=(account, u64::MAX),
+            |r| r.next_back().map(|((_, idx), ())| idx),
+        )
+    }
+
+    fn derive_address(&self, account: Account, index: u64) -> Address {
         tweaked_address(
             &self.cfg.agg_pk,
             &self
-                .derive_tweak(index)
+                .derive_tweak(account, index)
                 .x_only_public_key()
                 .0
                 .consensus_hash(),
@@ -221,25 +226,32 @@ impl WalletClientModule {
         )
     }
 
-    fn derive_tweak(&self, index: u64) -> Keypair {
-        self.secret.address_keypair(index)
+    fn derive_tweak(&self, account: Account, index: u64) -> Keypair {
+        self.secret.address_keypair(account, index)
     }
 
-    /// Find the next valid index starting from (and including) `start_index`.
+    /// Find `account`'s next valid index starting from (and including)
+    /// `start_index`.
     #[allow(clippy::maybe_infinite_iter)]
-    fn next_valid_index(&self, start_index: u64) -> u64 {
+    fn next_valid_index(&self, account: Account, start_index: u64) -> u64 {
         let pks_hash = self.cfg.agg_pk.consensus_hash();
 
         block_in_place(|| {
             (start_index..)
-                .find(|i| is_potential_receive(&pks_hash, &self.derive_address(*i).script_pubkey()))
+                .find(|i| {
+                    is_potential_receive(
+                        &pks_hash,
+                        &self.derive_address(account, *i).script_pubkey(),
+                    )
+                })
                 .expect("Will always find a valid index")
         })
     }
 
-    /// Issue ecash for an unspent output with a given fee.
+    /// Issue ecash into `account` for an unspent output with a given fee.
     fn receive_output(
         &self,
+        account: Account,
         output_index: u64,
         amount: bitcoin::Amount,
         address_index: u64,
@@ -251,20 +263,26 @@ impl WalletClientModule {
             input: wire::Input::Wallet(WalletInput {
                 output_index,
                 fee,
-                tweak: self.derive_tweak(address_index).x_only_public_key().0,
+                tweak: self
+                    .derive_tweak(account, address_index)
+                    .x_only_public_key()
+                    .0,
             }),
-            keypair: self.derive_tweak(address_index),
+            keypair: self.derive_tweak(account, address_index),
             amount: Amount::from_sat((amount - fee).to_sat()),
             fee: self.cfg.input_fee,
         });
 
         let dbtx = self.client_ctx.db().begin_write();
 
-        let address = self.derive_address(address_index).as_unchecked().clone();
+        let address = self
+            .derive_address(account, address_index)
+            .as_unchecked()
+            .clone();
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx, operation, tx_builder, |txid| ReceiveEvent {
+            .finalize_and_submit_tx(&dbtx, account, operation, tx_builder, |txid| ReceiveEvent {
                 txid,
                 address,
                 amount,
@@ -277,19 +295,22 @@ impl WalletClientModule {
         (operation, txid)
     }
 
+    /// Walks the federation-wide output stream once, matching every account's
+    /// addresses in the same pass. The stream and its cursor are shared, so a
+    /// each extra account costs another entry in the address map rather than
+    /// another sweep.
     async fn output_scanner(module: WalletClientModule) {
-        let has_seed = module.client_ctx.db().begin_read().iter(
-            &ValidAddressIndexTable(module.client_ctx.federation()),
-            |r| r.next().is_some(),
-        );
+        for account in Account::ALL {
+            if module.highest_valid_index(account).is_some() {
+                continue;
+            }
 
-        if !has_seed {
-            let index = module.next_valid_index(0);
+            let index = module.next_valid_index(account, 0);
             let dbtx = module.client_ctx.db().begin_write();
             assert!(
                 dbtx.insert(
                     &ValidAddressIndexTable(module.client_ctx.federation()),
-                    &index,
+                    &(account, index),
                     &()
                 )
                 .is_none(),
@@ -325,17 +346,34 @@ impl WalletClientModule {
             .get(&NextOutputIndexTable(self.client_ctx.federation()), &())
             .unwrap_or(0);
 
-        let mut valid_indices: Vec<u64> = dbtx
+        // Every account's indices come out of one iteration, already tagged
+        // with the account they belong to.
+        let valid_indices: Vec<(Account, u64)> = dbtx
             .iter(&ValidAddressIndexTable(self.client_ctx.federation()), |r| {
-                r.map(|(idx, ())| idx).collect()
+                r.map(|(key, ())| key).collect()
             });
 
         drop(dbtx);
 
-        let mut address_map: BTreeMap<ScriptBuf, u64> = valid_indices
+        let mut address_map: BTreeMap<ScriptBuf, (Account, u64)> = valid_indices
             .iter()
-            .map(|&i| (self.derive_address(i).script_pubkey(), i))
+            .map(|&(account, i)| {
+                (
+                    self.derive_address(account, i).script_pubkey(),
+                    (account, i),
+                )
+            })
             .collect();
+
+        // Highest index reached per account, so a match on an account's
+        // frontier extends that account rather than the whole table's.
+        let mut frontier: BTreeMap<Account, u64> = BTreeMap::new();
+        for &(account, i) in &valid_indices {
+            frontier
+                .entry(account)
+                .and_modify(|highest| *highest = (*highest).max(i))
+                .or_insert(i);
+        }
 
         let outputs = self
             .client_ctx
@@ -345,29 +383,32 @@ impl WalletClientModule {
             .map_err(|_| anyhow!("Failed to fetch wallet output info slice"))?;
 
         for output in &outputs {
-            if let Some(&address_index) = address_map.get(&output.script) {
-                let next_address_index = valid_indices
-                    .last()
-                    .copied()
-                    .expect("we have at least one address index");
+            if let Some(&(account, address_index)) = address_map.get(&output.script) {
+                let next_address_index = *frontier
+                    .get(&account)
+                    .expect("every account in the map has a frontier");
 
-                // If we used the highest valid index, add the next valid one
+                // If we used this account's highest valid index, add its next
+                // valid one
                 if address_index == next_address_index {
-                    let index = self.next_valid_index(next_address_index + 1);
+                    let index = self.next_valid_index(account, next_address_index + 1);
 
                     let dbtx = self.client_ctx.db().begin_write();
 
                     dbtx.insert(
                         &ValidAddressIndexTable(self.client_ctx.federation()),
-                        &index,
+                        &(account, index),
                         &(),
                     );
 
                     dbtx.commit();
 
-                    valid_indices.push(index);
+                    frontier.insert(account, index);
 
-                    address_map.insert(self.derive_address(index).script_pubkey(), index);
+                    address_map.insert(
+                        self.derive_address(account, index).script_pubkey(),
+                        (account, index),
+                    );
                 }
 
                 if !output.spent {
@@ -395,6 +436,7 @@ impl WalletClientModule {
 
                     if output.value > receive_fee {
                         let (operation, txid) = self.receive_output(
+                            account,
                             output.index,
                             output.value,
                             address_index,

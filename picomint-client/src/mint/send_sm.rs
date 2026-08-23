@@ -1,6 +1,6 @@
 use futures::StreamExt;
 use picomint_core::Amount;
-use picomint_core::core::OperationId;
+use picomint_core::core::{Account, OperationId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTx;
 
@@ -23,6 +23,9 @@ crate::client_table!(
 /// `SendFailureEvent`.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
+    /// Account the reissued notes land in, and therefore the one the bundle
+    /// is assembled from.
+    pub account: Account,
     pub operation: OperationId,
     pub amount: Amount,
 }
@@ -67,19 +70,24 @@ impl StateMachine for SendStateMachine {
     ) -> Option<Self> {
         match outcome {
             SendOutcome::Success => {
-                match super::send_ecash_dbtx(dbtx, ctx.federation, self.amount) {
-                    Some(ecash) => {
-                        ctx.client_ctx
-                            .log_event(dbtx, self.operation, SendSuccessEvent { ecash })
-                    }
-                    None => ctx
-                        .client_ctx
-                        .log_event(dbtx, self.operation, SendFailureEvent),
+                match super::send_ecash_dbtx(dbtx, ctx.federation, self.account, self.amount) {
+                    Some(ecash) => ctx.client_ctx.log_event(
+                        dbtx,
+                        self.account,
+                        self.operation,
+                        SendSuccessEvent { ecash },
+                    ),
+                    None => ctx.client_ctx.log_event(
+                        dbtx,
+                        self.account,
+                        self.operation,
+                        SendFailureEvent,
+                    ),
                 }
             }
             SendOutcome::Failure => {
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation, SendFailureEvent)
+                    .log_event(dbtx, self.account, self.operation, SendFailureEvent)
             }
         }
         None

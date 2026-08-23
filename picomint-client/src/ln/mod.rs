@@ -19,7 +19,7 @@ use db::{GatewayPkTable, IncomingContractStreamIndexTable, SendOperationTable};
 use gateway::Gateways;
 use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::config::FederationId;
-use picomint_core::core::OperationId;
+use picomint_core::core::{Account, OperationId};
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
@@ -203,6 +203,7 @@ impl LightningClientModule {
     #[allow(clippy::too_many_lines)]
     pub async fn send(
         &self,
+        account: Account,
         gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
         invoice: Bolt11Invoice,
@@ -226,7 +227,7 @@ impl LightningClientModule {
 
         let tweak: [u8; 16] = rand::Rng::r#gen(&mut rand::thread_rng());
 
-        let refund_keypair = self.secret.refund_keypair(&tweak);
+        let refund_keypair = self.secret.refund_keypair(account, &tweak);
 
         let is_direct_swap = invoice.recover_payee_pub_key() == gateway_info.lightning_public_key;
 
@@ -283,12 +284,12 @@ impl LightningClientModule {
             .insert(&SendOperationTable(self.federation), &operation, &())
             .is_some()
         {
-            return Err(SendPaymentError::InvoiceAlreadyAttempted(operation));
+            return Err(SendPaymentError::InvoiceAlreadyAttempted);
         }
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx, operation, tx_builder, |txid| SendEvent {
+            .finalize_and_submit_tx(&dbtx, account, operation, tx_builder, |txid| SendEvent {
                 txid,
                 amount,
                 fee,
@@ -297,6 +298,7 @@ impl LightningClientModule {
 
         let sm = SendStateMachine {
             common: SendSMCommon {
+                account,
                 operation,
                 outpoint: OutPoint { txid, out_idx: 0 },
                 contract,
@@ -323,11 +325,12 @@ impl LightningClientModule {
     /// `gateway_info` as a backstop against an abusive gateway.
     pub async fn receive(
         &self,
+        account: Account,
         gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
         amount: Amount,
     ) -> Result<Bolt11Invoice, ReceiveError> {
-        let receive_keypair = self.secret.receive_keypair();
+        let receive_keypair = self.secret.receive_keypair(account);
 
         self.create_contract_and_fetch_invoice(
             gateway_pk,
@@ -416,6 +419,7 @@ impl LightningClientModule {
     fn receive_incoming_contract(
         &self,
         dbtx: &WriteTx,
+        account: Account,
         sk: SecretKey,
         outpoint: OutPoint,
         contract: &IncomingContract,
@@ -437,7 +441,7 @@ impl LightningClientModule {
         let fee = contract.commitment.fee;
 
         self.mint
-            .finalize_and_submit_tx(dbtx, operation, tx_builder, |txid| ReceiveEvent {
+            .finalize_and_submit_tx(dbtx, account, operation, tx_builder, |txid| ReceiveEvent {
                 txid,
                 amount,
                 fee,
@@ -494,7 +498,11 @@ impl LightningClientModule {
     /// [`GenerateLnurlError::NoGatewaysAvailable`] until the startup
     /// [`Self::update_gateway_pks`] lands. Callers that generate an lnurl
     /// immediately after adding a federation should retry.
-    pub fn generate_lnurl(&self, lnurl_daemon: String) -> Result<String, GenerateLnurlError> {
+    pub fn generate_lnurl(
+        &self,
+        account: Account,
+        lnurl_daemon: String,
+    ) -> Result<String, GenerateLnurlError> {
         let gateways: Vec<GatewayPk> = self
             .client_ctx
             .db()
@@ -513,7 +521,7 @@ impl LightningClientModule {
             .into_iter()
             .choose_multiple(&mut rand::thread_rng(), MAX_GATEWAYS_PER_LNURL);
 
-        let receive_keypair = self.secret.receive_keypair();
+        let receive_keypair = self.secret.receive_keypair(account);
 
         let payload = picomint_base32::encode(&lnurl::LnurlRequest {
             federation: self.federation,
@@ -527,7 +535,14 @@ impl LightningClientModule {
         )))
     }
 
+    /// Walks the federation-wide contract stream once, trialling every
+    /// account's receive key against each entry. The stream and its cursor are
+    /// shared, so each extra account costs one ECDH per contract rather than
+    /// another sweep.
     async fn receive_scan(module: LightningClientModule) {
+        let keys = Account::ALL
+            .map(|account| (account, module.secret.receive_keypair(account).secret_key()));
+
         loop {
             let stream_index = module
                 .client_ctx
@@ -542,12 +557,12 @@ impl LightningClientModule {
                 .ln_await_incoming_contracts(stream_index, 128)
                 .await;
 
-            let sk = module.secret.receive_keypair().secret_key();
-
             let dbtx = module.client_ctx.db().begin_write();
 
             for (outpoint, contract) in &entries {
-                module.receive_incoming_contract(&dbtx, sk, *outpoint, contract);
+                for (account, sk) in keys {
+                    module.receive_incoming_contract(&dbtx, account, sk, *outpoint, contract);
+                }
             }
 
             dbtx.insert(
@@ -574,7 +589,7 @@ pub enum SendPaymentError {
     #[error("Invoice has expired")]
     InvoiceExpired,
     #[error("A payment for this invoice has already been attempted")]
-    InvoiceAlreadyAttempted(OperationId),
+    InvoiceAlreadyAttempted,
     #[error("Gateway fee exceeds the allowed limit")]
     GatewayFeeExceedsLimit,
     #[error("Gateway expiry time exceeds the allowed limit")]

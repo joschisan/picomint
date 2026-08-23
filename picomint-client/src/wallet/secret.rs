@@ -3,6 +3,7 @@
 //!
 //! [`ClientSecret::wallet_secret`]: crate::secret::ClientSecret::wallet_secret
 
+use picomint_core::core::Account;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::secret::Secret;
 use picomint_encoding::Encodable;
@@ -20,7 +21,11 @@ impl WalletSecret {
         Self(module_root)
     }
 
-    pub fn address_keypair(&self, index: u64) -> Keypair {
-        self.0.child(&Path::Address).child(&index).to_secp_keypair()
+    pub fn address_keypair(&self, account: Account, index: u64) -> Keypair {
+        self.0
+            .child(&account)
+            .child(&Path::Address)
+            .child(&index)
+            .to_secp_keypair()
     }
 }

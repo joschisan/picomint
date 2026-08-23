@@ -5,7 +5,7 @@ use anyhow::ensure;
 use async_stream::stream;
 use futures::StreamExt;
 use picomint_client::mint::{MintSuccessEvent, ReceiveEvent, SendEvent};
-use picomint_client::{Client, Mnemonic, TxAcceptEvent, TxRejectEvent};
+use picomint_client::{Account, Client, Mnemonic, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_eventlog::{EventLogEntry, EventLogId};
@@ -30,7 +30,7 @@ fn mint_event_stream(
     stream! {
         loop {
             let notified = notify.notified();
-            let events = client.get_event_log(next_id, 100).await;
+            let events = client.get_event_log(next_id, 100);
 
             for (id, entry) in events {
                 next_id = id.saturating_add(1);
@@ -103,13 +103,16 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     for i in 0..10 {
         info!("Sending ecash payment {} of 10", i + 1);
 
-        let ecash = client_send.mint().send(Amount::from_sat(1_000)).await?;
+        let ecash = client_send
+            .mint()
+            .send(Account::Primary, Amount::from_sat(1_000))
+            .await?;
 
         let Some((_, MintEvent::Send(_))) = send_events.next().await else {
             panic!("Expected Send event");
         };
 
-        let operation = client_receive.mint().receive(&ecash)?;
+        let operation = client_receive.mint().receive(Account::Primary, &ecash)?;
 
         let Some((op, MintEvent::Receive(_))) = receive_events.next().await else {
             panic!("Expected Receive event");
@@ -128,7 +131,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // opportunistically pulls excess notes (>TARGET_PER_DENOMINATION) into
     // the IssuanceSM's `spendable_notes` and only recovers them once the SM
     // transitions on Err. Capturing here avoids racing that reclaim.
-    let expected = client_receive.get_balance();
+    let expected = client_receive.get_balance(Account::Primary);
 
     ensure!(
         expected != Amount::ZERO,
@@ -137,14 +140,17 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     info!("mint: double_spend_is_rejected");
 
-    let ecash = client_send.mint().send(Amount::from_sat(1_000)).await?;
+    let ecash = client_send
+        .mint()
+        .send(Account::Primary, Amount::from_sat(1_000))
+        .await?;
 
     let Some((_, MintEvent::Send(_))) = send_events.next().await else {
         panic!("Expected Send event");
     };
 
     // First receive succeeds (sender receives own ecash back)
-    let operation = client_send.mint().receive(&ecash)?;
+    let operation = client_send.mint().receive(Account::Primary, &ecash)?;
 
     let Some((op, MintEvent::Receive(_))) = send_events.next().await else {
         panic!("Expected Receive event");
@@ -156,7 +162,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
         .expect("first receive should be accepted");
 
     // Second receive with same ecash is rejected
-    let operation = client_receive.mint().receive(&ecash)?;
+    let operation = client_receive.mint().receive(Account::Primary, &ecash)?;
 
     let Some((op, MintEvent::Receive(_))) = receive_events.next().await else {
         panic!("Expected Receive event");
@@ -187,13 +193,15 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // ordinary out-of-band receive, so the wallet holds them only once that
     // reissuance settles. It re-mints under fresh outputs, leaving the balance
     // just below `expected` by the federation's fees.
-    let operation = restored.mint().receive(&restore.ecash())?;
+    let operation = restored
+        .mint()
+        .receive(Account::Primary, &restore.ecash())?;
 
     await_tx_outcome(&restored, operation)
         .await
         .expect("restore reissuance should be accepted");
 
-    let swept = restored.get_balance();
+    let swept = restored.get_balance(Account::Primary);
 
     ensure!(
         swept > Amount::ZERO && swept <= expected,

@@ -6,8 +6,8 @@ use futures::stream::BoxStream;
 use picomint_core::TransactionId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
-use picomint_core::core::OperationId;
-use picomint_eventlog::{Event, EventLogEntry, EventLogId, EventLogger};
+use picomint_core::core::{Account, OperationId};
+use picomint_eventlog::{Event, EventLogEntry, EventLogger};
 use picomint_redb::{Database, WriteTx};
 use tokio::sync::Notify;
 
@@ -87,15 +87,6 @@ impl ClientContext {
         self.logger.event_notify(&self.db)
     }
 
-    /// Read a batch of persisted event log entries starting at `pos`.
-    pub async fn get_event_log(
-        &self,
-        pos: EventLogId,
-        limit: u64,
-    ) -> Vec<(EventLogId, EventLogEntry)> {
-        self.logger.get_event_log(&self.db, pos, limit)
-    }
-
     /// Stream every event belonging to `operation`, starting from the
     /// beginning of the log (existing events first, then live ones).
     pub fn subscribe_operation_events(
@@ -109,12 +100,12 @@ impl ClientContext {
         ))
     }
 
-    pub fn log_event<E>(&self, dbtx: &WriteTx, operation: OperationId, event: E)
+    pub fn log_event<E>(&self, dbtx: &WriteTx, account: Account, operation: OperationId, event: E)
     where
         E: Event + Send,
     {
         self.logger
-            .log_event(dbtx, self.federation(), operation, event);
+            .log_event(dbtx, self.federation(), account, operation, event);
     }
 
     pub fn logger(&self) -> &EventLogger {

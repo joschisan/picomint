@@ -2,7 +2,7 @@
 
 use crate::api::FederationApi;
 use picomint_core::config::FederationId;
-use picomint_core::core::OperationId;
+use picomint_core::core::{Account, OperationId};
 use picomint_core::tx::Transaction;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_eventlog::EventLogger;
@@ -23,6 +23,9 @@ crate::client_table!(
 /// invalidated.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct TxSubmissionStateMachine {
+    /// Account the transaction was built for. Only used to tag the accept /
+    /// reject events, since submission itself is account-agnostic.
+    pub account: Account,
     pub operation: OperationId,
     pub tx: Transaction,
 }
@@ -59,13 +62,19 @@ impl StateMachine for TxSubmissionStateMachine {
 
         match outcome {
             Ok(()) => {
-                ctx.logger
-                    .log_event(dbtx, ctx.federation, self.operation, TxAcceptEvent { txid });
+                ctx.logger.log_event(
+                    dbtx,
+                    ctx.federation,
+                    self.account,
+                    self.operation,
+                    TxAcceptEvent { txid },
+                );
             }
             Err(error) => {
                 ctx.logger.log_event(
                     dbtx,
                     ctx.federation,
+                    self.account,
                     self.operation,
                     TxRejectEvent { txid, error },
                 );
