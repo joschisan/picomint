@@ -15,7 +15,7 @@ use picomint_core::Amount;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
-use picomint_core::core::OperationId;
+use picomint_core::core::{Account, OperationId};
 use picomint_eventlog::{EventLogEntry, EventLogId, EventLogger};
 use picomint_redb::Database;
 use tracing::debug;
@@ -271,30 +271,26 @@ impl Client {
         &self.db
     }
 
-    pub fn get_balance(&self) -> Amount {
-        self.mint.get_balance(&self.db().begin_read())
+    pub fn get_balance(&self, account: Account) -> Amount {
+        self.mint.get_balance(&self.db().begin_read(), account)
     }
 
-    /// Returns a stream that yields the current client balance every time it
-    /// changes.
-    pub async fn subscribe_balance_changes(&self) -> BoxStream<'static, Amount> {
+    /// Yields `account`'s balance whenever the note table is written. The same
+    /// value may be yielded repeatedly — every account shares one table, so
+    /// writes to another account wake this stream too.
+    pub fn subscribe_balance_changes(&self, account: Account) -> BoxStream<'static, Amount> {
         let notify = self.mint.balance_notify();
-        let initial_balance = self.get_balance();
         let mint = self.mint.clone();
         let db = self.db().clone();
 
         Box::pin(async_stream::stream! {
-            yield initial_balance;
-            let mut prev_balance = initial_balance;
             loop {
+                // Registered before the read so a write landing in between
+                // still wakes the already-registered waiter.
                 let notified = notify.notified();
-                let balance = mint.get_balance(&db.begin_read());
 
-                // Deduplicate in case modules cannot always tell if the balance actually changed
-                if balance != prev_balance {
-                    prev_balance = balance;
-                    yield balance;
-                }
+                yield mint.get_balance(&db.begin_read(), account);
+
                 notified.await;
             }
         })
@@ -320,11 +316,7 @@ impl Client {
             .collect()
     }
 
-    pub async fn get_event_log(
-        &self,
-        pos: EventLogId,
-        limit: u64,
-    ) -> Vec<(EventLogId, EventLogEntry)> {
+    pub fn get_event_log(&self, pos: EventLogId, limit: u64) -> Vec<(EventLogId, EventLogEntry)> {
         self.logger.get_event_log(&self.db, pos, limit)
     }
 

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use crate::executor::{SmId, StateMachine};
 use anyhow::ensure;
-use picomint_core::core::OperationId;
+use picomint_core::core::{Account, OperationId};
 use picomint_core::mint::{Denomination, verify_note};
 use picomint_core::{PeerId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
@@ -21,6 +21,10 @@ crate::client_table!(
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct MintStateMachine {
+    /// Account whose balance this issuance settles into. Carried in the state
+    /// rather than in the table name, so one executor drives every account's
+    /// state machines.
+    pub account: Account,
     pub operation: OperationId,
     /// Notes consumed on the input side that came out of our own
     /// `NoteTable`, and are re-inserted there on tx rejection. A restore's
@@ -68,7 +72,11 @@ impl StateMachine for MintStateMachine {
     ) -> Option<Self> {
         let Ok(signature_shares) = outcome else {
             for note in &self.spendable_notes {
-                dbtx.insert(&NoteTable(ctx.federation), note, &());
+                dbtx.insert(
+                    &NoteTable(ctx.federation),
+                    &(self.account, note.clone()),
+                    &(),
+                );
             }
 
             return None;
@@ -91,14 +99,18 @@ impl StateMachine for MintStateMachine {
 
             if !verify_note(spendable_note.note(), pk) {
                 ctx.client_ctx
-                    .log_event(dbtx, self.operation, MintFailureEvent);
+                    .log_event(dbtx, self.account, self.operation, MintFailureEvent);
 
                 return None;
             }
 
             assert!(
-                dbtx.insert(&NoteTable(ctx.federation), &spendable_note, &())
-                    .is_none()
+                dbtx.insert(
+                    &NoteTable(ctx.federation),
+                    &(self.account, spendable_note),
+                    &()
+                )
+                .is_none()
             );
         }
 
@@ -111,7 +123,8 @@ impl StateMachine for MintStateMachine {
                 .sum(),
         };
 
-        ctx.client_ctx.log_event(dbtx, self.operation, event);
+        ctx.client_ctx
+            .log_event(dbtx, self.account, self.operation, event);
 
         None
     }

@@ -1,7 +1,7 @@
 use crate::executor::{SmId, StateMachine};
 use crate::module::ClientContext;
 use picomint_core::OutPoint;
-use picomint_core::core::OperationId;
+use picomint_core::core::{Account, OperationId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::WriteTx;
 
@@ -16,6 +16,8 @@ crate::client_table!(
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendStateMachine {
     pub operation: OperationId,
+    /// Account that funded the send. Only used to tag this SM's events.
+    pub account: Account,
     pub outpoint: OutPoint,
     pub amount: bitcoin::Amount,
     pub fee: bitcoin::Amount,
@@ -56,11 +58,16 @@ impl StateMachine for SendStateMachine {
     ) -> Option<Self> {
         match outcome {
             AwaitFundingResult::Success(txid) => {
-                ctx.log_event(dbtx, self.operation, SendSuccessEvent { txid });
+                ctx.log_event(
+                    dbtx,
+                    self.account,
+                    self.operation,
+                    SendSuccessEvent { txid },
+                );
             }
             AwaitFundingResult::Aborted(_) => {}
             AwaitFundingResult::Failure => {
-                ctx.log_event(dbtx, self.operation, SendFailureEvent);
+                ctx.log_event(dbtx, self.account, self.operation, SendFailureEvent);
             }
         }
 

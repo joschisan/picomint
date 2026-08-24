@@ -7,7 +7,7 @@ use futures::future::pending;
 use picomint_core::TransactionId;
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::config::FederationId;
-use picomint_core::core::OperationId;
+use picomint_core::core::{Account, OperationId};
 use picomint_core::ln::contracts::OutgoingContract;
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_core::ln::{LightningInput, OutgoingWitness};
@@ -47,6 +47,8 @@ impl SendStateMachine {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct SendSMCommon {
+    /// Account that funded the contract, and the one a refund returns to.
+    pub account: Account,
     pub operation: OperationId,
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
@@ -154,6 +156,7 @@ impl StateMachine for SendStateMachine {
             SendOutcome::PreimageTable(preimage) => {
                 ctx.client_ctx.log_event(
                     dbtx,
+                    self.common.account,
                     self.common.operation,
                     SendSuccessEvent { preimage },
                 );
@@ -162,6 +165,7 @@ impl StateMachine for SendStateMachine {
             SendOutcome::GatewayResponse(Ok(preimage)) => {
                 ctx.client_ctx.log_event(
                     dbtx,
+                    self.common.account,
                     self.common.operation,
                     SendSuccessEvent { preimage },
                 );
@@ -185,8 +189,12 @@ impl StateMachine for SendStateMachine {
             )))),
             SendOutcome::Refunded => None,
             SendOutcome::Failure => {
-                ctx.client_ctx
-                    .log_event(dbtx, self.common.operation, SendFailureEvent);
+                ctx.client_ctx.log_event(
+                    dbtx,
+                    self.common.account,
+                    self.common.operation,
+                    SendFailureEvent,
+                );
                 None
             }
         }
@@ -212,10 +220,13 @@ fn submit_refund(
     let operation = old_state.common.operation;
 
     ctx.mint
-        .finalize_and_submit_tx(dbtx, operation, tx_builder, |txid| SendRefundEvent {
-            txid,
-            expired,
-        })
+        .finalize_and_submit_tx(
+            dbtx,
+            old_state.common.account,
+            operation,
+            tx_builder,
+            |txid| SendRefundEvent { txid, expired },
+        )
         .expect("Cannot claim input, additional funding needed")
 }
 

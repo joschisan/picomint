@@ -1,3 +1,4 @@
+use picomint_core::core::Account;
 use picomint_core::mint::{Denomination, MintOutput, nonce_message};
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_encoding::{Decodable, Encodable};
@@ -20,11 +21,11 @@ pub struct NoteIssuance {
 }
 
 impl NoteIssuance {
-    pub fn new(counter: u64, mint_secret: &MintSecret) -> Self {
+    pub fn new(account: Account, counter: u64, mint_secret: &MintSecret) -> Self {
         Self {
             counter,
-            keypair: mint_secret.note_nonce_keypair(counter),
-            blinding_key: mint_secret.note_blinding_key(counter),
+            keypair: mint_secret.note_nonce_keypair(account, counter),
+            blinding_key: mint_secret.note_blinding_key(account, counter),
         }
     }
 
@@ -55,8 +56,13 @@ pub struct NoteIssuanceRequest {
 }
 
 impl NoteIssuanceRequest {
-    pub fn new(denomination: Denomination, counter: u64, mint_secret: &MintSecret) -> Self {
-        NoteIssuance::new(counter, mint_secret).request(denomination)
+    pub fn new(
+        account: Account,
+        denomination: Denomination,
+        counter: u64,
+        mint_secret: &MintSecret,
+    ) -> Self {
+        NoteIssuance::new(account, counter, mint_secret).request(denomination)
     }
 
     pub fn output(&self) -> MintOutput {

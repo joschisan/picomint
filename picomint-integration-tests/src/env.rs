@@ -12,7 +12,7 @@ use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_client::mint::Restore;
-use picomint_client::{Client, Mnemonic};
+use picomint_client::{Account, Client, Mnemonic};
 use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::gateway::GatewayPk;
@@ -249,11 +249,12 @@ impl TestEnv {
 
         let config = picomint_client::download(&self.endpoint, &self.invite).await?;
 
-        let restore = picomint_client::restore(&self.endpoint, &mnemonic, &config).await?;
+        let restore =
+            picomint_client::restore(&self.endpoint, &mnemonic, &config, Account::Primary).await?;
 
         let dbtx = db.begin_write();
 
-        picomint_client::commit_restore(&dbtx, &restore);
+        picomint_client::commit_restore(&dbtx, Account::Primary, &restore);
 
         dbtx.commit();
 

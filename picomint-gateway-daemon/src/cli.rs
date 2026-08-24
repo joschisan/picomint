@@ -13,6 +13,7 @@ use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
+use picomint_client::gw::GATEWAY_ACCOUNT;
 use picomint_client::wallet::events::{SendFailureEvent, SendSuccessEvent};
 use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
@@ -581,7 +582,7 @@ async fn federation_balance(
 ) -> Result<Json<FederationBalanceResponse>, CliError> {
     let client = resolve_client(&state, payload.federation).await?;
 
-    let balance_msat = client.get_balance();
+    let balance_msat = client.get_balance(GATEWAY_ACCOUNT);
 
     Ok(Json(FederationBalanceResponse { balance_msat }))
 }
@@ -623,7 +624,7 @@ async fn federation_module_mint_count(
     Json(payload): Json<FederationMintCountRequest>,
 ) -> Result<Json<FederationMintCountResponse>, CliError> {
     let client = resolve_client(&state, payload.federation).await?;
-    let counts = client.mint().get_count_by_denomination();
+    let counts = client.mint().get_count_by_denomination(GATEWAY_ACCOUNT);
     Ok(Json(FederationMintCountResponse { counts }))
 }
 
@@ -637,7 +638,10 @@ async fn federation_module_mint_send(
 
     let ecash = client
         .mint()
-        .send(picomint_core::Amount::from_sat(payload.amount.to_sat()))
+        .send(
+            GATEWAY_ACCOUNT,
+            picomint_core::Amount::from_sat(payload.amount.to_sat()),
+        )
         .await
         .map_err(CliError::internal)?;
 
@@ -660,7 +664,7 @@ async fn federation_module_mint_receive(
 
     let operation = client
         .mint()
-        .receive(&payload.ecash)
+        .receive(GATEWAY_ACCOUNT, &payload.ecash)
         .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
 
     let mut events = client.subscribe_operation_events(operation);
@@ -704,7 +708,12 @@ async fn federation_module_wallet_send(
     let client = resolve_client(&state, payload.federation).await?;
     let operation = client
         .wallet()
-        .send(payload.address, payload.amount, payload.fee)
+        .send(
+            GATEWAY_ACCOUNT,
+            payload.address,
+            payload.amount,
+            payload.fee,
+        )
         .await
         .map_err(|e| CliError::internal(format!("Failed to submit onchain send: {e}")))?;
 
@@ -735,7 +744,7 @@ async fn federation_module_wallet_receive(
     Json(payload): Json<FederationWalletReceiveRequest>,
 ) -> Result<Json<FederationWalletReceiveResponse>, CliError> {
     let client = resolve_client(&state, payload.federation).await?;
-    let address = client.wallet().receive().await;
+    let address = client.wallet().receive(GATEWAY_ACCOUNT).await;
     Ok(Json(FederationWalletReceiveResponse {
         address: address.as_unchecked().clone(),
     }))

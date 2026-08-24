@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use derive_more::{Display, FromStr};
 use futures::Stream;
 use picomint_core::config::FederationId;
-use picomint_core::core::OperationId;
+use picomint_core::core::{Account, OperationId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, Table, TableDef, WriteTx, consensus_key, consensus_value};
 use serde::{Deserialize, Serialize};
@@ -127,6 +127,11 @@ pub struct EventLogEntry {
     /// `operation` lets a subscriber stitch them together.
     pub federation: FederationId,
 
+    /// Account within that federation whose balance the event concerns.
+    /// Accounts share one log, so this is what lets a subscriber attribute
+    /// an entry to the balance it moved.
+    pub account: Account,
+
     /// Operation this event belongs to. Used to index the event into the
     /// by-operation secondary table for op-scoped tailing.
     pub operation: OperationId,
@@ -178,12 +183,14 @@ impl EventLogger {
     /// redb's single-writer serialization. The per-table [`Notify`] for the
     /// main event-log table is woken automatically on commit by the redb
     /// layer.
+    #[allow(clippy::too_many_arguments)]
     pub fn log_event_raw(
         &self,
         dbtx: &WriteTx,
         kind: EventKind,
         source: EventSource,
         federation: FederationId,
+        account: Account,
         operation: OperationId,
         payload: Vec<u8>,
     ) {
@@ -191,6 +198,7 @@ impl EventLogger {
             kind = %kind,
             source = ?source,
             %federation,
+            %account,
             operation = %operation,
             payload = %String::from_utf8_lossy(&payload),
             "event",
@@ -205,6 +213,7 @@ impl EventLogger {
             kind,
             source,
             federation,
+            account,
             operation,
             timestamp,
             payload,
@@ -227,6 +236,7 @@ impl EventLogger {
         &self,
         dbtx: &WriteTx,
         federation: FederationId,
+        account: Account,
         operation: OperationId,
         event: E,
     ) {
@@ -235,6 +245,7 @@ impl EventLogger {
             E::KIND,
             E::SOURCE,
             federation,
+            account,
             operation,
             serde_json::to_vec(&event).expect("Serialization can't fail"),
         );

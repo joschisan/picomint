@@ -83,7 +83,7 @@ use tracing::debug;
 pub use client::Client;
 pub use connection::ConnStatus;
 pub use mint::commit_restore;
-pub use picomint_core::core::OperationId;
+pub use picomint_core::core::{Account, OperationId};
 pub use secret::{Mnemonic, random as random_mnemonic};
 
 use picomint_core::{Amount, TransactionId};
@@ -156,25 +156,31 @@ pub async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Resul
     Ok(invite_resp.config)
 }
 
-/// Rebuild a wallet's notes from its seed by scanning the federation.
+/// Rebuild one account's notes from the seed by scanning the federation.
 ///
 /// Reads nothing and writes nothing locally. Applying the result is two
 /// steps, in this order:
 ///
 /// 1. [`commit_restore`] in whichever dbtx marks the federation as added —
-///    this persists the counter marks, and must land before the wallet issues
+///    this persists the counter mark, and must land before the account issues
 ///    anything.
 /// 2. [`mint::MintClientModule::receive`] on [`mint::Restore::ecash`], once
 ///    the client is up, to reissue the restored notes under nonces the
 ///    federation cannot tie back to the scan.
 ///
-/// Neither step needs the other to have succeeded: the marks are safe to
-/// persist without the reissuance, and the reissuance is idempotent, so an
-/// interrupted restore is simply run again.
+/// The marks are safe to persist without the reissuance. The reissuance is
+/// not a no-op if repeated: a bundle can be received once per federation, so
+/// running it a second time fails with
+/// [`mint::ReceiveECashError::AlreadyAttempted`].
+///
+/// Covers a single [`Account`]. Restoring a whole client means running this
+/// once per account and applying each result under the account it was asked
+/// for — the counter marks can all be committed in one dbtx.
 pub async fn restore(
     endpoint: &Endpoint,
     mnemonic: &Mnemonic,
     config: &ConsensusConfig,
+    account: Account,
 ) -> anyhow::Result<mint::Restore> {
     let federation = config.calculate_federation_id();
 
@@ -188,5 +194,5 @@ pub async fn restore(
 
     let secret = secret::ClientSecret::new(mnemonic, federation).mint_secret();
 
-    mint::scan(&api, &secret, &config.mint, federation).await
+    mint::scan(&api, &secret, &config.mint, federation, account).await
 }

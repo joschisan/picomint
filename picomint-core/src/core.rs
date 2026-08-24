@@ -38,3 +38,51 @@ impl OperationId {
 }
 
 picomint_redb::consensus_key!(OperationId);
+
+/// One of a client's balances within a single federation.
+///
+/// The federation cannot tell accounts apart — an account is purely a
+/// client-side split of the derivation tree and of the few tables that hold
+/// per-account state. It lives here rather than in the client because the
+/// event log is tagged with it, and the log is written by a crate that cannot
+/// depend on the client.
+///
+/// Used as the leading component of every account-scoped table key and as a
+/// hop in the derivation tree, so variant order is load-bearing — reordering
+/// silently re-keys every client.
+///
+/// Deliberately has no `Default` impl: every entry point that touches
+/// account-scoped state takes one of these explicitly, so an omitted argument
+/// is a compile error rather than a silent write to the wrong balance.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Encodable,
+    Decodable,
+    Display,
+)]
+pub enum Account {
+    Primary,
+    Secondary,
+    Tertiary,
+}
+
+picomint_redb::consensus_key!(Account);
+
+impl Account {
+    /// Every account, in key order. Iterated by the stream scanners, which
+    /// sweep for all accounts against a single cursor, and by integrators
+    /// applying an operation across the whole client.
+    ///
+    /// The set is fixed on purpose: every account exists from the moment a
+    /// client is built, so no account ever joins a stream late.
+    pub const ALL: [Account; 3] = [Account::Primary, Account::Secondary, Account::Tertiary];
+}

@@ -14,7 +14,7 @@ use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
 use picomint_core::config::FederationId;
-use picomint_core::core::OperationId;
+use picomint_core::core::{Account, OperationId};
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::ln::{LightningInput, LightningOutput, OutgoingWitness};
@@ -27,6 +27,12 @@ use tracing::warn;
 
 pub use self::secret::GwSecret;
 use receive_sm::{ReceiveStateMachine, ReceiveStateMachineTable};
+
+/// A gateway client holds a single balance, so every account-scoped call this
+/// module makes names this one. Accounts are a wallet-facing split; the
+/// gateway has no use for a second balance and [`GwSecret`] grows no account
+/// hop to derive one.
+pub const GATEWAY_ACCOUNT: Account = Account::Primary;
 
 impl GatewayClientModule {
     pub fn new(
@@ -114,6 +120,7 @@ impl GatewayClientModule {
     ) {
         self.client_ctx.log_event(
             dbtx,
+            GATEWAY_ACCOUNT,
             operation,
             SendEvent {
                 outpoint,
@@ -152,10 +159,8 @@ impl GatewayClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(dbtx, operation, tx_builder, |txid| ReceiveEvent {
-                txid,
-                amount,
-                fee,
+            .finalize_and_submit_tx(dbtx, GATEWAY_ACCOUNT, operation, tx_builder, |txid| {
+                ReceiveEvent { txid, amount, fee }
             })
             .context("Insufficient funds")?;
 
@@ -211,17 +216,23 @@ impl GatewayClientModule {
                 });
 
                 self.mint
-                    .finalize_and_submit_tx(dbtx, operation, tx_builder, |txid| SendSuccessEvent {
-                        preimage,
-                        txid,
-                        ln_fee,
+                    .finalize_and_submit_tx(dbtx, GATEWAY_ACCOUNT, operation, tx_builder, |txid| {
+                        SendSuccessEvent {
+                            preimage,
+                            txid,
+                            ln_fee,
+                        }
                     })
                     .expect("Cannot claim outgoing contract — additional funding needed");
             }
             None => {
                 let signature = self.keypair.sign_schnorr(contract.forfeit_message());
-                self.client_ctx
-                    .log_event(dbtx, operation, SendCancelEvent { signature });
+                self.client_ctx.log_event(
+                    dbtx,
+                    GATEWAY_ACCOUNT,
+                    operation,
+                    SendCancelEvent { signature },
+                );
             }
         }
     }
