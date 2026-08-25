@@ -15,8 +15,10 @@ use crate::wallet::config::WalletConfigConsensus;
 use picomint_encoding::{Decodable, Encodable};
 
 // TODO: make configurable
-/// This limits the RAM consumption of a BFT Unit to roughly 50kB
-pub const BFT_UNIT_BYTE_LIMIT: usize = 50_000;
+/// How large a BFT unit's payload is meant to get. A unit stops taking items
+/// once it reaches this, so it ends up at least this large and overshoots by
+/// at most the item that got it there.
+pub const BFT_UNIT_BYTE_TARGET: usize = 50_000;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct PeerEndpoint {

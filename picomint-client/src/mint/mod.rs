@@ -18,9 +18,7 @@ use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
-use crate::tx::{
-    Transaction, TxSubmissionSmContext, TxSubmissionStateMachine, TxSubmissionStateMachineTable,
-};
+use crate::tx::{TxSubmissionSmContext, TxSubmissionStateMachine, TxSubmissionStateMachineTable};
 use anyhow::ensure;
 use client_db::{CounterTable, NoteTable, ReceiveOperationTable};
 pub use events::*;
@@ -30,6 +28,7 @@ use picomint_core::core::{Account, OperationId};
 use picomint_core::mint::config::{MintConfigConsensus, client_denominations};
 use picomint_core::mint::{Denomination, MintInput, Note};
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
+use picomint_core::tx::Transaction;
 use picomint_core::{Amount, PeerId, TransactionId, wire};
 use picomint_encoding::{Decodable, Encodable};
 use tbs::{AggregatePublicKey, aggregate_signature_shares};
@@ -422,8 +421,7 @@ impl MintClientModule {
     /// outputs issued back to the same account. Sub-denomination dust below
     /// `smallest_denom + output_fee` is left as implicit federation revenue.
     /// Returns `None` iff the account holds insufficient funds to cover the
-    /// builder's deficit — the sole failure mode after tx-too-large became a
-    /// programmer-error panic in [`Mint::submit`].
+    /// builder's deficit, which is the only way balancing fails.
     fn balance(
         &self,
         dbtx: &WriteTx,
@@ -475,9 +473,8 @@ impl MintClientModule {
         Some((spendable_notes, issuance_requests))
     }
 
-    /// Sign the builder, size-check the encoded transaction, spawn the
-    /// `TxSubmissionStateMachine`, log the caller's `event` followed by
-    /// `TxCreateEvent`.
+    /// Sign the builder, spawn the `TxSubmissionStateMachine`, log the
+    /// caller's `event` followed by `TxCreateEvent`.
     fn submit<E: picomint_eventlog::Event + Send>(
         &self,
         dbtx: &WriteTx,
@@ -489,11 +486,6 @@ impl MintClientModule {
     ) -> TransactionId {
         let fee = builder.total_fee();
         let tx = builder.build();
-
-        assert!(
-            tx.consensus_encode_to_vec().len() <= Transaction::MAX_TX_SIZE,
-            "The generated transaction is too large.",
-        );
 
         let txid = tx.compute_txid();
 
@@ -724,10 +716,6 @@ impl MintClientModule {
         let fee = builder.total_fee();
         let tx = builder.build();
 
-        if tx.consensus_encode_to_vec().len() > Transaction::MAX_TX_SIZE {
-            return Err(SendECashError::Failure);
-        }
-
         let txid = tx.compute_txid();
 
         // Everything past this point lands in the same dbtx that submits
@@ -851,6 +839,13 @@ impl MintClientModule {
         // and no outputs and submit it.
         if ecash.notes.is_empty() {
             return Err(ReceiveECashError::Empty);
+        }
+
+        // Every note in the bundle is an input, and they are the only inputs
+        // the account did not choose, so this is the one place a transaction
+        // can be handed more of them than it may carry.
+        if ecash.notes.len() > Transaction::MAX_INPUTS {
+            return Err(ReceiveECashError::TooManyNotes);
         }
 
         if ecash.mint != self.federation {
@@ -984,6 +979,8 @@ pub enum SendECashError {
 pub enum ReceiveECashError {
     #[error("The ECash bundle contains no notes")]
     Empty,
+    #[error("The ECash bundle contains more notes than one transaction can reissue")]
+    TooManyNotes,
     #[error("The ECash is from a different federation")]
     WrongFederation,
     #[error("ECash contains an uneconomical denomination")]

@@ -117,6 +117,14 @@ pub async fn process_tx_with_server(
         return Err(TxError::EmptyOutputs);
     }
 
+    if tx.inputs.len() > Transaction::MAX_INPUTS {
+        return Err(TxError::TooManyInputs);
+    }
+
+    if tx.outputs.len() > Transaction::MAX_OUTPUTS {
+        return Err(TxError::TooManyOutputs);
+    }
+
     let start = Instant::now();
 
     let mut funding_verifier = FundingVerifier::default();
@@ -136,7 +144,7 @@ pub async fn process_tx_with_server(
 
     tx.validate_signatures(&public_keys)?;
 
-    for (output, out_idx) in tx.outputs.iter().zip(0u64..) {
+    for (output, out_idx) in tx.outputs.iter().zip(0u16..) {
         let amount = server
             .process_output(dbtx, output, OutPoint { txid, out_idx })
             .await

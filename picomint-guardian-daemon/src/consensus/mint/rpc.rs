@@ -82,9 +82,9 @@ pub fn spend_state(mint: &Mint, req: SpendStateRequest) -> Result<SpendStateResp
 }
 
 fn collect_signature_shares(dbtx: &ReadTx, txid: TransactionId) -> Vec<BlindedSignatureShare> {
-    let bounds = OutPoint { txid, out_idx: 0 }..OutPoint {
+    let bounds = OutPoint { txid, out_idx: 0 }..=OutPoint {
         txid,
-        out_idx: u64::MAX,
+        out_idx: u16::MAX,
     };
 
     dbtx.range(&BlindedSignatureShareTable, bounds, |r| {

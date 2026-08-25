@@ -16,13 +16,13 @@ use picomint_bft::{
     DataProvider as BftDataProvider, INetwork, Message as BftMessage, Recipient as BftRecipient,
 };
 use picomint_core::PeerId;
-use picomint_core::config::BFT_UNIT_BYTE_LIMIT;
+use picomint_core::config::BFT_UNIT_BYTE_TARGET;
 use picomint_core::secp256k1::schnorr;
 use picomint_core::session::SignedSessionOutcome;
 use picomint_core::tx::ConsensusItem;
 use picomint_encoding::Encodable;
 use picomint_redb::Database;
-use tracing::{error, warn};
+use tracing::error;
 
 use crate::consensus::db::SignedSessionOutcomeTable;
 use crate::p2p::{P2PMessage, Recipient as P2PRecipient, ReconnectP2PConnections};
@@ -114,11 +114,9 @@ impl INetwork<ConsensusItem> for Network {
 }
 
 /// `DataProvider` impl draining the daemon's submission channel into the
-/// next unit's payload, capped at [`BFT_UNIT_BYTE_LIMIT`] bytes of
-/// encoded payload per unit. `pending_items` holds items observed but
-/// not yet returned: the item that would push a payload past the cap,
-/// and items pulled off the channel by `wait_for_data` to wake the
-/// engine out of quiescence.
+/// next unit's payload, cut off once the payload reaches
+/// [`BFT_UNIT_BYTE_TARGET`]. `pending_items` holds items pulled off the
+/// channel by `wait_for_data` to wake the engine out of quiescence.
 pub struct DataProvider {
     submission_rx: Receiver<ConsensusItem>,
     pending_items: VecDeque<ConsensusItem>,
@@ -142,27 +140,17 @@ impl DataProvider {
 #[async_trait]
 impl BftDataProvider<ConsensusItem> for DataProvider {
     fn get_data(&mut self) -> Vec<ConsensusItem> {
-        // `Vec<T>` consensus encoding is a `u32` length prefix followed
-        // by the concatenated item encodings — start the budget at 4 to
-        // account for the prefix.
-        let mut n_bytes: usize = 4;
         let mut items = Vec::new();
 
+        // The target bounds a unit's memory footprint, nothing consensus
+        // depends on, so no item is ever dropped to honour it: we take
+        // whatever gets us there and stop.
         while let Some(item) = self.next_item() {
-            let item_bytes = item.consensus_encode_to_vec().len();
+            items.push(item);
 
-            if n_bytes + item_bytes > BFT_UNIT_BYTE_LIMIT {
-                if items.is_empty() {
-                    warn!(?item, "Consensus item exceeds BFT_UNIT_BYTE_LIMIT; dropped");
-                    continue;
-                }
-
-                self.pending_items.push_front(item);
+            if items.consensus_encode_to_vec().len() >= BFT_UNIT_BYTE_TARGET {
                 break;
             }
-
-            n_bytes += item_bytes;
-            items.push(item);
         }
 
         items
