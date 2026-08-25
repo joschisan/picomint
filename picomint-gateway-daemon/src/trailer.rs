@@ -25,7 +25,7 @@ use picomint_eventlog::EventLogEntry;
 use picomint_redb::WriteTx;
 
 use crate::AppState;
-use crate::db::{EventCursorTable, IncomingContractTable, OutgoingContractTable};
+use crate::db::{EventCursorTable, IncomingOfferTable, OutgoingContractTable};
 
 const CHUNK_SIZE: u64 = 1_000;
 
@@ -117,17 +117,17 @@ fn dispatch_ln_receive(
     };
 
     let row = tx_ref
-        .get(&IncomingContractTable, &operation)
-        .expect("incoming_contract row registered by AppState::receive");
+        .get(&IncomingOfferTable, &operation)
+        .expect("incoming-offer row registered by AppState::receive");
 
-    let ph = PaymentHash(*row.contract.commitment.payment_hash.as_byte_array());
+    let ph = PaymentHash(*row.offer.commitment.payment_hash.as_byte_array());
 
     state
         .node
         .bolt11_payment()
         .claim_for_hash(
             ph,
-            row.contract.commitment.amount.msat,
+            row.offer.commitment.amount.msat,
             PaymentPreimage(preimage),
         )
         .expect("LDK has this payment_hash (registered via receive_for_hash)");

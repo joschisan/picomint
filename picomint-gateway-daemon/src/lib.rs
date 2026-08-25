@@ -34,7 +34,7 @@ use picomint_redb::Database;
 use std::sync::RwLock;
 
 use crate::db::{
-    ClientConfigTable, DisabledFederationTable, IncomingContractRow, IncomingContractTable,
+    ClientConfigTable, DisabledFederationTable, IncomingOfferRow, IncomingOfferTable,
     OutgoingContractRow, OutgoingContractTable,
 };
 
@@ -263,11 +263,11 @@ impl AppState {
             }
         } else {
             let incoming_row = dbtx
-                .get(&IncomingContractTable, &operation)
+                .get(&IncomingOfferTable, &operation)
                 .expect("Direct-swap target not registered for this payment hash");
 
             ensure!(
-                incoming_row.contract.commitment.amount.msat == amount,
+                incoming_row.offer.commitment.amount.msat == amount,
                 "Direct-swap amount mismatch"
             );
 
@@ -277,7 +277,7 @@ impl AppState {
 
             if f2_client
                 .gw()
-                .start_receive(&dbtx, operation, incoming_row.contract)
+                .start_receive(&dbtx, operation, incoming_row.offer)
                 .is_err()
             {
                 f1_client.gw().finalize_send(
@@ -298,38 +298,30 @@ impl AppState {
     }
 
     /// Creates a Bolt11 invoice for an incoming payment. Registers the
-    /// `IncomingContract` + the generated invoice in the daemon-global
-    /// `incoming_contract` table. Idempotent on operation: a retry with the same
-    /// contract returns the previously generated invoice.
+    /// `IncomingOffer` + the generated invoice in the daemon-global
+    /// `incoming-offer` table. Idempotent on operation: a retry with the same
+    /// offer returns the previously generated invoice.
     pub async fn receive(&self, payload: ReceiveRequest) -> anyhow::Result<Bolt11Invoice> {
-        ensure!(payload.contract.verify(), "The contract is invalid");
+        ensure!(payload.offer.verify(), "The offer is invalid");
 
-        let client = self
-            .select_client(payload.federation)
+        self.select_client(payload.federation)
             .context("Federation not connected")?;
 
-        ensure!(
-            payload.contract.commitment.refund_pk == client.gw().keypair.x_only_public_key().0,
-            "The incoming contract is keyed to another gateway"
-        );
-
-        let receive_fee = self
-            .receive_fee
-            .fee(payload.contract.commitment.amount.msat);
+        let receive_fee = self.receive_fee.fee(payload.offer.commitment.amount.msat);
 
         ensure!(
-            payload.contract.commitment.fee == receive_fee,
-            "Contract fee does not match the gateway receive fee"
+            payload.offer.commitment.fee == receive_fee,
+            "Offer fee does not match the gateway receive fee"
         );
 
         let invoice = self
             .node
             .bolt11_payment()
             .receive_for_hash(
-                payload.contract.commitment.amount.msat,
+                payload.offer.commitment.amount.msat,
                 &LdkBolt11InvoiceDescription::Direct(Description::empty()),
                 self.invoice_expiry_secs,
-                PaymentHash(payload.contract.commitment.payment_hash.to_byte_array()),
+                PaymentHash(payload.offer.commitment.payment_hash.to_byte_array()),
             )
             .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))?;
 
@@ -337,11 +329,11 @@ impl AppState {
 
         if dbtx
             .insert(
-                &IncomingContractTable,
-                &OperationId::from_encodable(&payload.contract.commitment.payment_hash),
-                &IncomingContractRow {
+                &IncomingOfferTable,
+                &OperationId::from_encodable(&payload.offer.commitment.payment_hash),
+                &IncomingOfferRow {
                     federation: payload.federation,
-                    contract: payload.contract,
+                    offer: payload.offer,
                     invoice: LightningInvoice::Bolt11(invoice.clone()),
                 },
             )
@@ -365,7 +357,7 @@ impl AppState {
         let row = self
             .gateway_db
             .begin_read()
-            .get(&IncomingContractTable, &operation)
+            .get(&IncomingOfferTable, &operation)
             .ok_or_else(|| anyhow!("Unknown payment hash"))?;
 
         let client = self

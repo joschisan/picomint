@@ -24,7 +24,7 @@ use picomint_core::ln::gateway::PaymentFee;
 use picomint_eventlog::EventLogger;
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::db::{
-    EventLogByOperationTable, EventLogTable, IncomingContractTable, OutgoingContractTable,
+    EventLogByOperationTable, EventLogTable, IncomingOfferTable, OutgoingContractTable,
     ProcessedLdkEventTable,
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
@@ -337,10 +337,10 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
     dbtx.commit();
 }
 
-/// Inbound HTLC arrived. Submit the registered incoming contract via
-/// `start_receive`. On amount mismatch or `start_receive` failure (e.g.
-/// insufficient gateway liquidity to fund the incoming contract), log the
-/// reason and fail the HTLC so the LN sender gets a refund.
+/// Inbound HTLC arrived. Fund the registered offer via `start_receive`.
+/// On amount mismatch or `start_receive` failure (e.g. insufficient
+/// gateway liquidity to fund the contract), log the reason and fail the
+/// HTLC so the LN sender gets a refund.
 fn handle_payment_claimable(
     state: &AppState,
     dbtx: &WriteTx,
@@ -358,12 +358,12 @@ fn handle_payment_claimable(
 
     // LDK only fires PaymentClaimable for hashes we registered via
     // `receive_for_hash` in `AppState::receive`, which commits the
-    // IncomingContract row before returning the invoice.
+    // offer row before returning the invoice.
     let row = dbtx
-        .get(&IncomingContractTable, &operation)
+        .get(&IncomingOfferTable, &operation)
         .expect("PaymentClaimable for an unregistered payment_hash");
 
-    if row.contract.commitment.amount.msat != amount_msat {
+    if row.offer.commitment.amount.msat != amount_msat {
         state
             .node
             .bolt11_payment()
@@ -376,7 +376,7 @@ fn handle_payment_claimable(
 
         if client
             .gw()
-            .start_receive(dbtx, operation, row.contract)
+            .start_receive(dbtx, operation, row.offer)
             .is_err()
         {
             state

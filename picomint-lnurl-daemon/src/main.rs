@@ -16,7 +16,7 @@ use lightning_invoice::Bolt11Invoice;
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::ln::MINIMUM_INCOMING_CONTRACT_AMOUNT;
-use picomint_core::ln::contracts::IncomingContract;
+use picomint_core::ln::contracts::IncomingOffer;
 use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::ln::lnurl::{LnurlRequest, MAX_GATEWAYS_PER_LNURL};
 use picomint_core::ln::methods::{
@@ -148,7 +148,7 @@ async fn invoice(
         )));
     }
 
-    let (gateway_pk, invoice) = match create_contract_and_fetch_invoice(
+    let (gateway_pk, invoice) = match create_offer_and_fetch_invoice(
         &endpoint,
         request.federation,
         request.recipient_pk,
@@ -182,7 +182,7 @@ async fn invoice(
     }))
 }
 
-async fn create_contract_and_fetch_invoice(
+async fn create_offer_and_fetch_invoice(
     endpoint: &Endpoint,
     federation: FederationId,
     recipient_pk: PublicKey,
@@ -225,7 +225,7 @@ async fn create_contract_and_fetch_invoice(
         "Amount too small"
     );
 
-    let contract = IncomingContract::new(
+    let offer = IncomingOffer::new(
         aggregate_pk,
         encryption_seed,
         preimage,
@@ -233,17 +233,13 @@ async fn create_contract_and_fetch_invoice(
         Amount::from_msat(amount),
         fee,
         claim_pk,
-        gateway_info.module_public_key,
         ephemeral_keypair.public_key(),
     );
 
     let invoice = gateway_request::<ReceiveResponse>(
         endpoint,
         gateway_pk,
-        GatewayMethod::Receive(ReceiveRequest {
-            federation,
-            contract: contract.clone(),
-        }),
+        GatewayMethod::Receive(ReceiveRequest { federation, offer }),
     )
     .await?
     .invoice;

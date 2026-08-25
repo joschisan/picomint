@@ -41,7 +41,10 @@ table!(
 );
 
 // Incoming contracts are indexed in three ways:
-// 1) A sequential stream: `stream_index (u64)` -> `(OutPoint, IncomingContract)`
+// 1) A sequential stream: `stream_index (u64)` -> `IncomingContractSummary`
+//    (the summary, not the contract — the full contract lives in
+//    `IncomingContractTable`, which is what claim-time validation reads;
+//    the stream is only ever read by clients hunting for their own)
 //    for efficient streaming reads via range queries on
 //    `IncomingContractStreamTable`.
 // 2) A monotonically-increasing index (`IncomingContractStreamIndexTable` -> u64)
@@ -58,7 +61,7 @@ table!(
 
 table!(
     IncomingContractStreamTable,
-    u64 => (OutPoint, contracts::IncomingContract),
+    u64 => contracts::IncomingContractSummary,
     "ln-incoming-contract-stream",
 );
 

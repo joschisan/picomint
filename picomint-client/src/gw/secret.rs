@@ -21,8 +21,13 @@ impl GwSecret {
     }
 
     /// The gateway's federation-facing identity keypair. Used as `claim_pk`
-    /// on outgoing contracts, as the refund key on incoming contracts, and
-    /// to sign forfeit messages on cancelled sends.
+    /// on outgoing contracts and to sign forfeit messages on cancelled
+    /// sends — both places a sender has to name the gateway in advance, so
+    /// both have to be static and public.
+    ///
+    /// Incoming contracts do not use it: their refund key is fresh per
+    /// contract, since the gateway picks it at funding time and nobody else
+    /// needs to predict it.
     pub fn contract_keypair(&self) -> Keypair {
         self.0.child(&Path::Contract).to_secp_keypair()
     }

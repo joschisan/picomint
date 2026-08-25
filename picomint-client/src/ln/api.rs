@@ -1,6 +1,6 @@
 use crate::api::FederationApi;
 use picomint_core::OutPoint;
-use picomint_core::ln::contracts::IncomingContract;
+use picomint_core::ln::contracts::IncomingContractSummary;
 use picomint_core::ln::methods::{
     AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitPreimageRequest,
     AwaitPreimageResponse, ConsensusBlockCountRequest, ConsensusBlockCountResponse,
@@ -29,7 +29,7 @@ impl FederationApi {
         &self,
         start: u64,
         batch: u64,
-    ) -> (Vec<(OutPoint, IncomingContract)>, u64) {
+    ) -> (Vec<IncomingContractSummary>, u64) {
         let resp = self
             .request_current_consensus_retry::<AwaitIncomingContractsResponse>(Method::Ln(
                 LnMethod::AwaitIncomingContracts(AwaitIncomingContractsRequest { start, batch }),
