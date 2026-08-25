@@ -48,6 +48,31 @@ impl ConsensusApi {
     /// submission to confirmation, so the server side of client-observed
     /// latency can be profiled straight from the guardian's `info` logs.
     pub async fn submit_tx(&self, tx: Transaction) -> Result<(), TxError> {
+        // Consensus checks these too, but that is after the transaction has
+        // been proposed, and a transaction we propose travels in a bft unit
+        // our peers have to be able to receive. The counts are what hold a
+        // submission to a size that fits one; the rest is refusing to carry a
+        // transaction consensus is certain to throw out.
+        if tx.inputs.is_empty() {
+            return Err(TxError::EmptyInputs);
+        }
+
+        if tx.outputs.is_empty() {
+            return Err(TxError::EmptyOutputs);
+        }
+
+        if tx.inputs.len() > Transaction::MAX_INPUTS {
+            return Err(TxError::TooManyInputs);
+        }
+
+        if tx.outputs.len() > Transaction::MAX_OUTPUTS {
+            return Err(TxError::TooManyOutputs);
+        }
+
+        if tx.signatures.len() != tx.inputs.len() {
+            return Err(TxError::InvalidWitnessLength);
+        }
+
         let start = Instant::now();
 
         // Subscribe before submitting so a rejection cannot land in the gap.

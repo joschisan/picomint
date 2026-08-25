@@ -125,6 +125,13 @@ pub async fn process_tx_with_server(
         return Err(TxError::TooManyOutputs);
     }
 
+    // Ahead of the inputs rather than alongside them: the count is what a
+    // signature list has to have, and knowing it is wrong costs nothing next
+    // to spending every input first and finding out afterwards.
+    if tx.signatures.len() != tx.inputs.len() {
+        return Err(TxError::InvalidWitnessLength);
+    }
+
     let start = Instant::now();
 
     let mut funding_verifier = FundingVerifier::default();
