@@ -10,7 +10,6 @@ use picomint_encoding::Encodable;
 
 #[derive(Encodable)]
 enum Path {
-    Refund,
     Receive,
 }
 
@@ -20,14 +19,6 @@ pub struct LnSecret(Secret);
 impl LnSecret {
     pub(crate) fn new(module_root: Secret) -> Self {
         Self(module_root)
-    }
-
-    pub fn refund_keypair(&self, account: Account, tweak: &[u8; 16]) -> Keypair {
-        self.0
-            .child(&account)
-            .child(&Path::Refund)
-            .child(tweak)
-            .to_secp_keypair()
     }
 
     /// The account's static receive key. Contracts are locked to a tweak of

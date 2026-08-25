@@ -14,7 +14,7 @@ use crate::OutPoint;
 use crate::config::FederationId;
 use crate::ln::ContractId;
 use crate::ln::LightningInvoice;
-use crate::ln::contracts::{IncomingContract, OutgoingContract};
+use crate::ln::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
 use crate::ln::gateway::{GatewayInfo, GatewayPk};
 
 // ── consensus-block-count ───────────────────────────────────────────────────
@@ -74,7 +74,7 @@ pub struct AwaitIncomingContractsRequest {
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct AwaitIncomingContractsResponse {
-    pub contracts: Vec<(OutPoint, IncomingContract)>,
+    pub contracts: Vec<IncomingContractSummary>,
     pub next_index: u64,
 }
 
@@ -133,7 +133,7 @@ pub struct SendResponse {
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct ReceiveRequest {
     pub federation: FederationId,
-    pub contract: IncomingContract,
+    pub offer: IncomingOffer,
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]

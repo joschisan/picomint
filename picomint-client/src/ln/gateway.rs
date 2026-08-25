@@ -26,7 +26,7 @@ use lightning_invoice::Bolt11Invoice;
 use picomint_core::OutPoint;
 use picomint_core::config::FederationId;
 use picomint_core::ln::LightningInvoice;
-use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
+use picomint_core::ln::contracts::{IncomingOffer, OutgoingContract};
 use picomint_core::ln::gateway::{GatewayInfo, GatewayPk};
 use picomint_core::ln::methods::{
     GatewayMethod, InfoRequest, InfoResponse, ReceiveRequest, ReceiveResponse, SendRequest,
@@ -185,14 +185,11 @@ impl Gateways {
         &self,
         gateway_pk: GatewayPk,
         federation: FederationId,
-        contract: IncomingContract,
+        offer: IncomingOffer,
     ) -> anyhow::Result<Bolt11Invoice> {
         self.request::<ReceiveResponse>(
             gateway_pk,
-            GatewayMethod::Receive(ReceiveRequest {
-                federation,
-                contract,
-            }),
+            GatewayMethod::Receive(ReceiveRequest { federation, offer }),
         )
         .await
         .map(|r| r.invoice)

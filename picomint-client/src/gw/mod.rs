@@ -16,7 +16,7 @@ use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::ln::config::LightningConfigConsensus;
-use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
+use picomint_core::ln::contracts::{IncomingContract, IncomingOffer, OutgoingContract};
 use picomint_core::ln::{LightningInput, LightningOutput, OutgoingWitness};
 use picomint_core::secp256k1::Keypair;
 use picomint_core::wire;
@@ -131,10 +131,16 @@ impl GatewayClientModule {
         );
     }
 
-    /// Bootstrap a receive: submit the IncomingContract tx to the federation,
-    /// log `ReceiveEvent`, and spawn the `ReceiveStateMachine`. Called by the
-    /// daemon's LDK `PaymentClaimable` handler (for LN receives) and by the
-    /// daemon's `/send-payment` direct-swap path.
+    /// Fund an incoming offer: attach a refund key, submit the resulting
+    /// contract to the federation, log `ReceiveEvent`, and spawn the
+    /// `ReceiveStateMachine`. Called by the daemon's LDK `PaymentClaimable`
+    /// handler (for LN receives) and by the daemon's `/send-payment`
+    /// direct-swap path.
+    ///
+    /// The refund key is ours by construction rather than by agreement — the
+    /// recipient never names it, and cannot, since the offer id does not
+    /// cover it. It is fresh per contract and kept only by the state machine
+    /// below, so it leaks nothing about which gateway funded what.
     ///
     /// Idempotent on `operation`: if the incoming-contract tx has already
     /// been submitted for this operation id, this is a no-op (the existing SM will
@@ -146,16 +152,23 @@ impl GatewayClientModule {
         &self,
         dbtx: &WriteTx,
         operation: OperationId,
-        contract: IncomingContract,
+        offer: IncomingOffer,
     ) -> anyhow::Result<()> {
+        let refund_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
+
+        let contract = IncomingContract {
+            offer: offer.clone(),
+            refund_pk: refund_keypair.x_only_public_key().0,
+        };
+
         let tx_builder = TxBuilder::from_output(Output {
-            output: wire::Output::Ln(Box::new(LightningOutput::Incoming(contract.clone()))),
-            amount: contract.commitment.amount - contract.commitment.fee,
+            output: wire::Output::Ln(Box::new(LightningOutput::Incoming(contract))),
+            amount: offer.commitment.amount - offer.commitment.fee,
             fee: self.cfg.output_fee,
         });
 
-        let amount = contract.commitment.amount;
-        let fee = contract.commitment.fee;
+        let amount = offer.commitment.amount;
+        let fee = offer.commitment.fee;
 
         let txid = self
             .mint
@@ -170,9 +183,9 @@ impl GatewayClientModule {
             dbtx,
             ReceiveStateMachine {
                 operation,
-                contract: contract.clone(),
+                offer,
                 outpoint,
-                refund_keypair: self.keypair,
+                refund_keypair,
             },
         );
 

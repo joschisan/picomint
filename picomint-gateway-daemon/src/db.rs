@@ -39,9 +39,9 @@ table!(
 );
 
 table!(
-    IncomingContractTable,
-    OperationId => IncomingContractRow,
-    "incoming-contract",
+    IncomingOfferTable,
+    OperationId => IncomingOfferRow,
+    "incoming-offer",
 );
 
 // Set of LDK-event `payment_hash`es that have been fully processed by the
@@ -92,10 +92,10 @@ pub struct OutgoingContractRow {
 picomint_redb::consensus_value!(OutgoingContractRow);
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct IncomingContractRow {
+pub struct IncomingOfferRow {
     pub federation: FederationId,
-    pub contract: contracts::IncomingContract,
+    pub offer: contracts::IncomingOffer,
     pub invoice: LightningInvoice,
 }
 
-picomint_redb::consensus_value!(IncomingContractRow);
+picomint_redb::consensus_value!(IncomingOfferRow);

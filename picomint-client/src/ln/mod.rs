@@ -21,7 +21,7 @@ use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::ln::config::LightningConfigConsensus;
-use picomint_core::ln::contracts::{IncomingContract, OutgoingContract};
+use picomint_core::ln::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
 use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::ln::lnurl::MAX_GATEWAYS_PER_LNURL;
 use picomint_core::ln::secret::IncomingContractSecret;
@@ -36,7 +36,6 @@ use picomint_encoding::Encodable;
 use rand::seq::IteratorRandom;
 use secp256k1::{Keypair, PublicKey, SecretKey, ecdh};
 use thiserror::Error;
-use tpe::{AggregateDecryptionKey, derive_agg_dk};
 
 use self::events::{ReceiveEvent, SendEvent};
 use self::send_sm::{SendSMCommon, SendSMState, SendStateMachine, SendStateMachineTable};
@@ -48,6 +47,16 @@ const EXPIRY_DELTA_LIMIT: u64 = 1000;
 
 /// A two hour buffer in case either the client or gateway go offline
 const CONTRACT_CONFIRMATION_BUFFER: u64 = 12;
+
+/// Contracts pulled per round trip when walking the incoming-contract
+/// stream.
+///
+/// The stream is federation-wide and a cold client walks all of it, so the
+/// batch sets how many round trips that costs — and each round trip fans out
+/// to every guardian. A thousand summaries is ~150 kB per peer, which is a
+/// reasonable unit of work against a set that only grows with the
+/// federation's unclaimed contracts.
+const CONTRACT_STREAM_BATCH: u64 = 1000;
 
 pub type SendResult = Result<OperationId, SendPaymentError>;
 
@@ -225,9 +234,7 @@ impl LightningClientModule {
 
         let operation = OperationId::from_encodable(&invoice.payment_hash());
 
-        let tweak: [u8; 16] = rand::Rng::r#gen(&mut rand::thread_rng());
-
-        let refund_keypair = self.secret.refund_keypair(account, &tweak);
+        let refund_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
         let is_direct_swap = invoice.recover_payee_pub_key() == gateway_info.lightning_public_key;
 
@@ -269,7 +276,6 @@ impl LightningClientModule {
                 + CONTRACT_CONFIRMATION_BUFFER,
             claim_pk: gateway_info.module_public_key,
             refund_pk: refund_keypair.x_only_public_key().0,
-            tweak,
         };
 
         let tx_builder = TxBuilder::from_output(Output {
@@ -332,7 +338,7 @@ impl LightningClientModule {
     ) -> Result<Bolt11Invoice, ReceiveError> {
         let receive_keypair = self.secret.receive_keypair(account);
 
-        self.create_contract_and_fetch_invoice(
+        self.create_offer_and_fetch_invoice(
             gateway_pk,
             gateway_info,
             receive_keypair.public_key(),
@@ -341,10 +347,10 @@ impl LightningClientModule {
         .await
     }
 
-    /// Create an incoming contract locked to a public key derived from the
-    /// recipient's static module public key and fetches the corresponding
-    /// invoice.
-    async fn create_contract_and_fetch_invoice(
+    /// Create an incoming offer locked to a public key derived from the
+    /// recipient's static module public key and fetch the invoice the gateway
+    /// issues against it.
+    async fn create_offer_and_fetch_invoice(
         &self,
         gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
@@ -383,7 +389,7 @@ impl LightningClientModule {
             .x_only_public_key()
             .0;
 
-        let contract = IncomingContract::new(
+        let offer = IncomingOffer::new(
             self.cfg.tpe_agg_pk,
             encryption_seed,
             preimage,
@@ -391,13 +397,12 @@ impl LightningClientModule {
             amount,
             fee,
             claim_pk,
-            gateway_info.module_public_key,
             ephemeral_kp.public_key(),
         );
 
         let invoice = self
             .gateways
-            .receive(gateway_pk, self.federation, contract.clone())
+            .receive(gateway_pk, self.federation, offer)
             .await
             .map_err(|e| ReceiveError::FailedToConnectToGateway(e.to_string()))?;
 
@@ -412,33 +417,39 @@ impl LightningClientModule {
         Ok(invoice)
     }
 
-    /// Try to claim a streamed incoming contract: decrypt with the caller's
-    /// secret key, and if it's ours submit the claim input + log the
-    /// `ReceiveEvent` in the caller's dbtx (which also advances the scanner's
-    /// stream index atomically).
+    /// Try to claim a streamed incoming contract: rebuild it from `sk` and,
+    /// if it is ours, submit the claim input + log the `ReceiveEvent` in the
+    /// caller's dbtx (which also advances the scanner's stream index
+    /// atomically).
+    ///
+    /// A summary that recovers has been proven byte-identical to the contract
+    /// the federation stores, so the input built here is one consensus will
+    /// accept — short of the contract having been spent in the meantime,
+    /// which nothing local can rule out.
     fn receive_incoming_contract(
         &self,
         dbtx: &WriteTx,
         account: Account,
         sk: SecretKey,
-        outpoint: OutPoint,
-        contract: &IncomingContract,
+        summary: &IncomingContractSummary,
     ) {
-        let Some((claim_keypair, agg_dk)) = self.recover_contract_keys(sk, contract) else {
+        let Some((claim_keypair, agg_dk)) = summary.recover(&self.cfg.tpe_agg_pk, &sk) else {
             return;
         };
 
         let tx_builder = TxBuilder::from_input(Input {
-            input: wire::Input::Ln(LightningInput::Incoming(outpoint, agg_dk)),
+            input: wire::Input::Ln(LightningInput::Incoming(summary.outpoint, agg_dk)),
             keypair: claim_keypair,
-            amount: contract.commitment.amount - contract.commitment.fee,
+            amount: summary
+                .claim_amount()
+                .expect("Recovered summary has fee <= amount"),
             fee: self.cfg.input_fee,
         });
 
-        let operation = OperationId::from_encodable(&outpoint);
+        let operation = OperationId::from_encodable(&summary.outpoint);
 
-        let amount = contract.commitment.amount;
-        let fee = contract.commitment.fee;
+        let amount = summary.amount;
+        let fee = summary.fee;
 
         self.mint
             .finalize_and_submit_tx(dbtx, account, operation, tx_builder, |txid| ReceiveEvent {
@@ -447,39 +458,6 @@ impl LightningClientModule {
                 fee,
             })
             .expect("Cannot claim input, additional funding needed");
-    }
-
-    fn recover_contract_keys(
-        &self,
-        sk: SecretKey,
-        contract: &IncomingContract,
-    ) -> Option<(Keypair, AggregateDecryptionKey)> {
-        let shared_secret =
-            ecdh::SharedSecret::new(&contract.commitment.ephemeral_pk, &sk).secret_bytes();
-
-        let contract_secret = IncomingContractSecret::new(shared_secret);
-
-        let encryption_seed = contract_secret.encryption_seed();
-        let claim_tweak = contract_secret.claim_tweak();
-
-        let claim_keypair = sk
-            .mul_tweak(&claim_tweak)
-            .expect("Tweak is valid")
-            .keypair(secp256k1::SECP256K1);
-
-        if claim_keypair.x_only_public_key().0 != contract.commitment.claim_pk {
-            return None; // The claim key is not derived from our pk
-        }
-
-        let agg_decryption_key = derive_agg_dk(&self.cfg.tpe_agg_pk, &encryption_seed);
-
-        if !contract.verify_agg_decryption_key(&self.cfg.tpe_agg_pk, &agg_decryption_key) {
-            return None; // The decryption key is not derived from our pk
-        }
-
-        contract.decrypt_preimage(&agg_decryption_key)?;
-
-        Some((claim_keypair, agg_decryption_key))
     }
 
     /// Generate an lnurl for the client.
@@ -554,14 +532,14 @@ impl LightningClientModule {
             let (entries, next_index) = module
                 .client_ctx
                 .api()
-                .ln_await_incoming_contracts(stream_index, 128)
+                .ln_await_incoming_contracts(stream_index, CONTRACT_STREAM_BATCH)
                 .await;
 
             let dbtx = module.client_ctx.db().begin_write();
 
-            for (outpoint, contract) in &entries {
+            for summary in &entries {
                 for (account, sk) in keys {
-                    module.receive_incoming_contract(&dbtx, account, sk, *outpoint, contract);
+                    module.receive_incoming_contract(&dbtx, account, sk, summary);
                 }
             }
 

@@ -9,6 +9,7 @@ use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::ln::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
+use picomint_core::ln::contracts::IncomingContractSummary;
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_core::ln::methods::LnMethod;
 use picomint_core::ln::{
@@ -186,20 +187,22 @@ impl Lightning {
                 dbtx.remove(&IncomingContractStreamTable, &index);
 
                 if !contract
+                    .offer
                     .verify_agg_decryption_key(&self.cfg.consensus.tpe_agg_pk, agg_decryption_key)
                 {
                     return Err(LightningInputError::InvalidDecryptionKey);
                 }
 
-                let pub_key = match contract.decrypt_preimage(agg_decryption_key) {
-                    Some(..) => contract.commitment.claim_pk,
-                    None => contract.commitment.refund_pk,
+                let pub_key = match contract.offer.decrypt_preimage(agg_decryption_key) {
+                    Some(..) => contract.offer.commitment.claim_pk,
+                    None => contract.refund_pk,
                 };
 
                 let amount = contract
+                    .offer
                     .commitment
                     .amount
-                    .checked_sub(contract.commitment.fee)
+                    .checked_sub(contract.offer.commitment.fee)
                     .ok_or(LightningInputError::ArithmeticOverflow)?;
 
                 (pub_key, amount)
@@ -233,7 +236,7 @@ impl Lightning {
                 amount
             }
             LightningOutput::Incoming(contract) => {
-                if !contract.verify() {
+                if !contract.offer.verify() {
                     return Err(LightningOutputError::InvalidContract);
                 }
 
@@ -246,21 +249,24 @@ impl Lightning {
                 dbtx.insert(
                     &IncomingContractStreamTable,
                     &stream_index,
-                    &(outpoint, contract.clone()),
+                    &IncomingContractSummary::new(outpoint, &contract.offer),
                 );
 
                 dbtx.insert(&IncomingContractIndexTable, &outpoint, &stream_index);
 
                 dbtx.insert(&IncomingContractStreamIndexTable, &(), &(stream_index + 1));
 
-                let dk_share = contract.create_decryption_key_share(&self.cfg.private.sk);
+                let dk_share = contract
+                    .offer
+                    .create_decryption_key_share(&self.cfg.private.sk);
 
                 dbtx.insert(&DecryptionKeyShareTable, &outpoint, &dk_share);
 
                 contract
+                    .offer
                     .commitment
                     .amount
-                    .checked_sub(contract.commitment.fee)
+                    .checked_sub(contract.offer.commitment.fee)
                     .ok_or(LightningOutputError::ArithmeticOverflow)?
             }
         };
@@ -287,7 +293,8 @@ impl Lightning {
 
         let incoming: i64 = dbtx.iter(&IncomingContractTable, |r| {
             r.map(|(_, contract)| {
-                -((contract.commitment.amount.msat - contract.commitment.fee.msat) as i64)
+                -((contract.offer.commitment.amount.msat - contract.offer.commitment.fee.msat)
+                    as i64)
             })
             .sum()
         });

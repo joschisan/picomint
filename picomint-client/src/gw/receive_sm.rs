@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use anyhow::{Context, anyhow};
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInput;
-use picomint_core::ln::contracts::IncomingContract;
+use picomint_core::ln::contracts::IncomingOffer;
 use picomint_core::ln::methods::{DecryptionKeyShareRequest, DecryptionKeyShareResponse, LnMethod};
 use picomint_core::module::Method;
 use picomint_core::secp256k1::Keypair;
@@ -35,7 +35,7 @@ crate::client_table!(
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveStateMachine {
     pub operation: OperationId,
-    pub contract: IncomingContract,
+    pub offer: IncomingOffer,
     pub outpoint: OutPoint,
     pub refund_keypair: Keypair,
 }
@@ -53,7 +53,7 @@ impl StateMachine for ReceiveStateMachine {
             .map_err(|e| e.to_string())?;
 
         let tpe_pks = ctx.tpe_pks.clone();
-        let contract = self.contract.clone();
+        let offer = self.offer.clone();
         let shares = ctx
             .client_ctx
             .api()
@@ -61,7 +61,7 @@ impl StateMachine for ReceiveStateMachine {
                 FilterMapThreshold::new(
                     move |peer, resp: DecryptionKeyShareResponse| {
                         let share = resp.share;
-                        if !contract.verify_decryption_share(
+                        if !offer.verify_decryption_share(
                             tpe_pks.get(&peer).context("Missing TPE PK for peer")?,
                             &share,
                         ) {
@@ -106,7 +106,7 @@ impl StateMachine for ReceiveStateMachine {
         let agg_decryption_key = aggregate_dk_shares(&decryption_shares);
 
         if !self
-            .contract
+            .offer
             .verify_agg_decryption_key(&ctx.tpe_agg_pk, &agg_decryption_key)
         {
             warn!("Aggregate decryption key invalid — TPE config inconsistent");
@@ -119,7 +119,7 @@ impl StateMachine for ReceiveStateMachine {
             return None;
         }
 
-        if let Some(preimage) = self.contract.decrypt_preimage(&agg_decryption_key) {
+        if let Some(preimage) = self.offer.decrypt_preimage(&agg_decryption_key) {
             ctx.client_ctx.log_event(
                 dbtx,
                 super::GATEWAY_ACCOUNT,
@@ -132,7 +132,7 @@ impl StateMachine for ReceiveStateMachine {
         let tx_builder = TxBuilder::from_input(Input {
             input: wire::Input::Ln(LightningInput::Incoming(self.outpoint, agg_decryption_key)),
             keypair: self.refund_keypair,
-            amount: self.contract.commitment.amount - self.contract.commitment.fee,
+            amount: self.offer.commitment.amount - self.offer.commitment.fee,
             fee: ctx.input_fee,
         });
 
