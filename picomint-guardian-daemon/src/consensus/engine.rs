@@ -24,6 +24,20 @@ use crate::consensus::db::{
 use crate::consensus::server::process_tx_with_server;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
+/// BFT rounds a session runs for, which is what sets how long one lasts.
+///
+/// Follows from the network rather than being agreed at DKG: every guardian
+/// on a federation is on the same network by construction, so the two can
+/// never disagree, and a federation that wants shorter sessions is a
+/// federation running a different binary.
+fn rounds_per_session(cfg: &ServerConfig) -> u32 {
+    if cfg.consensus.network == bitcoin::Network::Regtest {
+        100
+    } else {
+        10000
+    }
+}
+
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {
     pub server: crate::consensus::server::Server,
@@ -73,7 +87,7 @@ impl ConsensusEngine {
         // The bft engine creates units unpaced but work-gated: as fast as
         // new parents arrive while items await ordering, not at all while
         // idle. The session stops ordering items once it reaches
-        // `bft_rounds_per_session` rounds (see the ordering loop below),
+        // [`rounds_per_session`] rounds (see the ordering loop below),
         // which on a quiet federation can take arbitrarily long in wall
         // clock.
         let (signed_outcomes_tx, signed_outcomes_rx) = async_channel::unbounded();
@@ -163,14 +177,14 @@ impl ConsensusEngine {
         let mut ordered_rx = Box::pin(ordered_rx.enumerate().skip(skip));
 
         // We build a session outcome out of the ordered batches until either we have
-        // processed bft_rounds_per_session rounds or a threshold signed
+        // processed a session's worth of rounds or a threshold signed
         // session outcome is obtained from our peers
         loop {
             tokio::select! {
                 result = ordered_rx.next() => {
                     let (index, (round, creator, item)) = result?;
 
-                    if round >= self.cfg.consensus.bft_rounds_per_session {
+                    if round >= rounds_per_session(&self.cfg) {
                         break;
                     }
 
