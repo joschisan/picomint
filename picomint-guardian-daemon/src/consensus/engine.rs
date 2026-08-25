@@ -10,6 +10,7 @@ use picomint_core::session::{AcceptedItem, SessionOutcome, SignedSessionOutcome}
 use picomint_core::tx::{ConsensusItem, TxError};
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::{NumPeers, NumPeersExt, PeerId, TransactionId};
+use picomint_encoding::Encodable;
 use picomint_redb::{Database, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
 use tokio::sync::broadcast;
@@ -37,6 +38,20 @@ fn rounds_per_session(cfg: &ServerConfig) -> u32 {
         10000
     }
 }
+
+/// Bytes of accepted items a session collects before it closes.
+///
+/// A session outcome reaches a lagging guardian as a single p2p message, so
+/// it has to stay inside `MAX_P2P_MESSAGE_SIZE`; a session that outgrew that
+/// would be one no peer could ever recover. Nothing else bounds what a busy
+/// session collects, since the round cap only bounds an idle one.
+///
+/// Unlike the unit fill target this one is consensus: every guardian has to
+/// cut the session at the same item, which is why it counts accepted items in
+/// delivery order — the same items in the same order on every peer — and
+/// resumes the count from the database after a restart. The cut overshoots by
+/// the item that crossed it, itself bounded by the transaction caps.
+const SESSION_OUTCOME_BYTE_TARGET: usize = 1_000_000;
 
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {
@@ -164,25 +179,45 @@ impl ConsensusEngine {
 
         // We enumerate every bft delivery for this session; ACCEPTED_ITEM
         // is sparse (rejected positions are absent). On crash replay bft
-        // re-emits from position 0, so we skip past the highest index
+        // re-emits from position 0, so we resume past the highest index
         // already in AcceptedItemTable — every position up to and
         // including it was already processed (accepted *or* rejected) by
         // the prior run.
-        let skip = self
+        let resume_from = self
             .db
             .begin_read()
             .iter(&AcceptedItemTable, |r| r.next_back().map(|(k, _)| k))
             .map_or(0, |k| k as usize + 1);
 
-        let mut ordered_rx = Box::pin(ordered_rx.enumerate().skip(skip));
+        // The byte budget resumes where the prior run left it for the same
+        // reason: a session that cut at a different item than its peers is one
+        // they never sign together.
+        let mut n_bytes: usize = self.db.begin_read().iter(&AcceptedItemTable, |r| {
+            r.map(|(_, accepted)| accepted.item.consensus_encode_to_vec().len())
+                .sum()
+        });
+
+        let mut ordered_rx = Box::pin(ordered_rx.enumerate());
 
         // We build a session outcome out of the ordered batches until either we have
-        // processed a session's worth of rounds or a threshold signed
-        // session outcome is obtained from our peers
+        // processed a session's worth of rounds, collected a session's worth of
+        // bytes, or a threshold signed session outcome is obtained from our peers
         loop {
+            // Ahead of the next delivery rather than after the last one: a run
+            // that crashed between crossing the target and closing the session
+            // comes back with the count already past it, and has to cut where
+            // its peers did rather than one item further on.
+            if n_bytes >= SESSION_OUTCOME_BYTE_TARGET {
+                break;
+            }
+
             tokio::select! {
                 result = ordered_rx.next() => {
                     let (index, (round, creator, item)) = result?;
+
+                    if index < resume_from {
+                        continue;
+                    }
 
                     if round >= rounds_per_session(&self.cfg) {
                         break;
@@ -190,8 +225,10 @@ impl ConsensusEngine {
 
                     let dbtx = self.db.begin_write();
 
-                    if self.process_consensus_item(&dbtx, index as u64, creator, item).await.is_ok() {
+                    if self.process_consensus_item(&dbtx, index as u64, creator, &item).await.is_ok() {
                         dbtx.commit();
+
+                        n_bytes += item.consensus_encode_to_vec().len();
                     }
                 },
                 result = signed_outcomes_rx.recv() => {
@@ -232,7 +269,7 @@ impl ConsensusEngine {
                                 &dbtx,
                                 accepted_item.index,
                                 accepted_item.peer,
-                                accepted_item.item.clone(),
+                                &accepted_item.item,
                             )
                             .await
                             .expect("Rejected item accepted by federation consensus");
@@ -403,11 +440,11 @@ impl ConsensusEngine {
         dbtx: &WriteTx,
         index: u64,
         peer: PeerId,
-        item: ConsensusItem,
+        item: &ConsensusItem,
     ) -> anyhow::Result<()> {
-        match item.clone() {
+        match item {
             ConsensusItem::Module(ci) => {
-                self.server.process_module_ci(dbtx, peer, &ci).await?;
+                self.server.process_module_ci(dbtx, peer, ci).await?;
             }
             ConsensusItem::Tx(tx) => {
                 let txid = tx.compute_txid();
@@ -417,7 +454,7 @@ impl ConsensusEngine {
                     "Transaction is already accepted"
                 );
 
-                if let Err(error) = process_tx_with_server(&self.server, dbtx, &tx).await {
+                if let Err(error) = process_tx_with_server(&self.server, dbtx, tx).await {
                     // Only our own submission has a submission RPC waiting on
                     // it, and copies of an already accepted transaction bail at
                     // the check above - so every rejection we broadcast is
@@ -439,10 +476,10 @@ impl ConsensusEngine {
                 let default_version = self.cfg.consensus.default_version;
 
                 let current_vote = dbtx
-                    .insert(&ConsensusVersionVoteTable, &peer, &vote)
+                    .insert(&ConsensusVersionVoteTable, &peer, vote)
                     .unwrap_or(default_version);
 
-                ensure!(current_vote < vote, "Consensus version vote is redundant");
+                ensure!(current_vote < *vote, "Consensus version vote is redundant");
 
                 // A threshold has moved past what we know how to apply, so
                 // every rule we would run from here on is the wrong one.
@@ -457,7 +494,11 @@ impl ConsensusEngine {
         dbtx.insert(
             &AcceptedItemTable,
             &index,
-            &AcceptedItem { index, peer, item },
+            &AcceptedItem {
+                index,
+                peer,
+                item: item.clone(),
+            },
         );
 
         Ok(())
