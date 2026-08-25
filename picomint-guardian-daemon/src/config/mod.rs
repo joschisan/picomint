@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use bitcoin::Network;
 use dkg::DkgHandle;
 use picomint_core::config::ConsensusConfig;
 pub use picomint_core::config::{FederationId, PeerEndpoint};
@@ -30,18 +29,6 @@ pub mod dkg_g2;
 pub mod dkg_secp;
 pub mod poly;
 pub mod setup;
-
-/// BFT rounds per session. Controls session duration.
-const DEFAULT_BFT_ROUNDS_PER_SESSION: u32 = 10000;
-const REGTEST_BFT_ROUNDS_PER_SESSION: u32 = 100;
-
-fn bft_rounds_per_session(network: Network) -> u32 {
-    if network == Network::Regtest {
-        REGTEST_BFT_ROUNDS_PER_SESSION
-    } else {
-        DEFAULT_BFT_ROUNDS_PER_SESSION
-    }
-}
 
 #[allow(clippy::unsafe_derive_deserialize)] // clippy fires on `select!` https://github.com/rust-lang/rust-clippy/issues/13062
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
@@ -136,7 +123,6 @@ impl ServerConfig {
 
         let consensus = ConsensusConfig {
             peers,
-            bft_rounds_per_session: bft_rounds_per_session(params.network),
             network: params.network,
             name: params.name.clone(),
             default_version: CONSENSUS_VERSION,

@@ -95,8 +95,12 @@ pub struct OutPoint {
     /// The referenced transaction ID
     pub txid: TransactionId,
     /// As a transaction may have multiple outputs, this refers to the index of
-    /// the output in a transaction
-    pub out_idx: u64,
+    /// the output in a transaction. A `u16` covers every index a valid
+    /// transaction can have, since a transaction carries at most
+    /// [`Transaction::MAX_OUTPUTS`] of them.
+    ///
+    /// [`Transaction::MAX_OUTPUTS`]: crate::tx::Transaction::MAX_OUTPUTS
+    pub out_idx: u16,
 }
 
 impl std::fmt::Display for OutPoint {

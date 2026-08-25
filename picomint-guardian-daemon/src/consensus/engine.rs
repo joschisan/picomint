@@ -10,6 +10,7 @@ use picomint_core::session::{AcceptedItem, SessionOutcome, SignedSessionOutcome}
 use picomint_core::tx::{ConsensusItem, TxError};
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::{NumPeers, NumPeersExt, PeerId, TransactionId};
+use picomint_encoding::Encodable;
 use picomint_redb::{Database, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
 use tokio::sync::broadcast;
@@ -23,6 +24,43 @@ use crate::consensus::db::{
 };
 use crate::consensus::server::process_tx_with_server;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
+
+/// BFT rounds a session runs for, which is what sets how long one lasts.
+///
+/// Follows from the network rather than being agreed at DKG: every guardian
+/// on a federation is on the same network by construction, so the two can
+/// never disagree, and a federation that wants shorter sessions is a
+/// federation running a different binary.
+fn rounds_per_session(cfg: &ServerConfig) -> u32 {
+    if cfg.consensus.network == bitcoin::Network::Regtest {
+        100
+    } else {
+        10000
+    }
+}
+
+/// Bytes of accepted items a session collects before it closes.
+///
+/// A session outcome reaches a lagging guardian as a single p2p message, so
+/// it has to stay inside `MAX_P2P_MESSAGE_SIZE`; a session that outgrew that
+/// would be one no peer could ever recover. Nothing else bounds what a busy
+/// session collects, since the round cap only bounds an idle one.
+///
+/// Unlike the unit fill target this one is consensus: every guardian has to
+/// cut the session at the same item, which is why it counts accepted items in
+/// delivery order — the same items in the same order on every peer — and
+/// resumes the count from the database after a restart. The cut overshoots by
+/// the item that crossed it, itself bounded by the transaction caps.
+const SESSION_OUTCOME_BYTE_TARGET: usize = 1_000_000;
+
+/// Accepted items a session collects before it closes.
+///
+/// The byte budget alone would let a session of items too small to spend it
+/// run to tens of thousands of entries, each of which a recovering guardian
+/// walks and each of which carries the index and peer it was filed under. A
+/// count is what bounds that, and it is a cut on the same terms: read back
+/// from the database on restart, checked before the next delivery.
+const SESSION_OUTCOME_ITEM_TARGET: usize = 1_000;
 
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {
@@ -73,16 +111,24 @@ impl ConsensusEngine {
         // The bft engine creates units unpaced but work-gated: as fast as
         // new parents arrive while items await ordering, not at all while
         // idle. The session stops ordering items once it reaches
-        // `bft_rounds_per_session` rounds (see the ordering loop below),
+        // [`rounds_per_session`] rounds (see the ordering loop below),
         // which on a quiet federation can take arbitrarily long in wall
         // clock.
-        let (signed_outcomes_tx, signed_outcomes_rx) = async_channel::unbounded();
-        let (signatures_tx, signatures_rx) = async_channel::unbounded();
+
+        // Both of these are filled straight from the p2p reader, so leaving
+        // them unbounded would let a peer turn its bandwidth into our memory —
+        // the more so for signatures, which nothing reads until the session
+        // cuts. Dropping when full costs nothing: a peer rebroadcasts its
+        // signature every second, and a peer that holds the signed outcome
+        // sends it again the next time we ask for the session.
+        let (outcomes_tx, outcomes_rx) = async_channel::bounded(self.num_peers().total());
+        let (signatures_tx, signatures_rx) = async_channel::bounded(self.num_peers().total());
+
         let (ordered_tx, ordered_rx) = async_channel::unbounded();
 
         let network = Network::new(
             connections.clone(),
-            signed_outcomes_tx,
+            outcomes_tx,
             signatures_tx,
             self.db.clone(),
         )
@@ -105,7 +151,7 @@ impl ConsensusEngine {
         let signed_session_outcome = self
             .complete_signed_session_outcome(
                 session_index,
-                signed_outcomes_rx,
+                outcomes_rx,
                 signatures_rx,
                 ordered_rx,
                 connections,
@@ -134,7 +180,7 @@ impl ConsensusEngine {
     pub async fn complete_signed_session_outcome(
         &self,
         session_index: u64,
-        signed_outcomes_rx: Receiver<(PeerId, SignedSessionOutcome)>,
+        outcomes_rx: Receiver<(PeerId, SignedSessionOutcome)>,
         signatures_rx: Receiver<(PeerId, schnorr::Signature)>,
         ordered_rx: Receiver<(BftRound, PeerId, ConsensusItem)>,
         connections: ReconnectP2PConnections<P2PMessage>,
@@ -150,37 +196,66 @@ impl ConsensusEngine {
 
         // We enumerate every bft delivery for this session; ACCEPTED_ITEM
         // is sparse (rejected positions are absent). On crash replay bft
-        // re-emits from position 0, so we skip past the highest index
+        // re-emits from position 0, so we resume past the highest index
         // already in AcceptedItemTable — every position up to and
         // including it was already processed (accepted *or* rejected) by
         // the prior run.
-        let skip = self
+        let resume_from = self
             .db
             .begin_read()
             .iter(&AcceptedItemTable, |r| r.next_back().map(|(k, _)| k))
             .map_or(0, |k| k as usize + 1);
 
-        let mut ordered_rx = Box::pin(ordered_rx.enumerate().skip(skip));
+        // The byte budget resumes where the prior run left it for the same
+        // reason: a session that cut at a different item than its peers is one
+        // they never sign together.
+        let mut n_bytes: usize = self.db.begin_read().iter(&AcceptedItemTable, |r| {
+            r.map(|(_, accepted)| accepted.item.consensus_encode_to_vec().len())
+                .sum()
+        });
 
-        // We build a session outcome out of the ordered batches until either we have
-        // processed bft_rounds_per_session rounds or a threshold signed
-        // session outcome is obtained from our peers
+        // As does the item count, which cuts a session of items too small for
+        // the byte budget to reach.
+        let mut n_items: usize = self.db.begin_read().iter(&AcceptedItemTable, |r| r.count());
+
+        let mut ordered_rx = Box::pin(ordered_rx.enumerate());
+
+        // We build a session outcome out of the ordered batches until either we
+        // have processed a session's worth of rounds, collected a session's
+        // worth of items or bytes, or a threshold signed session outcome is
+        // obtained from our peers
         loop {
+            // Ahead of the next delivery rather than after the last one: a run
+            // that crashed between crossing the target and closing the session
+            // comes back with the count already past it, and has to cut where
+            // its peers did rather than one item further on.
+            if n_bytes >= SESSION_OUTCOME_BYTE_TARGET || n_items >= SESSION_OUTCOME_ITEM_TARGET {
+                break;
+            }
+
             tokio::select! {
                 result = ordered_rx.next() => {
                     let (index, (round, creator, item)) = result?;
 
-                    if round >= self.cfg.consensus.bft_rounds_per_session {
+                    if index < resume_from {
+                        continue;
+                    }
+
+                    if round >= rounds_per_session(&self.cfg) {
                         break;
                     }
 
                     let dbtx = self.db.begin_write();
 
-                    if self.process_consensus_item(&dbtx, index as u64, creator, item).await.is_ok() {
+                    if self.process_consensus_item(&dbtx, index as u64, creator, &item).await.is_ok() {
                         dbtx.commit();
+
+                        n_bytes += item.consensus_encode_to_vec().len();
+
+                        n_items += 1;
                     }
                 },
-                result = signed_outcomes_rx.recv() => {
+                result = outcomes_rx.recv() => {
                     let (peer, p2p_outcome) = result.ok()?;
 
                     // Validate signatures
@@ -218,7 +293,7 @@ impl ConsensusEngine {
                                 &dbtx,
                                 accepted_item.index,
                                 accepted_item.peer,
-                                accepted_item.item.clone(),
+                                &accepted_item.item,
                             )
                             .await
                             .expect("Rejected item accepted by federation consensus");
@@ -279,7 +354,7 @@ impl ConsensusEngine {
                     }
 
                 }
-                result = signed_outcomes_rx.recv() => {
+                result = outcomes_rx.recv() => {
                     let (peer, p2p_outcome) = result.ok()?;
 
                     if self.validate_signed_session_outcome(&p2p_outcome, session_index) {
@@ -389,11 +464,11 @@ impl ConsensusEngine {
         dbtx: &WriteTx,
         index: u64,
         peer: PeerId,
-        item: ConsensusItem,
+        item: &ConsensusItem,
     ) -> anyhow::Result<()> {
-        match item.clone() {
+        match item {
             ConsensusItem::Module(ci) => {
-                self.server.process_module_ci(dbtx, peer, &ci).await?;
+                self.server.process_module_ci(dbtx, peer, ci).await?;
             }
             ConsensusItem::Tx(tx) => {
                 let txid = tx.compute_txid();
@@ -403,7 +478,7 @@ impl ConsensusEngine {
                     "Transaction is already accepted"
                 );
 
-                if let Err(error) = process_tx_with_server(&self.server, dbtx, &tx).await {
+                if let Err(error) = process_tx_with_server(&self.server, dbtx, tx).await {
                     // Only our own submission has a submission RPC waiting on
                     // it, and copies of an already accepted transaction bail at
                     // the check above - so every rejection we broadcast is
@@ -425,10 +500,10 @@ impl ConsensusEngine {
                 let default_version = self.cfg.consensus.default_version;
 
                 let current_vote = dbtx
-                    .insert(&ConsensusVersionVoteTable, &peer, &vote)
+                    .insert(&ConsensusVersionVoteTable, &peer, vote)
                     .unwrap_or(default_version);
 
-                ensure!(current_vote < vote, "Consensus version vote is redundant");
+                ensure!(current_vote < *vote, "Consensus version vote is redundant");
 
                 // A threshold has moved past what we know how to apply, so
                 // every rule we would run from here on is the wrong one.
@@ -443,7 +518,11 @@ impl ConsensusEngine {
         dbtx.insert(
             &AcceptedItemTable,
             &index,
-            &AcceptedItem { index, peer, item },
+            &AcceptedItem {
+                index,
+                peer,
+                item: item.clone(),
+            },
         );
 
         Ok(())

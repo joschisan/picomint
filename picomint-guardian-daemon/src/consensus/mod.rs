@@ -34,8 +34,12 @@ use crate::consensus::engine::ConsensusEngine;
 use crate::consensus::server::Server;
 use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
 
-/// How many txs can be stored in memory before blocking the API
-const TX_BUFFER: usize = 1000;
+/// How many txs can be stored in memory before blocking the API.
+///
+/// What a submission costs us is its size, and a transaction is only bounded
+/// by the inputs and outputs it may carry — so this is what turns that bound
+/// into a bound on the memory a client can make us hold.
+const TX_BUFFER: usize = 100;
 
 /// How many rejected txs a waiting submission RPC can fall behind before it
 /// misses one. Only finally rejected txs are broadcast, so the steady-state

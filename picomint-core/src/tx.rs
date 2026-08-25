@@ -26,7 +26,14 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    pub const MAX_TX_SIZE: usize = crate::config::BFT_UNIT_BYTE_LIMIT - 32;
+    /// Most inputs a transaction may carry.
+    pub const MAX_INPUTS: usize = 1024;
+
+    /// Most outputs a transaction may carry, and so the range every
+    /// [`OutPoint::out_idx`] falls in.
+    ///
+    /// [`OutPoint::out_idx`]: crate::OutPoint::out_idx
+    pub const MAX_OUTPUTS: usize = 1024;
 
     pub fn compute_txid(&self) -> TransactionId {
         Self::compute_txid_from_parts(&self.inputs, &self.outputs)
@@ -71,6 +78,10 @@ pub enum TxError {
     EmptyInputs,
     #[error("The transaction has no outputs")]
     EmptyOutputs,
+    #[error("The transaction has too many inputs")]
+    TooManyInputs,
+    #[error("The transaction has too many outputs")]
+    TooManyOutputs,
     #[error("The transaction is underfunded")]
     Underfunded,
     #[error("Amount arithmetic overflowed u64 msat")]
