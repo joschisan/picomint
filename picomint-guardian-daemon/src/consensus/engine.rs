@@ -53,6 +53,15 @@ fn rounds_per_session(cfg: &ServerConfig) -> u32 {
 /// the item that crossed it, itself bounded by the transaction caps.
 const SESSION_OUTCOME_BYTE_TARGET: usize = 1_000_000;
 
+/// Accepted items a session collects before it closes.
+///
+/// The byte budget alone would let a session of items too small to spend it
+/// run to tens of thousands of entries, each of which a recovering guardian
+/// walks and each of which carries the index and peer it was filed under. A
+/// count is what bounds that, and it is a cut on the same terms: read back
+/// from the database on restart, checked before the next delivery.
+const SESSION_OUTCOME_ITEM_TARGET: usize = 1_000;
+
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {
     pub server: crate::consensus::server::Server,
@@ -205,17 +214,22 @@ impl ConsensusEngine {
                 .sum()
         });
 
+        // As does the item count, which cuts a session of items too small for
+        // the byte budget to reach.
+        let mut n_items: usize = self.db.begin_read().iter(&AcceptedItemTable, |r| r.count());
+
         let mut ordered_rx = Box::pin(ordered_rx.enumerate());
 
-        // We build a session outcome out of the ordered batches until either we have
-        // processed a session's worth of rounds, collected a session's worth of
-        // bytes, or a threshold signed session outcome is obtained from our peers
+        // We build a session outcome out of the ordered batches until either we
+        // have processed a session's worth of rounds, collected a session's
+        // worth of items or bytes, or a threshold signed session outcome is
+        // obtained from our peers
         loop {
             // Ahead of the next delivery rather than after the last one: a run
             // that crashed between crossing the target and closing the session
             // comes back with the count already past it, and has to cut where
             // its peers did rather than one item further on.
-            if n_bytes >= SESSION_OUTCOME_BYTE_TARGET {
+            if n_bytes >= SESSION_OUTCOME_BYTE_TARGET || n_items >= SESSION_OUTCOME_ITEM_TARGET {
                 break;
             }
 
@@ -237,6 +251,8 @@ impl ConsensusEngine {
                         dbtx.commit();
 
                         n_bytes += item.consensus_encode_to_vec().len();
+
+                        n_items += 1;
                     }
                 },
                 result = outcomes_rx.recv() => {
