@@ -1,10 +1,11 @@
 use picomint_bft::{UnitEnvelope, UnitHash};
-use picomint_core::TransactionId;
 use picomint_core::expiry;
 use picomint_core::session;
 use picomint_core::tx::ConsensusItem;
+use picomint_core::version::ConsensusVersion;
+use picomint_core::{NumPeers, PeerId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::table;
+use picomint_redb::{DbRead, table};
 
 table!(
     AcceptedItemTable,
@@ -33,6 +34,41 @@ table!(
     u64 => session::SignedSessionOutcome,
     "signed-session-outcome",
 );
+
+// Highest consensus version each peer has announced support for. A peer
+// votes once per upgrade and never downwards, so a missing entry means the
+// peer has not upgraded past the version the federation was created at.
+table!(
+    ConsensusVersionVoteTable,
+    PeerId => ConsensusVersion,
+    "consensus-version-vote",
+);
+
+/// The consensus version the federation currently runs at.
+///
+/// Sorted ascending and indexed at `max_evil()`, so `2f + 1` peers voted for
+/// at least this version — a threshold can run it — and `f + 1` voted for at
+/// most it, so at least one honest guardian announced it. The vec is padded
+/// rather than indexed short because a peer that has not voted still counts:
+/// it supports `default_version` and nothing beyond, and that has to weigh on
+/// the result the same as a vote would.
+pub fn consensus_version(
+    dbtx: &impl DbRead,
+    num_peers: NumPeers,
+    default_version: ConsensusVersion,
+) -> ConsensusVersion {
+    let mut versions = dbtx.iter(&ConsensusVersionVoteTable, |r| {
+        r.map(|(_, version)| version).collect::<Vec<_>>()
+    });
+
+    while versions.len() < num_peers.total() {
+        versions.push(default_version);
+    }
+
+    versions.sort_unstable();
+
+    versions[num_peers.max_evil()]
+}
 
 // This guardian's locally-announced expiry status. Mutated by the admin
 // dashboard; read by [`crate::consensus::rpc::expiry_status`] and

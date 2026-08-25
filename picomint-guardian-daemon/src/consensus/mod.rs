@@ -20,6 +20,7 @@ use picomint_bitcoin_rpc::{BitcoinRpcMonitor, BitcoindClient};
 use picomint_core::NumPeers;
 use picomint_core::module::Method;
 use picomint_core::tx::ConsensusItem;
+use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::wire;
 use picomint_redb::Database;
 use tokio::net::TcpListener;
@@ -28,6 +29,7 @@ use tracing::{info, warn};
 
 use crate::config::ServerConfig;
 use crate::consensus::api::ConsensusApi;
+use crate::consensus::db::ConsensusVersionVoteTable;
 use crate::consensus::engine::ConsensusEngine;
 use crate::consensus::server::Server;
 use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
@@ -115,10 +117,26 @@ pub async fn run(
         let server = consensus_api.server.clone();
         let db = db.clone();
         let submission_tx = submission_tx.clone();
+        let identity = cfg.private.identity;
+        let default_version = cfg.consensus.default_version;
         async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             loop {
                 let dbtx = db.begin_read();
+                // Upgrading the binary is the whole of casting a vote: we
+                // announce what we support until consensus has recorded it,
+                // then stay quiet until the next upgrade raises it again. A
+                // federation created by this binary has nothing to announce.
+                if dbtx
+                    .get(&ConsensusVersionVoteTable, &identity)
+                    .unwrap_or(default_version)
+                    < CONSENSUS_VERSION
+                {
+                    submission_tx
+                        .send(ConsensusItem::Version(CONSENSUS_VERSION))
+                        .await
+                        .ok();
+                }
                 for item in server.mint.consensus_proposal(&dbtx).await {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Mint(item)))

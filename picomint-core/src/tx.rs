@@ -9,6 +9,7 @@ use picomint_encoding::{Decodable, Encodable};
 use thiserror::Error;
 
 use crate::TransactionId;
+use crate::version::ConsensusVersion;
 use crate::wire;
 
 /// An atomic value transfer operation within the Picomint system and consensus.
@@ -91,6 +92,8 @@ pub enum ConsensusItem {
     Tx(Transaction),
     /// Any data that modules require consensus on
     Module(wire::ModuleConsensusItem),
+    /// Highest consensus version the submitting peer's binary can run.
+    Version(ConsensusVersion),
 }
 
 picomint_redb::consensus_value!(ConsensusItem);
