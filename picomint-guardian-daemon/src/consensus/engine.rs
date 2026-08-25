@@ -53,14 +53,20 @@ fn rounds_per_session(cfg: &ServerConfig) -> u32 {
 /// the item that crossed it, itself bounded by the transaction caps.
 const SESSION_OUTCOME_BYTE_TARGET: usize = 1_000_000;
 
-/// Accepted items a session collects before it closes.
+/// Most accepted items a session may collect before it closes.
 ///
 /// The byte budget alone would let a session of items too small to spend it
-/// run to tens of thousands of entries, each of which a recovering guardian
+/// run to near a hundred thousand entries, each of which a recovering guardian
 /// walks and each of which carries the index and peer it was filed under. A
-/// count is what bounds that, and it is a cut on the same terms: read back
-/// from the database on restart, checked before the next delivery.
-const SESSION_OUTCOME_ITEM_TARGET: usize = 1_000;
+/// count is what bounds that, and it is a cut on the same terms as the byte
+/// budget: read back from the database on restart, checked before the next
+/// delivery. A session lands on it exactly rather than overshooting, since an
+/// item moves the count by one.
+///
+/// Under load the byte budget cuts first, so what this sets is the cadence of
+/// an idle federation — the block count votes two modules cast per peer per
+/// block are all such a session collects, which is a session every few days.
+const SESSION_OUTCOME_ITEM_LIMIT: usize = 10_000;
 
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {
@@ -229,7 +235,7 @@ impl ConsensusEngine {
             // that crashed between crossing the target and closing the session
             // comes back with the count already past it, and has to cut where
             // its peers did rather than one item further on.
-            if n_bytes >= SESSION_OUTCOME_BYTE_TARGET || n_items >= SESSION_OUTCOME_ITEM_TARGET {
+            if n_bytes >= SESSION_OUTCOME_BYTE_TARGET || n_items >= SESSION_OUTCOME_ITEM_LIMIT {
                 break;
             }
 
