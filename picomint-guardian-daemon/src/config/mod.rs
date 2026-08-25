@@ -10,6 +10,7 @@ pub use picomint_core::config::{FederationId, PeerEndpoint};
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::config::LightningConfigPrivate;
 use picomint_core::mint::config::{MintConfig, MintConfigPrivate};
+use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::wallet::config::{WalletConfig, WalletConfigPrivate};
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
 use rand::rngs::OsRng;
@@ -138,6 +139,7 @@ impl ServerConfig {
             bft_rounds_per_session: bft_rounds_per_session(params.network),
             network: params.network,
             name: params.name.clone(),
+            default_version: CONSENSUS_VERSION,
             mint: mint.consensus,
             wallet: wallet.consensus,
             ln: ln.consensus,

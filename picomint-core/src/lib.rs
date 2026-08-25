@@ -47,6 +47,8 @@ pub mod secret;
 pub mod session;
 /// Wire-level Transaction and ConsensusItem types.
 pub mod tx;
+/// Consensus version of the federation and the vote that advances it.
+pub mod version;
 /// Wallet module wire types / helpers (shared between client and server).
 pub mod wallet;
 /// Static wire enums over the fixed module set.

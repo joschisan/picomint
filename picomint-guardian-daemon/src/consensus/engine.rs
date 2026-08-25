@@ -8,6 +8,7 @@ use picomint_bft::{Engine as BftEngine, INetwork, Keychain as BftKeychain, Round
 use picomint_core::secp256k1::{SECP256K1, schnorr};
 use picomint_core::session::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use picomint_core::tx::{ConsensusItem, TxError};
+use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::{NumPeers, NumPeersExt, PeerId, TransactionId};
 use picomint_redb::{Database, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
@@ -17,7 +18,8 @@ use tracing::{info, instrument};
 use crate::config::ServerConfig;
 use crate::consensus::bft::{DataProvider, Network};
 use crate::consensus::db::{
-    AcceptedItemTable, AcceptedTxTable, BftUnitsTable, SignedSessionOutcomeTable,
+    AcceptedItemTable, AcceptedTxTable, BftUnitsTable, ConsensusVersionVoteTable,
+    SignedSessionOutcomeTable, consensus_version,
 };
 use crate::consensus::server::process_tx_with_server;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
@@ -418,6 +420,23 @@ impl ConsensusEngine {
                 let audit = self.server.audit(dbtx).await;
 
                 assert!(audit.total >= 0, "Failed audit: {audit:?}");
+            }
+            ConsensusItem::Version(vote) => {
+                let default_version = self.cfg.consensus.default_version;
+
+                let current_vote = dbtx
+                    .insert(&ConsensusVersionVoteTable, &peer, &vote)
+                    .unwrap_or(default_version);
+
+                ensure!(current_vote < vote, "Consensus version vote is redundant");
+
+                // A threshold has moved past what we know how to apply, so
+                // every rule we would run from here on is the wrong one.
+                // Halting is the only correct move left.
+                assert!(
+                    consensus_version(dbtx, self.num_peers(), default_version) <= CONSENSUS_VERSION,
+                    "Guardian does not support the active consensus version, please upgrade"
+                );
             }
         }
 

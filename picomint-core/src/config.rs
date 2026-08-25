@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::PeerId;
 use crate::ln::config::LightningConfigConsensus;
 use crate::mint::config::MintConfigConsensus;
+use crate::version::ConsensusVersion;
 use crate::wallet::config::WalletConfigConsensus;
 use picomint_encoding::{Decodable, Encodable};
 
@@ -72,6 +73,13 @@ pub struct ConsensusConfig {
     pub network: Network,
     /// Federation name, chosen by the lead guardian during setup.
     pub name: String,
+    /// Consensus version this federation was created at, and so the version
+    /// a guardian that has never voted counts as supporting. Set to the
+    /// creating binary's [`CONSENSUS_VERSION`], which is what lets a fresh
+    /// federation run the newest rules without a single vote being cast.
+    ///
+    /// [`CONSENSUS_VERSION`]: crate::version::CONSENSUS_VERSION
+    pub default_version: ConsensusVersion,
     /// Mint module config
     pub mint: MintConfigConsensus,
     /// Wallet module config
