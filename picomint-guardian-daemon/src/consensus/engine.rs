@@ -105,13 +105,21 @@ impl ConsensusEngine {
         // [`rounds_per_session`] rounds (see the ordering loop below),
         // which on a quiet federation can take arbitrarily long in wall
         // clock.
-        let (signed_outcomes_tx, signed_outcomes_rx) = async_channel::unbounded();
-        let (signatures_tx, signatures_rx) = async_channel::unbounded();
+
+        // Both of these are filled straight from the p2p reader, so leaving
+        // them unbounded would let a peer turn its bandwidth into our memory —
+        // the more so for signatures, which nothing reads until the session
+        // cuts. Dropping when full costs nothing: a peer rebroadcasts its
+        // signature every second, and a peer that holds the signed outcome
+        // sends it again the next time we ask for the session.
+        let (outcomes_tx, outcomes_rx) = async_channel::bounded(self.num_peers().total());
+        let (signatures_tx, signatures_rx) = async_channel::bounded(self.num_peers().total());
+
         let (ordered_tx, ordered_rx) = async_channel::unbounded();
 
         let network = Network::new(
             connections.clone(),
-            signed_outcomes_tx,
+            outcomes_tx,
             signatures_tx,
             self.db.clone(),
         )
@@ -134,7 +142,7 @@ impl ConsensusEngine {
         let signed_session_outcome = self
             .complete_signed_session_outcome(
                 session_index,
-                signed_outcomes_rx,
+                outcomes_rx,
                 signatures_rx,
                 ordered_rx,
                 connections,
@@ -163,7 +171,7 @@ impl ConsensusEngine {
     pub async fn complete_signed_session_outcome(
         &self,
         session_index: u64,
-        signed_outcomes_rx: Receiver<(PeerId, SignedSessionOutcome)>,
+        outcomes_rx: Receiver<(PeerId, SignedSessionOutcome)>,
         signatures_rx: Receiver<(PeerId, schnorr::Signature)>,
         ordered_rx: Receiver<(BftRound, PeerId, ConsensusItem)>,
         connections: ReconnectP2PConnections<P2PMessage>,
@@ -231,7 +239,7 @@ impl ConsensusEngine {
                         n_bytes += item.consensus_encode_to_vec().len();
                     }
                 },
-                result = signed_outcomes_rx.recv() => {
+                result = outcomes_rx.recv() => {
                     let (peer, p2p_outcome) = result.ok()?;
 
                     // Validate signatures
@@ -330,7 +338,7 @@ impl ConsensusEngine {
                     }
 
                 }
-                result = signed_outcomes_rx.recv() => {
+                result = outcomes_rx.recv() => {
                     let (peer, p2p_outcome) = result.ok()?;
 
                     if self.validate_signed_session_outcome(&p2p_outcome, session_index) {
