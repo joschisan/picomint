@@ -304,17 +304,22 @@ impl MintClientModule {
     /// other left, so neither party's take depends on whether the other is
     /// charging.
     ///
-    /// Spending a fee account is how its owner collects, so an account is
-    /// never charged on a transaction funded from itself — otherwise a
-    /// collection would pay itself a cut of itself and leave a remainder that
-    /// can never be swept. A collection does still pay the *other* cut, which
-    /// is the same rule seen from the other side.
+    /// Spending a fee account is how its owner collects, and a collection
+    /// pays neither cut — not its own, which would leave a remainder that can
+    /// never be swept, and not the other party's, which would be a cut of
+    /// money that was never theirs.
     fn add_fee_outputs(
         &self,
         dbtx: &WriteTx,
         account: Account,
         builder: &mut TxBuilder,
     ) -> Vec<NoteIssuanceRequest> {
+        // On [`Account::User`] rather than on a list of the accounts to skip,
+        // so an account added later is exempt by being what it is.
+        if !matches!(account, Account::User(_)) {
+            return Vec::new();
+        }
+
         let basis = builder.deficit() + builder.excess_input();
 
         let cuts = [
@@ -325,7 +330,7 @@ impl MintClientModule {
         let mut requests = Vec::new();
 
         for (destination, ppm) in cuts {
-            if ppm == 0 || account == destination {
+            if ppm == 0 {
                 continue;
             }
 
