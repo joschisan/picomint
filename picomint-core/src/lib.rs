@@ -29,6 +29,8 @@ pub mod config;
 pub mod core;
 /// Guardian-announced federation expiry date.
 pub mod expiry;
+/// A cut charged on a client's transactions, and where to pay it out.
+pub mod fee;
 /// Federation invite code
 pub mod invite;
 /// Lightning module wire types / helpers (shared between client and server).

@@ -45,7 +45,7 @@ pub fn render(status: Option<&ExpiryStatus>) -> Markup {
                     }
                 } @else {
                     div class="alert alert-warning" {
-                        "All guardians have to enter the exact same values for an expiry status."
+                        "All guardians have to enter the exact same values."
                     }
                     form method="post" action=(SET_EXPIRY_ROUTE) {
                         div class="form-group mb-3" {

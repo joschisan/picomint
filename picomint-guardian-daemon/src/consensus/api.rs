@@ -7,6 +7,7 @@ use chrono::{Days, Utc};
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::TransactionId;
 use picomint_core::expiry::ExpiryStatus;
+use picomint_core::fee::FeeConfig;
 use picomint_core::invite::InviteCode;
 use picomint_core::methods::CoreMethod;
 use picomint_core::module::audit::AuditSummary;
@@ -20,8 +21,8 @@ use tracing::{info, warn};
 
 use crate::config::ServerConfig;
 use crate::consensus::db::{
-    AcceptedItemTable, AcceptedTxTable, ExpiryStatusTable, InviteMeta, InviteMetaTable,
-    InviteUserCountTable, SignedSessionOutcomeTable,
+    AcceptedItemTable, AcceptedTxTable, ExpiryStatusTable, FeeConfigTable, InviteMeta,
+    InviteMetaTable, InviteUserCountTable, SignedSessionOutcomeTable,
 };
 use crate::consensus::engine::get_finished_session_count_static;
 use crate::consensus::server::Server;
@@ -225,6 +226,31 @@ impl ConsensusApi {
         self.db.begin_read().get(&ExpiryStatusTable, &())
     }
 
+    /// Read this guardian's announced federation fee from the local
+    /// `FeeConfig` table. Returned over the wire by the `FeeConfig` RPC and
+    /// surfaced on the dashboard.
+    #[must_use]
+    pub fn fee_config_ui(&self) -> Option<FeeConfig> {
+        self.db.begin_read().get(&FeeConfigTable, &())
+    }
+
+    /// Set or clear this guardian's announced federation fee. Like the
+    /// expiry announcement it only takes effect once every guardian
+    /// announces the byte-equal value — including the same spelling of the
+    /// lnurl, not merely the same destination.
+    pub fn set_fee_config_ui(&self, fee: Option<FeeConfig>) {
+        let dbtx = self.db.begin_write();
+        match fee {
+            Some(fee) => {
+                dbtx.insert(&FeeConfigTable, &(), &fee);
+            }
+            None => {
+                dbtx.remove(&FeeConfigTable, &());
+            }
+        }
+        dbtx.commit();
+    }
+
     /// Set or clear this guardian's announced expiry status. All
     /// guardians must announce byte-equal values for clients to accept the
     /// announcement (threshold-consensus read).
@@ -248,6 +274,7 @@ impl ConsensusApi {
             CoreMethod::SubmitTx(req) => handler_async!(submit_tx, self, req).await,
             CoreMethod::Config(req) => handler!(config, self, req).await,
             CoreMethod::Liveness(req) => handler!(liveness, self, req).await,
+            CoreMethod::FeeConfig(req) => handler!(fee_config, self, req).await,
             CoreMethod::ExpiryStatus(req) => handler!(expiry_status, self, req).await,
         }
     }

@@ -53,14 +53,14 @@ pub const CLIENT_FEE_PPM: u64 = 10_000;
 /// Every account a restore has to walk the counter space of.
 ///
 /// [`Account::USER_ACCOUNTS`] is the set a counterparty can pay into, which
-/// is a different question from the one a restore asks: [`Account::AppFee`]
+/// is a different question from the one a restore asks: [`Account::IntegratorFee`]
 /// holds notes and burns counters like any other account, it is just never a
 /// destination anyone else names.
 const ACCOUNTS: [Account; 4] = [
     Account::PRIMARY,
     Account::SECONDARY,
     Account::TERTIARY,
-    Account::AppFee,
+    Account::IntegratorFee,
 ];
 
 const BTC_RPC_USER: &str = "bitcoin";
@@ -259,7 +259,7 @@ impl TestEnv {
     /// Every account is scanned, not just the one the caller goes on to
     /// reissue. A counter space left at zero re-derives nonces the federation
     /// has already signed, and the client charging a cut spends
-    /// [`Account::AppFee`]'s space on transactions made from any account —
+    /// [`Account::IntegratorFee`]'s space on transactions made from any account —
     /// so restoring only the user's balances would strand the fee balance and
     /// have the very first transaction after the restore rejected for a
     /// blinded nonce already signed.
@@ -302,14 +302,7 @@ impl TestEnv {
             .expect("the primary account was scanned");
 
         let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
-        let client = Client::new(
-            self.endpoint.clone(),
-            db,
-            logger,
-            &mnemonic,
-            config,
-            CLIENT_FEE_PPM,
-        );
+        let client = Client::new(self.endpoint.clone(), db, logger, &mnemonic, config, None);
 
         info!("Restored client-{n}");
 
@@ -364,7 +357,7 @@ async fn build_client(
     let config = picomint_client::download(&endpoint, &invite_code).await?;
 
     let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
-    let client = Client::new(endpoint, db, logger, &mnemonic, config, CLIENT_FEE_PPM);
+    let client = Client::new(endpoint, db, logger, &mnemonic, config, None);
 
     info!("Created client-{n}");
     Ok(client)
