@@ -1,8 +1,8 @@
 //! Freestanding API handlers for [`crate::consensus::api::ConsensusApi`].
 
 use picomint_core::methods::{
-    ConfigRequest, ConfigResponse, ExpiryStatusRequest, ExpiryStatusResponse, FeeConfigRequest,
-    FeeConfigResponse, LivenessRequest, LivenessResponse, SubmitTxRequest, SubmitTxResponse,
+    ConfigRequest, ConfigResponse, ExpiryStatusRequest, ExpiryStatusResponse, LivenessRequest,
+    LivenessResponse, SubmitTxRequest, SubmitTxResponse,
 };
 
 use crate::consensus::api::ConsensusApi;
@@ -26,12 +26,6 @@ pub fn config(api: &ConsensusApi, req: ConfigRequest) -> Result<ConfigResponse, 
 
 pub fn liveness(_: &ConsensusApi, _: LivenessRequest) -> Result<LivenessResponse, String> {
     Ok(LivenessResponse)
-}
-
-pub fn fee_config(api: &ConsensusApi, _: FeeConfigRequest) -> Result<FeeConfigResponse, String> {
-    Ok(FeeConfigResponse {
-        fee: api.fee_config_ui(),
-    })
 }
 
 pub fn expiry_status(

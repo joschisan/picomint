@@ -103,18 +103,14 @@ pub struct TxCreateEvent {
     /// Federation fee paid by this transaction (sum of per-input and
     /// per-output fees the federation deducts).
     pub tx_fee: Amount,
-    /// Federation's cut, issued into [`Account::OperatorFee`] by this
-    /// transaction. Zero until the guardians announce one, and for the
-    /// collections that spend the account.
-    pub operator_fee: Amount,
-    /// Integrator's cut, issued into [`Account::IntegratorFee`] by this
+    /// Integrator's cut, issued into [`Account::AppFee`] by this
     /// transaction. Zero for a client built with no cut, and for the
     /// collections that spend the account.
     ///
-    /// What either cut cost the federation to issue is in [`Self::tx_fee`]
-    /// with every other per-output fee, so the three do not overlap and each
-    /// of these is what actually reached its account.
-    pub integrator_fee: Amount,
+    /// What the cut cost the federation to issue is in [`Self::tx_fee`] with
+    /// every other per-output fee, so the two do not overlap and this is what
+    /// actually reached the account.
+    pub app_fee: Amount,
 }
 
 impl Event for TxCreateEvent {

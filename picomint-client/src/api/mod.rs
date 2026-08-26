@@ -8,10 +8,9 @@ use futures::stream::BoxStream;
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::expiry::ExpiryStatus;
-use picomint_core::fee::FeeConfig;
 use picomint_core::methods::{
-    CoreMethod, ExpiryStatusRequest, ExpiryStatusResponse, FeeConfigRequest, FeeConfigResponse,
-    LivenessRequest, LivenessResponse, SubmitTxRequest, SubmitTxResponse,
+    CoreMethod, ExpiryStatusRequest, ExpiryStatusResponse, LivenessRequest, LivenessResponse,
+    SubmitTxRequest, SubmitTxResponse,
 };
 use picomint_core::module::Method;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
@@ -274,17 +273,6 @@ impl FederationApi {
     /// consensus verified. Returns `Some(_)` only if a threshold of
     /// guardians return the byte-equal value, `None` if all guardians
     /// agree no expiry has been announced.
-    /// The federation's announced fee, accepted only when a threshold of
-    /// guardians return the byte-equal value — the same rule the expiry
-    /// announcement is read under.
-    pub async fn fee_config(&self) -> anyhow::Result<Option<FeeConfig>> {
-        self.request_current_consensus::<FeeConfigResponse>(Method::Core(CoreMethod::FeeConfig(
-            FeeConfigRequest,
-        )))
-        .await
-        .map(|r| r.fee)
-    }
-
     pub async fn expiry_status(&self) -> anyhow::Result<Option<ExpiryStatus>> {
         self.request_current_consensus::<ExpiryStatusResponse>(Method::Core(
             CoreMethod::ExpiryStatus(ExpiryStatusRequest),

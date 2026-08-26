@@ -55,7 +55,7 @@ picomint_redb::consensus_key!(OperationId);
 /// that they and the accounts the client keeps for itself grow in separate
 /// namespaces. A user balance added later is appended inside
 /// [`UserAccount`], which leaves every path outside that subtree — including
-/// [`Account::IntegratorFee`]'s — exactly where it was.
+/// [`Account::AppFee`]'s — exactly where it was.
 ///
 /// Deliberately has no `Default` impl: every entry point that touches
 /// account-scoped state takes one of these explicitly, so an omitted argument
@@ -78,20 +78,11 @@ picomint_redb::consensus_key!(OperationId);
 pub enum Account {
     /// A balance the user spends and is shown.
     User(UserAccount),
-    /// Where the federation's per-transaction cut accrues, if its guardians
-    /// announced one.
-    ///
-    /// Not a destination a counterparty can pay into either: like
-    /// [`Account::IntegratorFee`] it is funded only by outputs the client
-    /// adds to its own transactions, and drained only by paying them out.
-    /// The two differ in who decides the cut — guardians by announcement,
-    /// the integrator by argument — and in whose lnurl it leaves to.
-    OperatorFee,
     /// Where an integrator's per-transaction cut accrues, if it configured
     /// one. Never a destination a counterparty can pay into: it is funded
     /// only by outputs the client adds to its own transactions, and drained
     /// only by the integrator spending from it.
-    IntegratorFee,
+    AppFee,
 }
 
 picomint_redb::consensus_key!(Account);
@@ -140,7 +131,7 @@ impl Account {
     /// Every account a counterparty can pay into, in key order — and so the
     /// ones the address and contract scanners trial their keys against.
     ///
-    /// [`Account::IntegratorFee`] is reachable only from inside a transaction the
+    /// [`Account::AppFee`] is reachable only from inside a transaction the
     /// client builds, so a scanner that swept for it would derive a key per
     /// entry of a federation-wide stream to match something that cannot be
     /// there.

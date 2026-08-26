@@ -291,51 +291,34 @@ impl MintClientModule {
         counter
     }
 
-    /// Blinded outputs paying both cuts on the value a transaction moves, and
-    /// the issuance requests that redeem them into
-    /// [`Account::OperatorFee`] and [`Account::IntegratorFee`].
+    /// Blinded outputs paying the integrator's cut of the value a transaction
+    /// moves, and the issuance requests that redeem them into
+    /// [`Account::AppFee`].
     ///
     /// Called on a builder holding its caller's outputs and no funding, where
     /// the imbalance is still the operation's own amount — a payment's
     /// outputs on the way out, a claim's inputs on the way in, and exactly one
     /// of the two. A transaction that moves nothing pays nothing.
     ///
-    /// Both cuts are charged on that same amount rather than one on what the
-    /// other left, so neither party's take depends on whether the other is
-    /// charging.
-    ///
-    /// Spending a fee account is how its owner collects, and a collection
-    /// pays neither cut — not its own, which would leave a remainder that can
-    /// never be swept, and not the other party's, which would be a cut of
-    /// money that was never theirs.
+    /// Charged on transactions funded from a user's balance and on nothing
+    /// else. Spending the fee account is how the integrator collects, and a
+    /// collection pays no cut — it would leave a remainder that could never
+    /// be swept.
     fn add_fee_outputs(
         &self,
         dbtx: &WriteTx,
         account: Account,
         builder: &mut TxBuilder,
     ) -> Vec<NoteIssuanceRequest> {
-        // On [`Account::User`] rather than on a list of the accounts to skip,
-        // so an account added later is exempt by being what it is.
-        if !matches!(account, Account::User(_)) {
+        // Gated on [`Account::User`] rather than on a list of the accounts to
+        // skip, so an account added later is exempt by being what it is.
+        if self.app_fee_ppm == 0 || !matches!(account, Account::User(_)) {
             return Vec::new();
         }
 
         let basis = builder.deficit() + builder.excess_input();
 
-        let cuts = [
-            (Account::OperatorFee, self.operator_fee_ppm(dbtx)),
-            (Account::IntegratorFee, self.integrator_fee_ppm),
-        ];
-
-        let mut requests = Vec::new();
-
-        for (destination, ppm) in cuts {
-            if ppm == 0 {
-                continue;
-            }
-
-            requests.extend(self.fee_requests(dbtx, destination, basis, ppm));
-        }
+        let requests = self.fee_requests(dbtx, basis);
 
         for request in &requests {
             builder.add_output(Output {
@@ -348,31 +331,20 @@ impl MintClientModule {
         requests
     }
 
-    /// The federation's announced cut, as this client last read it back.
-    ///
-    /// A local read rather than a query: the announcement is refreshed on its
-    /// own schedule, so building a transaction never waits on the federation
-    /// to answer what it charges.
-    fn operator_fee_ppm(&self, dbtx: &WriteTx) -> u64 {
-        dbtx.get(&crate::fee::OperatorFeeTable(self.federation), &())
-            .map_or(0, |fee| fee.ppm)
-    }
-
-    /// One cut's worth of issuance requests, in denominations totalling
-    /// `ppm` parts per million of `basis`.
+    /// The cut's issuance requests, in denominations totalling the
+    /// configured parts per million of `basis`.
     ///
     /// The cut absorbs the federation's fee on the outputs carrying it, so
     /// what is charged is what is charged; a cut too small to buy the
     /// smallest denomination buys nothing at all and is left behind as
     /// federation revenue, the same way change dust is.
-    fn fee_requests(
-        &self,
-        dbtx: &WriteTx,
-        destination: Account,
-        basis: Amount,
-        ppm: u64,
-    ) -> Vec<NoteIssuanceRequest> {
-        let cut = Amount::from_msat(basis.msat.saturating_mul(ppm).saturating_div(1_000_000));
+    fn fee_requests(&self, dbtx: &WriteTx, basis: Amount) -> Vec<NoteIssuanceRequest> {
+        let cut = Amount::from_msat(
+            basis
+                .msat
+                .saturating_mul(self.app_fee_ppm)
+                .saturating_div(1_000_000),
+        );
 
         let mut denominations = Self::select_output_denominations(self.cfg.output_fee, cut);
 
@@ -384,23 +356,12 @@ impl MintClientModule {
         denominations
             .into_iter()
             .map(|d| {
-                let counter = self.next_counter(dbtx, destination);
+                let counter = self.next_counter(dbtx, Account::AppFee);
 
-                NoteIssuanceRequest::new(destination, d, counter, &self.secret)
+                NoteIssuanceRequest::new(Account::AppFee, d, counter, &self.secret)
             })
             .collect()
     }
-}
-
-/// What of `requests` settles into `account` — the value one cut actually
-/// reached its account with, which is not the amount charged when a
-/// denomination was too small to buy.
-fn cut_into(requests: &[NoteIssuanceRequest], account: Account) -> Amount {
-    requests
-        .iter()
-        .filter(|r| r.account() == account)
-        .map(|r| r.denomination.amount())
-        .sum()
 }
 
 impl MintClientModule {
@@ -409,7 +370,7 @@ impl MintClientModule {
         cfg: MintConfigConsensus,
         context: ClientContext,
         secret: MintSecret,
-        integrator_fee_ppm: u64,
+        app_fee_ppm: u64,
         tg: &TaskGroup,
     ) -> MintClientModule {
         let sm_context = MintSmContext {
@@ -448,7 +409,7 @@ impl MintClientModule {
             federation,
             cfg,
             secret,
-            integrator_fee_ppm,
+            app_fee_ppm,
             client_ctx: context,
             tx_submission_executor,
             mint_executor,
@@ -463,9 +424,9 @@ pub struct MintClientModule {
     cfg: MintConfigConsensus,
     secret: MintSecret,
     /// Parts per million of the value each transaction moves that the client
-    /// pays into [`Account::IntegratorFee`]. Zero for a client that charges nothing,
+    /// pays into [`Account::AppFee`]. Zero for a client that charges nothing,
     /// which is every client the workspace itself builds.
-    integrator_fee_ppm: u64,
+    app_fee_ppm: u64,
     client_ctx: ClientContext,
     tx_submission_executor: ModuleExecutor<TxSubmissionStateMachine, TxSubmissionStateMachineTable>,
     mint_executor: ModuleExecutor<MintStateMachine, MintStateMachineTable>,
@@ -513,8 +474,10 @@ impl MintClientModule {
         // like any other output rather than out of the change.
         let mut issuance_requests = self.add_fee_outputs(dbtx, account, &mut builder);
 
-        let operator_fee = cut_into(&issuance_requests, Account::OperatorFee);
-        let integrator_fee = cut_into(&issuance_requests, Account::IntegratorFee);
+        let app_fee = issuance_requests
+            .iter()
+            .map(|r| r.denomination.amount())
+            .sum();
 
         let deficit = builder.deficit();
 
@@ -526,16 +489,7 @@ impl MintClientModule {
 
         let remint = funding.saturating_sub(deficit);
 
-        let txid = self.submit(
-            dbtx,
-            account,
-            operation,
-            builder,
-            remint,
-            operator_fee,
-            integrator_fee,
-            event,
-        );
+        let txid = self.submit(dbtx, account, operation, builder, remint, app_fee, event);
 
         if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
             let sm = MintStateMachine {
@@ -618,8 +572,7 @@ impl MintClientModule {
         operation: OperationId,
         builder: TxBuilder,
         remint: Amount,
-        operator_fee: Amount,
-        integrator_fee: Amount,
+        app_fee: Amount,
         event: impl FnOnce(TransactionId) -> E,
     ) -> TransactionId {
         let tx_fee = builder.total_fee();
@@ -646,8 +599,7 @@ impl MintClientModule {
                 txid,
                 remint,
                 tx_fee,
-                operator_fee,
-                integrator_fee,
+                app_fee,
             },
         );
 
@@ -852,8 +804,7 @@ impl MintClientModule {
         // them.
         let fee_requests = self.add_fee_outputs(&dbtx, account, &mut builder);
 
-        let operator_fee = cut_into(&fee_requests, Account::OperatorFee);
-        let integrator_fee = cut_into(&fee_requests, Account::IntegratorFee);
+        let app_fee = fee_requests.iter().map(|r| r.denomination.amount()).sum();
 
         issuance_requests.extend(fee_requests);
 
@@ -899,8 +850,7 @@ impl MintClientModule {
                 txid,
                 remint,
                 tx_fee,
-                operator_fee,
-                integrator_fee,
+                app_fee,
             },
         );
 
