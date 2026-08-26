@@ -84,71 +84,45 @@ impl SpendableNote {
 /// Everything a seed-only scan of one account turned up: the notes it still
 /// owns, and how far its counter space was walked.
 ///
-/// Produced by [`crate::restore`], which touches no database at all. The
-/// counter goes to [`commit_restore`] in a dbtx the caller owns, alongside
-/// whatever marks the federation as added; the notes go to
-/// [`MintClientModule::receive`] as an ordinary bundle once the client is up.
-///
-/// One of these covers the single account the scan was run for. A caller
-/// restoring a whole client runs the scan once per [`Account`] and applies
-/// each result under the account it asked for.
+/// Produced by [`scan`], which touches no database at all — [`commit_scan`]
+/// is where it lands, in the dbtx [`crate::Join::commit`] was handed.
 #[derive(Debug, Clone)]
-pub struct Restore {
+pub(crate) struct Restore {
     federation: FederationId,
     notes: Vec<SpendableNote>,
     counter: u64,
 }
 
-impl Restore {
-    /// Gross value restored, before the reissuance's fees.
-    pub fn amount(&self) -> Amount {
-        self.notes.iter().map(SpendableNote::amount).sum()
-    }
-
-    pub fn federation(&self) -> FederationId {
-        self.federation
-    }
-
-    /// The restored notes as an out-of-band bundle, to hand straight to
-    /// [`MintClientModule::receive`].
-    ///
-    /// Restore and an ordinary out-of-band receive are the same operation:
-    /// notes that someone else may know traded for notes only this wallet
-    /// does. Here the someone else is the federation, which was asked about
-    /// every one of these nonces by name during the scan. Reissuing is what
-    /// makes the balance the wallet's own, so it rides the existing path
-    /// rather than a restore-shaped copy of it.
-    ///
-    /// Empty when the scan found nothing, which
-    /// [`MintClientModule::receive`] rejects with
-    /// [`ReceiveECashError::Empty`]; check [`Restore::amount`] first if a
-    /// never-used seed is a case the caller expects.
-    pub fn ecash(&self) -> ECash {
-        ECash::new(self.federation, self.notes.clone())
-    }
-}
-
-/// Persist the counter mark a [`scan`] reached for its account, in a dbtx the
-/// caller owns.
+/// Persist what a [`scan`] of `account` found, in a dbtx the caller owns.
 ///
-/// This is the whole of what restore writes locally, and it must land before
-/// the account issues anything: a restored account resuming from zero would
-/// re-derive nonces the federation has already signed, and every note behind
-/// them would be stranded. The notes themselves are not written here — they
-/// arrive through [`MintClientModule::receive`] like any other bundle.
+/// The counter mark must land before the account issues anything: an account
+/// resuming from zero would re-derive nonces the federation has already
+/// signed, and every note behind them would be stranded. That is why this
+/// shares a dbtx with whatever marks the federation as joined — a crash
+/// leaves either both or neither.
 ///
-/// `account` is the one the scan was run for — the caller named it when
-/// calling [`crate::restore`], so it is not carried on the result.
-///
-/// Belongs in the same dbtx as whatever marks the federation as added, so a
-/// crash leaves either both or neither. A caller restoring every account can
-/// commit all of their marks in that one dbtx.
-pub fn commit_restore(dbtx: &WriteTx, account: Account, restore: &Restore) {
+/// The notes go straight into the wallet rather than through a reissuance
+/// first, so the balance is simply there when the client opens. The federation
+/// was asked about each of these nonces by name during the scan and can
+/// recognise them when they are spent — a restored wallet is linkable to its
+/// scan until the notes churn out through the change of ordinary
+/// transactions. Trading them in up front would close that, at the cost of a
+/// transaction bounded by [`Transaction::MAX_INPUTS`], which a wallet holding
+/// more notes than that could not be restored through at all.
+pub(crate) fn commit_scan(dbtx: &WriteTx, account: Account, restore: &Restore) {
     dbtx.insert(
         &CounterTable(restore.federation),
         &account,
         &restore.counter,
     );
+
+    for note in &restore.notes {
+        dbtx.insert(
+            &NoteTable(restore.federation),
+            &(account, note.clone()),
+            &(),
+        );
+    }
 }
 
 /// Rebuild a wallet's notes from its seed, without touching a database.

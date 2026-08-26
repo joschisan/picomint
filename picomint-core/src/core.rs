@@ -140,4 +140,22 @@ impl Account {
     /// client is built, so no account ever joins a stream late.
     pub const USER_ACCOUNTS: [Account; 3] =
         [Account::PRIMARY, Account::SECONDARY, Account::TERTIARY];
+
+    /// Every account that holds notes, in key order — the set a seed scan has
+    /// to walk.
+    ///
+    /// A superset of [`Account::USER_ACCOUNTS`] because the two answer
+    /// different questions. A scanner asks who can be paid;
+    /// [`Account::AppFee`] cannot, so sweeping for it would derive a key per
+    /// entry of a federation-wide stream to match something that is never
+    /// there. A restore asks where notes live, and the fee account holds them
+    /// like any other — cuts collected but not yet swept when the wallet was
+    /// lost. Its counter space is walked from zero by the next client either
+    /// way, so leaving it out strands whatever it re-derives.
+    pub const ALL: [Account; 4] = [
+        Account::PRIMARY,
+        Account::SECONDARY,
+        Account::TERTIARY,
+        Account::AppFee,
+    ];
 }

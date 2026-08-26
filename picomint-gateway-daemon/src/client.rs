@@ -109,27 +109,33 @@ impl GatewayClientFactory {
         self.db.begin_read().get(&ClientConfigTable, federation)
     }
 
-    /// Download and persist the consensus config for a federation. The
-    /// `Client` itself is brought up lazily on first use via
-    /// [`AppState::select_client`]. Errors if a config for this federation is
-    /// already persisted.
+    /// Join a federation, persisting its config alongside whatever the scan
+    /// found. The `Client` itself is brought up lazily on first use via
+    /// [`AppState::select_client`], and opens on that balance. Errors if a
+    /// config for this federation is already persisted.
+    ///
+    /// The scan matters here as much as it does for a wallet: a gateway
+    /// rebuilt from its seed against a federation it has served before holds
+    /// its liquidity under counters this node knows nothing about.
     pub async fn add(&self, invite: &InviteCode) -> anyhow::Result<()> {
-        let config = picomint_client::download(&self.endpoint, invite).await?;
+        let join = picomint_client::join(&self.endpoint, &self.mnemonic, invite).await?;
 
-        if config.network != self.network {
-            anyhow::bail!("Unsupported network {}", config.network);
+        if join.config().network != self.network {
+            anyhow::bail!("Unsupported network {}", join.config().network);
         }
 
-        let federation_id = config.calculate_federation_id();
+        let federation_id = join.config().calculate_federation_id();
 
         let dbtx = self.db.begin_write();
 
         if dbtx
-            .insert(&ClientConfigTable, &federation_id, &config)
+            .insert(&ClientConfigTable, &federation_id, join.config())
             .is_some()
         {
             anyhow::bail!("Federation is already added");
         }
+
+        join.commit(&dbtx);
 
         dbtx.commit();
 

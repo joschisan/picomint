@@ -180,60 +180,66 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     info!("mint: restore (expected balance {expected})");
 
-    let (restored, restore) = env.new_restored_client(receive_mnemonic.clone()).await?;
+    let restored = env.new_client(Some(receive_mnemonic.clone())).await?;
 
-    let scanned = restore.amount();
+    // Restoring is not its own entry point and costs nothing: the scan ran
+    // inside the join and wrote its notes with the counter marks, so the
+    // wallet is whole the moment the client opens rather than once a
+    // reissuance settles.
+    let scanned = restored.get_balance(Account::PRIMARY);
 
     ensure!(
         scanned == expected,
         "restore scanned {scanned}, expected {expected}"
     );
 
-    // Second half of the restore: the scanned notes go back through the
-    // ordinary out-of-band receive, so the wallet holds them only once that
-    // reissuance settles. It re-mints under fresh outputs, leaving the balance
-    // just below `expected` by the federation's fees.
-    let operation = restored
+    info!("mint: restore passed");
+
+    // Restoring writes no counters of its own, so the restored wallet has to
+    // issue past the mark before a second restore means anything. Sending a
+    // bundle and receiving it back re-mints under counters above the mark,
+    // which is the state the next scan has to cross to.
+    let ecash = restored
         .mint()
-        .receive(Account::PRIMARY, &restore.ecash())?;
+        .send(Account::PRIMARY, Amount::from_sat(1_000))
+        .await?;
+
+    let operation = restored.mint().receive(Account::PRIMARY, &ecash)?;
 
     await_tx_outcome(&restored, operation)
         .await
-        .expect("restore reissuance should be accepted");
+        .expect("self-remint should be accepted");
 
     let swept = restored.get_balance(Account::PRIMARY);
 
     ensure!(
-        swept > Amount::ZERO && swept <= expected,
-        "restored balance out of range: {swept} vs {expected}"
+        swept > Amount::ZERO && swept < expected,
+        "remint left balance out of range: {swept} vs {expected}"
     );
 
-    // The reissuance pays the federation for its outputs and the integrator
-    // its cut of what it claimed, so the cut is what the bound is made of and
-    // the federation's fees are the allowance on top of it.
+    // The remint pays the federation for its outputs and the integrator its
+    // cut of what moved, so the cut over the whole balance is the loosest
+    // bound that still catches fees running away.
     let cut = Amount::from_msat(expected.msat * CLIENT_FEE_PPM / 1_000_000);
 
-    let loss = expected.checked_sub(swept).expect("swept <= expected");
+    let loss = expected.checked_sub(swept).expect("swept < expected");
     ensure!(
         loss < cut + Amount::from_sat(50),
-        "restore lost more than expected to fees: {expected} -> {swept} (loss {loss})"
+        "remint lost more than expected to fees: {expected} -> {swept} (loss {loss})"
     );
 
     restored.shutdown().await;
 
-    info!("mint: restore passed");
-
     // Restoring a second time is the only phase that exercises the counter
-    // mark the first restore persisted — the reissuance above re-mints the
-    // whole wallet under counters past that mark. A mark one batch too high
-    // opens a gap as wide as the one a scan refuses to cross, stranding every
-    // reissued note behind it, and the wallet comes back empty rather than
+    // mark the first restore persisted. A mark one batch too high opens a gap
+    // as wide as the one a scan refuses to cross, stranding every note the
+    // remint issued behind it, and the wallet comes back empty rather than
     // merely short.
     info!("mint: second restore (expected balance {swept})");
 
-    let (restored, restore) = env.new_restored_client(receive_mnemonic).await?;
+    let restored = env.new_client(Some(receive_mnemonic)).await?;
 
-    let scanned = restore.amount();
+    let scanned = restored.get_balance(Account::PRIMARY);
 
     ensure!(
         scanned == swept,
