@@ -60,7 +60,7 @@ async fn sanity_subscribe_operation_events() {
                     EventKind::from(format!("{i}")),
                     EventSource::Core,
                     federation,
-                    picomint_core::core::Account::Primary,
+                    picomint_core::core::Account::PRIMARY,
                     operation,
                     vec![],
                 );

@@ -72,7 +72,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     let mut send_events = pin!(wallet_event_stream(client_send));
 
-    let pegin_addr = client_send.wallet().receive(Account::Primary).await;
+    let pegin_addr = client_send.wallet().receive(Account::PRIMARY).await;
     info!(addr = %pegin_addr, "Pegin address ready");
 
     let pegin_txid = env.send_to_address(&pegin_addr, bitcoin::Amount::from_sat(100_000_000))?;
@@ -94,7 +94,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     info!(addr = %pegin_addr, "Pegin Receive Event");
 
     retry("pegin balance", || async {
-        let balance = client_send.get_balance(Account::Primary);
+        let balance = client_send.get_balance(Account::PRIMARY);
         ensure!(balance > Amount::ZERO, "Balance is zero");
         Ok(())
     })
@@ -110,7 +110,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     let operation = client_send
         .wallet()
         .send(
-            Account::Primary,
+            Account::PRIMARY,
             external_address.as_unchecked().clone(),
             bitcoin::Amount::from_sat(100_000),
             None,
@@ -160,7 +160,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     let abort_op = client_send
         .wallet()
         .send(
-            Account::Primary,
+            Account::PRIMARY,
             external_address.as_unchecked().clone(),
             bitcoin::Amount::from_sat(100_000),
             Some(bitcoin::Amount::ZERO),

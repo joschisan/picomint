@@ -105,14 +105,14 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
         let ecash = client_send
             .mint()
-            .send(Account::Primary, Amount::from_sat(1_000))
+            .send(Account::PRIMARY, Amount::from_sat(1_000))
             .await?;
 
         let Some((_, MintEvent::Send(_))) = send_events.next().await else {
             panic!("Expected Send event");
         };
 
-        let operation = client_receive.mint().receive(Account::Primary, &ecash)?;
+        let operation = client_receive.mint().receive(Account::PRIMARY, &ecash)?;
 
         let Some((op, MintEvent::Receive(_))) = receive_events.next().await else {
             panic!("Expected Receive event");
@@ -131,7 +131,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // opportunistically pulls excess notes (>TARGET_PER_DENOMINATION) into
     // the IssuanceSM's `spendable_notes` and only recovers them once the SM
     // transitions on Err. Capturing here avoids racing that reclaim.
-    let expected = client_receive.get_balance(Account::Primary);
+    let expected = client_receive.get_balance(Account::PRIMARY);
 
     ensure!(
         expected != Amount::ZERO,
@@ -142,7 +142,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     let ecash = client_send
         .mint()
-        .send(Account::Primary, Amount::from_sat(1_000))
+        .send(Account::PRIMARY, Amount::from_sat(1_000))
         .await?;
 
     let Some((_, MintEvent::Send(_))) = send_events.next().await else {
@@ -150,7 +150,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     };
 
     // First receive succeeds (sender receives own ecash back)
-    let operation = client_send.mint().receive(Account::Primary, &ecash)?;
+    let operation = client_send.mint().receive(Account::PRIMARY, &ecash)?;
 
     let Some((op, MintEvent::Receive(_))) = send_events.next().await else {
         panic!("Expected Receive event");
@@ -162,7 +162,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
         .expect("first receive should be accepted");
 
     // Second receive with same ecash is rejected
-    let operation = client_receive.mint().receive(Account::Primary, &ecash)?;
+    let operation = client_receive.mint().receive(Account::PRIMARY, &ecash)?;
 
     let Some((op, MintEvent::Receive(_))) = receive_events.next().await else {
         panic!("Expected Receive event");
@@ -195,13 +195,13 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // just below `expected` by the federation's fees.
     let operation = restored
         .mint()
-        .receive(Account::Primary, &restore.ecash())?;
+        .receive(Account::PRIMARY, &restore.ecash())?;
 
     await_tx_outcome(&restored, operation)
         .await
         .expect("restore reissuance should be accepted");
 
-    let swept = restored.get_balance(Account::Primary);
+    let swept = restored.get_balance(Account::PRIMARY);
 
     ensure!(
         swept > Amount::ZERO && swept <= expected,

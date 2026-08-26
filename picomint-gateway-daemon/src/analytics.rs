@@ -353,7 +353,7 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
                     ts,
                     e.txid.to_string(),
                     e.remint.msat as i64,
-                    e.fee.msat as i64,
+                    e.tx_fee.msat as i64,
                 ],
             )?;
         }

@@ -37,6 +37,10 @@ pub struct MintStateMachine {
     /// Blinded outputs this tx issues. Finalized into `SpendableNote`s and
     /// inserted into `NoteTable` once the federation's blind-signature shares are
     /// aggregated.
+    ///
+    /// Each carries the account it settles into, which is not always
+    /// [`Self::account`]: a client configured with a fee pays it as an
+    /// output of the transaction it is charging.
     pub issuance_requests: Vec<NoteIssuanceRequest>,
 }
 
@@ -107,18 +111,22 @@ impl StateMachine for MintStateMachine {
             assert!(
                 dbtx.insert(
                     &NoteTable(ctx.federation),
-                    &(self.account, spendable_note),
+                    &(request.account(), spendable_note),
                     &()
                 )
                 .is_none()
             );
         }
 
+        // The log entry is filed under this state machine's account, so it
+        // reports what that account received — not what a fee output filed
+        // elsewhere in the same transaction did.
         let event = MintSuccessEvent {
             txid: self.txid,
             amount: self
                 .issuance_requests
                 .iter()
+                .filter(|r| r.account() == self.account)
                 .map(|r| r.denomination.amount())
                 .sum(),
         };

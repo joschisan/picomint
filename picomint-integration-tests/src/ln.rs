@@ -252,7 +252,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
         let (gateway_pk, gateway_info) = ln.select_gateway(None)?;
         let invoice = ln
             .receive(
-                Account::Primary,
+                Account::PRIMARY,
                 gateway_pk,
                 gateway_info.clone(),
                 Amount::from_msat(500_000),
@@ -260,7 +260,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
             .await?;
 
         let send_op = ln
-            .send(Account::Primary, gateway_pk, gateway_info, invoice)
+            .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
             .await?;
 
         let Some((op, LnEvent::Send(_))) = events.next().await else {
@@ -291,7 +291,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
 
         let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
         let send_op = ln
-            .send(Account::Primary, gateway_pk, gateway_info, invoice)
+            .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
             .await?;
 
         let Some((op, LnEvent::Send(_))) = events.next().await else {
@@ -322,7 +322,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
 
         let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
         let send_op = ln
-            .send(Account::Primary, gateway_pk, gateway_info, invoice)
+            .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
             .await?;
 
         let Some((op, LnEvent::Send(_))) = events.next().await else {
@@ -356,7 +356,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
         let (gateway_pk, gateway_info) = ln.select_gateway(None)?;
         let invoice = ln
             .receive(
-                Account::Primary,
+                Account::PRIMARY,
                 gateway_pk,
                 gateway_info,
                 Amount::from_msat(500_000),
@@ -401,7 +401,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
 
         let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
         let send_op = ln
-            .send(Account::Primary, gateway_pk, gateway_info, invoice)
+            .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
             .await?;
 
         let Some((op, LnEvent::Send(_))) = events.next().await else {
@@ -494,7 +494,7 @@ async fn test_mock_send_exactly_once(client: &Arc<Client>) -> anyhow::Result<()>
     let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
     let send_op = ln
         .send(
-            Account::Primary,
+            Account::PRIMARY,
             gateway_pk,
             gateway_info.clone(),
             invoice.clone(),
@@ -508,7 +508,7 @@ async fn test_mock_send_exactly_once(client: &Arc<Client>) -> anyhow::Result<()>
     .await;
 
     match ln
-        .send(Account::Primary, gateway_pk, gateway_info, invoice)
+        .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
         .await
     {
         Err(SendPaymentError::InvoiceAlreadyAttempted) => {}
@@ -529,7 +529,7 @@ async fn test_mock_send_refund_forfeit(client: &Arc<Client>) -> anyhow::Result<(
     let (gateway_pk, gateway_info) = client.ln().select_gateway(Some(&invoice))?;
     let send_op = client
         .ln()
-        .send(Account::Primary, gateway_pk, gateway_info, invoice)
+        .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
         .await?;
 
     wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
@@ -551,7 +551,7 @@ async fn test_mock_wrong_network(client: &Arc<Client>) -> anyhow::Result<()> {
 
     match client
         .ln()
-        .send(Account::Primary, gateway_pk, gateway_info, invoice)
+        .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
         .await
     {
         Err(SendPaymentError::WrongCurrency {
@@ -581,7 +581,7 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
     let invoice = crash_invoice(preimage);
     let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
     let send_op = ln
-        .send(Account::Primary, gateway_pk, gateway_info, invoice)
+        .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
         .await?;
 
     let send_event =
@@ -617,7 +617,7 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
         .mint()
         .finalize_and_submit_tx(
             &dbtx,
-            Account::Primary,
+            Account::PRIMARY,
             OperationId::new_random(),
             tx_builder,
             |_| SendSuccessEvent { preimage },
@@ -648,7 +648,7 @@ async fn test_unilateral_refund(env: &TestEnv, client: &Arc<Client>) -> anyhow::
     let (gateway_pk, gateway_info) = client.ln().select_gateway(Some(&invoice))?;
     let send_op = client
         .ln()
-        .send(Account::Primary, gateway_pk, gateway_info, invoice)
+        .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
         .await?;
 
     wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
@@ -682,7 +682,7 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
     let lnurl = retry("lnurl gateway mirror", || async {
         client
             .ln()
-            .generate_lnurl(Account::Primary, lnurl_daemon.clone())
+            .generate_lnurl(Account::PRIMARY, lnurl_daemon.clone())
             .map_err(|e| anyhow::anyhow!("generate_lnurl: {e}"))
     })
     .await?;
