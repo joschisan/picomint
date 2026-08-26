@@ -50,6 +50,19 @@ pub const LNURL_DAEMON_PORT: u16 = 28176;
 /// smallest amount the suite moves still buys a note.
 pub const CLIENT_FEE_PPM: u64 = 10_000;
 
+/// Every account a restore has to walk the counter space of.
+///
+/// [`Account::USER_ACCOUNTS`] is the set a counterparty can pay into, which
+/// is a different question from the one a restore asks: [`Account::AppFee`]
+/// holds notes and burns counters like any other account, it is just never a
+/// destination anyone else names.
+const ACCOUNTS: [Account; 4] = [
+    Account::PRIMARY,
+    Account::SECONDARY,
+    Account::TERTIARY,
+    Account::AppFee,
+];
+
 const BTC_RPC_USER: &str = "bitcoin";
 const BTC_RPC_PASS: &str = "bitcoin";
 
@@ -243,8 +256,17 @@ impl TestEnv {
     /// same dbtx that would mark the federation as added, and only then bring
     /// the client up on an already-consistent database.
     ///
-    /// Returns the client and the scan. Reissuing the restored notes is the
-    /// caller's second step, via `mint().receive(&restore.ecash())`.
+    /// Every account is scanned, not just the one the caller goes on to
+    /// reissue. A counter space left at zero re-derives nonces the federation
+    /// has already signed, and the client charging a cut spends
+    /// [`Account::AppFee`]'s space on transactions made from any account —
+    /// so restoring only the user's balances would strand the fee balance and
+    /// have the very first transaction after the restore rejected for a
+    /// blinded nonce already signed.
+    ///
+    /// Returns the client and the primary account's scan. Reissuing the
+    /// restored notes is the caller's second step, via
+    /// `mint().receive(&restore.ecash())`.
     pub async fn new_restored_client(
         &self,
         mnemonic: Mnemonic,
@@ -258,14 +280,26 @@ impl TestEnv {
 
         let config = picomint_client::download(&self.endpoint, &self.invite).await?;
 
-        let restore =
-            picomint_client::restore(&self.endpoint, &mnemonic, &config, Account::PRIMARY).await?;
+        let mut restores = BTreeMap::new();
+
+        for account in ACCOUNTS {
+            let restore =
+                picomint_client::restore(&self.endpoint, &mnemonic, &config, account).await?;
+
+            restores.insert(account, restore);
+        }
 
         let dbtx = db.begin_write();
 
-        picomint_client::commit_restore(&dbtx, Account::PRIMARY, &restore);
+        for (account, restore) in &restores {
+            picomint_client::commit_restore(&dbtx, *account, restore);
+        }
 
         dbtx.commit();
+
+        let restore = restores
+            .remove(&Account::PRIMARY)
+            .expect("the primary account was scanned");
 
         let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
         let client = Client::new(
