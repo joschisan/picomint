@@ -12,11 +12,71 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use picomint_core::Amount;
+use picomint_core::config::FederationId;
 use picomint_core::core::Account;
+use picomint_core::fee::FeeConfig;
+use thiserror::Error;
 use tokio::time::sleep;
 use tracing::warn;
 
 use crate::Client;
+
+client_table!(
+    /// The federation's announced fee, as this client last read it back
+    /// under threshold consensus. Absent until a refresh finds one, which is
+    /// also how a withdrawn announcement is recorded.
+    OperatorFeeTable,
+    () => FeeConfig,
+    "operator-fee",
+);
+
+#[derive(Error, Debug, Clone, Eq, PartialEq)]
+pub enum RefreshOperatorFeeError {
+    #[error("Failed to request the federation fee")]
+    FailedToRequestOperatorFee,
+}
+
+impl Client {
+    /// Read the cached federation fee. Populated by
+    /// [`Self::refresh_operator_fee`] (run once at startup); returns `None`
+    /// until that completes successfully or if the federation announces no
+    /// fee.
+    pub fn operator_fee(&self) -> Option<FeeConfig> {
+        self.db()
+            .begin_read()
+            .get(&OperatorFeeTable(self.federation()), &())
+    }
+
+    /// Re-fetch the announced fee via threshold consensus and reconcile the
+    /// local cache. Inserts on `Some(_)`, removes on `None`.
+    pub async fn refresh_operator_fee(client: Arc<Self>) -> Result<(), RefreshOperatorFeeError> {
+        let fee = client
+            .api()
+            .fee_config()
+            .await
+            .map_err(|_| RefreshOperatorFeeError::FailedToRequestOperatorFee)?;
+
+        let dbtx = client.db().begin_write();
+
+        match fee {
+            Some(fee) => {
+                dbtx.insert(&OperatorFeeTable(client.federation()), &(), &fee);
+            }
+            None => {
+                dbtx.remove(&OperatorFeeTable(client.federation()), &());
+            }
+        }
+
+        dbtx.commit();
+
+        Ok(())
+    }
+}
+
+/// Drop the announcement cache. Called by [`Client::wipe`].
+pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTx, federation: FederationId) {
+    dbtx.delete_table(&OperatorFeeTable(federation));
+}
 
 /// How long between passes, and how long the first one waits.
 ///
@@ -42,6 +102,25 @@ pub(crate) async fn sweep(client: Arc<Client>, account: Account, lnurl: String) 
 
         if let Err(error) = sweep_once(&client, account, &lnurl).await {
             warn!(%account, %error, "Fee sweep did not go through");
+        }
+    }
+}
+
+/// Sweep the federation's cut to wherever its announcement says, forever.
+///
+/// The destination comes from the cache [`Client::refresh_operator_fee`]
+/// fills, so a pass before that lands, or after the federation withdraws its
+/// announcement, has nowhere to send and does nothing.
+pub(crate) async fn sweep_operator_fee(client: Arc<Client>) {
+    loop {
+        sleep(SWEEP_INTERVAL).await;
+
+        let Some(fee) = client.operator_fee() else {
+            continue;
+        };
+
+        if let Err(error) = sweep_once(&client, Account::OperatorFee, &fee.lnurl).await {
+            warn!(%error, "Federation fee sweep did not go through");
         }
     }
 }

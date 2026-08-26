@@ -70,7 +70,7 @@ impl Client {
     ///
     /// `fee` is the integrator's cut: [`FeeConfig::ppm`] parts per million of
     /// the value every transaction this client builds moves, paid into
-    /// [`Account::AppFee`] as an output of that same transaction and swept
+    /// [`Account::IntegratorFee`] as an output of that same transaction and swept
     /// from there to [`FeeConfig::lnurl`] as it accumulates. `None` charges
     /// nothing and starts no sweep.
     pub fn new(
@@ -218,7 +218,16 @@ impl Client {
             tg,
         });
 
+        client.tg.spawn(Self::refresh_operator_fee(client.clone()));
         client.tg.spawn(Self::refresh_expiry_status(client.clone()));
+
+        // The federation's cut needs no configuring here — a client charges
+        // it if and only if the guardians announce one, so the sweep runs on
+        // every client and does nothing until there is an announcement to
+        // read and a balance it produced.
+        client
+            .tg
+            .spawn(crate::fee::sweep_operator_fee(client.clone()));
 
         // Only when there is a cut to collect: a client that charges nothing
         // has nothing accruing in the account, and a sweep would wake every
@@ -226,7 +235,7 @@ impl Client {
         if let Some(fee) = fee {
             client.tg.spawn(crate::fee::sweep(
                 client.clone(),
-                Account::AppFee,
+                Account::IntegratorFee,
                 fee.lnurl,
             ));
         }
@@ -259,6 +268,7 @@ impl Client {
         crate::ln::wipe_tables(dbtx, self.federation);
         crate::gw::wipe_tables(dbtx, self.federation);
         crate::tx::wipe_tables(dbtx, self.federation);
+        crate::fee::wipe_tables(dbtx, self.federation);
         crate::expiry::wipe_tables(dbtx, self.federation);
     }
 

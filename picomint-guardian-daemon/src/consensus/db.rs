@@ -70,6 +70,16 @@ pub fn consensus_version(
     versions[num_peers.max_evil()]
 }
 
+// This guardian's announced federation fee — the cut its clients pay into
+// their operator-fee account, and the lnurl it leaves to. Set locally like
+// the expiry below and read back the same way, so a threshold of guardians
+// must announce byte-equal values before any client charges it.
+table!(
+    FeeConfigTable,
+    () => picomint_core::fee::FeeConfig,
+    "fee-config",
+);
+
 // This guardian's locally-announced expiry status. Mutated by the admin
 // dashboard; read by [`crate::consensus::rpc::expiry_status`] and
 // returned over the wire so a threshold of guardians must agree on the
