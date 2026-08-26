@@ -300,7 +300,7 @@ impl WalletClientModule {
     /// each extra account costs another entry in the address map rather than
     /// another sweep.
     async fn output_scanner(module: WalletClientModule) {
-        for account in Account::ALL {
+        for account in Account::USER_ACCOUNTS {
             if module.highest_valid_index(account).is_some() {
                 continue;
             }

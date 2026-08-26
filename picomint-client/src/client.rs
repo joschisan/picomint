@@ -66,19 +66,39 @@ impl Client {
     /// commit writes of their own. So this goes last, after the dbtx that
     /// persists `config` and marks the federation as added. The caller gets
     /// the config from [`crate::download`] and owns persisting it.
+    ///
+    /// `fee_ppm` is the integrator's cut, in parts per million of the value
+    /// every transaction this client builds moves, paid into
+    /// [`Account::AppFee`] as an output of that same transaction. Pass zero to
+    /// charge nothing. Collecting is not the library's business: the fee
+    /// account holds an ordinary balance, spent through the same API as any
+    /// other account.
     pub fn new(
         endpoint: Endpoint,
         db: Database,
         logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
+        fee_ppm: u64,
     ) -> Arc<Self> {
-        Self::build(endpoint, db, logger, mnemonic, config, LnChoice::Regular)
+        Self::build(
+            endpoint,
+            db,
+            logger,
+            mnemonic,
+            config,
+            fee_ppm,
+            LnChoice::Regular,
+        )
     }
 
     /// Gateway-flavor counterpart of [`Client::new`]. Used by the gateway
     /// daemon, which mounts [`GatewayClientModule`] in place of the regular
     /// lightning module.
+    ///
+    /// Takes no cut. A gateway's transactions are the other half of its
+    /// users' payments, and charging them would bill the gateway for
+    /// serving the very payment the sender was already charged for.
     pub fn new_gateway(
         endpoint: Endpoint,
         db: Database,
@@ -86,7 +106,7 @@ impl Client {
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
     ) -> Arc<Self> {
-        Self::build(endpoint, db, logger, mnemonic, config, LnChoice::Gateway)
+        Self::build(endpoint, db, logger, mnemonic, config, 0, LnChoice::Gateway)
     }
 
     fn build(
@@ -95,6 +115,7 @@ impl Client {
         logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
+        fee_ppm: u64,
         ln_choice: LnChoice,
     ) -> Arc<Self> {
         debug!(
@@ -124,6 +145,7 @@ impl Client {
             config.mint.clone(),
             mint_context,
             client_secret.mint_secret(),
+            fee_ppm,
             &tg,
         ));
 

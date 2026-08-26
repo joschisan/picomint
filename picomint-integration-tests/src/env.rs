@@ -250,16 +250,16 @@ impl TestEnv {
         let config = picomint_client::download(&self.endpoint, &self.invite).await?;
 
         let restore =
-            picomint_client::restore(&self.endpoint, &mnemonic, &config, Account::Primary).await?;
+            picomint_client::restore(&self.endpoint, &mnemonic, &config, Account::PRIMARY).await?;
 
         let dbtx = db.begin_write();
 
-        picomint_client::commit_restore(&dbtx, Account::Primary, &restore);
+        picomint_client::commit_restore(&dbtx, Account::PRIMARY, &restore);
 
         dbtx.commit();
 
         let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
-        let client = Client::new(self.endpoint.clone(), db, logger, &mnemonic, config);
+        let client = Client::new(self.endpoint.clone(), db, logger, &mnemonic, config, 0);
 
         info!("Restored client-{n}");
 
@@ -314,7 +314,7 @@ async fn build_client(
     let config = picomint_client::download(&endpoint, &invite_code).await?;
 
     let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
-    let client = Client::new(endpoint, db, logger, &mnemonic, config);
+    let client = Client::new(endpoint, db, logger, &mnemonic, config, 0);
 
     info!("Created client-{n}");
     Ok(client)

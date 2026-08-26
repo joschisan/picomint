@@ -290,6 +290,69 @@ impl MintClientModule {
 
         counter
     }
+
+    /// Blinded outputs paying the integrator's cut of the value a transaction
+    /// moves, and the issuance requests that redeem them into
+    /// [`Account::AppFee`].
+    ///
+    /// Called on a builder holding its caller's outputs and no funding, where
+    /// the imbalance is still the operation's own amount — a payment's
+    /// outputs on the way out, a claim's inputs on the way in, and exactly one
+    /// of the two. A transaction that moves nothing pays nothing.
+    ///
+    /// The cut absorbs the federation's fee on the outputs carrying it, so
+    /// what the client charges is what it charges; a cut too small to buy the
+    /// smallest denomination buys nothing at all and is left behind as
+    /// federation revenue, the same way change dust is.
+    ///
+    /// Spending the fee account is how the integrator collects, so it is the
+    /// one account that is never charged — otherwise a collection would pay
+    /// itself a cut of itself and leave a remainder that can never be swept.
+    fn add_fee_outputs(
+        &self,
+        dbtx: &WriteTx,
+        account: Account,
+        builder: &mut TxBuilder,
+    ) -> Vec<NoteIssuanceRequest> {
+        if self.fee_ppm == 0 || account == Account::AppFee {
+            return Vec::new();
+        }
+
+        let basis = builder.deficit() + builder.excess_input();
+
+        let cut = Amount::from_msat(
+            basis
+                .msat
+                .saturating_mul(self.fee_ppm)
+                .saturating_div(1_000_000),
+        );
+
+        let mut denominations = Self::select_output_denominations(self.cfg.output_fee, cut);
+
+        // Sorted for the same reason the change outputs are: the shape of a
+        // transaction's outputs should say as little as possible about which
+        // of them are whose.
+        denominations.sort();
+
+        let requests: Vec<NoteIssuanceRequest> = denominations
+            .into_iter()
+            .map(|d| {
+                let counter = self.next_counter(dbtx, Account::AppFee);
+
+                NoteIssuanceRequest::new(Account::AppFee, d, counter, &self.secret)
+            })
+            .collect();
+
+        for request in &requests {
+            builder.add_output(Output {
+                output: wire::Output::Mint(request.output()),
+                amount: request.denomination.amount(),
+                fee: self.cfg.output_fee,
+            });
+        }
+
+        requests
+    }
 }
 
 impl MintClientModule {
@@ -298,6 +361,7 @@ impl MintClientModule {
         cfg: MintConfigConsensus,
         context: ClientContext,
         secret: MintSecret,
+        fee_ppm: u64,
         tg: &TaskGroup,
     ) -> MintClientModule {
         let sm_context = MintSmContext {
@@ -336,6 +400,7 @@ impl MintClientModule {
             federation,
             cfg,
             secret,
+            fee_ppm,
             client_ctx: context,
             tx_submission_executor,
             mint_executor,
@@ -349,6 +414,10 @@ pub struct MintClientModule {
     federation: FederationId,
     cfg: MintConfigConsensus,
     secret: MintSecret,
+    /// Parts per million of the value each transaction moves that the client
+    /// pays into [`Account::AppFee`]. Zero for a client that charges nothing,
+    /// which is every client the workspace itself builds.
+    fee_ppm: u64,
     client_ctx: ClientContext,
     tx_submission_executor: ModuleExecutor<TxSubmissionStateMachine, TxSubmissionStateMachineTable>,
     mint_executor: ModuleExecutor<MintStateMachine, MintStateMachineTable>,
@@ -392,15 +461,26 @@ impl MintClientModule {
         mut builder: TxBuilder,
         event: impl FnOnce(TransactionId) -> E,
     ) -> Option<TransactionId> {
+        // Ahead of the deficit the funding has to cover, so the cut is funded
+        // like any other output rather than out of the change.
+        let mut issuance_requests = self.add_fee_outputs(dbtx, account, &mut builder);
+
+        let app_fee = issuance_requests
+            .iter()
+            .map(|r| r.denomination.amount())
+            .sum();
+
         let deficit = builder.deficit();
 
-        let (spendable_notes, issuance_requests) = self.balance(dbtx, account, &mut builder)?;
+        let (spendable_notes, change_requests) = self.balance(dbtx, account, &mut builder)?;
+
+        issuance_requests.extend(change_requests);
 
         let funding: Amount = spendable_notes.iter().map(|n| n.amount()).sum();
 
         let remint = funding.saturating_sub(deficit);
 
-        let txid = self.submit(dbtx, account, operation, builder, remint, event);
+        let txid = self.submit(dbtx, account, operation, builder, remint, app_fee, event);
 
         if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
             let sm = MintStateMachine {
@@ -475,6 +555,7 @@ impl MintClientModule {
 
     /// Sign the builder, spawn the `TxSubmissionStateMachine`, log the
     /// caller's `event` followed by `TxCreateEvent`.
+    #[allow(clippy::too_many_arguments)]
     fn submit<E: picomint_eventlog::Event + Send>(
         &self,
         dbtx: &WriteTx,
@@ -482,9 +563,10 @@ impl MintClientModule {
         operation: OperationId,
         builder: TxBuilder,
         remint: Amount,
+        app_fee: Amount,
         event: impl FnOnce(TransactionId) -> E,
     ) -> TransactionId {
-        let fee = builder.total_fee();
+        let tx_fee = builder.total_fee();
         let tx = builder.build();
 
         let txid = tx.compute_txid();
@@ -504,7 +586,12 @@ impl MintClientModule {
             dbtx,
             account,
             operation,
-            crate::TxCreateEvent { txid, remint, fee },
+            crate::TxCreateEvent {
+                txid,
+                remint,
+                tx_fee,
+                app_fee,
+            },
         );
 
         txid
@@ -703,6 +790,15 @@ impl MintClientModule {
             });
         }
 
+        // Between the targets and the change on both sides of the ledger:
+        // in the builder's outputs, and in the issuance order that mirrors
+        // them.
+        let fee_requests = self.add_fee_outputs(&dbtx, account, &mut builder);
+
+        let app_fee = fee_requests.iter().map(|r| r.denomination.amount()).sum();
+
+        issuance_requests.extend(fee_requests);
+
         let deficit = builder.deficit();
 
         let (funding_notes, change_requests) = self
@@ -713,7 +809,7 @@ impl MintClientModule {
 
         let remint = funding.saturating_sub(deficit);
 
-        let fee = builder.total_fee();
+        let tx_fee = builder.total_fee();
         let tx = builder.build();
 
         let txid = tx.compute_txid();
@@ -741,7 +837,12 @@ impl MintClientModule {
             &dbtx,
             account,
             operation,
-            crate::TxCreateEvent { txid, remint, fee },
+            crate::TxCreateEvent {
+                txid,
+                remint,
+                tx_fee,
+                app_fee,
+            },
         );
 
         issuance_requests.extend(change_requests);

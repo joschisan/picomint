@@ -518,7 +518,7 @@ impl LightningClientModule {
     /// shared, so each extra account costs one ECDH per contract rather than
     /// another sweep.
     async fn receive_scan(module: LightningClientModule) {
-        let keys = Account::ALL
+        let keys = Account::USER_ACCOUNTS
             .map(|account| (account, module.secret.receive_keypair(account).secret_key()));
 
         loop {

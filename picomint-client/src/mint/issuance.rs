@@ -15,6 +15,10 @@ use super::secret::MintSecret;
 /// that depends on the answer.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct NoteIssuance {
+    /// Balance the finished note settles into. Carried rather than derived,
+    /// so a transaction whose outputs are not all destined for the same
+    /// account still files each one where it belongs.
+    pub account: Account,
     pub counter: u64,
     pub keypair: Keypair,
     pub blinding_key: BlindingKey,
@@ -23,6 +27,7 @@ pub struct NoteIssuance {
 impl NoteIssuance {
     pub fn new(account: Account, counter: u64, mint_secret: &MintSecret) -> Self {
         Self {
+            account,
             counter,
             keypair: mint_secret.note_nonce_keypair(account, counter),
             blinding_key: mint_secret.note_blinding_key(account, counter),
@@ -78,6 +83,10 @@ impl NoteIssuanceRequest {
             keypair: self.issuance.keypair,
             signature: unblind_signature(self.issuance.blinding_key, signature),
         }
+    }
+
+    pub fn account(&self) -> Account {
+        self.issuance.account
     }
 
     pub fn nonce(&self) -> XOnlyPublicKey {
