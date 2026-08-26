@@ -109,9 +109,9 @@ impl GatewayClientFactory {
         self.db.begin_read().get(&ClientConfigTable, federation)
     }
 
-    /// Join a federation and persist its config. The `Client` itself is
-    /// brought up lazily on first use via [`AppState::select_client`], which
-    /// is also when whatever the join's scan found is reissued. Errors if a
+    /// Join a federation, persisting its config alongside whatever the scan
+    /// found. The `Client` itself is brought up lazily on first use via
+    /// [`AppState::select_client`], and opens on that balance. Errors if a
     /// config for this federation is already persisted.
     ///
     /// The scan matters here as much as it does for a wallet: a gateway
