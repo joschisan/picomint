@@ -302,14 +302,7 @@ impl TestEnv {
             .expect("the primary account was scanned");
 
         let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
-        let client = Client::new(
-            self.endpoint.clone(),
-            db,
-            logger,
-            &mnemonic,
-            config,
-            CLIENT_FEE_PPM,
-        );
+        let client = Client::new(self.endpoint.clone(), db, logger, &mnemonic, config, None);
 
         info!("Restored client-{n}");
 
@@ -364,7 +357,7 @@ async fn build_client(
     let config = picomint_client::download(&endpoint, &invite_code).await?;
 
     let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
-    let client = Client::new(endpoint, db, logger, &mnemonic, config, CLIENT_FEE_PPM);
+    let client = Client::new(endpoint, db, logger, &mnemonic, config, None);
 
     info!("Created client-{n}");
     Ok(client)

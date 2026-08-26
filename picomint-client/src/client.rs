@@ -16,6 +16,7 @@ use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
+use picomint_core::fee::FeeConfig;
 use picomint_eventlog::{EventLogEntry, EventLogId, EventLogger};
 use picomint_redb::Database;
 use tracing::debug;
@@ -67,19 +68,18 @@ impl Client {
     /// persists `config` and marks the federation as added. The caller gets
     /// the config from [`crate::download`] and owns persisting it.
     ///
-    /// `fee_ppm` is the integrator's cut, in parts per million of the value
-    /// every transaction this client builds moves, paid into
-    /// [`Account::AppFee`] as an output of that same transaction. Pass zero to
-    /// charge nothing. Collecting is not the library's business: the fee
-    /// account holds an ordinary balance, spent through the same API as any
-    /// other account.
+    /// `fee` is the integrator's cut: [`FeeConfig::ppm`] parts per million of
+    /// the value every transaction this client builds moves, paid into
+    /// [`Account::AppFee`] as an output of that same transaction and swept
+    /// from there to [`FeeConfig::lnurl`] as it accumulates. `None` charges
+    /// nothing and starts no sweep.
     pub fn new(
         endpoint: Endpoint,
         db: Database,
         logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
-        fee_ppm: u64,
+        fee: Option<FeeConfig>,
     ) -> Arc<Self> {
         Self::build(
             endpoint,
@@ -87,7 +87,7 @@ impl Client {
             logger,
             mnemonic,
             config,
-            fee_ppm,
+            fee,
             LnChoice::Regular,
         )
     }
@@ -106,7 +106,15 @@ impl Client {
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
     ) -> Arc<Self> {
-        Self::build(endpoint, db, logger, mnemonic, config, 0, LnChoice::Gateway)
+        Self::build(
+            endpoint,
+            db,
+            logger,
+            mnemonic,
+            config,
+            None,
+            LnChoice::Gateway,
+        )
     }
 
     fn build(
@@ -115,7 +123,7 @@ impl Client {
         logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
-        fee_ppm: u64,
+        fee: Option<FeeConfig>,
         ln_choice: LnChoice,
     ) -> Arc<Self> {
         debug!(
@@ -145,7 +153,7 @@ impl Client {
             config.mint.clone(),
             mint_context,
             client_secret.mint_secret(),
-            fee_ppm,
+            fee.as_ref().map_or(0, |fee| fee.ppm),
             &tg,
         ));
 
@@ -211,6 +219,17 @@ impl Client {
         });
 
         client.tg.spawn(Self::refresh_expiry_status(client.clone()));
+
+        // Only when there is a cut to collect: a client that charges nothing
+        // has nothing accruing in the account, and a sweep would wake every
+        // half minute to read a balance that is always zero.
+        if let Some(fee) = fee {
+            client.tg.spawn(crate::fee::sweep(
+                client.clone(),
+                Account::AppFee,
+                fee.lnurl,
+            ));
+        }
 
         client
     }

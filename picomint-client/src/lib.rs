@@ -53,6 +53,8 @@ mod connection;
 pub mod executor;
 /// Federation expiry-status cache + refresh.
 pub mod expiry;
+/// Paying out a collected cut over Lightning.
+mod fee;
 /// Gateway lightning module (mounted by the gateway daemon).
 pub mod gw;
 /// Lightning module client.
