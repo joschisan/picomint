@@ -41,6 +41,15 @@ pub const GW_LN_PORT: u16 = 9735;
 pub const TEST_LDK_PORT: u16 = 9736;
 pub const LNURL_DAEMON_PORT: u16 = 28176;
 
+/// Integrator's cut every test client charges itself, in parts per million.
+///
+/// Non-zero so the whole suite runs against a client that pays a cut on
+/// every transaction it builds — the fee outputs, their counters and their
+/// issuance ride along with each of mint, wallet and ln rather than needing
+/// a scenario of their own. One percent, high enough that a cut on the
+/// smallest amount the suite moves still buys a note.
+pub const CLIENT_FEE_PPM: u64 = 10_000;
+
 const BTC_RPC_USER: &str = "bitcoin";
 const BTC_RPC_PASS: &str = "bitcoin";
 
@@ -259,7 +268,14 @@ impl TestEnv {
         dbtx.commit();
 
         let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
-        let client = Client::new(self.endpoint.clone(), db, logger, &mnemonic, config, 0);
+        let client = Client::new(
+            self.endpoint.clone(),
+            db,
+            logger,
+            &mnemonic,
+            config,
+            CLIENT_FEE_PPM,
+        );
 
         info!("Restored client-{n}");
 
@@ -314,7 +330,7 @@ async fn build_client(
     let config = picomint_client::download(&endpoint, &invite_code).await?;
 
     let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
-    let client = Client::new(endpoint, db, logger, &mnemonic, config, 0);
+    let client = Client::new(endpoint, db, logger, &mnemonic, config, CLIENT_FEE_PPM);
 
     info!("Created client-{n}");
     Ok(client)
