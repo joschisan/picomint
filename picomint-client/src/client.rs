@@ -218,16 +218,21 @@ impl Client {
             tg,
         });
 
-        client.tg.spawn(Self::refresh_operator_fee(client.clone()));
-        client.tg.spawn(Self::refresh_expiry_status(client.clone()));
+        // Neither cut applies to a gateway, and neither could be collected by
+        // one if it did: paying an lnurl needs the lightning module this
+        // flavor mounts a gateway in place of. Never reading the federation's
+        // announcement is what makes that true rather than merely intended —
+        // an unread announcement is an uncharged cut, so nothing accrues in
+        // an account nothing could sweep.
+        if matches!(client.ln, LnFlavor::Regular(_)) {
+            client.tg.spawn(Self::refresh_operator_fee(client.clone()));
 
-        // The federation's cut needs no configuring here — a client charges
-        // it if and only if the guardians announce one, so the sweep runs on
-        // every client and does nothing until there is an announcement to
-        // read and a balance it produced.
-        client
-            .tg
-            .spawn(crate::fee::sweep_operator_fee(client.clone()));
+            client
+                .tg
+                .spawn(crate::fee::sweep_operator_fee(client.clone()));
+        }
+
+        client.tg.spawn(Self::refresh_expiry_status(client.clone()));
 
         // Only when there is a cut to collect: a client that charges nothing
         // has nothing accruing in the account, and a sweep would wake every
