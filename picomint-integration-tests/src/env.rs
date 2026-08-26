@@ -11,8 +11,7 @@ use bitcoincore_rpc::RpcApi;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
-use picomint_client::mint::Restore;
-use picomint_client::{Account, Client, Mnemonic};
+use picomint_client::{Client, Mnemonic};
 use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::gateway::GatewayPk;
@@ -49,19 +48,6 @@ pub const LNURL_DAEMON_PORT: u16 = 28176;
 /// a scenario of their own. One percent, high enough that a cut on the
 /// smallest amount the suite moves still buys a note.
 pub const CLIENT_FEE_PPM: u64 = 10_000;
-
-/// Every account a restore has to walk the counter space of.
-///
-/// [`Account::USER_ACCOUNTS`] is the set a counterparty can pay into, which
-/// is a different question from the one a restore asks: [`Account::AppFee`]
-/// holds notes and burns counters like any other account, it is just never a
-/// destination anyone else names.
-const ACCOUNTS: [Account; 4] = [
-    Account::PRIMARY,
-    Account::SECONDARY,
-    Account::TERTIARY,
-    Account::AppFee,
-];
 
 const BTC_RPC_USER: &str = "bitcoin";
 const BTC_RPC_PASS: &str = "bitcoin";
@@ -251,64 +237,9 @@ impl TestEnv {
         Ok(client)
     }
 
-    /// Restore a client from `mnemonic` the way an integrator would: scan the
-    /// federation before opening anything, persist the counter marks in the
-    /// same dbtx that would mark the federation as added, and only then bring
-    /// the client up on an already-consistent database.
-    ///
-    /// Every account is scanned, not just the one the caller goes on to
-    /// reissue. A counter space left at zero re-derives nonces the federation
-    /// has already signed, and the client charging a cut spends
-    /// [`Account::AppFee`]'s space on transactions made from any account —
-    /// so restoring only the user's balances would strand the fee balance and
-    /// have the very first transaction after the restore rejected for a
-    /// blinded nonce already signed.
-    ///
-    /// Returns the client and the primary account's scan. Reissuing the
-    /// restored notes is the caller's second step, via
-    /// `mint().receive(&restore.ecash())`.
-    pub async fn new_restored_client(
-        &self,
-        mnemonic: Mnemonic,
-    ) -> anyhow::Result<(Arc<Client>, Restore)> {
-        let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
-
-        let db_dir = self.data_dir.join(format!("client-{n}"));
-        tokio::fs::create_dir_all(&db_dir).await?;
-
-        let db = picomint_redb::Database::open(db_dir.join("database.redb"))?;
-
-        let config = picomint_client::download(&self.endpoint, &self.invite).await?;
-
-        let mut restores = BTreeMap::new();
-
-        for account in ACCOUNTS {
-            let restore =
-                picomint_client::restore(&self.endpoint, &mnemonic, &config, account).await?;
-
-            restores.insert(account, restore);
-        }
-
-        let dbtx = db.begin_write();
-
-        for (account, restore) in &restores {
-            picomint_client::commit_restore(&dbtx, *account, restore);
-        }
-
-        dbtx.commit();
-
-        let restore = restores
-            .remove(&Account::PRIMARY)
-            .expect("the primary account was scanned");
-
-        let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
-        let client = Client::new(self.endpoint.clone(), db, logger, &mnemonic, config, None);
-
-        info!("Restored client-{n}");
-
-        Ok((client, restore))
-    }
-
+    /// Bring up a client. Passing a `mnemonic` a previous client used against
+    /// this federation restores it — the scan is part of joining, so there is
+    /// no second entry point for it.
     pub async fn new_client(&self, mnemonic: Option<Mnemonic>) -> anyhow::Result<Arc<Client>> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
         build_client(
@@ -354,10 +285,18 @@ async fn build_client(
         None => Mnemonic::generate(12)?,
     };
 
-    let config = picomint_client::download(&endpoint, &invite_code).await?;
+    let join = picomint_client::join(&endpoint, &mnemonic, &invite_code).await?;
+
+    // The dbtx an integrator would also mark the federation as joined in, so
+    // a crash leaves the counter marks and that mark together or not at all.
+    let dbtx = db.begin_write();
+
+    join.commit(&dbtx);
+
+    dbtx.commit();
 
     let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
-    let client = Client::new(endpoint, db, logger, &mnemonic, config, None);
+    let client = Client::new(endpoint, db, logger, &mnemonic, join.config().clone(), None);
 
     info!("Created client-{n}");
     Ok(client)

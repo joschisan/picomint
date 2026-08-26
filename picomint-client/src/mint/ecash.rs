@@ -18,6 +18,8 @@ pub struct ECash {
     pub notes: Vec<SpendableNote>,
 }
 
+picomint_redb::consensus_value!(ECash);
+
 impl ECash {
     pub fn new(mint: FederationId, notes: Vec<SpendableNote>) -> Self {
         Self { mint, notes }

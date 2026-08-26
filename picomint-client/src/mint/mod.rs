@@ -20,7 +20,7 @@ use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use crate::tx::{TxSubmissionSmContext, TxSubmissionStateMachine, TxSubmissionStateMachineTable};
 use anyhow::ensure;
-use client_db::{CounterTable, NoteTable, ReceiveOperationTable};
+use client_db::{CounterTable, NoteTable, ReceiveOperationTable, RestoreTable};
 pub use events::*;
 use futures::StreamExt;
 use picomint_core::config::FederationId;
@@ -33,6 +33,7 @@ use picomint_core::{Amount, PeerId, TransactionId, wire};
 use picomint_encoding::{Decodable, Encodable};
 use tbs::{AggregatePublicKey, aggregate_signature_shares};
 use thiserror::Error;
+use tracing::warn;
 
 pub use self::ecash::ECash;
 use self::issuance::{NoteIssuance, NoteIssuanceRequest};
@@ -84,71 +85,80 @@ impl SpendableNote {
 /// Everything a seed-only scan of one account turned up: the notes it still
 /// owns, and how far its counter space was walked.
 ///
-/// Produced by [`crate::restore`], which touches no database at all. The
-/// counter goes to [`commit_restore`] in a dbtx the caller owns, alongside
-/// whatever marks the federation as added; the notes go to
-/// [`MintClientModule::receive`] as an ordinary bundle once the client is up.
-///
-/// One of these covers the single account the scan was run for. A caller
-/// restoring a whole client runs the scan once per [`Account`] and applies
-/// each result under the account it asked for.
+/// Produced by [`scan`], which touches no database at all — [`commit_scan`]
+/// is where it lands, in the dbtx [`crate::Join::commit`] was handed.
 #[derive(Debug, Clone)]
-pub struct Restore {
+pub(crate) struct Restore {
     federation: FederationId,
     notes: Vec<SpendableNote>,
     counter: u64,
 }
 
-impl Restore {
-    /// Gross value restored, before the reissuance's fees.
-    pub fn amount(&self) -> Amount {
-        self.notes.iter().map(SpendableNote::amount).sum()
-    }
-
-    pub fn federation(&self) -> FederationId {
-        self.federation
-    }
-
-    /// The restored notes as an out-of-band bundle, to hand straight to
-    /// [`MintClientModule::receive`].
-    ///
-    /// Restore and an ordinary out-of-band receive are the same operation:
-    /// notes that someone else may know traded for notes only this wallet
-    /// does. Here the someone else is the federation, which was asked about
-    /// every one of these nonces by name during the scan. Reissuing is what
-    /// makes the balance the wallet's own, so it rides the existing path
-    /// rather than a restore-shaped copy of it.
-    ///
-    /// Empty when the scan found nothing, which
-    /// [`MintClientModule::receive`] rejects with
-    /// [`ReceiveECashError::Empty`]; check [`Restore::amount`] first if a
-    /// never-used seed is a case the caller expects.
-    pub fn ecash(&self) -> ECash {
-        ECash::new(self.federation, self.notes.clone())
-    }
-}
-
-/// Persist the counter mark a [`scan`] reached for its account, in a dbtx the
-/// caller owns.
+/// Persist what a [`scan`] of `account` found, in a dbtx the caller owns.
 ///
-/// This is the whole of what restore writes locally, and it must land before
-/// the account issues anything: a restored account resuming from zero would
-/// re-derive nonces the federation has already signed, and every note behind
-/// them would be stranded. The notes themselves are not written here — they
-/// arrive through [`MintClientModule::receive`] like any other bundle.
+/// The counter mark must land before the account issues anything: an account
+/// resuming from zero would re-derive nonces the federation has already
+/// signed, and every note behind them would be stranded. That is why this
+/// shares a dbtx with whatever marks the federation as joined — a crash
+/// leaves either both or neither.
 ///
-/// `account` is the one the scan was run for — the caller named it when
-/// calling [`crate::restore`], so it is not carried on the result.
-///
-/// Belongs in the same dbtx as whatever marks the federation as added, so a
-/// crash leaves either both or neither. A caller restoring every account can
-/// commit all of their marks in that one dbtx.
-pub fn commit_restore(dbtx: &WriteTx, account: Account, restore: &Restore) {
+/// The notes are staged rather than reissued, since reissuing needs a client
+/// and this runs before there is one. [`drain_restores`] picks them up.
+pub(crate) fn commit_scan(dbtx: &WriteTx, account: Account, restore: &Restore) {
     dbtx.insert(
         &CounterTable(restore.federation),
         &account,
         &restore.counter,
     );
+
+    // A seed that never held anything scans to nothing, which is the ordinary
+    // shape of joining a federation for the first time rather than an edge
+    // case. No row, so the drain has nothing to reject.
+    if !restore.notes.is_empty() {
+        dbtx.insert(
+            &RestoreTable(restore.federation),
+            &account,
+            &ECash::new(restore.federation, restore.notes.clone()),
+        );
+    }
+}
+
+/// Reissue every staged bundle and drop its row, whether or not the
+/// reissuance was accepted.
+///
+/// Restore and an ordinary out-of-band receive are the same operation: notes
+/// that someone else may know traded for notes only this wallet does. Here
+/// the someone else is the federation, which was asked about every one of
+/// these nonces by name during the scan. Reissuing is what makes the balance
+/// the wallet's own, so it rides the existing path rather than a
+/// restore-shaped copy of it.
+///
+/// The row is dropped on rejection too, because every way
+/// [`MintClientModule::receive`] can fail here is terminal — a bundle that
+/// cannot cover its own input fees will not start being able to, and one
+/// already reissued is done. Keeping it would retry the same rejection every
+/// launch forever. Crashing between the reissuance and the drop is the one
+/// case that repeats, and it lands on the guard as
+/// [`ReceiveECashError::AlreadyAttempted`].
+pub(crate) fn drain_restores(client: &crate::Client) {
+    let federation = client.federation();
+
+    let staged: Vec<(Account, ECash)> = client
+        .db()
+        .begin_read()
+        .iter(&RestoreTable(federation), |it| it.collect());
+
+    for (account, ecash) in staged {
+        if let Err(error) = client.mint().receive(account, &ecash) {
+            warn!(%account, %error, "Restored notes could not be reissued");
+        }
+
+        let dbtx = client.db().begin_write();
+
+        dbtx.remove(&RestoreTable(federation), &account);
+
+        dbtx.commit();
+    }
 }
 
 /// Rebuild a wallet's notes from its seed, without touching a database.
@@ -1071,6 +1081,7 @@ pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
     dbtx.delete_table(&NoteTable(federation));
     dbtx.delete_table(&ReceiveOperationTable(federation));
     dbtx.delete_table(&CounterTable(federation));
+    dbtx.delete_table(&RestoreTable(federation));
     dbtx.delete_table(&MintStateMachineTable(federation));
     dbtx.delete_table(&SendStateMachineTable(federation));
 }

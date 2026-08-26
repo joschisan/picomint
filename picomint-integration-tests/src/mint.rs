@@ -56,6 +56,32 @@ fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, MintEvent
     None
 }
 
+/// Wait for the reissuance a freshly-joined client's restore staged, and
+/// return what the scan found — the gross amount, before the reissuance's
+/// fees.
+///
+/// Only sound on a client whose database is new, since it takes the first
+/// receive the log ever carried. Panics if the reissuance is rejected: a
+/// client built on a scan that turned something up has nothing else to
+/// receive, so there is no later attempt to wait for.
+async fn await_restore(client: &Arc<Client>) -> Amount {
+    let mut stream = pin!(mint_event_stream(client));
+
+    loop {
+        match stream.next().await {
+            Some((operation, MintEvent::Receive(event))) => {
+                await_tx_outcome(client, operation)
+                    .await
+                    .expect("restore reissuance should be accepted");
+
+                break event.amount;
+            }
+            Some(_) => continue,
+            None => unreachable!("stream only ends at client shutdown"),
+        }
+    }
+}
+
 /// Wait until a receive operation is fully settled. Returns:
 /// - `Ok` once both `TxAcceptEvent` AND `MintSuccessEvent` have been
 ///   observed — at that point the spendable notes have been written
@@ -180,27 +206,22 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     info!("mint: restore (expected balance {expected})");
 
-    let (restored, restore) = env.new_restored_client(receive_mnemonic.clone()).await?;
+    let restored = env.new_client(Some(receive_mnemonic.clone())).await?;
 
-    let scanned = restore.amount();
+    // Restoring is not its own entry point: the scan happened inside the join
+    // and the notes went back through the ordinary out-of-band receive as the
+    // client came up, so what the scan found is observed through the receive
+    // it produced rather than returned to the caller.
+    let scanned = await_restore(&restored).await;
 
     ensure!(
         scanned == expected,
         "restore scanned {scanned}, expected {expected}"
     );
 
-    // Second half of the restore: the scanned notes go back through the
-    // ordinary out-of-band receive, so the wallet holds them only once that
-    // reissuance settles. It re-mints under fresh outputs, leaving the balance
-    // just below `expected` by the federation's fees.
-    let operation = restored
-        .mint()
-        .receive(Account::PRIMARY, &restore.ecash())?;
-
-    await_tx_outcome(&restored, operation)
-        .await
-        .expect("restore reissuance should be accepted");
-
+    // The reissuance re-mints under fresh outputs, so the wallet holds the
+    // balance only once it settles, just below `expected` by the federation's
+    // fees.
     let swept = restored.get_balance(Account::PRIMARY);
 
     ensure!(
@@ -231,9 +252,9 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // merely short.
     info!("mint: second restore (expected balance {swept})");
 
-    let (restored, restore) = env.new_restored_client(receive_mnemonic).await?;
+    let restored = env.new_client(Some(receive_mnemonic)).await?;
 
-    let scanned = restore.amount();
+    let scanned = await_restore(&restored).await;
 
     ensure!(
         scanned == swept,

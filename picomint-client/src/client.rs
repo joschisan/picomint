@@ -218,6 +218,12 @@ impl Client {
             tg,
         });
 
+        // Whatever a join staged, if this is the first client built since one.
+        // Ordinarily a no-op read of an empty table, and it goes here rather
+        // than in the join because reissuing needs the executors the module
+        // constructors above just started.
+        crate::mint::drain_restores(&client);
+
         client.tg.spawn(Self::refresh_expiry_status(client.clone()));
 
         // Only when there is a cut to collect: a client that charges nothing
