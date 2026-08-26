@@ -11,7 +11,7 @@ use picomint_core::core::OperationId;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use tracing::info;
 
-use crate::env::TestEnv;
+use crate::env::{CLIENT_FEE_PPM, TestEnv};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -208,9 +208,14 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
         "restored balance out of range: {swept} vs {expected}"
     );
 
+    // The reissuance pays the federation for its outputs and the integrator
+    // its cut of what it claimed, so the cut is what the bound is made of and
+    // the federation's fees are the allowance on top of it.
+    let cut = Amount::from_msat(expected.msat * CLIENT_FEE_PPM / 1_000_000);
+
     let loss = expected.checked_sub(swept).expect("swept <= expected");
     ensure!(
-        loss < Amount::from_sat(50),
+        loss < cut + Amount::from_sat(50),
         "restore lost more than expected to fees: {expected} -> {swept} (loss {loss})"
     );
 
