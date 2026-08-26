@@ -43,19 +43,15 @@ impl Join {
         &self.config
     }
 
-    /// Land the join: counter marks for every account, and the notes the scan
-    /// found staged for reissuance.
+    /// Land the join: every account's counter mark and the notes its scan
+    /// found. The whole of what joining writes, so a [`crate::Client`] built
+    /// against this database afterwards opens on the restored balance.
     ///
     /// Belongs in the same dbtx that marks the federation as joined, so a
     /// crash leaves either both or neither. A wallet joined without these
     /// marks resumes from counter zero and re-derives nonces the federation
     /// has already signed, stranding every note behind them — which is why
     /// this is not a step an integrator can be handed and forget.
-    ///
-    /// The reissuance is not part of it. Those notes are ones the federation
-    /// was asked about by name during the scan, so they are traded for fresh
-    /// ones the first time a [`crate::Client`] is built against this
-    /// database, and the balance arrives when that settles.
     pub fn commit(&self, dbtx: &WriteTx) {
         for (account, restore) in &self.restores {
             crate::mint::commit_scan(dbtx, *account, restore);

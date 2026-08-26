@@ -56,32 +56,6 @@ fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, MintEvent
     None
 }
 
-/// Wait for the reissuance a freshly-joined client's restore staged, and
-/// return what the scan found — the gross amount, before the reissuance's
-/// fees.
-///
-/// Only sound on a client whose database is new, since it takes the first
-/// receive the log ever carried. Panics if the reissuance is rejected: a
-/// client built on a scan that turned something up has nothing else to
-/// receive, so there is no later attempt to wait for.
-async fn await_restore(client: &Arc<Client>) -> Amount {
-    let mut stream = pin!(mint_event_stream(client));
-
-    loop {
-        match stream.next().await {
-            Some((operation, MintEvent::Receive(event))) => {
-                await_tx_outcome(client, operation)
-                    .await
-                    .expect("restore reissuance should be accepted");
-
-                break event.amount;
-            }
-            Some(_) => continue,
-            None => unreachable!("stream only ends at client shutdown"),
-        }
-    }
-}
-
 /// Wait until a receive operation is fully settled. Returns:
 /// - `Ok` once both `TxAcceptEvent` AND `MintSuccessEvent` have been
 ///   observed — at that point the spendable notes have been written
@@ -208,53 +182,64 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     let restored = env.new_client(Some(receive_mnemonic.clone())).await?;
 
-    // Restoring is not its own entry point: the scan happened inside the join
-    // and the notes went back through the ordinary out-of-band receive as the
-    // client came up, so what the scan found is observed through the receive
-    // it produced rather than returned to the caller.
-    let scanned = await_restore(&restored).await;
+    // Restoring is not its own entry point and costs nothing: the scan ran
+    // inside the join and wrote its notes with the counter marks, so the
+    // wallet is whole the moment the client opens rather than once a
+    // reissuance settles.
+    let scanned = restored.get_balance(Account::PRIMARY);
 
     ensure!(
         scanned == expected,
         "restore scanned {scanned}, expected {expected}"
     );
 
-    // The reissuance re-mints under fresh outputs, so the wallet holds the
-    // balance only once it settles, just below `expected` by the federation's
-    // fees.
+    info!("mint: restore passed");
+
+    // Restoring writes no counters of its own, so the restored wallet has to
+    // issue past the mark before a second restore means anything. Sending a
+    // bundle and receiving it back re-mints under counters above the mark,
+    // which is the state the next scan has to cross to.
+    let ecash = restored
+        .mint()
+        .send(Account::PRIMARY, Amount::from_sat(1_000))
+        .await?;
+
+    let operation = restored.mint().receive(Account::PRIMARY, &ecash)?;
+
+    await_tx_outcome(&restored, operation)
+        .await
+        .expect("self-remint should be accepted");
+
     let swept = restored.get_balance(Account::PRIMARY);
 
     ensure!(
-        swept > Amount::ZERO && swept <= expected,
-        "restored balance out of range: {swept} vs {expected}"
+        swept > Amount::ZERO && swept < expected,
+        "remint left balance out of range: {swept} vs {expected}"
     );
 
-    // The reissuance pays the federation for its outputs and the integrator
-    // its cut of what it claimed, so the cut is what the bound is made of and
-    // the federation's fees are the allowance on top of it.
+    // The remint pays the federation for its outputs and the integrator its
+    // cut of what moved, so the cut over the whole balance is the loosest
+    // bound that still catches fees running away.
     let cut = Amount::from_msat(expected.msat * CLIENT_FEE_PPM / 1_000_000);
 
-    let loss = expected.checked_sub(swept).expect("swept <= expected");
+    let loss = expected.checked_sub(swept).expect("swept < expected");
     ensure!(
         loss < cut + Amount::from_sat(50),
-        "restore lost more than expected to fees: {expected} -> {swept} (loss {loss})"
+        "remint lost more than expected to fees: {expected} -> {swept} (loss {loss})"
     );
 
     restored.shutdown().await;
 
-    info!("mint: restore passed");
-
     // Restoring a second time is the only phase that exercises the counter
-    // mark the first restore persisted — the reissuance above re-mints the
-    // whole wallet under counters past that mark. A mark one batch too high
-    // opens a gap as wide as the one a scan refuses to cross, stranding every
-    // reissued note behind it, and the wallet comes back empty rather than
+    // mark the first restore persisted. A mark one batch too high opens a gap
+    // as wide as the one a scan refuses to cross, stranding every note the
+    // remint issued behind it, and the wallet comes back empty rather than
     // merely short.
     info!("mint: second restore (expected balance {swept})");
 
     let restored = env.new_client(Some(receive_mnemonic)).await?;
 
-    let scanned = await_restore(&restored).await;
+    let scanned = restored.get_balance(Account::PRIMARY);
 
     ensure!(
         scanned == swept,

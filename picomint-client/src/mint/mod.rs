@@ -20,7 +20,7 @@ use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use crate::tx::{TxSubmissionSmContext, TxSubmissionStateMachine, TxSubmissionStateMachineTable};
 use anyhow::ensure;
-use client_db::{CounterTable, NoteTable, ReceiveOperationTable, RestoreTable};
+use client_db::{CounterTable, NoteTable, ReceiveOperationTable};
 pub use events::*;
 use futures::StreamExt;
 use picomint_core::config::FederationId;
@@ -33,7 +33,6 @@ use picomint_core::{Amount, PeerId, TransactionId, wire};
 use picomint_encoding::{Decodable, Encodable};
 use tbs::{AggregatePublicKey, aggregate_signature_shares};
 use thiserror::Error;
-use tracing::warn;
 
 pub use self::ecash::ECash;
 use self::issuance::{NoteIssuance, NoteIssuanceRequest};
@@ -102,8 +101,14 @@ pub(crate) struct Restore {
 /// shares a dbtx with whatever marks the federation as joined — a crash
 /// leaves either both or neither.
 ///
-/// The notes are staged rather than reissued, since reissuing needs a client
-/// and this runs before there is one. [`drain_restores`] picks them up.
+/// The notes go straight into the wallet rather than through a reissuance
+/// first, so the balance is simply there when the client opens. The federation
+/// was asked about each of these nonces by name during the scan and can
+/// recognise them when they are spent — a restored wallet is linkable to its
+/// scan until the notes churn out through the change of ordinary
+/// transactions. Trading them in up front would close that, at the cost of a
+/// transaction bounded by [`Transaction::MAX_INPUTS`], which a wallet holding
+/// more notes than that could not be restored through at all.
 pub(crate) fn commit_scan(dbtx: &WriteTx, account: Account, restore: &Restore) {
     dbtx.insert(
         &CounterTable(restore.federation),
@@ -111,53 +116,12 @@ pub(crate) fn commit_scan(dbtx: &WriteTx, account: Account, restore: &Restore) {
         &restore.counter,
     );
 
-    // A seed that never held anything scans to nothing, which is the ordinary
-    // shape of joining a federation for the first time rather than an edge
-    // case. No row, so the drain has nothing to reject.
-    if !restore.notes.is_empty() {
+    for note in &restore.notes {
         dbtx.insert(
-            &RestoreTable(restore.federation),
-            &account,
-            &ECash::new(restore.federation, restore.notes.clone()),
+            &NoteTable(restore.federation),
+            &(account, note.clone()),
+            &(),
         );
-    }
-}
-
-/// Reissue every staged bundle and drop its row, whether or not the
-/// reissuance was accepted.
-///
-/// Restore and an ordinary out-of-band receive are the same operation: notes
-/// that someone else may know traded for notes only this wallet does. Here
-/// the someone else is the federation, which was asked about every one of
-/// these nonces by name during the scan. Reissuing is what makes the balance
-/// the wallet's own, so it rides the existing path rather than a
-/// restore-shaped copy of it.
-///
-/// The row is dropped on rejection too, because every way
-/// [`MintClientModule::receive`] can fail here is terminal — a bundle that
-/// cannot cover its own input fees will not start being able to, and one
-/// already reissued is done. Keeping it would retry the same rejection every
-/// launch forever. Crashing between the reissuance and the drop is the one
-/// case that repeats, and it lands on the guard as
-/// [`ReceiveECashError::AlreadyAttempted`].
-pub(crate) fn drain_restores(client: &crate::Client) {
-    let federation = client.federation();
-
-    let staged: Vec<(Account, ECash)> = client
-        .db()
-        .begin_read()
-        .iter(&RestoreTable(federation), |it| it.collect());
-
-    for (account, ecash) in staged {
-        if let Err(error) = client.mint().receive(account, &ecash) {
-            warn!(%account, %error, "Restored notes could not be reissued");
-        }
-
-        let dbtx = client.db().begin_write();
-
-        dbtx.remove(&RestoreTable(federation), &account);
-
-        dbtx.commit();
     }
 }
 
@@ -1081,7 +1045,6 @@ pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
     dbtx.delete_table(&NoteTable(federation));
     dbtx.delete_table(&ReceiveOperationTable(federation));
     dbtx.delete_table(&CounterTable(federation));
-    dbtx.delete_table(&RestoreTable(federation));
     dbtx.delete_table(&MintStateMachineTable(federation));
     dbtx.delete_table(&SendStateMachineTable(federation));
 }
