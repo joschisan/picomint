@@ -8,7 +8,6 @@ use picomint_encoding::{Decodable, Encodable};
 
 use crate::config::ConsensusConfig;
 use crate::expiry::ExpiryStatus;
-use crate::fee::FeeConfig;
 use crate::tx::{Transaction, TxError};
 
 // ── config ──────────────────────────────────────────────────────────────────
@@ -47,16 +46,6 @@ pub struct LivenessRequest;
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct LivenessResponse;
 
-// ── fee-config ──────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct FeeConfigRequest;
-
-#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct FeeConfigResponse {
-    pub fee: Option<FeeConfig>,
-}
-
 // ── expiry-status ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
@@ -74,6 +63,5 @@ pub enum CoreMethod {
     Config(ConfigRequest),
     SubmitTx(SubmitTxRequest),
     Liveness(LivenessRequest),
-    FeeConfig(FeeConfigRequest),
     ExpiryStatus(ExpiryStatusRequest),
 }
