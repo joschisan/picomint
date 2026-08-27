@@ -44,11 +44,11 @@ macro_rules! client_table {
 }
 
 /// Federation API transport
-pub mod api;
 /// Core [`Client`]
+pub mod api;
+
 mod client;
 /// Shared kept-alive iroh connection primitive (federation peers + gateways).
-mod connection;
 /// Per-module typed state machine executor
 pub mod executor;
 /// Federation expiry-status cache + refresh.
@@ -66,7 +66,6 @@ pub mod mint;
 /// Module client interface definitions
 pub mod module;
 /// Client query-consensus strategies
-pub mod query;
 /// Secret handling & derivation
 pub mod secret;
 /// Local `(TaskTracker, CancellationToken)` wrapper for client background tasks.
@@ -79,9 +78,9 @@ pub mod wallet;
 pub use iroh::Endpoint;
 
 pub use client::Client;
-pub use connection::ConnStatus;
 pub use join::{Join, join};
 pub use picomint_core::core::{Account, OperationId};
+pub use picomint_rpc::connection::ConnStatus;
 pub use secret::{Mnemonic, random as random_mnemonic};
 
 use picomint_core::{Amount, TransactionId};

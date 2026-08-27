@@ -18,6 +18,10 @@
 //! supply/return the typed response struct, the helpers handle the
 //! envelope wrap/unwrap.
 
+pub mod api;
+pub mod connection;
+pub mod query;
+
 use anyhow::{Context, anyhow};
 use futures::TryFutureExt;
 use iroh::endpoint::Connection;

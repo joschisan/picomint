@@ -38,7 +38,7 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio_util::task::AbortOnDropHandle;
 
-use crate::connection::{ConnState, connection_task, request_on_state};
+use picomint_rpc::connection::{ConnState, connection_task, request_on_state};
 
 /// One announced gateway: its pooled connection and the latest info probe,
 /// dropped together when the gateway leaves the announced set.

@@ -8,7 +8,7 @@ use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::schnorr::Signature;
 use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
-use tpe::DecryptionKeyShare;
+use tpe::{AggregatePublicKey, DecryptionKeyShare};
 
 use crate::OutPoint;
 use crate::config::FederationId;
@@ -88,6 +88,16 @@ pub struct GatewaysResponse {
     pub gateways: Vec<GatewayPk>,
 }
 
+// ── tpe-aggregate-pk ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct TpeAggregatePkRequest;
+
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct TpeAggregatePkResponse {
+    pub tpe_agg_pk: AggregatePublicKey,
+}
+
 // ── dispatch enum ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
@@ -98,6 +108,7 @@ pub enum LnMethod {
     OutgoingContractExpiry(OutgoingContractExpiryRequest),
     AwaitIncomingContracts(AwaitIncomingContractsRequest),
     Gateways(GatewaysRequest),
+    TpeAggregatePk(TpeAggregatePkRequest),
 }
 
 // ── info ────────────────────────────────────────────────────────────────────

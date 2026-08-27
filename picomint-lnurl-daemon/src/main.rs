@@ -1,14 +1,15 @@
 use std::net::SocketAddr;
 
-use anyhow::{bail, ensure};
+use anyhow::{Context, bail, ensure};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use bitcoin::hashes::sha256;
-use bitcoin::secp256k1::{self, Keypair, PublicKey, ecdh};
+use bitcoin::secp256k1::{self, Keypair, ecdh};
 use clap::Parser;
+use futures::future::select_ok;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
@@ -18,20 +19,25 @@ use picomint_core::config::FederationId;
 use picomint_core::ln::MINIMUM_INCOMING_CONTRACT_AMOUNT;
 use picomint_core::ln::contracts::IncomingOffer;
 use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
-use picomint_core::ln::lnurl::{LnurlRequest, MAX_GATEWAYS_PER_LNURL};
+use picomint_core::ln::lnurl::{LnurlRequest, MAX_GUARDIANS_PER_LNURL};
 use picomint_core::ln::methods::{
-    GatewayMethod, InfoRequest, InfoResponse, ReceiveRequest, ReceiveResponse, VerifyRequest,
+    GatewayMethod, GatewaysRequest, GatewaysResponse, InfoRequest, InfoResponse, LnMethod,
+    ReceiveRequest, ReceiveResponse, TpeAggregatePkRequest, TpeAggregatePkResponse, VerifyRequest,
     VerifyResponse as WireVerifyResponse,
 };
 use picomint_core::ln::secret::IncomingContractSecret;
+use picomint_core::methods::{CoreMethod, FederationInfoRequest, FederationInfoResponse};
+use picomint_core::module::Method;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_lnurl::{
     InvoiceResponse, LnurlResponse, PayResponse, VerifyResponse, pay_request_tag,
 };
+use picomint_rpc::api::FederationApi;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio::task::JoinSet;
+use tokio::try_join;
 use tower_http::cors;
 use tower_http::cors::CorsLayer;
 use tpe::AggregatePublicKey;
@@ -135,9 +141,9 @@ async fn invoice(
         return Json(LnurlResponse::error("Failed to decode payload"));
     };
 
-    if request.gateways.len() > MAX_GATEWAYS_PER_LNURL {
+    if request.guardians.len() > MAX_GUARDIANS_PER_LNURL {
         return Json(LnurlResponse::error(format!(
-            "Too many gateways in request (max {MAX_GATEWAYS_PER_LNURL})"
+            "Too many guardians in request (max {MAX_GUARDIANS_PER_LNURL})"
         )));
     }
 
@@ -148,21 +154,13 @@ async fn invoice(
         )));
     }
 
-    let (gateway_pk, invoice) = match create_offer_and_fetch_invoice(
-        &endpoint,
-        request.federation,
-        request.recipient_pk,
-        request.aggregate_pk,
-        request.gateways,
-        params.amount,
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(e) => {
-            return Json(LnurlResponse::error(e.to_string()));
-        }
-    };
+    let (gateway_pk, invoice) =
+        match resolve_and_fetch_invoice(&endpoint, &request, params.amount).await {
+            Ok(result) => result,
+            Err(e) => {
+                return Json(LnurlResponse::error(e.to_string()));
+            }
+        };
 
     info!(%params.amount, "Created invoice");
 
@@ -182,32 +180,28 @@ async fn invoice(
     }))
 }
 
-async fn create_offer_and_fetch_invoice(
+/// Resolve the federation from the payload's guardians, then buy an invoice
+/// from one of its currently announced gateways. Nothing perishable comes out
+/// of the lnurl itself, which is what keeps an outstanding one valid across
+/// gateway churn.
+async fn resolve_and_fetch_invoice(
     endpoint: &Endpoint,
-    federation: FederationId,
-    recipient_pk: PublicKey,
-    aggregate_pk: AggregatePublicKey,
-    gateways: Vec<GatewayPk>,
+    request: &LnurlRequest,
     amount: u64,
 ) -> anyhow::Result<(GatewayPk, Bolt11Invoice)> {
-    let ephemeral_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
+    let info = fetch_federation_info(endpoint, &request.guardians, request.info).await?;
 
-    let shared_secret =
-        ecdh::SharedSecret::new(&recipient_pk, &ephemeral_keypair.secret_key()).secret_bytes();
+    let peers = info
+        .peers
+        .iter()
+        .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
+        .collect();
 
-    let contract_secret = IncomingContractSecret::new(shared_secret);
+    let api = FederationApi::new(endpoint.clone(), peers);
 
-    let encryption_seed = contract_secret.encryption_seed();
-    let preimage = contract_secret.preimage();
-    let claim_tweak = contract_secret.claim_tweak();
+    let (aggregate_pk, gateways) = try_join!(fetch_aggregate_pk(&api), fetch_gateways(&api))?;
 
-    let claim_pk = recipient_pk
-        .mul_tweak(secp256k1::SECP256K1, &claim_tweak)
-        .expect("Tweak is valid")
-        .x_only_public_key()
-        .0;
-
-    let (gateway_info, gateway_pk) = select_gateway(endpoint, gateways, federation).await?;
+    let (gateway_info, gateway_pk) = select_gateway(endpoint, gateways, info.federation).await?;
 
     ensure!(
         gateway_info
@@ -225,6 +219,24 @@ async fn create_offer_and_fetch_invoice(
         "Amount too small"
     );
 
+    let ephemeral_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
+
+    let shared_secret =
+        ecdh::SharedSecret::new(&request.recipient, &ephemeral_keypair.secret_key()).secret_bytes();
+
+    let contract_secret = IncomingContractSecret::new(shared_secret);
+
+    let encryption_seed = contract_secret.encryption_seed();
+    let preimage = contract_secret.preimage();
+    let claim_tweak = contract_secret.claim_tweak();
+
+    let claim_pk = request
+        .recipient
+        .mul_tweak(secp256k1::SECP256K1, &claim_tweak)
+        .expect("Tweak is valid")
+        .x_only_public_key()
+        .0;
+
     let offer = IncomingOffer::new(
         aggregate_pk,
         encryption_seed,
@@ -236,13 +248,15 @@ async fn create_offer_and_fetch_invoice(
         ephemeral_keypair.public_key(),
     );
 
-    let invoice = gateway_request::<ReceiveResponse>(
-        endpoint,
-        gateway_pk,
-        GatewayMethod::Receive(ReceiveRequest { federation, offer }),
-    )
-    .await?
-    .invoice;
+    let receive = ReceiveRequest {
+        federation: info.federation,
+        offer,
+    };
+
+    let invoice =
+        gateway_request::<ReceiveResponse>(endpoint, gateway_pk, GatewayMethod::Receive(receive))
+            .await?
+            .invoice;
 
     ensure!(
         invoice.payment_hash() == &preimage.consensus_hash(),
@@ -255,6 +269,68 @@ async fn create_offer_and_fetch_invoice(
     );
 
     Ok((gateway_pk, invoice))
+}
+
+/// Take the first guardian response that hashes to the payload's commitment.
+/// That commitment is what makes a single guardian enough: one can stall or
+/// refuse, but a forged peer set will not hash. The payload carries `f + 1` of
+/// them, so one is honest and reachable whenever the federation itself is.
+///
+/// One request per guardian and no reuse, so this dials directly rather than
+/// standing up a [`FederationApi`] — and the guardians are a subset, which a
+/// federation-shaped peer set has no room for.
+async fn fetch_federation_info(
+    endpoint: &Endpoint,
+    guardians: &[iroh::PublicKey],
+    info: sha256::Hash,
+) -> anyhow::Result<FederationInfoResponse> {
+    ensure!(!guardians.is_empty(), "Lnurl names no guardians");
+
+    let attempts = guardians.iter().copied().map(|guardian| {
+        Box::pin(async move {
+            let response: FederationInfoResponse = picomint_rpc::request(
+                endpoint,
+                guardian,
+                Method::Core(CoreMethod::FederationInfo(FederationInfoRequest)),
+            )
+            .await?;
+
+            ensure!(
+                response.consensus_hash_sha256() == info,
+                "Response does not hash to the lnurl's commitment"
+            );
+
+            anyhow::Ok(response)
+        })
+    });
+
+    let response = select_ok(attempts)
+        .await
+        .context("No guardian served an info matching the lnurl's commitment")?
+        .0;
+
+    Ok(response)
+}
+
+/// Threshold-read the federation's tpe aggregate key. Not committed to by the
+/// lnurl: the peer set it is read from is, and `2f + 1` guardians agreeing on
+/// a value is the same assumption the rest of the federation already rests on.
+async fn fetch_aggregate_pk(api: &FederationApi) -> anyhow::Result<AggregatePublicKey> {
+    let response: TpeAggregatePkResponse = api
+        .request_current_consensus(Method::Ln(LnMethod::TpeAggregatePk(TpeAggregatePkRequest)))
+        .await?;
+
+    Ok(response.tpe_agg_pk)
+}
+
+/// Threshold-read the federation's announced gateway set — `2f + 1` guardians
+/// returning byte-identical lists.
+async fn fetch_gateways(api: &FederationApi) -> anyhow::Result<Vec<GatewayPk>> {
+    let response: GatewaysResponse = api
+        .request_current_consensus(Method::Ln(LnMethod::Gateways(GatewaysRequest)))
+        .await?;
+
+    Ok(response.gateways)
 }
 
 async fn select_gateway(

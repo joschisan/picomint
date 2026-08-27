@@ -314,6 +314,7 @@ impl Lightning {
                 handler_async!(await_incoming_contracts, self, req).await
             }
             LnMethod::Gateways(req) => handler!(gateways, self, req).await,
+            LnMethod::TpeAggregatePk(req) => handler!(tpe_aggregate_pk, self, req).await,
         }
     }
 }

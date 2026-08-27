@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use crate::Endpoint;
 use crate::api::FederationApi;
-use crate::connection::ConnStatus;
 use crate::gw::GatewayClientModule;
 use crate::ln::LightningClientModule;
 use crate::mint::MintClientModule;
@@ -19,6 +18,7 @@ use picomint_core::core::{Account, OperationId};
 use picomint_core::fee::FeeConfig;
 use picomint_eventlog::{EventLogEntry, EventLogId, EventLogger};
 use picomint_redb::Database;
+use picomint_rpc::connection::ConnStatus;
 use tracing::debug;
 
 /// LN-flavor selection used by the two constructors below.

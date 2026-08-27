@@ -1,8 +1,9 @@
 //! Freestanding API handlers for [`crate::consensus::api::ConsensusApi`].
 
 use picomint_core::methods::{
-    ConfigRequest, ConfigResponse, ExpiryStatusRequest, ExpiryStatusResponse, LivenessRequest,
-    LivenessResponse, SubmitTxRequest, SubmitTxResponse,
+    ConfigRequest, ConfigResponse, ExpiryStatusRequest, ExpiryStatusResponse,
+    FederationInfoRequest, FederationInfoResponse, LivenessRequest, LivenessResponse,
+    SubmitTxRequest, SubmitTxResponse,
 };
 
 use crate::consensus::api::ConsensusApi;
@@ -35,4 +36,14 @@ pub fn expiry_status(
     Ok(ExpiryStatusResponse {
         status: api.expiry_status_ui(),
     })
+}
+
+/// Ungated, unlike [`config`]: the federation id and peer set are already held
+/// by any joined client, and a caller that got them out of band can pin them
+/// against a hash. Serving them grants nothing an invite would otherwise gate.
+pub fn federation_info(
+    api: &ConsensusApi,
+    _: FederationInfoRequest,
+) -> Result<FederationInfoResponse, String> {
+    Ok(FederationInfoResponse::new(&api.cfg.consensus))
 }

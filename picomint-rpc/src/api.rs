@@ -7,11 +7,6 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{Retryable, networking_backoff};
-use picomint_core::expiry::ExpiryStatus;
-use picomint_core::methods::{
-    CoreMethod, ExpiryStatusRequest, ExpiryStatusResponse, LivenessRequest, LivenessResponse,
-    SubmitTxRequest, SubmitTxResponse,
-};
 use picomint_core::module::Method;
 use picomint_core::{NumPeers, NumPeersExt, PeerId};
 use picomint_encoding::Decodable;
@@ -22,9 +17,14 @@ use tracing::{debug, instrument};
 
 use crate::connection::{ConnState, ConnStatus, connection_task, request_on_state};
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
-use crate::tx::{Transaction, TxError};
 
-/// Federation API client.
+/// Federation API client: a pool of kept-alive connections to a federation's
+/// guardians, with the query strategies for fanning a request across them.
+///
+/// Spans the whole federation — [`Self::request_with_strategy`] gives up once
+/// `f + 1` peers have errored, so the peer set must have a federation's shape.
+/// A one-shot request to some subset of guardians wants [`crate::request`]
+/// instead, which pays for a connection it does not keep.
 ///
 /// Spawns one background [`connection_task`] per peer at construction that
 /// eagerly opens — and reconnects — a single kept-alive iroh connection,
@@ -56,19 +56,19 @@ impl FederationApi {
         }
     }
 
-    /// All federation peers.
+    /// Every peer in the pool.
     pub fn all_peers(&self) -> BTreeSet<PeerId> {
         self.peer_node_ids.keys().copied().collect()
     }
 
-    /// Federation size, derived from the peer set.
+    /// Federation size, derived from the peer set. Panics unless the pool
+    /// spans a whole federation — a subset has no such shape.
     pub fn num_peers(&self) -> NumPeers {
         self.peer_node_ids.to_num_peers()
     }
 
-    /// Iroh endpoint owned by this client. Re-used by module code that
-    /// needs to talk to other iroh nodes (e.g. the Lightning module
-    /// dialing gateways).
+    /// Iroh endpoint this pool dials over. Re-used by callers that need to
+    /// talk to other iroh nodes (e.g. the Lightning module dialing gateways).
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
     }
@@ -242,42 +242,5 @@ impl FederationApi {
     {
         self.request_with_strategy_retry(ThresholdConsensus::new(self.num_peers()), method)
             .await
-    }
-
-    /// Submit a transaction and await the final outcome. The server long-
-    /// polls until the tx is either accepted or becomes invalid.
-    pub async fn submit_tx(&self, tx: Transaction) -> Result<(), TxError> {
-        self.request_current_consensus_retry::<SubmitTxResponse>(Method::Core(
-            CoreMethod::SubmitTx(SubmitTxRequest { tx }),
-        ))
-        .await
-        .outcome
-    }
-
-    /// Lightweight liveness check — succeeds if a threshold of guardians is
-    /// reachable.
-    pub async fn liveness(&self) -> anyhow::Result<LivenessResponse> {
-        self.request_current_consensus(Method::Core(CoreMethod::Liveness(LivenessRequest)))
-            .await
-    }
-
-    /// Single-peer liveness check — succeeds if `peer` answers. Useful for
-    /// surfacing per-peer connection status (e.g. dashboards) where the
-    /// threshold-consensus variant would mask which peer is offline.
-    pub async fn liveness_peer(&self, peer: PeerId) -> anyhow::Result<LivenessResponse> {
-        self.request_single_peer(Method::Core(CoreMethod::Liveness(LivenessRequest)), peer)
-            .await
-    }
-
-    /// Fetch the federation's announced expiry status, threshold-
-    /// consensus verified. Returns `Some(_)` only if a threshold of
-    /// guardians return the byte-equal value, `None` if all guardians
-    /// agree no expiry has been announced.
-    pub async fn expiry_status(&self) -> anyhow::Result<Option<ExpiryStatus>> {
-        self.request_current_consensus::<ExpiryStatusResponse>(Method::Core(
-            CoreMethod::ExpiryStatus(ExpiryStatusRequest),
-        ))
-        .await
-        .map(|r| r.status)
     }
 }
