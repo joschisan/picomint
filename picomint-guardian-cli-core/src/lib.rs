@@ -136,7 +136,7 @@ pub struct WalletFeerateResponse {
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct LnGatewayAddRequest {
     /// Gateway iroh public key (base32-encoded).
-    pub gateway_pk: picomint_core::ln::gateway::GatewayPk,
+    pub pk: picomint_core::ln::gateway::GatewayPk,
     /// Display name to identify the gateway by.
     pub name: String,
 }
@@ -144,13 +144,13 @@ pub struct LnGatewayAddRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct LnGatewayRemoveRequest {
     /// Gateway iroh public key (base32-encoded).
-    pub gateway_pk: picomint_core::ln::gateway::GatewayPk,
+    pub pk: picomint_core::ln::gateway::GatewayPk,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LnGatewayListEntry {
     /// Gateway iroh public key (base32-encoded).
-    pub gateway_pk: picomint_core::ln::gateway::GatewayPk,
+    pub pk: picomint_core::ln::gateway::GatewayPk,
     /// Display name to identify the gateway by.
     pub name: String,
 }

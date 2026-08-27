@@ -11,18 +11,18 @@ use crate::consensus::api::ConsensusApi;
 pub const LN_ADD_ROUTE: &str = "/ln/add";
 pub const LN_REMOVE_ROUTE: &str = "/ln/remove";
 
-// Form for adding a gateway. `gateway_pk` is kept as a raw string so a
+// Form for adding a gateway. `pk` is kept as a raw string so a
 // malformed value renders an inline error instead of the extractor
 // rejecting the request with a 422.
 #[derive(serde::Deserialize)]
 pub struct AddGatewayForm {
-    pub gateway_pk: String,
+    pub pk: String,
     pub name: String,
 }
 
 #[derive(serde::Deserialize)]
 pub struct RemoveGatewayForm {
-    pub gateway_pk: String,
+    pub pk: String,
 }
 
 // Function to render the Lightning module UI section
@@ -71,13 +71,13 @@ fn gateway_section(gateways: &[(GatewayPk, String)], error: Option<&str>) -> Mar
                     }
                 } @else {
                     div class="list-group" {
-                        @for (gateway_pk, name) in gateways {
+                        @for (pk, name) in gateways {
                             div class="list-group-item d-flex align-items-center gap-2" {
                                 span class="text-truncate flex-grow-1" style="min-width: 0;" {
                                     (name)
                                 }
                                 form hx-post=(LN_REMOVE_ROUTE) hx-target="#gateway-section" hx-swap="innerHTML" class="flex-shrink-0" {
-                                    input type="hidden" name="gateway_pk" value=(picomint_base32::encode(gateway_pk));
+                                    input type="hidden" name="pk" value=(picomint_base32::encode(pk));
                                     button type="submit" class="btn btn-sm btn-danger" {
                                         "Remove"
                                     }
@@ -103,7 +103,7 @@ fn gateway_section(gateways: &[(GatewayPk, String)], error: Option<&str>) -> Mar
                             type="text"
                             class="form-control"
                             id="gateway-node-id"
-                            name="gateway_pk"
+                            name="pk"
                             placeholder="Enter Gateway Code"
                             required;
                     }
@@ -135,7 +135,7 @@ pub async fn post_add(
 ) -> impl IntoResponse {
     let gateways = state.server.ln.gateways_ui();
 
-    let Ok(gateway_pk) = form.gateway_pk.trim().parse::<GatewayPk>() else {
+    let Ok(pk) = form.pk.trim().parse::<GatewayPk>() else {
         return Html(gateway_section(&gateways, Some("Invalid gateway code")).into_string());
     };
 
@@ -145,7 +145,7 @@ pub async fn post_add(
         return Html(gateway_section(&gateways, Some("Name must not be empty")).into_string());
     }
 
-    state.server.ln.add_gateway_ui(gateway_pk, name).await;
+    state.server.ln.add_gateway_ui(pk, name).await;
 
     let gateways = state.server.ln.gateways_ui();
 
@@ -158,8 +158,8 @@ pub async fn post_remove(
     State(state): State<Arc<ConsensusApi>>,
     Form(form): Form<RemoveGatewayForm>,
 ) -> impl IntoResponse {
-    if let Ok(gateway_pk) = form.gateway_pk.trim().parse::<GatewayPk>() {
-        state.server.ln.remove_gateway_ui(gateway_pk).await;
+    if let Ok(pk) = form.pk.trim().parse::<GatewayPk>() {
+        state.server.ln.remove_gateway_ui(pk).await;
     }
 
     let gateways = state.server.ln.gateways_ui();

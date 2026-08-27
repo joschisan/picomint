@@ -171,10 +171,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         Json(payload): Json<LnGatewayAddRequest>,
     ) -> Result<Json<bool>, CliError> {
         Ok(Json(
-            api.server
-                .ln
-                .add_gateway_ui(payload.gateway_pk, payload.name)
-                .await,
+            api.server.ln.add_gateway_ui(payload.pk, payload.name).await,
         ))
     }
 
@@ -182,9 +179,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<LnGatewayRemoveRequest>,
     ) -> Result<Json<bool>, CliError> {
-        Ok(Json(
-            api.server.ln.remove_gateway_ui(payload.gateway_pk).await,
-        ))
+        Ok(Json(api.server.ln.remove_gateway_ui(payload.pk).await))
     }
 
     async fn ln_gateway_list(
@@ -195,7 +190,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
                 .ln
                 .gateways_ui()
                 .into_iter()
-                .map(|(gateway_pk, name)| LnGatewayListEntry { gateway_pk, name })
+                .map(|(pk, name)| LnGatewayListEntry { pk, name })
                 .collect(),
         ))
     }
