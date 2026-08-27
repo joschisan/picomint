@@ -124,7 +124,7 @@ pub fn gateways(ln: &Lightning, _: GatewaysRequest) -> Result<GatewaysResponse, 
         gateways: ln
             .db
             .begin_read()
-            .iter(&GatewayTable, |r| r.map(|(pk, ())| pk).collect()),
+            .iter(&GatewayTable, |r| r.map(|(pk, _)| pk).collect()),
     })
 }
 

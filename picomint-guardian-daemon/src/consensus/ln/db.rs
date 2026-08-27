@@ -34,9 +34,11 @@ table!(
     "ln-preimage",
 );
 
+// The value is an operator-chosen display name; it is guardian-local and
+// never served to clients, only the set of keys is consensus-relevant.
 table!(
     GatewayTable,
-    GatewayPk => (),
+    GatewayPk => String,
     "ln-gateway-pk",
 );
 

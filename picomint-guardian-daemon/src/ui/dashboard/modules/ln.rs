@@ -11,11 +11,17 @@ use crate::consensus::api::ConsensusApi;
 pub const LN_ADD_ROUTE: &str = "/ln/add";
 pub const LN_REMOVE_ROUTE: &str = "/ln/remove";
 
-// Form for gateway management. `gateway_pk` is kept as a raw string so a
+// Form for adding a gateway. `gateway_pk` is kept as a raw string so a
 // malformed value renders an inline error instead of the extractor
 // rejecting the request with a 422.
 #[derive(serde::Deserialize)]
-pub struct GatewayForm {
+pub struct AddGatewayForm {
+    pub gateway_pk: String,
+    pub name: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct RemoveGatewayForm {
     pub gateway_pk: String,
 }
 
@@ -51,54 +57,68 @@ pub async fn render(lightning: &crate::consensus::ln::Lightning) -> Markup {
     }
 }
 
-// Swappable gateway list + add form. `error`, when set, renders an inline
-// alert above the input. Returned both by `render` for the initial page
-// and by the add/remove handlers as the htmx fragment.
-fn gateway_section(gateways: &[GatewayPk], error: Option<&str>) -> Markup {
+// Swappable gateway management split: list of named gateways on the left,
+// add form on the right, divided on md+ screens. `error`, when set, renders
+// an inline alert above the form inputs. Returned both by `render` for the
+// initial page and by the add/remove handlers as the htmx fragment.
+fn gateway_section(gateways: &[(GatewayPk, String)], error: Option<&str>) -> Markup {
     html! {
-        // Add gateway form — input and button side by side, full width
-        form hx-post=(LN_ADD_ROUTE) hx-target="#gateway-section" hx-swap="innerHTML" {
-            div class="alert alert-warning mb-3" {
-                "All guardians have to enter the exact same set of gateway node ids for them to be served to clients."
-            }
-            @if let Some(error) = error {
-                div class="alert alert-danger mb-3" { (error) }
-            }
-            div class="d-flex gap-2" {
-                input
-                    type="text"
-                    class="form-control flex-grow-1"
-                    id="gateway-node-id"
-                    name="gateway_pk"
-                    placeholder="Enter Gateway Code"
-                    required;
-                button type="submit" class="btn btn-primary" style="min-width: 150px;" {
-                    "Add Gateway"
+        div class="row g-4" {
+            div class="col-md" {
+                @if gateways.is_empty() {
+                    div class="text-center p-4" {
+                        p { "You need a Lightning gateway to connect to your federation and then add it here in the dashboard to enable Lightning payments for your users." }
+                    }
+                } @else {
+                    div class="list-group" {
+                        @for (gateway_pk, name) in gateways {
+                            div class="list-group-item d-flex align-items-center gap-2" {
+                                span class="text-truncate flex-grow-1" style="min-width: 0;" {
+                                    (name)
+                                }
+                                form hx-post=(LN_REMOVE_ROUTE) hx-target="#gateway-section" hx-swap="innerHTML" class="flex-shrink-0" {
+                                    input type="hidden" name="gateway_pk" value=(picomint_base32::encode(gateway_pk));
+                                    button type="submit" class="btn btn-sm btn-danger" {
+                                        "Remove"
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
-        }
-
-        // Gateway list below the form, or empty-state message. Each code
-        // truncates with an ellipsis (`text-truncate` + `min-width: 0` on
-        // the flex child) so the Remove button is never pushed off a
-        // narrow viewport.
-        @if gateways.is_empty() {
-            div class="text-center p-4" {
-                p { "You need a Lightning gateway to connect to your federation and then add its URL here in the dashboard to enable Lightning payments for your users. You can either run your own gateway or reach out to the Picomint team on " a href="https://chat.picomint.org/" { "Discord" } " - we are running our own gateway and are happy to get you started." }
+            div class="col-md-auto d-none d-md-block p-0" {
+                div class="vr h-100" {}
             }
-        } @else {
-            div class="list-group mt-4" {
-                @for gateway in gateways {
-                    @let encoded = picomint_base32::encode(gateway);
-                    div class="list-group-item d-flex align-items-center gap-2" {
-                        span class="text-truncate flex-grow-1" style="min-width: 0;" {
-                            (encoded)
-                        }
-                        form hx-post=(LN_REMOVE_ROUTE) hx-target="#gateway-section" hx-swap="innerHTML" class="flex-shrink-0" {
-                            input type="hidden" name="gateway_pk" value=(encoded);
-                            button type="submit" class="btn btn-sm btn-danger" {
-                                "Remove"
-                            }
+            div class="col-md" {
+                form hx-post=(LN_ADD_ROUTE) hx-target="#gateway-section" hx-swap="innerHTML" {
+                    div class="alert alert-warning mb-3" {
+                        "All guardians have to enter the exact same set of gateways."
+                    }
+                    @if let Some(error) = error {
+                        div class="alert alert-danger mb-3" { (error) }
+                    }
+                    div class="mb-3" {
+                        input
+                            type="text"
+                            class="form-control"
+                            id="gateway-node-id"
+                            name="gateway_pk"
+                            placeholder="Enter Gateway Code"
+                            required;
+                    }
+                    div class="mb-3" {
+                        input
+                            type="text"
+                            class="form-control"
+                            id="gateway-name"
+                            name="name"
+                            placeholder="Enter Nickname"
+                            required;
+                    }
+                    div class="d-grid" {
+                        button type="submit" class="btn btn-primary" {
+                            "Add Gateway"
                         }
                     }
                 }
@@ -111,15 +131,21 @@ fn gateway_section(gateways: &[GatewayPk], error: Option<&str>) -> Markup {
 // failure, re-renders the section with an inline error.
 pub async fn post_add(
     State(state): State<Arc<ConsensusApi>>,
-    Form(form): Form<GatewayForm>,
+    Form(form): Form<AddGatewayForm>,
 ) -> impl IntoResponse {
-    let Ok(gateway_pk) = form.gateway_pk.trim().parse::<GatewayPk>() else {
-        let gateways = state.server.ln.gateways_ui();
+    let gateways = state.server.ln.gateways_ui();
 
+    let Ok(gateway_pk) = form.gateway_pk.trim().parse::<GatewayPk>() else {
         return Html(gateway_section(&gateways, Some("Invalid gateway code")).into_string());
     };
 
-    state.server.ln.add_gateway_ui(gateway_pk).await;
+    let name = form.name.trim().to_string();
+
+    if name.is_empty() {
+        return Html(gateway_section(&gateways, Some("Name must not be empty")).into_string());
+    }
+
+    state.server.ln.add_gateway_ui(gateway_pk, name).await;
 
     let gateways = state.server.ln.gateways_ui();
 
@@ -130,7 +156,7 @@ pub async fn post_add(
 // encoded key from the list, so a parse failure is a no-op.
 pub async fn post_remove(
     State(state): State<Arc<ConsensusApi>>,
-    Form(form): Form<GatewayForm>,
+    Form(form): Form<RemoveGatewayForm>,
 ) -> impl IntoResponse {
     if let Ok(gateway_pk) = form.gateway_pk.trim().parse::<GatewayPk>() {
         state.server.ln.remove_gateway_ui(gateway_pk).await;

@@ -87,13 +87,14 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     use axum::routing::post;
     use picomint_core::expiry::ExpiryStatus;
     use picomint_guardian_cli_core::{
-        AuditResponse, ExpirySetRequest, InviteRequest, InviteResponse, LnGatewayRequest,
-        ROUTE_AUDIT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
-        ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST,
-        ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_WALLET_BLOCK_COUNT,
-        ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
-        ROUTE_MODULE_WALLET_TOTAL_VALUE, ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT,
-        WalletBlockCountResponse, WalletFeerateResponse, WalletTotalValueResponse,
+        AuditResponse, ExpirySetRequest, InviteRequest, InviteResponse, LnGatewayAddRequest,
+        LnGatewayListEntry, LnGatewayRemoveRequest, ROUTE_AUDIT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
+        ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
+        ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
+        ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
+        ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
+        ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT, WalletBlockCountResponse,
+        WalletFeerateResponse, WalletTotalValueResponse,
     };
 
     async fn config(
@@ -167,14 +168,19 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
 
     async fn ln_gateway_add(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-        Json(payload): Json<LnGatewayRequest>,
+        Json(payload): Json<LnGatewayAddRequest>,
     ) -> Result<Json<bool>, CliError> {
-        Ok(Json(api.server.ln.add_gateway_ui(payload.gateway_pk).await))
+        Ok(Json(
+            api.server
+                .ln
+                .add_gateway_ui(payload.gateway_pk, payload.name)
+                .await,
+        ))
     }
 
     async fn ln_gateway_remove(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-        Json(payload): Json<LnGatewayRequest>,
+        Json(payload): Json<LnGatewayRemoveRequest>,
     ) -> Result<Json<bool>, CliError> {
         Ok(Json(
             api.server.ln.remove_gateway_ui(payload.gateway_pk).await,
@@ -183,8 +189,15 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
 
     async fn ln_gateway_list(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<Vec<picomint_core::ln::gateway::GatewayPk>>, CliError> {
-        Ok(Json(api.server.ln.gateways_ui()))
+    ) -> Result<Json<Vec<LnGatewayListEntry>>, CliError> {
+        Ok(Json(
+            api.server
+                .ln
+                .gateways_ui()
+                .into_iter()
+                .map(|(gateway_pk, name)| LnGatewayListEntry { gateway_pk, name })
+                .collect(),
+        ))
     }
 
     async fn expiry_set(
