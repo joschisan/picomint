@@ -249,6 +249,7 @@ impl ConsensusApi {
             CoreMethod::Config(req) => handler!(config, self, req).await,
             CoreMethod::Liveness(req) => handler!(liveness, self, req).await,
             CoreMethod::ExpiryStatus(req) => handler!(expiry_status, self, req).await,
+            CoreMethod::FederationInfo(req) => handler!(federation_info, self, req).await,
         }
     }
 }

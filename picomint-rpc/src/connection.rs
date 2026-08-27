@@ -1,6 +1,6 @@
 //! A single kept-alive, self-reconnecting iroh connection, published as a
 //! `watch<Option<ConnState>>`. Both the federation peer pool ([`crate::api`])
-//! and the gateway connection pool ([`crate::ln`]) are just this primitive
+//! and the client's gateway connection pool are just this primitive
 //! mapped over a set of node ids — the federation over its fixed peer set, the
 //! gateway pool over an append-only set of announced gateways.
 
@@ -10,6 +10,8 @@ use anyhow::anyhow;
 use iroh::endpoint::{Connection, PathId};
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{BackoffBuilder, networking_backoff};
+
+use crate::{ALPN, request_on_connection};
 use picomint_encoding::{Decodable, Encodable};
 use tokio::sync::watch;
 use tokio::time::sleep;
@@ -46,35 +48,43 @@ impl ConnState {
     }
 }
 
-/// Keep one iroh connection to `node_id` alive forever, publishing each
-/// transition on `state`. Connect, announce `Connected`, block on
-/// `Connection::closed`, announce `Disconnected`, then reconnect. Connect
-/// failures back off via `networking_backoff` (reset on success); the loop
-/// never terminates — it ends only when the watch receiver is dropped, which
-/// makes `send_replace` a no-op and the task is then cancelled with its
-/// runtime.
+/// Keep one iroh connection to `node_id` alive, publishing each transition on
+/// `state`. Connect, announce `Connected`, block on `Connection::closed`,
+/// announce `Disconnected`, then reconnect. Connect failures back off via
+/// `networking_backoff`, reset on success.
+///
+/// Returns once every receiver has been dropped, so a pool that goes out of
+/// scope takes its tasks with it. Without that a short-lived pool would leak
+/// one reconnecting task per node for the life of the process.
 pub async fn connection_task(
     node_id: PublicKey,
     endpoint: Endpoint,
     state: watch::Sender<Option<ConnState>>,
 ) {
-    let mut backoff = networking_backoff().build();
+    let reconnect = async {
+        let mut backoff = networking_backoff().build();
 
-    loop {
-        match endpoint.connect(node_id, picomint_rpc::ALPN).await {
-            Ok(conn) => {
-                backoff = networking_backoff().build();
+        loop {
+            match endpoint.connect(node_id, ALPN).await {
+                Ok(conn) => {
+                    backoff = networking_backoff().build();
 
-                state.send_replace(Some(ConnState::Connected(conn.clone())));
+                    state.send_replace(Some(ConnState::Connected(conn.clone())));
 
-                conn.closed().await;
+                    conn.closed().await;
 
-                state.send_replace(Some(ConnState::Disconnected));
-            }
-            Err(_) => {
-                sleep(backoff.next().expect("networking_backoff retries forever")).await;
+                    state.send_replace(Some(ConnState::Disconnected));
+                }
+                Err(_) => {
+                    sleep(backoff.next().expect("networking_backoff retries forever")).await;
+                }
             }
         }
+    };
+
+    tokio::select! {
+        () = state.closed() => {}
+        () = reconnect => {}
     }
 }
 
@@ -98,5 +108,5 @@ pub async fn request_on_state<R: Decodable>(
         return Err(anyhow!("Not connected"));
     };
 
-    picomint_rpc::request_on_connection(&conn, method).await
+    request_on_connection(&conn, method).await
 }

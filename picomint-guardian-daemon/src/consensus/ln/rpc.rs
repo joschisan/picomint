@@ -6,7 +6,8 @@ use picomint_core::ln::methods::{
     AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitPreimageRequest,
     AwaitPreimageResponse, ConsensusBlockCountRequest, ConsensusBlockCountResponse,
     DecryptionKeyShareRequest, DecryptionKeyShareResponse, GatewaysRequest, GatewaysResponse,
-    OutgoingContractExpiryRequest, OutgoingContractExpiryResponse,
+    OutgoingContractExpiryRequest, OutgoingContractExpiryResponse, TpeAggregatePkRequest,
+    TpeAggregatePkResponse,
 };
 use tokio::time::timeout;
 
@@ -124,5 +125,17 @@ pub fn gateways(ln: &Lightning, _: GatewaysRequest) -> Result<GatewaysResponse, 
             .db
             .begin_read()
             .iter(&GatewayTable, |r| r.map(|(pk, ())| pk).collect()),
+    })
+}
+
+/// The federation's tpe aggregate key. Ungated for the same reason as
+/// `federation_info`: it is public to every client, and a caller holding a
+/// hash of it out of band can check what it gets.
+pub fn tpe_aggregate_pk(
+    ln: &Lightning,
+    _: TpeAggregatePkRequest,
+) -> Result<TpeAggregatePkResponse, String> {
+    Ok(TpeAggregatePkResponse {
+        tpe_agg_pk: ln.cfg.consensus.tpe_agg_pk,
     })
 }

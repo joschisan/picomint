@@ -18,16 +18,18 @@ use bitcoin::secp256k1;
 use db::{GatewayPkTable, IncomingContractStreamIndexTable, SendOperationTable};
 use gateway::Gateways;
 use lightning_invoice::{Bolt11Invoice, Currency};
+use picomint_core::NumPeersExt;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
 use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
-use picomint_core::ln::lnurl::MAX_GATEWAYS_PER_LNURL;
+use picomint_core::ln::lnurl::LnurlRequest;
 use picomint_core::ln::secret::IncomingContractSecret;
 use picomint_core::ln::{
-    LightningInput, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT, lnurl,
+    LightningInput, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT,
 };
+use picomint_core::methods::FederationInfoResponse;
 use picomint_core::wire;
 
 pub use self::secret::LnSecret;
@@ -462,55 +464,43 @@ impl LightningClientModule {
 
     /// Generate an lnurl for the client.
     ///
-    /// Offline: the gateway set is read from [`GatewayPkTable`], the local
-    /// mirror kept current by [`Self::update_gateway_pks`], so this never
-    /// touches the network and cannot fail on a federation that is
-    /// unreachable. An lnurl is a long-lived string a user hands out — making
-    /// it depend on a live threshold-consensus query meant it could not be
-    /// produced at all while offline, which is precisely when someone wants to
-    /// show one.
+    /// Offline and infallible: every field is read from the federation config
+    /// this client was built with, so an lnurl can be produced on a device
+    /// that has never reached the network — which is precisely when someone
+    /// wants to show one.
     ///
-    /// The flip side is that a client which has never completed a gateway sync
-    /// has nothing to name: like [`crate::Client::expiry_status`], this reads
-    /// only what has already been mirrored, so a freshly built client returns
-    /// [`GenerateLnurlError::NoGatewaysAvailable`] until the startup
-    /// [`Self::update_gateway_pks`] lands. Callers that generate an lnurl
-    /// immediately after adding a federation should retry.
-    pub fn generate_lnurl(
-        &self,
-        account: Account,
-        lnurl_daemon: String,
-    ) -> Result<String, GenerateLnurlError> {
-        let gateways: Vec<GatewayPk> = self
-            .client_ctx
-            .db()
-            .begin_read()
-            .iter(&GatewayPkTable(self.federation), |it| {
-                it.map(|(pk, ())| pk).collect()
-            });
+    /// Nothing perishable goes into the payload. The gateway set is resolved
+    /// by the daemon at pay time, from the peer set inside the [`LnurlInfo`]
+    /// that `info` pins, so an lnurl handed out today still routes after
+    /// every gateway in the federation has been replaced.
+    pub fn generate_lnurl(&self, account: Account, lnurl_daemon: String) -> String {
+        let config = self.client_ctx.get_config();
 
-        if gateways.is_empty() {
-            return Err(GenerateLnurlError::NoGatewaysAvailable);
-        }
+        let recipient = self.secret.receive_keypair(account).public_key();
 
-        // Random sample so load spreads across the federation's announced
-        // gateways instead of always pinning the byte-canonically smallest few.
-        let gateways = gateways
-            .into_iter()
-            .choose_multiple(&mut rand::thread_rng(), MAX_GATEWAYS_PER_LNURL);
+        // `f + 1` guardians, sampled fresh per lnurl: enough that one is
+        // honest and reachable whenever the federation itself is, and random
+        // so bootstrap load spreads instead of pinning the lowest peer ids.
+        let guardians = config
+            .peers
+            .values()
+            .map(|endpoint| endpoint.iroh_pk)
+            .choose_multiple(
+                &mut rand::thread_rng(),
+                config.peers.to_num_peers().one_honest(),
+            );
 
-        let receive_keypair = self.secret.receive_keypair(account);
+        let info = FederationInfoResponse::new(config).consensus_hash_sha256();
 
-        let payload = picomint_base32::encode(&lnurl::LnurlRequest {
-            federation: self.federation,
-            recipient_pk: receive_keypair.public_key(),
-            aggregate_pk: self.cfg.tpe_agg_pk,
-            gateways,
-        });
+        let request = LnurlRequest {
+            recipient,
+            guardians,
+            info,
+        };
 
-        Ok(picomint_lnurl::encode_lnurl(&format!(
-            "{lnurl_daemon}pay/{payload}"
-        )))
+        let payload = picomint_base32::encode(&request);
+
+        picomint_lnurl::encode_lnurl(&format!("{lnurl_daemon}pay/{payload}"))
     }
 
     /// Walks the federation-wide contract stream once, trialling every
@@ -595,12 +585,6 @@ pub enum ReceiveError {
     InvalidInvoice,
     #[error("Gateway returned an invoice with incorrect amount")]
     IncorrectInvoiceAmount,
-}
-
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
-pub enum GenerateLnurlError {
-    #[error("No gateways are available")]
-    NoGatewaysAvailable,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]

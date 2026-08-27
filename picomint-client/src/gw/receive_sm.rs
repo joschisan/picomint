@@ -17,8 +17,8 @@ use tracing::warn;
 use super::GwSmContext;
 use super::events::{ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent};
 use crate::executor::{SmId, StateMachine};
-use crate::query::FilterMapThreshold;
 use crate::tx::{Input, TxBuilder};
+use picomint_rpc::query::FilterMapThreshold;
 
 crate::client_table!(
     ReceiveStateMachineTable,

@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use crate::api::FederationApi;
-use crate::query::FilterMapThreshold;
 use picomint_core::mint::Denomination;
 use picomint_core::mint::methods::{
     IssuanceStateRequest, IssuanceStateResponse, MintMethod, SignatureSharesRequest,
@@ -11,6 +10,7 @@ use picomint_core::mint::methods::{
 use picomint_core::module::Method;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{PeerId, TransactionId};
+use picomint_rpc::query::FilterMapThreshold;
 use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 
 use super::NoteIssuanceRequest;
