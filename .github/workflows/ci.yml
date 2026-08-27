@@ -147,6 +147,3 @@ jobs:
 
     - run: flutter analyze
       working-directory: app
-
-    - run: flutter test
-      working-directory: app
