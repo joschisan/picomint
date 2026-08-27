@@ -106,15 +106,18 @@ fn keep_alive(runtime: &tokio::runtime::Runtime, env: &env::TestEnv) -> anyhow::
     println!();
     println!(" Examples:");
     println!(
-        "   target/release/picomint-guardian-cli --data-dir {} invite",
+        "   {} --data-dir {} invite",
+        env::bin("picomint-guardian-cli").display(),
         g0.display(),
     );
     println!(
-        "   target/release/picomint-guardian-cli --data-dir {} session-count",
+        "   {} --data-dir {} session-count",
+        env::bin("picomint-guardian-cli").display(),
         g0.display(),
     );
     println!(
-        "   target/release/picomint-gateway-cli  --data-dir {} info",
+        "   {} --data-dir {} info",
+        env::bin("picomint-gateway-cli").display(),
         env.gw_data_dir.display(),
     );
     println!();

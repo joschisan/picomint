@@ -82,7 +82,7 @@ jobs:
         shared-key: picomint
 
     - name: Prebuild workspace
-      run: cargo build --workspace --release
+      run: cargo build --workspace
 
     - name: Make test script executable
       run: chmod +x test-integration.sh

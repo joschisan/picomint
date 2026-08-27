@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
+use std::env::current_exe;
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -302,6 +303,16 @@ async fn build_client(
     Ok(client)
 }
 
+/// Path to a sibling workspace binary next to the running test executable,
+/// so the suite works regardless of the cargo profile it was built with.
+pub fn bin(name: &str) -> PathBuf {
+    current_exe()
+        .expect("the OS always knows the running executable's path")
+        .parent()
+        .expect("an executable path always has a parent directory")
+        .join(name)
+}
+
 async fn start_guardian(base: &Path, peer: usize) -> anyhow::Result<Child> {
     let p2p_port = GUARDIAN_BASE_PORT + (peer as u16 * PORTS_PER_GUARDIAN);
     let ui_port = p2p_port + 1;
@@ -314,7 +325,7 @@ async fn start_guardian(base: &Path, peer: usize) -> anyhow::Result<Child> {
         .append(true)
         .open(base.join(format!("guardian-{peer}.log")))?;
 
-    let child = Command::new("target/release/picomint-guardian-daemon")
+    let child = Command::new(bin("picomint-guardian-daemon"))
         .env("DATA_DIR", data_dir.to_str().unwrap())
         .env("BITCOIN_NETWORK", "regtest")
         .env(
@@ -336,7 +347,7 @@ async fn start_guardian(base: &Path, peer: usize) -> anyhow::Result<Child> {
 async fn start_lnurl_daemon(base: &Path, port: u16) -> anyhow::Result<()> {
     let log_file = std::fs::File::create(base.join("lnurl-daemon.log"))?;
 
-    Command::new("target/release/picomint-lnurl-daemon")
+    Command::new(bin("picomint-lnurl-daemon"))
         .env("API_ADDR", format!("127.0.0.1:{port}"))
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
@@ -353,7 +364,7 @@ async fn start_gateway(base: &Path, name: &str, gw_port: u16, ln_port: u16) -> a
 
     let log_file = std::fs::File::create(base.join(format!("{name}.log")))?;
 
-    Command::new("target/release/picomint-gateway-daemon")
+    Command::new(bin("picomint-gateway-daemon"))
         .env("DATA_DIR", data_dir.to_str().unwrap())
         .env("API_ADDR", format!("0.0.0.0:{gw_port}"))
         .env("LDK_ADDR", format!("0.0.0.0:{ln_port}"))

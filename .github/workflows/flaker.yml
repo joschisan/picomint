@@ -36,7 +36,7 @@ jobs:
         }
         for i in $(seq 1 50); do
           START=$(date +%s)
-          if ! timeout 300 ./test-integration.sh >"$LOG" 2>&1; then
+          if ! PROFILE=release timeout 300 ./test-integration.sh >"$LOG" 2>&1; then
             echo "=== iteration $i FAILED after $(($(date +%s) - START))s ==="
             cat "$LOG"
             DIR=$(extract_dir)

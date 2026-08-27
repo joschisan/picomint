@@ -13,6 +13,8 @@ use picomint_guardian_cli_core::{InviteResponse, SetupStatus};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use crate::env::bin;
+
 trait RunCli {
     fn run_cli<T: DeserializeOwned>(&mut self) -> Result<T>;
 }
@@ -33,13 +35,13 @@ impl RunCli for Command {
 }
 
 fn gateway_cmd(gw_data_dir: &Path) -> Command {
-    let mut cmd = Command::new("target/release/picomint-gateway-cli");
+    let mut cmd = Command::new(bin("picomint-gateway-cli"));
     cmd.arg("--data-dir").arg(gw_data_dir);
     cmd
 }
 
 fn guardian_cmd(data_dir: &Path) -> Command {
-    let mut cmd = Command::new("target/release/picomint-guardian-cli");
+    let mut cmd = Command::new(bin("picomint-guardian-cli"));
     cmd.arg("--data-dir").arg(data_dir);
     cmd
 }

@@ -21,8 +21,15 @@ cleanup() {
 
 trap cleanup EXIT
 
-echo "Building workspace..."
-cargo build --workspace --release
+# Set PROFILE=release for a release-mode run (used by the flaker CI loop).
+PROFILE="${PROFILE:-debug}"
+
+echo "Building workspace ($PROFILE)..."
+if [[ "$PROFILE" == "release" ]]; then
+    cargo build --workspace --release
+else
+    cargo build --workspace
+fi
 
 # Clean up any leftover container from previous run
 docker stop "$CONTAINER_NAME" 2>/dev/null || true
@@ -61,8 +68,8 @@ docker exec "$CONTAINER_NAME" bitcoin-cli \
 
 if [[ -n "$KEEP_ALIVE" ]]; then
     echo "Bringing up federation (stays up until Ctrl-C)..."
-    KEEP_ALIVE=1 RUST_LOG="${RUST_LOG:-info}" ./target/release/picomint-integration-tests
+    KEEP_ALIVE=1 RUST_LOG="${RUST_LOG:-info}" "./target/$PROFILE/picomint-integration-tests"
 else
     echo "Running integration tests..."
-    RUST_LOG="${RUST_LOG:-info}" ./target/release/picomint-integration-tests
+    RUST_LOG="${RUST_LOG:-info}" "./target/$PROFILE/picomint-integration-tests"
 fi
