@@ -1,0 +1,37 @@
+import 'package:flutter/material.dart';
+import 'package:pico/widgets/drawer_shell_widget.dart';
+import 'package:pico/widgets/async_button_widget.dart';
+import 'package:pico/utils/drawer_utils.dart';
+
+class GenerateOnchainAddressDrawer extends StatelessWidget {
+  final VoidCallback onConfirm;
+
+  const GenerateOnchainAddressDrawer({super.key, required this.onConfirm});
+
+  static Future<void> show(
+    BuildContext context, {
+    required VoidCallback onConfirm,
+  }) {
+    return DrawerUtils.show(
+      context: context,
+      child: GenerateOnchainAddressDrawer(onConfirm: onConfirm),
+    );
+  }
+
+  void _handleConfirm(BuildContext context) {
+    Navigator.of(context).pop();
+    onConfirm();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DrawerShell(
+      children: [
+        AsyncButton(
+          text: 'Generate Onchain Address',
+          onPressed: () async => _handleConfirm(context),
+        ),
+      ],
+    );
+  }
+}

@@ -1,0 +1,212 @@
+import 'package:phosphor_flutter/phosphor_flutter.dart';
+import 'package:flutter/material.dart';
+import 'package:pico/bridge_generated.dart/client.dart';
+import 'package:pico/bridge_generated.dart/factory.dart';
+import 'package:pico/bridge_generated.dart/lnurl.dart';
+import 'package:pico/utils/async_button_mixin.dart';
+import 'package:pico/screens/lnurl_amount_screen.dart';
+import 'package:pico/screens/contact_name_entry_screen.dart';
+import 'package:pico/utils/styles.dart';
+import 'package:pico/widgets/search_field_widget.dart';
+import 'package:pico/widgets/grouped_list_widget.dart';
+import 'package:pico/widgets/icon_chip_widget.dart';
+
+class _ContactTile extends StatefulWidget {
+  final PicoContact contact;
+  final Future<void> Function() onTap;
+  final VoidCallback onLongPress;
+
+  const _ContactTile({
+    required this.contact,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  @override
+  State<_ContactTile> createState() => _ContactTileState();
+}
+
+class _ContactTileState extends State<_ContactTile> with AsyncButtonMixin {
+  @override
+  Future<void> Function() get onPressed => widget.onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    // The lnurl payload is the decoded service URL, so its host is the
+    // provider domain (e.g. blink.sv) shown as the subheader.
+    final domain = Uri.tryParse(widget.contact.lnurl.field0)?.host;
+
+    return ListTile(
+      contentPadding: listTilePadding,
+      leading: const IconChip(icon: PhosphorIconsRegular.user),
+      // Stack name (+ in-flight spinner) over the provider domain, keeping the
+      // single-line tile height. Spinner rides after the name for consistency
+      // with the payment tiles' in-flight indicator.
+      title: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(widget.contact.name, style: mediumStyle),
+              if (buttonState == AsyncButtonState.loading) ...[
+                const SizedBox(width: 8),
+                smallSpinner,
+              ],
+            ],
+          ),
+          if (domain != null && domain.isNotEmpty)
+            Text(
+              domain,
+              style: smallStyle.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+        ],
+      ),
+      onTap: switch (buttonState) {
+        AsyncButtonState.idle => handlePress,
+        AsyncButtonState.loading => null,
+      },
+      onLongPress: widget.onLongPress,
+    );
+  }
+}
+
+class DisplayContactsScreen extends StatefulWidget {
+  final PicoClient client;
+  final PicoClientFactory clientFactory;
+
+  const DisplayContactsScreen({
+    super.key,
+    required this.client,
+    required this.clientFactory,
+  });
+
+  @override
+  State<DisplayContactsScreen> createState() => _DisplayContactsScreenState();
+}
+
+class _DisplayContactsScreenState extends State<DisplayContactsScreen> {
+  final _searchController = TextEditingController();
+  String _query = '';
+  List<PicoContact> _contacts = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadContacts();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadContacts() async {
+    final contacts = await widget.clientFactory.listContacts();
+    if (!mounted) return;
+    setState(() {
+      _contacts = contacts;
+    });
+  }
+
+  List<PicoContact> get _filteredContacts {
+    return _contacts.where((c) => c.matchQuery(query: _query)).toList();
+  }
+
+  Future<void> _handleContactTap(PicoContact contact) async {
+    final payResponse = await lnurlFetchLimits(lnurl: contact.lnurl);
+
+    if (!mounted) return;
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder:
+            (_) => LnurlAmountScreen(
+              client: widget.client,
+              clientFactory: widget.clientFactory,
+              lnurl: contact.lnurl,
+              payResponse: payResponse,
+              contactName: contact.name,
+            ),
+      ),
+    );
+  }
+
+  Future<void> _handleEditContact(PicoContact contact) async {
+    await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder:
+            (_) => ContactNameEntryScreen(
+              clientFactory: widget.clientFactory,
+              lnurl: contact.lnurl,
+              initialName: contact.name,
+              onDelete: () async {
+                await widget.clientFactory.deleteContact(lnurl: contact.lnurl);
+              },
+            ),
+      ),
+    );
+
+    if (mounted) {
+      _loadContacts();
+    }
+  }
+
+  Widget _buildEmptyState() {
+    return Expanded(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            'You have no contacts yet.',
+            textAlign: TextAlign.center,
+            style: smallStyle.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _filteredContacts;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Lightning Contacts')),
+      body: SafeArea(
+        child: Column(
+          children: [
+            if (_contacts.isEmpty) _buildEmptyState(),
+            if (_contacts.isNotEmpty)
+              Expanded(
+                child: GroupedList<PicoContact>(
+                  header: Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: SearchField(
+                      controller: _searchController,
+                      onChanged: (value) => setState(() => _query = value),
+                    ),
+                  ),
+                  items: filtered,
+                  groupKey: (contact) => contact.name[0].toUpperCase(),
+                  itemBuilder:
+                      (context, contact) => _ContactTile(
+                        contact: contact,
+                        onTap: () => _handleContactTap(contact),
+                        onLongPress: () => _handleEditContact(contact),
+                      ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

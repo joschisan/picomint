@@ -104,3 +104,42 @@ jobs:
 
     - name: Verify Web UI is reachable
       run: curl -fsS --retry 10 --retry-delay 2 --retry-connrefused http://127.0.0.1:3000 > /dev/null
+
+  app:
+    name: App
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: app-bridge
+        workspaces: app/rust
+
+    # Pinned to the version the bridge's generated code is written against.
+    - uses: cargo-bins/cargo-binstall@main
+    - run: cargo binstall -y flutter_rust_bridge_codegen@2.10.0
+
+    - uses: subosito/flutter-action@v2
+      with:
+        cache: true
+
+    - run: flutter pub get
+      working-directory: app
+
+    # Neither generated tree is committed, so this is what makes the bridge
+    # compile and the Dart bindings exist at all.
+    - name: Generate bridge bindings
+      run: flutter_rust_bridge_codegen generate
+      working-directory: app
+
+    - name: Clippy bridge
+      run: cargo clippy --all-targets -- -D warnings
+      working-directory: app/rust
+
+    - run: flutter analyze
+      working-directory: app
+
+    - run: flutter test
+      working-directory: app

@@ -1,0 +1,53 @@
+[package]
+name = "pico"
+version = "0.1.0"
+edition = "2024"
+
+# Own workspace root: the bridge cross-compiles for mobile with a size-optimized
+# release profile, which a member of the picomint workspace could not carry.
+[workspace]
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(frb_expand)'] }
+
+[dependencies]
+anyhow = "1"
+bip39 = "2"
+picomint-base32 = { path = "../../picomint-base32" }
+picomint-client = { path = "../../picomint-client" }
+picomint-core = { path = "../../picomint-core" }
+picomint-encoding = { path = "../../picomint-encoding" }
+picomint-eventlog = { path = "../../picomint-eventlog" }
+picomint-fountain = { path = "../../picomint-fountain" }
+picomint-lnurl = { path = "../../picomint-lnurl" }
+picomint-redb = { path = "../../picomint-redb" }
+
+iroh = { version = "=1.0.3", default-features = false, features = ["tls-ring"] }
+iroh-mdns-address-lookup = "=0.4.0"
+bitcoin = "0.32.5"
+flutter_rust_bridge = "=2.10.0"
+futures = "0.3"
+futures-util = "0.3"
+lightning-invoice = { version = "0.34", features = ["std"] }
+log = "0.4"
+regex = "1"
+reqwest = { version = "=0.12.22", features = ["rustls-tls", "json"], default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
+url = "2"
+
+[profile.dev.package]
+secp256k1 = { opt-level = 3 }
+secp256k1-sys = { opt-level = 3 }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = false
+debug = "line-tables-only"
+
+[profile.release.package]
+secp256k1 = { opt-level = 3 }
+secp256k1-sys = { opt-level = 3 }
