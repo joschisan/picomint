@@ -352,16 +352,16 @@ impl Lightning {
         self.consensus_block_count(&self.db.begin_read())
     }
 
-    pub async fn add_gateway_ui(&self, gateway_pk: GatewayPk, name: String) -> bool {
+    pub async fn add_gateway_ui(&self, pk: GatewayPk, name: String) -> bool {
         let dbtx = self.db.begin_write();
-        let is_new_entry = dbtx.insert(&GatewayTable, &gateway_pk, &name).is_none();
+        let is_new_entry = dbtx.insert(&GatewayTable, &pk, &name).is_none();
         dbtx.commit();
         is_new_entry
     }
 
-    pub async fn remove_gateway_ui(&self, gateway_pk: GatewayPk) -> bool {
+    pub async fn remove_gateway_ui(&self, pk: GatewayPk) -> bool {
         let dbtx = self.db.begin_write();
-        let entry_existed = dbtx.remove(&GatewayTable, &gateway_pk).is_some();
+        let entry_existed = dbtx.remove(&GatewayTable, &pk).is_some();
         dbtx.commit();
         entry_existed
     }

@@ -197,24 +197,24 @@ pub fn guardian_session_count(data_dir: &Path) -> Result<u64> {
     guardian_cmd(data_dir).arg("session-count").run_cli::<u64>()
 }
 
-pub fn guardian_ln_gateway_add(data_dir: &Path, gateway_pk: &GatewayPk) -> Result<bool> {
+pub fn guardian_ln_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
     guardian_cmd(data_dir)
         .arg("module")
         .arg("ln")
         .arg("gateway")
         .arg("add")
-        .arg(picomint_base32::encode(gateway_pk))
+        .arg(picomint_base32::encode(pk))
         .arg("Test Gateway")
         .run_cli::<bool>()
 }
 
-pub fn guardian_ln_gateway_remove(data_dir: &Path, gateway_pk: &GatewayPk) -> Result<bool> {
+pub fn guardian_ln_gateway_remove(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
     guardian_cmd(data_dir)
         .arg("module")
         .arg("ln")
         .arg("gateway")
         .arg("remove")
-        .arg(picomint_base32::encode(gateway_pk))
+        .arg(picomint_base32::encode(pk))
         .run_cli::<bool>()
 }
 
