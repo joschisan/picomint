@@ -12,10 +12,10 @@ use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_guardian_cli_core::{
-    CLI_SOCKET_FILENAME, ExpirySetRequest, InviteRequest, LnGatewayRequest, ROUTE_AUDIT,
-    ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
-    ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
-    ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
+    CLI_SOCKET_FILENAME, ExpirySetRequest, InviteRequest, LnGatewayAddRequest,
+    LnGatewayRemoveRequest, ROUTE_AUDIT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET,
+    ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST,
+    ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
     ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
     ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_RESTORE,
     ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddPeerRequest,
@@ -121,9 +121,9 @@ enum LnCommands {
 #[derive(Subcommand)]
 enum LnGatewayCommands {
     /// Add a vetted gateway
-    Add(LnGatewayRequest),
+    Add(LnGatewayAddRequest),
     /// Remove a vetted gateway
-    Remove(LnGatewayRequest),
+    Remove(LnGatewayRemoveRequest),
     /// List vetted gateways
     List,
 }

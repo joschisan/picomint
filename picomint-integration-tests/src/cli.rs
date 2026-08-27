@@ -204,6 +204,7 @@ pub fn guardian_ln_gateway_add(data_dir: &Path, gateway_pk: &GatewayPk) -> Resul
         .arg("gateway")
         .arg("add")
         .arg(picomint_base32::encode(gateway_pk))
+        .arg("Test Gateway")
         .run_cli::<bool>()
 }
 

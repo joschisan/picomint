@@ -352,9 +352,9 @@ impl Lightning {
         self.consensus_block_count(&self.db.begin_read())
     }
 
-    pub async fn add_gateway_ui(&self, gateway_pk: GatewayPk) -> bool {
+    pub async fn add_gateway_ui(&self, gateway_pk: GatewayPk, name: String) -> bool {
         let dbtx = self.db.begin_write();
-        let is_new_entry = dbtx.insert(&GatewayTable, &gateway_pk, &()).is_none();
+        let is_new_entry = dbtx.insert(&GatewayTable, &gateway_pk, &name).is_none();
         dbtx.commit();
         is_new_entry
     }
@@ -367,9 +367,7 @@ impl Lightning {
     }
 
     #[must_use]
-    pub fn gateways_ui(&self) -> Vec<GatewayPk> {
-        self.db
-            .begin_read()
-            .iter(&GatewayTable, |r| r.map(|(pk, ())| pk).collect())
+    pub fn gateways_ui(&self) -> Vec<(GatewayPk, String)> {
+        self.db.begin_read().iter(&GatewayTable, |r| r.collect())
     }
 }
