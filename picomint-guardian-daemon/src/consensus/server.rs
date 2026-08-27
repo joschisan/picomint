@@ -42,9 +42,6 @@ impl Server {
             wire::ModuleConsensusItem::Wallet(ci) => {
                 wallet::process_consensus_item(self, dbtx, peer, ci.clone()).await
             }
-            wire::ModuleConsensusItem::Ln(ci) => {
-                ln::process_consensus_item(self, dbtx, peer, ci.clone())
-            }
         }
     }
 

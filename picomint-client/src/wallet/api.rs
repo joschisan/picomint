@@ -2,21 +2,12 @@ use crate::api::FederationApi;
 use picomint_core::OutPoint;
 use picomint_core::module::Method;
 use picomint_core::wallet::methods::{
-    ConsensusBlockCountRequest, ConsensusBlockCountResponse, ConsensusFeerateRequest,
-    ConsensusFeerateResponse, FederationWalletRequest, FederationWalletResponse,
-    OutputInfoSliceRequest, OutputInfoSliceResponse, PendingTxChainRequest, PendingTxChainResponse,
-    ReceiveFeeRequest, ReceiveFeeResponse, SendFeeRequest, SendFeeResponse, TxIdRequest,
-    TxIdResponse, WalletMethod,
+    ConsensusFeerateRequest, ConsensusFeerateResponse, FederationWalletRequest,
+    FederationWalletResponse, OutputInfoSliceRequest, OutputInfoSliceResponse,
+    PendingTxChainRequest, PendingTxChainResponse, ReceiveFeeRequest, ReceiveFeeResponse,
+    SendFeeRequest, SendFeeResponse, TxIdRequest, TxIdResponse, WalletMethod,
 };
 use picomint_core::wallet::{FederationWallet, OutputInfo, TxInfo};
-
-pub async fn consensus_block_count(api: &FederationApi) -> anyhow::Result<u64> {
-    api.request_current_consensus::<ConsensusBlockCountResponse>(Method::Wallet(
-        WalletMethod::ConsensusBlockCount(ConsensusBlockCountRequest),
-    ))
-    .await
-    .map(|resp| resp.count)
-}
 
 pub async fn consensus_feerate(api: &FederationApi) -> anyhow::Result<Option<u64>> {
     api.request_current_consensus::<ConsensusFeerateResponse>(Method::Wallet(

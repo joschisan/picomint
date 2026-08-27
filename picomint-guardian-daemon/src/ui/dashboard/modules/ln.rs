@@ -26,23 +26,13 @@ pub struct RemoveGatewayForm {
     pub pk: String,
 }
 
-pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Markup {
+pub fn render(dbtx: &ReadTx) -> Markup {
     let gateways = ln::gateways(dbtx);
-    let consensus_block_count = ln::consensus_block_count(server, dbtx);
 
     html! {
         div class="card h-100" {
             div class="card-header dashboard-header" { "Lightning" }
             div class="card-body" {
-                div class="mb-4" {
-                    table class="table" {
-                        tr {
-                            th { "Consensus Block Count" }
-                            td { (consensus_block_count) }
-                        }
-                    }
-                }
-
                 // Gateway management — htmx swaps this section in place on
                 // add/remove and on a validation error, so no full reload.
                 div id="gateway-section" {

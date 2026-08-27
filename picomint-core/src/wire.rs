@@ -1,9 +1,6 @@
 //! Static wire enums for the fixed module set: mint + wallet + ln.
 
-use crate::ln::{
-    LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
-    LightningOutputError,
-};
+use crate::ln::{LightningInput, LightningInputError, LightningOutput, LightningOutputError};
 use crate::mint::{MintInput, MintInputError, MintOutput, MintOutputError};
 use crate::wallet::{
     WalletConsensusItem, WalletInput, WalletInputError, WalletOutput, WalletOutputError,
@@ -64,13 +61,6 @@ impl From<WalletOutput> for Output {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum ModuleConsensusItem {
     Wallet(WalletConsensusItem),
-    Ln(LightningConsensusItem),
-}
-
-impl From<LightningConsensusItem> for ModuleConsensusItem {
-    fn from(v: LightningConsensusItem) -> Self {
-        Self::Ln(v)
-    }
 }
 
 impl From<WalletConsensusItem> for ModuleConsensusItem {

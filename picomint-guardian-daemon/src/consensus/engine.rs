@@ -18,10 +18,11 @@ use tracing::{info, instrument};
 use crate::config::ServerConfig;
 use crate::consensus::bft::{DataProvider, Network};
 use crate::consensus::db::{
-    AcceptedItemTable, AcceptedTxTable, BftUnitsTable, ConsensusVersionVoteTable,
-    SignedSessionOutcomeTable, consensus_version,
+    AcceptedItemTable, AcceptedTxTable, BftUnitsTable, BlockCountVoteTable,
+    ConsensusVersionVoteTable, SignedSessionOutcomeTable, consensus_block_count, consensus_version,
 };
 use crate::consensus::server::Server;
+use crate::consensus::wallet;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
 /// BFT rounds a session runs for, which is what sets how long one lasts.
@@ -523,6 +524,29 @@ async fn process_consensus_item(
         }
         ConsensusItem::Module(ci) => {
             server.process_module_ci(dbtx, peer, ci).await?;
+        }
+        ConsensusItem::BlockCount(vote) => {
+            let old_block_count = consensus_block_count(server, dbtx);
+
+            let current_vote = dbtx.insert(&BlockCountVoteTable, &peer, vote).unwrap_or(0);
+
+            ensure!(current_vote < *vote, "Block count vote is redundant");
+
+            let new_block_count = consensus_block_count(server, dbtx);
+
+            assert!(old_block_count <= new_block_count);
+
+            if new_block_count != old_block_count {
+                info!(
+                    %peer,
+                    vote,
+                    old_block_count,
+                    new_block_count,
+                    "consensus block count advanced"
+                );
+
+                wallet::sync_blocks(server, dbtx, old_block_count, new_block_count).await;
+            }
         }
         ConsensusItem::Version(vote) => {
             let default_version = server.cfg.consensus.default_version;

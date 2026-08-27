@@ -78,18 +78,20 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
 /// Build the Dashboard-phase CLI router that exposes read-only federation
 /// endpoints (audit, invite) plus the LN/wallet module-admin routes.
 pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
+    use crate::p2p::{P2PConnectionStatus, Transport};
     use axum::Json;
     use axum::routing::post;
     use picomint_core::expiry::ExpiryStatus;
     use picomint_guardian_cli_core::{
-        AuditResponse, ExpirySetRequest, INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse,
-        LnGatewayAddRequest, LnGatewayListEntry, LnGatewayRemoveRequest, ROUTE_AUDIT, ROUTE_CONFIG,
+        AuditResponse, BitcoinConnectionResponse, BlockCountResponse, ExpirySetRequest,
+        INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse, LnGatewayAddRequest,
+        LnGatewayInfo, LnGatewayListResponse, LnGatewayRemoveRequest, P2pResponse, PeerInfo,
+        PendingTxsResponse, ROUTE_AUDIT, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG,
         ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
         ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
-        ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
-        ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
-        ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT, WalletBlockCountResponse,
-        WalletFeerateResponse, WalletTotalValueResponse,
+        ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TXS,
+        ROUTE_MODULE_WALLET_TOTAL_VALUE, ROUTE_MODULE_WALLET_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
+        TxsResponse, WalletFeerateResponse, WalletTotalValueResponse,
     };
 
     async fn config(
@@ -137,11 +139,64 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         }))
     }
 
-    async fn wallet_block_count(
+    async fn block_count(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<WalletBlockCountResponse>, CliError> {
-        Ok(Json(WalletBlockCountResponse {
-            block_count: wallet::consensus_block_count(&api.server, &api.server.db.begin_read()),
+    ) -> Result<Json<BlockCountResponse>, CliError> {
+        Ok(Json(BlockCountResponse {
+            block_count: api.block_count(),
+        }))
+    }
+
+    async fn p2p(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<P2pResponse>, CliError> {
+        let peers = api
+            .p2p_status_receivers
+            .iter()
+            .map(|(peer, receiver)| {
+                let path = match receiver.borrow().clone() {
+                    P2PConnectionStatus::Connected(path) => Some(path),
+                    P2PConnectionStatus::Disconnected => None,
+                };
+
+                PeerInfo {
+                    id: *peer,
+                    name: api
+                        .server
+                        .cfg
+                        .consensus
+                        .peers
+                        .get(peer)
+                        .expect("every peer is in the consensus config")
+                        .name
+                        .clone(),
+                    connected: path.is_some(),
+                    transport: path.as_ref().map(|path| match path.transport {
+                        Transport::Direct => "direct".to_string(),
+                        Transport::Relay => "relay".to_string(),
+                    }),
+                    remote_addr: path.as_ref().map(|path| path.remote_addr.clone()),
+                    rtt_ms: path.map(|path| path.rtt.as_millis() as u64),
+                }
+            })
+            .collect();
+
+        Ok(Json(P2pResponse { peers }))
+    }
+
+    async fn bitcoin_connection(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<BitcoinConnectionResponse>, CliError> {
+        let status = api.server.btc_rpc.status().ok_or(CliError {
+            code: StatusCode::SERVICE_UNAVAILABLE,
+            error: "Not connected to the bitcoin backend yet".to_string(),
+        })?;
+
+        Ok(Json(BitcoinConnectionResponse {
+            network: status.network.to_string(),
+            block_count: status.block_count,
+            fee_rate_sat_per_vb: status.fee_rate.map(|fee_rate| fee_rate.sat_per_kvb / 1000),
+            sync_progress: status.sync_progress,
         }))
     }
 
@@ -154,16 +209,20 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         }))
     }
 
-    async fn wallet_pending_tx_chain(
+    async fn wallet_pending_txs(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<Vec<picomint_core::wallet::TxInfo>>, CliError> {
-        Ok(Json(wallet::pending_tx_chain(&api.server.db.begin_read())))
+    ) -> Result<Json<PendingTxsResponse>, CliError> {
+        Ok(Json(PendingTxsResponse {
+            txs: wallet::pending_tx_chain(&api.server.db.begin_read()),
+        }))
     }
 
-    async fn wallet_tx_chain(
+    async fn wallet_txs(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<Vec<picomint_core::wallet::TxInfo>>, CliError> {
-        Ok(Json(wallet::tx_chain(&api.server.db.begin_read())))
+    ) -> Result<Json<TxsResponse>, CliError> {
+        Ok(Json(TxsResponse {
+            txs: wallet::tx_chain(&api.server.db.begin_read()),
+        }))
     }
 
     async fn ln_gateway_add(
@@ -182,13 +241,13 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
 
     async fn ln_gateway_list(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<Vec<LnGatewayListEntry>>, CliError> {
-        Ok(Json(
-            ln::gateways(&api.server.db.begin_read())
+    ) -> Result<Json<LnGatewayListResponse>, CliError> {
+        Ok(Json(LnGatewayListResponse {
+            gateways: ln::gateways(&api.server.db.begin_read())
                 .into_iter()
-                .map(|(pk, name)| LnGatewayListEntry { pk, name })
+                .map(|(pk, name)| LnGatewayInfo { pk, name })
                 .collect(),
-        ))
+        }))
     }
 
     async fn expiry_set(
@@ -220,14 +279,13 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         .route(ROUTE_AUDIT, post(audit))
         .route(ROUTE_CONFIG, post(config))
         .route(ROUTE_SESSION_COUNT, post(session_count))
+        .route(ROUTE_BLOCK_COUNT, post(block_count))
+        .route(ROUTE_P2P, post(p2p))
+        .route(ROUTE_BITCOIN_CONNECTION, post(bitcoin_connection))
         .route(ROUTE_MODULE_WALLET_TOTAL_VALUE, post(wallet_total_value))
-        .route(ROUTE_MODULE_WALLET_BLOCK_COUNT, post(wallet_block_count))
         .route(ROUTE_MODULE_WALLET_FEERATE, post(wallet_feerate))
-        .route(
-            ROUTE_MODULE_WALLET_PENDING_TX_CHAIN,
-            post(wallet_pending_tx_chain),
-        )
-        .route(ROUTE_MODULE_WALLET_TX_CHAIN, post(wallet_tx_chain))
+        .route(ROUTE_MODULE_WALLET_PENDING_TXS, post(wallet_pending_txs))
+        .route(ROUTE_MODULE_WALLET_TXS, post(wallet_txs))
         .route(ROUTE_MODULE_LN_GATEWAY_ADD, post(ln_gateway_add))
         .route(ROUTE_MODULE_LN_GATEWAY_REMOVE, post(ln_gateway_remove))
         .route(ROUTE_MODULE_LN_GATEWAY_LIST, post(ln_gateway_list))

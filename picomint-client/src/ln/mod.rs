@@ -216,7 +216,7 @@ async fn send_inner(
     let fee = gateway_info.send_fee.fee(amount);
     let amount = Amount::from_msat(amount);
 
-    let consensus_block_count = api::consensus_block_count(&ctx.api)
+    let consensus_block_count = crate::api::block_count(&ctx.api)
         .await
         .map_err(|_| SendPaymentError::FailedToRequestBlockCount)?;
 

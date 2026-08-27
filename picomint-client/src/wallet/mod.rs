@@ -516,11 +516,6 @@ impl Client {
             .map(|tx_out| tx_out.map_or(bitcoin::Amount::ZERO, |tx_out| tx_out.value))
     }
 
-    /// The consensus block count of the federation.
-    pub async fn wallet_block_count(&self, federation: FederationId) -> anyhow::Result<u64> {
-        api::consensus_block_count(&self.ctx(federation)?.api).await
-    }
-
     /// The current consensus feerate.
     pub async fn wallet_feerate(&self, federation: FederationId) -> anyhow::Result<Option<u64>> {
         api::consensus_feerate(&self.ctx(federation)?.api).await

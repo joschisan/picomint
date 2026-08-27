@@ -3,9 +3,11 @@ use picomint_core::expiry;
 use picomint_core::session;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::ConsensusVersion;
-use picomint_core::{NumPeers, PeerId, TransactionId};
+use picomint_core::{NumPeers, NumPeersExt, PeerId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{DbRead, table};
+
+use crate::consensus::server::Server;
 
 table!(
     AcceptedItemTable,
@@ -34,6 +36,33 @@ table!(
     u64 => session::SignedSessionOutcome,
     "signed-session-outcome",
 );
+
+// Latest block count each peer has voted for. Votes only ever increase, so a
+// missing entry means the peer has not voted since the federation was created.
+table!(
+    BlockCountVoteTable,
+    PeerId => u64,
+    "block-count-vote",
+);
+
+/// The consensus block count the federation currently runs at.
+///
+/// Sorted descending and indexed at `threshold() - 1`, so any threshold of
+/// correct peers can increase the consensus block count and any consensus
+/// block count has been confirmed by a threshold of peers.
+pub fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u64 {
+    let num_peers = server.cfg.consensus.peers.to_num_peers();
+
+    let mut counts: Vec<u64> = dbtx.iter(&BlockCountVoteTable, |r| r.map(|(_, v)| v).collect());
+
+    assert!(counts.len() <= num_peers.total());
+
+    counts.sort_unstable();
+
+    counts.reverse();
+
+    counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
+}
 
 // Highest consensus version each peer has announced support for. A peer
 // votes once per upgrade and never downwards, so a missing entry means the

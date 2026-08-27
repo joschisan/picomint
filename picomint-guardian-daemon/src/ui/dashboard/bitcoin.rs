@@ -4,7 +4,7 @@ use picomint_bitcoin_rpc::BitcoinRpcStatus;
 pub fn render(status: &Option<BitcoinRpcStatus>) -> Markup {
     html! {
         div class="card h-100" {
-            div class="card-header dashboard-header" { "Bitcoin Rpc Connection" }
+            div class="card-header dashboard-header" { "Bitcoin Connection" }
             div class="card-body" {
                 @if let Some(status) = status {
                     table class="table table-sm mb-0" {

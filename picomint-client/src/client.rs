@@ -270,6 +270,11 @@ impl Client {
         Ok(self.ctx(federation)?.api.clone())
     }
 
+    /// The consensus block count of the federation.
+    pub async fn block_count(&self, federation: FederationId) -> anyhow::Result<u64> {
+        crate::api::block_count(&self.ctx(federation)?.api).await
+    }
+
     /// Cancel every federation's tasks and wait for them to finish.
     pub async fn shutdown(&self) {
         let federations =

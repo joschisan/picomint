@@ -17,16 +17,6 @@ use crate::ln::LightningInvoice;
 use crate::ln::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
 use crate::ln::gateway::{GatewayInfo, GatewayPk};
 
-// ── consensus-block-count ───────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct ConsensusBlockCountRequest;
-
-#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct ConsensusBlockCountResponse {
-    pub count: u64,
-}
-
 // ── await-preimage ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
@@ -102,7 +92,6 @@ pub struct TpeAggregatePkResponse {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum LnMethod {
-    ConsensusBlockCount(ConsensusBlockCountRequest),
     AwaitPreimage(AwaitPreimageRequest),
     DecryptionKeyShare(DecryptionKeyShareRequest),
     OutgoingContractExpiry(OutgoingContractExpiryRequest),

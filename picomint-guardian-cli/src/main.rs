@@ -13,13 +13,13 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_guardian_cli_core::{
     CLI_SOCKET_FILENAME, ExpirySetRequest, InviteRequest, LnGatewayAddRequest,
-    LnGatewayRemoveRequest, ROUTE_AUDIT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET,
-    ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST,
-    ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
-    ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
-    ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_RESTORE,
-    ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddPeerRequest,
-    SetupSetLocalParamsRequest,
+    LnGatewayRemoveRequest, ROUTE_AUDIT, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG,
+    ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
+    ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
+    ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TXS, ROUTE_MODULE_WALLET_TOTAL_VALUE,
+    ROUTE_MODULE_WALLET_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_PEER,
+    ROUTE_SETUP_RESTORE, ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS,
+    SetupAddPeerRequest, SetupSetLocalParamsRequest,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -52,6 +52,12 @@ enum Commands {
     Config,
     /// Number of consensus sessions this guardian has finalized
     SessionCount,
+    /// Get the federation's consensus block count
+    BlockCount,
+    /// Per-peer p2p connection status
+    P2p,
+    /// Status of the local bitcoin backend
+    BitcoinConnection,
     /// Federation expiry announcement
     #[command(subcommand)]
     Expiry(ExpiryCommands),
@@ -101,14 +107,12 @@ enum ModuleCommands {
 enum WalletCommands {
     /// Get total wallet value
     TotalValue,
-    /// Get consensus block count
-    BlockCount,
     /// Get consensus fee rate
     Feerate,
-    /// Get pending transaction chain
-    PendingTxChain,
-    /// Get transaction chain
-    TxChain,
+    /// Get pending transactions
+    PendingTxs,
+    /// Get transactions
+    Txs,
 }
 
 #[derive(Subcommand)]
@@ -205,6 +209,9 @@ async fn main() -> Result<()> {
         Commands::Audit => request(d, ROUTE_AUDIT, ()).await?,
         Commands::Config => request(d, ROUTE_CONFIG, ()).await?,
         Commands::SessionCount => request(d, ROUTE_SESSION_COUNT, ()).await?,
+        Commands::BlockCount => request(d, ROUTE_BLOCK_COUNT, ()).await?,
+        Commands::P2p => request(d, ROUTE_P2P, ()).await?,
+        Commands::BitcoinConnection => request(d, ROUTE_BITCOIN_CONNECTION, ()).await?,
 
         Commands::Expiry(cmd) => match cmd {
             ExpiryCommands::Set(req) => request(d, ROUTE_EXPIRY_SET, req).await?,
@@ -231,14 +238,11 @@ async fn main() -> Result<()> {
                 WalletCommands::TotalValue => {
                     request(d, ROUTE_MODULE_WALLET_TOTAL_VALUE, ()).await?
                 }
-                WalletCommands::BlockCount => {
-                    request(d, ROUTE_MODULE_WALLET_BLOCK_COUNT, ()).await?
-                }
                 WalletCommands::Feerate => request(d, ROUTE_MODULE_WALLET_FEERATE, ()).await?,
-                WalletCommands::PendingTxChain => {
-                    request(d, ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ()).await?
+                WalletCommands::PendingTxs => {
+                    request(d, ROUTE_MODULE_WALLET_PENDING_TXS, ()).await?
                 }
-                WalletCommands::TxChain => request(d, ROUTE_MODULE_WALLET_TX_CHAIN, ()).await?,
+                WalletCommands::Txs => request(d, ROUTE_MODULE_WALLET_TXS, ()).await?,
             },
             ModuleCommands::Ln(cmd) => match cmd {
                 LnCommands::Gateway(cmd) => match cmd {

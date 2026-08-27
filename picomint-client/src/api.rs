@@ -10,8 +10,8 @@ pub use picomint_rpc::api::FederationApi;
 use picomint_core::PeerId;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::methods::{
-    CoreMethod, ExpiryStatusRequest, ExpiryStatusResponse, LivenessRequest, LivenessResponse,
-    SubmitTxRequest, SubmitTxResponse,
+    BlockCountRequest, BlockCountResponse, CoreMethod, ExpiryStatusRequest, ExpiryStatusResponse,
+    LivenessRequest, LivenessResponse, SubmitTxRequest, SubmitTxResponse,
 };
 use picomint_core::module::Method;
 use picomint_core::tx::{Transaction, TxError};
@@ -24,6 +24,16 @@ pub async fn submit_tx(api: &FederationApi, tx: Transaction) -> Result<(), TxErr
     )))
     .await
     .outcome
+}
+
+/// Fetch the federation's consensus block count, which trails the chain
+/// tip by the confirmation finality delay.
+pub async fn block_count(api: &FederationApi) -> anyhow::Result<u64> {
+    api.request_current_consensus::<BlockCountResponse>(Method::Core(CoreMethod::BlockCount(
+        BlockCountRequest,
+    )))
+    .await
+    .map(|resp| resp.count)
 }
 
 /// Lightweight liveness check — succeeds if a threshold of guardians is

@@ -21,7 +21,7 @@ pub const INVITE_CREATE_ROUTE: &str = "/invite/create";
 pub fn render(consensus_block_count: u64) -> Markup {
     html! {
         div class="card h-100" {
-            div class="card-header dashboard-header" { "Invite Code" }
+            div class="card-header dashboard-header" { "Generate Invite" }
             div class="card-body" {
                 @if consensus_block_count == 0 {
                     div class="alert alert-warning" {
@@ -82,7 +82,7 @@ fn generate_form(error: Option<&str>) -> Markup {
             }
 
             button class="btn btn-primary w-100 py-2" type="submit" {
-                "Generate Invite Code"
+                "Generate Invite"
             }
         }
     }

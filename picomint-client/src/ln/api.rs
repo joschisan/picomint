@@ -4,18 +4,9 @@ use picomint_core::ln::contracts::IncomingContractSummary;
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_core::ln::methods::{
     AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitPreimageRequest,
-    AwaitPreimageResponse, ConsensusBlockCountRequest, ConsensusBlockCountResponse,
-    GatewaysRequest, GatewaysResponse, LnMethod,
+    AwaitPreimageResponse, GatewaysRequest, GatewaysResponse, LnMethod,
 };
 use picomint_core::module::Method;
-
-pub async fn consensus_block_count(api: &FederationApi) -> anyhow::Result<u64> {
-    api.request_current_consensus::<ConsensusBlockCountResponse>(Method::Ln(
-        LnMethod::ConsensusBlockCount(ConsensusBlockCountRequest),
-    ))
-    .await
-    .map(|resp| resp.count)
-}
 
 pub async fn await_preimage(
     api: &FederationApi,
