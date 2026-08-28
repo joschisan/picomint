@@ -420,10 +420,12 @@ picomint-gateway-cli …`.
 | `BITCOIND_URL`             | one of   |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |
 | `API_ADDR`                 | no       | `0.0.0.0:8080`    | Public API listen address                   |
 | `LDK_ADDR`                 | no       | `0.0.0.0:9735`    | LDK Lightning P2P listen address (BOLT)     |
-| `ROUTING_FEE_BASE_MSAT`    | no       | `2000`            | Lightning base routing fee (msat)           |
-| `ROUTING_FEE_PPM`          | no       | `3000`            | Lightning routing fee rate (ppm)            |
-| `TRANSACTION_FEE_BASE_MSAT`| no       | `2000`            | Federation transaction base fee (msat)      |
-| `TRANSACTION_FEE_PPM`      | no       | `3000`            | Federation transaction fee rate (ppm)       |
+| `SEND_FEE_BASE_MSAT`       | no       | `10000`           | Base send fee (msat)                        |
+| `SEND_FEE_PPM`             | no       | `3000`            | Send fee rate (ppm)                         |
+| `RECEIVE_FEE_BASE_MSAT`    | no       | `10000`           | Base receive fee (msat)                     |
+| `RECEIVE_FEE_PPM`          | no       | `1000`            | Receive fee rate (ppm)                      |
+| `INVOICE_EXPIRY_SECS`      | no       | `86400`           | Expiry of invoices the gateway issues (s)   |
+| `CLTV_EXPIRY_DELTA`        | no       | `500`             | Max total CLTV expiry delta on send routes  |
 
 ## License
 
