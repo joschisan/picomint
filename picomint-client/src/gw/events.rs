@@ -6,14 +6,13 @@ use serde::{Deserialize, Serialize};
 // --- Outgoing payment ---
 
 /// Emitted when the gateway accepts a send-payment request and spawns the
-/// state machine to relay the outgoing HTLC. `ln_fee` is the gateway's
-/// expected LN routing cost; `fee` is the gateway's tx-side cut. The
-/// client-side combined fee is `ln_fee + fee`.
+/// state machine to relay the outgoing HTLC. `fee` is the gateway's flat
+/// cut, the same whatever the settlement; on an external send the LN
+/// routing cost comes out of it.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendEvent {
     pub outpoint: OutPoint,
     pub amount: Amount,
-    pub ln_fee: Amount,
     pub fee: Amount,
 }
 

@@ -46,12 +46,10 @@ SELECT
     COUNT(*) FILTER (WHERE status='success')   AS succeeded,
     COUNT(*) FILTER (WHERE status='cancelled') AS failed,
     COALESCE(CAST(AVG(completed_at - started_at) FILTER (WHERE status='success') AS INTEGER), 0) AS avg_latency_ms,
-    COALESCE(SUM(amount_msat)        FILTER (WHERE status='success'), 0) AS volume_msat,
-    COALESCE(SUM(gw_fee_msat)        FILTER (WHERE status='success'), 0) AS gw_fee_msat,
-    COALESCE(SUM(tx_fee_msat)        FILTER (WHERE status='success'), 0) AS tx_fee_msat,
-    COALESCE(SUM(ln_fee_budget_msat) FILTER (WHERE status='success'), 0) AS ln_fee_budget_msat,
-    COALESCE(SUM(ln_fee_paid_msat)   FILTER (WHERE status='success'), 0) AS ln_fee_paid_msat,
-    COALESCE(SUM(ln_fee_kept_msat)   FILTER (WHERE status='success'), 0) AS ln_fee_kept_msat
+    COALESCE(SUM(amount_msat)      FILTER (WHERE status='success'), 0) AS volume_msat,
+    COALESCE(SUM(gw_fee_msat)      FILTER (WHERE status='success'), 0) AS gw_fee_msat,
+    COALESCE(SUM(tx_fee_msat)      FILTER (WHERE status='success'), 0) AS tx_fee_msat,
+    COALESCE(SUM(gw_fee_kept_msat) FILTER (WHERE status='success'), 0) AS gw_fee_kept_msat
 FROM outgoing_payments
 WHERE started_at > $since_ms AND federation = '$FEDERATION';
 " | jq -c '.[0]')
@@ -74,15 +72,9 @@ out_succeeded=$(echo   "$outgoing" | jq -r '.succeeded')
 out_failed=$(echo      "$outgoing" | jq -r '.failed')
 out_latency=$(echo     "$outgoing" | jq -r '.avg_latency_ms')
 out_volume_btc=$(msat_to_btc "$(echo "$outgoing" | jq -r '.volume_msat')")
-out_fee_sat=$(msat_to_sat    "$(echo "$outgoing" | jq -r '.gw_fee_msat')")
-out_tx_fee_sat=$(msat_to_sat "$(echo "$outgoing" | jq -r '.tx_fee_msat')")
-out_ln_budget_msat=$(echo "$outgoing" | jq -r '.ln_fee_budget_msat')
-out_ln_paid_msat=$(echo   "$outgoing" | jq -r '.ln_fee_paid_msat')
-out_ln_budget_sat=$(msat_to_sat "$out_ln_budget_msat")
-out_ln_paid_sat=$(msat_to_sat   "$out_ln_paid_msat")
-out_ln_kept_sat=$(msat_to_sat   "$(echo "$outgoing" | jq -r '.ln_fee_kept_msat')")
-out_ln_util=$(awk -v p="$out_ln_paid_msat" -v b="$out_ln_budget_msat" \
-    'BEGIN { if (b+0 == 0) printf "0.0"; else printf "%.1f", (p * 100.0) / b }')
+out_fee_sat=$(msat_to_sat      "$(echo "$outgoing" | jq -r '.gw_fee_msat')")
+out_tx_fee_sat=$(msat_to_sat   "$(echo "$outgoing" | jq -r '.tx_fee_msat')")
+out_fee_kept_sat=$(msat_to_sat "$(echo "$outgoing" | jq -r '.gw_fee_kept_msat')")
 
 in_succeeded=$(echo  "$incoming" | jq -r '.succeeded')
 in_failed=$(echo     "$incoming" | jq -r '.failed')
@@ -100,10 +92,7 @@ Payments: $out_succeeded ($out_failed failed)
 Average Latency: ${out_latency}ms
 Volume: $out_volume_btc BTC
 Fee: $out_fee_sat sat
-Ln Fee: $out_ln_budget_sat sat
-Ln Fee Paid: $out_ln_paid_sat sat
-Ln Fee Kept: $out_ln_kept_sat sat
-Ln Fee Utilization: ${out_ln_util}%
+Fee Kept: $out_fee_kept_sat sat
 Federation Fee: $out_tx_fee_sat sat
 
 Incoming

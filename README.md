@@ -386,11 +386,9 @@ sudo docker exec -it picomint-gateway-daemon \
 
 **Additional columns on `outgoing_payments`:**
 
-| Column               | Type    | Notes                                                                |
-|----------------------|---------|----------------------------------------------------------------------|
-| `ln_fee_budget_msat` | INTEGER | Maximum LN routing fee the gateway committed to pay                  |
-| `ln_fee_paid_msat`   | INTEGER | Realized LN routing fee (NULL while pending; 0 if cancelled)         |
-| `ln_fee_kept_msat`   | INTEGER | `ln_fee_budget_msat - ln_fee_paid_msat` (NULL while pending)         |
+| Column             | Type    | Notes                                                                  |
+|--------------------|---------|------------------------------------------------------------------------|
+| `gw_fee_kept_msat` | INTEGER | `gw_fee_msat` less the realized LN routing cost (NULL while pending; 0 if cancelled) |
 
 **Status values:**
 

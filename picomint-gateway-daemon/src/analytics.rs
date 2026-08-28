@@ -79,9 +79,9 @@ impl Analytics {
 
 /// Schema + the two per-direction payment views. Outgoing and incoming
 /// are split because the fee model is asymmetric — only the outgoing
-/// side has an LN routing-fee budget that can differ from the realized
-/// paid amount, and forcing those columns into a unified view would
-/// mean carrying three permanent NULL columns on every incoming row.
+/// side has a realized LN routing cost eating into the flat fee, and
+/// forcing its kept-margin column into a unified view would mean
+/// carrying a permanent NULL column on every incoming row.
 const SCHEMA_SQL: &str = r#"
 CREATE TABLE send (
     operation  TEXT NOT NULL,
@@ -89,7 +89,6 @@ CREATE TABLE send (
     federation TEXT NOT NULL,
     outpoint      TEXT NOT NULL,
     amount_msat   INTEGER NOT NULL,
-    ln_fee_msat   INTEGER NOT NULL,
     fee_msat      INTEGER NOT NULL,
     PRIMARY KEY (federation, operation)
 );
@@ -174,17 +173,11 @@ SELECT
     END AS status,
     s.amount_msat,
     s.fee_msat       AS gw_fee_msat,
-    s.ln_fee_msat    AS ln_fee_budget_msat,
     CASE
-        WHEN succ.operation IS NOT NULL THEN succ.ln_fee_msat
+        WHEN succ.operation IS NOT NULL THEN s.fee_msat - succ.ln_fee_msat
         WHEN canc.operation IS NOT NULL THEN 0
         ELSE NULL
-    END AS ln_fee_paid_msat,
-    CASE
-        WHEN succ.operation IS NOT NULL THEN s.ln_fee_msat - succ.ln_fee_msat
-        WHEN canc.operation IS NOT NULL THEN 0
-        ELSE NULL
-    END AS ln_fee_kept_msat,
+    END AS gw_fee_kept_msat,
     succ.preimage,
     tx.txid          AS tx_txid,
     tx.remint_msat   AS tx_remint_msat,
@@ -278,15 +271,14 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
         if let Some(e) = entry.to_event::<SendEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO send \
-                 (federation, operation, ts, outpoint, amount_msat, ln_fee_msat, fee_msat) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                 (federation, operation, ts, outpoint, amount_msat, fee_msat) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
                     federation,
                     operation,
                     ts,
                     format!("{}:{}", e.outpoint.txid, e.outpoint.out_idx),
                     e.amount.msat as i64,
-                    e.ln_fee.msat as i64,
                     e.fee.msat as i64,
                 ],
             )?;

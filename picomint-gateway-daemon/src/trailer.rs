@@ -97,9 +97,9 @@ fn dispatch_direct_swap(
         operation,
         row.contract,
         row.outpoint,
-        preimage,
-        // Direct swap — no routing cost
-        picomint_core::Amount::ZERO,
+        // An internal settlement routes nothing, so a successful one
+        // realized no routing cost.
+        preimage.map(|preimage| (preimage, picomint_core::Amount::ZERO)),
     );
 }
 

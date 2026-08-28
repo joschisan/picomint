@@ -96,7 +96,6 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     test_mock_send_exactly_once(client_send).await?;
     test_mock_send_refund_forfeit(client_send).await?;
     test_mock_wrong_network(client_send).await?;
-    test_mock_send_max(env, client_send).await?;
     test_claim_outgoing_contract(client_send).await?;
     test_unilateral_refund(env, client_send).await?;
     deregister_gateway(env, &mock_gw_pk)?;
@@ -250,7 +249,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     // gateway must signal a cancel so the client gets a gateway-signed refund
     // (`expired = false`), not a wait-for-CLTV unilateral refund.
     {
-        let (gateway_pk, gateway_info) = ln.select_gateway(None)?;
+        let (gateway_pk, gateway_info) = ln.select_gateway()?;
         let invoice = ln
             .receive(
                 Account::PRIMARY,
@@ -282,15 +281,15 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     info!("Testing external-LN refund when LDK has no route to the invoice payee...");
 
     // Bolt11Invoice signed by a random keypair (via `mock_invoice`); its
-    // payee pubkey is not in the gateway's LDK network graph, so
-    // `is_direct_swap = false` and `bolt11_payment().send()` returns
+    // payee pubkey is not the gateway's node and not in its LDK network
+    // graph, so `bolt11_payment().send()` returns
     // `Error::PaymentSendingFailed { RouteNotFound }` synchronously. The
     // gateway must write a cancel so the client gets a gateway-signed
     // refund (`expired = false`) without waiting for CLTV expiry.
     {
         let invoice = mock_invoice([30; 32], [31; 32], Currency::Regtest);
 
-        let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
+        let (gateway_pk, gateway_info) = ln.select_gateway()?;
         let send_op = ln
             .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
             .await?;
@@ -321,7 +320,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
             3600,
         )?;
 
-        let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
+        let (gateway_pk, gateway_info) = ln.select_gateway()?;
         let send_op = ln
             .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
             .await?;
@@ -354,7 +353,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
     info!("Testing payment from LDK node to client (half of first send)...");
 
     {
-        let (gateway_pk, gateway_info) = ln.select_gateway(None)?;
+        let (gateway_pk, gateway_info) = ln.select_gateway()?;
         let invoice = ln
             .receive(
                 Account::PRIMARY,
@@ -400,7 +399,7 @@ async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()
             payment_hash,
         )?;
 
-        let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
+        let (gateway_pk, gateway_info) = ln.select_gateway()?;
         let send_op = ln
             .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
             .await?;
@@ -492,7 +491,7 @@ async fn test_mock_send_exactly_once(client: &Arc<Client>) -> anyhow::Result<()>
 
     let mut events = pin!(ln_event_stream(client));
 
-    let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
+    let (gateway_pk, gateway_info) = ln.select_gateway()?;
     let send_op = ln
         .send(
             Account::PRIMARY,
@@ -527,7 +526,7 @@ async fn test_mock_send_refund_forfeit(client: &Arc<Client>) -> anyhow::Result<(
     let mut events = pin!(ln_event_stream(client));
 
     let invoice = unpayable_invoice();
-    let (gateway_pk, gateway_info) = client.ln().select_gateway(Some(&invoice))?;
+    let (gateway_pk, gateway_info) = client.ln().select_gateway()?;
     let send_op = client
         .ln()
         .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
@@ -548,7 +547,7 @@ async fn test_mock_wrong_network(client: &Arc<Client>) -> anyhow::Result<()> {
     info!("ln: test_mock_wrong_network");
 
     let invoice = signet_invoice();
-    let (gateway_pk, gateway_info) = client.ln().select_gateway(Some(&invoice))?;
+    let (gateway_pk, gateway_info) = client.ln().select_gateway()?;
 
     match client
         .ln()
@@ -567,86 +566,6 @@ async fn test_mock_wrong_network(client: &Arc<Client>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Fund a fresh client with ecash, pay a mock invoice sized by
-/// `send_max_amount` via `send_max`, and assert the account holds not a
-/// single note afterwards — the zero-remnant guarantee the max path exists
-/// for.
-async fn test_mock_send_max(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
-    info!("ln: test_mock_send_max");
-
-    // A fresh client, so emptying the account cannot race the mint suite
-    // running in parallel on `client_send`.
-    let client = env.new_client(None).await?;
-
-    LightningClientModule::update_gateway_pks(client.ln().clone()).await?;
-    LightningClientModule::update_gateway_info(client.ln().clone()).await;
-
-    let ecash = client_send
-        .mint()
-        .send(Account::PRIMARY, Amount::from_sat(5_000))
-        .await?;
-
-    let operation = client.mint().receive(Account::PRIMARY, &ecash)?;
-
-    crate::mint::await_tx_outcome(&client, operation)
-        .await
-        .expect("funding receive should be accepted");
-
-    let (gateway_pk, gateway_info) = client.ln().select_gateway(None)?;
-
-    // Size against a probe invoice the way an integrator's bridge does: any
-    // of the payee's invoices settles whether the gateway routes or is the
-    // payee itself, so a throwaway at a minimal amount prices the max the
-    // real invoice is then resolved for.
-    let probe = mock_invoice_msat(
-        PAYABLE_PREIMAGE,
-        PAYABLE_PAYMENT_SECRET,
-        Currency::Regtest,
-        1_000,
-    );
-
-    let max = client
-        .ln()
-        .send_max_amount(Account::PRIMARY, &gateway_info, &probe);
-
-    ensure!(max > Amount::ZERO, "max send amount is zero");
-
-    // The mock's payable preimage, so the payment settles; the operation is
-    // derived from the payment hash, but this client has never attempted it.
-    let invoice = mock_invoice_msat(
-        PAYABLE_PREIMAGE,
-        PAYABLE_PAYMENT_SECRET,
-        Currency::Regtest,
-        max.msat,
-    );
-
-    let mut events = pin!(ln_event_stream(&client));
-
-    let send_op = client
-        .ln()
-        .send_max(Account::PRIMARY, gateway_pk, gateway_info, invoice)
-        .await?;
-
-    wait_ln_event(&mut events, send_op, |e| {
-        matches!(e, LnEvent::SendSuccess(_))
-    })
-    .await;
-
-    ensure!(
-        client
-            .mint()
-            .get_count_by_denomination(Account::PRIMARY)
-            .is_empty(),
-        "send_max left notes behind"
-    );
-
-    client.shutdown().await;
-
-    info!("ln: test_mock_send_max passed");
-
-    Ok(())
-}
-
 async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()> {
     info!("ln: test_claim_outgoing_contract");
 
@@ -660,7 +579,7 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
     let preimage = [12u8; 32];
 
     let invoice = crash_invoice(preimage);
-    let (gateway_pk, gateway_info) = ln.select_gateway(Some(&invoice))?;
+    let (gateway_pk, gateway_info) = ln.select_gateway()?;
     let send_op = ln
         .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
         .await?;
@@ -727,7 +646,7 @@ async fn test_unilateral_refund(env: &TestEnv, client: &Arc<Client>) -> anyhow::
     // preimage reveal the contract must eventually expire so the client can
     // pull its funds back via `OutgoingWitness::Refund`.
     let invoice = crash_invoice([13; 32]);
-    let (gateway_pk, gateway_info) = client.ln().select_gateway(Some(&invoice))?;
+    let (gateway_pk, gateway_info) = client.ln().select_gateway()?;
     let send_op = client
         .ln()
         .send(Account::PRIMARY, gateway_pk, gateway_info, invoice)
@@ -940,11 +859,9 @@ async fn mock_handler(method: GatewayMethod) -> Result<Vec<u8>, String> {
             };
             Ok(InfoResponse {
                 info: Some(GatewayInfo {
-                    lightning_public_key: gateway_keypair().public_key(),
                     module_public_key: gateway_keypair().x_only_public_key().0,
                     send_fee: tx_fee,
                     receive_fee: tx_fee,
-                    ln_fee: tx_fee,
                     expiry_delta: 50,
                 }),
             }
