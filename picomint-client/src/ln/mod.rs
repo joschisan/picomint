@@ -7,6 +7,7 @@ mod gateway;
 mod secret;
 mod send_sm;
 
+use anyhow::Context;
 use picomint_redb::WriteTx;
 use std::sync::Arc;
 
@@ -190,16 +191,13 @@ impl LightningClientModule {
         module.gateways.probe(&list, module.federation).await;
     }
 
-    /// Pick a gateway from the pool. With `invoice = Some(_)`, prefer a gateway
-    /// whose lightning public key matches the invoice's recovered payee —
-    /// that's a direct ecash swap, no LN routing. Otherwise return any gateway
-    /// that has info, picked at random for load distribution.
-    pub fn select_gateway(
-        &self,
-        invoice: Option<&Bolt11Invoice>,
-    ) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
+    /// Pick any gateway from the pool that has info, at random for load
+    /// distribution. A gateway charges the same fee however a payment
+    /// settles, so there is nothing about an invoice to match a gateway
+    /// against — any of them prices any payment identically to itself.
+    pub fn select_gateway(&self) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
         self.gateways
-            .select(invoice)
+            .select()
             .ok_or(SelectGatewayError::NoGatewaysAvailable)
     }
 
@@ -208,9 +206,8 @@ impl LightningClientModule {
     /// The caller obtains `(gateway_pk, gateway_info)` via
     /// [`Self::select_gateway`] and inspects `gateway_info` to preview the
     /// cost before passing both back here. The library still enforces
-    /// `PaymentFee::SEND_FEE_LIMIT` / `LN_FEE_LIMIT` and
-    /// `EXPIRY_DELTA_LIMIT` on the supplied `gateway_info` as a
-    /// backstop against an abusive gateway.
+    /// `PaymentFee::SEND_FEE_LIMIT` and `EXPIRY_DELTA_LIMIT` on the supplied
+    /// `gateway_info` as a backstop against an abusive gateway.
     pub async fn send(
         &self,
         account: Account,
@@ -224,54 +221,57 @@ impl LightningClientModule {
 
     /// The largest whole-sat invoice amount a [`Self::send_max`] from
     /// `account` through this gateway can pay: the account's notes spent in
-    /// full cover the invoice, the gateway's fees, the federation's
+    /// full cover the invoice, the gateway's fee, the federation's
     /// transaction fee and the integrator's cut, with the sub-sat remainder
     /// donated. This is the amount at which [`Self::send_max`] empties the
     /// account; anything else leaves change behind.
     ///
-    /// Priced against an invoice because the payee decides the routing fee —
-    /// a gateway that is itself the payee routes nothing and charges nothing
-    /// for it. Any of the payee's invoices will do, which is how a caller
-    /// prices a max before the invoice it will pay exists: resolve a
-    /// throwaway invoice at the payee's minimum, size against it, then
-    /// resolve the real invoice for this figure.
-    pub fn send_max_amount(
-        &self,
-        account: Account,
-        gateway_info: &GatewayInfo,
-        invoice: &Bolt11Invoice,
-    ) -> Amount {
-        let is_direct = invoice.recover_payee_pub_key() == gateway_info.lightning_public_key;
-
+    /// Needs no invoice: the gateway's fee is the same however the payment
+    /// settles, so the figure holds for whatever invoice is later resolved
+    /// for it.
+    pub fn send_max_amount(&self, account: Account, gateway_info: &GatewayInfo) -> Amount {
         self.mint.largest_affordable_amount(account, |amount| {
-            let ln_fee = if is_direct {
-                Amount::ZERO
-            } else {
-                gateway_info.ln_fee.fee(amount.msat)
-            };
-
-            gateway_info.send_fee.fee(amount.msat) + ln_fee + self.cfg.output_fee
+            gateway_info.send_fee.fee(amount.msat) + self.cfg.output_fee
         })
     }
 
-    /// Pay an invoice sized by [`Self::send_max_amount`] against this same
-    /// gateway. Identical to [`Self::send`] except that change is minted at
-    /// the max-send floor: at the sized amount every note goes in and none
-    /// comes back, leaving the account empty. An amount gone stale against a
-    /// moved balance degrades to an ordinary send — change comes back rather
-    /// than the payment being refused.
+    /// Empty `account` to `lnurl` through a caller-selected gateway: resolve
+    /// it, size the max, pay — the Lightning shape of
+    /// [`crate::wallet::WalletClientModule::send_max`]. The max needs no
+    /// invoice to price, so the one invoice resolved is the one paid, for
+    /// the figure that empties the account: every note goes in and no change
+    /// comes back. An account that moved since the caller previewed
+    /// [`Self::send_max_amount`] moves the payment with it — the figure is
+    /// priced fresh here.
+    ///
+    /// All or nothing: a max outside what the endpoint accepts fails at
+    /// invoice resolution rather than sending a clamped amount, and the
+    /// balance stays where it is.
     pub async fn send_max(
         &self,
         account: Account,
         gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
-        invoice: Bolt11Invoice,
-    ) -> Result<OperationId, SendPaymentError> {
-        self.send_inner(account, gateway_pk, gateway_info, invoice, true)
+        lnurl: &str,
+    ) -> anyhow::Result<OperationId> {
+        let url = picomint_lnurl::parse_lnurl(lnurl).context("Not a valid lnurl")?;
+
+        let info = picomint_lnurl::request(&url)
             .await
+            .map_err(anyhow::Error::msg)?;
+
+        let max = self.send_max_amount(account, &gateway_info);
+
+        let invoice = picomint_lnurl::get_invoice(&info, max.msat)
+            .await
+            .map_err(anyhow::Error::msg)?
+            .pr;
+
+        Ok(self
+            .send_inner(account, gateway_pk, gateway_info, invoice, true)
+            .await?)
     }
 
-    #[allow(clippy::too_many_lines)]
     async fn send_inner(
         &self,
         account: Account,
@@ -299,13 +299,7 @@ impl LightningClientModule {
 
         let refund_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
-        let is_direct_swap = invoice.recover_payee_pub_key() == gateway_info.lightning_public_key;
-
         if !gateway_info.send_fee.is_within(&PaymentFee::SEND_FEE_LIMIT) {
-            return Err(SendPaymentError::GatewayFeeExceedsLimit);
-        }
-
-        if !is_direct_swap && !gateway_info.ln_fee.is_within(&PaymentFee::LN_FEE_LIMIT) {
             return Err(SendPaymentError::GatewayFeeExceedsLimit);
         }
 
@@ -313,15 +307,8 @@ impl LightningClientModule {
             return Err(SendPaymentError::GatewayExpiryExceedsLimit);
         }
 
-        let ln_fee = if is_direct_swap {
-            Amount::ZERO
-        } else {
-            gateway_info.ln_fee.fee(amount)
-        };
-
-        let send_fee = gateway_info.send_fee.fee(amount);
+        let fee = gateway_info.send_fee.fee(amount);
         let amount = Amount::from_msat(amount);
-        let fee = ln_fee + send_fee;
 
         let consensus_block_count = self
             .client_ctx

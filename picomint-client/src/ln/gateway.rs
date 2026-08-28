@@ -126,26 +126,13 @@ impl Gateways {
         }
     }
 
-    /// Pick a member gateway that has info. With `invoice = Some`, prefer a
-    /// direct-swap gateway whose lightning pk matches the invoice's recovered
-    /// payee (an ecash swap, no LN routing); otherwise pick at random for load
-    /// distribution. Returns `None` if no gateway currently has info.
-    pub fn select(&self, invoice: Option<&Bolt11Invoice>) -> Option<(GatewayPk, GatewayInfo)> {
-        let map = self.inner.read().expect("gateways RwLock poisoned");
-
-        if let Some(invoice) = invoice {
-            let payee = invoice.recover_payee_pub_key();
-
-            for (pk, gateway) in map.iter() {
-                if let Some(info) = &gateway.info
-                    && info.lightning_public_key == payee
-                {
-                    return Some((*pk, info.clone()));
-                }
-            }
-        }
-
-        map.iter()
+    /// Pick a member gateway that has info, at random for load distribution.
+    /// Returns `None` if no gateway currently has info.
+    pub fn select(&self) -> Option<(GatewayPk, GatewayInfo)> {
+        self.inner
+            .read()
+            .expect("gateways RwLock poisoned")
+            .iter()
             .filter_map(|(pk, gateway)| gateway.info.clone().map(|info| (*pk, info)))
             .choose(&mut rand::thread_rng())
     }

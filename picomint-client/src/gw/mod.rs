@@ -115,7 +115,6 @@ impl GatewayClientModule {
         operation: OperationId,
         outpoint: OutPoint,
         amount: Amount,
-        ln_fee: Amount,
         fee: Amount,
     ) {
         self.client_ctx.log_event(
@@ -125,7 +124,6 @@ impl GatewayClientModule {
             SendEvent {
                 outpoint,
                 amount,
-                ln_fee,
                 fee,
             },
         );
@@ -202,9 +200,10 @@ impl GatewayClientModule {
     ///     (external LN sends);
     ///   - the per-federation trailer on direct-swap receives.
     ///
-    /// `Some(preimage)` claims the outgoing contract and logs
-    /// `SendSuccessEvent`. `None` signs the forfeit message and logs
-    /// `SendCancelEvent`.
+    /// `Some((preimage, ln_fee))` claims the outgoing contract and logs
+    /// `SendSuccessEvent` with the realized routing cost. `None` signs the
+    /// forfeit message and logs `SendCancelEvent` — a payment that failed
+    /// routed nothing, so there is no cost to report.
     ///
     /// Called at most once per operation id: both callers short-circuit re-entry
     /// via upstream markers (`ProcessedLdkEventTable` on the LDK path,
@@ -218,11 +217,10 @@ impl GatewayClientModule {
         operation: OperationId,
         contract: OutgoingContract,
         outpoint: OutPoint,
-        preimage: Option<[u8; 32]>,
-        ln_fee: Amount,
+        success: Option<([u8; 32], Amount)>,
     ) {
-        match preimage {
-            Some(preimage) => {
+        match success {
+            Some((preimage, ln_fee)) => {
                 let tx_builder = TxBuilder::from_input(Input {
                     input: wire::Input::Ln(LightningInput::Outgoing(
                         outpoint,

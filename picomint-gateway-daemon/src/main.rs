@@ -91,15 +91,6 @@ pub struct GatewayOpts {
     #[arg(long, env = "RECEIVE_FEE_PPM", default_value_t = 3000)]
     pub receive_fee_ppm: u64,
 
-    /// Base Lightning routing fee in millisatoshis. Enforced exactly as
-    /// LDK's `max_total_routing_fee_msat` cap on external outgoing payments.
-    #[arg(long, env = "LN_FEE_BASE_MSAT", default_value_t = 2000)]
-    pub ln_fee_base_msat: u64,
-
-    /// Lightning routing fee rate in parts per million.
-    #[arg(long, env = "LN_FEE_PPM", default_value_t = 3000)]
-    pub ln_fee_ppm: u64,
-
     /// BOLT11 invoice expiry, in seconds, for invoices the gateway issues.
     #[arg(long, env = "INVOICE_EXPIRY_SECS", default_value_t = 86_400)]
     pub invoice_expiry_secs: u32,
@@ -147,17 +138,6 @@ fn main() -> anyhow::Result<()> {
         receive_fee.is_within(&PaymentFee::RECEIVE_FEE_LIMIT),
         "Configured receive fee {receive_fee:?} exceeds the limit clients accept {:?}",
         PaymentFee::RECEIVE_FEE_LIMIT,
-    );
-
-    let ln_fee = PaymentFee {
-        base: Amount::from_msat(opts.ln_fee_base_msat),
-        ppm: opts.ln_fee_ppm,
-    };
-
-    ensure!(
-        ln_fee.is_within(&PaymentFee::LN_FEE_LIMIT),
-        "Configured ln fee {ln_fee:?} exceeds the limit clients accept {:?}",
-        PaymentFee::LN_FEE_LIMIT,
     );
 
     let runtime = Arc::new(tokio::runtime::Runtime::new()?);
@@ -250,7 +230,6 @@ fn main() -> anyhow::Result<()> {
         network: opts.network,
         send_fee,
         receive_fee,
-        ln_fee,
         invoice_expiry_secs: opts.invoice_expiry_secs,
         cltv_expiry_delta: opts.cltv_expiry_delta,
         analytics: picomint_gateway_daemon::analytics::Analytics::wipe_and_init(&opts.data_dir)?,
@@ -417,8 +396,7 @@ fn handle_payment_successful(
             operation,
             row.contract,
             row.outpoint,
-            Some(preimage),
-            ln_fee,
+            Some((preimage, ln_fee)),
         );
     }
 }
@@ -440,13 +418,8 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32
             .select_client(row.federation)
             .expect("source federation for outgoing contract is connected");
 
-        client.gw().finalize_send(
-            dbtx,
-            operation,
-            row.contract,
-            row.outpoint,
-            None,
-            Amount::ZERO,
-        );
+        client
+            .gw()
+            .finalize_send(dbtx, operation, row.contract, row.outpoint, None);
     }
 }

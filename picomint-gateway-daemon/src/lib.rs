@@ -55,7 +55,6 @@ pub struct AppState {
     pub network: Network,
     pub send_fee: PaymentFee,
     pub receive_fee: PaymentFee,
-    pub ln_fee: PaymentFee,
     pub invoice_expiry_secs: u32,
     pub cltv_expiry_delta: u32,
     pub analytics: analytics::Analytics,
@@ -127,11 +126,9 @@ impl AppState {
             .context("Federation not connected")?;
 
         Ok(GatewayInfo {
-            lightning_public_key: self.node.node_id(),
             module_public_key: client.gw().keypair.x_only_public_key().0,
             send_fee: self.send_fee,
             receive_fee: self.receive_fee,
-            ln_fee: self.ln_fee,
             expiry_delta: self.cltv_expiry_delta as u64 + 144,
         })
     }
@@ -194,14 +191,9 @@ impl AppState {
 
         let fee = self.send_fee.fee(amount);
 
-        let ln_fee = match self.node.node_id() != payload.invoice.bolt11().get_payee_pub_key() {
-            true => self.ln_fee.fee(amount),
-            false => Amount::ZERO,
-        };
-
         ensure!(
-            payload.contract.fee == fee + ln_fee,
-            "Contract fee does not match send fee + ln fee"
+            payload.contract.fee == fee,
+            "Contract fee does not match the advertised send fee"
         );
 
         ensure!(
@@ -236,14 +228,16 @@ impl AppState {
             operation,
             payload.outpoint,
             Amount::from_msat(amount),
-            ln_fee,
             fee,
         );
 
         // --- Direct-swap vs external LN -------------------------------------
         if self.node.node_id() != payload.invoice.bolt11().get_payee_pub_key() {
+            // The whole fee is the routing budget: whatever routing does not
+            // take is the gateway's margin, and an internal settlement keeps
+            // all of it.
             let rpc = RouteParametersConfig::default()
-                .with_max_total_routing_fee_msat(ln_fee.msat)
+                .with_max_total_routing_fee_msat(fee.msat)
                 .with_max_total_cltv_expiry_delta(self.cltv_expiry_delta);
 
             if self
@@ -258,7 +252,6 @@ impl AppState {
                     payload.contract,
                     payload.outpoint,
                     None,
-                    picomint_core::Amount::ZERO, // Direct swap — no routing cost
                 );
             }
         } else {
@@ -286,7 +279,6 @@ impl AppState {
                     payload.contract,
                     payload.outpoint,
                     None,
-                    picomint_core::Amount::ZERO, // Direct swap — no routing cost
                 );
             }
         }
