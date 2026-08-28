@@ -56,6 +56,27 @@ fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, MintEvent
     None
 }
 
+/// Consume `events` until one matches `predicate`, discarding the rest.
+/// The ln and wallet suites fund their send_max clients with ecash from the
+/// shared `client_send`, so its stream carries Send events that are not this
+/// suite's — a strict next-event assertion would trip over them.
+async fn wait_mint_event<S>(
+    events: &mut std::pin::Pin<&mut S>,
+    predicate: impl Fn(OperationId, &MintEvent) -> bool,
+) where
+    S: futures::Stream<Item = (OperationId, MintEvent)>,
+{
+    loop {
+        let Some((op, event)) = events.next().await else {
+            panic!("event stream ended");
+        };
+
+        if predicate(op, &event) {
+            return;
+        }
+    }
+}
+
 /// Wait until a receive operation is fully settled. Returns:
 /// - `Ok` once both `TxAcceptEvent` AND `MintSuccessEvent` have been
 ///   observed — at that point the spendable notes have been written
@@ -67,7 +88,10 @@ fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, MintEvent
 /// signatures after the tx is accepted before the notes land. Reading
 /// `get_balance()` between TxAccept and MintSuccessEvent returns a
 /// stale (lower) figure.
-async fn await_tx_outcome(client: &Arc<Client>, operation: OperationId) -> Result<(), String> {
+pub(crate) async fn await_tx_outcome(
+    client: &Arc<Client>,
+    operation: OperationId,
+) -> Result<(), String> {
     let mut stream = client.subscribe_operation_events(operation);
 
     let mut tx_accepted = false;
@@ -108,9 +132,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
             .send(Account::PRIMARY, Amount::from_sat(1_000))
             .await?;
 
-        let Some((_, MintEvent::Send(_))) = send_events.next().await else {
-            panic!("Expected Send event");
-        };
+        wait_mint_event(&mut send_events, |_, e| matches!(e, MintEvent::Send(_))).await;
 
         let operation = client_receive.mint().receive(Account::PRIMARY, &ecash)?;
 
@@ -145,17 +167,15 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
         .send(Account::PRIMARY, Amount::from_sat(1_000))
         .await?;
 
-    let Some((_, MintEvent::Send(_))) = send_events.next().await else {
-        panic!("Expected Send event");
-    };
+    wait_mint_event(&mut send_events, |_, e| matches!(e, MintEvent::Send(_))).await;
 
     // First receive succeeds (sender receives own ecash back)
     let operation = client_send.mint().receive(Account::PRIMARY, &ecash)?;
 
-    let Some((op, MintEvent::Receive(_))) = send_events.next().await else {
-        panic!("Expected Receive event");
-    };
-    assert_eq!(op, operation);
+    wait_mint_event(&mut send_events, |op, e| {
+        op == operation && matches!(e, MintEvent::Receive(_))
+    })
+    .await;
 
     await_tx_outcome(client_send, operation)
         .await
@@ -249,6 +269,47 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     restored.shutdown().await;
 
     info!("mint: second restore passed");
+
+    info!("mint: send_max leaves no notes");
+
+    // A fresh client, so emptying the account cannot race the ln suite
+    // running in parallel on `client_send`.
+    let client = env.new_client(None).await?;
+
+    let ecash = client_send
+        .mint()
+        .send(Account::PRIMARY, Amount::from_sat(5_000))
+        .await?;
+
+    let operation = client.mint().receive(Account::PRIMARY, &ecash)?;
+
+    await_tx_outcome(&client, operation)
+        .await
+        .expect("funding receive should be accepted");
+
+    let ecash = client
+        .mint()
+        .send_max(Account::PRIMARY)
+        .expect("account holds notes");
+
+    ensure!(
+        client
+            .mint()
+            .get_count_by_denomination(Account::PRIMARY)
+            .is_empty(),
+        "send_max left notes behind"
+    );
+
+    // The bundle is real value, so hand it back rather than burning it.
+    let operation = client_send.mint().receive(Account::PRIMARY, &ecash)?;
+
+    await_tx_outcome(client_send, operation)
+        .await
+        .expect("return receive should be accepted");
+
+    client.shutdown().await;
+
+    info!("mint: send_max passed");
 
     Ok(())
 }

@@ -130,6 +130,58 @@ impl WalletClientModule {
         amount: bitcoin::Amount,
         fee: Option<bitcoin::Amount>,
     ) -> Result<OperationId, SendError> {
+        let fee = match fee {
+            Some(fee) => fee,
+            None => self.send_fee().await?,
+        };
+
+        self.submit_send(account, address, amount, fee, false)
+    }
+
+    /// The largest whole-sat amount a [`Self::send_max`] from `account` can
+    /// pay onchain at the current consensus feerate: the account's notes
+    /// spent in full cover the payment, its onchain fee, the federation's
+    /// transaction fee and the integrator's cut, with less than a sat left
+    /// over. The send itself re-prices at the moment it is submitted, so
+    /// this is a quote — a feerate that moves in between moves the amount
+    /// with it.
+    pub async fn send_max_amount(&self, account: Account) -> Result<bitcoin::Amount, SendError> {
+        Ok(self.max_amount_at(account, self.send_fee().await?))
+    }
+
+    fn max_amount_at(&self, account: Account, fee: bitcoin::Amount) -> bitcoin::Amount {
+        let amount = self.mint.largest_affordable_amount(account, |_| {
+            Amount::from_sat(fee.to_sat()) + self.cfg.output_fee
+        });
+
+        bitcoin::Amount::from_sat(amount.msat / 1000)
+    }
+
+    /// Send `account`'s whole balance onchain by spending every note it
+    /// holds. Identical to [`Self::send`] except that the amount is
+    /// [`Self::send_max_amount`]'s to compute rather than the caller's to
+    /// choose, and that change is minted at the max-send floor: no change
+    /// comes back and the sub-sat remainder is donated to the federation.
+    pub async fn send_max(
+        &self,
+        account: Account,
+        address: Address<NetworkUnchecked>,
+    ) -> Result<OperationId, SendError> {
+        let fee = self.send_fee().await?;
+
+        let amount = self.max_amount_at(account, fee);
+
+        self.submit_send(account, address, amount, fee, true)
+    }
+
+    fn submit_send(
+        &self,
+        account: Account,
+        address: Address<NetworkUnchecked>,
+        amount: bitcoin::Amount,
+        fee: bitcoin::Amount,
+        max: bool,
+    ) -> Result<OperationId, SendError> {
         if !address.is_valid_for_network(self.client_ctx.network()) {
             return Err(SendError::WrongNetwork);
         }
@@ -137,17 +189,6 @@ impl WalletClientModule {
         if amount < self.cfg.dust_limit {
             return Err(SendError::DustValue);
         }
-
-        let fee = match fee {
-            Some(fee) => fee,
-            None => self
-                .client_ctx
-                .api()
-                .wallet_send_fee()
-                .await
-                .map_err(|_| SendError::FederationError)?
-                .ok_or(SendError::NoConsensusFeerateAvailable)?,
-        };
 
         let operation = OperationId::new_random();
 
@@ -168,11 +209,13 @@ impl WalletClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx, account, operation, tx_builder, |txid| SendEvent {
-                txid,
-                address,
-                amount,
-                fee,
+            .finalize_and_submit_tx(&dbtx, account, operation, tx_builder, max, |txid| {
+                SendEvent {
+                    txid,
+                    address,
+                    amount,
+                    fee,
+                }
             })
             .ok_or(SendError::InsufficientFunds)?;
 
@@ -282,11 +325,13 @@ impl WalletClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx, account, operation, tx_builder, |txid| ReceiveEvent {
-                txid,
-                address,
-                amount,
-                fee,
+            .finalize_and_submit_tx(&dbtx, account, operation, tx_builder, false, |txid| {
+                ReceiveEvent {
+                    txid,
+                    address,
+                    amount,
+                    fee,
+                }
             })
             .expect("Input amount is sufficient to finalize transaction");
 

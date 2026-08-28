@@ -142,6 +142,7 @@ impl StateMachine for ReceiveStateMachine {
                 super::GATEWAY_ACCOUNT,
                 self.operation,
                 tx_builder,
+                false,
                 |txid| ReceiveRefundEvent { txid },
             )
             .expect("Cannot claim input, additional funding needed");

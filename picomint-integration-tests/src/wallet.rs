@@ -179,5 +179,55 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     info!("wallet: zero_fee_send_aborts passed");
 
+    info!("wallet: send_max leaves no notes");
+
+    // A fresh client, so emptying the account cannot interfere with the
+    // suites that draw on `client_send` afterwards.
+    let client = env.new_client(None).await?;
+
+    let ecash = client_send
+        .mint()
+        .send(Account::PRIMARY, Amount::from_sat(100_000))
+        .await?;
+
+    let operation = client.mint().receive(Account::PRIMARY, &ecash)?;
+
+    crate::mint::await_tx_outcome(&client, operation)
+        .await
+        .expect("funding receive should be accepted");
+
+    let amount = client.wallet().send_max_amount(Account::PRIMARY).await?;
+
+    ensure!(amount > bitcoin::Amount::ZERO, "max send amount is zero");
+
+    let mut events = pin!(wallet_event_stream(&client));
+
+    let operation = client
+        .wallet()
+        .send_max(Account::PRIMARY, external_address.as_unchecked().clone())
+        .await?;
+
+    let Some((op, WalletEvent::Send(_))) = events.next().await else {
+        panic!("Expected Send event");
+    };
+    assert_eq!(op, operation);
+
+    let Some((op, WalletEvent::SendSuccess(_))) = events.next().await else {
+        panic!("Expected SendSuccess event");
+    };
+    assert_eq!(op, operation);
+
+    ensure!(
+        client
+            .mint()
+            .get_count_by_denomination(Account::PRIMARY)
+            .is_empty(),
+        "send_max left notes behind"
+    );
+
+    client.shutdown().await;
+
+    info!("wallet: send_max passed");
+
     Ok(())
 }

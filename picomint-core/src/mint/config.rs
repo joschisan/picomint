@@ -17,7 +17,7 @@ pub fn consensus_denominations() -> impl DoubleEndedIterator<Item = Denomination
     (0..42).map(Denomination)
 }
 
-pub fn client_denominations() -> impl DoubleEndedIterator<Item = Denomination> {
+pub fn client_denominations() -> impl DoubleEndedIterator<Item = Denomination> + ExactSizeIterator {
     (9..42).map(Denomination)
 }
 
