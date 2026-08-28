@@ -211,13 +211,74 @@ impl LightningClientModule {
     /// `PaymentFee::SEND_FEE_LIMIT` / `LN_FEE_LIMIT` and
     /// `EXPIRY_DELTA_LIMIT` on the supplied `gateway_info` as a
     /// backstop against an abusive gateway.
-    #[allow(clippy::too_many_lines)]
     pub async fn send(
         &self,
         account: Account,
         gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
         invoice: Bolt11Invoice,
+    ) -> Result<OperationId, SendPaymentError> {
+        self.send_inner(account, gateway_pk, gateway_info, invoice, false)
+            .await
+    }
+
+    /// The largest whole-sat invoice amount a [`Self::send_max`] from
+    /// `account` through this gateway can pay: the account's notes spent in
+    /// full cover the invoice, the gateway's fees, the federation's
+    /// transaction fee and the integrator's cut, with the sub-sat remainder
+    /// donated. This is the amount at which [`Self::send_max`] empties the
+    /// account; anything else leaves change behind.
+    ///
+    /// Priced against an invoice because the payee decides the routing fee —
+    /// a gateway that is itself the payee routes nothing and charges nothing
+    /// for it. Any of the payee's invoices will do, which is how a caller
+    /// prices a max before the invoice it will pay exists: resolve a
+    /// throwaway invoice at the payee's minimum, size against it, then
+    /// resolve the real invoice for this figure.
+    pub fn send_max_amount(
+        &self,
+        account: Account,
+        gateway_info: &GatewayInfo,
+        invoice: &Bolt11Invoice,
+    ) -> Amount {
+        let is_direct = invoice.recover_payee_pub_key() == gateway_info.lightning_public_key;
+
+        self.mint.largest_affordable_amount(account, |amount| {
+            let ln_fee = if is_direct {
+                Amount::ZERO
+            } else {
+                gateway_info.ln_fee.fee(amount.msat)
+            };
+
+            gateway_info.send_fee.fee(amount.msat) + ln_fee + self.cfg.output_fee
+        })
+    }
+
+    /// Pay an invoice sized by [`Self::send_max_amount`] against this same
+    /// gateway. Identical to [`Self::send`] except that change is minted at
+    /// the max-send floor: at the sized amount every note goes in and none
+    /// comes back, leaving the account empty. An amount gone stale against a
+    /// moved balance degrades to an ordinary send — change comes back rather
+    /// than the payment being refused.
+    pub async fn send_max(
+        &self,
+        account: Account,
+        gateway_pk: GatewayPk,
+        gateway_info: GatewayInfo,
+        invoice: Bolt11Invoice,
+    ) -> Result<OperationId, SendPaymentError> {
+        self.send_inner(account, gateway_pk, gateway_info, invoice, true)
+            .await
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn send_inner(
+        &self,
+        account: Account,
+        gateway_pk: GatewayPk,
+        gateway_info: GatewayInfo,
+        invoice: Bolt11Invoice,
+        max: bool,
     ) -> Result<OperationId, SendPaymentError> {
         let amount = invoice
             .amount_milli_satoshis()
@@ -297,10 +358,8 @@ impl LightningClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(&dbtx, account, operation, tx_builder, |txid| SendEvent {
-                txid,
-                amount,
-                fee,
+            .finalize_and_submit_tx(&dbtx, account, operation, tx_builder, max, |txid| {
+                SendEvent { txid, amount, fee }
             })
             .ok_or_else(|| SendPaymentError::FailedToFundPayment("Insufficient funds".into()))?;
 
@@ -454,10 +513,8 @@ impl LightningClientModule {
         let fee = summary.fee;
 
         self.mint
-            .finalize_and_submit_tx(dbtx, account, operation, tx_builder, |txid| ReceiveEvent {
-                txid,
-                amount,
-                fee,
+            .finalize_and_submit_tx(dbtx, account, operation, tx_builder, false, |txid| {
+                ReceiveEvent { txid, amount, fee }
             })
             .expect("Cannot claim input, additional funding needed");
     }

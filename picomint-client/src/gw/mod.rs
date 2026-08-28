@@ -172,9 +172,14 @@ impl GatewayClientModule {
 
         let txid = self
             .mint
-            .finalize_and_submit_tx(dbtx, GATEWAY_ACCOUNT, operation, tx_builder, |txid| {
-                ReceiveEvent { txid, amount, fee }
-            })
+            .finalize_and_submit_tx(
+                dbtx,
+                GATEWAY_ACCOUNT,
+                operation,
+                tx_builder,
+                false,
+                |txid| ReceiveEvent { txid, amount, fee },
+            )
             .context("Insufficient funds")?;
 
         let outpoint = OutPoint { txid, out_idx: 0 };
@@ -229,13 +234,18 @@ impl GatewayClientModule {
                 });
 
                 self.mint
-                    .finalize_and_submit_tx(dbtx, GATEWAY_ACCOUNT, operation, tx_builder, |txid| {
-                        SendSuccessEvent {
+                    .finalize_and_submit_tx(
+                        dbtx,
+                        GATEWAY_ACCOUNT,
+                        operation,
+                        tx_builder,
+                        false,
+                        |txid| SendSuccessEvent {
                             preimage,
                             txid,
                             ln_fee,
-                        }
-                    })
+                        },
+                    )
                     .expect("Cannot claim outgoing contract — additional funding needed");
             }
             None => {

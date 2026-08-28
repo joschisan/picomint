@@ -96,6 +96,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     test_mock_send_exactly_once(client_send).await?;
     test_mock_send_refund_forfeit(client_send).await?;
     test_mock_wrong_network(client_send).await?;
+    test_mock_send_max(env, client_send).await?;
     test_claim_outgoing_contract(client_send).await?;
     test_unilateral_refund(env, client_send).await?;
     deregister_gateway(env, &mock_gw_pk)?;
@@ -566,6 +567,86 @@ async fn test_mock_wrong_network(client: &Arc<Client>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Fund a fresh client with ecash, pay a mock invoice sized by
+/// `send_max_amount` via `send_max`, and assert the account holds not a
+/// single note afterwards — the zero-remnant guarantee the max path exists
+/// for.
+async fn test_mock_send_max(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
+    info!("ln: test_mock_send_max");
+
+    // A fresh client, so emptying the account cannot race the mint suite
+    // running in parallel on `client_send`.
+    let client = env.new_client(None).await?;
+
+    LightningClientModule::update_gateway_pks(client.ln().clone()).await?;
+    LightningClientModule::update_gateway_info(client.ln().clone()).await;
+
+    let ecash = client_send
+        .mint()
+        .send(Account::PRIMARY, Amount::from_sat(5_000))
+        .await?;
+
+    let operation = client.mint().receive(Account::PRIMARY, &ecash)?;
+
+    crate::mint::await_tx_outcome(&client, operation)
+        .await
+        .expect("funding receive should be accepted");
+
+    let (gateway_pk, gateway_info) = client.ln().select_gateway(None)?;
+
+    // Size against a probe invoice the way an integrator's bridge does: any
+    // of the payee's invoices settles whether the gateway routes or is the
+    // payee itself, so a throwaway at a minimal amount prices the max the
+    // real invoice is then resolved for.
+    let probe = mock_invoice_msat(
+        PAYABLE_PREIMAGE,
+        PAYABLE_PAYMENT_SECRET,
+        Currency::Regtest,
+        1_000,
+    );
+
+    let max = client
+        .ln()
+        .send_max_amount(Account::PRIMARY, &gateway_info, &probe);
+
+    ensure!(max > Amount::ZERO, "max send amount is zero");
+
+    // The mock's payable preimage, so the payment settles; the operation is
+    // derived from the payment hash, but this client has never attempted it.
+    let invoice = mock_invoice_msat(
+        PAYABLE_PREIMAGE,
+        PAYABLE_PAYMENT_SECRET,
+        Currency::Regtest,
+        max.msat,
+    );
+
+    let mut events = pin!(ln_event_stream(&client));
+
+    let send_op = client
+        .ln()
+        .send_max(Account::PRIMARY, gateway_pk, gateway_info, invoice)
+        .await?;
+
+    wait_ln_event(&mut events, send_op, |e| {
+        matches!(e, LnEvent::SendSuccess(_))
+    })
+    .await;
+
+    ensure!(
+        client
+            .mint()
+            .get_count_by_denomination(Account::PRIMARY)
+            .is_empty(),
+        "send_max left notes behind"
+    );
+
+    client.shutdown().await;
+
+    info!("ln: test_mock_send_max passed");
+
+    Ok(())
+}
+
 async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()> {
     info!("ln: test_claim_outgoing_contract");
 
@@ -620,6 +701,7 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
             Account::PRIMARY,
             OperationId::new_random(),
             tx_builder,
+            false,
             |_| SendSuccessEvent { preimage },
         )
         .context("Insufficient funds")?;
@@ -805,6 +887,15 @@ fn signet_invoice() -> Bolt11Invoice {
 }
 
 fn mock_invoice(preimage: [u8; 32], payment_secret: [u8; 32], currency: Currency) -> Bolt11Invoice {
+    mock_invoice_msat(preimage, payment_secret, currency, 1_000_000)
+}
+
+fn mock_invoice_msat(
+    preimage: [u8; 32],
+    payment_secret: [u8; 32],
+    currency: Currency,
+    amount_msat: u64,
+) -> Bolt11Invoice {
     let sk = SecretKey::from_slice(&INVOICE_SECRET).expect("valid secret");
 
     InvoiceBuilder::new(currency)
@@ -813,7 +904,7 @@ fn mock_invoice(preimage: [u8; 32], payment_secret: [u8; 32], currency: Currency
         .current_timestamp()
         .min_final_cltv_expiry_delta(0)
         .payment_secret(PaymentSecret(payment_secret))
-        .amount_milli_satoshis(1_000_000)
+        .amount_milli_satoshis(amount_msat)
         .expiry_time(Duration::from_secs(3600))
         .build_signed(|m| SECP256K1.sign_ecdsa_recoverable(m, &sk))
         .expect("invoice build")

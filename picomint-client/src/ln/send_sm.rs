@@ -225,6 +225,7 @@ fn submit_refund(
             old_state.common.account,
             operation,
             tx_builder,
+            false,
             |txid| SendRefundEvent { txid, expired },
         )
         .expect("Cannot claim input, additional funding needed")

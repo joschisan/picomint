@@ -42,6 +42,19 @@ use self::send_sm::{SendStateMachine, SendStateMachineTable};
 
 const TARGET_PER_DENOMINATION: usize = 3;
 
+/// Denominations change may be minted in. An ordinary transaction uses all
+/// of them; a max send skips the two smallest, which lifts the change
+/// threshold (smallest change denomination + output fee = 2148 msat) above
+/// the largest sub-sat remainder an amount sized by
+/// [`MintClientModule::largest_affordable_amount`] can leave — one whole-sat
+/// pricing step plus the gateway fee limits' ppm rates and the app cut's
+/// dust wrap, ~1.65 sat. A freshly priced max send therefore pulls every
+/// note and mints no change at all, while an amount gone stale against a
+/// moved balance falls back to minting change like any other send.
+fn change_denominations(max: bool) -> impl DoubleEndedIterator<Item = Denomination> {
+    client_denominations().skip(if max { 2 } else { 0 })
+}
+
 /// Counters probed per round trip — and, since a scan stops on its first
 /// fully empty batch, the gap limit itself.
 ///
@@ -313,14 +326,11 @@ impl MintClientModule {
     /// smallest denomination buys nothing at all and is left behind as
     /// federation revenue, the same way change dust is.
     fn fee_requests(&self, dbtx: &WriteTx, basis: Amount) -> Vec<NoteIssuanceRequest> {
-        let cut = Amount::from_msat(
-            basis
-                .msat
-                .saturating_mul(self.app_fee_ppm)
-                .saturating_div(1_000_000),
+        let mut denominations = Self::select_output_denominations(
+            self.cfg.output_fee,
+            self.app_fee_cut(basis),
+            client_denominations(),
         );
-
-        let mut denominations = Self::select_output_denominations(self.cfg.output_fee, cut);
 
         // Sorted for the same reason the change outputs are: the shape of a
         // transaction's outputs should say as little as possible about which
@@ -335,6 +345,35 @@ impl MintClientModule {
                 NoteIssuanceRequest::new(Account::AppFee, d, counter, &self.secret)
             })
             .collect()
+    }
+
+    fn app_fee_cut(&self, basis: Amount) -> Amount {
+        Amount::from_msat(
+            basis
+                .msat
+                .saturating_mul(self.app_fee_ppm)
+                .saturating_div(1_000_000),
+        )
+    }
+
+    /// Output value plus federation fees the integrator's cut adds to a
+    /// transaction from `account` whose caller outputs and their fees total
+    /// `basis`. Mirrors [`Self::add_fee_outputs`] exactly, so
+    /// [`Self::largest_affordable_amount`] can price the cut without building
+    /// a transaction.
+    fn app_fee_total(&self, account: Account, basis: Amount) -> Amount {
+        if self.app_fee_ppm == 0 || !matches!(account, Account::User(_)) {
+            return Amount::ZERO;
+        }
+
+        Self::select_output_denominations(
+            self.cfg.output_fee,
+            self.app_fee_cut(basis),
+            client_denominations(),
+        )
+        .into_iter()
+        .map(|d| d.amount() + self.cfg.output_fee)
+        .sum()
     }
 }
 
@@ -432,6 +471,11 @@ impl MintClientModule {
     /// `MintStateMachine` that tracks the balance-side notes/requests
     /// (if any).
     ///
+    /// `max` raises the change floor (see [`change_denominations`]): an
+    /// amount sized by [`Self::largest_affordable_amount`] then pulls every
+    /// note the account holds and mints no change at all, so a committed
+    /// submission leaves the account empty.
+    ///
     /// `event` builds the module's initiating event (e.g. `SendEvent`)
     /// from the txid; this method logs it before the bookkeeping
     /// `TxCreateEvent` so the operation's event log opens with the
@@ -442,6 +486,7 @@ impl MintClientModule {
         account: Account,
         operation: OperationId,
         mut builder: TxBuilder,
+        max: bool,
         event: impl FnOnce(TransactionId) -> E,
     ) -> Option<TransactionId> {
         // Ahead of the deficit the funding has to cover, so the cut is funded
@@ -455,7 +500,7 @@ impl MintClientModule {
 
         let deficit = builder.deficit();
 
-        let (spendable_notes, change_requests) = self.balance(dbtx, account, &mut builder)?;
+        let (spendable_notes, change_requests) = self.balance(dbtx, account, &mut builder, max)?;
 
         issuance_requests.extend(change_requests);
 
@@ -482,14 +527,15 @@ impl MintClientModule {
     /// Mint-side transaction balancing. Pulls funding notes from `account`
     /// when the builder is underfunded, then absorbs any excess as change
     /// outputs issued back to the same account. Sub-denomination dust below
-    /// `smallest_denom + output_fee` is left as implicit federation revenue.
-    /// Returns `None` iff the account holds insufficient funds to cover the
-    /// builder's deficit, which is the only way balancing fails.
+    /// `smallest_change_denom + output_fee` is left as implicit federation
+    /// revenue. Returns `None` iff the account holds insufficient funds to
+    /// cover the builder's deficit, which is the only way balancing fails.
     fn balance(
         &self,
         dbtx: &WriteTx,
         account: Account,
         builder: &mut TxBuilder,
+        max: bool,
     ) -> Option<(Vec<SpendableNote>, Vec<NoteIssuanceRequest>)> {
         let mut spendable_notes = self.select_funding_input(dbtx, account, builder.deficit())?;
 
@@ -509,8 +555,11 @@ impl MintClientModule {
 
         assert_eq!(builder.deficit(), Amount::ZERO);
 
-        let mut denoms =
-            Self::select_output_denominations(self.cfg.output_fee, builder.excess_input());
+        let mut denoms = Self::select_output_denominations(
+            self.cfg.output_fee,
+            builder.excess_input(),
+            change_denominations(max),
+        );
 
         // Sort to minimize information leaked about the change shape.
         denoms.sort();
@@ -593,6 +642,63 @@ impl MintClientModule {
             .notify_for_table(&NoteTable(self.federation))
     }
 
+    /// Value `account`'s notes can deliver to a transaction's outputs when
+    /// spent in full — their face value minus one input fee per note. The
+    /// budget a max-send amount is solved against.
+    fn max_spendable(&self, account: Account) -> Amount {
+        account_notes(&self.client_ctx.db().begin_read(), self.federation, account)
+            .iter()
+            .map(|note| self.note_value(note))
+            .sum()
+    }
+
+    /// Largest whole-sat amount `account`'s notes can deliver to a rail's
+    /// outputs when spent in full: a max send for this amount pulls every
+    /// note and mints no change (see [`change_denominations`]), donating the
+    /// sub-sat remainder to the federation the way change dust already is.
+    /// Zero when even the fees on a zero-amount payment do not fit.
+    ///
+    /// `rail_fees` prices everything the rail's outputs add on top of the
+    /// amount itself — the rail's own fees and the federation's fee on the
+    /// outputs that carry them — and must be monotone. The integrator's cut
+    /// is priced in here, mirroring [`Self::add_fee_outputs`], so a rail
+    /// cannot size against a different cut than the one it will pay.
+    ///
+    /// Whole sats because that is the granularity every rail's amount entry
+    /// works in.
+    pub fn largest_affordable_amount(
+        &self,
+        account: Account,
+        rail_fees: impl Fn(Amount) -> Amount,
+    ) -> Amount {
+        let spendable = self.max_spendable(account);
+
+        let total = |amount: Amount| {
+            let basis = amount + rail_fees(amount);
+
+            basis + self.app_fee_total(account, basis)
+        };
+
+        if spendable < total(Amount::ZERO) {
+            return Amount::ZERO;
+        }
+
+        let mut lo = 0;
+        let mut hi = spendable.msat / 1000;
+
+        while lo < hi {
+            let mid = (lo + hi).div_ceil(2);
+
+            if total(Amount::from_sat(mid)) <= spendable {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+
+        Amount::from_sat(lo)
+    }
+
     fn select_funding_input(
         &self,
         dbtx: &WriteTx,
@@ -658,6 +764,7 @@ impl MintClientModule {
     fn select_output_denominations(
         output_fee: Amount,
         mut excess_input: Amount,
+        denominations: impl DoubleEndedIterator<Item = Denomination>,
     ) -> Vec<Denomination> {
         let mut output_denominations = Vec::new();
 
@@ -666,7 +773,7 @@ impl MintClientModule {
         // output per tier (since we only reach tier d once the remainder is
         // already below `denom(d+1) + output_fee`, and two of `denom(d)` cost
         // more than that). The largest tier absorbs whatever remains.
-        for d in client_denominations().rev() {
+        for d in denominations.rev() {
             for _ in 0.. {
                 match excess_input.checked_sub(d.amount() + output_fee) {
                     Some(remaining) => {
@@ -785,7 +892,7 @@ impl MintClientModule {
         let deficit = builder.deficit();
 
         let (funding_notes, change_requests) = self
-            .balance(&dbtx, account, &mut builder)
+            .balance(&dbtx, account, &mut builder, false)
             .ok_or(SendECashError::InsufficientBalance)?;
 
         let funding: Amount = funding_notes.iter().map(|n| n.amount()).sum();
@@ -965,9 +1072,8 @@ impl MintClientModule {
 
         let amount = ecash.amount();
 
-        self.finalize_and_submit_tx(&dbtx, account, operation, tx_builder, |txid| ReceiveEvent {
-            txid,
-            amount,
+        self.finalize_and_submit_tx(&dbtx, account, operation, tx_builder, false, |txid| {
+            ReceiveEvent { txid, amount }
         })
         .ok_or(ReceiveECashError::InsufficientFunds)?;
 
