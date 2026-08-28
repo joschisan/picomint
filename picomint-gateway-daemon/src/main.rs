@@ -76,7 +76,7 @@ pub struct GatewayOpts {
     pub ldk_addr: SocketAddr,
 
     /// Base send fee in millisatoshis: the gateway's tx cut on outgoing payments.
-    #[arg(long, env = "SEND_FEE_BASE_MSAT", default_value_t = 2000)]
+    #[arg(long, env = "SEND_FEE_BASE_MSAT", default_value_t = 10_000)]
     pub send_fee_base_msat: u64,
 
     /// Send fee rate in parts per million: the gateway's tx cut on outgoing payments.
@@ -84,11 +84,11 @@ pub struct GatewayOpts {
     pub send_fee_ppm: u64,
 
     /// Base receive fee in millisatoshis: the gateway's tx cut on incoming payments.
-    #[arg(long, env = "RECEIVE_FEE_BASE_MSAT", default_value_t = 2000)]
+    #[arg(long, env = "RECEIVE_FEE_BASE_MSAT", default_value_t = 10_000)]
     pub receive_fee_base_msat: u64,
 
     /// Receive fee rate in parts per million: the gateway's tx cut on incoming payments.
-    #[arg(long, env = "RECEIVE_FEE_PPM", default_value_t = 3000)]
+    #[arg(long, env = "RECEIVE_FEE_PPM", default_value_t = 1000)]
     pub receive_fee_ppm: u64,
 
     /// BOLT11 invoice expiry, in seconds, for invoices the gateway issues.
