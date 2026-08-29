@@ -72,7 +72,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
             }
 
             div class="col-lg-6" {
-                (audit::render(&audit_summary))
+                (ln::render(&api.server.ln).await)
             }
         }
 
@@ -82,7 +82,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
             }
 
             div class="col-lg-6" {
-                (ln::render(&api.server.ln).await)
+                (audit::render(&audit_summary))
             }
         }
 
