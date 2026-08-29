@@ -92,7 +92,7 @@ jobs:
 
   bootstrap:
     name: Bootstrap Installer
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
@@ -100,7 +100,8 @@ jobs:
     - name: Run bootstrap.sh via stdin (mirrors curl|bash on a real machine)
       env:
         AUTO_YES: "1"
-      run: cat bootstrap.sh | bash
+        REF: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: cat bootstrap/bootstrap.sh | bash
 
     - name: Verify Web UI is reachable
       run: curl -fsS --retry 10 --retry-delay 2 --retry-connrefused http://127.0.0.1:3000 > /dev/null

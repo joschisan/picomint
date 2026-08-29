@@ -13,7 +13,7 @@ mkdir -p ~/picomint-guardian-daemon && cd ~/picomint-guardian-daemon
 Download the compose file:
 
 ```bash
-curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-guardian/docker-compose.yml
+curl -O https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap/docker-compose.yml
 ```
 
 And then run:
@@ -30,13 +30,13 @@ ssh -NL 3000:127.0.0.1:3000 <your_server>
 
 ### Bootstrap on a fresh Ubuntu 26.04 LTS desktop
 
-For a fresh **Ubuntu 26.04 LTS desktop** with a screen and keyboard, the manual steps above are bundled into a single script. It installs Docker (if missing), brings up the guardian + bundled bitcoind compose in `~/picomint-guardian-daemon`, and optionally installs Signal Desktop for exchanging setup codes with co-guardians:
+For a fresh **Ubuntu 26.04 LTS desktop** with a screen and keyboard, the manual steps above are bundled into a single script. It installs Docker (if missing), brings up the guardian + bundled bitcoind compose in `~/picomint-guardian-daemon`, pins Dashboard / Logs / Update shortcuts to the dock, and installs Signal Desktop for exchanging setup codes with co-guardians:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap/bootstrap.sh | bash
 ```
 
-The script targets amd64 and aborts if a deployment already exists at `~/picomint-guardian-daemon`. Ubuntu 26.04 LTS is the recommended target on operator hardware; CI runs the bootstrap end-to-end on the latest Ubuntu runner GitHub Actions provides.
+The script requires Ubuntu 26.04 LTS on amd64 and aborts if a deployment already exists at `~/picomint-guardian-daemon`. CI runs the bootstrap end-to-end on GitHub Actions' `ubuntu-26.04` runner.
 
 ### Bitcoin Backend
 
@@ -172,23 +172,7 @@ picomint-guardian-cli …`.
 
 ## Deploy Gateway
 
-Pick a stable directory for the deployment:
-
-```bash
-mkdir -p ~/picomint-gateway-daemon && cd ~/picomint-gateway-daemon
-```
-
-Download the compose file:
-
-```bash
-curl -O https://raw.githubusercontent.com/joschisan/picomint/main/docker-gateway/docker-compose.yml
-```
-
-And then run:
-
-```bash
-sudo docker compose up -d
-```
+The gateway is a single container image: `ghcr.io/joschisan/picomint-gateway-daemon:main`. Set it up with Docker however you prefer — persist `/data` in a volume, publish the public API port `8080` and the LDK Lightning P2P port `9735`, and configure it through the environment variables documented in [Configuration](#configuration-1) below.
 
 ### Accessing the CLI
 
