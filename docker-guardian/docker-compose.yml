@@ -4,7 +4,7 @@ services:
     container_name: picomint-guardian-daemon
     restart: unless-stopped
     depends_on:
-      - bitcoind
+      - picomint-bitcoind
     ports:
       # Iroh endpoint
       - "8080:8080"
@@ -15,10 +15,10 @@ services:
       - picomint_guardian_daemon_data:/data
     environment:
       - DATA_DIR=/data
-      - BITCOIND_URL=http://bitcoin:bitcoin@bitcoind:8332
+      - BITCOIND_URL=http://bitcoin:bitcoin@picomint-bitcoind:8332
       - UI_ADDR=0.0.0.0:3000
 
-  bitcoind:
+  picomint-bitcoind:
     image: btcpayserver/bitcoin:31.0
     container_name: picomint-bitcoind
     restart: unless-stopped
@@ -34,7 +34,7 @@ services:
       - -rpcpassword=bitcoin
       - -dbcache=1024
 
-  dozzle:
+  picomint-dozzle:
     image: amir20/dozzle:latest
     container_name: picomint-dozzle
     restart: unless-stopped
