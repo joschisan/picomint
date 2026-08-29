@@ -19,14 +19,12 @@ services:
       - UI_ADDR=0.0.0.0:3000
 
   picomint-bitcoind:
-    image: btcpayserver/bitcoin:31.0
+    image: bitcoin/bitcoin:latest
     container_name: picomint-bitcoind
     restart: unless-stopped
     volumes:
-      - picomint_bitcoind_data:/data
+      - picomint_bitcoind_data:/home/bitcoin/.bitcoin
     command:
-      - bitcoind
-      - -datadir=/data
       - -server=1
       - -rpcbind=0.0.0.0
       - -rpcallowip=172.16.0.0/12
