@@ -1,33 +1,43 @@
+# All services run on the host network. The guardian's p2p and client api
+# share one iroh endpoint (UDP), and stacking Docker's NAT on top of the
+# router's would give iroh two layers to punch through instead of one. That
+# means each service binds its own address rather than being contained by a
+# published port, so the loopback binds below are what keep the Web UI, the
+# log viewer and the Bitcoin RPC off the LAN.
 services:
   picomint-guardian-daemon:
     image: ghcr.io/joschisan/picomint-guardian-daemon:main
     container_name: picomint-guardian-daemon
-    restart: unless-stopped
+    restart: always
+    network_mode: host
     depends_on:
       - bitcoind
-    ports:
-      # Iroh endpoint
-      - "8080:8080"
-      # Web UI — bound to host loopback only. Open <http://127.0.0.1:3000>
-      # locally, or `ssh -NL 3000:127.0.0.1:3000 <host>` from another machine.
-      - "127.0.0.1:3000:3000"
     volumes:
       - picomint_guardian_daemon_data:/data
     environment:
       - DATA_DIR=/data
-      - BITCOIND_URL=http://bitcoin:bitcoin@bitcoind:8332
-      - UI_ADDR=0.0.0.0:3000
+      - BITCOIND_URL=http://bitcoin:bitcoin@127.0.0.1:8332
+      # The iroh endpoint must be reachable from the internet for peers and
+      # clients to talk to your guardian.
+      - P2P_ADDR=0.0.0.0:8080
+      # Web UI — loopback only, reachable from a browser on this machine and
+      # nowhere else. Do not change this to 0.0.0.0: on the host network that
+      # puts guardian administration on your LAN.
+      - UI_ADDR=127.0.0.1:3000
 
   bitcoind:
     image: bitcoin/bitcoin:latest
     container_name: bitcoind
-    restart: unless-stopped
+    restart: always
+    network_mode: host
     volumes:
       - bitcoind_data:/home/bitcoin/.bitcoin
     command:
       - -server=1
-      - -rpcbind=0.0.0.0
-      - -rpcallowip=172.16.0.0/12
+      # RPC is loopback only — the guardian shares this network namespace, and
+      # nothing else needs to reach it.
+      - -rpcbind=127.0.0.1
+      - -rpcallowip=127.0.0.1
       - -rpcuser=bitcoin
       - -rpcpassword=bitcoin
       - -dbcache=1024
@@ -35,15 +45,15 @@ services:
   dozzle:
     image: amir20/dozzle:latest
     container_name: dozzle
-    restart: unless-stopped
-    ports:
-      # Browser log viewer — bound to host loopback only. Open
-      # <http://127.0.0.1:3001> locally, or
-      # `ssh -NL 3001:127.0.0.1:3001 <host>` from another machine.
-      - "127.0.0.1:3001:8080"
+    restart: always
+    network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
+      # Browser log viewer — loopback only. Dozzle defaults to :8080, which on
+      # the host network would bind every interface and collide with the iroh
+      # endpoint.
+      - DOZZLE_ADDR=127.0.0.1:3001
       - DOZZLE_NO_ANALYTICS=true
 
 volumes:
