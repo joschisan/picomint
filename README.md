@@ -312,34 +312,28 @@ because the outgoing side carries an LN-routing-fee budget that doesn't
 exist on the incoming side — a single unified view would mean three
 permanent NULL columns on every incoming row.
 
-Copy the DB out of the container and inspect it with `sqlite3` on the
-host. Pass `-header -column` for human-readable, column-aligned output —
-without it `sqlite3` prints unlabeled pipe-delimited rows:
+Query it with read-only SQL through the admin CLI — the daemon runs the
+query against the live db and returns one JSON object per row, the same
+shape `sqlite3 --json` prints. Ten most recent outgoing payments:
 
 ```bash
-sudo docker cp picomint-gateway-daemon:/data/analytics/analytics.sqlite .
-```
-
-Ten most recent outgoing payments:
-
-```bash
-sqlite3 -header -column analytics.sqlite \
-    "SELECT * FROM outgoing_payments ORDER BY started_at DESC LIMIT 10;"
+picomint-gateway-cli analytics \
+    "SELECT * FROM outgoing_payments ORDER BY started_at DESC LIMIT 10"
 ```
 
 Status breakdown for outgoing:
 
 ```bash
-sqlite3 -header -column analytics.sqlite \
-    "SELECT status, COUNT(*) FROM outgoing_payments GROUP BY status;"
+picomint-gateway-cli analytics \
+    "SELECT status, COUNT(*) AS n FROM outgoing_payments GROUP BY status"
 ```
 
 Total outgoing volume per federation, in sat:
 
 ```bash
-sqlite3 -header -column analytics.sqlite \
+picomint-gateway-cli analytics \
     "SELECT federation, SUM(amount_msat)/1000 AS sat \
-     FROM outgoing_payments WHERE status='success' GROUP BY federation;"
+     FROM outgoing_payments WHERE status='success' GROUP BY federation"
 ```
 
 **Columns common to both views:**

@@ -31,6 +31,9 @@ pub const ROUTE_LDK_PEER_CONNECT: &str = "/ldk/peer/connect";
 pub const ROUTE_LDK_PEER_DISCONNECT: &str = "/ldk/peer/disconnect";
 pub const ROUTE_LDK_PEER_LIST: &str = "/ldk/peer/list";
 
+// Analytics
+pub const ROUTE_ANALYTICS: &str = "/analytics";
+
 // Federation management
 pub const ROUTE_FEDERATION_ADD: &str = "/federation/add";
 pub const ROUTE_FEDERATION_LIST: &str = "/federation/list";
@@ -265,6 +268,19 @@ pub struct FederationConfigRequest {
 pub struct FederationConfigResponse {
     pub config: serde_json::Value,
 }
+
+// --- /analytics ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct AnalyticsRequest {
+    /// Read-only SQL run against the analytics db, e.g.
+    /// "SELECT * FROM outgoing_payments ORDER BY started_at DESC LIMIT 10"
+    pub query: String,
+}
+
+/// One JSON object per row, keyed by result column name — the same shape
+/// `sqlite3 --json` prints.
+pub type AnalyticsResponse = Vec<serde_json::Map<String, serde_json::Value>>;
 
 // --- /federation/module/mint/count ---
 
