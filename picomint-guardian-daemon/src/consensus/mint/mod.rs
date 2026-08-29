@@ -10,8 +10,7 @@ use picomint_core::mint::config::{
 };
 use picomint_core::mint::methods::MintMethod;
 use picomint_core::mint::{
-    Denomination, MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError,
-    verify_note,
+    MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError, verify_note,
 };
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, OutPoint, PeerId};
@@ -83,12 +82,6 @@ pub struct Mint {
 impl Mint {
     pub fn new(cfg: MintConfig, db: Database) -> Self {
         Self { cfg, db }
-    }
-
-    pub async fn note_distribution_ui(&self) -> BTreeMap<Denomination, u64> {
-        self.db.begin_read().iter(&IssuanceCounterTable, |r| {
-            r.filter(|(_, count)| *count > 0).collect()
-        })
     }
 }
 

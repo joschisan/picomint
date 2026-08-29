@@ -17,7 +17,7 @@ use maud::html;
 
 use crate::consensus::api::ConsensusApi;
 use crate::ui::assets::WithStaticRoutesExt;
-use crate::ui::dashboard::modules::{ln, mint, wallet};
+use crate::ui::dashboard::modules::{ln, wallet};
 use crate::ui::{ROOT_ROUTE, dashboard_layout};
 
 pub const BACKUP_CONFIG_ROUTE: &str = "/backup-config";
@@ -89,12 +89,6 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
         div class="row gy-4 mt-2" {
             div class="col-12" {
                 (wallet::render(&api.server.wallet).await)
-            }
-        }
-
-        div class="row gy-4 mt-2" {
-            div class="col-12" {
-                (mint::render(&api.server.mint).await)
             }
         }
 

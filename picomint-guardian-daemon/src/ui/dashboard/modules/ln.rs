@@ -51,12 +51,15 @@ pub async fn render(lightning: &crate::consensus::ln::Lightning) -> Markup {
     }
 }
 
-// Swappable gateway management split: list of named gateways on the left,
-// add form below. `error`, when set, renders an inline alert above the
-// form inputs. Returned both by `render` for the initial page and by the
+// Swappable gateway management: list of named gateways stacked above the
+// add form. `error`, when set, renders an inline alert above the form
+// inputs. Returned both by `render` for the initial page and by the
 // add/remove handlers as the htmx fragment.
 fn gateway_section(gateways: &[(GatewayPk, String)], error: Option<&str>) -> Markup {
     html! {
+        div class="alert alert-warning mb-3" {
+            "All guardians have to enter the exact same set of gateways."
+        }
         @if !gateways.is_empty() {
             div class="list-group mb-3" {
                 @for (pk, name) in gateways {
@@ -75,9 +78,6 @@ fn gateway_section(gateways: &[(GatewayPk, String)], error: Option<&str>) -> Mar
             }
         }
         form hx-post=(LN_ADD_ROUTE) hx-target="#gateway-section" hx-swap="innerHTML" {
-            div class="alert alert-warning mb-3" {
-                "All guardians have to enter the exact same set of gateways."
-            }
             @if let Some(error) = error {
                 div class="alert alert-danger mb-3" { (error) }
             }
