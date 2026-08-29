@@ -19,18 +19,18 @@ use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
-    CLI_SOCKET_FILENAME, ChannelInfo, FederationAddRequest, FederationBalanceRequest,
-    FederationBalanceResponse, FederationConfigRequest, FederationConfigResponse,
-    FederationDisableRequest, FederationEnableRequest, FederationListResponse,
-    FederationMintCountRequest, FederationMintCountResponse, FederationMintReceiveRequest,
-    FederationMintReceiveResponse, FederationMintSendRequest, FederationMintSendResponse,
-    FederationWalletReceiveRequest, FederationWalletReceiveResponse,
+    AnalyticsRequest, AnalyticsResponse, CLI_SOCKET_FILENAME, ChannelInfo, FederationAddRequest,
+    FederationBalanceRequest, FederationBalanceResponse, FederationConfigRequest,
+    FederationConfigResponse, FederationDisableRequest, FederationEnableRequest,
+    FederationListResponse, FederationMintCountRequest, FederationMintCountResponse,
+    FederationMintReceiveRequest, FederationMintReceiveResponse, FederationMintSendRequest,
+    FederationMintSendResponse, FederationWalletReceiveRequest, FederationWalletReceiveResponse,
     FederationWalletSendFeeRequest, FederationWalletSendFeeResponse, FederationWalletSendRequest,
     FederationWalletSendResponse, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
     LdkChannelCloseResponse, LdkChannelListResponse, LdkChannelOpenRequest, LdkLnReceiveRequest,
     LdkLnReceiveResponse, LdkLnSendRequest, LdkLnSendResponse, LdkOnchainReceiveResponse,
     LdkOnchainSendRequest, LdkOnchainSendResponse, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
-    LdkPeerListResponse, MnemonicResponse, PeerInfo, ROUTE_FEDERATION_ADD,
+    LdkPeerListResponse, MnemonicResponse, PeerInfo, ROUTE_ANALYTICS, ROUTE_FEDERATION_ADD,
     ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE,
     ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
     ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
@@ -111,6 +111,7 @@ fn router() -> Router<AppState> {
         // Top-level
         .route(ROUTE_INFO, post(info))
         .route(ROUTE_MNEMONIC, post(mnemonic))
+        .route(ROUTE_ANALYTICS, post(analytics))
         // LDK node management
         .route(ROUTE_LDK_BALANCES, post(ldk_balances))
         .route(ROUTE_LDK_CHANNEL_OPEN, post(ldk_channel_open))
@@ -191,6 +192,20 @@ async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse
         .collect::<Vec<_>>();
 
     Ok(Json(MnemonicResponse { mnemonic: words }))
+}
+
+async fn analytics(
+    State(state): State<AppState>,
+    Json(request): Json<AnalyticsRequest>,
+) -> Result<Json<AnalyticsResponse>, CliError> {
+    let rows = tokio::task::spawn_blocking(move || {
+        crate::analytics::query(&state.data_dir, &request.query)
+    })
+    .await
+    .map_err(CliError::internal)?
+    .map_err(CliError::bad_request)?;
+
+    Ok(Json(rows))
 }
 
 // ---------------------------------------------------------------------------
