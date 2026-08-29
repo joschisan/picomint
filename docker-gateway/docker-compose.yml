@@ -9,10 +9,10 @@ services:
       # LDK lightning P2P (BOLT default port)
       - "9735:9735"
     volumes:
-      - picomint_gateway_data:/data
+      - picomint_gateway_daemon_data:/data
     environment:
       - DATA_DIR=/data
       - ESPLORA_URL=https://mempool.space/api
 
 volumes:
-  picomint_gateway_data:
+  picomint_gateway_daemon_data:

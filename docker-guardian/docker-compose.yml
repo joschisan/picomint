@@ -12,7 +12,7 @@ services:
       # locally, or `ssh -NL 3000:127.0.0.1:3000 <host>` from another machine.
       - "127.0.0.1:3000:3000"
     volumes:
-      - picomint_guardian_data:/data
+      - picomint_guardian_daemon_data:/data
     environment:
       - DATA_DIR=/data
       - BITCOIND_URL=http://bitcoin:bitcoin@bitcoind:8332
@@ -23,7 +23,7 @@ services:
     container_name: picomint-bitcoind
     restart: unless-stopped
     volumes:
-      - bitcoind_data:/data
+      - picomint_bitcoind_data:/data
     command:
       - bitcoind
       - -datadir=/data
@@ -49,5 +49,5 @@ services:
       - DOZZLE_NO_ANALYTICS=true
 
 volumes:
-  picomint_guardian_data:
-  bitcoind_data:
+  picomint_guardian_daemon_data:
+  picomint_bitcoind_data:
