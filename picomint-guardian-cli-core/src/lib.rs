@@ -85,6 +85,11 @@ pub struct SetupAddPeerResponse {
 /// Default invite-code expiration, in days.
 pub const DEFAULT_INVITE_EXPIRY_DAYS: u64 = 30;
 
+/// Maximum expiration of an invite code in days. One year is far below
+/// chrono's date-range limit, so the expiry arithmetic in
+/// `create_invite_code` cannot overflow.
+pub const INVITE_EXPIRY_DAYS_LIMIT: u64 = 365;
+
 /// Default number of users an invite code may onboard.
 pub const DEFAULT_INVITE_USER_LIMIT: u64 = 50;
 

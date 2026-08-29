@@ -5,8 +5,8 @@ pub mod expiry;
 pub mod general;
 pub mod invite;
 pub mod modules;
-pub mod peers;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::Router;
@@ -42,7 +42,7 @@ async fn backup_config(State(state): State<Arc<ConsensusApi>>) -> impl IntoRespo
 async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResponse {
     let api = &*state;
 
-    let guardian_names: std::collections::BTreeMap<_, _> = api
+    let guardian_names: BTreeMap<_, _> = api
         .cfg
         .consensus
         .peers
@@ -50,8 +50,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
         .map(|(peer, endpoint)| (*peer, endpoint.name.clone()))
         .collect();
     let federation_name = api.cfg.consensus.name.clone();
-    let session_count = api.session_count().await;
-    let p2p_connection_status: std::collections::BTreeMap<_, _> = api
+    let p2p_connection_status: BTreeMap<_, _> = api
         .p2p_status_receivers
         .iter()
         .map(|(peer, receiver)| (*peer, receiver.borrow().clone()))
@@ -62,18 +61,14 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
 
     let content = html! {
         div class="row gy-4" {
-            div class="col-lg-6" {
-                (general::render(&federation_name, session_count, &guardian_names))
-            }
-
-            div class="col-lg-6" {
-                (invite::render(api.server.wallet.consensus_block_count_ui()))
+            div class="col-12" {
+                (general::render(&federation_name, &guardian_names, &p2p_connection_status))
             }
         }
 
         div class="row gy-4 mt-2" {
             div class="col-lg-6" {
-                (peers::render(&p2p_connection_status))
+                (invite::render(api.server.wallet.consensus_block_count_ui()))
             }
 
             div class="col-lg-6" {
@@ -82,8 +77,24 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
         }
 
         div class="row gy-4 mt-2" {
-            div class="col-12" {
+            div class="col-lg-6" {
                 (bitcoin::render(&bitcoin_rpc_status))
+            }
+
+            div class="col-lg-6" {
+                (ln::render(&api.server.ln).await)
+            }
+        }
+
+        div class="row gy-4 mt-2" {
+            div class="col-12" {
+                (wallet::render(&api.server.wallet).await)
+            }
+        }
+
+        div class="row gy-4 mt-2" {
+            div class="col-12" {
+                (mint::render(&api.server.mint).await)
             }
         }
 
@@ -94,20 +105,6 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
 
             div class="col-lg-6" {
                 (expiry::render(expiry_status.as_ref()))
-            }
-        }
-
-        div class="row gy-4 mt-2" {
-            div class="col-12" {
-                (ln::render(&api.server.ln).await)
-            }
-        }
-
-        (wallet::render(&api.server.wallet).await)
-
-        div class="row gy-4 mt-2" {
-            div class="col-12" {
-                (mint::render(&api.server.mint).await)
             }
         }
     };

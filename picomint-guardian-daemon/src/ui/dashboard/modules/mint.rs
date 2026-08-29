@@ -1,6 +1,5 @@
 use maud::{Markup, PreEscaped, html};
 
-// Function to render the Mint module UI section
 pub async fn render(mint: &crate::consensus::mint::Mint) -> Markup {
     let distribution = mint.note_distribution_ui().await;
 
@@ -55,7 +54,7 @@ pub async fn render(mint: &crate::consensus::mint::Mint) -> Markup {
                         }});
                         </script>",
                         labels = serde_json::to_string(&labels)
-                            .expect("Failed to serialize labels"),
+                            .expect("a list of strings is serializable"),
                     )))
                 }
             }

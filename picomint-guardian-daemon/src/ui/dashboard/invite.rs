@@ -4,7 +4,9 @@ use axum::extract::{Form, State};
 use axum::response::{Html, IntoResponse};
 use chrono::DateTime;
 use maud::{Markup, PreEscaped, html};
-use picomint_guardian_cli_core::{DEFAULT_INVITE_EXPIRY_DAYS, DEFAULT_INVITE_USER_LIMIT};
+use picomint_guardian_cli_core::{
+    DEFAULT_INVITE_EXPIRY_DAYS, DEFAULT_INVITE_USER_LIMIT, INVITE_EXPIRY_DAYS_LIMIT,
+};
 use qrcode::QrCode;
 use serde::Deserialize;
 
@@ -27,7 +29,7 @@ pub fn render(consensus_block_count: u64) -> Markup {
                     }
                 } @else {
                     div id="invite-container" {
-                        (generate_form())
+                        (generate_form(None))
                     }
                 }
             }
@@ -37,11 +39,16 @@ pub fn render(consensus_block_count: u64) -> Markup {
 
 // Form that asks the guardian for a fresh invite code with an operator-chosen
 // expiration (in days) and user limit, pre-filled with the defaults. The
-// generated code replaces the form via htmx.
-fn generate_form() -> Markup {
+// generated code replaces the form via htmx; `error`, when set, renders an
+// inline alert above the inputs.
+fn generate_form(error: Option<&str>) -> Markup {
     html! {
         div class="alert alert-info" {
             "Generate an invite code to onboard users to your federation."
+        }
+
+        @if let Some(error) = error {
+            div class="alert alert-danger" { (error) }
         }
 
         form
@@ -57,7 +64,9 @@ fn generate_form() -> Markup {
                     id="expiry_days"
                     name="expiry_days"
                     min="1"
-                    value=(DEFAULT_INVITE_EXPIRY_DAYS);
+                    max=(INVITE_EXPIRY_DAYS_LIMIT)
+                    value=(DEFAULT_INVITE_EXPIRY_DAYS)
+                    required;
             }
 
             div class="mb-3" {
@@ -68,7 +77,8 @@ fn generate_form() -> Markup {
                     id="user_limit"
                     name="user_limit"
                     min="1"
-                    value=(DEFAULT_INVITE_USER_LIMIT);
+                    value=(DEFAULT_INVITE_USER_LIMIT)
+                    required;
             }
 
             button class="btn btn-primary w-100 py-2" type="submit" {
@@ -80,7 +90,7 @@ fn generate_form() -> Markup {
 
 fn qr_code(data: &str) -> Markup {
     let qr_svg = QrCode::new(data)
-        .expect("Failed to generate QR code")
+        .expect("invite codes are far below the QR data capacity")
         .render::<qrcode::render::svg::Color>()
         .build();
 
@@ -107,6 +117,15 @@ pub async fn post_create_invite(
     State(state): State<Arc<ConsensusApi>>,
     Form(form): Form<CreateInviteForm>,
 ) -> impl IntoResponse {
+    if form.expiry_days > INVITE_EXPIRY_DAYS_LIMIT {
+        return Html(
+            generate_form(Some(&format!(
+                "Expiration must be at most {INVITE_EXPIRY_DAYS_LIMIT} days"
+            )))
+            .into_string(),
+        );
+    }
+
     let (invite_code, meta) = state.create_invite_code(form.expiry_days, form.user_limit);
     let invite_string = picomint_base32::encode(&invite_code);
 

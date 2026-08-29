@@ -4,7 +4,7 @@
 //! falls through to a single 503 response that renders the same waiting
 //! page the operator saw the moment they clicked "Start DKG". The 503
 //! status is load-bearing: the polling JS embedded in the page redirects
-//! to `/` on status `200`, so any other status keeps the spinner up. Once
+//! to `/` on status `200`, so any other status keeps the waiting page up. Once
 //! `ServerConfig` is committed and the consensus UI binds the same port,
 //! `/` starts returning 200 and the redirect fires.
 
@@ -48,12 +48,6 @@ pub fn loading_card(setup_code: &PeerSetupCode) -> Markup {
             }
             style="display: none;"
         {}
-
-        div class="text-center mt-4" {
-            div class="spinner-border text-primary" role="status" {
-                span class="visually-hidden" { "Loading..." }
-            }
-        }
     };
 
     single_card_layout("DKG Started", content)

@@ -7,7 +7,6 @@ use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 
-// Asset route constants
 pub const BOOTSTRAP_CSS_ROUTE: &str = "/assets/bootstrap.min.css";
 pub const BOOTSTRAP_JS_ROUTE: &str = "/assets/bootstrap.bundle.min.js";
 pub const BOOTSTRAP_ICONS_CSS_ROUTE: &str = "/assets/bootstrap-icons.min.css";

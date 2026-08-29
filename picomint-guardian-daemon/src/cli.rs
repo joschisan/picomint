@@ -87,10 +87,10 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     use axum::routing::post;
     use picomint_core::expiry::ExpiryStatus;
     use picomint_guardian_cli_core::{
-        AuditResponse, ExpirySetRequest, InviteRequest, InviteResponse, LnGatewayAddRequest,
-        LnGatewayListEntry, LnGatewayRemoveRequest, ROUTE_AUDIT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
-        ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
-        ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
+        AuditResponse, ExpirySetRequest, INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse,
+        LnGatewayAddRequest, LnGatewayListEntry, LnGatewayRemoveRequest, ROUTE_AUDIT, ROUTE_CONFIG,
+        ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
+        ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
         ROUTE_MODULE_WALLET_BLOCK_COUNT, ROUTE_MODULE_WALLET_FEERATE,
         ROUTE_MODULE_WALLET_PENDING_TX_CHAIN, ROUTE_MODULE_WALLET_TOTAL_VALUE,
         ROUTE_MODULE_WALLET_TX_CHAIN, ROUTE_SESSION_COUNT, WalletBlockCountResponse,
@@ -113,6 +113,13 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(req): Json<InviteRequest>,
     ) -> Result<Json<InviteResponse>, CliError> {
+        if req.expiry_days > INVITE_EXPIRY_DAYS_LIMIT {
+            return Err(CliError {
+                code: StatusCode::BAD_REQUEST,
+                error: format!("Expiration must be at most {INVITE_EXPIRY_DAYS_LIMIT} days"),
+            });
+        }
+
         Ok(Json(InviteResponse {
             invite: api.create_invite_code(req.expiry_days, req.user_limit).0,
         }))
