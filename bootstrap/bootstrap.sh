@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # One-shot installer for a picomint guardian on a fresh Ubuntu desktop.
 #
-# Installs Docker (if missing), brings up the bundled guardian + bitcoind
-# compose, pins Guardian / Logs / Update shortcuts to the GNOME dock, then
-# installs Signal Desktop for exchanging setup codes during the federation
-# ceremony.
+# Installs Docker (if missing), brings up the bundled guardian + a fully
+# validating bitcoind, opens the Web UI in a browser, installs Signal Desktop
+# for exchanging setup codes during the federation ceremony, and pins
+# Dashboard, Logs and Update shortcuts to the dock. Nothing here needs a
+# terminal afterwards.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap/bootstrap.sh | bash
@@ -39,6 +40,8 @@ Exec=$exec_cmd
 Icon=$icon
 Terminal=false
 EOF
+
+    pin_to_dock "$id"
 }
 
 pin_to_dock() {
@@ -84,12 +87,20 @@ if [[ -e "$DEPLOY_DIR" ]]; then
     exit 1
 fi
 
+# A full, unpruned bitcoind needs ~1TB, plus headroom for the guardian's own
+# database and future chain growth.
+AVAIL_GB=$(df -BG --output=avail "$HOME" | tail -1 | tr -dc '0-9')
+if [[ "$AVAIL_GB" -lt 1200 ]]; then
+    echo "Only ${AVAIL_GB}GB free on $HOME. A full Bitcoin Core node needs ~1TB, and 1.2TB is recommended." >&2
+    confirm "Continue anyway?" || { echo "Aborted."; exit 0; }
+fi
+
 cat <<EOF
 This installer will set up a picomint guardian on this machine:
 
   1. Install Docker (if missing)
   2. Download the guardian compose into $DEPLOY_DIR
-  3. Start the guardian + a bundled, pruned Bitcoin Core node
+  3. Start the guardian + a bundled, fully validating Bitcoin Core node (~1TB)
   4. Wait for the Web UI to come up at $UI_URL
   5. Pin Dashboard, Logs and Update shortcuts to the dock
   6. Install Signal Desktop for exchanging setup codes with co-guardians
@@ -116,24 +127,26 @@ curl -fsSL -O "$COMPOSE_URL"
 curl -fsSL -O "$UPDATE_URL"
 chmod +x update.sh
 
+echo "==> Pinning shortcuts to the dock"
+install_launcher picomint-guardian "Dashboard" "xdg-open $UI_URL" web-browser
+install_launcher picomint-guardian-logs "Logs" "xdg-open $LOGS_URL" utilities-system-monitor
+install_launcher picomint-guardian-update "Update" "$DEPLOY_DIR/update.sh" system-software-update
+
 echo "==> Starting guardian"
 sudo docker compose up -d
 
 echo "==> Waiting for Web UI at $UI_URL"
-for _ in $(seq 30); do
+for _ in $(seq 60); do
     if curl -sf "$UI_URL" >/dev/null; then
         break
     fi
     sleep 1
 done
 
-echo "==> Pinning shortcuts to the dock"
-install_launcher picomint-guardian "Dashboard" "xdg-open $UI_URL" applications-internet
-install_launcher picomint-guardian-logs "Logs" "xdg-open $LOGS_URL" utilities-terminal
-install_launcher picomint-guardian-update "Update" "$DEPLOY_DIR/update.sh" system-software-update
-pin_to_dock picomint-guardian
-pin_to_dock picomint-guardian-logs
-pin_to_dock picomint-guardian-update
+if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    echo "==> Opening $UI_URL"
+    xdg-open "$UI_URL" >/dev/null 2>&1 || true
+fi
 
 if ! command -v signal-desktop >/dev/null; then
     echo "==> Installing Signal Desktop"
@@ -158,10 +171,10 @@ Guardian is running.
   Compose:  $DEPLOY_DIR/docker-compose.yml
   Logs:     sudo docker compose -f $DEPLOY_DIR/docker-compose.yml logs -f
 
-The dock now has Dashboard, Logs and Update shortcuts — day-to-day
-operation never needs a terminal again.
-
 Next steps:
   1. Click Dashboard in the dock (or open $UI_URL).
   2. Open Signal and coordinate setup-code exchange with your co-guardians.
+
+The dock also has Logs for log output and Update for installing future
+releases — day-to-day operation never needs a terminal again.
 EOF
