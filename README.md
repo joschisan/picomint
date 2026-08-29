@@ -4,39 +4,13 @@ A minimal implementation of a federated Chaumian ecash mint on Bitcoin.
 
 ## Deploy Guardian
 
-Pick a stable directory for the deployment:
+Guardians run on a fresh **Ubuntu 26.04 LTS desktop** (amd64) with a screen and keyboard:
 
 ```bash
-mkdir -p ~/picomint-guardian-daemon && cd ~/picomint-guardian-daemon
+curl -fsSL https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap.sh | bash
 ```
 
-Download the compose file:
-
-```bash
-curl -O https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap/docker-compose.yml
-```
-
-And then run:
-
-```bash
-sudo docker compose up -d
-```
-
-The Web UI is enabled by default and bound to host loopback at <http://127.0.0.1:3000>. If the federation runs on the same machine as your browser, just open that URL. If it's headless, forward the port over SSH first:
-
-```bash
-ssh -NL 3000:127.0.0.1:3000 <your_server>
-```
-
-### Bootstrap on a fresh Ubuntu 26.04 LTS desktop
-
-For a fresh **Ubuntu 26.04 LTS desktop** with a screen and keyboard, the manual steps above are bundled into a single script. It installs Docker (if missing), brings up the guardian + bundled bitcoind compose in `~/picomint-guardian-daemon`, pins Dashboard / Logs / Update shortcuts to the dock, and installs Signal Desktop for exchanging setup codes with co-guardians:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap/bootstrap.sh | bash
-```
-
-The script requires Ubuntu 26.04 LTS on amd64 and aborts if a deployment already exists at `~/picomint-guardian-daemon`. CI runs the bootstrap end-to-end on GitHub Actions' `ubuntu-26.04` runner.
+The installer is fully self-contained — the compose file and updater are embedded in the script and written to `~/picomint-guardian-daemon`. It installs Docker (if missing), brings up the guardian + a bundled bitcoind + a log viewer, opens the Web UI at <http://127.0.0.1:3000>, pins Dashboard / Logs / Update shortcuts to the dock, and installs Signal Desktop for exchanging setup codes with co-guardians. It is safe to re-run at any time; guardian state lives in Docker volumes a re-run never touches. CI runs the bootstrap end-to-end on GitHub Actions' `ubuntu-26.04` runner.
 
 ### Bitcoin Backend
 

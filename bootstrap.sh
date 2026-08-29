@@ -7,15 +7,17 @@
 # Dashboard, Logs and Update shortcuts to the dock. Nothing here needs a
 # terminal afterwards.
 #
+# Fully self-contained — the compose file and updater are embedded below and
+# written to $DEPLOY_DIR. Safe to re-run at any time: every step is
+# idempotent and guardian state lives in Docker volumes a re-run never
+# touches.
+#
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap.sh | bash
 
 set -euo pipefail
 
 DEPLOY_DIR="$HOME/picomint-guardian-daemon"
-REF="${REF:-main}"
-COMPOSE_URL="https://raw.githubusercontent.com/joschisan/picomint/$REF/bootstrap/docker-compose.yml"
-UPDATE_URL="https://raw.githubusercontent.com/joschisan/picomint/$REF/bootstrap/update.sh"
 UI_URL="http://127.0.0.1:3000"
 LOGS_URL="http://127.0.0.1:3001"
 
@@ -82,11 +84,6 @@ if [[ "$DISTRO_ID" != "ubuntu" || "$DISTRO_VERSION" != "26.04" ]]; then
     exit 1
 fi
 
-if [[ -e "$DEPLOY_DIR" ]]; then
-    echo "Existing deployment found at $DEPLOY_DIR. Aborting." >&2
-    exit 1
-fi
-
 # A full, unpruned bitcoind needs ~1TB, plus headroom for the guardian's own
 # database and future chain growth.
 AVAIL_GB=$(df -BG --output=avail "$HOME" | tail -1 | tr -dc '0-9')
@@ -99,11 +96,13 @@ cat <<EOF
 This installer will set up a picomint guardian on this machine:
 
   1. Install Docker (if missing)
-  2. Download the guardian compose into $DEPLOY_DIR
+  2. Write the guardian compose and updater into $DEPLOY_DIR
   3. Start the guardian + a bundled, fully validating Bitcoin Core node (~1TB)
   4. Wait for the Web UI to come up at $UI_URL
   5. Pin Dashboard, Logs and Update shortcuts to the dock
   6. Install Signal Desktop for exchanging setup codes with co-guardians
+
+It is safe to re-run this installer at any time.
 
 EOF
 
@@ -113,18 +112,109 @@ sudo -v
 
 if ! command -v docker >/dev/null; then
     echo "==> Installing Docker"
-    curl -fsSL https://get.docker.com | sh
+    sudo apt update
+    sudo apt install -y docker.io docker-compose-v2
 fi
 
 sudo usermod -aG docker "$USER"
 
-echo "==> Preparing $DEPLOY_DIR"
-mkdir "$DEPLOY_DIR"
+echo "==> Writing $DEPLOY_DIR"
+mkdir -p "$DEPLOY_DIR"
 cd "$DEPLOY_DIR"
 
-echo "==> Downloading docker-compose.yml and update.sh"
-curl -fsSL -O "$COMPOSE_URL"
-curl -fsSL -O "$UPDATE_URL"
+cat > docker-compose.yml <<'COMPOSE'
+# All services run on the host network. The guardian's p2p and client api
+# share one iroh endpoint (UDP), and stacking Docker's NAT on top of the
+# router's would give iroh two layers to punch through instead of one. That
+# means each service binds its own address rather than being contained by a
+# published port, so the loopback binds below are what keep the Web UI, the
+# log viewer and the Bitcoin RPC off the LAN.
+services:
+  picomint-guardian-daemon:
+    image: ghcr.io/joschisan/picomint-guardian-daemon:main
+    container_name: picomint-guardian-daemon
+    restart: always
+    network_mode: host
+    depends_on:
+      - bitcoind
+    volumes:
+      - picomint_guardian_daemon_data:/data
+    environment:
+      - DATA_DIR=/data
+      - BITCOIND_URL=http://bitcoin:bitcoin@127.0.0.1:8332
+      # The iroh endpoint must be reachable from the internet for peers and
+      # clients to talk to your guardian.
+      - P2P_ADDR=0.0.0.0:8080
+      # Web UI — loopback only, reachable from a browser on this machine and
+      # nowhere else. Do not change this to 0.0.0.0: on the host network that
+      # puts guardian administration on your LAN.
+      - UI_ADDR=127.0.0.1:3000
+
+  bitcoind:
+    image: bitcoin/bitcoin:latest
+    container_name: bitcoind
+    restart: always
+    network_mode: host
+    volumes:
+      - bitcoind_data:/home/bitcoin/.bitcoin
+    command:
+      - -server=1
+      # RPC is loopback only — the guardian shares this network namespace, and
+      # nothing else needs to reach it.
+      - -rpcbind=127.0.0.1
+      - -rpcallowip=127.0.0.1
+      - -rpcuser=bitcoin
+      - -rpcpassword=bitcoin
+      - -dbcache=1024
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: always
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      # Browser log viewer — loopback only. Dozzle defaults to :8080, which on
+      # the host network would bind every interface and collide with the iroh
+      # endpoint.
+      - DOZZLE_ADDR=127.0.0.1:3001
+      - DOZZLE_NO_ANALYTICS=true
+
+volumes:
+  picomint_guardian_daemon_data:
+  bitcoind_data:
+COMPOSE
+
+cat > update.sh <<'UPDATE'
+#!/usr/bin/env bash
+# Graphical updater for a picomint guardian, launched from the "Update" icon
+# installed by bootstrap.sh. Pulls the newest images for the deployed compose
+# and recreates any containers whose image changed.
+
+set -euo pipefail
+
+DEPLOY_DIR="$HOME/picomint-guardian-daemon"
+
+info() { zenity --info --width=420 --title="Update" --text="$1"; }
+die() { zenity --error --width=420 --title="Update" --text="$1" || true; exit 1; }
+
+if [[ ! -f "$DEPLOY_DIR/docker-compose.yml" ]]; then
+    die "No guardian deployment found at $DEPLOY_DIR."
+fi
+
+cd "$DEPLOY_DIR"
+
+# sg applies docker-group membership granted after this desktop session began.
+if ! sg docker -c "docker compose pull && docker compose up -d" 2>&1 \
+    | zenity --progress --pulsate --auto-close --no-cancel --width=460 \
+        --title="Update" --text="Pulling the latest release…"; then
+    die "The update did not complete. Your guardian may still be running the previous release."
+fi
+
+info "Your guardian is up to date."
+UPDATE
+
 chmod +x update.sh
 
 echo "==> Pinning shortcuts to the dock"
