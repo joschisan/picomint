@@ -48,19 +48,13 @@ Initial block download pulls the full chain over the network, so expect the firs
 
 ### Accessing the CLI
 
-The `picomint-guardian-cli` binary is included in the container and on the `PATH`. Open an interactive shell inside the container via:
-
-```bash
-sudo docker exec -it picomint-guardian-daemon bash
-```
-
-Or run CLI commands directly from the host like:
+The `picomint-guardian-cli` binary is included in the container and on the `PATH`. Run CLI commands from the host like:
 
 ```bash
 sudo docker exec picomint-guardian-daemon picomint-guardian-cli --help
 ```
 
-The walkthroughs below use the bare `picomint-guardian-cli …` form. Run them from inside the container shell, or prefix with `sudo docker exec picomint-guardian-daemon` to run from the host.
+The walkthroughs below use the bare `picomint-guardian-cli …` form — prefix with `sudo docker exec picomint-guardian-daemon` to run them.
 
 ### Setup Ceremony
 
@@ -157,7 +151,7 @@ picomint-guardian-cli setup restore /tmp/config.json
 | 3000 | Web UI (setup + dashboard)   | Localhost only  |
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `sudo docker exec -it picomint-guardian-daemon
+network exposure. Reach it with `sudo docker exec picomint-guardian-daemon
 picomint-guardian-cli …`.
 
 ### Configuration
@@ -176,19 +170,13 @@ The gateway is a single container image: `ghcr.io/joschisan/picomint-gateway-dae
 
 ### Accessing the CLI
 
-The `picomint-gateway-cli` binary is included in the container and on the `PATH`. Open an interactive shell inside the container via:
-
-```bash
-sudo docker exec -it picomint-gateway-daemon bash
-```
-
-Or run CLI commands directly from the host like:
+The `picomint-gateway-cli` binary is included in the container and on the `PATH`. Run CLI commands from the host like:
 
 ```bash
 sudo docker exec picomint-gateway-daemon picomint-gateway-cli --help
 ```
 
-The walkthroughs below use the bare `picomint-gateway-cli …` form. Run them from inside the container shell, or prefix with `sudo docker exec picomint-gateway-daemon` to run from the host.
+The walkthroughs below use the bare `picomint-gateway-cli …` form — prefix with `sudo docker exec picomint-gateway-daemon` to run them.
 
 A first call to confirm everything is wired up:
 
@@ -324,30 +312,32 @@ because the outgoing side carries an LN-routing-fee budget that doesn't
 exist on the incoming side — a single unified view would mean three
 permanent NULL columns on every incoming row.
 
-Inspect the DB with `sqlite3` directly (the gateway container already
-has it installed). Pass `-header -column` for human-readable,
-column-aligned output — without it `sqlite3` prints unlabeled
-pipe-delimited rows. Ten most recent outgoing payments:
+Copy the DB out of the container and inspect it with `sqlite3` on the
+host. Pass `-header -column` for human-readable, column-aligned output —
+without it `sqlite3` prints unlabeled pipe-delimited rows:
 
 ```bash
-sudo docker exec -it picomint-gateway-daemon \
-    sqlite3 -header -column /data/analytics/analytics.sqlite \
+sudo docker cp picomint-gateway-daemon:/data/analytics/analytics.sqlite .
+```
+
+Ten most recent outgoing payments:
+
+```bash
+sqlite3 -header -column analytics.sqlite \
     "SELECT * FROM outgoing_payments ORDER BY started_at DESC LIMIT 10;"
 ```
 
 Status breakdown for outgoing:
 
 ```bash
-sudo docker exec -it picomint-gateway-daemon \
-    sqlite3 -header -column /data/analytics/analytics.sqlite \
+sqlite3 -header -column analytics.sqlite \
     "SELECT status, COUNT(*) FROM outgoing_payments GROUP BY status;"
 ```
 
 Total outgoing volume per federation, in sat:
 
 ```bash
-sudo docker exec -it picomint-gateway-daemon \
-    sqlite3 -header -column /data/analytics/analytics.sqlite \
+sqlite3 -header -column analytics.sqlite \
     "SELECT federation, SUM(amount_msat)/1000 AS sat \
      FROM outgoing_payments WHERE status='success' GROUP BY federation;"
 ```
@@ -391,7 +381,7 @@ also queryable if you need a finer view.
 | 9735 | LDK Lightning P2P (BOLT)     | Yes             |
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `sudo docker exec -it picomint-gateway-daemon
+network exposure. Reach it with `sudo docker exec picomint-gateway-daemon
 picomint-gateway-cli …`.
 
 ### Configuration
