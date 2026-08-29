@@ -1,5 +1,7 @@
 use maud::{Markup, html};
 
+use crate::ui::copiable_text;
+
 pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
     let network = wallet.network_ui();
     let federation_wallet = wallet.federation_wallet_ui();
@@ -157,16 +159,12 @@ pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
 
                                     div class="mb-3" {
                                         p class="mb-2" { strong { "Aggregate Public Key (hex)" } }
-                                        div class="alert alert-info text-break" style="word-break: break-all; font-family: monospace;" {
-                                            (tweaked_agg_pk)
-                                        }
+                                        (copiable_text(tweaked_agg_pk))
                                     }
 
                                     div class="mb-3" {
                                         p class="mb-2" { strong { "Your Secret Key Share (hex)" } }
-                                        div class="alert alert-danger text-break" style="word-break: break-all; font-family: monospace;" {
-                                            (tweaked_sks)
-                                        }
+                                        (copiable_text(tweaked_sks))
                                     }
                                 }
                             }
