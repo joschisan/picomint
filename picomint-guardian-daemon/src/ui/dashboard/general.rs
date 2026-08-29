@@ -3,36 +3,86 @@ use std::collections::BTreeMap;
 use maud::{Markup, html};
 use picomint_core::PeerId;
 
-/// Renders the Guardian info card with federation name, session count and
-/// guardian list
+use crate::p2p::{P2PConnectionStatus, Transport};
+
+/// Renders the federation card: one row per peer with its name and p2p
+/// connection status. The running guardian has no connection to itself
+/// and is omitted.
 pub fn render(
     federation_name: &str,
-    session_count: u64,
     guardian_names: &BTreeMap<PeerId, String>,
+    p2p_connection_status: &BTreeMap<PeerId, P2PConnectionStatus>,
 ) -> Markup {
     html! {
         div class="card h-100" {
             div class="card-header dashboard-header" { (federation_name) }
             div class="card-body" {
-                div id="session-count" class="alert alert-info" {
-                    "Session Count: " strong { (session_count) }
-                }
-
-                table class="table table-sm mb-0" {
+                table class="table table-striped mb-0" {
                     thead {
                         tr {
-                            th { "Guardian ID" }
-                            th { "Guardian Name" }
+                            th { "ID" }
+                            th { "Name" }
+                            th { "Status" }
+                            th { "Transport" }
+                            th { "Round Trip" }
                         }
                     }
                     tbody {
-                        @for (guardian_id, name) in guardian_names {
+                        @for (peer, status) in p2p_connection_status {
                             tr {
-                                td { (guardian_id.to_string()) }
-                                td { (name) }
+                                td { (peer.to_string()) }
+                                td { (guardian_names.get(peer).expect("every peer is in the consensus config")) }
+                                (connection_cells(status))
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+fn connection_cells(status: &P2PConnectionStatus) -> Markup {
+    let path = match status {
+        P2PConnectionStatus::Connected(path) => Some(path),
+        P2PConnectionStatus::Disconnected => None,
+    };
+
+    html! {
+        td {
+            @match path {
+                Some(_) => {
+                    span class="badge bg-success" { "Connected" }
+                }
+                None => {
+                    span class="badge bg-danger" { "Disconnected" }
+                }
+            }
+        }
+        td {
+            @match path {
+                Some(path) => {
+                    @match path.transport {
+                        Transport::Direct => {
+                            span class="badge bg-success" title=(path.remote_addr) { "Direct" }
+                        }
+                        Transport::Relay => {
+                            span class="badge bg-warning text-dark" title=(path.remote_addr) { "Relay" }
+                        }
+                    }
+                }
+                None => {
+                    span class="text-muted" { "—" }
+                }
+            }
+        }
+        td {
+            @match path {
+                Some(path) => {
+                    (format!("{} ms", path.rtt.as_millis()))
+                }
+                None => {
+                    span class="text-muted" { "N/A" }
                 }
             }
         }
