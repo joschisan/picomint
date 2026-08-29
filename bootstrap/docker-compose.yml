@@ -4,7 +4,7 @@ services:
     container_name: picomint-guardian-daemon
     restart: unless-stopped
     depends_on:
-      - picomint-bitcoind
+      - bitcoind
     ports:
       # Iroh endpoint
       - "8080:8080"
@@ -15,15 +15,15 @@ services:
       - picomint_guardian_daemon_data:/data
     environment:
       - DATA_DIR=/data
-      - BITCOIND_URL=http://bitcoin:bitcoin@picomint-bitcoind:8332
+      - BITCOIND_URL=http://bitcoin:bitcoin@bitcoind:8332
       - UI_ADDR=0.0.0.0:3000
 
-  picomint-bitcoind:
+  bitcoind:
     image: bitcoin/bitcoin:latest
-    container_name: picomint-bitcoind
+    container_name: bitcoind
     restart: unless-stopped
     volumes:
-      - picomint_bitcoind_data:/home/bitcoin/.bitcoin
+      - bitcoind_data:/home/bitcoin/.bitcoin
     command:
       - -server=1
       - -rpcbind=0.0.0.0
@@ -32,9 +32,9 @@ services:
       - -rpcpassword=bitcoin
       - -dbcache=1024
 
-  picomint-dozzle:
+  dozzle:
     image: amir20/dozzle:latest
-    container_name: picomint-dozzle
+    container_name: dozzle
     restart: unless-stopped
     ports:
       # Browser log viewer — bound to host loopback only. Open
@@ -48,4 +48,4 @@ services:
 
 volumes:
   picomint_guardian_daemon_data:
-  picomint_bitcoind_data:
+  bitcoind_data:
