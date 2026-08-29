@@ -14,7 +14,6 @@ pub const BOOTSTRAP_ICONS_WOFF2_ROUTE: &str = "/assets/fonts/bootstrap-icons.wof
 pub const BOOTSTRAP_ICONS_WOFF_ROUTE: &str = "/assets/fonts/bootstrap-icons.woff";
 pub const HTMX_JS_ROUTE: &str = "/assets/htmx.org-2.0.4.min.js";
 pub const HTML5_QRCODE_JS_ROUTE: &str = "/assets/html5-qrcode.min.js";
-pub const CHARTJS_ROUTE: &str = "/assets/chart.umd.min.js";
 pub const STYLE_CSS_ROUTE: &str = "/assets/style.css";
 pub const LOGO_PNG_ROUTE: &str = "/assets/logo.png";
 
@@ -93,10 +92,6 @@ where
         .route(
             HTML5_QRCODE_JS_ROUTE,
             get(|| async move { get_static_js(include_str!("../../assets/html5-qrcode.min.js")) }),
-        )
-        .route(
-            CHARTJS_ROUTE,
-            get(|| async move { get_static_js(include_str!("../../assets/chart.umd.min.js")) }),
         )
         .route(
             STYLE_CSS_ROUTE,
