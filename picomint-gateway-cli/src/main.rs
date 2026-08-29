@@ -12,20 +12,20 @@ use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_gateway_cli_core::{
-    CLI_SOCKET_FILENAME, FederationAddRequest, FederationBalanceRequest, FederationConfigRequest,
-    FederationDisableRequest, FederationEnableRequest, FederationMintCountRequest,
-    FederationMintReceiveRequest, FederationMintSendRequest, FederationWalletReceiveRequest,
-    FederationWalletSendFeeRequest, FederationWalletSendRequest, LdkChannelCloseRequest,
-    LdkChannelOpenRequest, LdkLnReceiveRequest, LdkLnSendRequest, LdkOnchainSendRequest,
-    LdkPeerConnectRequest, LdkPeerDisconnectRequest, ROUTE_FEDERATION_ADD,
-    ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE,
-    ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
-    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
-    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_LN_RECEIVE,
-    ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT,
-    ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
+    AnalyticsRequest, CLI_SOCKET_FILENAME, FederationAddRequest, FederationBalanceRequest,
+    FederationConfigRequest, FederationDisableRequest, FederationEnableRequest,
+    FederationMintCountRequest, FederationMintReceiveRequest, FederationMintSendRequest,
+    FederationWalletReceiveRequest, FederationWalletSendFeeRequest, FederationWalletSendRequest,
+    LdkChannelCloseRequest, LdkChannelOpenRequest, LdkLnReceiveRequest, LdkLnSendRequest,
+    LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest, ROUTE_ANALYTICS,
+    ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
+    ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_LIST,
+    ROUTE_FEDERATION_MODULE_MINT_COUNT, ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
+    ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
+    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -51,6 +51,8 @@ enum Commands {
     Info,
     /// Display mnemonic seed words
     Mnemonic,
+    /// Query the analytics db with read-only SQL; rows print as JSON objects
+    Analytics(AnalyticsRequest),
     /// LDK lightning node management
     #[command(subcommand)]
     Ldk(LdkCommands),
@@ -238,6 +240,7 @@ async fn main() -> Result<()> {
     let result = match cli.command {
         Commands::Info => request(d, ROUTE_INFO, ()).await?,
         Commands::Mnemonic => request(d, ROUTE_MNEMONIC, ()).await?,
+        Commands::Analytics(req) => request(d, ROUTE_ANALYTICS, req).await?,
 
         Commands::Ldk(cmd) => match cmd {
             LdkCommands::Balances => request(d, ROUTE_LDK_BALANCES, ()).await?,

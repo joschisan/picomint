@@ -11,20 +11,24 @@
 //! derived, not authoritative. The event log in the gateway redb is the
 //! source of truth; the trailer replays from position 0 on every boot.
 //!
-//! UsersTable and agents inspect the db directly via `sqlite3 analytics.sqlite`.
-//! No query transport is layered on top.
+//! Operators and agents inspect the db with read-only SQL via
+//! `picomint-gateway-cli analytics <query>`, served by [`query`].
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use hex::ToHex as _;
 use picomint_client::TxCreateEvent;
 use picomint_client::gw::events::{
     ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent, SendCancelEvent,
     SendEvent, SendSuccessEvent,
 };
 use picomint_eventlog::{EventLogEntry, EventLogId};
-use rusqlite::Connection;
+use picomint_gateway_cli_core::AnalyticsResponse;
+use rusqlite::types::ValueRef;
+use rusqlite::{Connection, OpenFlags};
+use serde_json::{Map, Value};
 use tokio::sync::Mutex;
 
 use crate::AppState;
@@ -75,6 +79,48 @@ impl Analytics {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
+}
+
+/// Run read-only SQL against the analytics db and return one JSON object per
+/// row, keyed by result column name. Opens its own `SQLITE_OPEN_READ_ONLY`
+/// connection — WAL mode lets it read concurrently with the trailer's writer
+/// connection, and the flag rejects any write statement outright.
+pub fn query(data_dir: &Path, sql: &str) -> anyhow::Result<AnalyticsResponse> {
+    let path = data_dir.join(ANALYTICS_DIR).join(ANALYTICS_FILE);
+
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .context("failed to open analytics.sqlite read-only")?;
+
+    let mut statement = conn.prepare(sql)?;
+
+    let columns = statement
+        .column_names()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    let mut rows = statement.query([])?;
+    let mut result = Vec::new();
+
+    while let Some(row) = rows.next()? {
+        let mut object = Map::new();
+
+        for (i, column) in columns.iter().enumerate() {
+            let value = match row.get_ref(i)? {
+                ValueRef::Null => Value::Null,
+                ValueRef::Integer(n) => Value::from(n),
+                ValueRef::Real(f) => Value::from(f),
+                ValueRef::Text(text) => String::from_utf8_lossy(text).into_owned().into(),
+                ValueRef::Blob(blob) => Value::String(blob.encode_hex()),
+            };
+
+            object.insert(column.clone(), value);
+        }
+
+        result.push(object);
+    }
+
+    Ok(result)
 }
 
 /// Schema + the two per-direction payment views. Outgoing and incoming
