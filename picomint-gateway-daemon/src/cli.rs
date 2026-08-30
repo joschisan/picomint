@@ -12,6 +12,7 @@ use hex::ToHex;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
+use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use picomint_client::gw::GATEWAY_ACCOUNT;
 use picomint_client::wallet::events::{SendFailureEvent, SendSuccessEvent};
@@ -27,23 +28,25 @@ use picomint_gateway_cli_core::{
     FederationMintSendResponse, FederationWalletReceiveRequest, FederationWalletReceiveResponse,
     FederationWalletSendFeeRequest, FederationWalletSendFeeResponse, FederationWalletSendRequest,
     FederationWalletSendResponse, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
-    LdkChannelCloseResponse, LdkChannelListResponse, LdkChannelOpenRequest, LdkLnReceiveRequest,
-    LdkLnReceiveResponse, LdkLnSendRequest, LdkLnSendResponse, LdkOnchainReceiveResponse,
-    LdkOnchainSendRequest, LdkOnchainSendResponse, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
-    LdkPeerListResponse, MnemonicResponse, PeerInfo, ROUTE_ANALYTICS, ROUTE_FEDERATION_ADD,
-    ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE,
-    ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
+    LdkChannelListResponse, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
+    LdkChannelSpliceOutRequest, LdkLnProbeRequest, LdkLnReceiveRequest, LdkLnReceiveResponse,
+    LdkLnSendRequest, LdkLnSendResponse, LdkOnchainReceiveResponse, LdkOnchainSendRequest,
+    LdkOnchainSendResponse, LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse,
+    MnemonicResponse, PeerInfo, ROUTE_ANALYTICS, ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE,
+    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE,
+    ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
     ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
     ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
     ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
-    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_LN_RECEIVE,
-    ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT,
-    ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
+    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LN_PROBE,
+    ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
+    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
 };
 use reqwest::StatusCode;
 use tokio::net::UnixListener;
 use tower_http::cors::CorsLayer;
-use tracing::{error, info, instrument};
+use tracing::{info, instrument};
 
 use crate::AppState;
 
@@ -117,10 +120,13 @@ fn router() -> Router<AppState> {
         .route(ROUTE_LDK_CHANNEL_OPEN, post(ldk_channel_open))
         .route(ROUTE_LDK_CHANNEL_CLOSE, post(ldk_channel_close))
         .route(ROUTE_LDK_CHANNEL_LIST, post(ldk_channel_list))
+        .route(ROUTE_LDK_CHANNEL_SPLICE_IN, post(ldk_channel_splice_in))
+        .route(ROUTE_LDK_CHANNEL_SPLICE_OUT, post(ldk_channel_splice_out))
         .route(ROUTE_LDK_ONCHAIN_RECEIVE, post(ldk_onchain_receive))
         .route(ROUTE_LDK_ONCHAIN_SEND, post(ldk_onchain_send))
         .route(ROUTE_LDK_LN_RECEIVE, post(ldk_ln_receive))
         .route(ROUTE_LDK_LN_SEND, post(ldk_ln_send))
+        .route(ROUTE_LDK_LN_PROBE, post(ldk_ln_probe))
         .route(ROUTE_LDK_PEER_CONNECT, post(ldk_peer_connect))
         .route(ROUTE_LDK_PEER_DISCONNECT, post(ldk_peer_disconnect))
         .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
@@ -219,22 +225,56 @@ async fn ldk_balances(
 ) -> Result<Json<LdkBalancesResponse>, CliError> {
     let node_balances = state.node.list_balances();
 
-    let channels = state.node.list_channels();
-    let total_inbound_capacity_msat: u64 = channels
+    // A channel that is not usable — still awaiting its funding confirmation,
+    // or its peer disconnected — carries no payment in either direction, so it
+    // contributes to none of the three capacities below.
+    let usable_channels = state
+        .node
+        .list_channels()
+        .into_iter()
+        .filter(|channel| channel.is_usable)
+        .collect::<Vec<_>>();
+
+    let total_inbound_capacity_sat: u64 = usable_channels
         .iter()
-        .filter(|chan| chan.is_usable)
-        .map(|channel| channel.inbound_capacity_msat)
+        .map(|channel| channel.inbound_capacity_msat / 1000)
         .sum();
-    let total_outbound_capacity_msat: u64 = channels
+
+    let total_outbound_capacity_sat: u64 = usable_channels
         .iter()
-        .filter(|chan| chan.is_usable)
-        .map(|channel| channel.outbound_capacity_msat)
+        .map(|channel| channel.outbound_capacity_msat / 1000)
+        .sum();
+
+    let total_next_outbound_htlc_limit_sat: u64 = usable_channels
+        .iter()
+        .map(|channel| channel.next_outbound_htlc_limit_msat / 1000)
+        .sum();
+
+    let total_pending_closure_balance_sat = node_balances
+        .pending_balances_from_channel_closures
+        .iter()
+        .map(|balance| match balance {
+            PendingSweepBalance::PendingBroadcast {
+                amount_satoshis, ..
+            }
+            | PendingSweepBalance::BroadcastAwaitingConfirmation {
+                amount_satoshis, ..
+            }
+            | PendingSweepBalance::AwaitingThresholdConfirmations {
+                amount_satoshis, ..
+            } => *amount_satoshis,
+        })
         .sum();
 
     Ok(Json(LdkBalancesResponse {
         total_onchain_balance_sat: node_balances.total_onchain_balance_sats,
-        total_inbound_capacity_msat,
-        total_outbound_capacity_msat,
+        spendable_onchain_balance_sat: node_balances.spendable_onchain_balance_sats,
+        total_anchor_channels_reserve_sat: node_balances.total_anchor_channels_reserve_sats,
+        total_inbound_capacity_sat,
+        total_outbound_capacity_sat,
+        total_next_outbound_htlc_limit_sat,
+        total_lightning_balance_sat: node_balances.total_lightning_balance_sats,
+        total_pending_closure_balance_sat,
     }))
 }
 
@@ -250,72 +290,117 @@ async fn ldk_channel_open(
         Some(payload.push_amount_sat * 1000)
     };
 
-    state
-        .node
-        .open_announced_channel(
-            payload.pubkey,
-            SocketAddress::from_str(&payload.host)
-                .map_err(|e| CliError::internal(format!("Invalid address: {e}")))?,
-            payload.channel_size_sat,
-            push_amount_msat,
-            None,
-        )
-        .map_err(|e| CliError::internal(format!("Failed to open channel: {e}")))?;
+    // Unannounced by default, matching LDK; a gateway only needs its peers to
+    // route to it, not the wider network.
+    let open_channel = if payload.announce {
+        ldk_node::Node::open_announced_channel
+    } else {
+        ldk_node::Node::open_channel
+    };
 
-    info!(pubkey = %payload.pubkey, "Initiated channel open");
+    open_channel(
+        &state.node,
+        payload.pubkey,
+        SocketAddress::from_str(&payload.host)
+            .map_err(|e| CliError::internal(format!("Invalid address: {e}")))?,
+        payload.channel_size_sat,
+        push_amount_msat,
+        None,
+    )
+    .map_err(|e| CliError::internal(format!("Failed to open channel: {e}")))?;
+
+    info!(pubkey = %payload.pubkey, announce = payload.announce, "Initiated channel open");
     Ok(Json(()))
 }
 
-/// Closes all channels with a peer
+/// Closes a channel. The channel is named by its `user_channel_id` rather
+/// than by peer, since a peer may hold several; `channel list` reports both
+/// fields.
 #[instrument(skip_all, err)]
 async fn ldk_channel_close(
     State(state): State<AppState>,
     Json(payload): Json<LdkChannelCloseRequest>,
-) -> Result<Json<LdkChannelCloseResponse>, CliError> {
-    let mut num_channels_closed = 0;
-    for channel_with_peer in state
-        .node
-        .list_channels()
-        .iter()
-        .filter(|channel| channel.counterparty_node_id == payload.pubkey)
-    {
-        if payload.force {
-            match state.node.force_close_channel(
-                &channel_with_peer.user_channel_id,
+) -> Result<Json<()>, CliError> {
+    let user_channel_id = UserChannelId(payload.user_channel_id);
+
+    if payload.force {
+        state
+            .node
+            .force_close_channel(
+                &user_channel_id,
                 payload.pubkey,
                 Some("User initiated force close".to_string()),
-            ) {
-                Ok(()) => num_channels_closed += 1,
-                Err(err) => {
-                    error!(
-                        pubkey = %payload.pubkey,
-                        err = %err,
-                        "Could not force close channel",
-                    );
-                }
-            }
-        } else {
-            match state
-                .node
-                .close_channel(&channel_with_peer.user_channel_id, payload.pubkey)
-            {
-                Ok(()) => num_channels_closed += 1,
-                Err(err) => {
-                    error!(
-                        pubkey = %payload.pubkey,
-                        err = %err,
-                        "Could not close channel",
-                    );
-                }
-            }
-        }
+            )
+            .map_err(|e| CliError::internal(format!("Failed to force close channel: {e}")))?;
+    } else {
+        state
+            .node
+            .close_channel(&user_channel_id, payload.pubkey)
+            .map_err(|e| CliError::internal(format!("Failed to close channel: {e}")))?;
     }
 
-    info!(pubkey = %payload.pubkey, "Initiated channel closure");
-    let response = LdkChannelCloseResponse {
-        num_channels_closed,
-    };
-    Ok(Json(response))
+    info!(
+        user_channel_id = payload.user_channel_id,
+        pubkey = %payload.pubkey,
+        force = payload.force,
+        "Initiated channel closure"
+    );
+
+    Ok(Json(()))
+}
+
+/// Splices on-chain funds into the channel with a peer, growing its capacity
+/// without closing it. Experimental; the counterparty must support splicing.
+#[instrument(skip_all, err)]
+async fn ldk_channel_splice_in(
+    State(state): State<AppState>,
+    Json(payload): Json<LdkChannelSpliceInRequest>,
+) -> Result<Json<()>, CliError> {
+    state
+        .node
+        .splice_in(
+            &UserChannelId(payload.user_channel_id),
+            payload.pubkey,
+            payload.amount_sat,
+        )
+        .map_err(|e| CliError::internal(format!("Failed to splice in: {e}")))?;
+
+    info!(
+        user_channel_id = payload.user_channel_id,
+        pubkey = %payload.pubkey,
+        amount_sat = payload.amount_sat,
+        "Initiated splice-in"
+    );
+
+    Ok(Json(()))
+}
+
+/// Splices funds out of a channel to an on-chain address without closing it.
+/// Experimental; the amount must not exceed the channel's outbound capacity
+/// and the counterparty must support splicing.
+#[instrument(skip_all, err)]
+async fn ldk_channel_splice_out(
+    State(state): State<AppState>,
+    Json(payload): Json<LdkChannelSpliceOutRequest>,
+) -> Result<Json<()>, CliError> {
+    state
+        .node
+        .splice_out(
+            &UserChannelId(payload.user_channel_id),
+            payload.pubkey,
+            &payload.address.assume_checked(),
+            payload.amount_sat,
+        )
+        .map_err(|e| CliError::internal(format!("Failed to splice out: {e}")))?;
+
+    info!(
+        user_channel_id = payload.user_channel_id,
+        pubkey = %payload.pubkey,
+        amount_sat = payload.amount_sat,
+        "Initiated splice-out"
+    );
+
+    Ok(Json(()))
 }
 
 /// Lists all Lightning channels
@@ -349,14 +434,17 @@ async fn ldk_channel_list(
             .cloned();
 
         channels.push(ChannelInfo {
+            user_channel_id: channel_details.user_channel_id.0,
             remote_pubkey: channel_details.counterparty_node_id,
             remote_alias: remote_node_alias,
             remote_address,
             channel_size_sat: channel_details.channel_value_sats,
             outbound_liquidity_sat: channel_details.outbound_capacity_msat / 1000,
+            next_outbound_htlc_limit_sat: channel_details.next_outbound_htlc_limit_msat / 1000,
             inbound_liquidity_sat: channel_details.inbound_capacity_msat / 1000,
             is_usable: channel_details.is_usable,
             is_outbound: channel_details.is_outbound,
+            is_announced: channel_details.is_announced,
             funding_txid: channel_details.funding_txo.map(|txo| txo.txid),
         });
     }
@@ -461,6 +549,24 @@ async fn ldk_ln_send(
     Ok(Json(LdkLnSendResponse {
         preimage: preimage.encode_hex::<String>(),
     }))
+}
+
+/// Sends payment probes over all routes towards a node for the given amount,
+/// to exercise pathfinding and warm the scorer without moving funds. Probe
+/// outcomes surface only in the daemon's LDK logs, so nothing meaningful is
+/// returned here.
+#[instrument(skip_all, err)]
+async fn ldk_ln_probe(
+    State(state): State<AppState>,
+    Json(payload): Json<LdkLnProbeRequest>,
+) -> Result<Json<()>, CliError> {
+    state
+        .node
+        .spontaneous_payment()
+        .send_probes(payload.amount_msat, payload.node_id)
+        .map_err(|e| CliError::internal(format!("Failed to send probes: {e}")))?;
+
+    Ok(Json(()))
 }
 
 /// Connects to a Lightning peer

@@ -27,15 +27,18 @@ use picomint_gateway_daemon::db::{
     EventLogByOperationTable, EventLogTable, IncomingOfferTable, OutgoingContractTable,
     ProcessedLdkEventTable,
 };
-use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, public};
+use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
 use picomint_redb::WriteTx;
 use rand::rngs::OsRng;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use url::Url;
+
+/// The LDK project's Rapid Gossip Sync server; serves mainnet snapshots only.
+const RGS_SERVER_URL: &str = "https://rapidsync.lightningdevkit.org/snapshot";
 
 /// Command line parameters for starting the gateway.
 #[derive(Parser)]
@@ -187,6 +190,15 @@ fn main() -> anyhow::Result<()> {
     node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
     node_builder.set_storage_dir_path(ldk_data_dir);
 
+    // The default peer-to-peer gossip sync takes hours to assemble a usable
+    // network graph on a fresh node, and every routed payment fails with
+    // `RouteNotFound` until it does — pull snapshots from the LDK project's
+    // Rapid Gossip Sync server instead. There is no RGS server for regtest,
+    // where the two-node test topology needs no gossip anyway.
+    if opts.network == Network::Bitcoin {
+        node_builder.set_gossip_source_rgs(RGS_SERVER_URL.to_string());
+    }
+
     match (opts.bitcoind_url.clone(), opts.esplora_url.clone()) {
         (Some(url), _) => {
             let host = url
@@ -218,6 +230,20 @@ fn main() -> anyhow::Result<()> {
     node.start()?;
 
     info!("Successfully started LDK Node");
+
+    // On a fresh node with no persisted peers yet, seed connections to a few
+    // large, well-run public nodes so the node participates in the network
+    // right away.
+    if opts.network == Network::Bitcoin && node.list_peers().is_empty() {
+        for &(name, node_id, address) in connect::PUBLIC_NODES {
+            let node_id = node_id.parse().expect("node id is valid");
+            let address = address.parse().expect("address is valid");
+
+            if let Err(err) = node.connect(node_id, address, true) {
+                warn!(%err, name, "Failed to connect to public node");
+            }
+        }
+    }
 
     // 5. Construct AppState
     let state = AppState {
