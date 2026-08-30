@@ -10,7 +10,7 @@ Guardians run on a fresh **Ubuntu 26.04 LTS desktop** (amd64) with a screen and 
 curl -fsSL https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap.sh | bash
 ```
 
-The installer is fully self-contained — the compose file and updater are embedded in the script and written to `~/picomint-guardian-daemon`. It installs Docker (if missing), brings up the guardian + a bundled bitcoind + a log viewer, opens the Web UI at <http://127.0.0.1:3000>, pins Dashboard / Logs / Update shortcuts to the dock, and installs Signal Desktop for exchanging setup codes with co-guardians. It is safe to re-run at any time; guardian state lives in Docker volumes a re-run never touches. CI runs the bootstrap end-to-end on GitHub Actions' `ubuntu-26.04` runner.
+The installer is fully self-contained — the compose file, updater and log viewer are embedded in the script and written to `~/picomint`. It installs Docker (if missing), brings up the guardian + a bundled bitcoind, pins Dashboard / Logs / Update shortcuts to the dock, and installs Signal Desktop for exchanging setup codes with co-guardians. It is safe to re-run at any time; guardian state lives in Docker volumes a re-run never touches. CI runs the bootstrap end-to-end on GitHub Actions' `ubuntu-26.04` runner.
 
 ### Bitcoin Backend
 
