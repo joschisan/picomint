@@ -16,7 +16,8 @@ use picomint_gateway_cli_core::{
     FederationConfigRequest, FederationDisableRequest, FederationEnableRequest,
     FederationMintCountRequest, FederationMintReceiveRequest, FederationMintSendRequest,
     FederationWalletReceiveRequest, FederationWalletSendFeeRequest, FederationWalletSendRequest,
-    LdkChannelCloseRequest, LdkChannelOpenRequest, LdkLnReceiveRequest, LdkLnSendRequest,
+    LdkChannelCloseRequest, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
+    LdkChannelSpliceOutRequest, LdkLnProbeRequest, LdkLnReceiveRequest, LdkLnSendRequest,
     LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest, ROUTE_ANALYTICS,
     ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
     ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_LIST,
@@ -24,6 +25,7 @@ use picomint_gateway_cli_core::{
     ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
     ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
     ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LN_PROBE,
     ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
     ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
 };
@@ -91,10 +93,14 @@ enum LdkOnchainCommands {
 enum LdkChannelCommands {
     /// Open a channel
     Open(LdkChannelOpenRequest),
-    /// Close channels with a peer
+    /// Close a channel
     Close(LdkChannelCloseRequest),
     /// List channels
     List,
+    /// Splice on-chain funds into a channel (experimental)
+    SpliceIn(LdkChannelSpliceInRequest),
+    /// Splice funds out of a channel to an on-chain address (experimental)
+    SpliceOut(LdkChannelSpliceOutRequest),
 }
 
 #[derive(Subcommand)]
@@ -103,6 +109,8 @@ enum LdkLnCommands {
     Receive(LdkLnReceiveRequest),
     /// Pay a bolt11 invoice
     Send(LdkLnSendRequest),
+    /// Probe routes towards a node to warm the pathfinding scorer
+    Probe(LdkLnProbeRequest),
 }
 
 #[derive(Subcommand)]
@@ -252,10 +260,17 @@ async fn main() -> Result<()> {
                 LdkChannelCommands::Open(req) => request(d, ROUTE_LDK_CHANNEL_OPEN, req).await?,
                 LdkChannelCommands::Close(req) => request(d, ROUTE_LDK_CHANNEL_CLOSE, req).await?,
                 LdkChannelCommands::List => request(d, ROUTE_LDK_CHANNEL_LIST, ()).await?,
+                LdkChannelCommands::SpliceIn(req) => {
+                    request(d, ROUTE_LDK_CHANNEL_SPLICE_IN, req).await?
+                }
+                LdkChannelCommands::SpliceOut(req) => {
+                    request(d, ROUTE_LDK_CHANNEL_SPLICE_OUT, req).await?
+                }
             },
             LdkCommands::Ln(cmd) => match cmd {
                 LdkLnCommands::Receive(req) => request(d, ROUTE_LDK_LN_RECEIVE, req).await?,
                 LdkLnCommands::Send(req) => request(d, ROUTE_LDK_LN_SEND, req).await?,
+                LdkLnCommands::Probe(req) => request(d, ROUTE_LDK_LN_PROBE, req).await?,
             },
             LdkCommands::Peer(cmd) => match cmd {
                 LdkPeerCommands::Connect(req) => request(d, ROUTE_LDK_PEER_CONNECT, req).await?,

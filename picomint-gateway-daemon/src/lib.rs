@@ -1,6 +1,7 @@
 pub mod analytics;
 pub mod cli;
 pub mod client;
+pub mod connect;
 pub mod db;
 pub mod public;
 pub mod trailer;
@@ -184,6 +185,14 @@ impl AppState {
             "The invoice's payment hash does not match the contract's payment hash"
         );
 
+        // The invoice's expiry is deliberately not checked here. Rejecting the
+        // request returns a plain error, which leaves the sender's contract
+        // funded until it times out, while attempting the payment fails it via
+        // the LDK `PaymentFailed` event and hence hands the sender a forfeit
+        // signature to reclaim the funds immediately. Neither ldk-node nor LDK
+        // enforce the expiry either, so an invoice the payee still honors is
+        // simply paid.
+
         ensure!(
             payload.contract.amount == Amount::from_msat(amount),
             "Contract amount does not match invoice amount"
@@ -240,12 +249,16 @@ impl AppState {
                 .with_max_total_routing_fee_msat(fee.msat)
                 .with_max_total_cltv_expiry_delta(self.cltv_expiry_delta);
 
-            if self
+            let result = self
                 .node
                 .bolt11_payment()
-                .send(payload.invoice.bolt11(), Some(rpc))
-                .is_err()
-            {
+                .send(payload.invoice.bolt11(), Some(rpc));
+
+            // A duplicate payment means a previous run of this request already
+            // kicked off the payment (its transaction failed to commit after
+            // the LDK send); the LDK events drive its terminal, so treat it as
+            // a successful kick-off instead of cancelling an in-flight send.
+            if !matches!(result, Ok(_) | Err(ldk_node::NodeError::DuplicatePayment)) {
                 f1_client.gw().finalize_send(
                     &dbtx,
                     operation,

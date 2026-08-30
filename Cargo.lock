@@ -3506,6 +3506,7 @@ dependencies = [
  "picomint-core",
  "serde",
  "serde_json",
+ "serde_with",
 ]
 
 [[package]]
