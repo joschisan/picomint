@@ -203,7 +203,10 @@ pub async fn run(
                         break;
                     }
 
-                    info!("Waiting for bitcoin backend to sync... {progress:.1}%");
+                    info!(
+                        "Waiting for bitcoin backend to sync... {:.1}%",
+                        progress * 100.0
+                    );
                 } else {
                     break;
                 }

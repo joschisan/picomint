@@ -17,9 +17,11 @@ pub fn render(status: &Option<BitcoinRpcStatus>) -> Markup {
                                 th { "Block Count" }
                                 td { (status.block_count) }
                             }
-                            tr {
-                                th { "Fee Rate" }
-                                td { (format!("{} sat/vB", status.fee_rate.sat_per_kvb / 1000)) }
+                            @if let Some(fee_rate) = status.fee_rate {
+                                tr {
+                                    th { "Fee Rate" }
+                                    td { (format!("{} sat/vB", fee_rate.sat_per_kvb / 1000)) }
+                                }
                             }
                             @if let Some(sync) = status.sync_progress {
                                 tr {
