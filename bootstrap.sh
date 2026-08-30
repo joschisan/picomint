@@ -178,31 +178,26 @@ COMPOSE
 
 cat > update.sh <<'UPDATE'
 #!/usr/bin/env bash
-# Graphical updater for a picomint guardian, launched from the "Update" icon
-# installed by bootstrap.sh. Pulls the newest images for the deployed compose
-# and recreates any containers whose image changed.
+# Guardian updater, launched in a terminal from the "Update" icon installed by
+# bootstrap.sh. Pulls the newest images for the deployed compose and recreates
+# any containers whose image changed.
 
 set -euo pipefail
 
-DEPLOY_DIR="$HOME/picomint"
+# Hold the window open on success and failure alike, so the operator can read
+# the outcome before the terminal closes.
+trap 'echo; read -rp "Press enter to close this window."' EXIT
 
-info() { zenity --info --width=420 --title="Update" --text="$1"; }
-die() { zenity --error --width=420 --title="Update" --text="$1" || true; exit 1; }
+cd "$HOME/picomint"
 
-if [[ ! -f "$DEPLOY_DIR/docker-compose.yml" ]]; then
-    die "No guardian deployment found at $DEPLOY_DIR."
-fi
+echo "Enter password to update Picomint Guardian and Bitcoind to the latest release."
+echo
 
-# One system authentication prompt for the whole privileged step — the same
-# dialog Ubuntu shows for its own software updates, with the friendly message
-# from the polkit policy installed by bootstrap.sh.
-if ! pkexec /usr/local/bin/picomint-update 2>&1 \
-    | zenity --progress --pulsate --auto-close --no-cancel --width=460 \
-        --title="Update" --text="Pulling the latest release…"; then
-    die "The update did not complete. Your guardian may still be running the previous release."
-fi
+sudo docker compose pull
+sudo docker compose up -d
 
-info "Your guardian is up to date."
+echo
+echo "Update successful."
 UPDATE
 
 cat > logs.sh <<'LOGS'
@@ -215,35 +210,6 @@ exec journalctl -f -n 200 CONTAINER_NAME=picomint-guardian-daemon
 LOGS
 
 chmod +x update.sh logs.sh
-
-# The Update button's privileged half lives root-owned at a fixed path so the
-# polkit policy below can whitelist exactly this file — and name the action in
-# the authentication dialog instead of showing a raw command line.
-sudo tee /usr/local/bin/picomint-update >/dev/null <<HELPER
-#!/usr/bin/env bash
-set -euo pipefail
-cd $DEPLOY_DIR
-docker compose pull
-docker compose up -d
-HELPER
-sudo chmod 755 /usr/local/bin/picomint-update
-
-sudo tee /usr/share/polkit-1/actions/com.picomint.update.policy >/dev/null <<'POLICY'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
-<policyconfig>
-  <action id="com.picomint.update">
-    <description>Update the picomint guardian</description>
-    <message>Authentication is required to update your guardian</message>
-    <defaults>
-      <allow_any>auth_admin</allow_any>
-      <allow_inactive>auth_admin</allow_inactive>
-      <allow_active>auth_admin</allow_active>
-    </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/picomint-update</annotate>
-  </action>
-</policyconfig>
-POLICY
 
 echo "==> Pulling images"
 sudo docker compose pull
@@ -262,7 +228,7 @@ done
 echo "==> Pinning shortcuts to the dock"
 install_launcher picomint-guardian "Dashboard" "xdg-open $UI_URL" web-browser
 install_launcher picomint-guardian-logs "Logs" "$DEPLOY_DIR/logs.sh" utilities-system-monitor true
-install_launcher picomint-guardian-update "Update" "$DEPLOY_DIR/update.sh" system-software-update
+install_launcher picomint-guardian-update "Update" "$DEPLOY_DIR/update.sh" system-software-update true
 
 # Unconditional so a re-run also upgrades an existing install — Signal
 # builds refuse to connect 90 days after being built.
