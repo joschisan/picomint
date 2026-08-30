@@ -264,16 +264,16 @@ install_launcher picomint-guardian "Dashboard" "xdg-open $UI_URL" web-browser
 install_launcher picomint-guardian-logs "Logs" "$DEPLOY_DIR/logs.sh" utilities-system-monitor true
 install_launcher picomint-guardian-update "Update" "$DEPLOY_DIR/update.sh" system-software-update
 
-if ! command -v signal-desktop >/dev/null; then
-    echo "==> Installing Signal Desktop"
-    curl -fsSL https://updates.signal.org/desktop/apt/keys.asc \
-        | gpg --dearmor \
-        | sudo tee /usr/share/keyrings/signal-desktop-keyring.gpg >/dev/null
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/signal-desktop-keyring.gpg] https://updates.signal.org/desktop/apt xenial main' \
-        | sudo tee /etc/apt/sources.list.d/signal-xenial.list >/dev/null
-    sudo apt update
-    sudo apt install -y signal-desktop
-fi
+# Unconditional so a re-run also upgrades an existing install — Signal
+# builds refuse to connect 90 days after being built.
+echo "==> Installing Signal Desktop"
+curl -fsSL https://updates.signal.org/desktop/apt/keys.asc \
+    | gpg --dearmor \
+    | sudo tee /usr/share/keyrings/signal-desktop-keyring.gpg >/dev/null
+echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/signal-desktop-keyring.gpg] https://updates.signal.org/desktop/apt xenial main' \
+    | sudo tee /etc/apt/sources.list.d/signal-xenial.list >/dev/null
+sudo apt update
+sudo apt install -y signal-desktop
 
 echo "==> Pinning Signal Desktop to the dock"
 pin_to_dock signal-desktop
