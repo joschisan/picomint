@@ -2,24 +2,22 @@
 # One-shot installer for a picomint guardian on a fresh Ubuntu desktop.
 #
 # Installs Docker (if missing), brings up the bundled guardian + a fully
-# validating bitcoind, opens the Web UI in a browser, installs Signal Desktop
-# for exchanging setup codes during the federation ceremony, and pins
-# Dashboard, Logs and Update shortcuts to the dock. Nothing here needs a
-# terminal afterwards.
+# validating bitcoind, installs Signal Desktop for exchanging setup codes
+# during the federation ceremony, and pins Dashboard, Logs and Update
+# shortcuts to the dock. Nothing here needs a terminal afterwards.
 #
-# Fully self-contained — the compose file and updater are embedded below and
-# written to $DEPLOY_DIR. Safe to re-run at any time: every step is
-# idempotent and guardian state lives in Docker volumes a re-run never
-# touches.
+# Fully self-contained — the compose file, updater and log viewer are
+# embedded below and written to $DEPLOY_DIR. Safe to re-run at any time:
+# every step is idempotent and guardian state lives in Docker volumes a
+# re-run never touches.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap.sh | bash
 
 set -euo pipefail
 
-DEPLOY_DIR="$HOME/picomint-guardian-daemon"
+DEPLOY_DIR="$HOME/picomint"
 UI_URL="http://127.0.0.1:3000"
-LOGS_URL="http://127.0.0.1:3001"
 
 confirm() {
     if [[ "${AUTO_YES:-}" == "1" ]]; then
@@ -30,7 +28,7 @@ confirm() {
 }
 
 install_launcher() {
-    local id="$1" name="$2" exec_cmd="$3" icon="$4"
+    local id="$1" name="$2" exec_cmd="$3" icon="$4" terminal="${5:-false}"
 
     mkdir -p "$HOME/.local/share/applications"
 
@@ -40,7 +38,7 @@ Type=Application
 Name=$name
 Exec=$exec_cmd
 Icon=$icon
-Terminal=false
+Terminal=$terminal
 EOF
 
     pin_to_dock "$id"
@@ -96,8 +94,8 @@ cat <<EOF
 This installer will set up a picomint guardian on this machine:
 
   1. Install Docker (if missing)
-  2. Write the guardian compose and updater into $DEPLOY_DIR
-  3. Start the guardian + a bundled, fully validating Bitcoin Core node (~1TB)
+  2. Write the guardian compose, updater and log viewer into $DEPLOY_DIR
+  3. Pull and start the guardian + a bundled, fully validating Bitcoin Core node (~1TB)
   4. Wait for the Web UI to come up at $UI_URL
   5. Pin Dashboard, Logs and Update shortcuts to the dock
   6. Install Signal Desktop for exchanging setup codes with co-guardians
@@ -116,25 +114,27 @@ if ! command -v docker >/dev/null; then
     sudo apt install -y docker.io docker-compose-v2
 fi
 
-sudo usermod -aG docker "$USER"
-
 echo "==> Writing $DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR"
 cd "$DEPLOY_DIR"
 
 cat > docker-compose.yml <<'COMPOSE'
-# All services run on the host network. The guardian's p2p and client api
+# Both services run on the host network. The guardian's p2p and client api
 # share one iroh endpoint (UDP), and stacking Docker's NAT on top of the
 # router's would give iroh two layers to punch through instead of one. That
 # means each service binds its own address rather than being contained by a
-# published port, so the loopback binds below are what keep the Web UI, the
-# log viewer and the Bitcoin RPC off the LAN.
+# published port, so the loopback binds below are what keep the Web UI and
+# the Bitcoin RPC off the LAN.
 services:
   picomint-guardian-daemon:
     image: ghcr.io/joschisan/picomint-guardian-daemon:main
     container_name: picomint-guardian-daemon
     restart: always
     network_mode: host
+    # Logs go to the system journal: the desktop user can read them without
+    # docker privileges, and they survive container recreation on update.
+    logging:
+      driver: journald
     depends_on:
       - bitcoind
     volumes:
@@ -155,6 +155,10 @@ services:
     container_name: bitcoind
     restart: always
     network_mode: host
+    # Logs go to the system journal: the desktop user can read them without
+    # docker privileges, and they survive container recreation on update.
+    logging:
+      driver: journald
     volumes:
       - bitcoind_data:/home/bitcoin/.bitcoin
     command:
@@ -166,20 +170,6 @@ services:
       - -rpcuser=bitcoin
       - -rpcpassword=bitcoin
       - -dbcache=1024
-
-  dozzle:
-    image: amir20/dozzle:latest
-    container_name: dozzle
-    restart: always
-    network_mode: host
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      # Browser log viewer — loopback only. Dozzle defaults to :8080, which on
-      # the host network would bind every interface and collide with the iroh
-      # endpoint.
-      - DOZZLE_ADDR=127.0.0.1:3001
-      - DOZZLE_NO_ANALYTICS=true
 
 volumes:
   picomint_guardian_daemon_data:
@@ -194,7 +184,7 @@ cat > update.sh <<'UPDATE'
 
 set -euo pipefail
 
-DEPLOY_DIR="$HOME/picomint-guardian-daemon"
+DEPLOY_DIR="$HOME/picomint"
 
 info() { zenity --info --width=420 --title="Update" --text="$1"; }
 die() { zenity --error --width=420 --title="Update" --text="$1" || true; exit 1; }
@@ -203,10 +193,10 @@ if [[ ! -f "$DEPLOY_DIR/docker-compose.yml" ]]; then
     die "No guardian deployment found at $DEPLOY_DIR."
 fi
 
-cd "$DEPLOY_DIR"
-
-# sg applies docker-group membership granted after this desktop session began.
-if ! sg docker -c "docker compose pull && docker compose up -d" 2>&1 \
+# One system authentication prompt for the whole privileged step — the same
+# dialog Ubuntu shows for its own software updates, with the friendly message
+# from the polkit policy installed by bootstrap.sh.
+if ! pkexec /usr/local/bin/picomint-update 2>&1 \
     | zenity --progress --pulsate --auto-close --no-cancel --width=460 \
         --title="Update" --text="Pulling the latest release…"; then
     die "The update did not complete. Your guardian may still be running the previous release."
@@ -215,12 +205,48 @@ fi
 info "Your guardian is up to date."
 UPDATE
 
-chmod +x update.sh
+cat > logs.sh <<'LOGS'
+#!/usr/bin/env bash
+# Live guardian log viewer, launched from the "Logs" icon installed by
+# bootstrap.sh. Reads the system journal the containers log to — no docker
+# privileges needed. Read-only; close the window when done.
 
-echo "==> Pinning shortcuts to the dock"
-install_launcher picomint-guardian "Dashboard" "xdg-open $UI_URL" web-browser
-install_launcher picomint-guardian-logs "Logs" "xdg-open $LOGS_URL" utilities-system-monitor
-install_launcher picomint-guardian-update "Update" "$DEPLOY_DIR/update.sh" system-software-update
+exec journalctl -f -n 200 CONTAINER_NAME=picomint-guardian-daemon
+LOGS
+
+chmod +x update.sh logs.sh
+
+# The Update button's privileged half lives root-owned at a fixed path so the
+# polkit policy below can whitelist exactly this file — and name the action in
+# the authentication dialog instead of showing a raw command line.
+sudo tee /usr/local/bin/picomint-update >/dev/null <<HELPER
+#!/usr/bin/env bash
+set -euo pipefail
+cd $DEPLOY_DIR
+docker compose pull
+docker compose up -d
+HELPER
+sudo chmod 755 /usr/local/bin/picomint-update
+
+sudo tee /usr/share/polkit-1/actions/com.picomint.update.policy >/dev/null <<'POLICY'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+<policyconfig>
+  <action id="com.picomint.update">
+    <description>Update the picomint guardian</description>
+    <message>Authentication is required to update your guardian</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/picomint-update</annotate>
+  </action>
+</policyconfig>
+POLICY
+
+echo "==> Pulling images"
+sudo docker compose pull
 
 echo "==> Starting guardian"
 sudo docker compose up -d
@@ -233,10 +259,10 @@ for _ in $(seq 60); do
     sleep 1
 done
 
-if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
-    echo "==> Opening $UI_URL"
-    xdg-open "$UI_URL" >/dev/null 2>&1 || true
-fi
+echo "==> Pinning shortcuts to the dock"
+install_launcher picomint-guardian "Dashboard" "xdg-open $UI_URL" web-browser
+install_launcher picomint-guardian-logs "Logs" "$DEPLOY_DIR/logs.sh" utilities-system-monitor true
+install_launcher picomint-guardian-update "Update" "$DEPLOY_DIR/update.sh" system-software-update
 
 if ! command -v signal-desktop >/dev/null; then
     echo "==> Installing Signal Desktop"
@@ -256,15 +282,11 @@ cat <<EOF
 
 Guardian is running.
 
-  Web UI:   $UI_URL
-  Logs UI:  $LOGS_URL
-  Compose:  $DEPLOY_DIR/docker-compose.yml
-  Logs:     sudo docker compose -f $DEPLOY_DIR/docker-compose.yml logs -f
-
 Next steps:
   1. Click Dashboard in the dock (or open $UI_URL).
   2. Open Signal and coordinate setup-code exchange with your co-guardians.
 
-The dock also has Logs for log output and Update for installing future
-releases — day-to-day operation never needs a terminal again.
+The dock also has Logs for the guardian's log output and Update for
+installing future releases — day-to-day operation never needs a terminal
+again.
 EOF
