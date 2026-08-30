@@ -31,7 +31,10 @@ pub struct Feerate {
 pub struct BitcoinRpcStatus {
     pub network: Network,
     pub block_count: u64,
-    pub fee_rate: Feerate,
+    /// `None` while the backend is still syncing — fee estimation has no
+    /// data until the node is at the tip, and consensus (the only consumer
+    /// that needs a feerate) doesn't start until then either.
+    pub fee_rate: Option<Feerate>,
     pub sync_progress: Option<f64>,
 }
 
@@ -84,11 +87,9 @@ impl BitcoinRpcMonitor {
         let sync_progress = rpc.get_sync_progress().await?;
 
         let fee_rate = if network == Network::Regtest {
-            Feerate { sat_per_kvb: 1000 }
+            Some(Feerate { sat_per_kvb: 1000 })
         } else {
-            rpc.get_feerate()
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("Feerate not available"))?
+            rpc.get_feerate().await?
         };
 
         Ok(BitcoinRpcStatus {

@@ -125,14 +125,14 @@ impl Wallet {
             .into_iter()
             .collect();
 
-        let feerate_vote = self.btc_rpc.status().map(|status| {
+        let feerate_vote = self.btc_rpc.status().and_then(|status| {
             status
                 .fee_rate
-                .sat_per_kvb
-                .max(MIN_FEERATE_VOTE_SATS_PER_KVB)
+                .map(|fee_rate| fee_rate.sat_per_kvb.max(MIN_FEERATE_VOTE_SATS_PER_KVB))
         });
 
-        // `None` retracts our vote while the bitcoin backend is down.
+        // `None` retracts our vote while the bitcoin backend is down or
+        // still syncing and thus unable to estimate fees.
         if dbtx.get(&FeeRateVoteTable, &self.identity) != Some(feerate_vote) {
             items.push(WalletConsensusItem::Feerate(feerate_vote));
         }
