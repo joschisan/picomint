@@ -1,17 +1,16 @@
 use std::pin::pin;
-use std::sync::Arc;
 
 use anyhow::ensure;
 use async_stream::stream;
 use futures::StreamExt;
 use picomint_client::mint::{MintSuccessEvent, ReceiveEvent, SendEvent};
-use picomint_client::{Account, Client, Mnemonic, TxAcceptEvent, TxRejectEvent};
+use picomint_client::{Account, Mnemonic, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use tracing::info;
 
-use crate::env::{CLIENT_FEE_PPM, TestEnv};
+use crate::env::{CLIENT_FEE_PPM, TestClient, TestEnv};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -20,9 +19,7 @@ enum MintEvent {
     Receive(ReceiveEvent),
 }
 
-fn mint_event_stream(
-    client: &Arc<Client>,
-) -> impl futures::Stream<Item = (OperationId, MintEvent)> {
+fn mint_event_stream(client: &TestClient) -> impl futures::Stream<Item = (OperationId, MintEvent)> {
     let client = client.clone();
     let notify = client.event_notify();
     let mut next_id = EventLogId::LOG_START;
@@ -89,7 +86,7 @@ async fn wait_mint_event<S>(
 /// `get_balance()` between TxAccept and MintSuccessEvent returns a
 /// stale (lower) figure.
 pub(crate) async fn await_tx_outcome(
-    client: &Arc<Client>,
+    client: &TestClient,
     operation: OperationId,
 ) -> Result<(), String> {
     let mut stream = client.subscribe_operation_events(operation);
@@ -113,7 +110,7 @@ pub(crate) async fn await_tx_outcome(
     unreachable!("stream only ends at client shutdown")
 }
 
-pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
+pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Result<()> {
     info!("mint: send_and_receive (10 iterations) + double_spend_is_rejected");
 
     // Capture the receive client's mnemonic so we can restore it at

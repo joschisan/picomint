@@ -16,7 +16,7 @@ use picomint_core::core::Account;
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::Client;
+use crate::FederationClient;
 
 /// How long between passes, and how long the first one waits.
 ///
@@ -38,7 +38,7 @@ const SWEEP_THRESHOLD: Amount = Amount::from_sat(1000);
 /// Passes are sequential, so a slow payment delays the next pass rather than
 /// racing it — which is what keeps two sweeps from both deciding the same
 /// balance is theirs to send.
-pub(crate) async fn sweep(client: Arc<Client>, account: Account, lnurl: String) {
+pub(crate) async fn sweep(client: Arc<FederationClient>, account: Account, lnurl: String) {
     loop {
         sleep(SWEEP_INTERVAL).await;
 
@@ -52,7 +52,11 @@ pub(crate) async fn sweep(client: Arc<Client>, account: Account, lnurl: String) 
     }
 }
 
-async fn sweep_once(client: &Client, account: Account, lnurl: &str) -> anyhow::Result<()> {
+async fn sweep_once(
+    client: &FederationClient,
+    account: Account,
+    lnurl: &str,
+) -> anyhow::Result<()> {
     let (gateway_pk, gateway_info) = client.ln().select_gateway()?;
 
     client

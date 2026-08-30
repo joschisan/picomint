@@ -16,7 +16,7 @@ use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use picomint_client::gw::GATEWAY_ACCOUNT;
 use picomint_client::wallet::events::{SendFailureEvent, SendSuccessEvent};
-use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
+use picomint_client::{FederationClient, TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
@@ -175,7 +175,7 @@ async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, CliEr
 
     Ok(Json(InfoResponse {
         lightning_pk: state.node.node_id(),
-        gateway_pk: GatewayPk(state.client_factory.endpoint().id()),
+        gateway_pk: GatewayPk(state.client.endpoint().id()),
         alias: state
             .node
             .node_alias()
@@ -191,7 +191,7 @@ async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, CliEr
 #[instrument(skip_all, err)]
 async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse>, CliError> {
     let words = state
-        .client_factory
+        .client
         .mnemonic()
         .words()
         .map(std::string::ToString::to_string)
@@ -633,7 +633,16 @@ async fn federation_add(
     State(state): State<AppState>,
     Json(payload): Json<FederationAddRequest>,
 ) -> Result<Json<()>, CliError> {
-    state.client_factory.add(&payload.invite).await?;
+    // The scan matters here as much as it does for a wallet: a gateway
+    // rebuilt from its seed against a federation it has served before holds
+    // its liquidity under counters this node knows nothing about.
+    let join = state.client.scan(&payload.invite).await?;
+
+    if join.config().network != state.network {
+        return Err(anyhow::anyhow!("Unsupported network {}", join.config().network).into());
+    }
+
+    state.client.join(join)?;
 
     Ok(Json(()))
 }
@@ -719,7 +728,7 @@ async fn federation_balance(
 async fn resolve_client(
     state: &AppState,
     id: Option<FederationId>,
-) -> Result<Arc<Client>, CliError> {
+) -> Result<Arc<FederationClient>, CliError> {
     let id = match id {
         Some(id) => id,
         None => match state.federation_list().as_slice() {
@@ -788,7 +797,7 @@ async fn federation_module_mint_receive(
         .receive(GATEWAY_ACCOUNT, &payload.ecash)
         .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
 
-    let mut events = client.subscribe_operation_events(operation);
+    let mut events = state.client.subscribe_operation_events(operation);
     while let Some(entry) = events.next().await {
         if entry.to_event::<TxAcceptEvent>().is_some() {
             return Ok(Json(FederationMintReceiveResponse { amount }));
@@ -838,7 +847,7 @@ async fn federation_module_wallet_send(
         .await
         .map_err(|e| CliError::internal(format!("Failed to submit onchain send: {e}")))?;
 
-    let mut events = client.subscribe_operation_events(operation);
+    let mut events = state.client.subscribe_operation_events(operation);
     while let Some(entry) = events.next().await {
         if let Some(e) = entry.to_event::<SendSuccessEvent>() {
             return Ok(Json(FederationWalletSendResponse { txid: e.txid }));

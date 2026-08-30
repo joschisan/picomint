@@ -6,21 +6,19 @@ pub mod db;
 pub mod public;
 pub mod trailer;
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow, bail, ensure};
 use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
-use client::GatewayClientFactory;
 use futures::StreamExt as _;
 use lightning::routing::router::RouteParametersConfig;
 use lightning::types::payment::PaymentHash;
 use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
-use picomint_client::Client;
 use picomint_client::gw::events::ReceiveSuccessEvent;
+use picomint_client::{Client, FederationClient};
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -31,11 +29,10 @@ use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_sqlite::{Database, DbRead};
-use std::sync::RwLock;
 
 use crate::db::{
-    ClientConfigTable, DisabledFederationTable, IncomingOfferRow, IncomingOfferTable,
-    OutgoingContractRow, OutgoingContractTable,
+    DisabledFederationTable, IncomingOfferRow, IncomingOfferTable, OutgoingContractRow,
+    OutgoingContractTable,
 };
 
 /// Name of the gateway's database.
@@ -46,9 +43,8 @@ pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 
 #[derive(Clone)]
 pub struct AppState {
-    pub clients: Arc<RwLock<BTreeMap<FederationId, Arc<Client>>>>,
+    pub client: Arc<Client>,
     pub node: Arc<ldk_node::Node>,
-    pub client_factory: GatewayClientFactory,
     pub gateway_db: Database,
     pub data_dir: std::path::PathBuf,
     pub network: Network,
@@ -60,52 +56,24 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Get a client for `federation`, lazily loading it from
-    /// [`ClientConfigTable`] on cache miss. Returns `None` only if no config
-    /// is persisted for that federation — i.e. the gateway has never added
-    /// it.
-    ///
-    /// Double-checked: read lock → cache hit returns immediately; cache miss
-    /// drops the read lock, takes the write lock, re-checks the cache (in
-    /// case another caller raced and inserted), and otherwise loads + inserts
-    /// exactly once. The write lock is held across the load, so cold loads
-    /// for *different* feds are serialized — fine because cold loads are
-    /// rare and `Client::new_gateway` is fast.
-    pub fn select_client(&self, federation: FederationId) -> Option<Arc<Client>> {
-        if let Some(client) = self
-            .clients
-            .read()
-            .expect("clients RwLock poisoned")
-            .get(&federation)
-            .cloned()
-        {
-            return Some(client);
-        }
-
-        let mut clients = self.clients.write().expect("clients RwLock poisoned");
-
-        if let Some(client) = clients.get(&federation).cloned() {
-            return Some(client);
-        }
-
-        let client = self.client_factory.load(&federation)?;
-
-        clients.insert(federation, client.clone());
-
-        Some(client)
+    /// Get a client for `federation`, brought up lazily on first use.
+    /// Returns `None` only if the federation was never added.
+    pub fn select_client(&self, federation: FederationId) -> Option<Arc<FederationClient>> {
+        self.client.federation(federation)
     }
 
     /// List every federation the gateway has added, with its config-declared
-    /// name. Reads [`ClientConfigTable`] directly so dormant federations are
+    /// name. Reads the persisted configs directly so dormant federations are
     /// not forced to lazy-load.
     pub fn federation_list(&self) -> Vec<FederationInfo> {
-        self.gateway_db.begin_read().iter(&ClientConfigTable, |r| {
-            r.map(|entry| FederationInfo {
-                federation: entry.1.calculate_federation_id(),
+        self.client
+            .federation_configs()
+            .into_iter()
+            .map(|entry| FederationInfo {
+                federation: entry.0,
                 federation_name: entry.1.name,
             })
             .collect()
-        })
     }
 }
 
@@ -363,12 +331,14 @@ impl AppState {
             .get(&IncomingOfferTable, &operation)
             .ok_or_else(|| anyhow!("Unknown payment hash"))?;
 
-        let client = self
-            .select_client(row.federation)
+        // Bring the federation up so its state machines drive the contract
+        // to settlement; the event reads below go through the shared log.
+        self.select_client(row.federation)
             .expect("source federation for incoming contract is connected");
 
         if !wait {
-            if let Some(preimage) = client
+            if let Some(preimage) = self
+                .client
                 .read_operation_events(operation)
                 .into_iter()
                 .find_map(|entry| entry.to_event::<ReceiveSuccessEvent>().map(|e| e.preimage))
@@ -385,7 +355,7 @@ impl AppState {
             });
         }
 
-        let mut stream = client.subscribe_operation_events(operation);
+        let mut stream = self.client.subscribe_operation_events(operation);
 
         loop {
             let entry = stream

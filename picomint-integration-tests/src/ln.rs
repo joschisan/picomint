@@ -1,5 +1,4 @@
 use std::pin::pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, ensure};
@@ -14,7 +13,7 @@ use lightning_invoice::{Bolt11Invoice, Currency, InvoiceBuilder, PaymentSecret};
 use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
 use picomint_client::ln::{LightningClientModule, SendPaymentError};
 use picomint_client::tx::{Input, TxBuilder};
-use picomint_client::{Account, Client, OperationId};
+use picomint_client::{Account, OperationId};
 use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::ln::methods::{GatewayMethod, InfoResponse, SendResponse};
 use picomint_core::ln::{LightningInput, OutgoingWitness};
@@ -25,7 +24,7 @@ use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_
 use tracing::info;
 
 use crate::cli;
-use crate::env::{NUM_GUARDIANS, TestEnv, retry};
+use crate::env::{NUM_GUARDIANS, TestClient, TestEnv, retry};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -37,7 +36,7 @@ enum LnEvent {
 }
 
 fn ln_event_stream(
-    client: &Arc<Client>,
+    client: &TestClient,
 ) -> impl futures::Stream<Item = (picomint_core::core::OperationId, LnEvent)> {
     let client = client.clone();
     let notify = client.event_notify();
@@ -80,7 +79,7 @@ fn try_parse_ln_event(
     None
 }
 
-pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
+pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Result<()> {
     register_gateway(env, &env.gw_pk)?;
     LightningClientModule::update_gateway_pks(client_send.ln().clone()).await?;
     LightningClientModule::update_gateway_info(client_send.ln().clone()).await;
@@ -233,7 +232,7 @@ async fn test_direct_ln_payments(env: &TestEnv) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn test_payments(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()> {
+async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()> {
     info!("ln: test_payments");
 
     let ln = client.ln();
@@ -459,7 +458,7 @@ where
 }
 
 async fn wait_tx_accepted(
-    client: &Arc<Client>,
+    client: &TestClient,
     op: OperationId,
     txid: picomint_core::TransactionId,
 ) {
@@ -482,7 +481,7 @@ async fn wait_tx_accepted(
     panic!("operation event stream ended");
 }
 
-async fn test_mock_send_exactly_once(client: &Arc<Client>) -> anyhow::Result<()> {
+async fn test_mock_send_exactly_once(client: &TestClient) -> anyhow::Result<()> {
     info!("ln: test_mock_send_exactly_once");
 
     let ln = client.ln();
@@ -520,7 +519,7 @@ async fn test_mock_send_exactly_once(client: &Arc<Client>) -> anyhow::Result<()>
     Ok(())
 }
 
-async fn test_mock_send_refund_forfeit(client: &Arc<Client>) -> anyhow::Result<()> {
+async fn test_mock_send_refund_forfeit(client: &TestClient) -> anyhow::Result<()> {
     info!("ln: test_mock_send_refund_forfeit");
 
     let mut events = pin!(ln_event_stream(client));
@@ -543,7 +542,7 @@ async fn test_mock_send_refund_forfeit(client: &Arc<Client>) -> anyhow::Result<(
     Ok(())
 }
 
-async fn test_mock_wrong_network(client: &Arc<Client>) -> anyhow::Result<()> {
+async fn test_mock_wrong_network(client: &TestClient) -> anyhow::Result<()> {
     info!("ln: test_mock_wrong_network");
 
     let invoice = signet_invoice();
@@ -566,7 +565,7 @@ async fn test_mock_wrong_network(client: &Arc<Client>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()> {
+async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()> {
     info!("ln: test_claim_outgoing_contract");
 
     let ln = client.ln();
@@ -637,7 +636,7 @@ async fn test_claim_outgoing_contract(client: &Arc<Client>) -> anyhow::Result<()
     Ok(())
 }
 
-async fn test_unilateral_refund(env: &TestEnv, client: &Arc<Client>) -> anyhow::Result<()> {
+async fn test_unilateral_refund(env: &TestEnv, client: &TestClient) -> anyhow::Result<()> {
     info!("ln: test_unilateral_refund");
 
     let mut events = pin!(ln_event_stream(client));

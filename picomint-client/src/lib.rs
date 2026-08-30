@@ -1,14 +1,18 @@
 //! Picomint client library.
 //!
-//! [`Client`] is the entry point for applications interacting with one
-//! federation. Use [`Client::new`] for regular clients and
-//! [`Client::new_gateway`] for the gateway daemon's flavor — both take a
-//! [`ConsensusConfig`] the integrator persists itself, obtained from an
-//! invite code by [`join`].
+//! [`Client`] is the entry point for applications: one instance per app,
+//! holding every joined federation. Use [`Client::new`] for regular clients
+//! and [`Client::new_gateway`] for the gateway daemon's flavor. Federations
+//! are joined via [`Client::scan`] + [`Client::join`] and served as
+//! per-federation [`FederationClient`] handles by [`Client::federation`].
+//!
+//! Every table is shared across federations with a
+//! [`picomint_core::config::FederationId`]-prefixed key, so joins, leaves,
+//! and all module writes commit through one database.
 //!
 //! Per-module logic lives in [`mod@mint`], [`mod@wallet`], [`mod@ln`], and
 //! [`mod@gw`]. Each module owns its own state machines and exposes a
-//! `*Module::new` constructor used by the [`Client`] entry points.
+//! `*Module::new` constructor used by the [`FederationClient`] bring-up.
 //! Submission ownership lives entirely in [`crate::mint::MintClientModule`]
 //! — non-mint modules build a [`crate::tx::TxBuilder`]
 //! and call `MintClientModule::finalize_and_submit_tx`, which
@@ -49,8 +53,8 @@ pub mod wallet;
 
 pub use iroh::Endpoint;
 
-pub use client::Client;
-pub use join::{Join, join};
+pub use client::{Client, FederationClient};
+pub use join::Join;
 pub use picomint_core::core::{Account, OperationId};
 pub use picomint_rpc::connection::ConnStatus;
 pub use secret::{Mnemonic, random as random_mnemonic};

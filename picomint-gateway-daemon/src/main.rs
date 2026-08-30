@@ -8,11 +8,9 @@
 //! clients to request routing of payments through the Lightning Network.
 //! The API also has endpoints for managing the gateway.
 
-use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::RwLock;
 
 use anyhow::{Context, ensure};
 use bitcoin::Network;
@@ -21,7 +19,6 @@ use lightning::types::payment::PaymentHash;
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::ln::gateway::PaymentFee;
-use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::db::{
     IncomingOfferTable, OutgoingContractTable, ProcessedLdkEventTable,
 };
@@ -150,22 +147,24 @@ fn main() -> anyhow::Result<()> {
 
     let gateway_db = picomint_sqlite::Database::open(opts.data_dir.join(DB_FILE))?;
 
-    // 3. Load or init client factory (mnemonic)
-    let client_factory = match runtime.block_on(GatewayClientFactory::try_load(
-        gateway_db.clone(),
-        opts.network,
+    // 3. Load or init the gateway identity (mnemonic + iroh endpoint)
+    let (endpoint, mnemonic) = match runtime.block_on(picomint_gateway_daemon::client::try_load(
+        &gateway_db,
         opts.api_addr,
     ))? {
-        Some(factory) => factory,
-        None => runtime.block_on(GatewayClientFactory::init(
-            gateway_db.clone(),
+        Some(identity) => identity,
+        None => runtime.block_on(picomint_gateway_daemon::client::init(
+            &gateway_db,
             picomint_client::random_mnemonic(&mut OsRng),
-            opts.network,
             opts.api_addr,
         ))?,
     };
 
-    let mnemonic = client_factory.mnemonic().clone();
+    let client = Arc::new(picomint_client::Client::new_gateway(
+        endpoint,
+        gateway_db.clone(),
+        mnemonic.clone(),
+    ));
 
     // 4. Build LDK node
     let ldk_data_dir = opts
@@ -241,9 +240,8 @@ fn main() -> anyhow::Result<()> {
 
     // 5. Construct AppState
     let state = AppState {
-        clients: Arc::new(RwLock::new(BTreeMap::new())),
+        client,
         node: node.clone(),
-        client_factory,
         gateway_db,
         data_dir: opts.data_dir.clone(),
         network: opts.network,
@@ -260,7 +258,7 @@ fn main() -> anyhow::Result<()> {
     //    cleanly.
     runtime.spawn(public::run_public(
         state.clone(),
-        state.client_factory.endpoint().clone(),
+        state.client.endpoint().clone(),
     ));
 
     runtime.spawn(cli::run_cli(state.clone()));

@@ -1,5 +1,5 @@
 use picomint_core::OutPoint;
-use picomint_core::config::{ConsensusConfig, FederationId};
+use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts;
@@ -14,12 +14,6 @@ table!(
     RootEntropyTable,
     () => Vec<u8>,
     "root-entropy",
-);
-
-table!(
-    ClientConfigTable,
-    FederationId => ConsensusConfig,
-    "client-config",
 );
 
 // Set of federation ids whose public-facing endpoints (`gateway_info`,

@@ -1,18 +1,17 @@
 use std::pin::pin;
-use std::sync::Arc;
 
 use anyhow::{Context, ensure};
 use async_stream::stream;
 use bitcoincore_rpc::RpcApi;
 use futures::StreamExt;
 use picomint_client::wallet::events::{ReceiveEvent, SendEvent, SendSuccessEvent};
-use picomint_client::{Account, Client, TxRejectEvent};
+use picomint_client::{Account, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use tokio::task::block_in_place;
 use tracing::info;
 
-use crate::env::{TestEnv, retry};
+use crate::env::{TestClient, TestEnv, retry};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -24,7 +23,7 @@ enum WalletEvent {
 }
 
 fn wallet_event_stream(
-    client: &Arc<Client>,
+    client: &TestClient,
 ) -> impl futures::Stream<Item = (picomint_core::core::OperationId, WalletEvent)> {
     let client = client.clone();
     let notify = client.event_notify();
@@ -67,7 +66,7 @@ fn try_parse_wallet_event(
     None
 }
 
-pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
+pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Result<()> {
     info!("wallet: pegin + on-chain send");
 
     let mut send_events = pin!(wallet_event_stream(client_send));

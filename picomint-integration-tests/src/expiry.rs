@@ -39,7 +39,7 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
 
     // The startup refresh task races with us; force a sync read so the
     // cache is settled before we assert.
-    picomint_client::Client::refresh_expiry_status(client.clone())
+    picomint_client::FederationClient::refresh_expiry_status(client.fed.clone())
         .await
         .map_err(|e| anyhow::anyhow!("refresh_expiry_status: {e}"))?;
 
@@ -58,7 +58,7 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
         cli::guardian_expiry_clear(&data_dir)?;
     }
 
-    picomint_client::Client::refresh_expiry_status(client.clone())
+    picomint_client::FederationClient::refresh_expiry_status(client.fed.clone())
         .await
         .map_err(|e| anyhow::anyhow!("refresh_expiry_status (clear): {e}"))?;
 

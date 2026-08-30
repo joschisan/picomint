@@ -8,18 +8,59 @@ use std::time::Duration;
 use anyhow::{Context, ensure};
 use bitcoin::Network;
 use bitcoincore_rpc::RpcApi;
+use futures::stream::BoxStream;
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
-use picomint_client::{Client, Mnemonic};
+use picomint_client::{Client, FederationClient, Mnemonic};
+use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::gateway::GatewayPk;
+use picomint_eventlog::{EventLogEntry, EventLogId};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::block_in_place;
 use tracing::info;
 
 use crate::cli;
+
+/// One test wallet: the app-level [`Client`] plus the handle of the single
+/// federation it joins. Derefs to the federation handle, which is what most
+/// assertions talk to; log reads and shutdown go through the app client.
+#[derive(Clone)]
+pub struct TestClient {
+    pub client: Arc<Client>,
+    pub fed: Arc<FederationClient>,
+}
+
+impl std::ops::Deref for TestClient {
+    type Target = FederationClient;
+
+    fn deref(&self) -> &FederationClient {
+        &self.fed
+    }
+}
+
+impl TestClient {
+    pub fn event_notify(&self) -> Arc<tokio::sync::Notify> {
+        self.client.event_notify()
+    }
+
+    pub fn get_event_log(&self, pos: EventLogId, limit: u64) -> Vec<(EventLogId, EventLogEntry)> {
+        self.client.get_event_log(pos, limit)
+    }
+
+    pub fn subscribe_operation_events(
+        &self,
+        operation: OperationId,
+    ) -> BoxStream<'static, EventLogEntry> {
+        self.client.subscribe_operation_events(operation)
+    }
+
+    pub async fn shutdown(&self) {
+        self.client.shutdown().await
+    }
+}
 
 pub const BTC_RPC_PORT: u16 = 18443;
 pub const GUARDIAN_BASE_PORT: u16 = 17000;
@@ -65,7 +106,7 @@ pub struct TestEnv {
 }
 
 impl TestEnv {
-    pub fn setup(runtime: Arc<tokio::runtime::Runtime>) -> anyhow::Result<(Self, Arc<Client>)> {
+    pub fn setup(runtime: Arc<tokio::runtime::Runtime>) -> anyhow::Result<(Self, TestClient)> {
         let data_dir = tempfile::TempDir::new()?.keep();
         let base = data_dir.as_path();
         info!("Test data directory: {}", base.display());
@@ -230,7 +271,7 @@ impl TestEnv {
     /// Bring up a client. Passing a `mnemonic` a previous client used against
     /// this federation restores it — the scan is part of joining, so there is
     /// no second entry point for it.
-    pub async fn new_client(&self, mnemonic: Option<Mnemonic>) -> anyhow::Result<Arc<Client>> {
+    pub async fn new_client(&self, mnemonic: Option<Mnemonic>) -> anyhow::Result<TestClient> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
         build_client(
             self.endpoint.clone(),
@@ -264,7 +305,7 @@ async fn build_client(
     data_dir: std::path::PathBuf,
     n: u64,
     mnemonic: Option<Mnemonic>,
-) -> anyhow::Result<Arc<Client>> {
+) -> anyhow::Result<TestClient> {
     let db_dir = data_dir.join(format!("client-{n}"));
     tokio::fs::create_dir_all(&db_dir).await?;
 
@@ -275,20 +316,14 @@ async fn build_client(
         None => Mnemonic::generate(12)?,
     };
 
-    let join = picomint_client::join(&endpoint, &mnemonic, &invite_code).await?;
+    let client = Arc::new(Client::new(endpoint, db, mnemonic, None));
 
-    // The dbtx an integrator would also mark the federation as joined in, so
-    // a crash leaves the counter marks and that mark together or not at all.
-    let dbtx = db.begin_write();
+    let join = client.scan(&invite_code).await?;
 
-    join.commit(&dbtx);
-
-    dbtx.commit();
-
-    let client = Client::new(endpoint, db, &mnemonic, join.config().clone(), None);
+    let fed = client.join(join)?;
 
     info!("Created client-{n}");
-    Ok(client)
+    Ok(TestClient { client, fed })
 }
 
 async fn start_guardian(base: &Path, peer: usize) -> anyhow::Result<Child> {
