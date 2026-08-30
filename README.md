@@ -1,6 +1,6 @@
 # Picomint - Alpha
 
-A minimal implementation of a federated Chaumian ecash mint on Bitcoin.
+A minimal implementation of a federated Chaumian ecash mint on Bitcoin. The mobile wallet app lives in [`app/`](app/).
 
 ## Deploy Guardian
 

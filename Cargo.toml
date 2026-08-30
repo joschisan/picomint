@@ -25,6 +25,7 @@ members = [
     "picomint-tpe",
     "picomint-tss",
 ]
+exclude = ["app/rust"]
 resolver = "2"
 
 [workspace.package]

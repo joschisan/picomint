@@ -90,6 +90,91 @@ jobs:
     - name: Run integration tests
       run: timeout 300 ./test-integration.sh
 
+  # App jobs run against app/, which is deliberately its own cargo workspace
+  # (see app/rust/Cargo.toml). cargo fmt is deliberately absent for the app:
+  # rustfmt walks the module tree from lib.rs, so it always reaches the
+  # generated frb_generated.rs, which frb emits with pre-edition-2024 import
+  # ordering. Excluding it needs nightly. Root machete covers app/rust (it
+  # scans the whole directory tree), so no app machete job.
+  app-sort:
+    name: App Cargo Sort
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-sort
+    - run: cargo sort --check
+      working-directory: app/rust
+
+  # Flutter is pinned everywhere below rather than tracking latest stable:
+  # both `dart format` and `flutter analyze` change behaviour between
+  # releases, so an unpinned toolchain turns CI red with no repo change.
+  # Bump this in step with the local SDK.
+  app-format:
+    name: App Dart Format
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: subosito/flutter-action@v2
+      with:
+        flutter-version: 3.38.7
+        cache: true
+
+    # Without package_config.json the formatter cannot read the package's
+    # language version and falls back to the newest, which reformats.
+    - run: flutter pub get
+      working-directory: app
+
+    - run: dart format --set-exit-if-changed --output=none lib
+      working-directory: app
+
+  app-check:
+    name: App Bridge and Dart
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: app/rust
+
+    # Pinned to the version the bridge's generated code is written against.
+    # Cached because building it from source takes minutes.
+    - id: frb-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/bin/flutter_rust_bridge_codegen
+        key: frb-codegen-2.10.0-${{ runner.os }}
+
+    - if: steps.frb-cache.outputs.cache-hit != 'true'
+      run: cargo install --locked flutter_rust_bridge_codegen@2.10.0
+
+    - uses: subosito/flutter-action@v2
+      with:
+        flutter-version: 3.38.7
+        cache: true
+
+    - run: flutter pub get
+      working-directory: app
+
+    # Neither generated tree is committed, so this is what makes the bridge
+    # compile and the Dart bindings exist at all.
+    - name: Generate bridge bindings
+      run: flutter_rust_bridge_codegen generate
+      working-directory: app
+
+    - name: Clippy bridge
+      run: cargo clippy --all-targets -- -D warnings
+      working-directory: app/rust
+
+    - run: flutter analyze
+      working-directory: app
+
   bootstrap:
     name: Bootstrap Installer
     runs-on: ubuntu-26.04

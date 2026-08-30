@@ -1,4 +1,5 @@
 target/
+app/
 .git/
 .github/
 **/*.swp
