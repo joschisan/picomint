@@ -1,29 +1,29 @@
-//! Concrete `Server` container for the fixed module set.
+//! The shared server context and wire dispatch for the fixed module set.
 //!
-//! Holds typed instances of the three canonical modules and match-dispatches
-//! on the wire enum variant directly — no trait indirection.
+//! `Server` is plain data — config, database, bitcoin backend. The modules
+//! are functions over it; dispatch match-dispatches on the wire enum variant
+//! directly — no trait indirection.
 
-use std::sync::Arc;
 use std::time::Instant;
 
+use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::module::InputMeta;
 use picomint_core::module::audit::AuditSummary;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
 use picomint_core::{OutPoint, PeerId};
-use picomint_sqlite::WriteTx;
+use picomint_sqlite::{Database, WriteTx};
 use tracing::info;
 
-use crate::consensus::ln::Lightning;
-use crate::consensus::mint::Mint;
+use crate::config::ServerConfig;
 use crate::consensus::tx::FundingVerifier;
-use crate::consensus::wallet::Wallet;
+use crate::consensus::{ln, mint, wallet};
 
 #[derive(Clone)]
 pub struct Server {
-    pub mint: Arc<Mint>,
-    pub wallet: Arc<Wallet>,
-    pub ln: Arc<Lightning>,
+    pub cfg: ServerConfig,
+    pub db: Database,
+    pub btc_rpc: BitcoinRpcMonitor,
 }
 
 impl Server {
@@ -36,12 +36,10 @@ impl Server {
         match item {
             wire::ModuleConsensusItem::Mint(ci) => match *ci {},
             wire::ModuleConsensusItem::Wallet(ci) => {
-                self.wallet
-                    .process_consensus_item(dbtx, peer, ci.clone())
-                    .await
+                wallet::process_consensus_item(self, dbtx, peer, ci.clone()).await
             }
             wire::ModuleConsensusItem::Ln(ci) => {
-                self.ln.process_consensus_item(dbtx, peer, ci.clone()).await
+                ln::process_consensus_item(self, dbtx, peer, ci.clone()).await
             }
         }
     }
@@ -52,19 +50,13 @@ impl Server {
         input: &wire::Input,
     ) -> Result<InputMeta, wire::InputError> {
         match input {
-            wire::Input::Mint(i) => self
-                .mint
-                .process_input(dbtx, i)
+            wire::Input::Mint(i) => mint::process_input(self, dbtx, i)
                 .await
                 .map_err(wire::InputError::Mint),
-            wire::Input::Wallet(i) => self
-                .wallet
-                .process_input(dbtx, i)
+            wire::Input::Wallet(i) => wallet::process_input(self, dbtx, i)
                 .await
                 .map_err(wire::InputError::Wallet),
-            wire::Input::Ln(i) => self
-                .ln
-                .process_input(dbtx, i)
+            wire::Input::Ln(i) => ln::process_input(self, dbtx, i)
                 .await
                 .map_err(wire::InputError::Ln),
         }
@@ -77,28 +69,22 @@ impl Server {
         out_point: OutPoint,
     ) -> Result<picomint_core::module::TxItemAmounts, wire::OutputError> {
         match output {
-            wire::Output::Mint(o) => self
-                .mint
-                .process_output(dbtx, o, out_point)
+            wire::Output::Mint(o) => mint::process_output(self, dbtx, o, out_point)
                 .await
                 .map_err(wire::OutputError::Mint),
-            wire::Output::Wallet(o) => self
-                .wallet
-                .process_output(dbtx, o, out_point)
+            wire::Output::Wallet(o) => wallet::process_output(self, dbtx, o, out_point)
                 .await
                 .map_err(wire::OutputError::Wallet),
-            wire::Output::Ln(o) => self
-                .ln
-                .process_output(dbtx, o, out_point)
+            wire::Output::Ln(o) => ln::process_output(self, dbtx, o, out_point)
                 .await
                 .map_err(wire::OutputError::Ln),
         }
     }
 
     pub async fn audit(&self, dbtx: &WriteTx) -> AuditSummary {
-        let mint = self.mint.audit(dbtx).await;
-        let wallet = self.wallet.audit(dbtx).await;
-        let ln = self.ln.audit(dbtx).await;
+        let mint = mint::audit(self, dbtx).await;
+        let wallet = wallet::audit(self, dbtx).await;
+        let ln = ln::audit(self, dbtx).await;
         AuditSummary::new(mint, wallet, ln)
     }
 }

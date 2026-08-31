@@ -1,17 +1,18 @@
 use maud::{Markup, html};
 
+use crate::consensus::wallet;
 use crate::ui::copiable_text;
 
-pub async fn render(wallet: &crate::consensus::wallet::Wallet) -> Markup {
-    let network = wallet.network_ui();
-    let federation_wallet = wallet.federation_wallet_ui();
-    let consensus_block_count = wallet.consensus_block_count_ui();
-    let consensus_fee_rate = wallet.consensus_feerate_ui();
-    let send_fee = wallet.send_fee_ui();
-    let receive_fee = wallet.receive_fee_ui();
-    let pending_tx_chain = wallet.pending_tx_chain_ui();
-    let transaction_count = wallet.transaction_count_ui();
-    let restore_keys = wallet.restore_keys_ui();
+pub async fn render(server: &crate::consensus::server::Server) -> Markup {
+    let network = server.cfg.consensus.network;
+    let federation_wallet = wallet::federation_wallet_ui(server);
+    let consensus_block_count = wallet::consensus_block_count_ui(server);
+    let consensus_fee_rate = wallet::consensus_feerate_ui(server);
+    let send_fee = wallet::send_fee_ui(server);
+    let receive_fee = wallet::receive_fee_ui(server);
+    let pending_tx_chain = wallet::pending_tx_chain_ui(server);
+    let transaction_count = wallet::transaction_count_ui(server);
+    let restore_keys = wallet::restore_keys_ui(server);
 
     let total_pending_vbytes = pending_tx_chain.iter().map(|info| info.vbytes).sum::<u64>();
 

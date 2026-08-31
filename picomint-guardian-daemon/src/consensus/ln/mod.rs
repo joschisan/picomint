@@ -5,7 +5,6 @@ mod rpc;
 
 use anyhow::{Context, ensure};
 use group::Curve;
-use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::ln::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
@@ -18,12 +17,14 @@ use picomint_core::ln::{
 };
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, NumPeersExt, OutPoint, PeerId};
-use picomint_sqlite::{Database, DbRead, ReadTx, WriteTx};
+use picomint_sqlite::{DbRead, ReadTx, WriteTx};
 use tpe::{PublicKeyShare, SecretKeyShare};
 use tracing::trace;
 
+use crate::config::ServerConfig;
 use crate::config::dkg::DkgHandle;
 use crate::config::poly::eval_poly_g1;
+use crate::consensus::server::Server;
 use crate::{handler, handler_async};
 
 use self::db::{
@@ -56,11 +57,12 @@ pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<LightningC
 
 /// Verify our private tpe share matches the public share in the consensus
 /// config.
-pub fn validate_config(identity: &PeerId, cfg: &LightningConfig) -> anyhow::Result<()> {
+pub fn validate_config(identity: &PeerId, cfg: &ServerConfig) -> anyhow::Result<()> {
     ensure!(
-        tpe::derive_pk_share(&cfg.private.sk)
+        tpe::derive_pk_share(&cfg.private.ln.sk)
             == *cfg
                 .consensus
+                .ln
                 .tpe_pks
                 .get(identity)
                 .context("Public key set has no key for our identity")?,
@@ -70,304 +72,279 @@ pub fn validate_config(identity: &PeerId, cfg: &LightningConfig) -> anyhow::Resu
     Ok(())
 }
 
-pub struct Lightning {
-    identity: PeerId,
-    cfg: LightningConfig,
-    db: Database,
-    server_bitcoin_rpc_monitor: BitcoinRpcMonitor,
+pub async fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<LightningConsensusItem> {
+    let mut items = Vec::new();
+
+    if let Ok(block_count) = get_block_count(server)
+        && block_count
+            > dbtx
+                .get(&BlockCountVoteTable, &server.cfg.private.identity)
+                .unwrap_or(0)
+    {
+        trace!(?block_count, "Proposing block count");
+        items.push(LightningConsensusItem::BlockCount(block_count));
+    }
+
+    items
 }
 
-impl Lightning {
-    #[must_use]
-    pub fn new(
-        identity: PeerId,
-        cfg: LightningConfig,
-        db: Database,
-        server_bitcoin_rpc_monitor: BitcoinRpcMonitor,
-    ) -> Self {
-        Self {
-            identity,
-            cfg,
-            db,
-            server_bitcoin_rpc_monitor,
+pub async fn process_consensus_item(
+    _server: &Server,
+    dbtx: &WriteTx,
+    peer: PeerId,
+    consensus_item: LightningConsensusItem,
+) -> anyhow::Result<()> {
+    trace!(?consensus_item, "Processing consensus item proposal");
+
+    match consensus_item {
+        LightningConsensusItem::BlockCount(vote) => {
+            let current_vote = dbtx.insert(&BlockCountVoteTable, &peer, &vote).unwrap_or(0);
+
+            ensure!(current_vote < vote, "Block count vote is redundant");
+
+            Ok(())
         }
     }
 }
 
-impl Lightning {
-    pub async fn consensus_proposal(&self, dbtx: &ReadTx) -> Vec<LightningConsensusItem> {
-        let mut items = Vec::new();
+pub async fn process_input(
+    server: &Server,
+    dbtx: &WriteTx,
+    input: &LightningInput,
+) -> Result<InputMeta, LightningInputError> {
+    let (pub_key, amount) = match input {
+        LightningInput::Outgoing(outpoint, outgoing_witness) => {
+            let contract = dbtx
+                .remove(&OutgoingContractTable, outpoint)
+                .ok_or(LightningInputError::UnknownContract)?;
 
-        if let Ok(block_count) = self.get_block_count()
-            && block_count > dbtx.get(&BlockCountVoteTable, &self.identity).unwrap_or(0)
-        {
-            trace!(?block_count, "Proposing block count");
-            items.push(LightningConsensusItem::BlockCount(block_count));
-        }
-
-        items
-    }
-
-    pub async fn process_consensus_item(
-        &self,
-        dbtx: &WriteTx,
-        peer: PeerId,
-        consensus_item: LightningConsensusItem,
-    ) -> anyhow::Result<()> {
-        trace!(?consensus_item, "Processing consensus item proposal");
-
-        match consensus_item {
-            LightningConsensusItem::BlockCount(vote) => {
-                let current_vote = dbtx.insert(&BlockCountVoteTable, &peer, &vote).unwrap_or(0);
-
-                ensure!(current_vote < vote, "Block count vote is redundant");
-
-                Ok(())
-            }
-        }
-    }
-
-    pub async fn process_input(
-        &self,
-        dbtx: &WriteTx,
-        input: &LightningInput,
-    ) -> Result<InputMeta, LightningInputError> {
-        let (pub_key, amount) = match input {
-            LightningInput::Outgoing(outpoint, outgoing_witness) => {
-                let contract = dbtx
-                    .remove(&OutgoingContractTable, outpoint)
-                    .ok_or(LightningInputError::UnknownContract)?;
-
-                let pub_key = match outgoing_witness {
-                    OutgoingWitness::Claim(preimage) => {
-                        if contract.expiry <= self.consensus_block_count(dbtx) {
-                            return Err(LightningInputError::Expired);
-                        }
-
-                        if !contract.verify_preimage(preimage) {
-                            return Err(LightningInputError::InvalidPreimage);
-                        }
-
-                        dbtx.insert(&PreimageTable, outpoint, preimage);
-
-                        contract.claim_pk
+            let pub_key = match outgoing_witness {
+                OutgoingWitness::Claim(preimage) => {
+                    if contract.expiry <= consensus_block_count(server, dbtx) {
+                        return Err(LightningInputError::Expired);
                     }
-                    OutgoingWitness::Refund => {
-                        if contract.expiry > self.consensus_block_count(dbtx) {
-                            return Err(LightningInputError::NotExpired);
-                        }
 
-                        contract.refund_pk
+                    if !contract.verify_preimage(preimage) {
+                        return Err(LightningInputError::InvalidPreimage);
                     }
-                    OutgoingWitness::Cancel(forfeit_signature) => {
-                        if !contract.verify_forfeit_signature(forfeit_signature) {
-                            return Err(LightningInputError::InvalidForfeitSignature);
-                        }
 
-                        contract.refund_pk
-                    }
-                };
+                    dbtx.insert(&PreimageTable, outpoint, preimage);
 
-                let amount = contract
-                    .amount
-                    .checked_add(contract.fee)
-                    .ok_or(LightningInputError::ArithmeticOverflow)?;
-
-                (pub_key, amount)
-            }
-            LightningInput::Incoming(outpoint, agg_decryption_key) => {
-                let contract = dbtx
-                    .remove(&IncomingContractTable, outpoint)
-                    .ok_or(LightningInputError::UnknownContract)?;
-
-                let index = dbtx
-                    .remove(&IncomingContractIndexTable, outpoint)
-                    .expect("Incoming contract index should exist");
-
-                dbtx.remove(&IncomingContractStreamTable, &index);
-
-                if !contract
-                    .offer
-                    .verify_agg_decryption_key(&self.cfg.consensus.tpe_agg_pk, agg_decryption_key)
-                {
-                    return Err(LightningInputError::InvalidDecryptionKey);
+                    contract.claim_pk
                 }
+                OutgoingWitness::Refund => {
+                    if contract.expiry > consensus_block_count(server, dbtx) {
+                        return Err(LightningInputError::NotExpired);
+                    }
 
-                let pub_key = match contract.offer.decrypt_preimage(agg_decryption_key) {
-                    Some(..) => contract.offer.commitment.claim_pk,
-                    None => contract.refund_pk,
-                };
-
-                let amount = contract
-                    .offer
-                    .commitment
-                    .amount
-                    .checked_sub(contract.offer.commitment.fee)
-                    .ok_or(LightningInputError::ArithmeticOverflow)?;
-
-                (pub_key, amount)
-            }
-        };
-
-        Ok(InputMeta {
-            amount: TxItemAmounts {
-                amount,
-                fee: self.cfg.consensus.input_fee,
-            },
-            pub_key,
-        })
-    }
-
-    pub async fn process_output(
-        &self,
-        dbtx: &WriteTx,
-        output: &LightningOutput,
-        outpoint: OutPoint,
-    ) -> Result<TxItemAmounts, LightningOutputError> {
-        let amount = match output {
-            LightningOutput::Outgoing(contract) => {
-                let amount = contract
-                    .amount
-                    .checked_add(contract.fee)
-                    .ok_or(LightningOutputError::ArithmeticOverflow)?;
-
-                dbtx.insert(&OutgoingContractTable, &outpoint, contract);
-
-                amount
-            }
-            LightningOutput::Incoming(contract) => {
-                if !contract.offer.verify() {
-                    return Err(LightningOutputError::InvalidContract);
+                    contract.refund_pk
                 }
+                OutgoingWitness::Cancel(forfeit_signature) => {
+                    if !contract.verify_forfeit_signature(forfeit_signature) {
+                        return Err(LightningInputError::InvalidForfeitSignature);
+                    }
 
-                dbtx.insert(&IncomingContractTable, &outpoint, contract);
+                    contract.refund_pk
+                }
+            };
 
-                let stream_index = dbtx
-                    .get(&IncomingContractStreamIndexTable, &())
-                    .unwrap_or(0);
+            let amount = contract
+                .amount
+                .checked_add(contract.fee)
+                .ok_or(LightningInputError::ArithmeticOverflow)?;
 
-                dbtx.insert(
-                    &IncomingContractStreamTable,
-                    &stream_index,
-                    &IncomingContractSummary::new(outpoint, &contract.offer),
-                );
+            (pub_key, amount)
+        }
+        LightningInput::Incoming(outpoint, agg_decryption_key) => {
+            let contract = dbtx
+                .remove(&IncomingContractTable, outpoint)
+                .ok_or(LightningInputError::UnknownContract)?;
 
-                dbtx.insert(&IncomingContractIndexTable, &outpoint, &stream_index);
+            let index = dbtx
+                .remove(&IncomingContractIndexTable, outpoint)
+                .expect("Incoming contract index should exist");
 
-                dbtx.insert(&IncomingContractStreamIndexTable, &(), &(stream_index + 1));
+            dbtx.remove(&IncomingContractStreamTable, &index);
 
-                let dk_share = contract
-                    .offer
-                    .create_decryption_key_share(&self.cfg.private.sk);
-
-                dbtx.insert(&DecryptionKeyShareTable, &outpoint, &dk_share);
-
-                contract
-                    .offer
-                    .commitment
-                    .amount
-                    .checked_sub(contract.offer.commitment.fee)
-                    .ok_or(LightningOutputError::ArithmeticOverflow)?
+            if !contract
+                .offer
+                .verify_agg_decryption_key(&server.cfg.consensus.ln.tpe_agg_pk, agg_decryption_key)
+            {
+                return Err(LightningInputError::InvalidDecryptionKey);
             }
-        };
 
-        Ok(TxItemAmounts {
+            let pub_key = match contract.offer.decrypt_preimage(agg_decryption_key) {
+                Some(..) => contract.offer.commitment.claim_pk,
+                None => contract.refund_pk,
+            };
+
+            let amount = contract
+                .offer
+                .commitment
+                .amount
+                .checked_sub(contract.offer.commitment.fee)
+                .ok_or(LightningInputError::ArithmeticOverflow)?;
+
+            (pub_key, amount)
+        }
+    };
+
+    Ok(InputMeta {
+        amount: TxItemAmounts {
             amount,
-            fee: self.cfg.consensus.output_fee,
-        })
-    }
+            fee: server.cfg.consensus.ln.input_fee,
+        },
+        pub_key,
+    })
+}
 
-    /// Both incoming and outgoing contracts represent liabilities to the
-    /// federation since they are obligations to issue notes. The amount
-    /// the federation has actually locked per contract has to match the
-    /// arithmetic in [`Self::process_input`] / [`Self::process_output`]:
-    /// outgoing locks `amount + fee` (the gateway claims that on payout,
-    /// or the sender does on refund); incoming locks `amount - fee` (the
-    /// recipient claims that on success, with `fee` accruing to the
-    /// federation as implicit revenue).
-    pub async fn audit(&self, dbtx: &WriteTx) -> i64 {
-        let outgoing: i64 = dbtx.iter(&OutgoingContractTable, |r| {
-            r.map(|(_, contract)| -((contract.amount.msat + contract.fee.msat) as i64))
-                .sum()
-        });
+pub async fn process_output(
+    server: &Server,
+    dbtx: &WriteTx,
+    output: &LightningOutput,
+    outpoint: OutPoint,
+) -> Result<TxItemAmounts, LightningOutputError> {
+    let amount = match output {
+        LightningOutput::Outgoing(contract) => {
+            let amount = contract
+                .amount
+                .checked_add(contract.fee)
+                .ok_or(LightningOutputError::ArithmeticOverflow)?;
 
-        let incoming: i64 = dbtx.iter(&IncomingContractTable, |r| {
-            r.map(|(_, contract)| {
-                -((contract.offer.commitment.amount.msat - contract.offer.commitment.fee.msat)
-                    as i64)
-            })
-            .sum()
-        });
+            dbtx.insert(&OutgoingContractTable, &outpoint, contract);
 
-        outgoing + incoming
-    }
-
-    pub async fn handle_api(&self, method: LnMethod) -> Result<Vec<u8>, String> {
-        match method {
-            LnMethod::ConsensusBlockCount(req) => handler!(consensus_block_count, self, req).await,
-            LnMethod::AwaitPreimage(req) => handler_async!(await_preimage, self, req).await,
-            LnMethod::DecryptionKeyShare(req) => handler!(decryption_key_share, self, req).await,
-            LnMethod::OutgoingContractExpiry(req) => {
-                handler!(outgoing_contract_expiry, self, req).await
-            }
-            LnMethod::AwaitIncomingContracts(req) => {
-                handler_async!(await_incoming_contracts, self, req).await
-            }
-            LnMethod::Gateways(req) => handler!(gateways, self, req).await,
-            LnMethod::TpeAggregatePk(req) => handler!(tpe_aggregate_pk, self, req).await,
+            amount
         }
+        LightningOutput::Incoming(contract) => {
+            if !contract.offer.verify() {
+                return Err(LightningOutputError::InvalidContract);
+            }
+
+            dbtx.insert(&IncomingContractTable, &outpoint, contract);
+
+            let stream_index = dbtx
+                .get(&IncomingContractStreamIndexTable, &())
+                .unwrap_or(0);
+
+            dbtx.insert(
+                &IncomingContractStreamTable,
+                &stream_index,
+                &IncomingContractSummary::new(outpoint, &contract.offer),
+            );
+
+            dbtx.insert(&IncomingContractIndexTable, &outpoint, &stream_index);
+
+            dbtx.insert(&IncomingContractStreamIndexTable, &(), &(stream_index + 1));
+
+            let dk_share = contract
+                .offer
+                .create_decryption_key_share(&server.cfg.private.ln.sk);
+
+            dbtx.insert(&DecryptionKeyShareTable, &outpoint, &dk_share);
+
+            contract
+                .offer
+                .commitment
+                .amount
+                .checked_sub(contract.offer.commitment.fee)
+                .ok_or(LightningOutputError::ArithmeticOverflow)?
+        }
+    };
+
+    Ok(TxItemAmounts {
+        amount,
+        fee: server.cfg.consensus.ln.output_fee,
+    })
+}
+
+/// Both incoming and outgoing contracts represent liabilities to the
+/// federation since they are obligations to issue notes. The amount
+/// the federation has actually locked per contract has to match the
+/// arithmetic in [`process_input`] / [`process_output`]:
+/// outgoing locks `amount + fee` (the gateway claims that on payout,
+/// or the sender does on refund); incoming locks `amount - fee` (the
+/// recipient claims that on success, with `fee` accruing to the
+/// federation as implicit revenue).
+pub async fn audit(_server: &Server, dbtx: &WriteTx) -> i64 {
+    let outgoing: i64 = dbtx.iter(&OutgoingContractTable, |r| {
+        r.map(|(_, contract)| -((contract.amount.msat + contract.fee.msat) as i64))
+            .sum()
+    });
+
+    let incoming: i64 = dbtx.iter(&IncomingContractTable, |r| {
+        r.map(|(_, contract)| {
+            -((contract.offer.commitment.amount.msat - contract.offer.commitment.fee.msat) as i64)
+        })
+        .sum()
+    });
+
+    outgoing + incoming
+}
+
+pub async fn handle_api(server: &Server, method: LnMethod) -> Result<Vec<u8>, String> {
+    match method {
+        LnMethod::ConsensusBlockCount(req) => handler!(consensus_block_count, server, req).await,
+        LnMethod::AwaitPreimage(req) => handler_async!(await_preimage, server, req).await,
+        LnMethod::DecryptionKeyShare(req) => handler!(decryption_key_share, server, req).await,
+        LnMethod::OutgoingContractExpiry(req) => {
+            handler!(outgoing_contract_expiry, server, req).await
+        }
+        LnMethod::AwaitIncomingContracts(req) => {
+            handler_async!(await_incoming_contracts, server, req).await
+        }
+        LnMethod::Gateways(req) => handler!(gateways, server, req).await,
+        LnMethod::TpeAggregatePk(req) => handler!(tpe_aggregate_pk, server, req).await,
     }
 }
 
-impl Lightning {
-    fn get_block_count(&self) -> anyhow::Result<u64> {
-        self.server_bitcoin_rpc_monitor
-            .status()
-            .map(|status| status.block_count)
-            .context("Block count not available yet")
-    }
+fn get_block_count(server: &Server) -> anyhow::Result<u64> {
+    server
+        .btc_rpc
+        .status()
+        .map(|status| status.block_count)
+        .context("Block count not available yet")
+}
 
-    pub(crate) fn consensus_block_count(&self, dbtx: &impl picomint_sqlite::DbRead) -> u64 {
-        let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
+pub(crate) fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u64 {
+    let num_peers = server.cfg.consensus.ln.tpe_pks.to_num_peers();
 
-        let mut counts = dbtx.iter(&BlockCountVoteTable, |r| {
-            r.map(|(_, v)| v).collect::<Vec<u64>>()
-        });
+    let mut counts = dbtx.iter(&BlockCountVoteTable, |r| {
+        r.map(|(_, v)| v).collect::<Vec<u64>>()
+    });
 
-        counts.sort_unstable();
+    counts.sort_unstable();
 
-        counts.reverse();
+    counts.reverse();
 
-        assert!(counts.last() <= counts.first());
+    assert!(counts.last() <= counts.first());
 
-        // The block count we select guarantees that any threshold of correct peers can
-        // increase the consensus block count and any consensus block count has been
-        // confirmed by a threshold of peers.
+    // The block count we select guarantees that any threshold of correct peers can
+    // increase the consensus block count and any consensus block count has been
+    // confirmed by a threshold of peers.
 
-        counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
-    }
+    counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
+}
 
-    #[must_use]
-    pub fn consensus_block_count_ui(&self) -> u64 {
-        self.consensus_block_count(&self.db.begin_read())
-    }
+#[must_use]
+pub fn consensus_block_count_ui(server: &Server) -> u64 {
+    consensus_block_count(server, &server.db.begin_read())
+}
 
-    pub async fn add_gateway_ui(&self, pk: GatewayPk, name: String) -> bool {
-        let dbtx = self.db.begin_write();
-        let is_new_entry = dbtx.insert(&GatewayTable, &pk, &name).is_none();
-        dbtx.commit();
-        is_new_entry
-    }
+pub async fn add_gateway_ui(server: &Server, pk: GatewayPk, name: String) -> bool {
+    let dbtx = server.db.begin_write();
+    let is_new_entry = dbtx.insert(&GatewayTable, &pk, &name).is_none();
+    dbtx.commit();
+    is_new_entry
+}
 
-    pub async fn remove_gateway_ui(&self, pk: GatewayPk) -> bool {
-        let dbtx = self.db.begin_write();
-        let entry_existed = dbtx.remove(&GatewayTable, &pk).is_some();
-        dbtx.commit();
-        entry_existed
-    }
+pub async fn remove_gateway_ui(server: &Server, pk: GatewayPk) -> bool {
+    let dbtx = server.db.begin_write();
+    let entry_existed = dbtx.remove(&GatewayTable, &pk).is_some();
+    dbtx.commit();
+    entry_existed
+}
 
-    #[must_use]
-    pub fn gateways_ui(&self) -> Vec<(GatewayPk, String)> {
-        self.db.begin_read().iter(&GatewayTable, |r| r.collect())
-    }
+#[must_use]
+pub fn gateways_ui(server: &Server) -> Vec<(GatewayPk, String)> {
+    server.db.begin_read().iter(&GatewayTable, |r| r.collect())
 }

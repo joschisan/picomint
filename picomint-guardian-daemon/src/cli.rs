@@ -15,6 +15,7 @@ use tokio::net::UnixListener;
 
 use crate::config::ServerConfig;
 use crate::config::setup::SetupApi;
+use crate::consensus::{ln, wallet};
 pub type DynSetupApi = Arc<SetupApi>;
 
 #[derive(Clone)]
@@ -100,7 +101,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     async fn config(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<ServerConfig>, CliError> {
-        Ok(Json(api.cfg.clone()))
+        Ok(Json(api.server.cfg.clone()))
     }
 
     async fn session_count(
@@ -137,11 +138,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<WalletTotalValueResponse>, CliError> {
         Ok(Json(WalletTotalValueResponse {
-            total_value_sat: api
-                .server
-                .wallet
-                .federation_wallet_ui()
-                .map(|w| w.value.to_sat()),
+            total_value_sat: wallet::federation_wallet_ui(&api.server).map(|w| w.value.to_sat()),
         }))
     }
 
@@ -149,7 +146,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<WalletBlockCountResponse>, CliError> {
         Ok(Json(WalletBlockCountResponse {
-            block_count: api.server.wallet.consensus_block_count_ui(),
+            block_count: wallet::consensus_block_count_ui(&api.server),
         }))
     }
 
@@ -157,20 +154,20 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<WalletFeerateResponse>, CliError> {
         Ok(Json(WalletFeerateResponse {
-            sat_per_vbyte: api.server.wallet.consensus_feerate_ui(),
+            sat_per_vbyte: wallet::consensus_feerate_ui(&api.server),
         }))
     }
 
     async fn wallet_pending_tx_chain(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<Vec<picomint_core::wallet::TxInfo>>, CliError> {
-        Ok(Json(api.server.wallet.pending_tx_chain_ui()))
+        Ok(Json(wallet::pending_tx_chain_ui(&api.server)))
     }
 
     async fn wallet_tx_chain(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<Vec<picomint_core::wallet::TxInfo>>, CliError> {
-        Ok(Json(api.server.wallet.tx_chain_ui()))
+        Ok(Json(wallet::tx_chain_ui(&api.server)))
     }
 
     async fn ln_gateway_add(
@@ -178,7 +175,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         Json(payload): Json<LnGatewayAddRequest>,
     ) -> Result<Json<bool>, CliError> {
         Ok(Json(
-            api.server.ln.add_gateway_ui(payload.pk, payload.name).await,
+            ln::add_gateway_ui(&api.server, payload.pk, payload.name).await,
         ))
     }
 
@@ -186,16 +183,14 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<LnGatewayRemoveRequest>,
     ) -> Result<Json<bool>, CliError> {
-        Ok(Json(api.server.ln.remove_gateway_ui(payload.pk).await))
+        Ok(Json(ln::remove_gateway_ui(&api.server, payload.pk).await))
     }
 
     async fn ln_gateway_list(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<Vec<LnGatewayListEntry>>, CliError> {
         Ok(Json(
-            api.server
-                .ln
-                .gateways_ui()
+            ln::gateways_ui(&api.server)
                 .into_iter()
                 .map(|(pk, name)| LnGatewayListEntry { pk, name })
                 .collect(),

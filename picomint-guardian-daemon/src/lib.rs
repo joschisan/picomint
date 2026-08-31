@@ -26,10 +26,11 @@ use tracing::info;
 
 /// Dispatch helper for module `handle_api` match arms.
 ///
-/// `handler!(fn_name, self, req).await` calls `rpc::fn_name(self, req)` and
-/// consensus-encodes the response. Each module has a `mod rpc` submodule with
-/// one `fn name(module: &Self, req: XRequest) -> Result<XResponse, String>`
-/// per endpoint. Use [`handler_async!`] when the rpc handler is itself async.
+/// `handler!(fn_name, server, req).await` calls `rpc::fn_name(server, req)`
+/// and consensus-encodes the response. Each module has a `mod rpc` submodule
+/// with one `fn name(server: &Server, req: XRequest) -> Result<XResponse,
+/// String>` per endpoint (the core API passes `&ConsensusApi` instead). Use
+/// [`handler_async!`] when the rpc handler is itself async.
 #[macro_export]
 macro_rules! handler {
     ($func:ident, $self:expr, $req:expr) => {

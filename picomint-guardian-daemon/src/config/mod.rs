@@ -151,29 +151,6 @@ impl ServerConfig {
         )
     }
 
-    /// Bundle the current peer's typed configs back into per-module
-    /// `*Config` values for passing into the module constructors.
-    pub fn mint_config(&self) -> MintConfig {
-        MintConfig {
-            private: self.private.mint.clone(),
-            consensus: self.consensus.mint.clone(),
-        }
-    }
-
-    pub fn ln_config(&self) -> picomint_core::ln::config::LightningConfig {
-        picomint_core::ln::config::LightningConfig {
-            private: self.private.ln.clone(),
-            consensus: self.consensus.ln.clone(),
-        }
-    }
-
-    pub fn wallet_config(&self) -> WalletConfig {
-        WalletConfig {
-            private: self.private.wallet.clone(),
-            consensus: self.consensus.wallet.clone(),
-        }
-    }
-
     pub fn validate_config(&self, identity: &PeerId) -> anyhow::Result<()> {
         let peers = &self.consensus.peers;
         let my_public_key = self
@@ -193,9 +170,9 @@ impl ServerConfig {
             bail!("Peer ids are not indexed from 0");
         }
 
-        crate::consensus::mint::validate_config(identity, &self.mint_config())?;
-        crate::consensus::ln::validate_config(identity, &self.ln_config())?;
-        crate::consensus::wallet::validate_config(identity, &self.wallet_config())?;
+        crate::consensus::mint::validate_config(identity, self)?;
+        crate::consensus::ln::validate_config(identity, self)?;
+        crate::consensus::wallet::validate_config(identity, self)?;
 
         Ok(())
     }
