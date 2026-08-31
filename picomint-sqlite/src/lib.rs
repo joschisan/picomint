@@ -676,9 +676,10 @@ impl Drop for ReadTx {
 // ─── Typed ops ───────────────────────────────────────────────────────────
 
 /// Streaming iterator over a table scan. Wraps the underlying SQLite rows so
-/// callers receive owned, decoded `(K, V)` pairs directly.
+/// callers receive owned, decoded `(K, V)` pairs directly. A table that has
+/// never been created iterates as empty (`rows` is `None`).
 pub struct SqliteIter<'a, D: Table> {
-    rows: rusqlite::Rows<'a>,
+    rows: Option<rusqlite::Rows<'a>>,
     _table: PhantomData<D>,
 }
 
@@ -687,6 +688,7 @@ impl<D: Table> Iterator for SqliteIter<'_, D> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.rows
+            .as_mut()?
             .next()
             .expect("sqlite row read failed")
             .map(decode_row::<D>)
@@ -736,17 +738,20 @@ fn query_value<V: Decodable>(conn: &Connection, sql: &str, params: &[Vec<u8>]) -
     })
 }
 
-/// Run `f` over the decoded rows of `sql`, or return `missing()` if the
-/// backing table has never been created.
+/// Run `f` over the decoded rows of `sql`. A backing table that has never
+/// been created scans as empty — `f` always runs, so closure results on an
+/// empty iterator (e.g. `all` returning `true`) hold either way.
 fn scan<D: Table, R>(
     conn: &Connection,
     sql: &str,
     params: Vec<Vec<u8>>,
-    missing: impl FnOnce() -> R,
     f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
 ) -> R {
     let Some(mut stmt) = prepare_read(conn, sql) else {
-        return missing();
+        return f(&mut SqliteIter {
+            rows: None,
+            _table: PhantomData,
+        });
     };
 
     let rows = stmt
@@ -754,7 +759,7 @@ fn scan<D: Table, R>(
         .expect("sqlite query failed");
 
     let mut iter = SqliteIter {
-        rows,
+        rows: Some(rows),
         _table: PhantomData,
     };
 
@@ -889,8 +894,8 @@ impl HasConn for ReadTx {
 }
 
 /// Typed read operations, shared by both tx types. A table that has never
-/// been written reads as empty — `None` for gets, `R::default()` for scans
-/// — so reads never create tables as a side effect.
+/// been written reads as empty — `None` for gets, an empty iteration for
+/// scans — so reads never create tables as a side effect.
 pub trait DbRead: HasConn {
     fn get<D: Table>(&self, def: &D, key: &D::Key) -> Option<D::Value> {
         query_value(
@@ -900,30 +905,22 @@ pub trait DbRead: HasConn {
         )
     }
 
-    fn iter<D: Table, R: Default>(
-        &self,
-        def: &D,
-        f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-    ) -> R {
+    fn iter<D: Table, R>(&self, def: &D, f: impl FnOnce(&mut SqliteIter<'_, D>) -> R) -> R {
         let sql = scan_sql(def.name(), D::KEY_COLS, &[], false);
 
-        scan(&self.conn(), &sql, Vec::new(), R::default, f)
+        scan(&self.conn(), &sql, Vec::new(), f)
     }
 
     /// Iterate the table in descending key order.
-    fn iter_rev<D: Table, R: Default>(
-        &self,
-        def: &D,
-        f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-    ) -> R {
+    fn iter_rev<D: Table, R>(&self, def: &D, f: impl FnOnce(&mut SqliteIter<'_, D>) -> R) -> R {
         let sql = scan_sql(def.name(), D::KEY_COLS, &[], true);
 
-        scan(&self.conn(), &sql, Vec::new(), R::default, f)
+        scan(&self.conn(), &sql, Vec::new(), f)
     }
 
     /// Iterate every entry whose key starts with `prefix`, in ascending key
     /// order. Compiles to an indexed `WHERE` on the prefix columns.
-    fn prefix<D: Table, P: Prefix<D>, R: Default>(
+    fn prefix<D: Table, P: Prefix<D>, R>(
         &self,
         def: &D,
         prefix: &P,
@@ -931,12 +928,12 @@ pub trait DbRead: HasConn {
     ) -> R {
         let sql = scan_sql(def.name(), D::KEY_COLS, &[where_key(P::LEN)], false);
 
-        scan(&self.conn(), &sql, prefix.encode_prefix(), R::default, f)
+        scan(&self.conn(), &sql, prefix.encode_prefix(), f)
     }
 
     /// Iterate every entry whose key starts with `prefix`, in descending key
     /// order.
-    fn prefix_rev<D: Table, P: Prefix<D>, R: Default>(
+    fn prefix_rev<D: Table, P: Prefix<D>, R>(
         &self,
         def: &D,
         prefix: &P,
@@ -944,11 +941,11 @@ pub trait DbRead: HasConn {
     ) -> R {
         let sql = scan_sql(def.name(), D::KEY_COLS, &[where_key(P::LEN)], true);
 
-        scan(&self.conn(), &sql, prefix.encode_prefix(), R::default, f)
+        scan(&self.conn(), &sql, prefix.encode_prefix(), f)
     }
 
     /// Iterate the entries within a typed key range, in ascending key order.
-    fn range<D: Table, B: RangeBounds<D::Key>, R: Default>(
+    fn range<D: Table, B: RangeBounds<D::Key>, R>(
         &self,
         def: &D,
         range: B,
@@ -958,7 +955,7 @@ pub trait DbRead: HasConn {
 
         let sql = scan_sql(def.name(), D::KEY_COLS, &clauses, false);
 
-        scan(&self.conn(), &sql, params, R::default, f)
+        scan(&self.conn(), &sql, params, f)
     }
 }
 
@@ -1080,6 +1077,20 @@ mod tests {
         assert_eq!(tx.iter(&UsersTable, |r| r.collect::<Vec<_>>()), vec![]);
         assert_eq!(tx.prefix(&NotesTable, &1u64, |r| r.count()), 0);
         assert_eq!(tx.range(&BalancesTable, 0u64.., |r| r.count()), 0);
+    }
+
+    // Regression: a scan on a missing table must run the closure on an empty
+    // iterator, not fabricate a default — `all` on an empty iterator is
+    // `true`, while `bool::default()` is `false`.
+    #[test]
+    fn scans_on_missing_tables_run_the_closure_on_empty() {
+        let (_dir, db) = test_db();
+
+        let tx = db.begin_read();
+        assert!(tx.iter(&NotesTable, |r| r.all(|entry| entry.0.0 > 0)));
+
+        let tx = db.begin_write();
+        assert!(tx.iter(&NotesTable, |r| r.all(|entry| entry.0.0 > 0)));
     }
 
     #[test]
