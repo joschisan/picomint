@@ -7,12 +7,12 @@ use picomint_core::mint::methods::{
     SignatureSharesRestoreRequest, SignatureSharesRestoreResponse, SpendStateRequest,
     SpendStateResponse,
 };
-use picomint_redb::ReadTx;
+use picomint_sqlite::ReadTx;
 use tbs::BlindedSignatureShare;
 
 use super::Mint;
 use super::db::{
-    BlindedNonceTable, BlindedSignatureShareRestoreTable, BlindedSignatureShareTable, NoteNonceKey,
+    BlindedNonceTable, BlindedSignatureShareRestoreTable, BlindedSignatureShareTable,
     NoteNonceTable,
 };
 
@@ -75,7 +75,7 @@ pub fn spend_state(mint: &Mint, req: SpendStateRequest) -> Result<SpendStateResp
     let spent = req
         .nonces
         .iter()
-        .map(|nonce| dbtx.get(&NoteNonceTable, &NoteNonceKey(*nonce)).is_some())
+        .map(|nonce| dbtx.get(&NoteNonceTable, nonce).is_some())
         .collect();
 
     Ok(SpendStateResponse { spent })

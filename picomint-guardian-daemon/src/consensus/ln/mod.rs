@@ -18,7 +18,7 @@ use picomint_core::ln::{
 };
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, NumPeersExt, OutPoint, PeerId};
-use picomint_redb::{Database, ReadTx, WriteTx};
+use picomint_sqlite::{Database, ReadTx, WriteTx};
 use tpe::{PublicKeyShare, SecretKeyShare};
 use tracing::trace;
 
@@ -327,7 +327,7 @@ impl Lightning {
             .context("Block count not available yet")
     }
 
-    pub(crate) fn consensus_block_count(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
+    pub(crate) fn consensus_block_count(&self, dbtx: &impl picomint_sqlite::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.tpe_pks.to_num_peers();
 
         let mut counts = dbtx.iter(&BlockCountVoteTable, |r| {

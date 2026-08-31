@@ -29,7 +29,7 @@ use picomint_bft::{
 use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
 use picomint_core::{NumPeers, PeerId};
 use picomint_encoding::Encodable;
-use picomint_redb::{Database, table};
+use picomint_sqlite::{Database, table};
 use rand::Rng;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -220,6 +220,9 @@ struct Engines {
     handles: Vec<JoinHandle<()>>,
     ordered_rxs: BTreeMap<PeerId, Receiver<(Round, PeerId, u64)>>,
     dbs: BTreeMap<PeerId, Database>,
+    /// Backing directories of the per-peer databases; dropping them
+    /// deletes the files, so they live as long as the harness.
+    _dirs: Vec<tempfile::TempDir>,
 }
 
 /// Spawn one engine per remaining entry of `channels`, each on a fresh
@@ -234,10 +237,15 @@ fn spawn_engines(
         handles: Vec::new(),
         ordered_rxs: BTreeMap::new(),
         dbs: BTreeMap::new(),
+        _dirs: Vec::new(),
     };
 
     for (peer, channel) in channels {
-        let db = Database::open_in_memory();
+        let dir = tempfile::TempDir::new().expect("failed to create temp dir");
+
+        let db = Database::open(dir.path().join("bft.sqlite")).expect("sqlite open failed");
+
+        engines._dirs.push(dir);
         engines.dbs.insert(peer, db.clone());
 
         let (ordered_tx, ordered_rx) = async_channel::unbounded();

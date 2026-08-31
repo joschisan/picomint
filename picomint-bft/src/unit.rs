@@ -34,8 +34,6 @@ impl<T> UnitData for T where
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable)]
 pub struct UnitHash(pub sha256::Hash);
 
-picomint_redb::consensus_key!(UnitHash);
-
 /// One node in the consensus DAG: position, parent map, and payload
 /// commitment — everything the ordering engine tallies over, and the
 /// exact record the in-memory `extended` map holds. The payload
@@ -69,8 +67,6 @@ pub struct Unit {
     pub data: Option<sha256::Hash>,
 }
 
-picomint_redb::consensus_value!(Unit);
-
 impl Unit {
     /// The hash identifying this unit; what parents reference and
     /// what keys the unit's row in `BFT_UNITS`.
@@ -94,5 +90,3 @@ pub struct UnitEnvelope<D: UnitData> {
     /// The creator's signature over `(session, unit)`.
     pub sig: schnorr::Signature,
 }
-
-picomint_redb::consensus_value!([D: UnitData] UnitEnvelope<D>);

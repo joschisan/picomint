@@ -32,7 +32,7 @@ pub mod setup;
 
 #[allow(clippy::unsafe_derive_deserialize)] // clippy fires on `select!` https://github.com/rust-lang/rust-clippy/issues/13062
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
-/// Full picomint server config (persisted in redb).
+/// Full picomint server config (persisted in the guardian database).
 pub struct ServerConfig {
     /// Federation-wide config, identical across peers
     pub consensus: ConsensusConfig,

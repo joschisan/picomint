@@ -5,7 +5,7 @@ use picomint_core::tx::ConsensusItem;
 use picomint_core::version::ConsensusVersion;
 use picomint_core::{NumPeers, PeerId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::{DbRead, table};
+use picomint_sqlite::{DbRead, table};
 
 table!(
     AcceptedItemTable,
@@ -89,8 +89,6 @@ pub struct InviteMeta {
     /// Maximum number of users that may download the config via this invite.
     pub user_limit: u64,
 }
-
-picomint_redb::consensus_value!(InviteMeta);
 
 // Expiration date and user limit for each invite code this guardian issued,
 // keyed by invite id. Written by the dashboard / CLI create flow, read when

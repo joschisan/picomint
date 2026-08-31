@@ -11,7 +11,7 @@ use picomint_core::tx::{ConsensusItem, TxError};
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::{NumPeers, NumPeersExt, PeerId, TransactionId};
 use picomint_encoding::Encodable;
-use picomint_redb::{Database, ReadTx, WriteTx};
+use picomint_sqlite::{Database, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
 use tokio::sync::broadcast;
 use tracing::{info, instrument};
@@ -209,7 +209,7 @@ impl ConsensusEngine {
         let resume_from = self
             .db
             .begin_read()
-            .iter(&AcceptedItemTable, |r| r.next_back().map(|(k, _)| k))
+            .iter_rev(&AcceptedItemTable, |r| r.next().map(|entry| entry.0))
             .map_or(0, |k| k as usize + 1);
 
         // The byte budget resumes where the prior run left it for the same
@@ -447,9 +447,9 @@ impl ConsensusEngine {
     ) {
         let dbtx = self.db.begin_write();
 
-        dbtx.delete_table(&AcceptedItemTable);
+        dbtx.clear_table(&AcceptedItemTable);
 
-        dbtx.delete_table(&BftUnitsTable);
+        dbtx.clear_table(&BftUnitsTable);
 
         assert!(
             dbtx.insert(
@@ -542,8 +542,8 @@ impl ConsensusEngine {
 }
 
 pub async fn get_finished_session_count_static(dbtx: &ReadTx) -> u64 {
-    dbtx.iter(&SignedSessionOutcomeTable, |r| {
-        r.next_back().map_or(0, |(k, _)| k + 1)
+    dbtx.iter_rev(&SignedSessionOutcomeTable, |r| {
+        r.next().map_or(0, |entry| entry.0 + 1)
     })
 }
 

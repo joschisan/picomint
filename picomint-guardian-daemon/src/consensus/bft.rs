@@ -2,8 +2,8 @@
 //! mempool — an `INetwork` impl over `ReconnectP2PConnections<P2PMessage>`
 //! and a `DataProvider` impl pulling from the submission channel.
 //!
-//! Storage is owned by `picomint-bft` directly via the redb table
-//! `BFT_UNITS`. The application consumer that drains
+//! Storage is owned by `picomint-bft` directly via the daemon-declared
+//! `BFT_UNITS` table. The application consumer that drains
 //! committed items lives in [`crate::consensus::engine`] and receives
 //! through the `ordered_tx` channel passed to `BftEngine::new`.
 
@@ -21,7 +21,7 @@ use picomint_core::secp256k1::schnorr;
 use picomint_core::session::SignedSessionOutcome;
 use picomint_core::tx::ConsensusItem;
 use picomint_encoding::Encodable;
-use picomint_redb::Database;
+use picomint_sqlite::Database;
 use tracing::error;
 
 use crate::consensus::db::SignedSessionOutcomeTable;

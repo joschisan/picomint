@@ -5,7 +5,7 @@ use anyhow::{Result, ensure};
 use async_channel::Sender;
 use picomint_core::{NumPeers, PeerId};
 use picomint_encoding::Encodable;
-use picomint_redb::{Database, DbRead, Table, TableDef, WriteTx};
+use picomint_sqlite::{Database, DbRead, Table, WriteTx};
 use tokio::time::{Instant, sleep_until};
 use tracing::warn;
 
@@ -33,10 +33,11 @@ const REQUEST_DEDUP_INTERVAL: Duration = Duration::from_secs(1);
 /// previously-committed item through `ordered_tx`. The caller-side
 /// idempotency check (e.g. the daemon's `item_index` probe against
 /// `ACCEPTED_ITEM`) absorbs the redelivery.
-pub struct Engine<P, D>
+pub struct Engine<P, D, T>
 where
     D: UnitData,
     P: DataProvider<D>,
+    T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
 {
     pub(crate) id: PeerId,
     session: u64,
@@ -49,7 +50,7 @@ where
 
     /// Daemon-declared units table (`UnitHash => UnitEnvelope<D>`).
     /// Bft only reads/writes it.
-    pub(crate) units_table: TableDef<UnitHash, UnitEnvelope<D>>,
+    pub(crate) units_table: T,
 
     /// Hashes of every stored unit keyed by round — the round index
     /// over `units_table`. Drives the extension cascade and, filtered
@@ -91,13 +92,14 @@ where
     request_sent_at: BTreeMap<UnitHash, Instant>,
 }
 
-impl<P, D> Engine<P, D>
+impl<P, D, T> Engine<P, D, T>
 where
     D: UnitData,
     P: DataProvider<D>,
+    T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
 {
     #[allow(clippy::too_many_arguments)]
-    pub fn new<TU>(
+    pub fn new(
         id: PeerId,
         session: u64,
         n: NumPeers,
@@ -106,11 +108,8 @@ where
         network: DynNetwork<D>,
         data_provider: P,
         ordered_tx: Sender<(Round, PeerId, D)>,
-        units_table: TU,
-    ) -> Self
-    where
-        TU: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
-    {
+        units_table: T,
+    ) -> Self {
         Self {
             id,
             session,
@@ -120,7 +119,7 @@ where
             network,
             data_provider,
             ordered_tx,
-            units_table: TableDef::from(units_table),
+            units_table,
             rounds: BTreeMap::new(),
             extended: BTreeMap::new(),
             emitted: BTreeSet::new(),
@@ -218,7 +217,7 @@ where
 
     /// One write tx per inbound message; on Ok commit it, on Err drop
     /// it (any partial writes roll back). All reads in handlers see
-    /// their own writes via redb's read-your-own-writes on `WriteTx`.
+    /// their own writes via `WriteTx`'s read-your-own-writes.
     /// In-memory mutations (`rounds`, `extended`, `emitted`, channel
     /// sends) are not rolled back on Err — only the persistent
     /// `BFT_UNITS` writes are. The mutators only run after the dbtx

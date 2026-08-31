@@ -5,7 +5,7 @@ use anyhow::{Context, ensure};
 use iroh::SecretKey;
 use picomint_core::PeerId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::Database;
+use picomint_sqlite::Database;
 use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
@@ -309,7 +309,7 @@ impl SetupApi {
         // without operator interaction.
         let dbtx = self.db.begin_write();
 
-        dbtx.delete_table(&LocalParamsTable);
+        dbtx.clear_table(&LocalParamsTable);
 
         dbtx.insert(&ConfigGenParamsTable, &(), &params);
 

@@ -56,7 +56,7 @@ use std::collections::VecDeque;
 
 use bitcoin::hashes::Hash as _;
 use picomint_encoding::Encodable;
-use picomint_redb::DbRead;
+use picomint_sqlite::{DbRead, Table};
 
 use crate::data::DataProvider;
 use crate::engine::Engine;
@@ -79,10 +79,11 @@ fn common_vote(candidate: UnitHash, candidate_round: Round, round: Round) -> boo
     }
 }
 
-impl<P, D> Engine<P, D>
+impl<P, D, T> Engine<P, D, T>
 where
     D: UnitData,
     P: DataProvider<D>,
+    T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
 {
     /// Drain round heads from `self.next_decide_round` upward while
     /// each round resolves. For every head, BFS-extract the

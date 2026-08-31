@@ -11,7 +11,7 @@ use picomint_core::module::audit::AuditSummary;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
 use picomint_core::{OutPoint, PeerId};
-use picomint_redb::WriteTx;
+use picomint_sqlite::WriteTx;
 use tracing::info;
 
 use crate::consensus::ln::Lightning;

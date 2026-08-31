@@ -14,7 +14,7 @@ use picomint_core::mint::{
 };
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, OutPoint, PeerId};
-use picomint_redb::{Database, ReadTx, WriteTx};
+use picomint_sqlite::{Database, ReadTx, WriteTx};
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
 
 use crate::config::dkg::DkgHandle;
@@ -23,7 +23,7 @@ use crate::{handler, handler_async};
 
 use self::db::{
     BlindedNonceTable, BlindedSignatureShareRestoreTable, BlindedSignatureShareTable,
-    IssuanceCounterTable, NoteNonceKey, NoteNonceTable,
+    IssuanceCounterTable, NoteNonceTable,
 };
 
 /// Run DKG for the mint module, producing a fresh `MintConfig` for this peer.
@@ -105,7 +105,7 @@ impl Mint {
         input: &MintInput,
     ) -> Result<InputMeta, MintInputError> {
         if dbtx
-            .insert(&NoteNonceTable, &NoteNonceKey(input.note.nonce), &())
+            .insert(&NoteNonceTable, &input.note.nonce, &())
             .is_some()
         {
             return Err(MintInputError::SpentCoin);
