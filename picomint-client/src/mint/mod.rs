@@ -940,7 +940,7 @@ impl Client {
                 account,
                 operation,
                 SendSuccessEvent {
-                    ecash: ecash.clone(),
+                    ecash: ecash.to_string(),
                 },
             );
             dbtx.commit();
@@ -1065,7 +1065,11 @@ impl Client {
         let mut stream = ctx.subscribe_operation_events(operation);
         while let Some(entry) = stream.next().await {
             if let Some(ev) = entry.to_event::<SendSuccessEvent>() {
-                return Ok(ev.ecash);
+                return ev
+                    .ecash
+                    .parse()
+                    .map(Ok)
+                    .expect("logged ecash is its own to_string, which from_str reverses");
             }
             if entry.to_event::<SendFailureEvent>().is_some() {
                 return Err(SendECashError::Failure);
@@ -1106,7 +1110,7 @@ impl Client {
             account,
             operation,
             SendSuccessEvent {
-                ecash: ecash.clone(),
+                ecash: ecash.to_string(),
             },
         );
 
