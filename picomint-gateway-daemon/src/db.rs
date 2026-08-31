@@ -26,7 +26,7 @@ table!(
 table!(
     IrohSecretKeyTable,
     () => [u8; 32],
-    "iroh-secret-key",
+    "iroh-sk",
 );
 
 // Set of federation ids whose public-facing endpoints (`gateway_info`,
