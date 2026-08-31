@@ -7,7 +7,6 @@ use anyhow::Context as _;
 use picomint_sqlite::WriteTx;
 
 use crate::client::Client;
-use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
@@ -30,25 +29,10 @@ use receive_sm::{ReceiveStateMachine, ReceiveStateMachineTable};
 /// hop to derive one.
 pub const GATEWAY_ACCOUNT: Account = Account::PRIMARY;
 
-/// The executor for the gateway receive state machines, constructed on
-/// demand — executors are cheap handles; [`resume`] is what runs once per
-/// bring-up.
-fn receive_executor(
-    ctx: &ClientContext,
-) -> ModuleExecutor<ReceiveStateMachine, ReceiveStateMachineTable> {
-    ModuleExecutor::new(
-        ctx.db.clone(),
-        ctx.federation(),
-        ReceiveStateMachineTable,
-        ctx.clone(),
-        ctx.tg.clone(),
-    )
-}
-
 /// Resume this federation's persisted receive state machines. Called
 /// exactly once, at federation bring-up.
 pub(crate) fn resume(ctx: &ClientContext) {
-    receive_executor(ctx).resume();
+    crate::executor::resume::<ReceiveStateMachine, _>(ctx, ReceiveStateMachineTable);
 }
 
 /// Remove every row this module owns under the caller's federation prefix.
@@ -141,7 +125,9 @@ impl Client {
 
         let outpoint = OutPoint { txid, out_idx: 0 };
 
-        receive_executor(&ctx).add_state_machine_dbtx(
+        crate::executor::add_state_machine_dbtx(
+            &ctx,
+            ReceiveStateMachineTable,
             dbtx,
             ReceiveStateMachine {
                 operation,

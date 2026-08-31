@@ -28,7 +28,7 @@ pub mod api;
 mod client;
 /// Shared kept-alive iroh connection primitive (federation peers + gateways).
 /// Per-module typed state machine executor
-pub mod executor;
+mod executor;
 /// Federation expiry-status cache + refresh.
 pub mod expiry;
 /// Federation fee announcement cache, and paying out a collected cut.
@@ -42,7 +42,7 @@ pub mod ln;
 /// Mint module client.
 pub mod mint;
 /// Module client interface definitions
-pub mod module;
+mod module;
 /// Client query-consensus strategies
 /// Secret handling & derivation
 pub mod secret;

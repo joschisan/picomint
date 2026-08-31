@@ -14,7 +14,6 @@ use std::collections::BTreeMap;
 
 use crate::api::FederationApi;
 use crate::client::Client;
-use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use crate::tx::{TxSubmissionStateMachine, TxSubmissionStateMachineTable};
@@ -266,10 +265,10 @@ async fn scan_counters(
 /// blinded message is committed to.
 fn next_counter(ctx: &ClientContext, dbtx: &WriteTx, account: Account) -> u64 {
     let counter = dbtx
-        .get(&CounterTable, &(ctx.federation(), account))
+        .get(&CounterTable, &(ctx.federation, account))
         .unwrap_or(0);
 
-    dbtx.insert(&CounterTable, &(ctx.federation(), account), &(counter + 1));
+    dbtx.insert(&CounterTable, &(ctx.federation, account), &(counter + 1));
 
     counter
 }
@@ -427,7 +426,7 @@ pub(crate) fn finalize_and_submit_tx<E: picomint_eventlog::Event + Send>(
             txid,
             issuance_requests,
         };
-        mint_executor(ctx).add_state_machine_dbtx(dbtx, sm);
+        crate::executor::add_state_machine_dbtx(ctx, MintStateMachineTable, dbtx, sm);
     }
 
     Some(txid)
@@ -453,7 +452,7 @@ fn fund(
     spendable_notes.sort_by_key(|note| note.denomination);
 
     for note in &spendable_notes {
-        remove_spendable_note(dbtx, ctx.federation(), account, note);
+        remove_spendable_note(dbtx, ctx.federation, account, note);
         builder.add_input(Input {
             input: wire::Input::Mint(MintInput { note: note.note() }),
             keypair: note.keypair,
@@ -523,7 +522,7 @@ fn submit<E: picomint_eventlog::Event + Send>(
         tx,
     };
 
-    tx_submission_executor(ctx).add_state_machine_dbtx(dbtx, sm);
+    crate::executor::add_state_machine_dbtx(ctx, TxSubmissionStateMachineTable, dbtx, sm);
 
     ctx.log_event(dbtx, account, operation, event(txid));
 
@@ -546,7 +545,7 @@ fn submit<E: picomint_eventlog::Event + Send>(
 /// spent in full — their face value minus one input fee per note. The
 /// budget a max-send amount is solved against.
 fn max_spendable(ctx: &ClientContext, account: Account) -> Amount {
-    account_notes(&ctx.db().begin_read(), ctx.federation(), account)
+    account_notes(&ctx.db.begin_read(), ctx.federation, account)
         .iter()
         .map(|note| note_value(ctx, note))
         .sum()
@@ -608,7 +607,7 @@ fn select_funding_input(
     let mut selected = Vec::new();
     let mut target_notes = Vec::new();
 
-    let all_notes = account_notes(dbtx, ctx.federation(), account);
+    let all_notes = account_notes(dbtx, ctx.federation, account);
 
     for amount in client_denominations().rev() {
         let notes_amount: Vec<SpendableNote> = all_notes
@@ -773,48 +772,14 @@ pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
     dbtx.remove_prefix(&SendStateMachineTable, &federation);
 }
 
-/// The executor for [`TxSubmissionStateMachine`]s, constructed on demand —
-/// executors are cheap handles; [`resume`] is what runs once per bring-up.
-fn tx_submission_executor(
-    ctx: &ClientContext,
-) -> ModuleExecutor<TxSubmissionStateMachine, TxSubmissionStateMachineTable> {
-    ModuleExecutor::new(
-        ctx.db.clone(),
-        ctx.federation(),
-        TxSubmissionStateMachineTable,
-        ctx.clone(),
-        ctx.tg.clone(),
-    )
-}
-
-fn mint_executor(ctx: &ClientContext) -> ModuleExecutor<MintStateMachine, MintStateMachineTable> {
-    ModuleExecutor::new(
-        ctx.db.clone(),
-        ctx.federation(),
-        MintStateMachineTable,
-        ctx.clone(),
-        ctx.tg.clone(),
-    )
-}
-
-fn send_executor(ctx: &ClientContext) -> ModuleExecutor<SendStateMachine, SendStateMachineTable> {
-    ModuleExecutor::new(
-        ctx.db.clone(),
-        ctx.federation(),
-        SendStateMachineTable,
-        ctx.clone(),
-        ctx.tg.clone(),
-    )
-}
-
 /// Resume this federation's persisted mint state machines. Called exactly
 /// once, at federation bring-up.
 pub(crate) fn resume(ctx: &ClientContext) {
-    tx_submission_executor(ctx).resume();
+    crate::executor::resume::<TxSubmissionStateMachine, _>(ctx, TxSubmissionStateMachineTable);
 
-    mint_executor(ctx).resume();
+    crate::executor::resume::<MintStateMachine, _>(ctx, MintStateMachineTable);
 
-    send_executor(ctx).resume();
+    crate::executor::resume::<SendStateMachine, _>(ctx, SendStateMachineTable);
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
@@ -941,9 +906,9 @@ impl Client {
         // Fast path: the account already has notes that sum exactly to
         // `amount`. Pull them out and emit `SendEvent` + `SendSuccessEvent`
         // atomically in one dbtx — no tx, no SM.
-        let dbtx = ctx.db().begin_write();
+        let dbtx = ctx.db.begin_write();
 
-        if let Some(ecash) = send_ecash_dbtx(&dbtx, ctx.federation(), account, amount) {
+        if let Some(ecash) = send_ecash_dbtx(&dbtx, ctx.federation, account, amount) {
             ctx.log_event(&dbtx, account, operation, SendEvent { amount });
             ctx.log_event(
                 &dbtx,
@@ -961,12 +926,12 @@ impl Client {
         // so dropping this dbtx without committing is harmless.
         drop(dbtx);
 
-        ctx.api()
+        ctx.api
             .liveness()
             .await
             .map_err(|_| SendECashError::Offline)?;
 
-        let dbtx = ctx.db().begin_write();
+        let dbtx = ctx.db.begin_write();
 
         // Build target issuance requests up-front. Their outputs go into the
         // builder first; the balance loop then pulls funding from the wallet
@@ -1021,7 +986,9 @@ impl Client {
         // the reissuance: SendEvent → RemintEvent → TxCreateEvent →
         // MintSM + SendSM. A crash before the commit leaves no half-state
         // behind; on restart the operation simply doesn't exist.
-        tx_submission_executor(&ctx).add_state_machine_dbtx(
+        crate::executor::add_state_machine_dbtx(
+            &ctx,
+            TxSubmissionStateMachineTable,
             &dbtx,
             TxSubmissionStateMachine {
                 account,
@@ -1056,7 +1023,7 @@ impl Client {
             issuance_requests,
         };
 
-        mint_executor(&ctx).add_state_machine_dbtx(&dbtx, mint_sm);
+        crate::executor::add_state_machine_dbtx(&ctx, MintStateMachineTable, &dbtx, mint_sm);
 
         let send_sm = SendStateMachine {
             account,
@@ -1064,7 +1031,7 @@ impl Client {
             amount,
         };
 
-        send_executor(&ctx).add_state_machine_dbtx(&dbtx, send_sm);
+        crate::executor::add_state_machine_dbtx(&ctx, SendStateMachineTable, &dbtx, send_sm);
 
         dbtx.commit();
 
@@ -1092,20 +1059,20 @@ impl Client {
         let ctx = self.ctx(federation)?;
 
         let operation = OperationId::new_random();
-        let dbtx = ctx.db().begin_write();
+        let dbtx = ctx.db.begin_write();
 
-        let notes = account_notes(&dbtx, ctx.federation(), account);
+        let notes = account_notes(&dbtx, ctx.federation, account);
 
         if notes.is_empty() {
             return Ok(None);
         }
 
         for note in &notes {
-            dbtx.remove(&NoteTable, &(ctx.federation(), account, note.clone()))
+            dbtx.remove(&NoteTable, &(ctx.federation, account, note.clone()))
                 .expect("Must delete existing spendable note");
         }
 
-        let ecash = ECash::new(ctx.federation(), notes);
+        let ecash = ECash::new(ctx.federation, notes);
         let amount = ecash.amount();
 
         ctx.log_event(&dbtx, account, operation, SendEvent { amount });
@@ -1152,7 +1119,7 @@ impl Client {
             return Err(ReceiveECashError::TooManyNotes);
         }
 
-        if ecash.mint != ctx.federation() {
+        if ecash.mint != ctx.federation {
             return Err(ReceiveECashError::WrongFederation);
         }
 
@@ -1174,10 +1141,10 @@ impl Client {
             });
         }
 
-        let dbtx = ctx.db().begin_write();
+        let dbtx = ctx.db.begin_write();
 
         if dbtx
-            .insert(&ReceiveOperationTable, &(ctx.federation(), operation), &())
+            .insert(&ReceiveOperationTable, &(ctx.federation, operation), &())
             .is_some()
         {
             return Err(ReceiveECashError::AlreadyAttempted);

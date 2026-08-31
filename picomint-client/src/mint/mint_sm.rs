@@ -47,14 +47,13 @@ pub struct MintStateMachine {
 }
 
 impl StateMachine for MintStateMachine {
-    type Context = ClientContext;
     type Outcome = Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String>;
 
-    async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
+    async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         ctx.await_tx_accepted(self.operation, self.txid).await?;
 
         let shares = ctx
-            .api()
+            .api
             .signature_shares(
                 self.txid,
                 self.issuance_requests.clone(),
@@ -67,7 +66,7 @@ impl StateMachine for MintStateMachine {
 
     fn transition(
         &self,
-        ctx: &Self::Context,
+        ctx: &ClientContext,
         dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {
@@ -75,7 +74,7 @@ impl StateMachine for MintStateMachine {
             for note in &self.spendable_notes {
                 dbtx.insert(
                     &NoteTable,
-                    &(ctx.federation(), self.account, note.clone()),
+                    &(ctx.federation, self.account, note.clone()),
                     &(),
                 );
             }
@@ -109,7 +108,7 @@ impl StateMachine for MintStateMachine {
             assert!(
                 dbtx.insert(
                     &NoteTable,
-                    &(ctx.federation(), request.account(), spendable_note),
+                    &(ctx.federation, request.account(), spendable_note),
                     &()
                 )
                 .is_none()

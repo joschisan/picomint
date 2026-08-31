@@ -30,10 +30,9 @@ pub struct TxSubmissionStateMachine {
 }
 
 impl StateMachine for TxSubmissionStateMachine {
-    type Context = ClientContext;
     type Outcome = Result<(), String>;
 
-    async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
+    async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         ctx.api
             .submit_tx(self.tx.clone())
             .await
@@ -42,7 +41,7 @@ impl StateMachine for TxSubmissionStateMachine {
 
     fn transition(
         &self,
-        ctx: &Self::Context,
+        ctx: &ClientContext,
         dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {
@@ -52,7 +51,7 @@ impl StateMachine for TxSubmissionStateMachine {
             Ok(()) => {
                 picomint_eventlog::log_event(
                     dbtx,
-                    ctx.federation(),
+                    ctx.federation,
                     self.account,
                     self.operation,
                     TxAcceptEvent { txid },
@@ -61,7 +60,7 @@ impl StateMachine for TxSubmissionStateMachine {
             Err(error) => {
                 picomint_eventlog::log_event(
                     dbtx,
-                    ctx.federation(),
+                    ctx.federation,
                     self.account,
                     self.operation,
                     TxRejectEvent { txid, error },

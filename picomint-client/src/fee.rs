@@ -41,7 +41,7 @@ pub(crate) async fn sweep(ctx: ClientContext, account: Account, lnurl: String) {
     loop {
         sleep(SWEEP_INTERVAL).await;
 
-        let balance = crate::mint::balance(&ctx.db.begin_read(), ctx.federation(), account);
+        let balance = crate::mint::balance(&ctx.db.begin_read(), ctx.federation, account);
 
         if balance.msat < SWEEP_THRESHOLD.msat {
             continue;

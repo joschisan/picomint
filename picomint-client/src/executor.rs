@@ -1,11 +1,11 @@
 //! Per-module state machine executor.
 //!
-//! Each module (and the client-level tx submission) owns a single
-//! [`ModuleExecutor<S, T>`] parameterised by its state type and the
-//! [`Table`] that persists it. Tables are shared across federations, so the
-//! executor scopes every op by its federation's slice of the key space.
-//! Active states are keyed by `(federation, SmId)` and driven in a typed
-//! reactor loop.
+//! Two functions over the shared [`ClientContext`]: [`resume`] restarts a
+//! table's persisted state machines at federation bring-up, and
+//! [`add_state_machine_dbtx`] lands a new one atomically with the caller's
+//! writes. Tables are shared across federations, so both scope by the
+//! context federation's slice of the key space; active states are keyed by
+//! `(federation, SmId)` and driven in a typed reactor loop.
 //!
 //! Each driver iteration: wait for [`StateMachine::trigger`] to resolve,
 //! then apply [`StateMachine::transition`] atomically in a DB tx. A
@@ -14,12 +14,11 @@
 
 use std::fmt::Debug;
 use std::future::Future;
-use std::sync::Arc;
 
-use crate::task::TaskGroup;
+use crate::module::ClientContext;
 use picomint_core::config::FederationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_sqlite::{Database, DbRead, Prefix, Table, WriteTx};
+use picomint_sqlite::{DbRead, Prefix, Table, WriteTx};
 
 /// Random opaque identifier assigned by the executor when a state
 /// machine is first inserted. Used as the table key; the state machine
@@ -33,17 +32,16 @@ impl SmId {
     }
 }
 
-/// A persistent state machine driven by a [`ModuleExecutor`].
+/// A persistent state machine driven by [`resume`] and the drive loop.
 ///
 /// States with multiple concurrent reasons-to-transition fold them into
 /// [`Self::Outcome`] via `tokio::select!` inside [`Self::trigger`]. The
-/// owning [`ModuleExecutor`] hands the resolved outcome to
+/// drive loop hands the resolved outcome to
 /// [`Self::transition`], which runs atomically in a write tx and either
 /// produces the next state or `None` to terminate.
-pub trait StateMachine: Debug + Clone + Encodable + Decodable + Send + Sync + 'static {
-    /// Per-module context handed to `trigger` and `transition`.
-    type Context: Clone + Send + Sync + 'static;
-
+pub(crate) trait StateMachine:
+    Debug + Clone + Encodable + Decodable + Send + Sync + 'static
+{
     /// Value produced by [`Self::trigger`] and consumed by
     /// [`Self::transition`]. For SMs with multi-variant state this is
     /// usually a sum type.
@@ -58,128 +56,91 @@ pub trait StateMachine: Debug + Clone + Encodable + Decodable + Send + Sync + 's
     /// proves the resulting future matches the `Send` bound.
     fn trigger<'a>(
         &'a self,
-        ctx: &'a Self::Context,
+        ctx: &'a ClientContext,
     ) -> impl Future<Output = Self::Outcome> + Send + 'a;
 
     /// Apply `outcome` atomically inside `dbtx`, producing the next state.
     /// `None` terminates the state machine.
     fn transition(
         &self,
-        ctx: &Self::Context,
+        ctx: &ClientContext,
         dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self>;
 }
 
-/// Per-module reactor driving state machines of type `S` persisted in `T`
-/// under `federation`'s key prefix. Cheaply cloneable ([`Arc`]-backed).
-#[derive(Clone)]
-pub struct ModuleExecutor<S: StateMachine, T> {
-    inner: Arc<Inner<S, T>>,
-}
-
-struct Inner<S: StateMachine, T> {
-    db: Database,
-    federation: FederationId,
-    table: T,
-    context: S::Context,
-    tg: TaskGroup,
-}
-
-impl<S, T> ModuleExecutor<S, T>
+/// Resume every state machine the context's federation persisted in `table`
+/// from a previous run. Called exactly once per federation bring-up — a
+/// second call would double-drive every active state machine.
+pub(crate) fn resume<S, T>(ctx: &ClientContext, table: T)
 where
     S: StateMachine,
     T: Table<Key = (FederationId, SmId), Value = S> + Copy + Send + Sync + 'static,
     FederationId: Prefix<T>,
 {
-    /// A handle for driving state machines of type `S` in `table` under
-    /// `federation`. Cheap to construct — nothing is read or spawned until
-    /// [`Self::resume`] or a state machine is added.
-    pub fn new(
-        db: Database,
-        federation: FederationId,
-        table: T,
-        context: S::Context,
-        tg: TaskGroup,
-    ) -> Self {
-        Self {
-            inner: Arc::new(Inner {
-                db,
-                federation,
-                table,
-                context,
-                tg,
-            }),
-        }
-    }
+    let active: Vec<(SmId, S)> = ctx.db.begin_read().prefix(&table, &ctx.federation, |r| {
+        r.map(|entry| (entry.0.1, entry.1)).collect()
+    });
 
-    /// Resume every state machine `federation` persisted in `table` from a
-    /// previous run. Called exactly once per federation bring-up — a second
-    /// call would double-drive every active state machine.
-    pub fn resume(&self) {
-        for (id, state) in self.inner.get_active_states() {
-            self.inner.clone().spawn_drive(id, state);
-        }
-    }
-
-    /// Atomically insert `state` as a new active state machine under a
-    /// freshly-generated [`SmId`]. A driver task is spawned for it when
-    /// the DB transaction commits.
-    pub fn add_state_machine_dbtx(&self, dbtx: &WriteTx, state: S) {
-        let id = SmId::random();
-        assert!(
-            dbtx.insert(&self.inner.table, &(self.inner.federation, id), &state)
-                .is_none(),
-            "SmId collision"
-        );
-
-        let inner = self.inner.clone();
-
-        dbtx.on_commit(move || {
-            inner.spawn_drive(id, state);
-        });
+    for (id, state) in active {
+        spawn_drive(ctx.clone(), table, id, state);
     }
 }
 
-impl<S, T> Inner<S, T>
+/// Atomically insert `state` as a new active state machine under a
+/// freshly-generated [`SmId`]. A driver task is spawned for it when the DB
+/// transaction commits.
+pub(crate) fn add_state_machine_dbtx<S, T>(ctx: &ClientContext, table: T, dbtx: &WriteTx, state: S)
 where
     S: StateMachine,
     T: Table<Key = (FederationId, SmId), Value = S> + Copy + Send + Sync + 'static,
-    FederationId: Prefix<T>,
 {
-    fn get_active_states(&self) -> Vec<(SmId, S)> {
-        self.db
-            .begin_read()
-            .prefix(&self.table, &self.federation, |r| {
-                r.map(|entry| (entry.0.1, entry.1)).collect()
-            })
-    }
+    let id = SmId::random();
+    assert!(
+        dbtx.insert(&table, &(ctx.federation, id), &state).is_none(),
+        "SmId collision"
+    );
 
-    fn spawn_drive(self: Arc<Self>, id: SmId, state: S) {
-        let tg = self.tg.clone();
-        tg.spawn(self.drive(id, state));
-    }
+    let ctx = ctx.clone();
 
-    /// Drive one state machine until `transition` returns `None`. Each
-    /// iteration: await the trigger, then apply the transition atomically
-    /// and write (or delete) the state row.
-    async fn drive(self: Arc<Self>, id: SmId, mut state: S) {
-        loop {
-            let outcome = state.trigger(&self.context).await;
+    dbtx.on_commit(move || {
+        spawn_drive(ctx, table, id, state);
+    });
+}
 
-            let dbtx = self.db.begin_write();
+fn spawn_drive<S, T>(ctx: ClientContext, table: T, id: SmId, state: S)
+where
+    S: StateMachine,
+    T: Table<Key = (FederationId, SmId), Value = S> + Copy + Send + Sync + 'static,
+{
+    let tg = ctx.tg.clone();
 
-            match state.transition(&self.context, &dbtx, outcome) {
-                Some(new_state) => {
-                    dbtx.insert(&self.table, &(self.federation, id), &new_state);
-                    dbtx.commit();
-                    state = new_state;
-                }
-                None => {
-                    dbtx.remove(&self.table, &(self.federation, id));
-                    dbtx.commit();
-                    return;
-                }
+    tg.spawn(drive(ctx, table, id, state));
+}
+
+/// Drive one state machine until `transition` returns `None`. Each
+/// iteration: await the trigger, then apply the transition atomically and
+/// write (or delete) the state row.
+async fn drive<S, T>(ctx: ClientContext, table: T, id: SmId, mut state: S)
+where
+    S: StateMachine,
+    T: Table<Key = (FederationId, SmId), Value = S> + Copy + Send + Sync + 'static,
+{
+    loop {
+        let outcome = state.trigger(&ctx).await;
+
+        let dbtx = ctx.db.begin_write();
+
+        match state.transition(&ctx, &dbtx, outcome) {
+            Some(new_state) => {
+                dbtx.insert(&table, &(ctx.federation, id), &new_state);
+                dbtx.commit();
+                state = new_state;
+            }
+            None => {
+                dbtx.remove(&table, &(ctx.federation, id));
+                dbtx.commit();
+                return;
             }
         }
     }

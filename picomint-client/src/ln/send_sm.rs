@@ -82,10 +82,9 @@ pub enum SendOutcome {
 /// State machine that requests the lightning gateway to pay an invoice on
 /// behalf of a federation client.
 impl StateMachine for SendStateMachine {
-    type Context = ClientContext;
     type Outcome = SendOutcome;
 
-    async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
+    async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         match &self.state {
             SendSMState::Funding => SendOutcome::FundingResult(
                 ctx.await_tx_accepted(self.common.operation, self.common.outpoint.txid)
@@ -98,7 +97,7 @@ impl StateMachine for SendStateMachine {
                     response = gateway_send_sm(
                         ctx.gateways.clone(),
                         gateway_pk,
-                        ctx.federation(),
+                        ctx.federation,
                         self.common.outpoint,
                         self.common.contract.clone(),
                         invoice,
@@ -126,7 +125,7 @@ impl StateMachine for SendStateMachine {
                         // federation for the preimage one more time before giving
                         // up.
                         let p = ctx
-                            .api()
+                            .api
                             .ln_await_preimage(self.common.outpoint, self.common.contract.expiry)
                             .await
                             .filter(|p| self.common.contract.verify_preimage(p));
@@ -142,7 +141,7 @@ impl StateMachine for SendStateMachine {
 
     fn transition(
         &self,
-        ctx: &Self::Context,
+        ctx: &ClientContext,
         dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {
@@ -269,10 +268,7 @@ async fn await_preimage_sm(
     contract: OutgoingContract,
     ctx: ClientContext,
 ) -> Option<[u8; 32]> {
-    let preimage = ctx
-        .api()
-        .ln_await_preimage(outpoint, contract.expiry)
-        .await?;
+    let preimage = ctx.api.ln_await_preimage(outpoint, contract.expiry).await?;
 
     if contract.verify_preimage(&preimage) {
         return Some(preimage);

@@ -11,7 +11,6 @@ use anyhow::Context;
 use picomint_sqlite::{DbRead, WriteTx};
 
 use crate::client::Client;
-use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
@@ -61,19 +60,6 @@ const CONTRACT_STREAM_BATCH: u64 = 1000;
 
 pub type SendResult = Result<OperationId, SendPaymentError>;
 
-/// The executor for the lightning send state machines, constructed on
-/// demand — executors are cheap handles; [`resume`] is what runs once per
-/// bring-up.
-fn send_executor(ctx: &ClientContext) -> ModuleExecutor<SendStateMachine, SendStateMachineTable> {
-    ModuleExecutor::new(
-        ctx.db.clone(),
-        ctx.federation(),
-        SendStateMachineTable,
-        ctx.clone(),
-        ctx.tg.clone(),
-    )
-}
-
 /// Resume this federation's persisted send state machines and start the
 /// incoming-contract scan plus the cold-start gateway warmup. Called
 /// exactly once, at federation bring-up.
@@ -82,7 +68,7 @@ fn send_executor(ctx: &ClientContext) -> ModuleExecutor<SendStateMachine, SendSt
 /// previous session persisted, so `select_gateway` becomes usable without
 /// waiting on the threshold-consensus pk query.
 pub(crate) fn resume(ctx: &ClientContext) {
-    send_executor(ctx).resume();
+    crate::executor::resume::<SendStateMachine, _>(ctx, SendStateMachineTable);
 
     ctx.tg.spawn(receive_scan(ctx.clone()));
 
@@ -98,17 +84,17 @@ pub(crate) fn resume(ctx: &ClientContext) {
 /// separately by [`update_gateway_info`].
 async fn update_gateway_pks(ctx: ClientContext) -> Result<(), RefreshGatewaysError> {
     let list = ctx
-        .api()
+        .api
         .ln_gateways()
         .await
         .map_err(|_| RefreshGatewaysError::FailedToRequestGateways)?;
 
-    let dbtx = ctx.db().begin_write();
+    let dbtx = ctx.db.begin_write();
 
-    dbtx.remove_prefix(&GatewayPkTable, &ctx.federation());
+    dbtx.remove_prefix(&GatewayPkTable, &ctx.federation);
 
     for gateway_pk in &list {
-        dbtx.insert(&GatewayPkTable, &(ctx.federation(), *gateway_pk), &());
+        dbtx.insert(&GatewayPkTable, &(ctx.federation, *gateway_pk), &());
     }
 
     dbtx.commit();
@@ -123,16 +109,16 @@ async fn update_gateway_pks(ctx: ClientContext) -> Result<(), RefreshGatewaysErr
 /// concurrently with [`update_gateway_pks`]) and probes over it; a
 /// gateway that fails to answer is left unselectable.
 async fn update_gateway_info(ctx: ClientContext) {
-    let list: Vec<GatewayPk> =
-        ctx.db()
-            .begin_read()
-            .prefix(&GatewayPkTable, &ctx.federation(), |it| {
-                it.map(|entry| entry.0.1).collect()
-            });
+    let list: Vec<GatewayPk> = ctx
+        .db
+        .begin_read()
+        .prefix(&GatewayPkTable, &ctx.federation, |it| {
+            it.map(|entry| entry.0.1).collect()
+        });
 
     ctx.gateways.reconcile(&list, false);
 
-    ctx.gateways.probe(&list, ctx.federation()).await;
+    ctx.gateways.probe(&list, ctx.federation).await;
 }
 
 /// The largest whole-sat invoice amount a max send from `account`
@@ -208,10 +194,10 @@ async fn send_inner(
         return Err(SendPaymentError::InvoiceExpired);
     }
 
-    if ctx.network() != invoice.currency().into() {
+    if ctx.config.network != invoice.currency().into() {
         return Err(SendPaymentError::WrongCurrency {
             invoice_currency: invoice.currency(),
-            federation_currency: ctx.network().into(),
+            federation_currency: ctx.config.network.into(),
         });
     }
 
@@ -231,7 +217,7 @@ async fn send_inner(
     let amount = Amount::from_msat(amount);
 
     let consensus_block_count = ctx
-        .api()
+        .api
         .ln_consensus_block_count()
         .await
         .map_err(|_| SendPaymentError::FailedToRequestBlockCount)?;
@@ -251,10 +237,10 @@ async fn send_inner(
         fee: ctx.config.ln.output_fee,
     });
 
-    let dbtx = ctx.db().begin_write();
+    let dbtx = ctx.db.begin_write();
 
     if dbtx
-        .insert(&SendOperationTable, &(ctx.federation(), operation), &())
+        .insert(&SendOperationTable, &(ctx.federation, operation), &())
         .is_some()
     {
         return Err(SendPaymentError::InvoiceAlreadyAttempted);
@@ -284,7 +270,7 @@ async fn send_inner(
         state: SendSMState::Funding,
     };
 
-    send_executor(ctx).add_state_machine_dbtx(&dbtx, sm);
+    crate::executor::add_state_machine_dbtx(ctx, SendStateMachineTable, &dbtx, sm);
 
     dbtx.commit();
 
@@ -346,7 +332,7 @@ async fn create_offer_and_fetch_invoice(
 
     let invoice = ctx
         .gateways
-        .receive(gateway_pk, ctx.federation(), offer)
+        .receive(gateway_pk, ctx.federation, offer)
         .await
         .map_err(|e| ReceiveError::FailedToConnectToGateway(e.to_string()))?;
 
@@ -415,17 +401,17 @@ async fn receive_scan(ctx: ClientContext) {
 
     loop {
         let stream_index = ctx
-            .db()
+            .db
             .begin_read()
-            .get(&IncomingContractStreamIndexTable, &ctx.federation())
+            .get(&IncomingContractStreamIndexTable, &ctx.federation)
             .unwrap_or(0);
 
         let (entries, next_index) = ctx
-            .api()
+            .api
             .ln_await_incoming_contracts(stream_index, CONTRACT_STREAM_BATCH)
             .await;
 
-        let dbtx = ctx.db().begin_write();
+        let dbtx = ctx.db.begin_write();
 
         for summary in &entries {
             for (account, sk) in keys {
@@ -435,7 +421,7 @@ async fn receive_scan(ctx: ClientContext) {
 
         dbtx.insert(
             &IncomingContractStreamIndexTable,
-            &ctx.federation(),
+            &ctx.federation,
             &next_index,
         );
 
@@ -605,7 +591,7 @@ impl Client {
     ) -> anyhow::Result<String> {
         let ctx = self.ctx(federation)?;
 
-        let config = ctx.get_config();
+        let config = &ctx.config;
 
         let recipient = ctx.secret.ln_secret().receive_keypair(account).public_key();
 

@@ -42,10 +42,9 @@ pub struct ReceiveStateMachine {
 }
 
 impl StateMachine for ReceiveStateMachine {
-    type Context = ClientContext;
     type Outcome = Result<BTreeMap<PeerId, DecryptionKeyShare>, String>;
 
-    async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
+    async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         ctx.await_tx_accepted(self.operation, self.outpoint.txid)
             .await
             .map_err(|e| e.to_string())?;
@@ -53,7 +52,7 @@ impl StateMachine for ReceiveStateMachine {
         let tpe_pks = ctx.config.ln.tpe_pks.clone();
         let offer = self.offer.clone();
         let shares = ctx
-            .api()
+            .api
             .request_with_strategy_retry(
                 FilterMapThreshold::new(
                     move |peer, resp: DecryptionKeyShareResponse| {
@@ -66,7 +65,7 @@ impl StateMachine for ReceiveStateMachine {
                         }
                         Ok(share)
                     },
-                    ctx.api().num_peers(),
+                    ctx.api.num_peers(),
                 ),
                 Method::Ln(LnMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
                     outpoint: self.outpoint,
@@ -79,7 +78,7 @@ impl StateMachine for ReceiveStateMachine {
 
     fn transition(
         &self,
-        ctx: &Self::Context,
+        ctx: &ClientContext,
         dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {

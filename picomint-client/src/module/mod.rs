@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::api::FederationApi;
 use crate::ln::Gateways;
 use crate::secret::ClientSecret;
@@ -12,7 +10,6 @@ use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_eventlog::{Event, EventLogEntry};
 use picomint_sqlite::{Database, WriteTx};
-use tokio::sync::Notify;
 
 use crate::{TxAcceptEvent, TxRejectEvent};
 
@@ -27,6 +24,10 @@ pub struct ClientContext {
     pub(crate) api: FederationApi,
     pub(crate) db: Database,
     pub(crate) config: ConsensusConfig,
+    /// Memoized [`ConsensusConfig::calculate_federation_id`] — a consensus
+    /// hash over the whole config, too hot to recompute per table key. Can
+    /// never go stale: the config it is derived from is immutable beside it.
+    pub(crate) federation: FederationId,
     pub(crate) secret: ClientSecret,
     pub(crate) app_fee_ppm: u64,
     pub(crate) gateways: Gateways,
@@ -46,27 +47,13 @@ impl ClientContext {
         Self {
             api,
             db,
+            federation: config.calculate_federation_id(),
             config,
             secret,
             app_fee_ppm,
             gateways,
             tg,
         }
-    }
-
-    pub fn network(&self) -> bitcoin::Network {
-        self.config.network
-    }
-
-    /// Federation API handle. Typed wire methods are built with
-    /// `Method::<Module>(<ModuleMethod>::...)` — there is no module-scope
-    /// plumbing to attach.
-    pub fn api(&self) -> FederationApi {
-        self.api.clone()
-    }
-
-    pub fn db(&self) -> &Database {
-        &self.db
     }
 
     pub async fn await_tx_accepted(
@@ -90,19 +77,6 @@ impl ClientContext {
         unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 
-    pub fn get_config(&self) -> &ConsensusConfig {
-        &self.config
-    }
-
-    pub fn federation(&self) -> FederationId {
-        self.config.calculate_federation_id()
-    }
-
-    /// Shared [`Notify`] that fires on every commit touching the event log.
-    pub fn event_notify(&self) -> Arc<Notify> {
-        picomint_eventlog::event_notify(&self.db)
-    }
-
     /// Stream every event belonging to `operation`, starting from the
     /// beginning of the log (existing events first, then live ones).
     pub fn subscribe_operation_events(
@@ -119,6 +93,6 @@ impl ClientContext {
     where
         E: Event + Send,
     {
-        picomint_eventlog::log_event(dbtx, self.federation(), account, operation, event);
+        picomint_eventlog::log_event(dbtx, self.federation, account, operation, event);
     }
 }

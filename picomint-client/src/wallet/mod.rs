@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::client::Client;
-use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use anyhow::{Context, anyhow};
@@ -39,30 +38,17 @@ use tracing::warn;
 /// Number of output info entries to scan per batch.
 const SLICE_SIZE: u64 = 1000;
 
-/// The executor for the wallet's send state machines, constructed on
-/// demand — executors are cheap handles; [`resume`] is what runs once per
-/// bring-up.
-fn send_executor(ctx: &ClientContext) -> ModuleExecutor<SendStateMachine, SendStateMachineTable> {
-    ModuleExecutor::new(
-        ctx.db.clone(),
-        ctx.federation(),
-        SendStateMachineTable,
-        ctx.clone(),
-        ctx.tg.clone(),
-    )
-}
-
 /// Resume this federation's persisted wallet state machines and start the
 /// address scanner. Called exactly once, at federation bring-up.
 pub(crate) fn resume(ctx: &ClientContext) {
-    send_executor(ctx).resume();
+    crate::executor::resume::<SendStateMachine, _>(ctx, SendStateMachineTable);
 
     ctx.tg.spawn(output_scanner(ctx.clone()));
 }
 
 /// Fetch the current fee required to send an onchain payment.
 pub(crate) async fn send_fee(ctx: &ClientContext) -> Result<bitcoin::Amount, SendError> {
-    ctx.api()
+    ctx.api
         .wallet_send_fee()
         .await
         .map_err(|_| SendError::FederationError)?
@@ -85,7 +71,7 @@ fn submit_send(
     fee: bitcoin::Amount,
     max: bool,
 ) -> Result<OperationId, SendError> {
-    if !address.is_valid_for_network(ctx.network()) {
+    if !address.is_valid_for_network(ctx.config.network) {
         return Err(SendError::WrongNetwork);
     }
 
@@ -108,7 +94,7 @@ fn submit_send(
         fee: ctx.config.wallet.output_fee,
     });
 
-    let dbtx = ctx.db().begin_write();
+    let dbtx = ctx.db.begin_write();
 
     let txid = crate::mint::finalize_and_submit_tx(
         ctx,
@@ -134,7 +120,7 @@ fn submit_send(
         fee,
     };
 
-    send_executor(ctx).add_state_machine_dbtx(&dbtx, sm);
+    crate::executor::add_state_machine_dbtx(ctx, SendStateMachineTable, &dbtx, sm);
 
     dbtx.commit();
 
@@ -145,9 +131,9 @@ fn submit_send(
 /// the scanner has seeded it. All accounts share one table, so this reads
 /// the tail of the account's own key prefix rather than the table's.
 fn highest_valid_index(ctx: &ClientContext, account: Account) -> Option<u64> {
-    ctx.db()
+    ctx.db
         .begin_read()
-        .prefix_rev(&ValidAddressIndexTable, &(ctx.federation(), account), |r| {
+        .prefix_rev(&ValidAddressIndexTable, &(ctx.federation, account), |r| {
             r.next().map(|entry| entry.0.2)
         })
 }
@@ -159,7 +145,7 @@ fn derive_address(ctx: &ClientContext, account: Account, index: u64) -> Address 
             .x_only_public_key()
             .0
             .consensus_hash(),
-        ctx.network(),
+        ctx.config.network,
     )
 }
 
@@ -206,7 +192,7 @@ fn receive_output(
         fee: ctx.config.wallet.input_fee,
     });
 
-    let dbtx = ctx.db().begin_write();
+    let dbtx = ctx.db.begin_write();
 
     let address = derive_address(ctx, account, address_index)
         .as_unchecked()
@@ -244,11 +230,11 @@ async fn output_scanner(ctx: ClientContext) {
         }
 
         let index = next_valid_index(&ctx, account, 0);
-        let dbtx = ctx.db().begin_write();
+        let dbtx = ctx.db.begin_write();
         assert!(
             dbtx.insert(
                 &ValidAddressIndexTable,
-                &(ctx.federation(), account, index),
+                &(ctx.federation, account, index),
                 &()
             )
             .is_none(),
@@ -269,7 +255,7 @@ async fn output_scanner(ctx: ClientContext) {
             }
         }
 
-        if ctx.network() == bitcoin::Network::Regtest {
+        if ctx.config.network == bitcoin::Network::Regtest {
             sleep(Duration::from_secs(1)).await;
         } else {
             sleep(Duration::from_secs(60)).await;
@@ -278,16 +264,16 @@ async fn output_scanner(ctx: ClientContext) {
 }
 
 async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
-    let dbtx = ctx.db().begin_read();
+    let dbtx = ctx.db.begin_read();
 
     let next_output_index = dbtx
-        .get(&NextOutputIndexTable, &ctx.federation())
+        .get(&NextOutputIndexTable, &ctx.federation)
         .unwrap_or(0);
 
     // Every account's indices come out of one prefix scan, already tagged
     // with the account they belong to.
     let valid_indices: Vec<(Account, u64)> =
-        dbtx.prefix(&ValidAddressIndexTable, &ctx.federation(), |r| {
+        dbtx.prefix(&ValidAddressIndexTable, &ctx.federation, |r| {
             r.map(|entry| (entry.0.1, entry.0.2)).collect()
         });
 
@@ -314,7 +300,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
     }
 
     let outputs = ctx
-        .api()
+        .api
         .wallet_output_info_slice(next_output_index, next_output_index + SLICE_SIZE)
         .await
         .map_err(|_| anyhow!("Failed to fetch wallet output info slice"))?;
@@ -330,11 +316,11 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
             if address_index == next_address_index {
                 let index = next_valid_index(ctx, account, next_address_index + 1);
 
-                let dbtx = ctx.db().begin_write();
+                let dbtx = ctx.db.begin_write();
 
                 dbtx.insert(
                     &ValidAddressIndexTable,
-                    &(ctx.federation(), account, index),
+                    &(ctx.federation, account, index),
                     &(),
                 );
 
@@ -352,7 +338,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
                 // In order to not overpay on fees we choose to wait,
                 // the congestion will clear up within a few blocks.
                 if ctx
-                    .api()
+                    .api
                     .wallet_pending_tx_chain()
                     .await
                     .map_err(|_| anyhow!("Failed to request wallet pending tx chain"))?
@@ -363,7 +349,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
                 }
 
                 let receive_fee = ctx
-                    .api()
+                    .api
                     .wallet_receive_fee()
                     .await
                     .map_err(|_| anyhow!("Failed to request wallet receive fee"))?
@@ -386,13 +372,9 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
             }
         }
 
-        let dbtx = ctx.db().begin_write();
+        let dbtx = ctx.db.begin_write();
 
-        dbtx.insert(
-            &NextOutputIndexTable,
-            &ctx.federation(),
-            &(output.index + 1),
-        );
+        dbtx.insert(&NextOutputIndexTable, &ctx.federation, &(output.index + 1));
 
         dbtx.commit();
     }
@@ -514,7 +496,7 @@ impl Client {
     ) -> anyhow::Result<bitcoin::Amount> {
         let ctx = self.ctx(federation)?;
 
-        ctx.api()
+        ctx.api
             .wallet_federation_wallet()
             .await
             .map(|tx_out| tx_out.map_or(bitcoin::Amount::ZERO, |tx_out| tx_out.value))
@@ -523,13 +505,13 @@ impl Client {
     /// The consensus block count of the federation.
     pub async fn wallet_block_count(&self, federation: FederationId) -> anyhow::Result<u64> {
         self.ctx(federation)?
-            .api()
+            .api
             .wallet_consensus_block_count()
             .await
     }
 
     /// The current consensus feerate.
     pub async fn wallet_feerate(&self, federation: FederationId) -> anyhow::Result<Option<u64>> {
-        self.ctx(federation)?.api().wallet_consensus_feerate().await
+        self.ctx(federation)?.api.wallet_consensus_feerate().await
     }
 }

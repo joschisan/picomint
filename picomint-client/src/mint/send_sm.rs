@@ -42,10 +42,9 @@ pub enum SendOutcome {
 }
 
 impl StateMachine for SendStateMachine {
-    type Context = ClientContext;
     type Outcome = SendOutcome;
 
-    async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
+    async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         let mut stream = ctx.subscribe_operation_events(self.operation);
         while let Some(entry) = stream.next().await {
             if entry.to_event::<MintSuccessEvent>().is_some() {
@@ -63,13 +62,13 @@ impl StateMachine for SendStateMachine {
 
     fn transition(
         &self,
-        ctx: &Self::Context,
+        ctx: &ClientContext,
         dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {
         match outcome {
             SendOutcome::Success => {
-                match super::send_ecash_dbtx(dbtx, ctx.federation(), self.account, self.amount) {
+                match super::send_ecash_dbtx(dbtx, ctx.federation, self.account, self.amount) {
                     Some(ecash) => ctx.log_event(
                         dbtx,
                         self.account,
