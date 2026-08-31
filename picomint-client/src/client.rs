@@ -307,6 +307,21 @@ impl Client {
         picomint_eventlog::read_operation_events(&self.db, operation)
     }
 
+    /// Whether any state machine is still driving `operation` under
+    /// `federation`. The synchronous companion to
+    /// [`Self::subscribe_completion`]: read the current state with this,
+    /// subscribe to the transition with that — a subscription alone leaves
+    /// the caller guessing until its first resolution arrives.
+    pub fn operation_is_active(&self, federation: FederationId, operation: OperationId) -> bool {
+        let dbtx = self.db.begin_read();
+
+        crate::tx::operation_is_active(&dbtx, federation, operation)
+            || crate::mint::operation_is_active(&dbtx, federation, operation)
+            || crate::ln::operation_is_active(&dbtx, federation, operation)
+            || crate::wallet::operation_is_active(&dbtx, federation, operation)
+            || crate::gw::operation_is_active(&dbtx, federation, operation)
+    }
+
     /// Resolve once no state machine is still driving `operation` under
     /// `federation`. Resolves immediately for a settled or unknown
     /// operation.
@@ -341,17 +356,7 @@ impl Client {
                 .map(|notify| Box::pin(notify.notified()))
                 .collect();
 
-            let dbtx = self.db.begin_read();
-
-            let active = crate::tx::operation_is_active(&dbtx, federation, operation)
-                || crate::mint::operation_is_active(&dbtx, federation, operation)
-                || crate::ln::operation_is_active(&dbtx, federation, operation)
-                || crate::wallet::operation_is_active(&dbtx, federation, operation)
-                || crate::gw::operation_is_active(&dbtx, federation, operation);
-
-            drop(dbtx);
-
-            if !active {
+            if !self.operation_is_active(federation, operation) {
                 return;
             }
 
