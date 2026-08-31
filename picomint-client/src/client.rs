@@ -4,12 +4,10 @@ use std::sync::{Arc, RwLock};
 
 use crate::Endpoint;
 use crate::api::FederationApi;
-use crate::gw::Gw;
-use crate::ln::{Gateways, Ln};
-use crate::mint::Mint;
-use crate::secret::Mnemonic;
+use crate::ln::Gateways;
+use crate::module::ClientContext;
+use crate::secret::{ClientSecret, Mnemonic};
 use crate::task::TaskGroup;
-use crate::wallet::Wallet;
 use anyhow::{Context as _, ensure};
 use futures::stream::BoxStream;
 use iroh::endpoint::presets::N0;
@@ -165,7 +163,7 @@ impl Client {
         // Wait for every task to observe cancellation before the wipe, so no
         // state machine is mid-write while its rows disappear.
         if let Some(runtime) = runtime {
-            runtime.tg.shutdown().await;
+            runtime.ctx.tg.shutdown().await;
         }
 
         let dbtx = self.db.begin_write();
@@ -225,6 +223,12 @@ impl Client {
         Ok(runtime)
     }
 
+    /// The connected federation's context, bringing the federation up on
+    /// first use. Errors for a federation that is not joined.
+    pub(crate) fn ctx(&self, federation: FederationId) -> anyhow::Result<ClientContext> {
+        Ok(self.runtime(federation)?.ctx.clone())
+    }
+
     /// Every joined federation, whether or not it is currently up.
     pub fn federations(&self) -> Vec<FederationId> {
         self.db
@@ -281,12 +285,12 @@ impl Client {
         &self,
         federation: FederationId,
     ) -> anyhow::Result<BoxStream<'static, BTreeMap<PeerId, ConnStatus>>> {
-        Ok(self.runtime(federation)?.api.connection_status_stream())
+        Ok(self.runtime(federation)?.ctx.api.connection_status_stream())
     }
 
     /// The federation's API handle. Brings the federation up.
     pub fn api(&self, federation: FederationId) -> anyhow::Result<FederationApi> {
-        Ok(self.runtime(federation)?.api.clone())
+        Ok(self.runtime(federation)?.ctx.api.clone())
     }
 
     /// The iroh endpoint bound from the seed, shared by every federation's
@@ -302,7 +306,7 @@ impl Client {
             std::mem::take(&mut *self.federations.write().expect("federations lock poisoned"));
 
         for runtime in federations.into_values() {
-            runtime.tg.shutdown().await;
+            runtime.ctx.tg.shutdown().await;
         }
     }
 
@@ -334,18 +338,14 @@ impl Client {
     }
 }
 
-/// The live half of a joined federation: its connection pools and task
-/// group, plus the immutable config the pools were built from. Everything
-/// else an operation needs — module configs, keys, executor handles — is
-/// derived per call from the seed and this config, so nothing here can go
-/// stale. Internal: the public surface is [`Client`]'s federation-keyed
+/// Unique owner of a connected federation's [`ClientContext`]. State
+/// machines and background tasks run against context *clones*, so the
+/// cancel-on-drop below has to live on this wrapper rather than the context
+/// itself. Internal: the public surface is [`Client`]'s federation-keyed
 /// methods, so nothing outside the crate can hold a runtime across a
 /// [`Client::remove`].
 pub(crate) struct FederationRuntime {
-    pub(crate) config: ConsensusConfig,
-    pub(crate) api: FederationApi,
-    pub(crate) gateways: Gateways,
-    pub(crate) tg: TaskGroup,
+    pub(crate) ctx: ClientContext,
 }
 
 impl FederationRuntime {
@@ -365,28 +365,27 @@ impl FederationRuntime {
             .map(|entry| (*entry.0, entry.1.iroh_pk))
             .collect();
 
-        let runtime = FederationRuntime {
-            config,
-            api: FederationApi::new(client.endpoint.clone(), peer_node_ids),
-            gateways: Gateways::new(client.endpoint.clone()),
-            tg: TaskGroup::new(),
-        };
-
-        let mint = Mint::derive(client, &runtime, federation);
-
-        mint.resume();
-
-        Wallet::derive(client, &runtime, federation).resume(&runtime.tg);
-
-        let ln = Ln::derive(client, &runtime, federation);
-
-        ln.resume(&runtime.tg);
-
-        Gw::derive(client, &runtime, federation).resume();
-
-        runtime.tg.spawn(crate::expiry::refresh(
-            runtime.api.clone(),
+        let ctx = ClientContext::new(
+            FederationApi::new(client.endpoint.clone(), peer_node_ids),
             client.db.clone(),
+            config,
+            ClientSecret::new(&client.mnemonic, federation),
+            client.fee.as_ref().map_or(0, |fee| fee.ppm),
+            Gateways::new(client.endpoint.clone()),
+            TaskGroup::new(),
+        );
+
+        crate::mint::resume(&ctx);
+
+        crate::wallet::resume(&ctx);
+
+        crate::ln::resume(&ctx);
+
+        crate::gw::resume(&ctx);
+
+        ctx.tg.spawn(crate::expiry::refresh(
+            ctx.api.clone(),
+            ctx.db.clone(),
             federation,
         ));
 
@@ -394,16 +393,11 @@ impl FederationRuntime {
         // has nothing accruing in the account, and a sweep would wake every
         // half minute to read a balance that is always zero.
         if let Some(fee) = client.fee.clone() {
-            runtime.tg.spawn(crate::fee::sweep(
-                client.db.clone(),
-                mint,
-                ln,
-                Account::AppFee,
-                fee.lnurl,
-            ));
+            ctx.tg
+                .spawn(crate::fee::sweep(ctx.clone(), Account::AppFee, fee.lnurl));
         }
 
-        Arc::new(runtime)
+        Arc::new(FederationRuntime { ctx })
     }
 }
 
@@ -412,6 +406,6 @@ impl FederationRuntime {
 /// wait for them instead.
 impl Drop for FederationRuntime {
     fn drop(&mut self) {
-        self.tg.cancel();
+        self.ctx.tg.cancel();
     }
 }

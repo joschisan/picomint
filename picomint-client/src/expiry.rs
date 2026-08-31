@@ -43,13 +43,11 @@ impl Client {
         &self,
         federation: FederationId,
     ) -> Result<(), RefreshExpiryStatusError> {
-        let api = self
-            .runtime(federation)
-            .map_err(|_| RefreshExpiryStatusError::FailedToRequestExpiryStatus)?
-            .api
-            .clone();
+        let ctx = self
+            .ctx(federation)
+            .map_err(|_| RefreshExpiryStatusError::FailedToRequestExpiryStatus)?;
 
-        refresh_once(&api, &self.db, federation).await
+        refresh_once(&ctx.api, &self.db, federation).await
     }
 }
 

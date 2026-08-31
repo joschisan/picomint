@@ -1,6 +1,6 @@
 //! State machine for submitting transactions
 
-use crate::api::FederationApi;
+use crate::module::ClientContext;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::tx::Transaction;
@@ -29,16 +29,8 @@ pub struct TxSubmissionStateMachine {
     pub tx: Transaction,
 }
 
-/// Context for running [`TxSubmissionStateMachine`] in a typed
-/// [`crate::executor::ModuleExecutor`].
-#[derive(Debug, Clone)]
-pub struct TxSubmissionSmContext {
-    pub api: FederationApi,
-    pub federation: FederationId,
-}
-
 impl StateMachine for TxSubmissionStateMachine {
-    type Context = TxSubmissionSmContext;
+    type Context = ClientContext;
     type Outcome = Result<(), String>;
 
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
@@ -60,7 +52,7 @@ impl StateMachine for TxSubmissionStateMachine {
             Ok(()) => {
                 picomint_eventlog::log_event(
                     dbtx,
-                    ctx.federation,
+                    ctx.federation(),
                     self.account,
                     self.operation,
                     TxAcceptEvent { txid },
@@ -69,7 +61,7 @@ impl StateMachine for TxSubmissionStateMachine {
             Err(error) => {
                 picomint_eventlog::log_event(
                     dbtx,
-                    ctx.federation,
+                    ctx.federation(),
                     self.account,
                     self.operation,
                     TxRejectEvent { txid, error },

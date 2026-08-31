@@ -19,8 +19,9 @@ use secp256k1::Keypair;
 use secp256k1::schnorr::Signature;
 use tracing::{error, instrument};
 
+use super::LightningInvoice;
 use super::events::{SendFailureEvent, SendRefundEvent, SendSuccessEvent};
-use super::{LightningClientContext, LightningInvoice};
+use crate::module::ClientContext;
 
 table!(
     SendStateMachineTable,
@@ -81,14 +82,13 @@ pub enum SendOutcome {
 /// State machine that requests the lightning gateway to pay an invoice on
 /// behalf of a federation client.
 impl StateMachine for SendStateMachine {
-    type Context = LightningClientContext;
+    type Context = ClientContext;
     type Outcome = SendOutcome;
 
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
         match &self.state {
             SendSMState::Funding => SendOutcome::FundingResult(
-                ctx.client_ctx
-                    .await_tx_accepted(self.common.operation, self.common.outpoint.txid)
+                ctx.await_tx_accepted(self.common.operation, self.common.outpoint.txid)
                     .await,
             ),
             SendSMState::Funded => {
@@ -98,7 +98,7 @@ impl StateMachine for SendStateMachine {
                     response = gateway_send_sm(
                         ctx.gateways.clone(),
                         gateway_pk,
-                        ctx.federation,
+                        ctx.federation(),
                         self.common.outpoint,
                         self.common.contract.clone(),
                         invoice,
@@ -116,7 +116,6 @@ impl StateMachine for SendStateMachine {
             }
             SendSMState::Refunding(refund_txid) => {
                 match ctx
-                    .client_ctx
                     .await_tx_accepted(self.common.operation, *refund_txid)
                     .await
                 {
@@ -127,7 +126,6 @@ impl StateMachine for SendStateMachine {
                         // federation for the preimage one more time before giving
                         // up.
                         let p = ctx
-                            .client_ctx
                             .api()
                             .ln_await_preimage(self.common.outpoint, self.common.contract.expiry)
                             .await
@@ -152,7 +150,7 @@ impl StateMachine for SendStateMachine {
             SendOutcome::FundingResult(Ok(())) => Some(self.update(SendSMState::Funded)),
             SendOutcome::FundingResult(Err(_)) => None,
             SendOutcome::PreimageTable(preimage) => {
-                ctx.client_ctx.log_event(
+                ctx.log_event(
                     dbtx,
                     self.common.account,
                     self.common.operation,
@@ -161,7 +159,7 @@ impl StateMachine for SendStateMachine {
                 None
             }
             SendOutcome::GatewayResponse(Ok(preimage)) => {
-                ctx.client_ctx.log_event(
+                ctx.log_event(
                     dbtx,
                     self.common.account,
                     self.common.operation,
@@ -187,7 +185,7 @@ impl StateMachine for SendStateMachine {
             )))),
             SendOutcome::Refunded => None,
             SendOutcome::Failure => {
-                ctx.client_ctx.log_event(
+                ctx.log_event(
                     dbtx,
                     self.common.account,
                     self.common.operation,
@@ -202,7 +200,7 @@ impl StateMachine for SendStateMachine {
 /// Build and submit the refund-claim tx, log `SendRefundEvent`, return its
 /// txid for the SM to advance into the `Refunding` state with.
 fn submit_refund(
-    ctx: &LightningClientContext,
+    ctx: &ClientContext,
     dbtx: &WriteTx,
     old_state: &SendStateMachine,
     witness: OutgoingWitness,
@@ -212,21 +210,21 @@ fn submit_refund(
         input: wire::Input::Ln(LightningInput::Outgoing(old_state.common.outpoint, witness)),
         keypair: old_state.common.refund_keypair,
         amount: old_state.common.contract.amount + old_state.common.contract.fee,
-        fee: ctx.input_fee,
+        fee: ctx.config.ln.input_fee,
     });
 
     let operation = old_state.common.operation;
 
-    ctx.mint
-        .finalize_and_submit_tx(
-            dbtx,
-            old_state.common.account,
-            operation,
-            tx_builder,
-            false,
-            |txid| SendRefundEvent { txid, expired },
-        )
-        .expect("Cannot claim input, additional funding needed")
+    crate::mint::finalize_and_submit_tx(
+        ctx,
+        dbtx,
+        old_state.common.account,
+        operation,
+        tx_builder,
+        false,
+        |txid| SendRefundEvent { txid, expired },
+    )
+    .expect("Cannot claim input, additional funding needed")
 }
 
 #[instrument(skip(refund_keypair, gateways))]
@@ -269,10 +267,9 @@ async fn gateway_send_sm(
 async fn await_preimage_sm(
     outpoint: OutPoint,
     contract: OutgoingContract,
-    ctx: LightningClientContext,
+    ctx: ClientContext,
 ) -> Option<[u8; 32]> {
     let preimage = ctx
-        .client_ctx
         .api()
         .ln_await_preimage(outpoint, contract.expiry)
         .await?;

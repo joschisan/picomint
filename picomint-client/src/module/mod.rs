@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
 use crate::api::FederationApi;
+use crate::ln::Gateways;
+use crate::secret::ClientSecret;
+use crate::task::TaskGroup;
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
 use picomint_core::TransactionId;
@@ -13,18 +16,42 @@ use tokio::sync::Notify;
 
 use crate::{TxAcceptEvent, TxRejectEvent};
 
-/// Per-module bundle of API handles, the shared client db, and federation
-/// config. Each module is constructed with one of these.
+/// The one per-federation context: API and gateway pools, the shared client
+/// db, the federation config, the root secret, and the task group. Every
+/// state machine runs against a clone of this, and every module operation
+/// is a function over it — module configs, public key sets and per-module
+/// secrets are projections (`config.mint.tbs_pks`, `secret.mint_secret()`),
+/// never copies.
 #[derive(Clone)]
 pub struct ClientContext {
-    api: FederationApi,
-    db: Database,
-    config: ConsensusConfig,
+    pub(crate) api: FederationApi,
+    pub(crate) db: Database,
+    pub(crate) config: ConsensusConfig,
+    pub(crate) secret: ClientSecret,
+    pub(crate) app_fee_ppm: u64,
+    pub(crate) gateways: Gateways,
+    pub(crate) tg: TaskGroup,
 }
 
 impl ClientContext {
-    pub fn new(api: FederationApi, db: Database, config: ConsensusConfig) -> Self {
-        Self { api, db, config }
+    pub(crate) fn new(
+        api: FederationApi,
+        db: Database,
+        config: ConsensusConfig,
+        secret: ClientSecret,
+        app_fee_ppm: u64,
+        gateways: Gateways,
+        tg: TaskGroup,
+    ) -> Self {
+        Self {
+            api,
+            db,
+            config,
+            secret,
+            app_fee_ppm,
+            gateways,
+            tg,
+        }
     }
 
     pub fn network(&self) -> bitcoin::Network {

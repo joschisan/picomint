@@ -12,7 +12,8 @@ use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use super::client_db::NoteTable;
 use super::events::{MintFailureEvent, MintSuccessEvent};
-use super::{MintSmContext, NoteIssuanceRequest, SpendableNote};
+use super::{NoteIssuanceRequest, SpendableNote};
+use crate::module::ClientContext;
 
 table!(
     MintStateMachineTable,
@@ -46,21 +47,18 @@ pub struct MintStateMachine {
 }
 
 impl StateMachine for MintStateMachine {
-    type Context = MintSmContext;
+    type Context = ClientContext;
     type Outcome = Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String>;
 
     async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
-        ctx.client_ctx
-            .await_tx_accepted(self.operation, self.txid)
-            .await?;
+        ctx.await_tx_accepted(self.operation, self.txid).await?;
 
         let shares = ctx
-            .client_ctx
             .api()
             .signature_shares(
                 self.txid,
                 self.issuance_requests.clone(),
-                ctx.tbs_pks.clone(),
+                ctx.config.mint.tbs_pks.clone(),
             )
             .await;
 
@@ -77,7 +75,7 @@ impl StateMachine for MintStateMachine {
             for note in &self.spendable_notes {
                 dbtx.insert(
                     &NoteTable,
-                    &(ctx.federation, self.account, note.clone()),
+                    &(ctx.federation(), self.account, note.clone()),
                     &(),
                 );
             }
@@ -96,13 +94,14 @@ impl StateMachine for MintStateMachine {
             let spendable_note = request.finalize(agg_blind_signature);
 
             let pk = *ctx
+                .config
+                .mint
                 .tbs_agg_pks
                 .get(&request.denomination)
                 .expect("No aggregated pk found for denomination");
 
             if !verify_note(spendable_note.note(), pk) {
-                ctx.client_ctx
-                    .log_event(dbtx, self.account, self.operation, MintFailureEvent);
+                ctx.log_event(dbtx, self.account, self.operation, MintFailureEvent);
 
                 return None;
             }
@@ -110,7 +109,7 @@ impl StateMachine for MintStateMachine {
             assert!(
                 dbtx.insert(
                     &NoteTable,
-                    &(ctx.federation, request.account(), spendable_note),
+                    &(ctx.federation(), request.account(), spendable_note),
                     &()
                 )
                 .is_none()
@@ -130,8 +129,7 @@ impl StateMachine for MintStateMachine {
                 .sum(),
         };
 
-        ctx.client_ctx
-            .log_event(dbtx, self.account, self.operation, event);
+        ctx.log_event(dbtx, self.account, self.operation, event);
 
         None
     }

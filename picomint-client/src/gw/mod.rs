@@ -5,26 +5,20 @@ mod secret;
 
 use anyhow::Context as _;
 use picomint_sqlite::WriteTx;
-use std::collections::BTreeMap;
 
-use crate::client::{Client, FederationRuntime};
+use crate::client::Client;
 use crate::executor::ModuleExecutor;
-use crate::mint::Mint;
 use crate::module::ClientContext;
-use crate::secret::ClientSecret;
-use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
-use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, IncomingOffer, OutgoingContract};
 use picomint_core::ln::{LightningInput, LightningOutput, OutgoingWitness};
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_core::wire;
-use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
+use picomint_core::{Amount, OutPoint, secp256k1};
 use secp256k1::schnorr::Signature;
-use tpe::{AggregatePublicKey, PublicKeyShare};
 use tracing::warn;
 
 pub use self::secret::GwSecret;
@@ -36,95 +30,26 @@ use receive_sm::{ReceiveStateMachine, ReceiveStateMachineTable};
 /// hop to derive one.
 pub const GATEWAY_ACCOUNT: Account = Account::PRIMARY;
 
-impl Gw {
-    pub fn new(
-        federation: FederationId,
-        cfg: LightningConfigConsensus,
-        context: ClientContext,
-        mint: Mint,
-        gw_secret: GwSecret,
-        tg: &TaskGroup,
-    ) -> Gw {
-        let keypair = gw_secret.contract_keypair();
-
-        let sm_context = GwSmContext {
-            client_ctx: context.clone(),
-            mint: mint.clone(),
-            input_fee: cfg.input_fee,
-            keypair,
-            tpe_agg_pk: cfg.tpe_agg_pk,
-            tpe_pks: cfg.tpe_pks.clone(),
-        };
-
-        let receive_executor = ModuleExecutor::new(
-            context.db().clone(),
-            federation,
-            ReceiveStateMachineTable,
-            sm_context,
-            tg.clone(),
-        );
-
-        Gw {
-            federation,
-            cfg,
-            client_ctx: context,
-            mint,
-            keypair,
-            receive_executor,
-        }
-    }
-
-    /// Derive the gateway record for `federation` — a throwaway bundle of
-    /// config, keys and executor handles, rebuilt per call from the seed
-    /// and the runtime's config.
-    pub(crate) fn derive(
-        client: &Client,
-        runtime: &FederationRuntime,
-        federation: FederationId,
-    ) -> Gw {
-        Gw::new(
-            federation,
-            runtime.config.ln.clone(),
-            ClientContext::new(
-                runtime.api.clone(),
-                client.db.clone(),
-                runtime.config.clone(),
-            ),
-            Mint::derive(client, runtime, federation),
-            ClientSecret::new(&client.mnemonic, federation).gw_secret(),
-            &runtime.tg,
-        )
-    }
-
-    /// Resume this federation's persisted receive state machines. Called
-    /// exactly once, at federation bring-up.
-    pub(crate) fn resume(&self) {
-        self.receive_executor.resume();
-    }
+/// The executor for the gateway receive state machines, constructed on
+/// demand — executors are cheap handles; [`resume`] is what runs once per
+/// bring-up.
+fn receive_executor(
+    ctx: &ClientContext,
+) -> ModuleExecutor<ReceiveStateMachine, ReceiveStateMachineTable> {
+    ModuleExecutor::new(
+        ctx.db.clone(),
+        ctx.federation(),
+        ReceiveStateMachineTable,
+        ctx.clone(),
+        ctx.tg.clone(),
+    )
 }
 
-#[derive(Clone)]
-pub struct Gw {
-    pub federation: FederationId,
-    pub cfg: LightningConfigConsensus,
-    pub client_ctx: ClientContext,
-    pub mint: Mint,
-    pub keypair: Keypair,
-    receive_executor: ModuleExecutor<ReceiveStateMachine, ReceiveStateMachineTable>,
+/// Resume this federation's persisted receive state machines. Called
+/// exactly once, at federation bring-up.
+pub(crate) fn resume(ctx: &ClientContext) {
+    receive_executor(ctx).resume();
 }
-
-/// Context shared with the ReceiveSM executor.
-#[derive(Clone)]
-pub struct GwSmContext {
-    pub client_ctx: ClientContext,
-    pub mint: Mint,
-    pub input_fee: Amount,
-    pub keypair: Keypair,
-    pub tpe_agg_pk: AggregatePublicKey,
-    pub tpe_pks: BTreeMap<PeerId, PublicKeyShare>,
-}
-
-impl Gw {}
 
 /// Remove every row this module owns under the caller's federation prefix.
 /// Called by [`crate::Client::remove`] for end-of-life cleanup.
@@ -135,15 +60,16 @@ pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
 // ─── Flat federation-keyed surface ───────────────────────────────────────
 
 impl Client {
-    /// Derive the gateway record for `federation`, bringing the federation
-    /// up.
-    pub(crate) fn gw(&self, federation: FederationId) -> anyhow::Result<Gw> {
-        Ok(Gw::derive(self, &*self.runtime(federation)?, federation))
-    }
-
     /// The public key this gateway's contracts are keyed to on `federation`.
     pub fn gw_pk(&self, federation: FederationId) -> anyhow::Result<XOnlyPublicKey> {
-        Ok(self.gw(federation)?.keypair.x_only_public_key().0)
+        let ctx = self.ctx(federation)?;
+
+        Ok(ctx
+            .secret
+            .gw_secret()
+            .contract_keypair()
+            .x_only_public_key()
+            .0)
     }
 
     /// Log a `SendEvent` on the federation's event log. Called by the
@@ -158,9 +84,9 @@ impl Client {
         amount: Amount,
         fee: Amount,
     ) -> anyhow::Result<()> {
-        let gw = self.gw(federation)?;
+        let ctx = self.ctx(federation)?;
 
-        gw.client_ctx.log_event(
+        ctx.log_event(
             dbtx,
             GATEWAY_ACCOUNT,
             operation,
@@ -184,7 +110,7 @@ impl Client {
         operation: OperationId,
         offer: IncomingOffer,
     ) -> anyhow::Result<()> {
-        let gw = self.gw(federation)?;
+        let ctx = self.ctx(federation)?;
 
         let refund_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
@@ -196,27 +122,26 @@ impl Client {
         let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Ln(Box::new(LightningOutput::Incoming(contract))),
             amount: offer.commitment.amount - offer.commitment.fee,
-            fee: gw.cfg.output_fee,
+            fee: ctx.config.ln.output_fee,
         });
 
         let amount = offer.commitment.amount;
         let fee = offer.commitment.fee;
 
-        let txid = gw
-            .mint
-            .finalize_and_submit_tx(
-                dbtx,
-                GATEWAY_ACCOUNT,
-                operation,
-                tx_builder,
-                false,
-                |txid| ReceiveEvent { txid, amount, fee },
-            )
-            .context("Insufficient funds")?;
+        let txid = crate::mint::finalize_and_submit_tx(
+            &ctx,
+            dbtx,
+            GATEWAY_ACCOUNT,
+            operation,
+            tx_builder,
+            false,
+            |txid| ReceiveEvent { txid, amount, fee },
+        )
+        .context("Insufficient funds")?;
 
         let outpoint = OutPoint { txid, out_idx: 0 };
 
-        gw.receive_executor.add_state_machine_dbtx(
+        receive_executor(&ctx).add_state_machine_dbtx(
             dbtx,
             ReceiveStateMachine {
                 operation,
@@ -241,7 +166,7 @@ impl Client {
         outpoint: OutPoint,
         success: Option<([u8; 32], Amount)>,
     ) -> anyhow::Result<()> {
-        let gw = self.gw(federation)?;
+        let ctx = self.ctx(federation)?;
 
         match success {
             Some((preimage, ln_fee)) => {
@@ -250,29 +175,33 @@ impl Client {
                         outpoint,
                         OutgoingWitness::Claim(preimage),
                     )),
-                    keypair: gw.keypair,
+                    keypair: ctx.secret.gw_secret().contract_keypair(),
                     amount: contract.amount + contract.fee,
-                    fee: gw.cfg.input_fee,
+                    fee: ctx.config.ln.input_fee,
                 });
 
-                gw.mint
-                    .finalize_and_submit_tx(
-                        dbtx,
-                        GATEWAY_ACCOUNT,
-                        operation,
-                        tx_builder,
-                        false,
-                        |txid| SendSuccessEvent {
-                            preimage,
-                            txid,
-                            ln_fee,
-                        },
-                    )
-                    .expect("Cannot claim outgoing contract — additional funding needed");
+                crate::mint::finalize_and_submit_tx(
+                    &ctx,
+                    dbtx,
+                    GATEWAY_ACCOUNT,
+                    operation,
+                    tx_builder,
+                    false,
+                    |txid| SendSuccessEvent {
+                        preimage,
+                        txid,
+                        ln_fee,
+                    },
+                )
+                .expect("Cannot claim outgoing contract — additional funding needed");
             }
             None => {
-                let signature = gw.keypair.sign_schnorr(contract.forfeit_message());
-                gw.client_ctx.log_event(
+                let signature = ctx
+                    .secret
+                    .gw_secret()
+                    .contract_keypair()
+                    .sign_schnorr(contract.forfeit_message());
+                ctx.log_event(
                     dbtx,
                     GATEWAY_ACCOUNT,
                     operation,
@@ -292,11 +221,11 @@ impl Client {
         federation: FederationId,
         operation: OperationId,
     ) -> anyhow::Result<Result<[u8; 32], Signature>> {
-        let gw = self.gw(federation)?;
+        let ctx = self.ctx(federation)?;
 
         use futures::StreamExt as _;
 
-        let mut stream = gw.client_ctx.subscribe_operation_events(operation);
+        let mut stream = ctx.subscribe_operation_events(operation);
         while let Some(entry) = stream.next().await {
             if let Some(ev) = entry.to_event::<SendSuccessEvent>() {
                 return Ok(Ok(ev.preimage));
