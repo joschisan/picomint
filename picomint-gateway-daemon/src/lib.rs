@@ -11,6 +11,7 @@ use anyhow::{anyhow, bail, ensure};
 use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
 use futures::StreamExt as _;
+use iroh::Endpoint;
 use lightning::routing::router::RouteParametersConfig;
 use lightning::types::payment::PaymentHash;
 use lightning_invoice::{
@@ -43,6 +44,7 @@ pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 #[derive(Clone)]
 pub struct AppState {
     pub client: Arc<Client>,
+    pub endpoint: Endpoint,
     pub mnemonic: Mnemonic,
     pub node: Arc<ldk_node::Node>,
     pub gateway_db: Database,

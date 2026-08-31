@@ -8,6 +8,9 @@ use std::time::Duration;
 use anyhow::{Context, ensure};
 use bitcoin::Network;
 use bitcoincore_rpc::RpcApi;
+use iroh::Endpoint;
+use iroh::endpoint::presets::N0;
+use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::config::FederationId;
 use picomint_core::invite::InviteCode;
@@ -262,15 +265,14 @@ async fn build_client(
         None => Mnemonic::generate(12)?,
     };
 
-    let client = Arc::new(
-        Client::new(
-            db.clone(),
-            mnemonic,
-            "0.0.0.0:0".parse().expect("valid addr"),
-            None,
-        )
-        .await?,
-    );
+    // No secret key: a wallet's network identity is ephemeral — nothing
+    // dials it.
+    let endpoint = Endpoint::builder(N0)
+        .address_lookup(MdnsAddressLookup::builder())
+        .bind()
+        .await?;
+
+    let client = Arc::new(Client::new(endpoint, db.clone(), mnemonic, None));
 
     let fed = client
         .add(&invite_code, Some(bitcoin::Network::Regtest))

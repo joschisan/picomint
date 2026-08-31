@@ -15,6 +15,8 @@ use std::sync::Arc;
 use anyhow::{Context, ensure};
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
+use iroh::endpoint::presets::N0;
+use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning::types::payment::PaymentHash;
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
@@ -146,16 +148,28 @@ fn main() -> anyhow::Result<()> {
 
     let gateway_db = picomint_sqlite::Database::open(opts.data_dir.join(DB_FILE))?;
 
-    // 3. Load or init the gateway identity, then bind the client (and with
-    // it the iroh endpoint the public API is served on).
+    // 3. Load or init the gateway identity: the mnemonic (federation-client
+    // seed + LDK entropy) and the independent iroh key the public API is
+    // served under.
     let mnemonic = picomint_gateway_daemon::db::load_or_init_mnemonic(&gateway_db)?;
 
-    let client = Arc::new(runtime.block_on(picomint_client::Client::new(
+    let iroh_secret_key = picomint_gateway_daemon::db::load_or_init_iroh_secret_key(&gateway_db);
+
+    let endpoint = runtime.block_on(
+        iroh::Endpoint::builder(N0)
+            .secret_key(iroh_secret_key)
+            .alpns(vec![picomint_rpc::ALPN.to_vec()])
+            .bind_addr(opts.api_addr)?
+            .address_lookup(MdnsAddressLookup::builder())
+            .bind(),
+    )?;
+
+    let client = Arc::new(picomint_client::Client::new(
+        endpoint.clone(),
         gateway_db.clone(),
         mnemonic.clone(),
-        opts.api_addr,
         None,
-    ))?);
+    ));
 
     // 4. Build LDK node
     let ldk_data_dir = opts
@@ -232,6 +246,7 @@ fn main() -> anyhow::Result<()> {
     // 5. Construct AppState
     let state = AppState {
         client,
+        endpoint: endpoint.clone(),
         mnemonic,
         node: node.clone(),
         gateway_db,
@@ -248,10 +263,7 @@ fn main() -> anyhow::Result<()> {
     //    lazy-loaded on first use; all work is persisted incrementally and
     //    idempotent on retry, so the runtime drop on process exit aborts
     //    cleanly.
-    runtime.spawn(public::run_public(
-        state.clone(),
-        state.client.endpoint().clone(),
-    ));
+    runtime.spawn(public::run_public(state.clone(), endpoint.clone()));
 
     runtime.spawn(cli::run_cli(state.clone()));
 

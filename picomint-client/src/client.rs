@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
 use crate::Endpoint;
@@ -10,8 +9,6 @@ use crate::secret::{ClientSecret, Mnemonic};
 use crate::task::TaskGroup;
 use anyhow::{Context as _, ensure};
 use futures::stream::BoxStream;
-use iroh::endpoint::presets::N0;
-use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
@@ -19,7 +16,6 @@ use picomint_core::core::{Account, OperationId};
 use picomint_core::fee::FeeConfig;
 use picomint_core::invite::InviteCode;
 use picomint_core::secp256k1::XOnlyPublicKey;
-use picomint_core::secret::Secret;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_rpc::connection::ConnStatus;
 use picomint_sqlite::{Database, DbRead, table};
@@ -54,14 +50,16 @@ pub struct Client {
 }
 
 impl Client {
-    /// Build a client over `db` and the seed, binding the iroh endpoint from
-    /// the seed's derived secret key. Inert: no federation is brought up
-    /// until [`Self::connect`] or the first operation does so.
+    /// Build a client over the embedder's `endpoint`, `db` and seed. Inert:
+    /// no federation is brought up until [`Self::connect`] or the first
+    /// operation does so.
     ///
     /// Seed storage is the embedder's job — pass the same mnemonic on every
-    /// start. A wallet app binds an ephemeral `api_addr` (`0.0.0.0:0`); the
-    /// gateway daemon passes its stable public address and serves its API on
-    /// [`Self::endpoint`].
+    /// start. The endpoint is the embedder's network identity choice: a
+    /// wallet app binds one without a secret key (fresh random identity per
+    /// launch — nothing dials a wallet), while the gateway daemon binds its
+    /// persisted iroh key so the `GatewayPk` clients connect to survives
+    /// restarts.
     ///
     /// `fee` is the integrator's cut: [`FeeConfig::ppm`] parts per million of
     /// the value every transaction this client builds moves, paid into
@@ -69,34 +67,24 @@ impl Client {
     /// from there to [`FeeConfig::lnurl`] as it accumulates. `None` charges
     /// nothing and starts no sweep — which is what a gateway passes, since
     /// its transactions are the other half of its users' payments.
-    pub async fn new(
+    pub fn new(
+        endpoint: Endpoint,
         db: Database,
         mnemonic: Mnemonic,
-        api_addr: SocketAddr,
         fee: Option<FeeConfig>,
-    ) -> anyhow::Result<Client> {
+    ) -> Client {
         debug!(
             version = %env!("CARGO_PKG_VERSION"),
             "Building picomint client",
         );
 
-        let iroh_sk = Secret::new_root(&mnemonic.to_entropy()).to_iroh_secret_key();
-
-        let endpoint = Endpoint::builder(N0)
-            .secret_key(iroh_sk)
-            .alpns(vec![picomint_rpc::ALPN.to_vec()])
-            .bind_addr(api_addr)?
-            .address_lookup(MdnsAddressLookup::builder())
-            .bind()
-            .await?;
-
-        Ok(Client {
+        Client {
             endpoint,
             db,
             mnemonic,
             fee,
             federations: RwLock::new(BTreeMap::new()),
-        })
+        }
     }
 
     /// Join the federation behind `invite`: download its config, verify it
@@ -291,13 +279,6 @@ impl Client {
     /// The federation's API handle. Brings the federation up.
     pub fn api(&self, federation: FederationId) -> anyhow::Result<FederationApi> {
         Ok(self.runtime(federation)?.ctx.api.clone())
-    }
-
-    /// The iroh endpoint bound from the seed, shared by every federation's
-    /// connections. The gateway daemon serves its public API by accepting on
-    /// this endpoint.
-    pub fn endpoint(&self) -> &Endpoint {
-        &self.endpoint
     }
 
     /// Cancel every federation's tasks and wait for them to finish.

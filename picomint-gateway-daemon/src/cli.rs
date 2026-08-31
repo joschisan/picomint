@@ -174,7 +174,7 @@ async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, CliEr
 
     Ok(Json(InfoResponse {
         lightning_pk: state.node.node_id(),
-        gateway_pk: GatewayPk(state.client.endpoint().id()),
+        gateway_pk: GatewayPk(state.endpoint.id()),
         alias: state
             .node
             .node_alias()
