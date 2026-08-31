@@ -5,7 +5,6 @@ use crate::consensus::wallet;
 use crate::ui::copiable_text;
 
 pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Markup {
-    let network = server.cfg.consensus.network;
     let federation_wallet = wallet::federation_wallet(dbtx);
     let consensus_block_count = wallet::consensus_block_count(server, dbtx);
     let consensus_fee_rate = wallet::consensus_feerate(server, dbtx).map(|f| f / 1000);
@@ -34,7 +33,7 @@ pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Marku
                     table class="table" {
                         tr {
                             th { "Network" }
-                            td { (network) }
+                            td { (server.cfg.consensus.network) }
                         }
                         @if let Some(wallet) = federation_wallet {
                             tr {
