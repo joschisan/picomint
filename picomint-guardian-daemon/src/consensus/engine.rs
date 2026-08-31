@@ -152,17 +152,17 @@ async fn run_session(
 
     let signed_session_outcome = complete_signed_session_outcome(
         server,
+        connections,
         tx_reject_tx,
         session_index,
         outcomes_rx,
         signatures_rx,
         ordered_rx,
-        connections,
     )
     .await?;
 
     assert!(
-        validate_signed_session_outcome(&server.cfg, &signed_session_outcome, session_index),
+        validate_signed_session_outcome(&server.cfg, session_index, &signed_session_outcome),
         "Our created signed session outcome fails validation"
     );
 
@@ -181,12 +181,12 @@ async fn run_session(
 
 async fn complete_signed_session_outcome(
     server: &Server,
+    connections: &ReconnectP2PConnections<P2PMessage>,
     tx_reject_tx: &broadcast::Sender<(TransactionId, TxError)>,
     session_index: u64,
     outcomes_rx: Receiver<(PeerId, SignedSessionOutcome)>,
     signatures_rx: Receiver<(PeerId, schnorr::Signature)>,
     ordered_rx: Receiver<(BftRound, PeerId, ConsensusItem)>,
-    connections: &ReconnectP2PConnections<P2PMessage>,
 ) -> Option<SignedSessionOutcome> {
     // We request the signed session outcome from a random peer at a fixed
     // interval (3s prod / 300ms regtest).
@@ -265,7 +265,7 @@ async fn complete_signed_session_outcome(
                 let (peer, p2p_outcome) = result.ok()?;
 
                 // Validate signatures
-                if validate_signed_session_outcome(&server.cfg, &p2p_outcome, session_index) {
+                if validate_signed_session_outcome(&server.cfg, session_index, &p2p_outcome) {
                     info!(
                         session_index,
                         peer = %peer,
@@ -365,7 +365,7 @@ async fn complete_signed_session_outcome(
             result = outcomes_rx.recv() => {
                 let (peer, p2p_outcome) = result.ok()?;
 
-                if validate_signed_session_outcome(&server.cfg, &p2p_outcome, session_index) {
+                if validate_signed_session_outcome(&server.cfg, session_index, &p2p_outcome) {
                     assert_eq!(
                         header,
                         p2p_outcome.session_outcome.header(session_index),
@@ -421,8 +421,8 @@ fn random_peer(cfg: &ServerConfig) -> PeerId {
 /// Validate a SignedSessionOutcome received via P2P
 fn validate_signed_session_outcome(
     cfg: &ServerConfig,
-    outcome: &SignedSessionOutcome,
     session_index: u64,
+    outcome: &SignedSessionOutcome,
 ) -> bool {
     if outcome.signatures.len() != cfg.consensus.peers.to_num_peers().threshold() {
         return false;

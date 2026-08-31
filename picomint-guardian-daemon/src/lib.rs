@@ -168,12 +168,12 @@ async fn run_dkg_then_consensus(
     info!("Starting consensus...");
 
     Box::pin(consensus::run(
-        connections,
-        status_rxs,
-        conn_rx,
         cfg,
         db,
         bitcoin_rpc,
+        connections,
+        status_rxs,
+        conn_rx,
         settings.ui_addr,
         &data_dir,
     ))
@@ -212,12 +212,12 @@ async fn run_consensus(
     info!("Starting consensus...");
 
     Box::pin(consensus::run(
-        connections,
-        status_rxs,
-        conn_rx,
         cfg,
         db,
         bitcoin_rpc,
+        connections,
+        status_rxs,
+        conn_rx,
         settings.ui_addr,
         &data_dir,
     ))

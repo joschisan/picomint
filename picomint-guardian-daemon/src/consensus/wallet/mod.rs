@@ -258,7 +258,7 @@ pub async fn process_consensus_item(
 ) -> anyhow::Result<()> {
     match consensus_item {
         WalletConsensusItem::BlockCount(block_count_vote) => {
-            process_block_count(server, dbtx, block_count_vote, peer).await
+            process_block_count(server, dbtx, peer, block_count_vote).await
         }
         WalletConsensusItem::Feerate(feerate) => {
             if Some(feerate) == dbtx.insert(&FeeRateVoteTable, &peer, &feerate) {
@@ -267,9 +267,9 @@ pub async fn process_consensus_item(
 
             Ok(())
         }
-        WalletConsensusItem::Nonces(txid, nonces) => process_nonces(dbtx, txid, nonces, peer),
+        WalletConsensusItem::Nonces(txid, nonces) => process_nonces(dbtx, peer, txid, nonces),
         WalletConsensusItem::Signatures(txid, shares, nonces) => {
-            process_signatures(server, dbtx, txid, shares, nonces, peer).await
+            process_signatures(server, dbtx, peer, txid, shares, nonces).await
         }
     }
 }
@@ -579,8 +579,8 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
 async fn process_block_count(
     server: &Server,
     dbtx: &WriteTx,
-    block_count_vote: u64,
     peer: PeerId,
+    block_count_vote: u64,
 ) -> anyhow::Result<()> {
     let old_consensus_block_count = consensus_block_count(server, dbtx);
 
@@ -665,9 +665,9 @@ async fn process_block_count(
 
 fn process_nonces(
     dbtx: &WriteTx,
+    peer: PeerId,
     txid: Txid,
     nonces: Vec<PublicNonce>,
-    peer: PeerId,
 ) -> anyhow::Result<()> {
     let unsigned = dbtx
         .get(&UnsignedTxTable, &())
@@ -698,10 +698,10 @@ fn process_nonces(
 async fn process_signatures(
     server: &Server,
     dbtx: &WriteTx,
+    peer: PeerId,
     txid: Txid,
     shares: Vec<SignatureShare>,
     fresh_nonces: Vec<PublicNonce>,
-    peer: PeerId,
 ) -> anyhow::Result<()> {
     let mut unsigned = dbtx
         .get(&UnsignedTxTable, &())

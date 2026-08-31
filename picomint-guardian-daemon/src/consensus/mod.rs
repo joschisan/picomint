@@ -46,12 +46,12 @@ const TX_REJECT_BUFFER: usize = 1000;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
-    connections: ReconnectP2PConnections<P2PMessage>,
-    p2p_status_receivers: P2PStatusReceivers,
-    foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
     cfg: ServerConfig,
     db: Database,
     bitcoin_backend: Arc<BitcoindClient>,
+    connections: ReconnectP2PConnections<P2PMessage>,
+    p2p_status_receivers: P2PStatusReceivers,
+    foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
     ui_addr: SocketAddr,
     data_dir: &Path,
 ) -> anyhow::Result<()> {
