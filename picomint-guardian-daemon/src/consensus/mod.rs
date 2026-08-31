@@ -9,8 +9,6 @@ pub mod server;
 pub mod tx;
 pub mod wallet;
 
-use std::net::SocketAddr;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,7 +24,7 @@ use tokio::net::TcpListener;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-use crate::config::ServerConfig;
+use crate::config::{ConfigGenSettings, ServerConfig};
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::ConsensusVersionVoteTable;
 use crate::consensus::server::Server;
@@ -44,16 +42,14 @@ const TX_BUFFER: usize = 100;
 /// rate is zero and the buffer only has to absorb bursts of invalid txs.
 const TX_REJECT_BUFFER: usize = 1000;
 
-#[allow(clippy::too_many_arguments)]
 pub async fn run(
     cfg: ServerConfig,
+    settings: ConfigGenSettings,
     db: Database,
     bitcoin_backend: Arc<BitcoindClient>,
     connections: ReconnectP2PConnections<P2PMessage>,
     p2p_status_receivers: P2PStatusReceivers,
     foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
-    ui_addr: SocketAddr,
-    data_dir: &Path,
 ) -> anyhow::Result<()> {
     cfg.validate_config()?;
 
@@ -146,7 +142,7 @@ pub async fn run(
 
     let ui_service = crate::ui::dashboard::router(consensus_api.clone()).into_make_service();
 
-    let ui_listener = TcpListener::bind(ui_addr)
+    let ui_listener = TcpListener::bind(settings.ui_addr)
         .await
         .expect("Failed to bind dashboard UI");
 
@@ -156,10 +152,10 @@ pub async fn run(
             .expect("Failed to serve dashboard UI");
     });
 
-    info!("Dashboard UI running at http://{ui_addr} 🚀");
+    info!("Dashboard UI running at http://{} 🚀", settings.ui_addr);
 
     {
-        let data_dir = data_dir.to_owned();
+        let data_dir = settings.data_dir.clone();
         let dashboard_router = crate::cli::dashboard_cli_router(consensus_api.clone());
         tokio::spawn(async move {
             crate::cli::run_dashboard_cli(&data_dir, dashboard_router).await;

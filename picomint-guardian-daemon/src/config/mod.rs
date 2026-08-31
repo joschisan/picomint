@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
@@ -65,6 +66,8 @@ pub struct ConfigGenSettings {
     pub ui_addr: SocketAddr,
     /// Bitcoin network for the federation
     pub network: bitcoin::Network,
+    /// Path to the folder holding the database and the admin CLI socket
+    pub data_dir: PathBuf,
 }
 
 /// Outcome of the setup phase: either fresh DKG params (run a DKG) or a

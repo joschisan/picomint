@@ -65,14 +65,15 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting picomint-guardian-daemon (version: {picomint_version})");
 
+    let db = picomint_sqlite::Database::open(server_opts.data_dir.join(DB_FILE))
+        .expect("Failed to open picomint-guardian-daemon database");
+
     let settings = ConfigGenSettings {
         p2p_addr: server_opts.p2p_addr,
         ui_addr: server_opts.ui_addr,
         network: server_opts.bitcoin_network,
+        data_dir: server_opts.data_dir,
     };
-
-    let db = picomint_sqlite::Database::open(server_opts.data_dir.join(DB_FILE))
-        .expect("Failed to open picomint-guardian-daemon database");
 
     let bitcoind = Arc::new(BitcoindClient::new(&server_opts.bitcoind_url)?);
 
@@ -85,5 +86,5 @@ async fn main() -> anyhow::Result<()> {
     // are atomic and BFT sessions resume from disk on next boot. The only
     // graceful return path is the federation-shutdown-via-API mechanism, which
     // unwinds the engine cleanly.
-    run_server(settings, db, bitcoind, server_opts.data_dir).await
+    run_server(settings, db, bitcoind).await
 }
