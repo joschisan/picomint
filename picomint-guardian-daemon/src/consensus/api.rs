@@ -14,7 +14,7 @@ use picomint_core::tx::{ConsensusItem, Transaction, TxError};
 
 use crate::consensus::rpc;
 use crate::{handler, handler_async};
-use picomint_sqlite::Database;
+use picomint_sqlite::{Database, DbRead};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 

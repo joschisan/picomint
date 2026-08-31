@@ -8,7 +8,7 @@ mod secret;
 mod send_sm;
 
 use anyhow::Context;
-use picomint_sqlite::WriteTx;
+use picomint_sqlite::{DbRead, WriteTx};
 use std::sync::Arc;
 
 use crate::executor::ModuleExecutor;

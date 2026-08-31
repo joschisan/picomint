@@ -5,7 +5,7 @@ use anyhow::{Context, ensure};
 use iroh::SecretKey;
 use picomint_core::PeerId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_sqlite::Database;
+use picomint_sqlite::{Database, DbRead};
 use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;

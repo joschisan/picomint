@@ -26,7 +26,7 @@ use picomint_gateway_daemon::db::{
     IncomingOfferTable, OutgoingContractTable, ProcessedLdkEventTable,
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
-use picomint_sqlite::WriteTx;
+use picomint_sqlite::{DbRead, WriteTx};
 use rand::rngs::OsRng;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;

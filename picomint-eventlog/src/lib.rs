@@ -13,12 +13,12 @@ use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use derive_more::{Display, FromStr};
+use derive_more::Display;
 use futures::Stream;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_sqlite::{Database, WriteTx, table};
+use picomint_sqlite::{Database, DbRead, WriteTx, table};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
@@ -63,8 +63,6 @@ pub trait Event: serde::Serialize + serde::de::DeserializeOwned {
     Deserialize,
     Encodable,
     Decodable,
-    Display,
-    FromStr,
 )]
 pub struct EventLogId(pub u64);
 
@@ -78,12 +76,6 @@ impl EventLogId {
 
     pub fn saturating_add(self, rhs: u64) -> EventLogId {
         Self(self.0.saturating_add(rhs))
-    }
-}
-
-impl From<EventLogId> for u64 {
-    fn from(value: EventLogId) -> Self {
-        value.0
     }
 }
 

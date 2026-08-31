@@ -14,7 +14,7 @@ use picomint_core::mint::{
 };
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, OutPoint, PeerId};
-use picomint_sqlite::{Database, ReadTx, WriteTx};
+use picomint_sqlite::{Database, DbRead, ReadTx, WriteTx};
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
 
 use crate::config::dkg::DkgHandle;

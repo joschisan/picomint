@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use picomint_core::config::FederationId;
 use picomint_core::expiry::ExpiryStatus;
-use picomint_sqlite::table;
+use picomint_sqlite::{DbRead, table};
 use thiserror::Error;
 
 use crate::Client;

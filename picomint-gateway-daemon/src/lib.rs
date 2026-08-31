@@ -30,7 +30,7 @@ use picomint_core::ln::methods::{ReceiveRequest, SendRequest, VerifyResponse};
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::FederationInfo;
-use picomint_sqlite::Database;
+use picomint_sqlite::{Database, DbRead};
 use std::sync::RwLock;
 
 use crate::db::{

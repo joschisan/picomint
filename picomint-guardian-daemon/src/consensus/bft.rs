@@ -21,7 +21,7 @@ use picomint_core::secp256k1::schnorr;
 use picomint_core::session::SignedSessionOutcome;
 use picomint_core::tx::ConsensusItem;
 use picomint_encoding::Encodable;
-use picomint_sqlite::Database;
+use picomint_sqlite::{Database, DbRead};
 use tracing::error;
 
 use crate::consensus::db::SignedSessionOutcomeTable;

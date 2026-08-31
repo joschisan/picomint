@@ -98,73 +98,6 @@ macro_rules! table {
     (
         $(#[$attr:meta])*
         $name:ident,
-        ($k0:ty, $k1:ty, $k2:ty, $k3:ty) => $v:ty,
-        $label:literal $(,)?
-    ) => {
-        $(#[$attr])*
-        #[derive(Copy, Clone, Debug)]
-        pub struct $name;
-
-        impl $crate::Table for $name {
-            type Key = ($k0, $k1, $k2, $k3);
-            type Value = $v;
-
-            const KEY_COLS: usize = 4;
-
-            fn name(&self) -> &'static str {
-                $label
-            }
-
-            fn encode_key(key: &Self::Key) -> ::std::vec::Vec<::std::vec::Vec<u8>> {
-                ::std::vec![
-                    $crate::encode(&key.0),
-                    $crate::encode(&key.1),
-                    $crate::encode(&key.2),
-                    $crate::encode(&key.3),
-                ]
-            }
-
-            fn decode_key(cols: &[&[u8]]) -> Self::Key {
-                (
-                    $crate::decode(cols[0]),
-                    $crate::decode(cols[1]),
-                    $crate::decode(cols[2]),
-                    $crate::decode(cols[3]),
-                )
-            }
-        }
-
-        impl $crate::Prefix<$name> for $k0 {
-            const LEN: usize = 1;
-
-            fn encode_prefix(&self) -> ::std::vec::Vec<::std::vec::Vec<u8>> {
-                ::std::vec![$crate::encode(self)]
-            }
-        }
-
-        impl $crate::Prefix<$name> for ($k0, $k1) {
-            const LEN: usize = 2;
-
-            fn encode_prefix(&self) -> ::std::vec::Vec<::std::vec::Vec<u8>> {
-                ::std::vec![$crate::encode(&self.0), $crate::encode(&self.1)]
-            }
-        }
-
-        impl $crate::Prefix<$name> for ($k0, $k1, $k2) {
-            const LEN: usize = 3;
-
-            fn encode_prefix(&self) -> ::std::vec::Vec<::std::vec::Vec<u8>> {
-                ::std::vec![
-                    $crate::encode(&self.0),
-                    $crate::encode(&self.1),
-                    $crate::encode(&self.2),
-                ]
-            }
-        }
-    };
-    (
-        $(#[$attr:meta])*
-        $name:ident,
         ($k0:ty, $k1:ty, $k2:ty) => $v:ty,
         $label:literal $(,)?
     ) => {
@@ -352,10 +285,6 @@ fn delete_sql(name: &str, n: usize) -> String {
     format!("DELETE FROM \"{name}\" WHERE {}", where_key(n))
 }
 
-fn delete_prefix_sql(name: &str, m: usize) -> String {
-    format!("DELETE FROM \"{name}\" WHERE {}", where_key(m))
-}
-
 fn clear_sql(name: &str) -> String {
     format!("DELETE FROM \"{name}\"")
 }
@@ -421,8 +350,6 @@ struct DatabaseInner {
     /// Lazily-populated map of table name -> shared `Notify`. Any commit
     /// that wrote a table wakes every waiter on that table.
     notify: Mutex<BTreeMap<&'static str, Arc<Notify>>>,
-    /// Fires on every commit, regardless of which tables were written.
-    global_notify: Arc<Notify>,
 }
 
 impl DatabaseInner {
@@ -515,7 +442,6 @@ impl Database {
                 writer_returned: Condvar::new(),
                 readers: Mutex::new(Vec::new()),
                 notify: Mutex::new(BTreeMap::new()),
-                global_notify: Arc::new(Notify::new()),
             }),
         })
     }
@@ -569,22 +495,13 @@ impl Database {
         }
     }
 
-    /// Notification future for the next commit on this database. Fires on
-    /// every committed write, regardless of which tables were touched.
-    ///
-    /// Must be constructed *before* the check it guards — tokio's `Notified`
-    /// captures the `notify_waiters` generation at construction time, so any
-    /// commit that happens after `wait_commit()` returns but before the
-    /// future is awaited will still wake the waiter. Wrapping this in an
-    /// `async fn` would defer the generation capture to first poll and
-    /// reintroduce the TOCTOU race.
-    pub fn wait_commit(&self) -> tokio::sync::futures::Notified<'_> {
-        self.inner.global_notify.notified()
-    }
-
     /// Shared [`Notify`] handle for `table`. Fires via `notify_waiters` on
-    /// every commit that wrote the table. Callers should construct
-    /// `notified()` *before* the check it guards (see [`Self::wait_commit`]).
+    /// every commit that wrote the table.
+    ///
+    /// Callers must construct `notified()` *before* the check it guards —
+    /// tokio's `Notified` captures the `notify_waiters` generation at
+    /// construction time, so any commit that lands between the check and the
+    /// await will still wake the waiter.
     pub fn notify_for_table<T: Table>(&self, def: &T) -> Arc<Notify> {
         self.inner.notify_for(def.name())
     }
@@ -675,17 +592,11 @@ impl WriteTx {
             self.db.notify_for(name).notify_waiters();
         }
 
-        self.db.global_notify.notify_waiters();
-
         let callbacks = mem::take(&mut *self.on_commit.lock().expect("on_commit poisoned"));
 
         for cb in callbacks {
             cb();
         }
-    }
-
-    fn conn(&self) -> ConnGuard<'_> {
-        ConnGuard(self.conn.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
     /// Idempotently create the backing SQLite table. Runs inside the write
@@ -710,20 +621,6 @@ impl WriteTx {
             .lock()
             .expect("touched poisoned")
             .insert(def.name());
-    }
-}
-
-/// Locked view of a tx's connection; derefs to [`Connection`] for the
-/// duration of one op.
-struct ConnGuard<'a>(std::sync::MutexGuard<'a, Option<Connection>>);
-
-impl std::ops::Deref for ConnGuard<'_> {
-    type Target = Connection;
-
-    fn deref(&self) -> &Connection {
-        self.0
-            .as_ref()
-            .expect("connection present until commit or drop")
     }
 }
 
@@ -865,16 +762,6 @@ fn scan<D: Table, R>(
 }
 
 impl WriteTx {
-    pub fn get<D: Table>(&self, def: &D, key: &D::Key) -> Option<D::Value> {
-        self.ensure_table(def);
-
-        query_value(
-            &self.conn(),
-            &select_sql(def.name(), D::KEY_COLS),
-            &D::encode_key(key),
-        )
-    }
-
     /// Insert `value` under `key`, returning the previously stored value.
     pub fn insert<D: Table>(&self, def: &D, key: &D::Key, value: &D::Value) -> Option<D::Value> {
         self.ensure_table(def);
@@ -931,7 +818,7 @@ impl WriteTx {
         self.touch(def);
 
         self.conn()
-            .prepare_cached(&delete_prefix_sql(def.name(), P::LEN))
+            .prepare_cached(&delete_sql(def.name(), P::LEN))
             .expect("sqlite prepare failed")
             .execute(params_from_iter(prefix.encode_prefix()))
             .expect("sqlite delete failed");
@@ -950,107 +837,62 @@ impl WriteTx {
             .execute([])
             .expect("sqlite delete failed");
     }
+}
 
-    pub fn iter<D: Table, R>(&self, def: &D, f: impl FnOnce(&mut SqliteIter<'_, D>) -> R) -> R {
-        self.ensure_table(def);
+// ─── DbRead / DbWrite trait abstraction ──────────────────────────────────
+//
+// Typed methods defined directly over `Table`-implementing tables. The read
+// methods are provided once here over the sealed connection accessor, so
+// both tx types share one implementation. Server modules take
+// `&impl DbRead` / `&impl DbWrite` to stay generic over owned-vs-borrowed
+// and read-vs-write.
 
-        let sql = scan_sql(def.name(), D::KEY_COLS, &[], false);
+mod sealed {
+    use std::sync::MutexGuard;
 
-        scan(
-            &self.conn(),
-            &sql,
-            Vec::new(),
-            || unreachable!("table was just created"),
-            f,
-        )
+    use rusqlite::Connection;
+
+    /// Locked view of a tx's connection; derefs to [`Connection`] for the
+    /// duration of one op.
+    pub struct ConnGuard<'a>(pub(super) MutexGuard<'a, Option<Connection>>);
+
+    impl std::ops::Deref for ConnGuard<'_> {
+        type Target = Connection;
+
+        fn deref(&self) -> &Connection {
+            self.0
+                .as_ref()
+                .expect("connection present until commit or drop")
+        }
     }
 
-    /// Iterate the table in descending key order.
-    pub fn iter_rev<D: Table, R>(&self, def: &D, f: impl FnOnce(&mut SqliteIter<'_, D>) -> R) -> R {
-        self.ensure_table(def);
-
-        let sql = scan_sql(def.name(), D::KEY_COLS, &[], true);
-
-        scan(
-            &self.conn(),
-            &sql,
-            Vec::new(),
-            || unreachable!("table was just created"),
-            f,
-        )
-    }
-
-    /// Iterate every entry whose key starts with `prefix`, in ascending key
-    /// order. Compiles to an indexed `WHERE` on the prefix columns.
-    pub fn prefix<D: Table, P: Prefix<D>, R>(
-        &self,
-        def: &D,
-        prefix: &P,
-        f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-    ) -> R {
-        self.ensure_table(def);
-
-        let sql = scan_sql(def.name(), D::KEY_COLS, &[where_key(P::LEN)], false);
-
-        scan(
-            &self.conn(),
-            &sql,
-            prefix.encode_prefix(),
-            || unreachable!("table was just created"),
-            f,
-        )
-    }
-
-    /// Iterate every entry whose key starts with `prefix`, in descending key
-    /// order.
-    pub fn prefix_rev<D: Table, P: Prefix<D>, R>(
-        &self,
-        def: &D,
-        prefix: &P,
-        f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-    ) -> R {
-        self.ensure_table(def);
-
-        let sql = scan_sql(def.name(), D::KEY_COLS, &[where_key(P::LEN)], true);
-
-        scan(
-            &self.conn(),
-            &sql,
-            prefix.encode_prefix(),
-            || unreachable!("table was just created"),
-            f,
-        )
-    }
-
-    /// Iterate the entries within a typed key range, in ascending key order.
-    pub fn range<D: Table, B: RangeBounds<D::Key>, R>(
-        &self,
-        def: &D,
-        range: B,
-        f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-    ) -> R {
-        self.ensure_table(def);
-
-        let (clauses, params) = range_clauses::<D>(&range);
-
-        let sql = scan_sql(def.name(), D::KEY_COLS, &clauses, false);
-
-        scan(
-            &self.conn(),
-            &sql,
-            params,
-            || unreachable!("table was just created"),
-            f,
-        )
+    /// Sealed supertrait of [`DbRead`](super::DbRead): restricts the trait
+    /// to the two tx types and hands their connection to the provided read
+    /// methods. Unnameable outside the crate, so `conn` stays internal.
+    pub trait HasConn {
+        fn conn(&self) -> ConnGuard<'_>;
     }
 }
 
-impl ReadTx {
+use sealed::{ConnGuard, HasConn};
+
+impl HasConn for WriteTx {
     fn conn(&self) -> ConnGuard<'_> {
         ConnGuard(self.conn.lock().unwrap_or_else(PoisonError::into_inner))
     }
+}
 
-    pub fn get<D: Table>(&self, def: &D, key: &D::Key) -> Option<D::Value> {
+impl HasConn for ReadTx {
+    fn conn(&self) -> ConnGuard<'_> {
+        ConnGuard(self.conn.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+}
+
+/// Typed read operations, shared by both tx types. A table that has never
+/// been written reads as empty — `None` for gets, `R::default()` for scans
+/// — so reads never create tables as a side effect.
+pub trait DbRead: HasConn {
+    fn get<D: Table>(&self, def: &D, key: &D::Key) -> Option<D::Value> {
         query_value(
             &self.conn(),
             &select_sql(def.name(), D::KEY_COLS),
@@ -1058,7 +900,7 @@ impl ReadTx {
         )
     }
 
-    pub fn iter<D: Table, R: Default>(
+    fn iter<D: Table, R: Default>(
         &self,
         def: &D,
         f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
@@ -1069,7 +911,7 @@ impl ReadTx {
     }
 
     /// Iterate the table in descending key order.
-    pub fn iter_rev<D: Table, R: Default>(
+    fn iter_rev<D: Table, R: Default>(
         &self,
         def: &D,
         f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
@@ -1081,7 +923,7 @@ impl ReadTx {
 
     /// Iterate every entry whose key starts with `prefix`, in ascending key
     /// order. Compiles to an indexed `WHERE` on the prefix columns.
-    pub fn prefix<D: Table, P: Prefix<D>, R: Default>(
+    fn prefix<D: Table, P: Prefix<D>, R: Default>(
         &self,
         def: &D,
         prefix: &P,
@@ -1094,7 +936,7 @@ impl ReadTx {
 
     /// Iterate every entry whose key starts with `prefix`, in descending key
     /// order.
-    pub fn prefix_rev<D: Table, P: Prefix<D>, R: Default>(
+    fn prefix_rev<D: Table, P: Prefix<D>, R: Default>(
         &self,
         def: &D,
         prefix: &P,
@@ -1106,7 +948,7 @@ impl ReadTx {
     }
 
     /// Iterate the entries within a typed key range, in ascending key order.
-    pub fn range<D: Table, B: RangeBounds<D::Key>, R: Default>(
+    fn range<D: Table, B: RangeBounds<D::Key>, R: Default>(
         &self,
         def: &D,
         range: B,
@@ -1120,45 +962,8 @@ impl ReadTx {
     }
 }
 
-// ─── DbRead / DbWrite trait abstraction ──────────────────────────────────
-//
-// Typed methods defined directly over `Table`-implementing tables and
-// implemented on each concrete tx type. Server modules take `&impl DbRead` /
-// `&impl DbWrite` to stay generic over owned-vs-borrowed and read-vs-write.
-
-pub trait DbRead {
-    fn get<D: Table>(&self, def: &D, key: &D::Key) -> Option<D::Value>;
-
-    fn iter<D: Table, R: Default>(&self, def: &D, f: impl FnOnce(&mut SqliteIter<'_, D>) -> R)
-    -> R;
-
-    fn iter_rev<D: Table, R: Default>(
-        &self,
-        def: &D,
-        f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-    ) -> R;
-
-    fn prefix<D: Table, P: Prefix<D>, R: Default>(
-        &self,
-        def: &D,
-        prefix: &P,
-        f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-    ) -> R;
-
-    fn prefix_rev<D: Table, P: Prefix<D>, R: Default>(
-        &self,
-        def: &D,
-        prefix: &P,
-        f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-    ) -> R;
-
-    fn range<D: Table, B: RangeBounds<D::Key>, R: Default>(
-        &self,
-        def: &D,
-        range: B,
-        f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-    ) -> R;
-}
+impl DbRead for ReadTx {}
+impl DbRead for WriteTx {}
 
 pub trait DbWrite: DbRead {
     fn insert<D: Table>(&self, def: &D, key: &D::Key, value: &D::Value) -> Option<D::Value>;
@@ -1169,64 +974,6 @@ pub trait DbWrite: DbRead {
 
     fn clear_table<D: Table>(&self, def: &D);
 }
-
-// Cuts the read method-body duplication per tx type; each impl delegates to
-// the inherent methods that carry the actual logic.
-macro_rules! impl_db_read_via_inherent {
-    ($ty:ty) => {
-        impl DbRead for $ty {
-            fn get<D: Table>(&self, def: &D, key: &D::Key) -> Option<D::Value> {
-                <$ty>::get(self, def, key)
-            }
-
-            fn iter<D: Table, R: Default>(
-                &self,
-                def: &D,
-                f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-            ) -> R {
-                <$ty>::iter(self, def, f)
-            }
-
-            fn iter_rev<D: Table, R: Default>(
-                &self,
-                def: &D,
-                f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-            ) -> R {
-                <$ty>::iter_rev(self, def, f)
-            }
-
-            fn prefix<D: Table, P: Prefix<D>, R: Default>(
-                &self,
-                def: &D,
-                prefix: &P,
-                f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-            ) -> R {
-                <$ty>::prefix(self, def, prefix, f)
-            }
-
-            fn prefix_rev<D: Table, P: Prefix<D>, R: Default>(
-                &self,
-                def: &D,
-                prefix: &P,
-                f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-            ) -> R {
-                <$ty>::prefix_rev(self, def, prefix, f)
-            }
-
-            fn range<D: Table, B: RangeBounds<D::Key>, R: Default>(
-                &self,
-                def: &D,
-                range: B,
-                f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
-            ) -> R {
-                <$ty>::range(self, def, range, f)
-            }
-        }
-    };
-}
-
-impl_db_read_via_inherent!(ReadTx);
-impl_db_read_via_inherent!(WriteTx);
 
 impl DbWrite for WriteTx {
     fn insert<D: Table>(&self, def: &D, key: &D::Key, value: &D::Value) -> Option<D::Value> {

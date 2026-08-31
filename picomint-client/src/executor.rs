@@ -19,7 +19,7 @@ use std::sync::Arc;
 use crate::task::TaskGroup;
 use picomint_core::config::FederationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_sqlite::{Database, Prefix, Table, WriteTx};
+use picomint_sqlite::{Database, DbRead, Prefix, Table, WriteTx};
 
 /// Random opaque identifier assigned by the executor when a state
 /// machine is first inserted. Used as the table key; the state machine
@@ -132,10 +132,6 @@ where
         dbtx.on_commit(move || {
             inner.spawn_drive(id, state);
         });
-    }
-
-    pub fn get_active_states(&self) -> Vec<(SmId, S)> {
-        self.inner.get_active_states()
     }
 }
 

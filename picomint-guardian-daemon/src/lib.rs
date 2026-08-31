@@ -20,7 +20,7 @@ pub const DB_FILE: &str = "database.sqlite";
 
 use config::ServerConfig;
 use picomint_bitcoin_rpc::BitcoindClient;
-use picomint_sqlite::Database;
+use picomint_sqlite::{Database, DbRead};
 use tokio::net::TcpListener;
 use tracing::info;
 

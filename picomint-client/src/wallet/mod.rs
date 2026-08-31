@@ -26,6 +26,7 @@ use picomint_core::wallet::{
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_encoding::Encodable;
+use picomint_sqlite::DbRead;
 
 pub use self::secret::WalletSecret;
 use secp256k1::Keypair;

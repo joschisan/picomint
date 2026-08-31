@@ -11,6 +11,8 @@ use picomint_core::ln::methods::{
 };
 use tokio::time::timeout;
 
+use picomint_sqlite::DbRead;
+
 use super::Lightning;
 use super::db::{
     DecryptionKeyShareTable, GatewayTable, IncomingContractStreamIndexTable,

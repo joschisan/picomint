@@ -1,5 +1,5 @@
-use picomint_sqlite::Database;
 use picomint_sqlite::table;
+use picomint_sqlite::{Database, DbRead};
 
 use crate::config::setup::LocalParams;
 use crate::config::{ConfigGenParams, ServerConfig};

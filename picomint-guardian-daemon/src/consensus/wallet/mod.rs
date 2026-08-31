@@ -23,7 +23,7 @@ use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::wallet as common;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_sqlite::{Database, ReadTx, WriteTx};
+use picomint_sqlite::{Database, DbRead, ReadTx, WriteTx};
 use tokio::time::sleep;
 
 use crate::config::dkg::DkgHandle;

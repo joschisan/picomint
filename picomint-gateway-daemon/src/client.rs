@@ -9,7 +9,7 @@ use picomint_client::{Client, Mnemonic};
 use picomint_core::config::{ConsensusConfig, FederationId};
 use picomint_core::invite::InviteCode;
 use picomint_core::secret::Secret;
-use picomint_sqlite::Database;
+use picomint_sqlite::{Database, DbRead};
 
 use crate::db::{ClientConfigTable, RootEntropyTable};
 

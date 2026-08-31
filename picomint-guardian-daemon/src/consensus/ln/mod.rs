@@ -18,7 +18,7 @@ use picomint_core::ln::{
 };
 use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::{Amount, NumPeersExt, OutPoint, PeerId};
-use picomint_sqlite::{Database, ReadTx, WriteTx};
+use picomint_sqlite::{Database, DbRead, ReadTx, WriteTx};
 use tpe::{PublicKeyShare, SecretKeyShare};
 use tracing::trace;
 
