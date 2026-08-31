@@ -92,8 +92,9 @@ where
     T: Table<Key = (FederationId, SmId), Value = S> + Copy + Send + Sync + 'static,
     FederationId: Prefix<T>,
 {
-    /// Resume every state machine `federation` persisted in `table` from a
-    /// previous run, and drive new ones as they are added.
+    /// A handle for driving state machines of type `S` in `table` under
+    /// `federation`. Cheap to construct — nothing is read or spawned until
+    /// [`Self::resume`] or a state machine is added.
     pub fn new(
         db: Database,
         federation: FederationId,
@@ -101,19 +102,24 @@ where
         context: S::Context,
         tg: TaskGroup,
     ) -> Self {
-        let inner = Arc::new(Inner {
-            db,
-            federation,
-            table,
-            context,
-            tg,
-        });
-
-        for (id, state) in inner.get_active_states() {
-            inner.clone().spawn_drive(id, state);
+        Self {
+            inner: Arc::new(Inner {
+                db,
+                federation,
+                table,
+                context,
+                tg,
+            }),
         }
+    }
 
-        Self { inner }
+    /// Resume every state machine `federation` persisted in `table` from a
+    /// previous run. Called exactly once per federation bring-up — a second
+    /// call would double-drive every active state machine.
+    pub fn resume(&self) {
+        for (id, state) in self.inner.get_active_states() {
+            self.inner.clone().spawn_drive(id, state);
+        }
     }
 
     /// Atomically insert `state` as a new active state machine under a

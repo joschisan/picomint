@@ -16,8 +16,8 @@ use lightning::types::payment::PaymentHash;
 use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
-use picomint_client::Client;
 use picomint_client::gw::events::ReceiveSuccessEvent;
+use picomint_client::{Client, Mnemonic};
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -43,7 +43,7 @@ pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 #[derive(Clone)]
 pub struct AppState {
     pub client: Arc<Client>,
-    pub mnemonic: picomint_client::Mnemonic,
+    pub mnemonic: Mnemonic,
     pub node: Arc<ldk_node::Node>,
     pub gateway_db: Database,
     pub data_dir: std::path::PathBuf,

@@ -13,8 +13,10 @@ use picomint_sqlite::{DbRead, WriteTx};
 use std::collections::BTreeMap;
 
 use crate::api::FederationApi;
+use crate::client::{Client, FederationRuntime};
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
+use crate::secret::ClientSecret;
 use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use crate::tx::{TxSubmissionSmContext, TxSubmissionStateMachine, TxSubmissionStateMachineTable};
@@ -427,6 +429,18 @@ impl Mint {
             mint_executor,
             send_executor,
         }
+    }
+}
+
+impl Mint {
+    /// Resume this federation's persisted mint state machines. Called
+    /// exactly once, at federation bring-up.
+    pub(crate) fn resume(&self) {
+        self.tx_submission_executor.resume();
+
+        self.mint_executor.resume();
+
+        self.send_executor.resume();
     }
 }
 
@@ -909,6 +923,37 @@ fn represent_amount(mut remaining_amount: Amount) -> Vec<Denomination> {
 
 // ─── Flat federation-keyed surface ───────────────────────────────────────
 
+impl Mint {
+    /// Derive the mint record for `federation` — a throwaway bundle of
+    /// config, keys and executor handles, rebuilt per call from the seed
+    /// and the runtime's config.
+    pub(crate) fn derive(
+        client: &Client,
+        runtime: &FederationRuntime,
+        federation: FederationId,
+    ) -> Mint {
+        Mint::new(
+            federation,
+            runtime.config.mint.clone(),
+            ClientContext::new(
+                runtime.api.clone(),
+                client.db.clone(),
+                runtime.config.clone(),
+            ),
+            ClientSecret::new(&client.mnemonic, federation).mint_secret(),
+            client.fee.as_ref().map_or(0, |fee| fee.ppm),
+            &runtime.tg,
+        )
+    }
+}
+
+impl Client {
+    /// Derive the mint record for `federation`, bringing the federation up.
+    pub(crate) fn mint(&self, federation: FederationId) -> anyhow::Result<Mint> {
+        Ok(Mint::derive(self, &*self.runtime(federation)?, federation))
+    }
+}
+
 /// `account`'s ecash balance: the face value of every note it holds.
 pub(crate) fn balance(dbtx: &impl DbRead, federation: FederationId, account: Account) -> Amount {
     account_notes(dbtx, federation, account)
@@ -917,7 +962,7 @@ pub(crate) fn balance(dbtx: &impl DbRead, federation: FederationId, account: Acc
         .sum()
 }
 
-impl crate::Client {
+impl Client {
     /// `account`'s ecash balance. Pure read — never brings the federation
     /// up, and an unjoined federation simply holds nothing.
     pub fn mint_balance(&self, federation: FederationId, account: Account) -> Amount {
@@ -971,10 +1016,9 @@ impl crate::Client {
         account: Account,
         amount: Amount,
     ) -> Result<ECash, SendECashError> {
-        let runtime = self
-            .runtime(federation)
+        let mint = self
+            .mint(federation)
             .map_err(|_| SendECashError::NotJoined)?;
-        let mint = &runtime.mint;
 
         let amount = round_to_multiple(amount, client_denominations().next().unwrap().amount());
 
@@ -1131,8 +1175,7 @@ impl crate::Client {
         federation: FederationId,
         account: Account,
     ) -> anyhow::Result<Option<ECash>> {
-        let runtime = self.runtime(federation)?;
-        let mint = &runtime.mint;
+        let mint = self.mint(federation)?;
 
         let operation = OperationId::new_random();
         let dbtx = mint.client_ctx.db().begin_write();
@@ -1175,10 +1218,9 @@ impl crate::Client {
         account: Account,
         ecash: &ECash,
     ) -> Result<OperationId, ReceiveECashError> {
-        let runtime = self
-            .runtime(federation)
+        let mint = self
+            .mint(federation)
             .map_err(|_| ReceiveECashError::NotJoined)?;
-        let mint = &runtime.mint;
 
         let operation = OperationId::from_encodable(ecash);
 
@@ -1241,7 +1283,7 @@ impl crate::Client {
     }
 }
 
-impl crate::Client {
+impl Client {
     /// Fund, sign and submit a hand-built transaction, minting change into
     /// `account`. An escape hatch for integration tests that forge foreign
     /// inputs; not part of the supported surface.
@@ -1253,13 +1295,12 @@ impl crate::Client {
         dbtx: &WriteTx,
         account: Account,
         operation: OperationId,
-        tx_builder: crate::tx::TxBuilder,
+        tx_builder: TxBuilder,
         max: bool,
         event: impl FnOnce(TransactionId) -> E,
     ) -> anyhow::Result<Option<TransactionId>> {
         Ok(self
-            .runtime(federation)?
-            .mint
+            .mint(federation)?
             .finalize_and_submit_tx(dbtx, account, operation, tx_builder, max, event))
     }
 }

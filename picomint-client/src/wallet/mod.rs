@@ -9,8 +9,11 @@ mod send_sm;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use crate::client::{Client, FederationRuntime};
 use crate::executor::ModuleExecutor;
+use crate::mint::Mint;
 use crate::module::ClientContext;
+use crate::secret::ClientSecret;
 use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use anyhow::{Context, anyhow};
@@ -27,7 +30,7 @@ use picomint_core::wallet::{
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_encoding::Encodable;
-use picomint_sqlite::DbRead;
+use picomint_sqlite::{DbRead, WriteTx};
 
 pub use self::secret::WalletSecret;
 use secp256k1::Keypair;
@@ -45,7 +48,7 @@ pub struct Wallet {
     secret: WalletSecret,
     cfg: WalletConfigConsensus,
     client_ctx: ClientContext,
-    mint: crate::mint::Mint,
+    mint: Mint,
     send_executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
 }
 
@@ -55,7 +58,7 @@ impl Wallet {
     pub fn new(
         cfg: WalletConfigConsensus,
         context: ClientContext,
-        mint: crate::mint::Mint,
+        mint: Mint,
         secret: WalletSecret,
         tg: &TaskGroup,
     ) -> Wallet {
@@ -68,17 +71,42 @@ impl Wallet {
             tg.clone(),
         );
 
-        let module = Wallet {
+        Wallet {
             secret,
             cfg,
             client_ctx: context,
             mint,
             send_executor,
-        };
+        }
+    }
 
-        tg.spawn(Self::output_scanner(module.clone()));
+    /// Derive the wallet record for `federation` — a throwaway bundle of
+    /// config, keys and executor handles, rebuilt per call from the seed
+    /// and the runtime's config.
+    pub(crate) fn derive(
+        client: &Client,
+        runtime: &FederationRuntime,
+        federation: FederationId,
+    ) -> Wallet {
+        Wallet::new(
+            runtime.config.wallet.clone(),
+            ClientContext::new(
+                runtime.api.clone(),
+                client.db.clone(),
+                runtime.config.clone(),
+            ),
+            Mint::derive(client, runtime, federation),
+            ClientSecret::new(&client.mnemonic, federation).wallet_secret(),
+            &runtime.tg,
+        )
+    }
 
-        module
+    /// Resume this federation's persisted wallet state machines and start
+    /// the address scanner. Called exactly once, at federation bring-up.
+    pub(crate) fn resume(self, tg: &TaskGroup) {
+        self.send_executor.resume();
+
+        tg.spawn(Self::output_scanner(self));
     }
 }
 
@@ -429,10 +457,7 @@ impl Wallet {
 
 /// Remove every row this module owns under the caller's federation prefix.
 /// Called by [`crate::Client::remove`] for end-of-life cleanup.
-pub(crate) fn wipe_tables(
-    dbtx: &picomint_sqlite::WriteTx,
-    federation: picomint_core::config::FederationId,
-) {
+pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
     dbtx.remove(&NextOutputIndexTable, &federation);
     dbtx.remove_prefix(&ValidAddressIndexTable, &federation);
     dbtx.remove_prefix(&SendStateMachineTable, &federation);
@@ -458,7 +483,17 @@ pub enum SendError {
 
 // ─── Flat federation-keyed surface ───────────────────────────────────────
 
-impl crate::Client {
+impl Client {
+    /// Derive the wallet record for `federation`, bringing the federation
+    /// up.
+    pub(crate) fn wallet(&self, federation: FederationId) -> anyhow::Result<Wallet> {
+        Ok(Wallet::derive(
+            self,
+            &*self.runtime(federation)?,
+            federation,
+        ))
+    }
+
     /// `account`'s next unused onchain deposit address, polling until the
     /// initial address derivation has completed.
     pub async fn wallet_deposit_address(
@@ -466,8 +501,7 @@ impl crate::Client {
         federation: FederationId,
         account: Account,
     ) -> anyhow::Result<Address> {
-        let runtime = self.runtime(federation)?;
-        let wallet = &runtime.wallet;
+        let wallet = self.wallet(federation)?;
 
         loop {
             if let Some(idx) = wallet.highest_valid_index(account) {
@@ -488,8 +522,7 @@ impl crate::Client {
         amount: bitcoin::Amount,
         fee: Option<bitcoin::Amount>,
     ) -> Result<OperationId, SendError> {
-        let runtime = self.runtime(federation).map_err(|_| SendError::NotJoined)?;
-        let wallet = &runtime.wallet;
+        let wallet = self.wallet(federation).map_err(|_| SendError::NotJoined)?;
 
         let fee = match fee {
             Some(fee) => fee,
@@ -507,8 +540,7 @@ impl crate::Client {
         federation: FederationId,
         account: Account,
     ) -> Result<bitcoin::Amount, SendError> {
-        let runtime = self.runtime(federation).map_err(|_| SendError::NotJoined)?;
-        let wallet = &runtime.wallet;
+        let wallet = self.wallet(federation).map_err(|_| SendError::NotJoined)?;
 
         Ok(wallet.max_amount_at(account, wallet.send_fee().await?))
     }
@@ -521,8 +553,7 @@ impl crate::Client {
         account: Account,
         address: Address<NetworkUnchecked>,
     ) -> Result<OperationId, SendError> {
-        let runtime = self.runtime(federation).map_err(|_| SendError::NotJoined)?;
-        let wallet = &runtime.wallet;
+        let wallet = self.wallet(federation).map_err(|_| SendError::NotJoined)?;
 
         let fee = wallet.send_fee().await?;
 
@@ -536,9 +567,8 @@ impl crate::Client {
         &self,
         federation: FederationId,
     ) -> Result<bitcoin::Amount, SendError> {
-        self.runtime(federation)
+        self.wallet(federation)
             .map_err(|_| SendError::NotJoined)?
-            .wallet
             .send_fee()
             .await
     }
@@ -548,8 +578,7 @@ impl crate::Client {
         &self,
         federation: FederationId,
     ) -> anyhow::Result<bitcoin::Amount> {
-        let runtime = self.runtime(federation)?;
-        let wallet = &runtime.wallet;
+        let wallet = self.wallet(federation)?;
 
         wallet
             .client_ctx
@@ -561,16 +590,14 @@ impl crate::Client {
 
     /// The consensus block count of the federation.
     pub async fn wallet_block_count(&self, federation: FederationId) -> anyhow::Result<u64> {
-        let runtime = self.runtime(federation)?;
-        let wallet = &runtime.wallet;
+        let wallet = self.wallet(federation)?;
 
         wallet.client_ctx.api().wallet_consensus_block_count().await
     }
 
     /// The current consensus feerate.
     pub async fn wallet_feerate(&self, federation: FederationId) -> anyhow::Result<Option<u64>> {
-        let runtime = self.runtime(federation)?;
-        let wallet = &runtime.wallet;
+        let wallet = self.wallet(federation)?;
 
         wallet.client_ctx.api().wallet_consensus_feerate().await
     }

@@ -12,6 +12,7 @@ use picomint_client::{Client, Mnemonic};
 use picomint_core::config::FederationId;
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::gateway::GatewayPk;
+use picomint_sqlite::Database;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::block_in_place;
@@ -25,7 +26,7 @@ use crate::cli;
 pub struct TestClient {
     pub client: Arc<Client>,
     pub fed: FederationId,
-    pub db: picomint_sqlite::Database,
+    pub db: Database,
 }
 
 pub const BTC_RPC_PORT: u16 = 18443;
@@ -254,7 +255,7 @@ async fn build_client(
     let db_dir = data_dir.join(format!("client-{n}"));
     tokio::fs::create_dir_all(&db_dir).await?;
 
-    let db = picomint_sqlite::Database::open(db_dir.join("database.sqlite"))?;
+    let db = Database::open(db_dir.join("database.sqlite"))?;
 
     let mnemonic = match mnemonic {
         Some(m) => m,

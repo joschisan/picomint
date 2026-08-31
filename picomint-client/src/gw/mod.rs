@@ -7,8 +7,11 @@ use anyhow::Context as _;
 use picomint_sqlite::WriteTx;
 use std::collections::BTreeMap;
 
+use crate::client::{Client, FederationRuntime};
 use crate::executor::ModuleExecutor;
+use crate::mint::Mint;
 use crate::module::ClientContext;
+use crate::secret::ClientSecret;
 use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
@@ -38,7 +41,7 @@ impl Gw {
         federation: FederationId,
         cfg: LightningConfigConsensus,
         context: ClientContext,
-        mint: crate::mint::Mint,
+        mint: Mint,
         gw_secret: GwSecret,
         tg: &TaskGroup,
     ) -> Gw {
@@ -70,6 +73,34 @@ impl Gw {
             receive_executor,
         }
     }
+
+    /// Derive the gateway record for `federation` — a throwaway bundle of
+    /// config, keys and executor handles, rebuilt per call from the seed
+    /// and the runtime's config.
+    pub(crate) fn derive(
+        client: &Client,
+        runtime: &FederationRuntime,
+        federation: FederationId,
+    ) -> Gw {
+        Gw::new(
+            federation,
+            runtime.config.ln.clone(),
+            ClientContext::new(
+                runtime.api.clone(),
+                client.db.clone(),
+                runtime.config.clone(),
+            ),
+            Mint::derive(client, runtime, federation),
+            ClientSecret::new(&client.mnemonic, federation).gw_secret(),
+            &runtime.tg,
+        )
+    }
+
+    /// Resume this federation's persisted receive state machines. Called
+    /// exactly once, at federation bring-up.
+    pub(crate) fn resume(&self) {
+        self.receive_executor.resume();
+    }
 }
 
 #[derive(Clone)]
@@ -77,7 +108,7 @@ pub struct Gw {
     pub federation: FederationId,
     pub cfg: LightningConfigConsensus,
     pub client_ctx: ClientContext,
-    pub mint: crate::mint::Mint,
+    pub mint: Mint,
     pub keypair: Keypair,
     receive_executor: ModuleExecutor<ReceiveStateMachine, ReceiveStateMachineTable>,
 }
@@ -86,7 +117,7 @@ pub struct Gw {
 #[derive(Clone)]
 pub struct GwSmContext {
     pub client_ctx: ClientContext,
-    pub mint: crate::mint::Mint,
+    pub mint: Mint,
     pub input_fee: Amount,
     pub keypair: Keypair,
     pub tpe_agg_pk: AggregatePublicKey,
@@ -97,16 +128,22 @@ impl Gw {}
 
 /// Remove every row this module owns under the caller's federation prefix.
 /// Called by [`crate::Client::remove`] for end-of-life cleanup.
-pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: picomint_core::config::FederationId) {
+pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
     dbtx.remove_prefix(&ReceiveStateMachineTable, &federation);
 }
 
 // ─── Flat federation-keyed surface ───────────────────────────────────────
 
-impl crate::Client {
+impl Client {
+    /// Derive the gateway record for `federation`, bringing the federation
+    /// up.
+    pub(crate) fn gw(&self, federation: FederationId) -> anyhow::Result<Gw> {
+        Ok(Gw::derive(self, &*self.runtime(federation)?, federation))
+    }
+
     /// The public key this gateway's contracts are keyed to on `federation`.
     pub fn gw_pk(&self, federation: FederationId) -> anyhow::Result<XOnlyPublicKey> {
-        Ok(self.runtime(federation)?.gw.keypair.x_only_public_key().0)
+        Ok(self.gw(federation)?.keypair.x_only_public_key().0)
     }
 
     /// Log a `SendEvent` on the federation's event log. Called by the
@@ -121,8 +158,7 @@ impl crate::Client {
         amount: Amount,
         fee: Amount,
     ) -> anyhow::Result<()> {
-        let runtime = self.runtime(federation)?;
-        let gw = &runtime.gw;
+        let gw = self.gw(federation)?;
 
         gw.client_ctx.log_event(
             dbtx,
@@ -148,8 +184,7 @@ impl crate::Client {
         operation: OperationId,
         offer: IncomingOffer,
     ) -> anyhow::Result<()> {
-        let runtime = self.runtime(federation)?;
-        let gw = &runtime.gw;
+        let gw = self.gw(federation)?;
 
         let refund_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
@@ -206,8 +241,7 @@ impl crate::Client {
         outpoint: OutPoint,
         success: Option<([u8; 32], Amount)>,
     ) -> anyhow::Result<()> {
-        let runtime = self.runtime(federation)?;
-        let gw = &runtime.gw;
+        let gw = self.gw(federation)?;
 
         match success {
             Some((preimage, ln_fee)) => {
@@ -258,8 +292,7 @@ impl crate::Client {
         federation: FederationId,
         operation: OperationId,
     ) -> anyhow::Result<Result<[u8; 32], Signature>> {
-        let runtime = self.runtime(federation)?;
-        let gw = &runtime.gw;
+        let gw = self.gw(federation)?;
 
         use futures::StreamExt as _;
 

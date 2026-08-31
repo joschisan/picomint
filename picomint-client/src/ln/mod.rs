@@ -10,13 +10,16 @@ mod send_sm;
 use anyhow::Context;
 use picomint_sqlite::{DbRead, WriteTx};
 
+use crate::client::{Client, FederationRuntime};
 use crate::executor::ModuleExecutor;
+use crate::mint::Mint;
 use crate::module::ClientContext;
+use crate::secret::ClientSecret;
 use crate::task::TaskGroup;
 use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
 use db::{GatewayPkTable, IncomingContractStreamIndexTable, SendOperationTable};
-use gateway::Gateways;
+pub(crate) use gateway::Gateways;
 use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::NumPeersExt;
 use picomint_core::config::FederationId;
@@ -66,7 +69,7 @@ pub type SendResult = Result<OperationId, SendPaymentError>;
 pub struct LightningClientContext {
     pub(crate) federation: FederationId,
     pub(crate) client_ctx: ClientContext,
-    pub(crate) mint: crate::mint::Mint,
+    pub(crate) mint: Mint,
     pub(crate) input_fee: Amount,
     pub(crate) gateways: Gateways,
 }
@@ -76,11 +79,11 @@ pub struct Ln {
     federation: FederationId,
     cfg: LightningConfigConsensus,
     client_ctx: ClientContext,
-    mint: crate::mint::Mint,
+    mint: Mint,
     secret: LnSecret,
     executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
-    // Pool of announced gateways, each holding its kept-alive connection and
-    // latest probed info together. Membership is reconciled by
+    // Handle to the runtime's gateway pool: kept-alive connections plus the
+    // latest probed info per announced gateway. Membership is reconciled by
     // `update_gateway_pks` and info by `update_gateway_info`; the announced pk
     // set is persisted to [`GatewayPkTable`] so a cold start can warm the pool
     // without first re-running the threshold-consensus gateway query.
@@ -92,12 +95,11 @@ impl Ln {
         federation: FederationId,
         cfg: LightningConfigConsensus,
         client_ctx: ClientContext,
-        mint: crate::mint::Mint,
+        mint: Mint,
         secret: LnSecret,
+        gateways: Gateways,
         tg: &TaskGroup,
     ) -> Self {
-        let gateways = Gateways::new(client_ctx.api().endpoint().clone());
-
         let sm_context = LightningClientContext {
             federation,
             client_ctx: client_ctx.clone(),
@@ -114,7 +116,7 @@ impl Ln {
             tg.clone(),
         );
 
-        let module = Self {
+        Self {
             federation,
             cfg,
             client_ctx,
@@ -122,17 +124,47 @@ impl Ln {
             secret,
             executor,
             gateways,
-        };
+        }
+    }
 
-        tg.spawn(Self::receive_scan(module.clone()));
+    /// Derive the lightning record for `federation` — a throwaway bundle of
+    /// config, keys, executor handles and the runtime's gateway pool,
+    /// rebuilt per call from the seed and the runtime's config.
+    pub(crate) fn derive(
+        client: &Client,
+        runtime: &FederationRuntime,
+        federation: FederationId,
+    ) -> Ln {
+        Ln::new(
+            federation,
+            runtime.config.ln.clone(),
+            ClientContext::new(
+                runtime.api.clone(),
+                client.db.clone(),
+                runtime.config.clone(),
+            ),
+            Mint::derive(client, runtime, federation),
+            ClientSecret::new(&client.mnemonic, federation).ln_secret(),
+            runtime.gateways.clone(),
+            &runtime.tg,
+        )
+    }
 
-        // Cold-start gateway warmup, run concurrently: the info probe reads
-        // whatever pks the previous session persisted, so `select_gateway`
-        // becomes usable without waiting on the threshold-consensus pk query.
-        tg.spawn(Self::update_gateway_pks(module.clone()));
-        tg.spawn(Self::update_gateway_info(module.clone()));
+    /// Resume this federation's persisted send state machines and start the
+    /// incoming-contract scan plus the cold-start gateway warmup. Called
+    /// exactly once, at federation bring-up.
+    ///
+    /// The warmup runs concurrently: the info probe reads whatever pks the
+    /// previous session persisted, so `select_gateway` becomes usable
+    /// without waiting on the threshold-consensus pk query.
+    pub(crate) fn resume(&self, tg: &TaskGroup) {
+        self.executor.resume();
 
-        module
+        tg.spawn(Self::receive_scan(self.clone()));
+
+        tg.spawn(Self::update_gateway_pks(self.clone()));
+
+        tg.spawn(Self::update_gateway_info(self.clone()));
     }
 
     /// Fetch the federation's announced gateway pk list via threshold
@@ -555,7 +587,13 @@ pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
 
 // ─── Flat federation-keyed surface ───────────────────────────────────────
 
-impl crate::Client {
+impl Client {
+    /// Derive the lightning record for `federation`, bringing the
+    /// federation up.
+    pub(crate) fn ln(&self, federation: FederationId) -> anyhow::Result<Ln> {
+        Ok(Ln::derive(self, &*self.runtime(federation)?, federation))
+    }
+
     /// Pick a gateway from the federation's pool, at random for load
     /// distribution. The returned info prices any payment identically, so
     /// callers preview it and pass both values back into the send/receive
@@ -564,9 +602,8 @@ impl crate::Client {
         &self,
         federation: FederationId,
     ) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
-        self.runtime(federation)
+        self.ln(federation)
             .map_err(|_| SelectGatewayError::NotJoined)?
-            .ln
             .select_gateway()
     }
 
@@ -580,10 +617,9 @@ impl crate::Client {
         gateway_info: GatewayInfo,
         invoice: Bolt11Invoice,
     ) -> Result<OperationId, SendPaymentError> {
-        let runtime = self
-            .runtime(federation)
+        let ln = self
+            .ln(federation)
             .map_err(|_| SendPaymentError::NotJoined)?;
-        let ln = &runtime.ln;
 
         ln.send_inner(account, gateway_pk, gateway_info, invoice, false)
             .await
@@ -597,10 +633,7 @@ impl crate::Client {
         account: Account,
         gateway_info: &GatewayInfo,
     ) -> anyhow::Result<Amount> {
-        Ok(self
-            .runtime(federation)?
-            .ln
-            .send_max_amount(account, gateway_info))
+        Ok(self.ln(federation)?.send_max_amount(account, gateway_info))
     }
 
     /// Empty `account` to `lnurl` through a caller-selected gateway: resolve
@@ -613,8 +646,7 @@ impl crate::Client {
         gateway_info: GatewayInfo,
         lnurl: &str,
     ) -> anyhow::Result<OperationId> {
-        self.runtime(federation)?
-            .ln
+        self.ln(federation)?
             .send_max(account, gateway_pk, gateway_info, lnurl)
             .await
     }
@@ -629,10 +661,7 @@ impl crate::Client {
         gateway_info: GatewayInfo,
         amount: Amount,
     ) -> Result<Bolt11Invoice, ReceiveError> {
-        let runtime = self
-            .runtime(federation)
-            .map_err(|_| ReceiveError::NotJoined)?;
-        let ln = &runtime.ln;
+        let ln = self.ln(federation).map_err(|_| ReceiveError::NotJoined)?;
 
         let receive_keypair = ln.secret.receive_keypair(account);
 
@@ -654,8 +683,7 @@ impl crate::Client {
         account: Account,
         lnurl_daemon: String,
     ) -> anyhow::Result<String> {
-        let runtime = self.runtime(federation)?;
-        let ln = &runtime.ln;
+        let ln = self.ln(federation)?;
 
         let config = ln.client_ctx.get_config();
 
@@ -692,11 +720,11 @@ impl crate::Client {
     /// announced gateway, so [`Self::ln_select_gateway`] reflects the
     /// federation's current set.
     pub async fn ln_refresh_gateways(&self, federation: FederationId) -> anyhow::Result<()> {
-        let runtime = self.runtime(federation)?;
+        let ln = self.ln(federation)?;
 
-        Ln::update_gateway_pks(runtime.ln.clone()).await?;
+        Ln::update_gateway_pks(ln.clone()).await?;
 
-        Ln::update_gateway_info(runtime.ln.clone()).await;
+        Ln::update_gateway_info(ln).await;
 
         Ok(())
     }

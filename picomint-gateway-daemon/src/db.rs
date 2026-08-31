@@ -1,4 +1,4 @@
-use picomint_client::Mnemonic;
+use picomint_client::{Mnemonic, random_mnemonic};
 use picomint_core::OutPoint;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -6,7 +6,8 @@ use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_eventlog::EventLogId;
-use picomint_sqlite::{DbRead, table};
+use picomint_sqlite::{Database, DbRead, table};
+use rand::rngs::OsRng;
 
 // BIP39 entropy for the daemon's mnemonic, written once on first start.
 // Drives both federation-client derivation and the iroh secret key, so the
@@ -79,13 +80,13 @@ pub struct IncomingOfferRow {
 /// on first start. The entropy drives both federation-client derivation and
 /// the iroh secret key, so the gateway's identity is reproducible from this
 /// row alone.
-pub fn load_or_init_mnemonic(db: &picomint_sqlite::Database) -> anyhow::Result<Mnemonic> {
+pub fn load_or_init_mnemonic(db: &Database) -> anyhow::Result<Mnemonic> {
     if let Some(entropy) = db.begin_read().get(&RootEntropyTable, &()) {
         return Mnemonic::from_entropy(&entropy)
             .map_err(|e| anyhow::anyhow!("Invalid stored entropy: {e}"));
     }
 
-    let mnemonic = picomint_client::random_mnemonic(&mut rand::rngs::OsRng);
+    let mnemonic = random_mnemonic(&mut OsRng);
 
     let dbtx = db.begin_write();
 

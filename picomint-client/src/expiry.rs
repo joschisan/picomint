@@ -9,7 +9,7 @@
 
 use picomint_core::config::FederationId;
 use picomint_core::expiry::ExpiryStatus;
-use picomint_sqlite::{Database, DbRead, table};
+use picomint_sqlite::{Database, DbRead, WriteTx, table};
 use thiserror::Error;
 use tracing::warn;
 
@@ -89,6 +89,6 @@ async fn refresh_once(
 }
 
 /// Remove the federation's expiry cache row. Called on remove.
-pub(crate) fn wipe_tables(dbtx: &picomint_sqlite::WriteTx, federation: FederationId) {
+pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
     dbtx.remove(&ExpiryStatusTable, &federation);
 }

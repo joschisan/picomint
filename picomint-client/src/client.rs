@@ -5,9 +5,9 @@ use std::sync::{Arc, RwLock};
 use crate::Endpoint;
 use crate::api::FederationApi;
 use crate::gw::Gw;
-use crate::ln::Ln;
+use crate::ln::{Gateways, Ln};
 use crate::mint::Mint;
-use crate::secret::{ClientSecret, Mnemonic};
+use crate::secret::Mnemonic;
 use crate::task::TaskGroup;
 use crate::wallet::Wallet;
 use anyhow::{Context as _, ensure};
@@ -20,6 +20,7 @@ use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::fee::FeeConfig;
 use picomint_core::invite::InviteCode;
+use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::secret::Secret;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_rpc::connection::ConnStatus;
@@ -49,7 +50,7 @@ table!(
 pub struct Client {
     endpoint: Endpoint,
     pub(crate) db: Database,
-    mnemonic: Mnemonic,
+    pub(crate) mnemonic: Mnemonic,
     pub(crate) fee: Option<FeeConfig>,
     federations: RwLock<BTreeMap<FederationId, Arc<FederationRuntime>>>,
 }
@@ -261,7 +262,7 @@ impl Client {
     pub fn guardian_public_keys(
         &self,
         federation: FederationId,
-    ) -> Option<BTreeMap<PeerId, picomint_core::secp256k1::XOnlyPublicKey>> {
+    ) -> Option<BTreeMap<PeerId, XOnlyPublicKey>> {
         self.config(federation).map(|config| {
             config
                 .peers
@@ -333,88 +334,58 @@ impl Client {
     }
 }
 
-/// The live half of a joined federation: its task group, connection pool,
-/// and the module values every operation derives against. Internal — the
-/// public surface is [`Client`]'s federation-keyed methods, so nothing
-/// outside the crate can hold a runtime across a [`Client::remove`].
+/// The live half of a joined federation: its connection pools and task
+/// group, plus the immutable config the pools were built from. Everything
+/// else an operation needs — module configs, keys, executor handles — is
+/// derived per call from the seed and this config, so nothing here can go
+/// stale. Internal: the public surface is [`Client`]'s federation-keyed
+/// methods, so nothing outside the crate can hold a runtime across a
+/// [`Client::remove`].
 pub(crate) struct FederationRuntime {
+    pub(crate) config: ConsensusConfig,
     pub(crate) api: FederationApi,
-    pub(crate) mint: Mint,
-    pub(crate) wallet: Wallet,
-    pub(crate) ln: Ln,
-    pub(crate) gw: Gw,
-    tg: TaskGroup,
+    pub(crate) gateways: Gateways,
+    pub(crate) tg: TaskGroup,
 }
 
 impl FederationRuntime {
     /// Bring up a federation against `config`.
     ///
-    /// Not inert: the modules spawn their state-machine executors — resuming
-    /// whatever the database already holds — and the background refreshes
-    /// commit writes of their own. So this goes last, after the dbtx that
-    /// persists `config` and the join's scan results.
-    ///
-    /// All four modules mount unconditionally: a wallet's gateway module
-    /// resumes an empty executor and a gateway's lightning module probes
-    /// gateways it never pays through — both cheaper than a flavor concept.
+    /// Not inert: resuming the persisted state machines and the background
+    /// refreshes commit writes of their own. So this goes last, after the
+    /// dbtx that persists `config` and the join's scan results — and the
+    /// resumes run before the runtime is published in the federation map,
+    /// so no concurrent operation can add a state machine mid-resume.
     fn build(client: &Client, config: ConsensusConfig) -> Arc<Self> {
         let federation = config.calculate_federation_id();
-        let client_secret = ClientSecret::new(&client.mnemonic, federation);
 
         let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
             .peers
             .iter()
             .map(|entry| (*entry.0, entry.1.iroh_pk))
             .collect();
-        let api: FederationApi = FederationApi::new(client.endpoint.clone(), peer_node_ids);
 
-        let tg = TaskGroup::new();
+        let runtime = FederationRuntime {
+            config,
+            api: FederationApi::new(client.endpoint.clone(), peer_node_ids),
+            gateways: Gateways::new(client.endpoint.clone()),
+            tg: TaskGroup::new(),
+        };
 
-        let mint_context =
-            crate::module::ClientContext::new(api.clone(), client.db.clone(), config.clone());
-        let mint = Mint::new(
-            federation,
-            config.mint.clone(),
-            mint_context,
-            client_secret.mint_secret(),
-            client.fee.as_ref().map_or(0, |fee| fee.ppm),
-            &tg,
-        );
+        let mint = Mint::derive(client, &runtime, federation);
 
-        let wallet_context =
-            crate::module::ClientContext::new(api.clone(), client.db.clone(), config.clone());
-        let wallet = Wallet::new(
-            config.wallet.clone(),
-            wallet_context,
-            mint.clone(),
-            client_secret.wallet_secret(),
-            &tg,
-        );
+        mint.resume();
 
-        let ln_context =
-            crate::module::ClientContext::new(api.clone(), client.db.clone(), config.clone());
-        let ln = Ln::new(
-            federation,
-            config.ln.clone(),
-            ln_context,
-            mint.clone(),
-            client_secret.ln_secret(),
-            &tg,
-        );
+        Wallet::derive(client, &runtime, federation).resume(&runtime.tg);
 
-        let gw_context =
-            crate::module::ClientContext::new(api.clone(), client.db.clone(), config.clone());
-        let gw = Gw::new(
-            federation,
-            config.ln.clone(),
-            gw_context,
-            mint.clone(),
-            client_secret.gw_secret(),
-            &tg,
-        );
+        let ln = Ln::derive(client, &runtime, federation);
 
-        tg.spawn(crate::expiry::refresh(
-            api.clone(),
+        ln.resume(&runtime.tg);
+
+        Gw::derive(client, &runtime, federation).resume();
+
+        runtime.tg.spawn(crate::expiry::refresh(
+            runtime.api.clone(),
             client.db.clone(),
             federation,
         ));
@@ -423,23 +394,16 @@ impl FederationRuntime {
         // has nothing accruing in the account, and a sweep would wake every
         // half minute to read a balance that is always zero.
         if let Some(fee) = client.fee.clone() {
-            tg.spawn(crate::fee::sweep(
+            runtime.tg.spawn(crate::fee::sweep(
                 client.db.clone(),
-                mint.clone(),
-                ln.clone(),
+                mint,
+                ln,
                 Account::AppFee,
                 fee.lnurl,
             ));
         }
 
-        Arc::new(FederationRuntime {
-            api,
-            mint,
-            wallet,
-            ln,
-            gw,
-            tg,
-        })
+        Arc::new(runtime)
     }
 }
 
