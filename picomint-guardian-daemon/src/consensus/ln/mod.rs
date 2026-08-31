@@ -81,7 +81,6 @@ pub async fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<Lightning
                 .get(&BlockCountVoteTable, &server.cfg.private.identity)
                 .unwrap_or(0)
     {
-        trace!(?block_count, "Proposing block count");
         items.push(LightningConsensusItem::BlockCount(block_count));
     }
 
