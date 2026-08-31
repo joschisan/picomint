@@ -1,6 +1,5 @@
 pub mod analytics;
 pub mod cli;
-pub mod client;
 pub mod connect;
 pub mod db;
 pub mod public;
@@ -8,7 +7,7 @@ pub mod trailer;
 
 use std::sync::Arc;
 
-use anyhow::{Context as _, anyhow, bail, ensure};
+use anyhow::{anyhow, bail, ensure};
 use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
 use futures::StreamExt as _;
@@ -17,8 +16,8 @@ use lightning::types::payment::PaymentHash;
 use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
+use picomint_client::Client;
 use picomint_client::gw::events::ReceiveSuccessEvent;
-use picomint_client::{Client, FederationClient};
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
@@ -44,6 +43,7 @@ pub const LDK_NODE_DB_FOLDER: &str = "ldk_node";
 #[derive(Clone)]
 pub struct AppState {
     pub client: Arc<Client>,
+    pub mnemonic: picomint_client::Mnemonic,
     pub node: Arc<ldk_node::Node>,
     pub gateway_db: Database,
     pub data_dir: std::path::PathBuf,
@@ -56,12 +56,6 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Get a client for `federation`, brought up lazily on first use.
-    /// Returns `None` only if the federation was never added.
-    pub fn select_client(&self, federation: FederationId) -> Option<Arc<FederationClient>> {
-        self.client.federation(federation)
-    }
-
     /// List every federation the gateway has added, with its config-declared
     /// name. Reads the persisted configs directly so dormant federations are
     /// not forced to lazy-load.
@@ -88,12 +82,8 @@ impl AppState {
             "Federation is disabled",
         );
 
-        let client = self
-            .select_client(*federation)
-            .context("Federation not connected")?;
-
         Ok(GatewayInfo {
-            module_public_key: client.gw().keypair.x_only_public_key().0,
+            module_public_key: self.client.gw_pk(*federation)?,
             send_fee: self.send_fee,
             receive_fee: self.receive_fee,
             expiry_delta: self.cltv_expiry_delta as u64 + 144,
@@ -109,14 +99,10 @@ impl AppState {
         &self,
         payload: SendRequest,
     ) -> anyhow::Result<std::result::Result<[u8; 32], Signature>> {
-        let f1_client = self
-            .select_client(payload.federation)
-            .context("Federation not connected")?;
-
         // --- Verify the request ---------------------------------------------
 
         ensure!(
-            payload.contract.claim_pk == f1_client.gw().keypair.x_only_public_key().0,
+            payload.contract.claim_pk == self.client.gw_pk(payload.federation)?,
             "The outgoing contract is keyed to another gateway"
         );
 
@@ -128,8 +114,9 @@ impl AppState {
             "Invalid auth signature for the invoice data"
         );
 
-        let (contract_id, expiry) = f1_client
-            .api()
+        let (contract_id, expiry) = self
+            .client
+            .api(payload.federation)?
             .gw_outgoing_contract_expiry(payload.outpoint)
             .await
             .map_err(|_| anyhow!("The gateway cannot reach the federation"))?
@@ -195,16 +182,20 @@ impl AppState {
             )
             .is_some()
         {
-            return Ok(f1_client.gw().subscribe_send(operation).await);
+            return self
+                .client
+                .gw_subscribe_send(payload.federation, operation)
+                .await;
         }
 
-        f1_client.gw().log_send_started(
+        self.client.gw_log_send_started(
+            payload.federation,
             &dbtx,
             operation,
             payload.outpoint,
             Amount::from_msat(amount),
             fee,
-        );
+        )?;
 
         // --- Direct-swap vs external LN -------------------------------------
         if self.node.node_id() != payload.invoice.bolt11().get_payee_pub_key() {
@@ -225,13 +216,14 @@ impl AppState {
             // the LDK send); the LDK events drive its terminal, so treat it as
             // a successful kick-off instead of cancelling an in-flight send.
             if !matches!(result, Ok(_) | Err(ldk_node::NodeError::DuplicatePayment)) {
-                f1_client.gw().finalize_send(
+                self.client.gw_finalize_send(
+                    payload.federation,
                     &dbtx,
                     operation,
                     payload.contract,
                     payload.outpoint,
                     None,
-                );
+                )?;
             }
         } else {
             let incoming_row = dbtx
@@ -243,29 +235,33 @@ impl AppState {
                 "Direct-swap amount mismatch"
             );
 
-            let f2_client = self
-                .select_client(incoming_row.federation)
-                .expect("Direct-swap target federation not connected");
-
-            if f2_client
-                .gw()
-                .start_receive(&dbtx, operation, incoming_row.offer)
+            if self
+                .client
+                .gw_start_receive(
+                    incoming_row.federation,
+                    &dbtx,
+                    operation,
+                    incoming_row.offer,
+                )
                 .is_err()
             {
-                f1_client.gw().finalize_send(
+                self.client.gw_finalize_send(
+                    payload.federation,
                     &dbtx,
                     operation,
                     payload.contract,
                     payload.outpoint,
                     None,
-                );
+                )?;
             }
         }
 
         dbtx.commit();
 
         // --- Await terminal event on F1 -------------------------------------
-        Ok(f1_client.gw().subscribe_send(operation).await)
+        self.client
+            .gw_subscribe_send(payload.federation, operation)
+            .await
     }
 
     /// Creates a Bolt11 invoice for an incoming payment. Registers the
@@ -275,8 +271,7 @@ impl AppState {
     pub async fn receive(&self, payload: ReceiveRequest) -> anyhow::Result<Bolt11Invoice> {
         ensure!(payload.offer.verify(), "The offer is invalid");
 
-        self.select_client(payload.federation)
-            .context("Federation not connected")?;
+        self.client.connect(payload.federation)?;
 
         let receive_fee = self.receive_fee.fee(payload.offer.commitment.amount.msat);
 
@@ -333,8 +328,9 @@ impl AppState {
 
         // Bring the federation up so its state machines drive the contract
         // to settlement; the event reads below go through the shared log.
-        self.select_client(row.federation)
-            .expect("source federation for incoming contract is connected");
+        self.client
+            .connect(row.federation)
+            .expect("source federation for incoming contract is joined");
 
         if !wait {
             if let Some(preimage) = self

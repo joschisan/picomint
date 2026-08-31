@@ -6,7 +6,6 @@ mod secret;
 use anyhow::Context as _;
 use picomint_sqlite::WriteTx;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
@@ -18,7 +17,7 @@ use picomint_core::core::{Account, OperationId};
 use picomint_core::ln::config::LightningConfigConsensus;
 use picomint_core::ln::contracts::{IncomingContract, IncomingOffer, OutgoingContract};
 use picomint_core::ln::{LightningInput, LightningOutput, OutgoingWitness};
-use picomint_core::secp256k1::Keypair;
+use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, PeerId, secp256k1};
 use secp256k1::schnorr::Signature;
@@ -39,7 +38,7 @@ impl GatewayClientModule {
         federation: FederationId,
         cfg: LightningConfigConsensus,
         context: ClientContext,
-        mint: Arc<crate::mint::MintClientModule>,
+        mint: crate::mint::MintClientModule,
         gw_secret: GwSecret,
         tg: &TaskGroup,
     ) -> GatewayClientModule {
@@ -78,7 +77,7 @@ pub struct GatewayClientModule {
     pub federation: FederationId,
     pub cfg: LightningConfigConsensus,
     pub client_ctx: ClientContext,
-    pub mint: Arc<crate::mint::MintClientModule>,
+    pub mint: crate::mint::MintClientModule,
     pub keypair: Keypair,
     receive_executor: ModuleExecutor<ReceiveStateMachine, ReceiveStateMachineTable>,
 }
@@ -87,7 +86,7 @@ pub struct GatewayClientModule {
 #[derive(Clone)]
 pub struct GwSmContext {
     pub client_ctx: ClientContext,
-    pub mint: Arc<crate::mint::MintClientModule>,
+    pub mint: crate::mint::MintClientModule,
     pub input_fee: Amount,
     pub keypair: Keypair,
     pub tpe_agg_pk: AggregatePublicKey,
@@ -280,7 +279,80 @@ impl GatewayClientModule {
 }
 
 /// Remove every row this module owns under the caller's federation prefix.
-/// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
+/// Called by [`crate::Client::remove`] for end-of-life cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: picomint_core::config::FederationId) {
     dbtx.remove_prefix(&ReceiveStateMachineTable, &federation);
+}
+
+// ─── Flat federation-keyed surface ───────────────────────────────────────
+
+impl crate::Client {
+    /// The public key this gateway's contracts are keyed to on `federation`.
+    pub fn gw_pk(&self, federation: FederationId) -> anyhow::Result<XOnlyPublicKey> {
+        Ok(self.runtime(federation)?.gw.keypair.x_only_public_key().0)
+    }
+
+    /// Log a `SendEvent` on the federation's event log. See
+    /// [`GatewayClientModule::log_send_started`].
+    pub fn gw_log_send_started(
+        &self,
+        federation: FederationId,
+        dbtx: &WriteTx,
+        operation: OperationId,
+        outpoint: OutPoint,
+        amount: Amount,
+        fee: Amount,
+    ) -> anyhow::Result<()> {
+        self.runtime(federation)?
+            .gw
+            .log_send_started(dbtx, operation, outpoint, amount, fee);
+
+        Ok(())
+    }
+
+    /// Fund an incoming offer and spawn the state machine that drives it to
+    /// settlement. See [`GatewayClientModule::start_receive`].
+    pub fn gw_start_receive(
+        &self,
+        federation: FederationId,
+        dbtx: &WriteTx,
+        operation: OperationId,
+        offer: IncomingOffer,
+    ) -> anyhow::Result<()> {
+        self.runtime(federation)?
+            .gw
+            .start_receive(dbtx, operation, offer)
+    }
+
+    /// Settle an outgoing contract: claim it with the preimage on success,
+    /// or log the forfeit signature on failure. See
+    /// [`GatewayClientModule::finalize_send`].
+    pub fn gw_finalize_send(
+        &self,
+        federation: FederationId,
+        dbtx: &WriteTx,
+        operation: OperationId,
+        contract: OutgoingContract,
+        outpoint: OutPoint,
+        success: Option<([u8; 32], Amount)>,
+    ) -> anyhow::Result<()> {
+        self.runtime(federation)?
+            .gw
+            .finalize_send(dbtx, operation, contract, outpoint, success);
+
+        Ok(())
+    }
+
+    /// Await either `SendSuccessEvent` (the preimage) or `SendCancelEvent`
+    /// (the forfeit signature) for `operation`. Replays history, so a
+    /// completed operation returns immediately.
+    pub async fn gw_subscribe_send(
+        &self,
+        federation: FederationId,
+        operation: OperationId,
+    ) -> anyhow::Result<Result<[u8; 32], Signature>> {
+        let runtime = self.runtime(federation)?;
+
+        Ok(runtime.gw.subscribe_send(operation).await)
+    }
 }

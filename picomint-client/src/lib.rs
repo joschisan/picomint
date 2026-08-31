@@ -1,21 +1,23 @@
 //! Picomint client library.
 //!
 //! [`Client`] is the entry point for applications: one instance per app,
-//! holding every joined federation. Use [`Client::new`] for regular clients
-//! and [`Client::new_gateway`] for the gateway daemon's flavor. Federations
-//! are joined via [`Client::scan`] + [`Client::join`] and served as
-//! per-federation [`FederationClient`] handles by [`Client::federation`].
+//! holding every joined federation as data. [`Client::new`] binds the iroh
+//! endpoint from the seed; [`Client::add`] joins a federation,
+//! [`Client::connect`] brings one up, [`Client::remove`] wipes one. Every
+//! operation takes the [`picomint_core::config::FederationId`] it acts on
+//! and is named for the module that serves it — `mint_send`,
+//! `wallet_deposit_address`, `ln_receive`, `gw_finalize_send` — so there is
+//! no per-federation handle to hold or leak.
 //!
 //! Every table is shared across federations with a
-//! [`picomint_core::config::FederationId`]-prefixed key, so joins, leaves,
+//! [`picomint_core::config::FederationId`]-prefixed key, so adds, removes,
 //! and all module writes commit through one database.
 //!
 //! Per-module logic lives in [`mod@mint`], [`mod@wallet`], [`mod@ln`], and
-//! [`mod@gw`]. Each module owns its own state machines and exposes a
-//! `*Module::new` constructor used by the [`FederationClient`] bring-up.
-//! Submission ownership lives entirely in [`crate::mint::MintClientModule`]
-//! — non-mint modules build a [`crate::tx::TxBuilder`]
-//! and call `MintClientModule::finalize_and_submit_tx`, which
+//! [`mod@gw`]. Each module owns its own state machines and contributes its
+//! slice of the flat [`Client`] surface. Submission ownership lives
+//! entirely in the mint module — non-mint modules build a
+//! [`crate::tx::TxBuilder`] and call its `finalize_and_submit_tx`, which
 //! balances against the wallet and submits via its own
 //! [`crate::tx::TxSubmissionStateMachine`].
 
@@ -53,8 +55,7 @@ pub mod wallet;
 
 pub use iroh::Endpoint;
 
-pub use client::{Client, FederationClient};
-pub use join::Join;
+pub use client::Client;
 pub use picomint_core::core::{Account, OperationId};
 pub use picomint_rpc::connection::ConnStatus;
 pub use secret::{Mnemonic, random as random_mnemonic};

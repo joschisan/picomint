@@ -96,7 +96,7 @@ impl SpendableNote {
 /// owns, and how far its counter space was walked.
 ///
 /// Produced by [`scan`], which touches no database at all — [`commit_scan`]
-/// is where it lands, in the dbtx [`crate::Join::commit`] was handed.
+/// is where it lands, in the dbtx [`crate::Client::add`] owns.
 #[derive(Debug, Clone)]
 pub(crate) struct Restore {
     federation: FederationId,
@@ -630,10 +630,7 @@ impl MintClientModule {
     }
 
     pub fn get_balance(&self, dbtx: &impl DbRead, account: Account) -> Amount {
-        Self::get_count_by_denomination_dbtx(dbtx, self.federation, account)
-            .into_iter()
-            .map(|(denomination, count)| denomination.amount().mul_u64(count))
-            .sum()
+        balance(dbtx, self.federation, account)
     }
 
     pub fn balance_notify(&self) -> Arc<tokio::sync::Notify> {
@@ -1141,7 +1138,7 @@ fn send_ecash_dbtx(
 }
 
 /// Remove every row this module owns under the caller's federation prefix.
-/// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
+/// Called by [`crate::Client::remove`] for end-of-life cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
     dbtx.remove_prefix(&NoteTable, &federation);
     dbtx.remove_prefix(&ReceiveOperationTable, &federation);
@@ -1158,6 +1155,8 @@ pub enum SendECashError {
     InsufficientBalance,
     #[error("A non-recoverable error has occurred")]
     Failure,
+    #[error("Federation is not joined")]
+    NotJoined,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
@@ -1174,6 +1173,8 @@ pub enum ReceiveECashError {
     InsufficientFunds,
     #[error("This ecash bundle has already been received")]
     AlreadyAttempted,
+    #[error("Federation is not joined")]
+    NotJoined,
 }
 
 fn round_to_multiple(amount: Amount, min_denomiation: Amount) -> Amount {
@@ -1193,4 +1194,120 @@ fn represent_amount(mut remaining_amount: Amount) -> Vec<Denomination> {
     }
 
     denominations
+}
+
+// ─── Flat federation-keyed surface ───────────────────────────────────────
+
+/// `account`'s ecash balance: the face value of every note it holds.
+pub(crate) fn balance(dbtx: &impl DbRead, federation: FederationId, account: Account) -> Amount {
+    account_notes(dbtx, federation, account)
+        .iter()
+        .map(|note| note.amount())
+        .sum()
+}
+
+impl crate::Client {
+    /// `account`'s ecash balance. Pure read — never brings the federation
+    /// up, and an unjoined federation simply holds nothing.
+    pub fn mint_balance(&self, federation: FederationId, account: Account) -> Amount {
+        balance(&self.db.begin_read(), federation, account)
+    }
+
+    /// Yields `account`'s balance whenever the note table is written. The
+    /// same value may be yielded repeatedly — every federation's accounts
+    /// share one table, so writes to another account or federation wake this
+    /// stream too. Pure read — never brings the federation up.
+    pub fn mint_subscribe_balance(
+        &self,
+        federation: FederationId,
+        account: Account,
+    ) -> futures::stream::BoxStream<'static, Amount> {
+        let notify = self.db.notify_for_table(&NoteTable);
+        let db = self.db.clone();
+
+        Box::pin(async_stream::stream! {
+            loop {
+                // Registered before the read so a write landing in between
+                // still wakes the already-registered waiter.
+                let notified = notify.notified();
+
+                yield balance(&db.begin_read(), federation, account);
+
+                notified.await;
+            }
+        })
+    }
+
+    /// Count `account`'s notes by denomination. Pure read — never brings
+    /// the federation up.
+    pub fn mint_count_by_denomination(
+        &self,
+        federation: FederationId,
+        account: Account,
+    ) -> BTreeMap<Denomination, u64> {
+        MintClientModule::get_count_by_denomination_dbtx(&self.db.begin_read(), federation, account)
+    }
+
+    /// Send [`ECash`] for the given amount from `account`, reissuing notes
+    /// through the federation when the balance's denominations cannot cover
+    /// it exactly. See [`MintClientModule::send`] on cancellation semantics.
+    pub async fn mint_send(
+        &self,
+        federation: FederationId,
+        account: Account,
+        amount: Amount,
+    ) -> Result<ECash, SendECashError> {
+        self.runtime(federation)
+            .map_err(|_| SendECashError::NotJoined)?
+            .mint
+            .send(account, amount)
+            .await
+    }
+
+    /// Send everything `account` holds as one [`ECash`] bundle. `None` when
+    /// it holds nothing.
+    pub fn mint_send_max(
+        &self,
+        federation: FederationId,
+        account: Account,
+    ) -> anyhow::Result<Option<ECash>> {
+        Ok(self.runtime(federation)?.mint.send_max(account))
+    }
+
+    /// Receive an [`ECash`] bundle into `account` by reissuing its notes.
+    /// A bundle can be received exactly once per federation.
+    pub fn mint_receive(
+        &self,
+        federation: FederationId,
+        account: Account,
+        ecash: &ECash,
+    ) -> Result<OperationId, ReceiveECashError> {
+        self.runtime(federation)
+            .map_err(|_| ReceiveECashError::NotJoined)?
+            .mint
+            .receive(account, ecash)
+    }
+}
+
+impl crate::Client {
+    /// Fund, sign and submit a hand-built transaction, minting change into
+    /// `account`. An escape hatch for integration tests that forge foreign
+    /// inputs; not part of the supported surface.
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn mint_finalize_and_submit_tx<E: picomint_eventlog::Event + Send>(
+        &self,
+        federation: FederationId,
+        dbtx: &WriteTx,
+        account: Account,
+        operation: OperationId,
+        tx_builder: crate::tx::TxBuilder,
+        max: bool,
+        event: impl FnOnce(TransactionId) -> E,
+    ) -> anyhow::Result<Option<TransactionId>> {
+        Ok(self
+            .runtime(federation)?
+            .mint
+            .finalize_and_submit_tx(dbtx, account, operation, tx_builder, max, event))
+    }
 }

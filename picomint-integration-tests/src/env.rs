@@ -8,15 +8,10 @@ use std::time::Duration;
 use anyhow::{Context, ensure};
 use bitcoin::Network;
 use bitcoincore_rpc::RpcApi;
-use futures::stream::BoxStream;
-use iroh::Endpoint;
-use iroh::endpoint::presets::N0;
-use iroh_mdns_address_lookup::MdnsAddressLookup;
-use picomint_client::{Client, FederationClient, Mnemonic};
-use picomint_core::core::OperationId;
+use picomint_client::{Client, Mnemonic};
+use picomint_core::config::FederationId;
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::gateway::GatewayPk;
-use picomint_eventlog::{EventLogEntry, EventLogId};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::block_in_place;
@@ -24,42 +19,13 @@ use tracing::info;
 
 use crate::cli;
 
-/// One test wallet: the app-level [`Client`] plus the handle of the single
-/// federation it joins. Derefs to the federation handle, which is what most
-/// assertions talk to; log reads and shutdown go through the app client.
+/// One test wallet: the app-level [`Client`] plus the id of the single
+/// federation it joins — the two values every federation-keyed call takes.
 #[derive(Clone)]
 pub struct TestClient {
     pub client: Arc<Client>,
-    pub fed: Arc<FederationClient>,
-}
-
-impl std::ops::Deref for TestClient {
-    type Target = FederationClient;
-
-    fn deref(&self) -> &FederationClient {
-        &self.fed
-    }
-}
-
-impl TestClient {
-    pub fn event_notify(&self) -> Arc<tokio::sync::Notify> {
-        self.client.event_notify()
-    }
-
-    pub fn get_event_log(&self, pos: EventLogId, limit: u64) -> Vec<(EventLogId, EventLogEntry)> {
-        self.client.get_event_log(pos, limit)
-    }
-
-    pub fn subscribe_operation_events(
-        &self,
-        operation: OperationId,
-    ) -> BoxStream<'static, EventLogEntry> {
-        self.client.subscribe_operation_events(operation)
-    }
-
-    pub async fn shutdown(&self) {
-        self.client.shutdown().await
-    }
+    pub fed: FederationId,
+    pub db: picomint_sqlite::Database,
 }
 
 pub const BTC_RPC_PORT: u16 = 18443;
@@ -99,7 +65,6 @@ pub struct TestEnv {
     pub gw_data_dir: std::path::PathBuf,
     pub gw_pk: GatewayPk,
     pub lnurl_daemon_url: String,
-    pub endpoint: Endpoint,
     pub client_counter: AtomicU64,
     /// One per guardian, indexed by peer id. `None` once we've killed it.
     pub guardian_processes: Mutex<Vec<Option<Child>>>,
@@ -142,19 +107,8 @@ impl TestEnv {
             .invite;
         info!("Federation ready");
 
-        // Bind the iroh endpoint now so we can start building the first client
-        // concurrently with the rest of setup — address grinding is the
-        // slowest part of client construction and benefits from overlapping
-        // with gateway/LDK bring-up.
-        let endpoint = runtime.block_on(
-            Endpoint::builder(N0)
-                .address_lookup(MdnsAddressLookup::builder())
-                .bind(),
-        )?;
-
         let client_counter = AtomicU64::new(0);
         let client_send = runtime.block_on(build_client(
-            endpoint.clone(),
             invite.clone(),
             data_dir.clone(),
             client_counter.fetch_add(1, Ordering::Relaxed),
@@ -199,7 +153,6 @@ impl TestEnv {
                 gw_data_dir,
                 gw_pk,
                 lnurl_daemon_url,
-                endpoint,
                 client_counter,
                 guardian_processes: Mutex::new(guardian_processes),
             },
@@ -273,14 +226,7 @@ impl TestEnv {
     /// no second entry point for it.
     pub async fn new_client(&self, mnemonic: Option<Mnemonic>) -> anyhow::Result<TestClient> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
-        build_client(
-            self.endpoint.clone(),
-            self.invite.clone(),
-            self.data_dir.clone(),
-            n,
-            mnemonic,
-        )
-        .await
+        build_client(self.invite.clone(), self.data_dir.clone(), n, mnemonic).await
     }
 
     pub fn mine_blocks(&self, n: u64) {
@@ -300,7 +246,6 @@ impl TestEnv {
 }
 
 async fn build_client(
-    endpoint: Endpoint,
     invite_code: InviteCode,
     data_dir: std::path::PathBuf,
     n: u64,
@@ -316,14 +261,24 @@ async fn build_client(
         None => Mnemonic::generate(12)?,
     };
 
-    let client = Arc::new(Client::new(endpoint, db, mnemonic, None));
+    let client = Arc::new(
+        Client::new(
+            db.clone(),
+            mnemonic,
+            "0.0.0.0:0".parse().expect("valid addr"),
+            None,
+        )
+        .await?,
+    );
 
-    let join = client.scan(&invite_code).await?;
+    let fed = client
+        .add(&invite_code, Some(bitcoin::Network::Regtest))
+        .await?;
 
-    let fed = client.join(join)?;
+    client.connect(fed)?;
 
     info!("Created client-{n}");
-    Ok(TestClient { client, fed })
+    Ok(TestClient { client, fed, db })
 }
 
 async fn start_guardian(base: &Path, peer: usize) -> anyhow::Result<Child> {

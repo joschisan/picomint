@@ -18,6 +18,7 @@ use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
 use db::{NextOutputIndexTable, ValidAddressIndexTable};
 use events::{ReceiveEvent, SendEvent};
+use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::wallet::config::WalletConfigConsensus;
 use picomint_core::wallet::{
@@ -44,7 +45,7 @@ pub struct WalletClientModule {
     secret: WalletSecret,
     cfg: WalletConfigConsensus,
     client_ctx: ClientContext,
-    mint: std::sync::Arc<crate::mint::MintClientModule>,
+    mint: crate::mint::MintClientModule,
     send_executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
 }
 
@@ -62,7 +63,7 @@ impl WalletClientModule {
     pub fn new(
         cfg: WalletConfigConsensus,
         context: ClientContext,
-        mint: std::sync::Arc<crate::mint::MintClientModule>,
+        mint: crate::mint::MintClientModule,
         secret: WalletSecret,
         tg: &TaskGroup,
     ) -> WalletClientModule {
@@ -515,7 +516,7 @@ impl WalletClientModule {
 }
 
 /// Remove every row this module owns under the caller's federation prefix.
-/// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
+/// Called by [`crate::Client::remove`] for end-of-life cleanup.
 pub(crate) fn wipe_tables(
     dbtx: &picomint_sqlite::WriteTx,
     federation: picomint_core::config::FederationId,
@@ -539,4 +540,99 @@ pub enum SendError {
     InsufficientFunds,
     #[error("Unsupported address type")]
     UnsupportedAddress,
+    #[error("Federation is not joined")]
+    NotJoined,
+}
+
+// ─── Flat federation-keyed surface ───────────────────────────────────────
+
+impl crate::Client {
+    /// `account`'s next unused onchain deposit address, polling until the
+    /// initial address derivation has completed.
+    pub async fn wallet_deposit_address(
+        &self,
+        federation: FederationId,
+        account: Account,
+    ) -> anyhow::Result<Address> {
+        let runtime = self.runtime(federation)?;
+
+        Ok(runtime.wallet.receive(account).await)
+    }
+
+    /// Send an onchain payment funded from `account`. `fee` defaults to the
+    /// federation's current send fee.
+    pub async fn wallet_send(
+        &self,
+        federation: FederationId,
+        account: Account,
+        address: Address<NetworkUnchecked>,
+        amount: bitcoin::Amount,
+        fee: Option<bitcoin::Amount>,
+    ) -> Result<OperationId, SendError> {
+        self.runtime(federation)
+            .map_err(|_| SendError::NotJoined)?
+            .wallet
+            .send(account, address, amount, fee)
+            .await
+    }
+
+    /// The largest whole-sat amount a [`Self::wallet_send_max`] from
+    /// `account` can pay onchain at the current consensus feerate. A quote —
+    /// the send itself re-prices at the moment it is submitted.
+    pub async fn wallet_send_max_amount(
+        &self,
+        federation: FederationId,
+        account: Account,
+    ) -> Result<bitcoin::Amount, SendError> {
+        self.runtime(federation)
+            .map_err(|_| SendError::NotJoined)?
+            .wallet
+            .send_max_amount(account)
+            .await
+    }
+
+    /// Send `account`'s whole balance onchain by spending every note it
+    /// holds; no change comes back.
+    pub async fn wallet_send_max(
+        &self,
+        federation: FederationId,
+        account: Account,
+        address: Address<NetworkUnchecked>,
+    ) -> Result<OperationId, SendError> {
+        self.runtime(federation)
+            .map_err(|_| SendError::NotJoined)?
+            .wallet
+            .send_max(account, address)
+            .await
+    }
+
+    /// The current fee required to send an onchain payment.
+    pub async fn wallet_send_fee(
+        &self,
+        federation: FederationId,
+    ) -> Result<bitcoin::Amount, SendError> {
+        self.runtime(federation)
+            .map_err(|_| SendError::NotJoined)?
+            .wallet
+            .send_fee()
+            .await
+    }
+
+    /// The total value of bitcoin controlled by the federation.
+    pub async fn wallet_total_value(
+        &self,
+        federation: FederationId,
+    ) -> anyhow::Result<bitcoin::Amount> {
+        self.runtime(federation)?.wallet.total_value().await
+    }
+
+    /// The consensus block count of the federation.
+    pub async fn wallet_block_count(&self, federation: FederationId) -> anyhow::Result<u64> {
+        self.runtime(federation)?.wallet.block_count().await
+    }
+
+    /// The current consensus feerate.
+    pub async fn wallet_feerate(&self, federation: FederationId) -> anyhow::Result<Option<u64>> {
+        self.runtime(federation)?.wallet.feerate().await
+    }
 }

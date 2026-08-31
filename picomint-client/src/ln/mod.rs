@@ -9,7 +9,6 @@ mod send_sm;
 
 use anyhow::Context;
 use picomint_sqlite::{DbRead, WriteTx};
-use std::sync::Arc;
 
 use crate::executor::ModuleExecutor;
 use crate::module::ClientContext;
@@ -67,7 +66,7 @@ pub type SendResult = Result<OperationId, SendPaymentError>;
 pub struct LightningClientContext {
     pub(crate) federation: FederationId,
     pub(crate) client_ctx: ClientContext,
-    pub(crate) mint: Arc<crate::mint::MintClientModule>,
+    pub(crate) mint: crate::mint::MintClientModule,
     pub(crate) input_fee: Amount,
     pub(crate) gateways: Gateways,
 }
@@ -77,7 +76,7 @@ pub struct LightningClientModule {
     federation: FederationId,
     cfg: LightningConfigConsensus,
     client_ctx: ClientContext,
-    mint: Arc<crate::mint::MintClientModule>,
+    mint: crate::mint::MintClientModule,
     secret: LnSecret,
     executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
     // Pool of announced gateways, each holding its kept-alive connection and
@@ -101,7 +100,7 @@ impl LightningClientModule {
         federation: FederationId,
         cfg: LightningConfigConsensus,
         client_ctx: ClientContext,
-        mint: Arc<crate::mint::MintClientModule>,
+        mint: crate::mint::MintClientModule,
         secret: LnSecret,
         tg: &TaskGroup,
     ) -> Self {
@@ -594,6 +593,8 @@ impl LightningClientModule {
 pub enum SelectGatewayError {
     #[error("No gateways are available")]
     NoGatewaysAvailable,
+    #[error("Federation is not joined")]
+    NotJoined,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
@@ -617,6 +618,8 @@ pub enum SendPaymentError {
         invoice_currency: Currency,
         federation_currency: Currency,
     },
+    #[error("Federation is not joined")]
+    NotJoined,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
@@ -631,6 +634,8 @@ pub enum ReceiveError {
     InvalidInvoice,
     #[error("Gateway returned an invoice with incorrect amount")]
     IncorrectInvoiceAmount,
+    #[error("Federation is not joined")]
+    NotJoined,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
@@ -640,10 +645,120 @@ pub enum RefreshGatewaysError {
 }
 
 /// Remove every row this module owns under the caller's federation prefix.
-/// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
+/// Called by [`crate::Client::remove`] for end-of-life cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
     dbtx.remove(&IncomingContractStreamIndexTable, &federation);
     dbtx.remove_prefix(&SendOperationTable, &federation);
     dbtx.remove_prefix(&GatewayPkTable, &federation);
     dbtx.remove_prefix(&SendStateMachineTable, &federation);
+}
+
+// ─── Flat federation-keyed surface ───────────────────────────────────────
+
+impl crate::Client {
+    /// Pick a gateway from the federation's pool, at random for load
+    /// distribution. The returned info prices any payment identically, so
+    /// callers preview it and pass both values back into the send/receive
+    /// calls.
+    pub fn ln_select_gateway(
+        &self,
+        federation: FederationId,
+    ) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
+        self.runtime(federation)
+            .map_err(|_| SelectGatewayError::NotJoined)?
+            .ln
+            .select_gateway()
+    }
+
+    /// Pay an invoice from `account` through a caller-selected gateway
+    /// obtained via [`Self::ln_select_gateway`].
+    pub async fn ln_send(
+        &self,
+        federation: FederationId,
+        account: Account,
+        gateway_pk: GatewayPk,
+        gateway_info: GatewayInfo,
+        invoice: Bolt11Invoice,
+    ) -> Result<OperationId, SendPaymentError> {
+        self.runtime(federation)
+            .map_err(|_| SendPaymentError::NotJoined)?
+            .ln
+            .send(account, gateway_pk, gateway_info, invoice)
+            .await
+    }
+
+    /// The largest whole-sat invoice amount a [`Self::ln_send_max`] from
+    /// `account` through this gateway can pay.
+    pub fn ln_send_max_amount(
+        &self,
+        federation: FederationId,
+        account: Account,
+        gateway_info: &GatewayInfo,
+    ) -> anyhow::Result<Amount> {
+        Ok(self
+            .runtime(federation)?
+            .ln
+            .send_max_amount(account, gateway_info))
+    }
+
+    /// Empty `account` to `lnurl` through a caller-selected gateway: resolve
+    /// it, size the max, pay.
+    pub async fn ln_send_max(
+        &self,
+        federation: FederationId,
+        account: Account,
+        gateway_pk: GatewayPk,
+        gateway_info: GatewayInfo,
+        lnurl: &str,
+    ) -> anyhow::Result<OperationId> {
+        self.runtime(federation)?
+            .ln
+            .send_max(account, gateway_pk, gateway_info, lnurl)
+            .await
+    }
+
+    /// Request an invoice into `account` from a caller-selected gateway
+    /// obtained via [`Self::ln_select_gateway`].
+    pub async fn ln_receive(
+        &self,
+        federation: FederationId,
+        account: Account,
+        gateway_pk: GatewayPk,
+        gateway_info: GatewayInfo,
+        amount: Amount,
+    ) -> Result<Bolt11Invoice, ReceiveError> {
+        self.runtime(federation)
+            .map_err(|_| ReceiveError::NotJoined)?
+            .ln
+            .receive(account, gateway_pk, gateway_info, amount)
+            .await
+    }
+
+    /// A shareable lnurl for `account`, served by `lnurl_daemon`. Nothing
+    /// perishable goes into the payload, so it stays valid for as long as
+    /// the federation exists.
+    pub fn ln_generate_lnurl(
+        &self,
+        federation: FederationId,
+        account: Account,
+        lnurl_daemon: String,
+    ) -> anyhow::Result<String> {
+        Ok(self
+            .runtime(federation)?
+            .ln
+            .generate_lnurl(account, lnurl_daemon))
+    }
+
+    /// Re-run the threshold-consensus gateway query and re-probe every
+    /// announced gateway, so [`Self::ln_select_gateway`] reflects the
+    /// federation's current set.
+    pub async fn ln_refresh_gateways(&self, federation: FederationId) -> anyhow::Result<()> {
+        let runtime = self.runtime(federation)?;
+
+        LightningClientModule::update_gateway_pks(runtime.ln.clone()).await?;
+
+        LightningClientModule::update_gateway_info(runtime.ln.clone()).await;
+
+        Ok(())
+    }
 }

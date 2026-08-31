@@ -8,15 +8,16 @@
 //! picomint never charges a cut on, so a sweep does not pay itself a fee it
 //! would then have to sweep.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use picomint_core::Amount;
 use picomint_core::core::Account;
+use picomint_sqlite::Database;
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::FederationClient;
+use crate::ln::LightningClientModule;
+use crate::mint::MintClientModule;
 
 /// How long between passes, and how long the first one waits.
 ///
@@ -32,36 +33,40 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 const SWEEP_THRESHOLD: Amount = Amount::from_sat(1000);
 
 /// Sweep `account` to `lnurl` forever, one pass at a time. A pass over the
-/// threshold is one [`crate::ln::LightningClientModule::send_max`],
-/// which empties the account.
+/// threshold is one [`LightningClientModule::send_max`], which empties the
+/// account.
 ///
 /// Passes are sequential, so a slow payment delays the next pass rather than
 /// racing it — which is what keeps two sweeps from both deciding the same
 /// balance is theirs to send.
-pub(crate) async fn sweep(client: Arc<FederationClient>, account: Account, lnurl: String) {
+pub(crate) async fn sweep(
+    db: Database,
+    mint: MintClientModule,
+    ln: LightningClientModule,
+    account: Account,
+    lnurl: String,
+) {
     loop {
         sleep(SWEEP_INTERVAL).await;
 
-        if client.get_balance(account).msat < SWEEP_THRESHOLD.msat {
+        if mint.get_balance(&db.begin_read(), account).msat < SWEEP_THRESHOLD.msat {
             continue;
         }
 
-        if let Err(error) = sweep_once(&client, account, &lnurl).await {
+        if let Err(error) = sweep_once(&ln, account, &lnurl).await {
             warn!(%account, %error, "Fee sweep did not go through");
         }
     }
 }
 
 async fn sweep_once(
-    client: &FederationClient,
+    ln: &LightningClientModule,
     account: Account,
     lnurl: &str,
 ) -> anyhow::Result<()> {
-    let (gateway_pk, gateway_info) = client.ln().select_gateway()?;
+    let (gateway_pk, gateway_info) = ln.select_gateway()?;
 
-    client
-        .ln()
-        .send_max(account, gateway_pk, gateway_info, lnurl)
+    ln.send_max(account, gateway_pk, gateway_info, lnurl)
         .await
         .map(|_| ())
 }

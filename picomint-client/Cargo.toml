@@ -25,6 +25,7 @@ bitcoin_hashes = { workspace = true }
 futures = { workspace = true }
 iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false }
+iroh-mdns-address-lookup = { workspace = true }
 lightning-invoice = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-core = { workspace = true }

@@ -86,19 +86,19 @@ fn dispatch_direct_swap(
     row: crate::db::OutgoingContractRow,
     preimage: Option<[u8; 32]>,
 ) {
-    let source_client = state
-        .select_client(row.federation)
-        .expect("source federation for outgoing contract is connected");
-
-    source_client.gw().finalize_send(
-        tx_ref,
-        operation,
-        row.contract,
-        row.outpoint,
-        // An internal settlement routes nothing, so a successful one
-        // realized no routing cost.
-        preimage.map(|preimage| (preimage, picomint_core::Amount::ZERO)),
-    );
+    state
+        .client
+        .gw_finalize_send(
+            row.federation,
+            tx_ref,
+            operation,
+            row.contract,
+            row.outpoint,
+            // An internal settlement routes nothing, so a successful one
+            // realized no routing cost.
+            preimage.map(|preimage| (preimage, picomint_core::Amount::ZERO)),
+        )
+        .expect("source federation for outgoing contract is joined");
 }
 
 fn dispatch_ln_receive(

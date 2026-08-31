@@ -24,7 +24,6 @@ use picomint_gateway_daemon::db::{
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
 use picomint_sqlite::{DbRead, WriteTx};
-use rand::rngs::OsRng;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
@@ -147,24 +146,16 @@ fn main() -> anyhow::Result<()> {
 
     let gateway_db = picomint_sqlite::Database::open(opts.data_dir.join(DB_FILE))?;
 
-    // 3. Load or init the gateway identity (mnemonic + iroh endpoint)
-    let (endpoint, mnemonic) = match runtime.block_on(picomint_gateway_daemon::client::try_load(
-        &gateway_db,
-        opts.api_addr,
-    ))? {
-        Some(identity) => identity,
-        None => runtime.block_on(picomint_gateway_daemon::client::init(
-            &gateway_db,
-            picomint_client::random_mnemonic(&mut OsRng),
-            opts.api_addr,
-        ))?,
-    };
+    // 3. Load or init the gateway identity, then bind the client (and with
+    // it the iroh endpoint the public API is served on).
+    let mnemonic = picomint_gateway_daemon::db::load_or_init_mnemonic(&gateway_db)?;
 
-    let client = Arc::new(picomint_client::Client::new_gateway(
-        endpoint,
+    let client = Arc::new(runtime.block_on(picomint_client::Client::new(
         gateway_db.clone(),
         mnemonic.clone(),
-    ));
+        opts.api_addr,
+        None,
+    ))?);
 
     // 4. Build LDK node
     let ldk_data_dir = opts
@@ -180,7 +171,7 @@ fn main() -> anyhow::Result<()> {
     node_builder.set_network(opts.network);
     node_builder.set_node_alias("picomint-gateway-daemon".to_string())?;
     node_builder.set_listening_addresses(vec![opts.ldk_addr.into()])?;
-    node_builder.set_entropy_bip39_mnemonic(mnemonic, None);
+    node_builder.set_entropy_bip39_mnemonic(mnemonic.clone(), None);
     node_builder.set_storage_dir_path(ldk_data_dir);
 
     // The default peer-to-peer gossip sync takes hours to assemble a usable
@@ -241,6 +232,7 @@ fn main() -> anyhow::Result<()> {
     // 5. Construct AppState
     let state = AppState {
         client,
+        mnemonic,
         node: node.clone(),
         gateway_db,
         data_dir: opts.data_dir.clone(),
@@ -366,13 +358,9 @@ fn handle_payment_claimable(
             .fail_for_hash(PaymentHash(payment_hash))
             .expect("LDK has this payment_hash (registered via receive_for_hash)");
     } else {
-        let client = state
-            .select_client(row.federation)
-            .expect("source federation for incoming contract is connected");
-
-        if client
-            .gw()
-            .start_receive(dbtx, operation, row.offer)
+        if state
+            .client
+            .gw_start_receive(row.federation, dbtx, operation, row.offer)
             .is_err()
         {
             state
@@ -404,17 +392,17 @@ fn handle_payment_successful(
     }
 
     if let Some(row) = dbtx.get(&OutgoingContractTable, &operation) {
-        let client = state
-            .select_client(row.federation)
-            .expect("source federation for outgoing contract is connected");
-
-        client.gw().finalize_send(
-            dbtx,
-            operation,
-            row.contract,
-            row.outpoint,
-            Some((preimage, ln_fee)),
-        );
+        state
+            .client
+            .gw_finalize_send(
+                row.federation,
+                dbtx,
+                operation,
+                row.contract,
+                row.outpoint,
+                Some((preimage, ln_fee)),
+            )
+            .expect("source federation for outgoing contract is joined");
     }
 }
 
@@ -431,12 +419,16 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32
     }
 
     if let Some(row) = dbtx.get(&OutgoingContractTable, &operation) {
-        let client = state
-            .select_client(row.federation)
-            .expect("source federation for outgoing contract is connected");
-
-        client
-            .gw()
-            .finalize_send(dbtx, operation, row.contract, row.outpoint, None);
+        state
+            .client
+            .gw_finalize_send(
+                row.federation,
+                dbtx,
+                operation,
+                row.contract,
+                row.outpoint,
+                None,
+            )
+            .expect("source federation for outgoing contract is joined");
     }
 }

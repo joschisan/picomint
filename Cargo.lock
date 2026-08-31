@@ -3379,6 +3379,7 @@ dependencies = [
  "futures",
  "iroh",
  "iroh-base",
+ "iroh-mdns-address-lookup",
  "lightning-invoice",
  "picomint-base32",
  "picomint-core",
