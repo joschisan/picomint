@@ -8,6 +8,7 @@ use crate::module::ClientContext;
 use crate::secret::{ClientSecret, Mnemonic};
 use crate::task::TaskGroup;
 use anyhow::{Context as _, ensure};
+use futures::future::select_all;
 use futures::stream::BoxStream;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
@@ -304,6 +305,58 @@ impl Client {
     /// in insertion order.
     pub fn read_operation_events(&self, operation: OperationId) -> Vec<EventLogEntry> {
         picomint_eventlog::read_operation_events(&self.db, operation)
+    }
+
+    /// Resolve once no state machine is still driving `operation` under
+    /// `federation`. Resolves immediately for a settled or unknown
+    /// operation.
+    ///
+    /// This answers "is anything still running", not "did the payment
+    /// succeed": the outcome is carried by the event log, and a receive
+    /// that is waiting on its payer has no state machine yet and reads as
+    /// complete. State machines transition atomically, so once this
+    /// resolves the event log already holds every event the operation's
+    /// state machines logged — including the terminal one, committed in
+    /// the same tx that removed its state machine.
+    ///
+    /// Purely db-backed: does not bring the federation up, and against a
+    /// federation that is down it simply stays pending, since nothing is
+    /// driving the operation forward.
+    pub async fn await_completion(&self, federation: FederationId, operation: OperationId) {
+        let notifies = [
+            crate::tx::sm_notifies(&self.db),
+            crate::mint::sm_notifies(&self.db),
+            crate::ln::sm_notifies(&self.db),
+            crate::wallet::sm_notifies(&self.db),
+            crate::gw::sm_notifies(&self.db),
+        ]
+        .concat();
+
+        loop {
+            // Armed before the check: `Notified` captures the generation at
+            // construction, so a commit landing between check and await
+            // still wakes us.
+            let notified: Vec<_> = notifies
+                .iter()
+                .map(|notify| Box::pin(notify.notified()))
+                .collect();
+
+            let dbtx = self.db.begin_read();
+
+            let active = crate::tx::operation_is_active(&dbtx, federation, operation)
+                || crate::mint::operation_is_active(&dbtx, federation, operation)
+                || crate::ln::operation_is_active(&dbtx, federation, operation)
+                || crate::wallet::operation_is_active(&dbtx, federation, operation)
+                || crate::gw::operation_is_active(&dbtx, federation, operation);
+
+            drop(dbtx);
+
+            if !active {
+                return;
+            }
+
+            select_all(notified).await;
+        }
     }
 
     /// Stream every event belonging to `operation`, starting from the
