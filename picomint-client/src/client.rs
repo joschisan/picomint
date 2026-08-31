@@ -322,7 +322,7 @@ impl Client {
     /// Purely db-backed: does not bring the federation up, and against a
     /// federation that is down it simply stays pending, since nothing is
     /// driving the operation forward.
-    pub async fn await_completion(&self, federation: FederationId, operation: OperationId) {
+    pub async fn subscribe_completion(&self, federation: FederationId, operation: OperationId) {
         let notifies = [
             crate::tx::sm_notifies(&self.db),
             crate::mint::sm_notifies(&self.db),
