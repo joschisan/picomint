@@ -1,323 +1,294 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::Endpoint;
 use crate::api::FederationApi;
-use crate::gw::GatewayClientModule;
-use crate::ln::LightningClientModule;
-use crate::mint::MintClientModule;
+use crate::ln::Gateways;
+use crate::module::ClientContext;
 use crate::secret::{ClientSecret, Mnemonic};
 use crate::task::TaskGroup;
-use crate::wallet::WalletClientModule;
+use anyhow::{Context as _, ensure};
 use futures::stream::BoxStream;
-use picomint_core::Amount;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::fee::FeeConfig;
+use picomint_core::invite::InviteCode;
+use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_rpc::connection::ConnStatus;
-use picomint_sqlite::Database;
+use picomint_sqlite::{Database, DbRead, table};
 use tracing::debug;
 
-/// LN-flavor selection used by the two constructors below.
-enum LnChoice {
-    Regular,
-    Gateway,
-}
+// The config of every joined federation. The row is what makes a federation
+// joined: [`Client::add`] inserts it and [`Client::remove`] removes it,
+// atomically with the federation's other rows.
+table!(
+    ClientConfigTable,
+    FederationId => ConsensusConfig,
+    "client-config",
+);
 
-/// Lightning-module flavor mounted on a client. Regular federation clients
-/// use `Regular`, while the gateway daemon mounts `Gateway`. The two flavors
-/// are mutually exclusive at the same federation instance.
-pub(crate) enum LnFlavor {
-    Regular(Arc<LightningClientModule>),
-    Gateway(Arc<GatewayClientModule>),
-}
-
-/// Main client type
+/// Main client type: one instance per application, holding every joined
+/// federation as data.
 ///
-/// A handle and API to interacting with a single federation. End user
-/// applications that want to support interacting with multiple federations at
-/// the same time, will need to instantiate and manage multiple instances of
-/// this struct.
-///
-/// Under the hood it owns service tasks, state machines, database, and other
-/// resources. Dropping the last [`Arc<Client>`] cancels all spawned tasks
-/// (best-effort, non-blocking); call [`Client::shutdown`] explicitly to wait
-/// for them to finish.
+/// Owns the shared resources — database handle, iroh endpoint, seed, event
+/// log — and a private map of per-federation runtimes. Federations are
+/// joined via [`Client::add`], brought up explicitly by [`Client::connect`]
+/// or implicitly by the first operation that needs them, and removed by
+/// [`Client::remove`]. Every operation takes the [`FederationId`] it acts
+/// on; there is no per-federation handle to hold or leak. Policy stays with
+/// the integrator: the client never decides when to bring a federation up
+/// or whether removing is allowed.
 pub struct Client {
-    config: ConsensusConfig,
-    db: Database,
-    federation: FederationId,
-    pub(crate) mint: Arc<MintClientModule>,
-    pub(crate) wallet: Arc<WalletClientModule>,
-    pub(crate) ln: LnFlavor,
-    pub(crate) api: FederationApi,
-    tg: TaskGroup,
+    endpoint: Endpoint,
+    pub(crate) db: Database,
+    pub(crate) mnemonic: Mnemonic,
+    pub(crate) fee: Option<FeeConfig>,
+    federations: RwLock<BTreeMap<FederationId, Arc<FederationRuntime>>>,
 }
 
 impl Client {
-    /// Bring up a client against `config` and `db`, mounting the regular
-    /// lightning module.
+    /// Build a client over the embedder's `endpoint`, `db` and seed. Inert:
+    /// no federation is brought up until [`Self::connect`] or the first
+    /// operation does so.
     ///
-    /// Not inert: the modules spawn their state-machine executors — resuming
-    /// whatever the database already holds — and the background refreshes
-    /// commit writes of their own. So this goes last, after the dbtx that
-    /// persists `config` and marks the federation as added. The caller gets
-    /// the config from [`crate::download`] and owns persisting it.
+    /// Seed storage is the embedder's job — pass the same mnemonic on every
+    /// start. The endpoint is the embedder's network identity choice: a
+    /// wallet app binds one without a secret key (fresh random identity per
+    /// launch — nothing dials a wallet), while the gateway daemon binds its
+    /// persisted iroh key so the `GatewayPk` clients connect to survives
+    /// restarts.
     ///
     /// `fee` is the integrator's cut: [`FeeConfig::ppm`] parts per million of
     /// the value every transaction this client builds moves, paid into
     /// [`Account::AppFee`] as an output of that same transaction and swept
     /// from there to [`FeeConfig::lnurl`] as it accumulates. `None` charges
-    /// nothing and starts no sweep.
+    /// nothing and starts no sweep — which is what a gateway passes, since
+    /// its transactions are the other half of its users' payments.
     pub fn new(
         endpoint: Endpoint,
         db: Database,
-        mnemonic: &Mnemonic,
-        config: ConsensusConfig,
+        mnemonic: Mnemonic,
         fee: Option<FeeConfig>,
-    ) -> Arc<Self> {
-        Self::build(endpoint, db, mnemonic, config, fee, LnChoice::Regular)
-    }
-
-    /// Gateway-flavor counterpart of [`Client::new`]. Used by the gateway
-    /// daemon, which mounts [`GatewayClientModule`] in place of the regular
-    /// lightning module.
-    ///
-    /// Takes no cut. A gateway's transactions are the other half of its
-    /// users' payments, and charging them would bill the gateway for
-    /// serving the very payment the sender was already charged for.
-    pub fn new_gateway(
-        endpoint: Endpoint,
-        db: Database,
-        mnemonic: &Mnemonic,
-        config: ConsensusConfig,
-    ) -> Arc<Self> {
-        Self::build(endpoint, db, mnemonic, config, None, LnChoice::Gateway)
-    }
-
-    fn build(
-        endpoint: Endpoint,
-        db: Database,
-        mnemonic: &Mnemonic,
-        config: ConsensusConfig,
-        fee: Option<FeeConfig>,
-        ln_choice: LnChoice,
-    ) -> Arc<Self> {
+    ) -> Client {
         debug!(
             version = %env!("CARGO_PKG_VERSION"),
             "Building picomint client",
         );
-        let federation = config.calculate_federation_id();
-        let client_secret = ClientSecret::new(mnemonic, federation);
 
-        let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
-            .peers
-            .iter()
-            .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
-            .collect();
-        let api: FederationApi = FederationApi::new(endpoint.clone(), peer_node_ids);
-
-        let tg = TaskGroup::new();
-
-        let mint_context =
-            crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
-        let mint = Arc::new(MintClientModule::new(
-            federation,
-            config.mint.clone(),
-            mint_context,
-            client_secret.mint_secret(),
-            fee.as_ref().map_or(0, |fee| fee.ppm),
-            &tg,
-        ));
-
-        let wallet_context =
-            crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
-        let wallet = Arc::new(WalletClientModule::new(
-            config.wallet.clone(),
-            wallet_context,
-            mint.clone(),
-            client_secret.wallet_secret(),
-            &tg,
-        ));
-
-        let ln = match ln_choice {
-            LnChoice::Regular => {
-                let ln_context =
-                    crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
-                LnFlavor::Regular(Arc::new(LightningClientModule::new(
-                    federation,
-                    config.ln.clone(),
-                    ln_context,
-                    mint.clone(),
-                    client_secret.ln_secret(),
-                    &tg,
-                )))
-            }
-            LnChoice::Gateway => {
-                let gw_context =
-                    crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
-                LnFlavor::Gateway(Arc::new(GatewayClientModule::new(
-                    federation,
-                    config.ln.clone(),
-                    gw_context,
-                    mint.clone(),
-                    client_secret.gw_secret(),
-                    &tg,
-                )))
-            }
-        };
-
-        let client = Arc::new(Client {
-            config,
+        Client {
+            endpoint,
             db,
-            federation,
-            mint,
-            wallet,
-            ln,
-            api,
-            tg,
-        });
+            mnemonic,
+            fee,
+            federations: RwLock::new(BTreeMap::new()),
+        }
+    }
 
-        client.tg.spawn(Self::refresh_expiry_status(client.clone()));
+    /// Join the federation behind `invite`: download its config, verify it
+    /// against `network` if given, scan every account the seed could hold
+    /// notes under, and land config, counter marks and restored notes in one
+    /// dbtx. Inert — no executor is started and no guardian connection kept;
+    /// call [`Self::connect`] (or any operation) to bring the federation up.
+    ///
+    /// The scan matters as much on a first join: a seed that has been here
+    /// before holds notes behind counters a fresh client would re-derive
+    /// from zero, stranding them. A seed that never held anything scans to
+    /// nothing, which costs a round trip and is otherwise indistinguishable.
+    pub async fn add(
+        &self,
+        invite: &InviteCode,
+        network: Option<bitcoin::Network>,
+    ) -> anyhow::Result<FederationId> {
+        let (config, restores) =
+            crate::join::join(&self.endpoint, &self.mnemonic, invite, network).await?;
 
-        // Only when there is a cut to collect: a client that charges nothing
-        // has nothing accruing in the account, and a sweep would wake every
-        // half minute to read a balance that is always zero.
-        if let Some(fee) = fee {
-            client.tg.spawn(crate::fee::sweep(
-                client.clone(),
-                Account::AppFee,
-                fee.lnurl,
-            ));
+        let federation = config.calculate_federation_id();
+
+        let dbtx = self.db.begin_write();
+
+        ensure!(
+            dbtx.get(&ClientConfigTable, &federation).is_none(),
+            "Federation is already joined"
+        );
+
+        dbtx.insert(&ClientConfigTable, &federation, &config);
+
+        for (account, restore) in &restores {
+            crate::mint::commit_scan(&dbtx, *account, restore);
         }
 
-        client
+        dbtx.commit();
+
+        Ok(federation)
     }
 
-    /// Cancel all spawned tasks and wait for them to finish. No timeout —
-    /// blocks until every state machine driver and background task has
-    /// observed cancellation and exited cleanly.
-    pub async fn shutdown(&self) {
-        self.tg.shutdown().await;
-    }
-
-    /// Remove every row this client owns under its federation's key prefix.
-    /// Intended for shared-database deployments (e.g. the gateway daemon's
-    /// per-federation clients) where a "leave federation" operation needs to
-    /// wipe just one client's data.
+    /// Bring `federation` up: resume its state machines, spawn its refresh
+    /// loops, and build its connection pool. Idempotent — a federation that
+    /// is already up is left alone.
     ///
-    /// `dbtx` is supplied by the caller so the wipe commits atomically
-    /// with whatever else the caller is doing — typically removing
-    /// root-level rows scoped to this client by some other key (the
-    /// gateway's `ClientConfigTable[federation]`, per-federation event-log
-    /// entries, …) and dropping the live `Arc<Client>` from any cache.
-    /// The caller is responsible for [`Client::shutdown`] before calling
-    /// this so no task is mid-write.
-    pub fn wipe(&self, dbtx: &picomint_sqlite::WriteTx) {
-        crate::mint::wipe_tables(dbtx, self.federation);
-        crate::wallet::wipe_tables(dbtx, self.federation);
-        crate::ln::wipe_tables(dbtx, self.federation);
-        crate::gw::wipe_tables(dbtx, self.federation);
-        crate::tx::wipe_tables(dbtx, self.federation);
-        crate::expiry::wipe_tables(dbtx, self.federation);
+    /// An app that shows every balance at startup calls this for each joined
+    /// federation; a gateway serving federations on demand never calls it
+    /// and relies on operations connecting lazily, so a dormant federation
+    /// costs no connections.
+    pub fn connect(&self, federation: FederationId) -> anyhow::Result<()> {
+        self.runtime(federation).map(|_| ())
     }
 
-    pub fn api(&self) -> &FederationApi {
-        &self.api
+    /// Remove a federation: shut its runtime down, then remove its config
+    /// and every row it holds in one dbtx, so a crash mid-remove loses
+    /// nothing halfway. Re-joining later runs a fresh scan against clean
+    /// state.
+    pub async fn remove(&self, federation: FederationId) -> anyhow::Result<()> {
+        let runtime = self
+            .federations
+            .write()
+            .expect("federations lock poisoned")
+            .remove(&federation);
+
+        // Wait for every task to observe cancellation before the wipe, so no
+        // state machine is mid-write while its rows disappear.
+        if let Some(runtime) = runtime {
+            runtime.ctx.tg.shutdown().await;
+        }
+
+        let dbtx = self.db.begin_write();
+
+        ensure!(
+            dbtx.remove(&ClientConfigTable, &federation).is_some(),
+            "Federation is not joined"
+        );
+
+        crate::mint::wipe_tables(&dbtx, federation);
+        crate::wallet::wipe_tables(&dbtx, federation);
+        crate::ln::wipe_tables(&dbtx, federation);
+        crate::gw::wipe_tables(&dbtx, federation);
+        crate::tx::wipe_tables(&dbtx, federation);
+        crate::expiry::wipe_tables(&dbtx, federation);
+
+        dbtx.commit();
+
+        Ok(())
+    }
+
+    /// The joined federation's runtime, brought up from the persisted config
+    /// on first use. Errors for a federation that is not joined.
+    ///
+    /// Double-checked: the read-lock fast path serves the hot case, and a
+    /// cache miss re-checks under the write lock in case another caller
+    /// raced and inserted.
+    pub(crate) fn runtime(
+        &self,
+        federation: FederationId,
+    ) -> anyhow::Result<Arc<FederationRuntime>> {
+        if let Some(runtime) = self
+            .federations
+            .read()
+            .expect("federations lock poisoned")
+            .get(&federation)
+        {
+            return Ok(runtime.clone());
+        }
+
+        let mut federations = self.federations.write().expect("federations lock poisoned");
+
+        if let Some(runtime) = federations.get(&federation) {
+            return Ok(runtime.clone());
+        }
+
+        let config = self
+            .db
+            .begin_read()
+            .get(&ClientConfigTable, &federation)
+            .context("Federation is not joined")?;
+
+        let runtime = FederationRuntime::build(self, config);
+
+        federations.insert(federation, runtime.clone());
+
+        Ok(runtime)
+    }
+
+    /// The connected federation's context, bringing the federation up on
+    /// first use. Errors for a federation that is not joined.
+    pub(crate) fn ctx(&self, federation: FederationId) -> anyhow::Result<ClientContext> {
+        Ok(self.runtime(federation)?.ctx.clone())
+    }
+
+    /// Every joined federation, whether or not it is currently up.
+    pub fn federations(&self) -> Vec<FederationId> {
+        self.db
+            .begin_read()
+            .iter(&ClientConfigTable, |r| r.map(|entry| entry.0).collect())
+    }
+
+    /// Every joined federation's persisted config, without bringing any up.
+    pub fn federation_configs(&self) -> BTreeMap<FederationId, ConsensusConfig> {
+        self.db
+            .begin_read()
+            .iter(&ClientConfigTable, |r| r.collect())
+    }
+
+    /// The joined federation's persisted config, without bringing it up.
+    pub fn config(&self, federation: FederationId) -> Option<ConsensusConfig> {
+        self.db.begin_read().get(&ClientConfigTable, &federation)
+    }
+
+    /// The guardians' iroh node ids, read from the persisted config.
+    pub fn peer_node_ids(
+        &self,
+        federation: FederationId,
+    ) -> Option<BTreeMap<PeerId, iroh_base::PublicKey>> {
+        self.config(federation).map(|config| {
+            config
+                .peers
+                .iter()
+                .map(|entry| (*entry.0, entry.1.iroh_pk))
+                .collect()
+        })
+    }
+
+    /// The guardians' broadcast public keys, read from the persisted config.
+    pub fn guardian_public_keys(
+        &self,
+        federation: FederationId,
+    ) -> Option<BTreeMap<PeerId, XOnlyPublicKey>> {
+        self.config(federation).map(|config| {
+            config
+                .peers
+                .iter()
+                .map(|entry| (*entry.0, entry.1.broadcast_pk))
+                .collect()
+        })
     }
 
     /// Stream of per-peer guardian reachability, emitting a fresh
     /// `peer -> status` map on every change (current state first). Backed by
-    /// the client's pooled connections, so it reflects the same links requests
-    /// travel over; the `Connected` status carries the RTT sampled at connect.
-    pub fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, ConnStatus>> {
-        self.api.connection_status_stream()
-    }
-
-    pub fn federation(&self) -> FederationId {
-        self.federation
-    }
-
-    pub fn config(&self) -> &ConsensusConfig {
-        &self.config
-    }
-
-    pub fn mint(&self) -> &MintClientModule {
-        &self.mint
-    }
-
-    pub fn wallet(&self) -> &WalletClientModule {
-        &self.wallet
-    }
-
-    /// Regular-flavor lightning module. Panics if this client mounts the
-    /// gateway flavor instead.
-    pub fn ln(&self) -> &LightningClientModule {
-        match &self.ln {
-            LnFlavor::Regular(m) => m,
-            LnFlavor::Gateway(_) => panic!("LightningClientModule is not mounted on this client"),
-        }
-    }
-
-    /// Gateway-flavor lightning module. Panics if this client mounts the
-    /// regular flavor instead.
-    pub fn gw(&self) -> &GatewayClientModule {
-        match &self.ln {
-            LnFlavor::Gateway(m) => m,
-            LnFlavor::Regular(_) => panic!("GatewayClientModule is not mounted on this client"),
-        }
-    }
-
-    pub fn db(&self) -> &Database {
-        &self.db
-    }
-
-    pub fn get_balance(&self, account: Account) -> Amount {
-        self.mint.get_balance(&self.db().begin_read(), account)
-    }
-
-    /// Yields `account`'s balance whenever the note table is written. The same
-    /// value may be yielded repeatedly — every federation's accounts share one
-    /// table, so writes to another account or federation wake this stream too.
-    pub fn subscribe_balance_changes(&self, account: Account) -> BoxStream<'static, Amount> {
-        let notify = self.mint.balance_notify();
-        let mint = self.mint.clone();
-        let db = self.db().clone();
-
-        Box::pin(async_stream::stream! {
-            loop {
-                // Registered before the read so a write landing in between
-                // still wakes the already-registered waiter.
-                let notified = notify.notified();
-
-                yield mint.get_balance(&db.begin_read(), account);
-
-                notified.await;
-            }
-        })
-    }
-
-    /// Returns a list of guardian iroh API node ids
-    pub fn get_peer_node_ids(&self) -> BTreeMap<PeerId, iroh_base::PublicKey> {
-        self.config()
-            .peers
-            .iter()
-            .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
-            .collect()
-    }
-
-    /// Returns the guardian public key set from the client config.
-    pub fn get_guardian_public_keys_blocking(
+    /// the federation's pooled connections, so it reflects the same links
+    /// requests travel over; the `Connected` status carries the RTT sampled
+    /// at connect. Brings the federation up.
+    pub fn connection_status_stream(
         &self,
-    ) -> BTreeMap<PeerId, picomint_core::secp256k1::XOnlyPublicKey> {
-        self.config()
-            .peers
-            .iter()
-            .map(|(peer, endpoint)| (*peer, endpoint.broadcast_pk))
-            .collect()
+        federation: FederationId,
+    ) -> anyhow::Result<BoxStream<'static, BTreeMap<PeerId, ConnStatus>>> {
+        Ok(self.runtime(federation)?.ctx.api.connection_status_stream())
+    }
+
+    /// The federation's API handle. Brings the federation up.
+    pub fn api(&self, federation: FederationId) -> anyhow::Result<FederationApi> {
+        Ok(self.runtime(federation)?.ctx.api.clone())
+    }
+
+    /// Cancel every federation's tasks and wait for them to finish.
+    pub async fn shutdown(&self) {
+        let federations =
+            std::mem::take(&mut *self.federations.write().expect("federations lock poisoned"));
+
+        for runtime in federations.into_values() {
+            runtime.ctx.tg.shutdown().await;
+        }
     }
 
     pub fn get_event_log(&self, pos: EventLogId, limit: u64) -> Vec<(EventLogId, EventLogEntry)> {
@@ -348,11 +319,74 @@ impl Client {
     }
 }
 
+/// Unique owner of a connected federation's [`ClientContext`]. State
+/// machines and background tasks run against context *clones*, so the
+/// cancel-on-drop below has to live on this wrapper rather than the context
+/// itself. Internal: the public surface is [`Client`]'s federation-keyed
+/// methods, so nothing outside the crate can hold a runtime across a
+/// [`Client::remove`].
+pub(crate) struct FederationRuntime {
+    pub(crate) ctx: ClientContext,
+}
+
+impl FederationRuntime {
+    /// Bring up a federation against `config`.
+    ///
+    /// Not inert: resuming the persisted state machines and the background
+    /// refreshes commit writes of their own. So this goes last, after the
+    /// dbtx that persists `config` and the join's scan results — and the
+    /// resumes run before the runtime is published in the federation map,
+    /// so no concurrent operation can add a state machine mid-resume.
+    fn build(client: &Client, config: ConsensusConfig) -> Arc<Self> {
+        let federation = config.calculate_federation_id();
+
+        let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
+            .peers
+            .iter()
+            .map(|entry| (*entry.0, entry.1.iroh_pk))
+            .collect();
+
+        let ctx = ClientContext::new(
+            FederationApi::new(client.endpoint.clone(), peer_node_ids),
+            client.db.clone(),
+            config,
+            ClientSecret::new(&client.mnemonic, federation),
+            client.fee.as_ref().map_or(0, |fee| fee.ppm),
+            Gateways::new(client.endpoint.clone()),
+            TaskGroup::new(),
+        );
+
+        crate::mint::resume(&ctx);
+
+        crate::wallet::resume(&ctx);
+
+        crate::ln::resume(&ctx);
+
+        crate::gw::resume(&ctx);
+
+        ctx.tg.spawn(crate::expiry::refresh(
+            ctx.api.clone(),
+            ctx.db.clone(),
+            federation,
+        ));
+
+        // Only when there is a cut to collect: a client that charges nothing
+        // has nothing accruing in the account, and a sweep would wake every
+        // half minute to read a balance that is always zero.
+        if let Some(fee) = client.fee.clone() {
+            ctx.tg
+                .spawn(crate::fee::sweep(ctx.clone(), Account::AppFee, fee.lnurl));
+        }
+
+        Arc::new(FederationRuntime { ctx })
+    }
+}
+
 /// Cancel-only on drop. Spawned tasks observe the cancellation token at
-/// the next await and unwind. Callers wanting to wait for tasks to
-/// complete should `client.shutdown().await` first.
-impl Drop for Client {
+/// the next await and unwind. [`Client::remove`] and [`Client::shutdown`]
+/// wait for them instead.
+impl Drop for FederationRuntime {
     fn drop(&mut self) {
-        self.tg.cancel();
+        self.ctx.tg.cancel();
     }
 }

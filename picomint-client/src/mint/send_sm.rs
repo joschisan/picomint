@@ -8,8 +8,8 @@ use picomint_sqlite::{WriteTx, table};
 use crate::TxRejectEvent;
 use crate::executor::{SmId, StateMachine};
 
-use super::MintSmContext;
 use super::events::{MintFailureEvent, MintSuccessEvent, SendFailureEvent, SendSuccessEvent};
+use crate::module::ClientContext;
 
 table!(
     SendStateMachineTable,
@@ -42,11 +42,10 @@ pub enum SendOutcome {
 }
 
 impl StateMachine for SendStateMachine {
-    type Context = MintSmContext;
     type Outcome = SendOutcome;
 
-    async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
-        let mut stream = ctx.client_ctx.subscribe_operation_events(self.operation);
+    async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
+        let mut stream = ctx.subscribe_operation_events(self.operation);
         while let Some(entry) = stream.next().await {
             if entry.to_event::<MintSuccessEvent>().is_some() {
                 return SendOutcome::Success;
@@ -63,30 +62,24 @@ impl StateMachine for SendStateMachine {
 
     fn transition(
         &self,
-        ctx: &Self::Context,
+        ctx: &ClientContext,
         dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {
         match outcome {
             SendOutcome::Success => {
                 match super::send_ecash_dbtx(dbtx, ctx.federation, self.account, self.amount) {
-                    Some(ecash) => ctx.client_ctx.log_event(
+                    Some(ecash) => ctx.log_event(
                         dbtx,
                         self.account,
                         self.operation,
                         SendSuccessEvent { ecash },
                     ),
-                    None => ctx.client_ctx.log_event(
-                        dbtx,
-                        self.account,
-                        self.operation,
-                        SendFailureEvent,
-                    ),
+                    None => ctx.log_event(dbtx, self.account, self.operation, SendFailureEvent),
                 }
             }
             SendOutcome::Failure => {
-                ctx.client_ctx
-                    .log_event(dbtx, self.account, self.operation, SendFailureEvent)
+                ctx.log_event(dbtx, self.account, self.operation, SendFailureEvent)
             }
         }
         None

@@ -22,7 +22,7 @@ impl Event for SendEvent {
     const KIND: EventKind = EventKind::from_static("send");
 }
 
-/// Terminal success event for [`crate::mint::MintClientModule::send`].
+/// Terminal success event for [`crate::mint::Mint::send`].
 /// `ecash` is the assembled bundle the caller can hand off out-of-band;
 /// in the event log it serialises as the `picomint`-prefixed base32
 /// string (see `ECash`'s serde impl).
@@ -36,7 +36,7 @@ impl Event for SendSuccessEvent {
     const KIND: EventKind = EventKind::from_static("send-success");
 }
 
-/// Terminal failure event for [`crate::mint::MintClientModule::send`].
+/// Terminal failure event for [`crate::mint::Mint::send`].
 /// Fires when reissuance failed (`TxRejectEvent`/`MintFailureEvent`)
 /// or — defensively — when the post-reissuance NoteTable table no longer
 /// has the exact denominations the send needs.
@@ -62,7 +62,7 @@ impl Event for RemintEvent {
 
 /// Emitted when a receive (reissuance) operation is initiated. Also covers
 /// restore, which hands its restored notes to
-/// [`crate::mint::MintClientModule::receive`] as an ordinary bundle — the
+/// [`crate::mint::Mint::receive`] as an ordinary bundle — the
 /// two are the same operation, notes someone else may know traded for notes
 /// only this wallet does.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

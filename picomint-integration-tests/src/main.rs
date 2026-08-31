@@ -50,7 +50,7 @@ fn main() -> anyhow::Result<()> {
 
     info!("Shutting down the primary test client!");
 
-    runtime.block_on(client_send.shutdown());
+    runtime.block_on(client_send.client.shutdown());
 
     info!("Running guardian backup/restore test...");
     runtime.block_on(restore::run_test(&env))?;

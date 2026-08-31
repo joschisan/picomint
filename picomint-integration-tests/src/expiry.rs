@@ -39,12 +39,15 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
 
     // The startup refresh task races with us; force a sync read so the
     // cache is settled before we assert.
-    picomint_client::Client::refresh_expiry_status(client.clone())
+    client
+        .client
+        .refresh_expiry_status(client.fed)
         .await
         .map_err(|e| anyhow::anyhow!("refresh_expiry_status: {e}"))?;
 
     let cached = client
-        .expiry_status()
+        .client
+        .expiry_status(client.fed)
         .ok_or_else(|| anyhow::anyhow!("expected client cache to hold the announcement"))?;
 
     ensure!(
@@ -58,12 +61,14 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
         cli::guardian_expiry_clear(&data_dir)?;
     }
 
-    picomint_client::Client::refresh_expiry_status(client.clone())
+    client
+        .client
+        .refresh_expiry_status(client.fed)
         .await
         .map_err(|e| anyhow::anyhow!("refresh_expiry_status (clear): {e}"))?;
 
     ensure!(
-        client.expiry_status().is_none(),
+        client.client.expiry_status(client.fed).is_none(),
         "client cache should be empty after a federation-wide clear"
     );
 

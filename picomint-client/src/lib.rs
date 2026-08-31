@@ -1,17 +1,23 @@
 //! Picomint client library.
 //!
-//! [`Client`] is the entry point for applications interacting with one
-//! federation. Use [`Client::new`] for regular clients and
-//! [`Client::new_gateway`] for the gateway daemon's flavor — both take a
-//! [`ConsensusConfig`] the integrator persists itself, obtained from an
-//! invite code by [`join`].
+//! [`Client`] is the entry point for applications: one instance per app,
+//! holding every joined federation as data. [`Client::new`] binds the iroh
+//! endpoint from the seed; [`Client::add`] joins a federation,
+//! [`Client::connect`] brings one up, [`Client::remove`] wipes one. Every
+//! operation takes the [`picomint_core::config::FederationId`] it acts on
+//! and is named for the module that serves it — `mint_send`,
+//! `wallet_deposit_address`, `ln_receive`, `gw_finalize_send` — so there is
+//! no per-federation handle to hold or leak.
+//!
+//! Every table is shared across federations with a
+//! [`picomint_core::config::FederationId`]-prefixed key, so adds, removes,
+//! and all module writes commit through one database.
 //!
 //! Per-module logic lives in [`mod@mint`], [`mod@wallet`], [`mod@ln`], and
-//! [`mod@gw`]. Each module owns its own state machines and exposes a
-//! `*Module::new` constructor used by the [`Client`] entry points.
-//! Submission ownership lives entirely in [`crate::mint::MintClientModule`]
-//! — non-mint modules build a [`crate::tx::TxBuilder`]
-//! and call `MintClientModule::finalize_and_submit_tx`, which
+//! [`mod@gw`]. Each module owns its own state machines and contributes its
+//! slice of the flat [`Client`] surface. Submission ownership lives
+//! entirely in the mint module — non-mint modules build a
+//! [`crate::tx::TxBuilder`] and call its `finalize_and_submit_tx`, which
 //! balances against the wallet and submits via its own
 //! [`crate::tx::TxSubmissionStateMachine`].
 
@@ -22,7 +28,7 @@ pub mod api;
 mod client;
 /// Shared kept-alive iroh connection primitive (federation peers + gateways).
 /// Per-module typed state machine executor
-pub mod executor;
+mod executor;
 /// Federation expiry-status cache + refresh.
 pub mod expiry;
 /// Federation fee announcement cache, and paying out a collected cut.
@@ -36,7 +42,7 @@ pub mod ln;
 /// Mint module client.
 pub mod mint;
 /// Module client interface definitions
-pub mod module;
+mod module;
 /// Client query-consensus strategies
 /// Secret handling & derivation
 pub mod secret;
@@ -50,7 +56,6 @@ pub mod wallet;
 pub use iroh::Endpoint;
 
 pub use client::Client;
-pub use join::{Join, join};
 pub use picomint_core::core::{Account, OperationId};
 pub use picomint_rpc::connection::ConnStatus;
 pub use secret::{Mnemonic, random as random_mnemonic};

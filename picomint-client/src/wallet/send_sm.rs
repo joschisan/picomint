@@ -32,10 +32,9 @@ pub enum AwaitFundingResult {
 }
 
 impl StateMachine for SendStateMachine {
-    type Context = ClientContext;
     type Outcome = AwaitFundingResult;
 
-    async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
+    async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         if let Err(error) = ctx
             .await_tx_accepted(self.operation, self.outpoint.txid)
             .await
@@ -43,7 +42,7 @@ impl StateMachine for SendStateMachine {
             return AwaitFundingResult::Aborted(error);
         }
 
-        match ctx.api().wallet_tx_id(self.outpoint).await {
+        match ctx.api.wallet_tx_id(self.outpoint).await {
             Some(txid) => AwaitFundingResult::Success(txid),
             None => AwaitFundingResult::Failure,
         }
@@ -51,7 +50,7 @@ impl StateMachine for SendStateMachine {
 
     fn transition(
         &self,
-        ctx: &Self::Context,
+        ctx: &ClientContext,
         dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {

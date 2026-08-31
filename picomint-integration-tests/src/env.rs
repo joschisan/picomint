@@ -12,14 +12,25 @@ use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_client::{Client, Mnemonic};
+use picomint_core::config::FederationId;
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::gateway::GatewayPk;
+use picomint_sqlite::Database;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::block_in_place;
 use tracing::info;
 
 use crate::cli;
+
+/// One test wallet: the app-level [`Client`] plus the id of the single
+/// federation it joins — the two values every federation-keyed call takes.
+#[derive(Clone)]
+pub struct TestClient {
+    pub client: Arc<Client>,
+    pub fed: FederationId,
+    pub db: Database,
+}
 
 pub const BTC_RPC_PORT: u16 = 18443;
 pub const GUARDIAN_BASE_PORT: u16 = 17000;
@@ -58,14 +69,13 @@ pub struct TestEnv {
     pub gw_data_dir: std::path::PathBuf,
     pub gw_pk: GatewayPk,
     pub lnurl_daemon_url: String,
-    pub endpoint: Endpoint,
     pub client_counter: AtomicU64,
     /// One per guardian, indexed by peer id. `None` once we've killed it.
     pub guardian_processes: Mutex<Vec<Option<Child>>>,
 }
 
 impl TestEnv {
-    pub fn setup(runtime: Arc<tokio::runtime::Runtime>) -> anyhow::Result<(Self, Arc<Client>)> {
+    pub fn setup(runtime: Arc<tokio::runtime::Runtime>) -> anyhow::Result<(Self, TestClient)> {
         let data_dir = tempfile::TempDir::new()?.keep();
         let base = data_dir.as_path();
         info!("Test data directory: {}", base.display());
@@ -101,19 +111,8 @@ impl TestEnv {
             .invite;
         info!("Federation ready");
 
-        // Bind the iroh endpoint now so we can start building the first client
-        // concurrently with the rest of setup — address grinding is the
-        // slowest part of client construction and benefits from overlapping
-        // with gateway/LDK bring-up.
-        let endpoint = runtime.block_on(
-            Endpoint::builder(N0)
-                .address_lookup(MdnsAddressLookup::builder())
-                .bind(),
-        )?;
-
         let client_counter = AtomicU64::new(0);
         let client_send = runtime.block_on(build_client(
-            endpoint.clone(),
             invite.clone(),
             data_dir.clone(),
             client_counter.fetch_add(1, Ordering::Relaxed),
@@ -158,7 +157,6 @@ impl TestEnv {
                 gw_data_dir,
                 gw_pk,
                 lnurl_daemon_url,
-                endpoint,
                 client_counter,
                 guardian_processes: Mutex::new(guardian_processes),
             },
@@ -230,16 +228,9 @@ impl TestEnv {
     /// Bring up a client. Passing a `mnemonic` a previous client used against
     /// this federation restores it — the scan is part of joining, so there is
     /// no second entry point for it.
-    pub async fn new_client(&self, mnemonic: Option<Mnemonic>) -> anyhow::Result<Arc<Client>> {
+    pub async fn new_client(&self, mnemonic: Option<Mnemonic>) -> anyhow::Result<TestClient> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
-        build_client(
-            self.endpoint.clone(),
-            self.invite.clone(),
-            self.data_dir.clone(),
-            n,
-            mnemonic,
-        )
-        .await
+        build_client(self.invite.clone(), self.data_dir.clone(), n, mnemonic).await
     }
 
     pub fn mine_blocks(&self, n: u64) {
@@ -259,36 +250,38 @@ impl TestEnv {
 }
 
 async fn build_client(
-    endpoint: Endpoint,
     invite_code: InviteCode,
     data_dir: std::path::PathBuf,
     n: u64,
     mnemonic: Option<Mnemonic>,
-) -> anyhow::Result<Arc<Client>> {
+) -> anyhow::Result<TestClient> {
     let db_dir = data_dir.join(format!("client-{n}"));
     tokio::fs::create_dir_all(&db_dir).await?;
 
-    let db = picomint_sqlite::Database::open(db_dir.join("database.sqlite"))?;
+    let db = Database::open(db_dir.join("database.sqlite"))?;
 
     let mnemonic = match mnemonic {
         Some(m) => m,
         None => Mnemonic::generate(12)?,
     };
 
-    let join = picomint_client::join(&endpoint, &mnemonic, &invite_code).await?;
+    // No secret key: a wallet's network identity is ephemeral — nothing
+    // dials it.
+    let endpoint = Endpoint::builder(N0)
+        .address_lookup(MdnsAddressLookup::builder())
+        .bind()
+        .await?;
 
-    // The dbtx an integrator would also mark the federation as joined in, so
-    // a crash leaves the counter marks and that mark together or not at all.
-    let dbtx = db.begin_write();
+    let client = Arc::new(Client::new(endpoint, db.clone(), mnemonic, None));
 
-    join.commit(&dbtx);
+    let fed = client
+        .add(&invite_code, Some(bitcoin::Network::Regtest))
+        .await?;
 
-    dbtx.commit();
-
-    let client = Client::new(endpoint, db, &mnemonic, join.config().clone(), None);
+    client.connect(fed)?;
 
     info!("Created client-{n}");
-    Ok(client)
+    Ok(TestClient { client, fed, db })
 }
 
 async fn start_guardian(base: &Path, peer: usize) -> anyhow::Result<Child> {

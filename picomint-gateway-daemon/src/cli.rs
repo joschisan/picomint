@@ -1,5 +1,4 @@
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
@@ -16,7 +15,7 @@ use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use picomint_client::gw::GATEWAY_ACCOUNT;
 use picomint_client::wallet::events::{SendFailureEvent, SendSuccessEvent};
-use picomint_client::{Client, TxAcceptEvent, TxRejectEvent};
+use picomint_client::{TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
@@ -175,7 +174,7 @@ async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, CliEr
 
     Ok(Json(InfoResponse {
         lightning_pk: state.node.node_id(),
-        gateway_pk: GatewayPk(state.client_factory.endpoint().id()),
+        gateway_pk: GatewayPk(state.endpoint.id()),
         alias: state
             .node
             .node_alias()
@@ -191,8 +190,7 @@ async fn info(State(state): State<AppState>) -> Result<Json<InfoResponse>, CliEr
 #[instrument(skip_all, err)]
 async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse>, CliError> {
     let words = state
-        .client_factory
-        .mnemonic()
+        .mnemonic
         .words()
         .map(std::string::ToString::to_string)
         .collect::<Vec<_>>();
@@ -633,7 +631,10 @@ async fn federation_add(
     State(state): State<AppState>,
     Json(payload): Json<FederationAddRequest>,
 ) -> Result<Json<()>, CliError> {
-    state.client_factory.add(&payload.invite).await?;
+    state
+        .client
+        .add(&payload.invite, Some(state.network))
+        .await?;
 
     Ok(Json(()))
 }
@@ -687,8 +688,12 @@ async fn federation_config(
     State(state): State<AppState>,
     Json(payload): Json<FederationConfigRequest>,
 ) -> Result<Json<FederationConfigResponse>, CliError> {
-    let client = resolve_client(&state, payload.federation).await?;
-    let config = client.config();
+    let federation = resolve_federation(&state, payload.federation)?;
+
+    let config = state
+        .client
+        .config(federation)
+        .ok_or_else(|| CliError::bad_request("Federation not joined"))?;
 
     Ok(Json(FederationConfigResponse {
         config: serde_json::to_value(config).expect("ConsensusConfig is serializable"),
@@ -701,9 +706,9 @@ async fn federation_balance(
     State(state): State<AppState>,
     Json(payload): Json<FederationBalanceRequest>,
 ) -> Result<Json<FederationBalanceResponse>, CliError> {
-    let client = resolve_client(&state, payload.federation).await?;
+    let federation = resolve_federation(&state, payload.federation)?;
 
-    let balance_msat = client.get_balance(GATEWAY_ACCOUNT);
+    let balance_msat = state.client.mint_balance(federation, GATEWAY_ACCOUNT);
 
     Ok(Json(FederationBalanceResponse { balance_msat }))
 }
@@ -712,30 +717,24 @@ async fn federation_balance(
 // Per-federation module handlers
 // ---------------------------------------------------------------------------
 
-/// Resolve the target federation client. When `id` is `None` and the gateway
-/// has exactly one federation added, that one is used; otherwise the caller
-/// must supply `--id`. Resolves against persisted configs, not the in-memory
-/// client cache, so an added-but-not-yet-warm federation works on first use.
-async fn resolve_client(
+/// Resolve the target federation. When `id` is `None` and the gateway has
+/// exactly one federation added, that one is used; otherwise the caller must
+/// supply `--id`. Resolves against persisted configs, so an
+/// added-but-not-yet-connected federation works on first use.
+fn resolve_federation(
     state: &AppState,
     id: Option<FederationId>,
-) -> Result<Arc<Client>, CliError> {
-    let id = match id {
-        Some(id) => id,
+) -> Result<FederationId, CliError> {
+    match id {
+        Some(id) => Ok(id),
         None => match state.federation_list().as_slice() {
-            [] => return Err(CliError::bad_request("No federations connected")),
-            [info] => info.federation,
-            _ => {
-                return Err(CliError::bad_request(
-                    "Multiple federations connected — pass --id <FEDERATION_ID>",
-                ));
-            }
+            [] => Err(CliError::bad_request("No federations connected")),
+            [info] => Ok(info.federation),
+            _ => Err(CliError::bad_request(
+                "Multiple federations connected — pass --id <FEDERATION_ID>",
+            )),
         },
-    };
-
-    state
-        .select_client(id)
-        .ok_or_else(|| CliError::bad_request("Federation not connected"))
+    }
 }
 
 /// Count held ecash notes by denomination
@@ -744,8 +743,10 @@ async fn federation_module_mint_count(
     State(state): State<AppState>,
     Json(payload): Json<FederationMintCountRequest>,
 ) -> Result<Json<FederationMintCountResponse>, CliError> {
-    let client = resolve_client(&state, payload.federation).await?;
-    let counts = client.mint().get_count_by_denomination(GATEWAY_ACCOUNT);
+    let federation = resolve_federation(&state, payload.federation)?;
+    let counts = state
+        .client
+        .mint_count_by_denomination(federation, GATEWAY_ACCOUNT);
     Ok(Json(FederationMintCountResponse { counts }))
 }
 
@@ -755,11 +756,12 @@ async fn federation_module_mint_send(
     State(state): State<AppState>,
     Json(payload): Json<FederationMintSendRequest>,
 ) -> Result<Json<FederationMintSendResponse>, CliError> {
-    let client = resolve_client(&state, payload.federation).await?;
+    let federation = resolve_federation(&state, payload.federation)?;
 
-    let ecash = client
-        .mint()
-        .send(
+    let ecash = state
+        .client
+        .mint_send(
+            federation,
             GATEWAY_ACCOUNT,
             picomint_core::Amount::from_sat(payload.amount.to_sat()),
         )
@@ -777,18 +779,14 @@ async fn federation_module_mint_receive(
     State(state): State<AppState>,
     Json(payload): Json<FederationMintReceiveRequest>,
 ) -> Result<Json<FederationMintReceiveResponse>, CliError> {
-    let client = state
-        .select_client(payload.ecash.mint)
-        .ok_or(CliError::bad_request("Federation not connected"))?;
-
     let amount = payload.ecash.amount();
 
-    let operation = client
-        .mint()
-        .receive(GATEWAY_ACCOUNT, &payload.ecash)
+    let operation = state
+        .client
+        .mint_receive(payload.ecash.mint, GATEWAY_ACCOUNT, &payload.ecash)
         .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
 
-    let mut events = client.subscribe_operation_events(operation);
+    let mut events = state.client.subscribe_operation_events(operation);
     while let Some(entry) = events.next().await {
         if entry.to_event::<TxAcceptEvent>().is_some() {
             return Ok(Json(FederationMintReceiveResponse { amount }));
@@ -809,10 +807,10 @@ async fn federation_module_wallet_send_fee(
     State(state): State<AppState>,
     Json(payload): Json<FederationWalletSendFeeRequest>,
 ) -> Result<Json<FederationWalletSendFeeResponse>, CliError> {
-    let client = resolve_client(&state, payload.federation).await?;
-    let fee = client
-        .wallet()
-        .send_fee()
+    let federation = resolve_federation(&state, payload.federation)?;
+    let fee = state
+        .client
+        .wallet_send_fee(federation)
         .await
         .map_err(|e| CliError::internal(format!("Failed to fetch send fee: {e}")))?;
     Ok(Json(FederationWalletSendFeeResponse { fee }))
@@ -826,10 +824,11 @@ async fn federation_module_wallet_send(
     State(state): State<AppState>,
     Json(payload): Json<FederationWalletSendRequest>,
 ) -> Result<Json<FederationWalletSendResponse>, CliError> {
-    let client = resolve_client(&state, payload.federation).await?;
-    let operation = client
-        .wallet()
-        .send(
+    let federation = resolve_federation(&state, payload.federation)?;
+    let operation = state
+        .client
+        .wallet_send(
+            federation,
             GATEWAY_ACCOUNT,
             payload.address,
             payload.amount,
@@ -838,7 +837,7 @@ async fn federation_module_wallet_send(
         .await
         .map_err(|e| CliError::internal(format!("Failed to submit onchain send: {e}")))?;
 
-    let mut events = client.subscribe_operation_events(operation);
+    let mut events = state.client.subscribe_operation_events(operation);
     while let Some(entry) = events.next().await {
         if let Some(e) = entry.to_event::<SendSuccessEvent>() {
             return Ok(Json(FederationWalletSendResponse { txid: e.txid }));
@@ -864,8 +863,12 @@ async fn federation_module_wallet_receive(
     State(state): State<AppState>,
     Json(payload): Json<FederationWalletReceiveRequest>,
 ) -> Result<Json<FederationWalletReceiveResponse>, CliError> {
-    let client = resolve_client(&state, payload.federation).await?;
-    let address = client.wallet().receive(GATEWAY_ACCOUNT).await;
+    let federation = resolve_federation(&state, payload.federation)?;
+    let address = state
+        .client
+        .wallet_deposit_address(federation, GATEWAY_ACCOUNT)
+        .await
+        .map_err(CliError::internal)?;
     Ok(Json(FederationWalletReceiveResponse {
         address: address.as_unchecked().clone(),
     }))

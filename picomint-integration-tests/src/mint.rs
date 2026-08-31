@@ -1,17 +1,16 @@
 use std::pin::pin;
-use std::sync::Arc;
 
 use anyhow::ensure;
 use async_stream::stream;
 use futures::StreamExt;
 use picomint_client::mint::{MintSuccessEvent, ReceiveEvent, SendEvent};
-use picomint_client::{Account, Client, Mnemonic, TxAcceptEvent, TxRejectEvent};
+use picomint_client::{Account, Mnemonic, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use tracing::info;
 
-use crate::env::{CLIENT_FEE_PPM, TestEnv};
+use crate::env::{CLIENT_FEE_PPM, TestClient, TestEnv};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -20,17 +19,15 @@ enum MintEvent {
     Receive(ReceiveEvent),
 }
 
-fn mint_event_stream(
-    client: &Arc<Client>,
-) -> impl futures::Stream<Item = (OperationId, MintEvent)> {
+fn mint_event_stream(client: &TestClient) -> impl futures::Stream<Item = (OperationId, MintEvent)> {
     let client = client.clone();
-    let notify = client.event_notify();
+    let notify = client.client.event_notify();
     let mut next_id = EventLogId::LOG_START;
 
     stream! {
         loop {
             let notified = notify.notified();
-            let events = client.get_event_log(next_id, 100);
+            let events = client.client.get_event_log(next_id, 100);
 
             for (id, entry) in events {
                 next_id = id.saturating_add(1);
@@ -89,10 +86,10 @@ async fn wait_mint_event<S>(
 /// `get_balance()` between TxAccept and MintSuccessEvent returns a
 /// stale (lower) figure.
 pub(crate) async fn await_tx_outcome(
-    client: &Arc<Client>,
+    client: &TestClient,
     operation: OperationId,
 ) -> Result<(), String> {
-    let mut stream = client.subscribe_operation_events(operation);
+    let mut stream = client.client.subscribe_operation_events(operation);
 
     let mut tx_accepted = false;
 
@@ -113,7 +110,7 @@ pub(crate) async fn await_tx_outcome(
     unreachable!("stream only ends at client shutdown")
 }
 
-pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
+pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Result<()> {
     info!("mint: send_and_receive (10 iterations) + double_spend_is_rejected");
 
     // Capture the receive client's mnemonic so we can restore it at
@@ -128,13 +125,16 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
         info!("Sending ecash payment {} of 10", i + 1);
 
         let ecash = client_send
-            .mint()
-            .send(Account::PRIMARY, Amount::from_sat(1_000))
+            .client
+            .mint_send(client_send.fed, Account::PRIMARY, Amount::from_sat(1_000))
             .await?;
 
         wait_mint_event(&mut send_events, |_, e| matches!(e, MintEvent::Send(_))).await;
 
-        let operation = client_receive.mint().receive(Account::PRIMARY, &ecash)?;
+        let operation =
+            client_receive
+                .client
+                .mint_receive(client_receive.fed, Account::PRIMARY, &ecash)?;
 
         let Some((op, MintEvent::Receive(_))) = receive_events.next().await else {
             panic!("Expected Receive event");
@@ -153,7 +153,9 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // opportunistically pulls excess notes (>TARGET_PER_DENOMINATION) into
     // the IssuanceSM's `spendable_notes` and only recovers them once the SM
     // transitions on Err. Capturing here avoids racing that reclaim.
-    let expected = client_receive.get_balance(Account::PRIMARY);
+    let expected = client_receive
+        .client
+        .mint_balance(client_receive.fed, Account::PRIMARY);
 
     ensure!(
         expected != Amount::ZERO,
@@ -163,14 +165,16 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     info!("mint: double_spend_is_rejected");
 
     let ecash = client_send
-        .mint()
-        .send(Account::PRIMARY, Amount::from_sat(1_000))
+        .client
+        .mint_send(client_send.fed, Account::PRIMARY, Amount::from_sat(1_000))
         .await?;
 
     wait_mint_event(&mut send_events, |_, e| matches!(e, MintEvent::Send(_))).await;
 
     // First receive succeeds (sender receives own ecash back)
-    let operation = client_send.mint().receive(Account::PRIMARY, &ecash)?;
+    let operation = client_send
+        .client
+        .mint_receive(client_send.fed, Account::PRIMARY, &ecash)?;
 
     wait_mint_event(&mut send_events, |op, e| {
         op == operation && matches!(e, MintEvent::Receive(_))
@@ -182,7 +186,10 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
         .expect("first receive should be accepted");
 
     // Second receive with same ecash is rejected
-    let operation = client_receive.mint().receive(Account::PRIMARY, &ecash)?;
+    let operation =
+        client_receive
+            .client
+            .mint_receive(client_receive.fed, Account::PRIMARY, &ecash)?;
 
     let Some((op, MintEvent::Receive(_))) = receive_events.next().await else {
         panic!("Expected Receive event");
@@ -196,7 +203,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     info!("mint: double_spend_is_rejected passed");
 
-    client_receive.shutdown().await;
+    client_receive.client.shutdown().await;
 
     info!("mint: restore (expected balance {expected})");
 
@@ -206,7 +213,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // inside the join and wrote its notes with the counter marks, so the
     // wallet is whole the moment the client opens rather than once a
     // reissuance settles.
-    let scanned = restored.get_balance(Account::PRIMARY);
+    let scanned = restored.client.mint_balance(restored.fed, Account::PRIMARY);
 
     ensure!(
         scanned == expected,
@@ -220,17 +227,19 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     // bundle and receiving it back re-mints under counters above the mark,
     // which is the state the next scan has to cross to.
     let ecash = restored
-        .mint()
-        .send(Account::PRIMARY, Amount::from_sat(1_000))
+        .client
+        .mint_send(restored.fed, Account::PRIMARY, Amount::from_sat(1_000))
         .await?;
 
-    let operation = restored.mint().receive(Account::PRIMARY, &ecash)?;
+    let operation = restored
+        .client
+        .mint_receive(restored.fed, Account::PRIMARY, &ecash)?;
 
     await_tx_outcome(&restored, operation)
         .await
         .expect("self-remint should be accepted");
 
-    let swept = restored.get_balance(Account::PRIMARY);
+    let swept = restored.client.mint_balance(restored.fed, Account::PRIMARY);
 
     ensure!(
         swept > Amount::ZERO && swept < expected,
@@ -248,7 +257,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
         "remint lost more than expected to fees: {expected} -> {swept} (loss {loss})"
     );
 
-    restored.shutdown().await;
+    restored.client.shutdown().await;
 
     // Restoring a second time is the only phase that exercises the counter
     // mark the first restore persisted. A mark one batch too high opens a gap
@@ -259,14 +268,14 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     let restored = env.new_client(Some(receive_mnemonic)).await?;
 
-    let scanned = restored.get_balance(Account::PRIMARY);
+    let scanned = restored.client.mint_balance(restored.fed, Account::PRIMARY);
 
     ensure!(
         scanned == swept,
         "second restore scanned {scanned}, expected {swept}"
     );
 
-    restored.shutdown().await;
+    restored.client.shutdown().await;
 
     info!("mint: second restore passed");
 
@@ -277,37 +286,41 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     let client = env.new_client(None).await?;
 
     let ecash = client_send
-        .mint()
-        .send(Account::PRIMARY, Amount::from_sat(5_000))
+        .client
+        .mint_send(client_send.fed, Account::PRIMARY, Amount::from_sat(5_000))
         .await?;
 
-    let operation = client.mint().receive(Account::PRIMARY, &ecash)?;
+    let operation = client
+        .client
+        .mint_receive(client.fed, Account::PRIMARY, &ecash)?;
 
     await_tx_outcome(&client, operation)
         .await
         .expect("funding receive should be accepted");
 
     let ecash = client
-        .mint()
-        .send_max(Account::PRIMARY)
+        .client
+        .mint_send_max(client.fed, Account::PRIMARY)?
         .expect("account holds notes");
 
     ensure!(
         client
-            .mint()
-            .get_count_by_denomination(Account::PRIMARY)
+            .client
+            .mint_count_by_denomination(client.fed, Account::PRIMARY)
             .is_empty(),
         "send_max left notes behind"
     );
 
     // The bundle is real value, so hand it back rather than burning it.
-    let operation = client_send.mint().receive(Account::PRIMARY, &ecash)?;
+    let operation = client_send
+        .client
+        .mint_receive(client_send.fed, Account::PRIMARY, &ecash)?;
 
     await_tx_outcome(client_send, operation)
         .await
         .expect("return receive should be accepted");
 
-    client.shutdown().await;
+    client.client.shutdown().await;
 
     info!("mint: send_max passed");
 

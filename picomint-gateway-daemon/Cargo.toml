@@ -20,6 +20,7 @@ clap = { workspace = true }
 futures = { workspace = true }
 hex = { workspace = true }
 iroh = { workspace = true, default-features = false }
+iroh-base = { workspace = true, default-features = false }
 iroh-mdns-address-lookup = { workspace = true }
 ldk-node = { workspace = true }
 lightning = { workspace = true }

@@ -15,9 +15,9 @@ use picomint_encoding::{Decodable, Encodable};
 use tpe::{DecryptionKeyShare, aggregate_dk_shares};
 use tracing::warn;
 
-use super::GwSmContext;
 use super::events::{ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent};
 use crate::executor::{SmId, StateMachine};
+use crate::module::ClientContext;
 use crate::tx::{Input, TxBuilder};
 use picomint_rpc::query::FilterMapThreshold;
 
@@ -42,20 +42,17 @@ pub struct ReceiveStateMachine {
 }
 
 impl StateMachine for ReceiveStateMachine {
-    type Context = GwSmContext;
     type Outcome = Result<BTreeMap<PeerId, DecryptionKeyShare>, String>;
 
-    async fn trigger(&self, ctx: &Self::Context) -> Self::Outcome {
-        ctx.client_ctx
-            .await_tx_accepted(self.operation, self.outpoint.txid)
+    async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
+        ctx.await_tx_accepted(self.operation, self.outpoint.txid)
             .await
             .map_err(|e| e.to_string())?;
 
-        let tpe_pks = ctx.tpe_pks.clone();
+        let tpe_pks = ctx.config.ln.tpe_pks.clone();
         let offer = self.offer.clone();
         let shares = ctx
-            .client_ctx
-            .api()
+            .api
             .request_with_strategy_retry(
                 FilterMapThreshold::new(
                     move |peer, resp: DecryptionKeyShareResponse| {
@@ -68,7 +65,7 @@ impl StateMachine for ReceiveStateMachine {
                         }
                         Ok(share)
                     },
-                    ctx.client_ctx.api().num_peers(),
+                    ctx.api.num_peers(),
                 ),
                 Method::Ln(LnMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
                     outpoint: self.outpoint,
@@ -81,13 +78,13 @@ impl StateMachine for ReceiveStateMachine {
 
     fn transition(
         &self,
-        ctx: &Self::Context,
+        ctx: &ClientContext,
         dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {
         let shares = match outcome {
             Err(_) => {
-                ctx.client_ctx.log_event(
+                ctx.log_event(
                     dbtx,
                     super::GATEWAY_ACCOUNT,
                     self.operation,
@@ -106,10 +103,10 @@ impl StateMachine for ReceiveStateMachine {
 
         if !self
             .offer
-            .verify_agg_decryption_key(&ctx.tpe_agg_pk, &agg_decryption_key)
+            .verify_agg_decryption_key(&ctx.config.ln.tpe_agg_pk, &agg_decryption_key)
         {
             warn!("Aggregate decryption key invalid — TPE config inconsistent");
-            ctx.client_ctx.log_event(
+            ctx.log_event(
                 dbtx,
                 super::GATEWAY_ACCOUNT,
                 self.operation,
@@ -119,7 +116,7 @@ impl StateMachine for ReceiveStateMachine {
         }
 
         if let Some(preimage) = self.offer.decrypt_preimage(&agg_decryption_key) {
-            ctx.client_ctx.log_event(
+            ctx.log_event(
                 dbtx,
                 super::GATEWAY_ACCOUNT,
                 self.operation,
@@ -132,19 +129,19 @@ impl StateMachine for ReceiveStateMachine {
             input: wire::Input::Ln(LightningInput::Incoming(self.outpoint, agg_decryption_key)),
             keypair: self.refund_keypair,
             amount: self.offer.commitment.amount - self.offer.commitment.fee,
-            fee: ctx.input_fee,
+            fee: ctx.config.ln.input_fee,
         });
 
-        ctx.mint
-            .finalize_and_submit_tx(
-                dbtx,
-                super::GATEWAY_ACCOUNT,
-                self.operation,
-                tx_builder,
-                false,
-                |txid| ReceiveRefundEvent { txid },
-            )
-            .expect("Cannot claim input, additional funding needed");
+        crate::mint::finalize_and_submit_tx(
+            ctx,
+            dbtx,
+            super::GATEWAY_ACCOUNT,
+            self.operation,
+            tx_builder,
+            false,
+            |txid| ReceiveRefundEvent { txid },
+        )
+        .expect("Cannot claim input, additional funding needed");
 
         None
     }

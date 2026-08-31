@@ -3521,6 +3521,7 @@ dependencies = [
  "futures",
  "hex",
  "iroh",
+ "iroh-base",
  "iroh-mdns-address-lookup",
  "ldk-node",
  "lightning",

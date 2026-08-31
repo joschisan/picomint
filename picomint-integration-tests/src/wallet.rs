@@ -1,18 +1,17 @@
 use std::pin::pin;
-use std::sync::Arc;
 
 use anyhow::{Context, ensure};
 use async_stream::stream;
 use bitcoincore_rpc::RpcApi;
 use futures::StreamExt;
 use picomint_client::wallet::events::{ReceiveEvent, SendEvent, SendSuccessEvent};
-use picomint_client::{Account, Client, TxRejectEvent};
+use picomint_client::{Account, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_eventlog::{EventLogEntry, EventLogId};
 use tokio::task::block_in_place;
 use tracing::info;
 
-use crate::env::{TestEnv, retry};
+use crate::env::{TestClient, TestEnv, retry};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -24,16 +23,16 @@ enum WalletEvent {
 }
 
 fn wallet_event_stream(
-    client: &Arc<Client>,
+    client: &TestClient,
 ) -> impl futures::Stream<Item = (picomint_core::core::OperationId, WalletEvent)> {
     let client = client.clone();
-    let notify = client.event_notify();
+    let notify = client.client.event_notify();
     let mut next_id = EventLogId::LOG_START;
 
     stream! {
         loop {
             let notified = notify.notified();
-            let events = client.get_event_log(next_id, 100);
+            let events = client.client.get_event_log(next_id, 100);
 
             for (id, entry) in events {
                 next_id = id.saturating_add(1);
@@ -67,12 +66,15 @@ fn try_parse_wallet_event(
     None
 }
 
-pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Result<()> {
+pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Result<()> {
     info!("wallet: pegin + on-chain send");
 
     let mut send_events = pin!(wallet_event_stream(client_send));
 
-    let pegin_addr = client_send.wallet().receive(Account::PRIMARY).await;
+    let pegin_addr = client_send
+        .client
+        .wallet_deposit_address(client_send.fed, Account::PRIMARY)
+        .await?;
     info!(addr = %pegin_addr, "Pegin address ready");
 
     let pegin_txid = env.send_to_address(&pegin_addr, bitcoin::Amount::from_sat(100_000_000))?;
@@ -94,7 +96,9 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     info!(addr = %pegin_addr, "Pegin Receive Event");
 
     retry("pegin balance", || async {
-        let balance = client_send.get_balance(Account::PRIMARY);
+        let balance = client_send
+            .client
+            .mint_balance(client_send.fed, Account::PRIMARY);
         ensure!(balance > Amount::ZERO, "Balance is zero");
         Ok(())
     })
@@ -108,8 +112,9 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     info!(address = %external_address, "Sending on-chain to external address");
 
     let operation = client_send
-        .wallet()
-        .send(
+        .client
+        .wallet_send(
+            client_send.fed,
             Account::PRIMARY,
             external_address.as_unchecked().clone(),
             bitcoin::Amount::from_sat(100_000),
@@ -158,8 +163,9 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     info!("wallet: zero_fee_send_aborts");
 
     let abort_op = client_send
-        .wallet()
-        .send(
+        .client
+        .wallet_send(
+            client_send.fed,
             Account::PRIMARY,
             external_address.as_unchecked().clone(),
             bitcoin::Amount::from_sat(100_000),
@@ -186,25 +192,34 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
     let client = env.new_client(None).await?;
 
     let ecash = client_send
-        .mint()
-        .send(Account::PRIMARY, Amount::from_sat(100_000))
+        .client
+        .mint_send(client_send.fed, Account::PRIMARY, Amount::from_sat(100_000))
         .await?;
 
-    let operation = client.mint().receive(Account::PRIMARY, &ecash)?;
+    let operation = client
+        .client
+        .mint_receive(client.fed, Account::PRIMARY, &ecash)?;
 
     crate::mint::await_tx_outcome(&client, operation)
         .await
         .expect("funding receive should be accepted");
 
-    let amount = client.wallet().send_max_amount(Account::PRIMARY).await?;
+    let amount = client
+        .client
+        .wallet_send_max_amount(client.fed, Account::PRIMARY)
+        .await?;
 
     ensure!(amount > bitcoin::Amount::ZERO, "max send amount is zero");
 
     let mut events = pin!(wallet_event_stream(&client));
 
     let operation = client
-        .wallet()
-        .send_max(Account::PRIMARY, external_address.as_unchecked().clone())
+        .client
+        .wallet_send_max(
+            client.fed,
+            Account::PRIMARY,
+            external_address.as_unchecked().clone(),
+        )
         .await?;
 
     let Some((op, WalletEvent::Send(_))) = events.next().await else {
@@ -219,13 +234,13 @@ pub async fn run_tests(env: &TestEnv, client_send: &Arc<Client>) -> anyhow::Resu
 
     ensure!(
         client
-            .mint()
-            .get_count_by_denomination(Account::PRIMARY)
+            .client
+            .mint_count_by_denomination(client.fed, Account::PRIMARY)
             .is_empty(),
         "send_max left notes behind"
     );
 
-    client.shutdown().await;
+    client.client.shutdown().await;
 
     info!("wallet: send_max passed");
 
