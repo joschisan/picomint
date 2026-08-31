@@ -1,15 +1,16 @@
 use crate::executor::{SmId, StateMachine};
 use crate::module::ClientContext;
 use picomint_core::OutPoint;
+use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::WriteTx;
+use picomint_sqlite::{WriteTx, table};
 
 use super::events::{SendFailureEvent, SendSuccessEvent};
 
-crate::client_table!(
+table!(
     SendStateMachineTable,
-    SmId => SendStateMachine,
+    (FederationId, SmId) => SendStateMachine,
     "wallet-send-sm",
 );
 
@@ -22,8 +23,6 @@ pub struct SendStateMachine {
     pub amount: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
-
-picomint_redb::consensus_value!(SendStateMachine);
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AwaitFundingResult {

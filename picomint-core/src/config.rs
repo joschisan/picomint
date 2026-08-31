@@ -49,8 +49,6 @@ pub struct PeerEndpoint {
 )]
 pub struct FederationId(pub sha256::Hash);
 
-picomint_redb::consensus_key!(FederationId);
-
 impl FederationId {
     /// Random dummy id for testing
     pub fn dummy() -> Self {
@@ -87,8 +85,6 @@ pub struct ConsensusConfig {
     /// Lightning module config
     pub ln: LightningConfigConsensus,
 }
-
-picomint_redb::consensus_value!(ConsensusConfig);
 
 impl ConsensusConfig {
     pub fn calculate_federation_id(&self) -> FederationId {

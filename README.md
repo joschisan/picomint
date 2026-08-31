@@ -102,7 +102,7 @@ picomint-guardian-cli config > config.json
 
 This single file is the only state you need to keep. It contains your
 guardian's secret keys plus the federation's consensus config. The live
-`database.redb` is operational state (BFT sessions, block sync) which is
+`database.sqlite` is operational state (BFT sessions, block sync) which is
 reconstructed from peers when a restored guardian rejoins.
 
 If your deployment is ever lost, copy the backup back into a fresh container:
@@ -132,7 +132,7 @@ picomint-guardian-cli …`.
 
 | Env                          | Required | Default           | Description                                |
 |------------------------------|----------|-------------------|--------------------------------------------|
-| `DATA_DIR`                   | yes      |                   | Directory for the redb database file       |
+| `DATA_DIR`                   | yes      |                   | Directory for the database file            |
 | `BITCOIN_NETWORK`            | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`  |
 | `BITCOIND_URL`               | yes      |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332`. Must point at an **unpruned** node — see [Bitcoin Backend](#bitcoin-backend) above. |
 | `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
@@ -356,7 +356,7 @@ picomint-gateway-cli …`.
 
 | Env                        | Required | Default           | Description                                 |
 |----------------------------|----------|-------------------|---------------------------------------------|
-| `DATA_DIR`                 | yes      |                   | Directory for redb + LDK node data          |
+| `DATA_DIR`                 | yes      |                   | Directory for the database + LDK node data  |
 | `BITCOIN_NETWORK`          | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`   |
 | `ESPLORA_URL`              | one of   |                   | Esplora HTTP URL                            |
 | `BITCOIND_URL`             | one of   |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |

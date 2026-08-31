@@ -16,11 +16,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Name of the server daemon's database file on disk.
-pub const DB_FILE: &str = "database.redb";
+pub const DB_FILE: &str = "database.sqlite";
 
 use config::ServerConfig;
 use picomint_bitcoin_rpc::BitcoindClient;
-use picomint_redb::Database;
+use picomint_sqlite::{Database, DbRead};
 use tokio::net::TcpListener;
 use tracing::info;
 

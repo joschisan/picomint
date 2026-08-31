@@ -32,8 +32,6 @@ use serde::{Deserialize, Serialize};
 )]
 pub struct ConsensusVersion(pub u32);
 
-picomint_redb::consensus_value!(ConsensusVersion);
-
 /// Highest consensus version this binary can run.
 ///
 /// Each guardian votes for this and nothing else, so upgrading the binary is

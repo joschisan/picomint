@@ -8,6 +8,8 @@ use picomint_core::wallet::methods::{
     TxChainResponse, TxIdRequest, TxIdResponse,
 };
 
+use picomint_sqlite::DbRead;
+
 use super::Wallet;
 use super::db::FederationWalletTable;
 

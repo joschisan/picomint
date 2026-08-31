@@ -106,5 +106,3 @@ pub enum ConsensusItem {
     /// Highest consensus version the submitting peer's binary can run.
     Version(ConsensusVersion),
 }
-
-picomint_redb::consensus_value!(ConsensusItem);

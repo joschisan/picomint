@@ -1,8 +1,9 @@
 use futures::StreamExt;
 use picomint_core::Amount;
+use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::WriteTx;
+use picomint_sqlite::{WriteTx, table};
 
 use crate::TxRejectEvent;
 use crate::executor::{SmId, StateMachine};
@@ -10,9 +11,9 @@ use crate::executor::{SmId, StateMachine};
 use super::MintSmContext;
 use super::events::{MintFailureEvent, MintSuccessEvent, SendFailureEvent, SendSuccessEvent};
 
-crate::client_table!(
+table!(
     SendStateMachineTable,
-    SmId => SendStateMachine,
+    (FederationId, SmId) => SendStateMachine,
     "mint-send-sm",
 );
 
@@ -29,8 +30,6 @@ pub struct SendStateMachine {
     pub operation: OperationId,
     pub amount: Amount,
 }
-
-picomint_redb::consensus_value!(SendStateMachine);
 
 #[derive(Debug)]
 pub enum SendOutcome {

@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use self::db::{
     BlockCountVoteTable, FederationWalletTable, FeeRateVoteTable, NonceEntry, NonceLogTable,
-    Output, OutputTable, Signatures, SignaturesTable, SpentOutputTable, TxInfoIndexTable,
-    TxInfoTable, TxidKey, UnconfirmedTxTable, UnsignedTxTable,
+    Output, OutputTable, SignaturesTable, SpentOutputTable, TxInfoIndexTable, TxInfoTable,
+    UnconfirmedTxTable, UnsignedTxTable,
 };
 use anyhow::{Context, anyhow, ensure};
 use bitcoin::absolute::LockTime;
@@ -23,7 +23,7 @@ use picomint_core::module::{InputMeta, TxItemAmounts};
 use picomint_core::wallet as common;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::{Database, ReadTx, WriteTx};
+use picomint_sqlite::{Database, DbRead, ReadTx, WriteTx};
 use tokio::time::sleep;
 
 use crate::config::dkg::DkgHandle;
@@ -66,15 +66,13 @@ pub struct FederationTx {
     pub fee: Amount,
 }
 
-picomint_redb::consensus_value!(FederationTx);
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct SpentTxOut {
     pub value: Amount,
     pub tweak: sha256::Hash,
 }
 
-fn pending_txs_unordered(dbtx: &impl picomint_redb::DbRead) -> Vec<FederationTx> {
+fn pending_txs_unordered(dbtx: &impl picomint_sqlite::DbRead) -> Vec<FederationTx> {
     let unsigned: Option<FederationTx> = dbtx.get(&UnsignedTxTable, &());
 
     let unconfirmed: Vec<FederationTx> =
@@ -171,9 +169,8 @@ impl Wallet {
 
         let inputs = unsigned_tx.spent_tx_outs.len();
 
-        let latest = dbtx.iter(&NonceLogTable, |r| {
-            r.rev()
-                .find(|entry| entry.1.0 == self.identity)
+        let latest = dbtx.iter_rev(&NonceLogTable, |r| {
+            r.find(|entry| entry.1.0 == self.identity)
                 .map(|entry| entry.0 as usize)
         });
 
@@ -669,7 +666,7 @@ impl Wallet {
             let pks_hash = self.cfg.consensus.agg_pk.consensus_hash();
 
             for tx in block.txdata {
-                dbtx.remove(&UnconfirmedTxTable, &TxidKey(tx.compute_txid()));
+                dbtx.remove(&UnconfirmedTxTable, &tx.compute_txid());
 
                 // We maintain an append-only log of transaction outputs that pass
                 // the probabilistic receive filter created since the federation was
@@ -684,8 +681,8 @@ impl Wallet {
                                 .expect("Bitcoin transaction has more than u32::MAX outputs"),
                         };
 
-                        let index =
-                            dbtx.iter(&OutputTable, |r| r.next_back().map_or(0, |(k, _)| k + 1));
+                        let index = dbtx
+                            .iter_rev(&OutputTable, |r| r.next().map_or(0, |entry| entry.0 + 1));
 
                         dbtx.insert(&OutputTable, &index, &Output(outpoint, tx_out.clone()));
                     }
@@ -722,9 +719,7 @@ impl Wallet {
             "Nonce entry is redundant"
         );
 
-        let next_index = dbtx.iter(&NonceLogTable, |r| {
-            r.next_back().map_or(0, |entry| entry.0 + 1)
-        });
+        let next_index = dbtx.iter_rev(&NonceLogTable, |r| r.next().map_or(0, |entry| entry.0 + 1));
 
         dbtx.insert(&NonceLogTable, &next_index, &NonceEntry(peer, nonces));
 
@@ -762,9 +757,8 @@ impl Wallet {
         // not have signed yet, since appending an entry requires signing the
         // session of the previous one.
         let latest = dbtx
-            .iter(&NonceLogTable, |r| {
-                r.rev()
-                    .find(|entry| entry.1.0 == peer)
+            .iter_rev(&NonceLogTable, |r| {
+                r.find(|entry| entry.1.0 == peer)
                     .map(|entry| entry.0 as usize)
             })
             .context("Peer has no nonce entry")?;
@@ -806,18 +800,16 @@ impl Wallet {
         }
 
         ensure!(
-            dbtx.insert(&SignaturesTable, &(latest as u64), &Signatures(shares))
+            dbtx.insert(&SignaturesTable, &(latest as u64), &shares)
                 .is_none(),
             "Already received signature shares for this entry"
         );
 
-        let next_index = dbtx.iter(&NonceLogTable, |r| {
-            r.next_back().map_or(0, |entry| entry.0 + 1)
-        });
+        let next_index = dbtx.iter_rev(&NonceLogTable, |r| r.next().map_or(0, |entry| entry.0 + 1));
 
         dbtx.insert(&NonceLogTable, &next_index, &NonceEntry(peer, fresh_nonces));
 
-        let responses: Vec<Signatures> = dbtx.range(&SignaturesTable, chunk_range, |r| {
+        let responses: Vec<Vec<SignatureShare>> = dbtx.range(&SignaturesTable, chunk_range, |r| {
             r.map(|(_, shares)| shares).collect()
         });
 
@@ -826,11 +818,11 @@ impl Wallet {
 
             dbtx.remove(&UnsignedTxTable, &());
 
-            dbtx.delete_table(&NonceLogTable);
+            dbtx.clear_table(&NonceLogTable);
 
-            dbtx.delete_table(&SignaturesTable);
+            dbtx.clear_table(&SignaturesTable);
 
-            dbtx.insert(&UnconfirmedTxTable, &TxidKey(txid), &unsigned);
+            dbtx.insert(&UnconfirmedTxTable, &txid, &unsigned);
 
             self.btc_rpc.submit_tx(unsigned.tx).await;
         }
@@ -858,7 +850,7 @@ impl Wallet {
         }
     }
 
-    pub fn consensus_block_count(&self, dbtx: &impl picomint_redb::DbRead) -> u64 {
+    pub fn consensus_block_count(&self, dbtx: &impl picomint_sqlite::DbRead) -> u64 {
         let num_peers = self.cfg.consensus.pks.to_num_peers();
 
         let mut counts: Vec<u64> = dbtx.iter(&BlockCountVoteTable, |r| r.map(|(_, v)| v).collect());
@@ -878,7 +870,7 @@ impl Wallet {
         counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
     }
 
-    pub fn consensus_feerate(&self, dbtx: &impl picomint_redb::DbRead) -> Option<u64> {
+    pub fn consensus_feerate(&self, dbtx: &impl picomint_sqlite::DbRead) -> Option<u64> {
         let num_peers = self.cfg.consensus.pks.to_num_peers();
 
         let mut rates: Vec<u64> =
@@ -895,7 +887,7 @@ impl Wallet {
 
     pub fn consensus_fee(
         &self,
-        dbtx: &impl picomint_redb::DbRead,
+        dbtx: &impl picomint_sqlite::DbRead,
         tx_vbytes: u64,
     ) -> Option<Amount> {
         // The minimum feerate is a protection against a catastrophic error in the
@@ -928,11 +920,11 @@ impl Wallet {
         Some(Amount::from_sat(tx_fee.max(stack_fee)))
     }
 
-    pub fn send_fee(&self, dbtx: &impl picomint_redb::DbRead) -> Option<Amount> {
+    pub fn send_fee(&self, dbtx: &impl picomint_sqlite::DbRead) -> Option<Amount> {
         self.consensus_fee(dbtx, self.cfg.consensus.send_tx_vbytes)
     }
 
-    pub fn receive_fee(&self, dbtx: &impl picomint_redb::DbRead) -> Option<Amount> {
+    pub fn receive_fee(&self, dbtx: &impl picomint_sqlite::DbRead) -> Option<Amount> {
         self.consensus_fee(dbtx, self.cfg.consensus.receive_tx_vbytes)
     }
 
@@ -1028,7 +1020,7 @@ impl Wallet {
         federation_tx: &mut FederationTx,
         sighashes: &[[u8; 32]],
         chunk: &[NonceEntry],
-        responses: &[Signatures],
+        responses: &[Vec<SignatureShare>],
     ) {
         assert_eq!(
             federation_tx.spent_tx_outs.len(),
@@ -1047,7 +1039,6 @@ impl Wallet {
                 .map(|entry| {
                     let share = entry
                         .1
-                        .0
                         .get(index)
                         .expect("Signature shares are validated to have one share per input");
 
@@ -1075,14 +1066,14 @@ impl Wallet {
         }
     }
 
-    fn tx_id(dbtx: &impl picomint_redb::DbRead, outpoint: OutPoint) -> Option<Txid> {
+    fn tx_id(dbtx: &impl picomint_sqlite::DbRead, outpoint: OutPoint) -> Option<Txid> {
         let index = dbtx.get(&TxInfoIndexTable, &outpoint)?;
 
         dbtx.get(&TxInfoTable, &index).map(|entry| entry.txid)
     }
 
     fn get_outputs(
-        dbtx: &impl picomint_redb::DbRead,
+        dbtx: &impl picomint_sqlite::DbRead,
         start_index: u64,
         end_index: u64,
     ) -> Vec<OutputInfo> {
@@ -1103,7 +1094,7 @@ impl Wallet {
         })
     }
 
-    fn pending_tx_chain(dbtx: &impl picomint_redb::DbRead) -> Vec<TxInfo> {
+    fn pending_tx_chain(dbtx: &impl picomint_sqlite::DbRead) -> Vec<TxInfo> {
         let n_pending = pending_txs_unordered(dbtx).len();
 
         let mut items: Vec<TxInfo> = dbtx.iter(&TxInfoTable, |r| r.map(|(_, v)| v).collect());
@@ -1113,12 +1104,12 @@ impl Wallet {
         items
     }
 
-    fn tx_chain(dbtx: &impl picomint_redb::DbRead) -> Vec<TxInfo> {
+    fn tx_chain(dbtx: &impl picomint_sqlite::DbRead) -> Vec<TxInfo> {
         dbtx.iter(&TxInfoTable, |r| r.map(|(_, v)| v).collect())
     }
 
-    fn total_txs(dbtx: &impl picomint_redb::DbRead) -> u64 {
-        dbtx.iter(&TxInfoTable, |r| r.next_back().map_or(0, |(k, _)| k + 1))
+    fn total_txs(dbtx: &impl picomint_sqlite::DbRead) -> u64 {
+        dbtx.iter_rev(&TxInfoTable, |r| r.next().map_or(0, |entry| entry.0 + 1))
     }
 
     /// Get the network for UI display

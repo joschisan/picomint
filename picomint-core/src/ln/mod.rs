@@ -43,8 +43,6 @@ pub const MINIMUM_INCOMING_CONTRACT_AMOUNT: Amount = Amount::from_sat(5);
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct ContractId(pub sha256::Hash);
 
-picomint_redb::consensus_key!(ContractId);
-
 /// Identity of an [`contracts::IncomingOffer`], and so of the incoming
 /// contract funding it, up to the refund key that offer deliberately does
 /// not cover.

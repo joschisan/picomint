@@ -14,7 +14,7 @@ use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::wire;
 use picomint_core::{OutPoint, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::WriteTx;
+use picomint_sqlite::{WriteTx, table};
 use secp256k1::Keypair;
 use secp256k1::schnorr::Signature;
 use tracing::{error, instrument};
@@ -22,9 +22,9 @@ use tracing::{error, instrument};
 use super::events::{SendFailureEvent, SendRefundEvent, SendSuccessEvent};
 use super::{LightningClientContext, LightningInvoice};
 
-crate::client_table!(
+table!(
     SendStateMachineTable,
-    SmId => SendStateMachine,
+    (FederationId, SmId) => SendStateMachine,
     "ln-send-sm",
 );
 
@@ -33,8 +33,6 @@ pub struct SendStateMachine {
     pub common: SendSMCommon,
     pub state: SendSMState,
 }
-
-picomint_redb::consensus_value!(SendStateMachine);
 
 impl SendStateMachine {
     pub fn update(&self, state: SendSMState) -> Self {

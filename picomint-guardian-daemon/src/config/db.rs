@@ -1,12 +1,8 @@
-use picomint_redb::Database;
-use picomint_redb::table;
+use picomint_sqlite::table;
+use picomint_sqlite::{Database, DbRead};
 
 use crate::config::setup::LocalParams;
 use crate::config::{ConfigGenParams, ServerConfig};
-
-picomint_redb::consensus_value!(ServerConfig);
-picomint_redb::consensus_value!(LocalParams);
-picomint_redb::consensus_value!(ConfigGenParams);
 
 table!(
     ServerConfigTable,
@@ -41,8 +37,8 @@ pub async fn store_server_config(db: &Database, cfg: &ServerConfig) {
         "Server config already present in database"
     );
 
-    dbtx.delete_table(&LocalParamsTable);
-    dbtx.delete_table(&ConfigGenParamsTable);
+    dbtx.clear_table(&LocalParamsTable);
+    dbtx.clear_table(&ConfigGenParamsTable);
 
     dbtx.commit();
 }

@@ -100,7 +100,7 @@ push of their column. Other peers' envelopes flow only on explicit
 
 ## Storage
 
-All persisted state lives in one redb table. It is *declared by the
+All persisted state lives in one database table. It is *declared by the
 daemon* and passed into `Engine::new`; bft only reads and writes it:
 
 ```rust
@@ -131,7 +131,7 @@ evidence the decision rule needs — virtual votes are computed from
 parent maps alone, so the extender never touches the db except to
 read payloads at emission time.
 
-Persistence is just the per-message redb commit. Inbound `Unit`
+Persistence is just the per-message db commit. Inbound `Unit`
 commits are **relaxed** (non-fsync): they are peer-originated and
 re-fetched via anti-entropy after a crash. The fsync barrier is
 own-unit creation, whose durable commit before broadcast both

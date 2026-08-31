@@ -8,7 +8,7 @@
 //! federation-scoped at log time.
 //!
 //! The file is **wiped on every gateway startup** — analytics state is
-//! derived, not authoritative. The event log in the gateway redb is the
+//! derived, not authoritative. The event log in the gateway db is the
 //! source of truth; the trailer replays from position 0 on every boot.
 //!
 //! Operators and agents inspect the db with read-only SQL via
@@ -54,7 +54,7 @@ pub struct Analytics {
 impl Analytics {
     /// Wipe `{DATA_DIR}/analytics/`, recreate it, and open a fresh SQLite
     /// DB with the schema + `outgoing_payments` / `incoming_payments`
-    /// views installed. Analytics state is always rebuilt from the redb
+    /// views installed. Analytics state is always rebuilt from the daemon-db
     /// event log on startup, so we don't preserve anything across
     /// restarts.
     pub fn wipe_and_init(data_dir: &Path) -> anyhow::Result<Self> {
@@ -270,16 +270,14 @@ LEFT JOIN tx_create       tx
 /// when caught up with the head. Spawned daemon-wide at startup.
 pub async fn trailer(state: AppState) {
     let mut cursor = EventLogId::default();
-    let notify = state.logger.event_notify(&state.gateway_db);
+    let notify = picomint_eventlog::event_notify(&state.gateway_db);
 
     loop {
         // Register interest in the next commit BEFORE reading, so we don't
         // miss a commit that lands between the read and `.await`.
         let notified = notify.notified();
 
-        let chunk = state
-            .logger
-            .get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
+        let chunk = picomint_eventlog::get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
 
         if let Some((last_id, _)) = chunk.last() {
             cursor = last_id.saturating_add(1);

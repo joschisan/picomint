@@ -1,7 +1,7 @@
 use picomint_core::ln::contracts;
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_core::{OutPoint, PeerId};
-use picomint_redb::table;
+use picomint_sqlite::table;
 use tpe;
 
 table!(

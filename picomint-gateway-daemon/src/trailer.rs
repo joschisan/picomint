@@ -22,7 +22,7 @@ use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use picomint_client::gw::events::{ReceiveRefundEvent, ReceiveSuccessEvent};
 use picomint_core::core::OperationId;
 use picomint_eventlog::EventLogEntry;
-use picomint_redb::WriteTx;
+use picomint_sqlite::{DbRead, WriteTx};
 
 use crate::AppState;
 use crate::db::{EventCursorTable, IncomingOfferTable, OutgoingContractTable};
@@ -36,14 +36,12 @@ pub async fn run(state: AppState) {
         .get(&EventCursorTable, &())
         .unwrap_or_default();
 
-    let notify = state.logger.event_notify(&state.gateway_db);
+    let notify = picomint_eventlog::event_notify(&state.gateway_db);
 
     loop {
         let notified = notify.notified();
 
-        let chunk = state
-            .logger
-            .get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
+        let chunk = picomint_eventlog::get_event_log(&state.gateway_db, cursor, CHUNK_SIZE);
 
         for (id, entry) in &chunk {
             let dbtx = state.gateway_db.begin_write();

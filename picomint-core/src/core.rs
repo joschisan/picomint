@@ -37,8 +37,6 @@ impl OperationId {
     }
 }
 
-picomint_redb::consensus_key!(OperationId);
-
 /// One of a client's balances within a single federation.
 ///
 /// The federation cannot tell accounts apart — an account is purely a
@@ -84,8 +82,6 @@ pub enum Account {
     /// only by the integrator spending from it.
     AppFee,
 }
-
-picomint_redb::consensus_key!(Account);
 
 /// One of the balances belonging to the user of a client, as opposed to one
 /// the client keeps for its integrator.

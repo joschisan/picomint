@@ -1,9 +1,11 @@
+use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::gateway::GatewayPk;
+use picomint_sqlite::table;
 
-client_table!(
+table!(
     IncomingContractStreamIndexTable,
-    () => u64,
+    FederationId => u64,
     "ln-incoming-contract-stream-index",
 );
 
@@ -12,17 +14,17 @@ client_table!(
 // `update_gateway_info` to repopulate the in-memory pool, so the client need
 // not wait on the threshold-consensus gateway query before `select_gateway`
 // can return. The probed `GatewayInfo` itself stays in memory, never persisted.
-client_table!(
+table!(
     GatewayPkTable,
-    GatewayPk => (),
+    (FederationId, GatewayPk) => (),
     "ln-gateway-pk",
 );
 
 // Tracks that a send operation has been started for this [`OperationId`].
 // Used to reject duplicate pay attempts for the same invoice (the operation id is
 // derived from the invoice payment hash).
-client_table!(
+table!(
     SendOperationTable,
-    OperationId => (),
+    (FederationId, OperationId) => (),
     "ln-send-operation",
 );

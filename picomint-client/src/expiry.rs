@@ -11,13 +11,14 @@ use std::sync::Arc;
 
 use picomint_core::config::FederationId;
 use picomint_core::expiry::ExpiryStatus;
+use picomint_sqlite::{DbRead, table};
 use thiserror::Error;
 
 use crate::Client;
 
-client_table!(
+table!(
     ExpiryStatusTable,
-    () => ExpiryStatus,
+    FederationId => ExpiryStatus,
     "expiry-status",
 );
 
@@ -35,7 +36,7 @@ impl Client {
     pub fn expiry_status(&self) -> Option<ExpiryStatus> {
         self.db()
             .begin_read()
-            .get(&ExpiryStatusTable(self.federation()), &())
+            .get(&ExpiryStatusTable, &self.federation())
     }
 
     /// Re-fetch the announced expiry via threshold consensus and
@@ -51,10 +52,10 @@ impl Client {
 
         match status {
             Some(s) => {
-                dbtx.insert(&ExpiryStatusTable(client.federation()), &(), &s);
+                dbtx.insert(&ExpiryStatusTable, &client.federation(), &s);
             }
             None => {
-                dbtx.remove(&ExpiryStatusTable(client.federation()), &());
+                dbtx.remove(&ExpiryStatusTable, &client.federation());
             }
         }
 
@@ -64,7 +65,7 @@ impl Client {
     }
 }
 
-/// Drop the expiry cache table. Called by [`Client::wipe`].
-pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTx, federation: FederationId) {
-    dbtx.delete_table(&ExpiryStatusTable(federation));
+/// Remove the federation's expiry cache row. Called by [`Client::wipe`].
+pub(crate) fn wipe_tables(dbtx: &picomint_sqlite::WriteTx, federation: FederationId) {
+    dbtx.remove(&ExpiryStatusTable, &federation);
 }

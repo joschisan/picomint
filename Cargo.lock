@@ -3347,8 +3347,9 @@ dependencies = [
  "bitcoin",
  "picomint-core",
  "picomint-encoding",
- "picomint-redb",
+ "picomint-sqlite",
  "rand 0.8.6",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -3384,8 +3385,8 @@ dependencies = [
  "picomint-encoding",
  "picomint-eventlog",
  "picomint-lnurl",
- "picomint-redb",
  "picomint-rpc",
+ "picomint-sqlite",
  "picomint-tbs",
  "picomint-tpe",
  "rand 0.8.6",
@@ -3413,7 +3414,6 @@ dependencies = [
  "lightning-invoice",
  "picomint-base32",
  "picomint-encoding",
- "picomint-redb",
  "picomint-tbs",
  "picomint-tpe",
  "picomint-tss",
@@ -3461,9 +3461,10 @@ dependencies = [
  "futures",
  "picomint-core",
  "picomint-encoding",
- "picomint-redb",
+ "picomint-sqlite",
  "serde",
  "serde_json",
+ "tempfile",
  "test-log",
  "tokio",
  "tracing",
@@ -3529,8 +3530,8 @@ dependencies = [
  "picomint-encoding",
  "picomint-eventlog",
  "picomint-gateway-cli-core",
- "picomint-redb",
  "picomint-rpc",
+ "picomint-sqlite",
  "rand 0.8.6",
  "reqwest 0.13.3",
  "rusqlite",
@@ -3593,8 +3594,8 @@ dependencies = [
  "picomint-core",
  "picomint-encoding",
  "picomint-guardian-cli-core",
- "picomint-redb",
  "picomint-rpc",
+ "picomint-sqlite",
  "picomint-tbs",
  "picomint-tpe",
  "picomint-tss",
@@ -3633,8 +3634,8 @@ dependencies = [
  "picomint-gateway-cli-core",
  "picomint-guardian-cli-core",
  "picomint-lnurl",
- "picomint-redb",
  "picomint-rpc",
+ "picomint-sqlite",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3683,17 +3684,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-redb"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "picomint-encoding",
- "redb",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "picomint-rpc"
 version = "0.1.0"
 dependencies = [
@@ -3708,6 +3698,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-sqlite"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "picomint-encoding",
+ "rusqlite",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "picomint-tbs"
 version = "0.1.0"
 dependencies = [
@@ -3715,7 +3716,6 @@ dependencies = [
  "bls12_381",
  "group",
  "picomint-encoding",
- "picomint-redb",
  "rand 0.8.6",
  "rand_chacha 0.3.1",
  "serde",
@@ -3730,7 +3730,6 @@ dependencies = [
  "bls12_381",
  "group",
  "picomint-encoding",
- "picomint-redb",
  "rand 0.8.6",
  "rand_chacha 0.3.1",
  "serde",
@@ -4220,15 +4219,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caa0f4137e1c0a72f4c651489402276c8e8e1cf081f3b0ba156d2cbeef09e86a"
 dependencies = [
  "rand_core 0.10.1",
-]
-
-[[package]]
-name = "redb"
-version = "4.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e925444704b5f17d32bf42f5b6e2df050bceebc3dcd6e71cc73dafe8092e839"
-dependencies = [
- "libc",
 ]
 
 [[package]]

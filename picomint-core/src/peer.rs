@@ -5,7 +5,6 @@ use derive_more::{Display, FromStr};
 use serde::{Deserialize, Serialize};
 
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::consensus_key;
 
 #[derive(
     Debug,
@@ -24,8 +23,6 @@ use picomint_redb::consensus_key;
     FromStr,
 )]
 pub struct PeerId(u8);
-
-consensus_key!(PeerId);
 
 impl PeerId {
     pub fn to_usize(self) -> usize {
@@ -96,26 +93,6 @@ impl From<usize> for NumPeers {
 
         Self(total / 3)
     }
-}
-
-/// Build an inclusive `redb` range over a tuple key whose final
-/// component is a [`PeerId`], covering every possible peer at the
-/// given prefix. The prefix arity is whatever the table key requires
-/// (`peer_range!(round)` for `(Round, PeerId)`, `peer_range!(round,
-/// creator)` for `(Round, PeerId, PeerId)`, etc.). The bounds are
-/// `0u8..=u8::MAX`, independent of federation size — keys past
-/// `n.total()` simply don't exist in the table.
-#[macro_export]
-macro_rules! peer_range {
-    ($($prefix:expr),+ $(,)?) => {
-        (
-            $($prefix,)+
-            $crate::PeerId::from(0u8),
-        )..=(
-            $($prefix,)+
-            $crate::PeerId::from(u8::MAX),
-        )
-    };
 }
 
 /// Types that can be easily converted to [`NumPeers`]

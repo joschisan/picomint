@@ -71,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
         network: server_opts.bitcoin_network,
     };
 
-    let db = picomint_redb::Database::open(server_opts.data_dir.join(DB_FILE))
+    let db = picomint_sqlite::Database::open(server_opts.data_dir.join(DB_FILE))
         .expect("Failed to open picomint-guardian-daemon database");
 
     let bitcoind = Arc::new(BitcoindClient::new(&server_opts.bitcoind_url)?);
@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
         .ok();
 
     // Run consensus on the main task. Inner spawned tasks are fire-and-forget
-    // — process death (SIGTERM/SIGKILL) is the shutdown protocol; redb commits
+    // — process death (SIGTERM/SIGKILL) is the shutdown protocol; db commits
     // are atomic and BFT sessions resume from disk on next boot. The only
     // graceful return path is the federation-shutdown-via-API mechanism, which
     // unwinds the engine cleanly.

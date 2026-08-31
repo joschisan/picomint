@@ -21,14 +21,12 @@ use lightning::types::payment::PaymentHash;
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::ln::gateway::PaymentFee;
-use picomint_eventlog::EventLogger;
 use picomint_gateway_daemon::client::GatewayClientFactory;
 use picomint_gateway_daemon::db::{
-    EventLogByOperationTable, EventLogTable, IncomingOfferTable, OutgoingContractTable,
-    ProcessedLdkEventTable,
+    IncomingOfferTable, OutgoingContractTable, ProcessedLdkEventTable,
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
-use picomint_redb::WriteTx;
+use picomint_sqlite::{DbRead, WriteTx};
 use rand::rngs::OsRng;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -150,21 +148,17 @@ fn main() -> anyhow::Result<()> {
         .install_default()
         .ok();
 
-    let gateway_db = picomint_redb::Database::open(opts.data_dir.join(DB_FILE))?;
-
-    let logger = EventLogger::new(EventLogTable, EventLogByOperationTable);
+    let gateway_db = picomint_sqlite::Database::open(opts.data_dir.join(DB_FILE))?;
 
     // 3. Load or init client factory (mnemonic)
     let client_factory = match runtime.block_on(GatewayClientFactory::try_load(
         gateway_db.clone(),
-        logger.clone(),
         opts.network,
         opts.api_addr,
     ))? {
         Some(factory) => factory,
         None => runtime.block_on(GatewayClientFactory::init(
             gateway_db.clone(),
-            logger.clone(),
             picomint_client::random_mnemonic(&mut OsRng),
             opts.network,
             opts.api_addr,
@@ -251,7 +245,6 @@ fn main() -> anyhow::Result<()> {
         node: node.clone(),
         client_factory,
         gateway_db,
-        logger,
         data_dir: opts.data_dir.clone(),
         network: opts.network,
         send_fee,

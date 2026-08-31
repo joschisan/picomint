@@ -5,15 +5,14 @@ use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::tx::Transaction;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_eventlog::EventLogger;
-use picomint_redb::WriteTx;
+use picomint_sqlite::{WriteTx, table};
 
 use crate::executor::{SmId, StateMachine};
 use crate::{TxAcceptEvent, TxRejectEvent};
 
-crate::client_table!(
+table!(
     TxSubmissionStateMachineTable,
-    SmId => TxSubmissionStateMachine,
+    (FederationId, SmId) => TxSubmissionStateMachine,
     "tx-submission-sm",
 );
 
@@ -30,15 +29,12 @@ pub struct TxSubmissionStateMachine {
     pub tx: Transaction,
 }
 
-picomint_redb::consensus_value!(TxSubmissionStateMachine);
-
 /// Context for running [`TxSubmissionStateMachine`] in a typed
 /// [`crate::executor::ModuleExecutor`].
 #[derive(Debug, Clone)]
 pub struct TxSubmissionSmContext {
     pub api: FederationApi,
     pub federation: FederationId,
-    pub logger: EventLogger,
 }
 
 impl StateMachine for TxSubmissionStateMachine {
@@ -62,7 +58,7 @@ impl StateMachine for TxSubmissionStateMachine {
 
         match outcome {
             Ok(()) => {
-                ctx.logger.log_event(
+                picomint_eventlog::log_event(
                     dbtx,
                     ctx.federation,
                     self.account,
@@ -71,7 +67,7 @@ impl StateMachine for TxSubmissionStateMachine {
                 );
             }
             Err(error) => {
-                ctx.logger.log_event(
+                picomint_eventlog::log_event(
                     dbtx,
                     ctx.federation,
                     self.account,
