@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
@@ -65,6 +66,8 @@ pub struct ConfigGenSettings {
     pub ui_addr: SocketAddr,
     /// Bitcoin network for the federation
     pub network: bitcoin::Network,
+    /// Path to the folder holding the database and the admin CLI socket
+    pub data_dir: PathBuf,
 }
 
 /// Outcome of the setup phase: either fresh DKG params (run a DKG) or a
@@ -151,7 +154,7 @@ impl ServerConfig {
         )
     }
 
-    pub fn validate_config(&self, identity: &PeerId) -> anyhow::Result<()> {
+    pub fn validate_config(&self) -> anyhow::Result<()> {
         let peers = &self.consensus.peers;
         let my_public_key = self
             .private
@@ -160,7 +163,7 @@ impl ServerConfig {
             .x_only_public_key()
             .0;
 
-        if Some(my_public_key) != peers.get(identity).map(|p| p.broadcast_pk) {
+        if Some(my_public_key) != peers.get(&self.private.identity).map(|p| p.broadcast_pk) {
             bail!("Broadcast secret key doesn't match corresponding public key");
         }
         if peers.keys().max().copied().map(PeerId::to_usize) != Some(peers.len() - 1) {
@@ -170,9 +173,9 @@ impl ServerConfig {
             bail!("Peer ids are not indexed from 0");
         }
 
-        crate::consensus::mint::validate_config(identity, self)?;
-        crate::consensus::ln::validate_config(identity, self)?;
-        crate::consensus::wallet::validate_config(identity, self)?;
+        crate::consensus::mint::validate_config(self)?;
+        crate::consensus::ln::validate_config(self)?;
+        crate::consensus::wallet::validate_config(self)?;
 
         Ok(())
     }
@@ -180,7 +183,7 @@ impl ServerConfig {
     /// Runs the distributed key gen algorithm
     pub async fn generate(
         params: &ConfigGenParams,
-        connections: ReconnectP2PConnections<P2PMessage>,
+        connections: ReconnectP2PConnections,
         p2p_status_receivers: P2PStatusReceivers,
     ) -> anyhow::Result<Self> {
         info!("Waiting for all p2p connections to open...");

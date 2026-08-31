@@ -34,50 +34,47 @@ impl Server {
         item: &wire::ModuleConsensusItem,
     ) -> anyhow::Result<()> {
         match item {
-            wire::ModuleConsensusItem::Mint(ci) => match *ci {},
             wire::ModuleConsensusItem::Wallet(ci) => {
                 wallet::process_consensus_item(self, dbtx, peer, ci.clone()).await
             }
             wire::ModuleConsensusItem::Ln(ci) => {
-                ln::process_consensus_item(self, dbtx, peer, ci.clone()).await
+                ln::process_consensus_item(self, dbtx, peer, ci.clone())
             }
         }
     }
 
-    pub async fn process_input(
+    pub fn process_input(
         &self,
         dbtx: &WriteTx,
         input: &wire::Input,
     ) -> Result<(Amount, XOnlyPublicKey), wire::InputError> {
         match input {
-            wire::Input::Mint(i) => mint::process_input(self, dbtx, i)
-                .await
-                .map_err(wire::InputError::Mint),
-            wire::Input::Wallet(i) => wallet::process_input(self, dbtx, i)
-                .await
-                .map_err(wire::InputError::Wallet),
-            wire::Input::Ln(i) => ln::process_input(self, dbtx, i)
-                .await
-                .map_err(wire::InputError::Ln),
+            wire::Input::Mint(i) => {
+                mint::process_input(self, dbtx, i).map_err(wire::InputError::Mint)
+            }
+            wire::Input::Wallet(i) => {
+                wallet::process_input(self, dbtx, i).map_err(wire::InputError::Wallet)
+            }
+            wire::Input::Ln(i) => ln::process_input(self, dbtx, i).map_err(wire::InputError::Ln),
         }
     }
 
-    pub async fn process_output(
+    pub fn process_output(
         &self,
         dbtx: &WriteTx,
         output: &wire::Output,
         out_point: OutPoint,
     ) -> Result<Amount, wire::OutputError> {
         match output {
-            wire::Output::Mint(o) => mint::process_output(self, dbtx, o, out_point)
-                .await
-                .map_err(wire::OutputError::Mint),
-            wire::Output::Wallet(o) => wallet::process_output(self, dbtx, o, out_point)
-                .await
-                .map_err(wire::OutputError::Wallet),
-            wire::Output::Ln(o) => ln::process_output(self, dbtx, o, out_point)
-                .await
-                .map_err(wire::OutputError::Ln),
+            wire::Output::Mint(o) => {
+                mint::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::Mint)
+            }
+            wire::Output::Wallet(o) => {
+                wallet::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::Wallet)
+            }
+            wire::Output::Ln(o) => {
+                ln::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::Ln)
+            }
         }
     }
 
@@ -97,80 +94,70 @@ impl Server {
         }
     }
 
-    pub async fn audit(&self, dbtx: &WriteTx) -> AuditSummary {
-        let mint = mint::audit(self, dbtx).await;
-        let wallet = wallet::audit(self, dbtx).await;
-        let ln = ln::audit(self, dbtx).await;
-        AuditSummary::new(mint, wallet, ln)
-    }
-}
-
-/// Dispatch the inputs and outputs of a transaction to the relevant modules.
-pub async fn process_tx_with_server(
-    server: &Server,
-    dbtx: &WriteTx,
-    tx: &Transaction,
-) -> Result<(), TxError> {
-    if tx.inputs.is_empty() {
-        return Err(TxError::EmptyInputs);
+    pub fn audit(&self, dbtx: &WriteTx) -> AuditSummary {
+        AuditSummary::new(mint::audit(dbtx), wallet::audit(dbtx), ln::audit(dbtx))
     }
 
-    if tx.outputs.is_empty() {
-        return Err(TxError::EmptyOutputs);
+    /// Dispatch the inputs and outputs of a transaction to the relevant
+    /// modules.
+    pub fn process_tx(&self, dbtx: &WriteTx, tx: &Transaction) -> Result<(), TxError> {
+        if tx.inputs.is_empty() {
+            return Err(TxError::EmptyInputs);
+        }
+
+        if tx.outputs.is_empty() {
+            return Err(TxError::EmptyOutputs);
+        }
+
+        if tx.inputs.len() > Transaction::MAX_INPUTS {
+            return Err(TxError::TooManyInputs);
+        }
+
+        if tx.outputs.len() > Transaction::MAX_OUTPUTS {
+            return Err(TxError::TooManyOutputs);
+        }
+
+        // Ahead of the inputs rather than alongside them: the count is what a
+        // signature list has to have, and knowing it is wrong costs nothing
+        // next to spending every input first and finding out afterwards.
+        if tx.signatures.len() != tx.inputs.len() {
+            return Err(TxError::InvalidWitnessLength);
+        }
+
+        let start = Instant::now();
+
+        let mut funding_verifier = FundingVerifier::default();
+        let mut public_keys = Vec::new();
+
+        let txid = tx.compute_txid();
+
+        for input in &tx.inputs {
+            let (amount, pub_key) = self.process_input(dbtx, input).map_err(TxError::Input)?;
+
+            funding_verifier.add_input(amount, self.input_fee(input))?;
+            public_keys.push(pub_key);
+        }
+
+        tx.validate_signatures(&public_keys)?;
+
+        for (output, out_idx) in tx.outputs.iter().zip(0u16..) {
+            let amount = self
+                .process_output(dbtx, output, OutPoint { txid, out_idx })
+                .map_err(TxError::Output)?;
+
+            funding_verifier.add_output(amount, self.output_fee(output))?;
+        }
+
+        funding_verifier.verify_funding()?;
+
+        info!(
+            %txid,
+            inputs = tx.inputs.len(),
+            outputs = tx.outputs.len(),
+            elapsed_us = start.elapsed().as_micros() as u64,
+            "Verified tx",
+        );
+
+        Ok(())
     }
-
-    if tx.inputs.len() > Transaction::MAX_INPUTS {
-        return Err(TxError::TooManyInputs);
-    }
-
-    if tx.outputs.len() > Transaction::MAX_OUTPUTS {
-        return Err(TxError::TooManyOutputs);
-    }
-
-    // Ahead of the inputs rather than alongside them: the count is what a
-    // signature list has to have, and knowing it is wrong costs nothing next
-    // to spending every input first and finding out afterwards.
-    if tx.signatures.len() != tx.inputs.len() {
-        return Err(TxError::InvalidWitnessLength);
-    }
-
-    let start = Instant::now();
-
-    let mut funding_verifier = FundingVerifier::default();
-    let mut public_keys = Vec::new();
-
-    let txid = tx.compute_txid();
-
-    for input in &tx.inputs {
-        let (amount, pub_key) = server
-            .process_input(dbtx, input)
-            .await
-            .map_err(TxError::Input)?;
-
-        funding_verifier.add_input(amount, server.input_fee(input))?;
-        public_keys.push(pub_key);
-    }
-
-    tx.validate_signatures(&public_keys)?;
-
-    for (output, out_idx) in tx.outputs.iter().zip(0u16..) {
-        let amount = server
-            .process_output(dbtx, output, OutPoint { txid, out_idx })
-            .await
-            .map_err(TxError::Output)?;
-
-        funding_verifier.add_output(amount, server.output_fee(output))?;
-    }
-
-    funding_verifier.verify_funding()?;
-
-    info!(
-        %txid,
-        inputs = tx.inputs.len(),
-        outputs = tx.outputs.len(),
-        elapsed_us = start.elapsed().as_micros() as u64,
-        "Verified tx",
-    );
-
-    Ok(())
 }

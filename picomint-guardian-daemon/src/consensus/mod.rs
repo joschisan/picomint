@@ -9,8 +9,6 @@ pub mod server;
 pub mod tx;
 pub mod wallet;
 
-use std::net::SocketAddr;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,12 +24,11 @@ use tokio::net::TcpListener;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-use crate::config::ServerConfig;
+use crate::config::{ConfigGenSettings, ServerConfig};
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::ConsensusVersionVoteTable;
-use crate::consensus::engine::ConsensusEngine;
 use crate::consensus::server::Server;
-use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
+use crate::p2p::{P2PStatusReceivers, ReconnectP2PConnections};
 
 /// How many txs can be stored in memory before blocking the API.
 ///
@@ -45,18 +42,16 @@ const TX_BUFFER: usize = 100;
 /// rate is zero and the buffer only has to absorb bursts of invalid txs.
 const TX_REJECT_BUFFER: usize = 1000;
 
-#[allow(clippy::too_many_arguments)]
 pub async fn run(
-    connections: ReconnectP2PConnections<P2PMessage>,
-    p2p_status_receivers: P2PStatusReceivers,
-    foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
     cfg: ServerConfig,
+    settings: ConfigGenSettings,
     db: Database,
     bitcoin_backend: Arc<BitcoindClient>,
-    ui_addr: SocketAddr,
-    data_dir: &Path,
+    connections: ReconnectP2PConnections,
+    p2p_status_receivers: P2PStatusReceivers,
+    foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
 ) -> anyhow::Result<()> {
-    cfg.validate_config(&cfg.private.identity)?;
+    cfg.validate_config()?;
 
     let bitcoin_rpc_connection = BitcoinRpcMonitor::new(
         bitcoin_backend,
@@ -98,21 +93,18 @@ pub async fn run(
 
     tokio::spawn({
         let server = consensus_api.server.clone();
-        let db = db.clone();
         let submission_tx = submission_tx.clone();
-        let identity = cfg.private.identity;
-        let default_version = cfg.consensus.default_version;
         async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             loop {
-                let dbtx = db.begin_read();
+                let dbtx = server.db.begin_read();
                 // Upgrading the binary is the whole of casting a vote: we
                 // announce what we support until consensus has recorded it,
                 // then stay quiet until the next upgrade raises it again. A
                 // federation created by this binary has nothing to announce.
                 if dbtx
-                    .get(&ConsensusVersionVoteTable, &identity)
-                    .unwrap_or(default_version)
+                    .get(&ConsensusVersionVoteTable, &server.cfg.private.identity)
+                    .unwrap_or(server.cfg.consensus.default_version)
                     < CONSENSUS_VERSION
                 {
                     submission_tx
@@ -120,13 +112,7 @@ pub async fn run(
                         .await
                         .ok();
                 }
-                for item in mint::consensus_proposal(&server, &dbtx).await {
-                    submission_tx
-                        .send(ConsensusItem::Module(wire::ModuleConsensusItem::Mint(item)))
-                        .await
-                        .ok();
-                }
-                for item in wallet::consensus_proposal(&server, &dbtx).await {
+                for item in wallet::consensus_proposal(&server, &dbtx) {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
                             item,
@@ -134,7 +120,7 @@ pub async fn run(
                         .await
                         .ok();
                 }
-                for item in ln::consensus_proposal(&server, &dbtx).await {
+                for item in ln::consensus_proposal(&server, &dbtx) {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
                         .await
@@ -147,7 +133,7 @@ pub async fn run(
 
     let ui_service = crate::ui::dashboard::router(consensus_api.clone()).into_make_service();
 
-    let ui_listener = TcpListener::bind(ui_addr)
+    let ui_listener = TcpListener::bind(settings.ui_addr)
         .await
         .expect("Failed to bind dashboard UI");
 
@@ -157,10 +143,10 @@ pub async fn run(
             .expect("Failed to serve dashboard UI");
     });
 
-    info!("Dashboard UI running at http://{ui_addr} 🚀");
+    info!("Dashboard UI running at http://{} 🚀", settings.ui_addr);
 
     {
-        let data_dir = data_dir.to_owned();
+        let data_dir = settings.data_dir.clone();
         let dashboard_router = crate::cli::dashboard_cli_router(consensus_api.clone());
         tokio::spawn(async move {
             crate::cli::run_dashboard_cli(&data_dir, dashboard_router).await;
@@ -200,14 +186,7 @@ pub async fn run(
 
     info!("Starting Consensus Engine...");
 
-    ConsensusEngine {
-        server: consensus_api.server.clone(),
-        connections,
-        submission_rx,
-        tx_reject_tx,
-    }
-    .run()
-    .await?;
+    engine::run(server, connections, submission_rx, tx_reject_tx).await?;
 
     Ok(())
 }

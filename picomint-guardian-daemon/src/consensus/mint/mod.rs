@@ -9,12 +9,10 @@ use picomint_core::mint::config::{
     MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
 };
 use picomint_core::mint::methods::MintMethod;
-use picomint_core::mint::{
-    MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError, verify_note,
-};
+use picomint_core::mint::{MintInput, MintInputError, MintOutput, MintOutputError, verify_note};
 use picomint_core::secp256k1::XOnlyPublicKey;
-use picomint_core::{Amount, OutPoint, PeerId};
-use picomint_sqlite::{DbRead, ReadTx, WriteTx};
+use picomint_core::{Amount, OutPoint};
+use picomint_sqlite::{DbRead, WriteTx};
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
 
 use crate::config::ServerConfig;
@@ -63,12 +61,12 @@ pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<MintConfig
 
 /// Verify our private tbs shares match the public shares in the consensus
 /// config.
-pub fn validate_config(identity: &PeerId, cfg: &ServerConfig) -> anyhow::Result<()> {
+pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
     for denomination in consensus_denominations() {
         let pk = derive_pk_share(&cfg.private.mint.tbs_sks[&denomination]);
 
         ensure!(
-            pk == cfg.consensus.mint.tbs_pks[&denomination][identity],
+            pk == cfg.consensus.mint.tbs_pks[&denomination][&cfg.private.identity],
             "Mint private key doesn't match pubkey share"
         );
     }
@@ -76,20 +74,7 @@ pub fn validate_config(identity: &PeerId, cfg: &ServerConfig) -> anyhow::Result<
     Ok(())
 }
 
-pub async fn consensus_proposal(_server: &Server, _dbtx: &ReadTx) -> Vec<MintConsensusItem> {
-    Vec::new()
-}
-
-pub async fn process_consensus_item(
-    _server: &Server,
-    _dbtx: &WriteTx,
-    _peer: PeerId,
-    consensus_item: MintConsensusItem,
-) -> anyhow::Result<()> {
-    match consensus_item {}
-}
-
-pub async fn process_input(
+pub fn process_input(
     server: &Server,
     dbtx: &WriteTx,
     input: &MintInput,
@@ -124,7 +109,7 @@ pub async fn process_input(
     Ok((input.note.amount(), input.note.nonce))
 }
 
-pub async fn process_output(
+pub fn process_output(
     server: &Server,
     dbtx: &WriteTx,
     output: &MintOutput,
@@ -171,7 +156,7 @@ pub async fn process_output(
     Ok(output.amount())
 }
 
-pub async fn audit(_server: &Server, dbtx: &WriteTx) -> i64 {
+pub fn audit(dbtx: &WriteTx) -> i64 {
     dbtx.iter(&IssuanceCounterTable, |r| {
         r.map(|(denomination, count)| -((denomination.amount().msat * count) as i64))
             .sum()

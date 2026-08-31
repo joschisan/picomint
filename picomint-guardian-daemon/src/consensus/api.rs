@@ -21,7 +21,7 @@ use crate::consensus::db::{
     AcceptedItemTable, AcceptedTxTable, ExpiryStatusTable, InviteMeta, InviteMetaTable,
     InviteUserCountTable, SignedSessionOutcomeTable,
 };
-use crate::consensus::engine::get_finished_session_count_static;
+use crate::consensus::engine::get_finished_session_count;
 use crate::consensus::server::Server;
 use crate::p2p::P2PStatusReceivers;
 
@@ -135,8 +135,8 @@ impl ConsensusApi {
         }
     }
 
-    pub async fn session_count(&self) -> u64 {
-        get_finished_session_count_static(&self.server.db.begin_read()).await
+    pub fn session_count(&self) -> u64 {
+        get_finished_session_count(&self.server.db.begin_read())
     }
 
     /// Generate a fresh invite code expiring `expiry_days` from now and
@@ -204,25 +204,25 @@ impl ConsensusApi {
         Ok(())
     }
 
-    pub async fn federation_audit(&self) -> AuditSummary {
+    pub fn federation_audit(&self) -> AuditSummary {
         // Modules read their own tables during `audit`; we open a write tx and
         // drop it without commit after building the audit view.
         let dbtx = self.server.db.begin_write();
-        self.server.audit(&dbtx).await
+        self.server.audit(&dbtx)
     }
 
     /// Read this guardian's announced expiry status from the local
     /// `ExpiryStatus` table. Returned over the wire by the
     /// `ExpiryStatus` RPC and surfaced on the dashboard.
     #[must_use]
-    pub fn expiry_status_ui(&self) -> Option<ExpiryStatus> {
+    pub fn expiry_status(&self) -> Option<ExpiryStatus> {
         self.server.db.begin_read().get(&ExpiryStatusTable, &())
     }
 
     /// Set or clear this guardian's announced expiry status. All
     /// guardians must announce byte-equal values for clients to accept the
     /// announcement (threshold-consensus read).
-    pub fn set_expiry_status_ui(&self, status: Option<ExpiryStatus>) {
+    pub fn set_expiry_status(&self, status: Option<ExpiryStatus>) {
         let dbtx = self.server.db.begin_write();
         match status {
             Some(s) => {

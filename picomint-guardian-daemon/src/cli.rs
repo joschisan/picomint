@@ -16,12 +16,6 @@ use tokio::net::UnixListener;
 use crate::config::ServerConfig;
 use crate::config::setup::SetupApi;
 use crate::consensus::{ln, wallet};
-pub type DynSetupApi = Arc<SetupApi>;
-
-#[derive(Clone)]
-pub struct CliState {
-    pub setup_api: DynSetupApi,
-}
 
 #[derive(Debug)]
 pub struct CliError {
@@ -61,7 +55,7 @@ impl From<anyhow::Error> for CliError {
 /// Setup CLI server — runs during DKG phase. Binds a Unix socket at
 /// `{data_dir}/{CLI_SOCKET_FILENAME}`; a stale socket from a previous
 /// (crashed) run is unlinked before we bind.
-pub async fn run_cli(data_dir: PathBuf, state: CliState) {
+pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
     let socket_path = data_dir.join(CLI_SOCKET_FILENAME);
     std::fs::remove_file(&socket_path).ok();
 
@@ -73,7 +67,7 @@ pub async fn run_cli(data_dir: PathBuf, state: CliState) {
         .route(ROUTE_SETUP_ADD_PEER, post(setup_add_peer))
         .route(ROUTE_SETUP_START_DKG, post(setup_start_dkg))
         .route(ROUTE_SETUP_RESTORE, post(setup_restore))
-        .with_state(state)
+        .with_state(setup_api)
         .into_make_service();
 
     axum::serve(listener, router)
@@ -107,7 +101,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     async fn session_count(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<u64>, CliError> {
-        Ok(Json(api.session_count().await))
+        Ok(Json(api.session_count()))
     }
 
     async fn invite(
@@ -130,7 +124,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<AuditResponse>, CliError> {
         Ok(Json(AuditResponse {
-            audit: api.federation_audit().await,
+            audit: api.federation_audit(),
         }))
     }
 
@@ -138,7 +132,8 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<WalletTotalValueResponse>, CliError> {
         Ok(Json(WalletTotalValueResponse {
-            total_value_sat: wallet::federation_wallet_ui(&api.server).map(|w| w.value.to_sat()),
+            total_value_sat: wallet::federation_wallet(&api.server.db.begin_read())
+                .map(|w| w.value.to_sat()),
         }))
     }
 
@@ -146,7 +141,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<WalletBlockCountResponse>, CliError> {
         Ok(Json(WalletBlockCountResponse {
-            block_count: wallet::consensus_block_count_ui(&api.server),
+            block_count: wallet::consensus_block_count(&api.server, &api.server.db.begin_read()),
         }))
     }
 
@@ -154,43 +149,42 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<WalletFeerateResponse>, CliError> {
         Ok(Json(WalletFeerateResponse {
-            sat_per_vbyte: wallet::consensus_feerate_ui(&api.server),
+            sat_per_vbyte: wallet::consensus_feerate(&api.server, &api.server.db.begin_read())
+                .map(|f| f / 1000),
         }))
     }
 
     async fn wallet_pending_tx_chain(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<Vec<picomint_core::wallet::TxInfo>>, CliError> {
-        Ok(Json(wallet::pending_tx_chain_ui(&api.server)))
+        Ok(Json(wallet::pending_tx_chain(&api.server.db.begin_read())))
     }
 
     async fn wallet_tx_chain(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<Vec<picomint_core::wallet::TxInfo>>, CliError> {
-        Ok(Json(wallet::tx_chain_ui(&api.server)))
+        Ok(Json(wallet::tx_chain(&api.server.db.begin_read())))
     }
 
     async fn ln_gateway_add(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<LnGatewayAddRequest>,
     ) -> Result<Json<bool>, CliError> {
-        Ok(Json(
-            ln::add_gateway_ui(&api.server, payload.pk, payload.name).await,
-        ))
+        Ok(Json(ln::add_gateway(&api.server, payload.pk, payload.name)))
     }
 
     async fn ln_gateway_remove(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<LnGatewayRemoveRequest>,
     ) -> Result<Json<bool>, CliError> {
-        Ok(Json(ln::remove_gateway_ui(&api.server, payload.pk).await))
+        Ok(Json(ln::remove_gateway(&api.server, payload.pk)))
     }
 
     async fn ln_gateway_list(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<Vec<LnGatewayListEntry>>, CliError> {
         Ok(Json(
-            ln::gateways_ui(&api.server)
+            ln::gateways(&api.server.db.begin_read())
                 .into_iter()
                 .map(|(pk, name)| LnGatewayListEntry { pk, name })
                 .collect(),
@@ -201,7 +195,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<ExpirySetRequest>,
     ) -> Result<Json<()>, CliError> {
-        api.set_expiry_status_ui(Some(ExpiryStatus {
+        api.set_expiry_status(Some(ExpiryStatus {
             timestamp: payload.timestamp,
             successor: payload.successor,
         }));
@@ -211,14 +205,14 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     async fn expiry_clear(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<()>, CliError> {
-        api.set_expiry_status_ui(None);
+        api.set_expiry_status(None);
         Ok(Json(()))
     }
 
     async fn expiry_status(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<Option<ExpiryStatus>>, CliError> {
-        Ok(Json(api.expiry_status_ui()))
+        Ok(Json(api.expiry_status()))
     }
 
     Router::new()
@@ -259,8 +253,10 @@ pub async fn run_dashboard_cli(data_dir: &Path, router: Router) {
 
 // Setup handlers
 
-async fn setup_status(State(state): State<CliState>) -> Result<Json<SetupStatus>, CliError> {
-    let status = if state.setup_api.setup_code().await.is_some() {
+async fn setup_status(
+    State(setup_api): State<Arc<SetupApi>>,
+) -> Result<Json<SetupStatus>, CliError> {
+    let status = if setup_api.setup_code().await.is_some() {
         SetupStatus::SharingConnectionCodes
     } else {
         SetupStatus::AwaitingLocalParams
@@ -269,11 +265,10 @@ async fn setup_status(State(state): State<CliState>) -> Result<Json<SetupStatus>
 }
 
 async fn setup_set_local_params(
-    State(state): State<CliState>,
+    State(setup_api): State<Arc<SetupApi>>,
     Json(payload): Json<SetupSetLocalParamsRequest>,
 ) -> Result<Json<SetupSetLocalParamsResponse>, CliError> {
-    let setup_code = state
-        .setup_api
+    let setup_code = setup_api
         .set_local_parameters(
             payload.name,
             payload.federation_name,
@@ -286,11 +281,10 @@ async fn setup_set_local_params(
 }
 
 async fn setup_add_peer(
-    State(state): State<CliState>,
+    State(setup_api): State<Arc<SetupApi>>,
     Json(payload): Json<SetupAddPeerRequest>,
 ) -> Result<Json<SetupAddPeerResponse>, CliError> {
-    let name = state
-        .setup_api
+    let name = setup_api
         .add_peer_setup_code(payload.setup_code)
         .await
         .map_err(CliError::internal)?;
@@ -298,22 +292,17 @@ async fn setup_add_peer(
     Ok(Json(SetupAddPeerResponse { name }))
 }
 
-async fn setup_start_dkg(State(state): State<CliState>) -> Result<Json<()>, CliError> {
-    state
-        .setup_api
-        .start_dkg()
-        .await
-        .map_err(CliError::internal)?;
+async fn setup_start_dkg(State(setup_api): State<Arc<SetupApi>>) -> Result<Json<()>, CliError> {
+    setup_api.start_dkg().await.map_err(CliError::internal)?;
 
     Ok(Json(()))
 }
 
 async fn setup_restore(
-    State(state): State<CliState>,
+    State(setup_api): State<Arc<SetupApi>>,
     Json(cfg): Json<ServerConfig>,
 ) -> Result<Json<()>, CliError> {
-    state
-        .setup_api
+    setup_api
         .restore_config(cfg)
         .await
         .map_err(CliError::internal)?;

@@ -130,13 +130,13 @@ pub async fn post_set(
         successor,
     };
 
-    state.set_expiry_status_ui(Some(status.clone()));
+    state.set_expiry_status(Some(status.clone()));
 
     Html(expiry_section(Some(&status), None).into_string())
 }
 
 pub async fn post_clear(State(state): State<Arc<ConsensusApi>>) -> impl IntoResponse {
-    state.set_expiry_status_ui(None);
+    state.set_expiry_status(None);
 
     Html(expiry_section(None, None).into_string())
 }

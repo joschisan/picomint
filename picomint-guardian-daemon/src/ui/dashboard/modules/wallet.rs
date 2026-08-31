@@ -1,18 +1,18 @@
 use maud::{Markup, html};
+use picomint_sqlite::ReadTx;
 
 use crate::consensus::wallet;
 use crate::ui::copiable_text;
 
-pub async fn render(server: &crate::consensus::server::Server) -> Markup {
-    let network = server.cfg.consensus.network;
-    let federation_wallet = wallet::federation_wallet_ui(server);
-    let consensus_block_count = wallet::consensus_block_count_ui(server);
-    let consensus_fee_rate = wallet::consensus_feerate_ui(server);
-    let send_fee = wallet::send_fee_ui(server);
-    let receive_fee = wallet::receive_fee_ui(server);
-    let pending_tx_chain = wallet::pending_tx_chain_ui(server);
-    let transaction_count = wallet::transaction_count_ui(server);
-    let restore_keys = wallet::restore_keys_ui(server);
+pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Markup {
+    let federation_wallet = wallet::federation_wallet(dbtx);
+    let consensus_block_count = wallet::consensus_block_count(server, dbtx);
+    let consensus_fee_rate = wallet::consensus_feerate(server, dbtx).map(|f| f / 1000);
+    let send_fee = wallet::send_fee(server, dbtx);
+    let receive_fee = wallet::receive_fee(server, dbtx);
+    let pending_tx_chain = wallet::pending_tx_chain(dbtx);
+    let transaction_count = wallet::total_txs(dbtx);
+    let restore_keys = wallet::restore_keys(server, dbtx);
 
     let total_pending_vbytes = pending_tx_chain.iter().map(|info| info.vbytes).sum::<u64>();
 
@@ -33,7 +33,7 @@ pub async fn render(server: &crate::consensus::server::Server) -> Markup {
                     table class="table" {
                         tr {
                             th { "Network" }
-                            td { (network) }
+                            td { (server.cfg.consensus.network) }
                         }
                         @if let Some(wallet) = federation_wallet {
                             tr {

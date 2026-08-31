@@ -12,7 +12,6 @@ pub mod consensus;
 pub mod p2p;
 pub mod ui;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Name of the server daemon's database file on disk.
@@ -65,14 +64,13 @@ pub async fn run_server(
     settings: ConfigGenSettings,
     db: Database,
     bitcoin: Arc<BitcoindClient>,
-    data: PathBuf,
 ) -> anyhow::Result<()> {
     if let Some(cfg) = load_server_config(&db).await {
-        return run_consensus(cfg, settings, db, bitcoin, data).await;
+        return run_consensus(cfg, settings, db, bitcoin).await;
     }
 
     if let Some(cgp) = db.begin_read().get(&ConfigGenParamsTable, &()) {
-        return run_dkg_then_consensus(cgp, settings, db, bitcoin, data).await;
+        return run_dkg_then_consensus(cgp, settings, db, bitcoin).await;
     }
 
     info!("Starting setup UI...");
@@ -95,11 +93,7 @@ pub async fn run_server(
 
     info!("Setup UI running at http://{} 🚀", settings.ui_addr);
 
-    let cli_state = cli::CliState {
-        setup_api: setup_api.clone(),
-    };
-
-    let setup_cli_handle = tokio::spawn(cli::run_cli(data.clone(), cli_state));
+    let setup_cli_handle = tokio::spawn(cli::run_cli(settings.data_dir.clone(), setup_api.clone()));
 
     let setup_result = setup_rx
         .recv()
@@ -118,8 +112,8 @@ pub async fn run_server(
     setup_cli_handle.await.ok();
 
     match setup_result {
-        SetupResult::Dkg(cgp) => run_dkg_then_consensus(*cgp, settings, db, bitcoin, data).await,
-        SetupResult::Restored(cfg) => run_consensus(*cfg, settings, db, bitcoin, data).await,
+        SetupResult::Dkg(cgp) => run_dkg_then_consensus(*cgp, settings, db, bitcoin).await,
+        SetupResult::Restored(cfg) => run_consensus(*cfg, settings, db, bitcoin).await,
     }
 }
 
@@ -128,7 +122,6 @@ async fn run_dkg_then_consensus(
     settings: ConfigGenSettings,
     db: Database,
     bitcoin_rpc: Arc<BitcoindClient>,
-    data_dir: PathBuf,
 ) -> anyhow::Result<()> {
     info!("Starting DKG...");
 
@@ -171,16 +164,15 @@ async fn run_dkg_then_consensus(
 
     info!("Starting consensus...");
 
-    Box::pin(consensus::run(
+    consensus::run(
+        cfg,
+        settings,
+        db,
+        bitcoin_rpc,
         connections,
         status_rxs,
         conn_rx,
-        cfg,
-        db,
-        bitcoin_rpc,
-        settings.ui_addr,
-        &data_dir,
-    ))
+    )
     .await
 }
 
@@ -189,7 +181,6 @@ async fn run_consensus(
     settings: ConfigGenSettings,
     db: Database,
     bitcoin_rpc: Arc<BitcoindClient>,
-    data_dir: PathBuf,
 ) -> anyhow::Result<()> {
     // Single channel for foreign (non-peer) iroh connections — fed by the
     // p2p accept loop's demux, drained by the consensus-phase api task.
@@ -215,16 +206,15 @@ async fn run_consensus(
 
     info!("Starting consensus...");
 
-    Box::pin(consensus::run(
+    consensus::run(
+        cfg,
+        settings,
+        db,
+        bitcoin_rpc,
         connections,
         status_rxs,
         conn_rx,
-        cfg,
-        db,
-        bitcoin_rpc,
-        settings.ui_addr,
-        &data_dir,
-    ))
+    )
     .await?;
 
     Ok(())

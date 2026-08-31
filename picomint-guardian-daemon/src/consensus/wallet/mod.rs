@@ -104,12 +104,12 @@ pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<WalletConf
 
 /// Verify our wallet secret key share matches the corresponding public key
 /// share in the consensus config.
-pub fn validate_config(identity: &PeerId, cfg: &ServerConfig) -> anyhow::Result<()> {
+pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
     ensure!(
         cfg.consensus
             .wallet
             .pks
-            .get(identity)
+            .get(&cfg.private.identity)
             .context("Public key share set has no key for our identity")?
             == &derive_pk_share(&cfg.private.wallet.sks),
         "Wallet secret key share does not match our public key share"
@@ -118,7 +118,7 @@ pub fn validate_config(identity: &PeerId, cfg: &ServerConfig) -> anyhow::Result<
     Ok(())
 }
 
-pub async fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<WalletConsensusItem> {
+pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<WalletConsensusItem> {
     let mut items: Vec<WalletConsensusItem> = dbtx
         .get(&UnsignedTxTable, &())
         .and_then(|unsigned_tx| signing_session_proposal(server, dbtx, &unsigned_tx))
@@ -258,7 +258,7 @@ pub async fn process_consensus_item(
 ) -> anyhow::Result<()> {
     match consensus_item {
         WalletConsensusItem::BlockCount(block_count_vote) => {
-            process_block_count(server, dbtx, block_count_vote, peer).await
+            process_block_count(server, dbtx, peer, block_count_vote).await
         }
         WalletConsensusItem::Feerate(feerate) => {
             if Some(feerate) == dbtx.insert(&FeeRateVoteTable, &peer, &feerate) {
@@ -267,14 +267,14 @@ pub async fn process_consensus_item(
 
             Ok(())
         }
-        WalletConsensusItem::Nonces(txid, nonces) => process_nonces(dbtx, txid, nonces, peer),
+        WalletConsensusItem::Nonces(txid, nonces) => process_nonces(dbtx, peer, txid, nonces),
         WalletConsensusItem::Signatures(txid, shares, nonces) => {
-            process_signatures(server, dbtx, txid, shares, nonces, peer).await
+            process_signatures(server, dbtx, peer, txid, shares, nonces).await
         }
     }
 }
 
-pub async fn process_input(
+pub fn process_input(
     server: &Server,
     dbtx: &WriteTx,
     input: &WalletInput,
@@ -415,7 +415,7 @@ pub async fn process_input(
     Ok((amount, input.tweak))
 }
 
-pub async fn process_output(
+pub fn process_output(
     server: &Server,
     dbtx: &WriteTx,
     output: &WalletOutput,
@@ -531,7 +531,7 @@ pub async fn process_output(
         .ok_or(WalletOutputError::ArithmeticOverflow)
 }
 
-pub async fn audit(_server: &Server, dbtx: &WriteTx) -> i64 {
+pub fn audit(dbtx: &WriteTx) -> i64 {
     dbtx.get(&FederationWalletTable, &())
         .map_or(0, |wallet| 1000 * wallet.value.to_sat() as i64)
 }
@@ -579,8 +579,8 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
 async fn process_block_count(
     server: &Server,
     dbtx: &WriteTx,
-    block_count_vote: u64,
     peer: PeerId,
+    block_count_vote: u64,
 ) -> anyhow::Result<()> {
     let old_consensus_block_count = consensus_block_count(server, dbtx);
 
@@ -665,9 +665,9 @@ async fn process_block_count(
 
 fn process_nonces(
     dbtx: &WriteTx,
+    peer: PeerId,
     txid: Txid,
     nonces: Vec<PublicNonce>,
-    peer: PeerId,
 ) -> anyhow::Result<()> {
     let unsigned = dbtx
         .get(&UnsignedTxTable, &())
@@ -698,10 +698,10 @@ fn process_nonces(
 async fn process_signatures(
     server: &Server,
     dbtx: &WriteTx,
+    peer: PeerId,
     txid: Txid,
     shares: Vec<SignatureShare>,
     fresh_nonces: Vec<PublicNonce>,
-    peer: PeerId,
 ) -> anyhow::Result<()> {
     let mut unsigned = dbtx
         .get(&UnsignedTxTable, &())
@@ -1059,7 +1059,7 @@ fn get_outputs(dbtx: &impl DbRead, start_index: u64, end_index: u64) -> Vec<Outp
     })
 }
 
-fn pending_tx_chain(dbtx: &impl DbRead) -> Vec<TxInfo> {
+pub fn pending_tx_chain(dbtx: &impl DbRead) -> Vec<TxInfo> {
     let n_pending = pending_txs_unordered(dbtx).len();
 
     let mut items: Vec<TxInfo> = dbtx.iter(&TxInfoTable, |r| r.map(|(_, v)| v).collect());
@@ -1069,52 +1069,17 @@ fn pending_tx_chain(dbtx: &impl DbRead) -> Vec<TxInfo> {
     items
 }
 
-fn tx_chain(dbtx: &impl DbRead) -> Vec<TxInfo> {
+pub fn tx_chain(dbtx: &impl DbRead) -> Vec<TxInfo> {
     dbtx.iter(&TxInfoTable, |r| r.map(|(_, v)| v).collect())
 }
 
-fn total_txs(dbtx: &impl DbRead) -> u64 {
+pub fn total_txs(dbtx: &impl DbRead) -> u64 {
     dbtx.iter_rev(&TxInfoTable, |r| r.next().map_or(0, |entry| entry.0 + 1))
 }
 
-/// Get the current federation wallet info for UI display
-pub fn federation_wallet_ui(server: &Server) -> Option<FederationWallet> {
-    server.db.begin_read().get(&FederationWalletTable, &())
-}
-
-/// Get the current consensus block count for UI display
-pub fn consensus_block_count_ui(server: &Server) -> u64 {
-    consensus_block_count(server, &server.db.begin_read())
-}
-
-/// Get the current consensus feerate for UI display
-pub fn consensus_feerate_ui(server: &Server) -> Option<u64> {
-    consensus_feerate(server, &server.db.begin_read()).map(|f| f / 1000)
-}
-
-/// Get the current send fee for UI display
-pub fn send_fee_ui(server: &Server) -> Option<Amount> {
-    send_fee(server, &server.db.begin_read())
-}
-
-/// Get the current receive fee for UI display
-pub fn receive_fee_ui(server: &Server) -> Option<Amount> {
-    receive_fee(server, &server.db.begin_read())
-}
-
-/// Get the current pending transaction info for UI display
-pub fn pending_tx_chain_ui(server: &Server) -> Vec<TxInfo> {
-    pending_tx_chain(&server.db.begin_read())
-}
-
-/// Get the current transaction log for UI display
-pub fn tx_chain_ui(server: &Server) -> Vec<TxInfo> {
-    tx_chain(&server.db.begin_read())
-}
-
-/// Get the total number of transactions in the chain for UI display
-pub fn transaction_count_ui(server: &Server) -> u64 {
-    total_txs(&server.db.begin_read())
+/// The current federation wallet, if a first receive has established one.
+pub fn federation_wallet(dbtx: &impl DbRead) -> Option<FederationWallet> {
+    dbtx.get(&FederationWalletTable, &())
 }
 
 /// Export recovery material for federation shutdown: the tweaked
@@ -1125,8 +1090,8 @@ pub fn transaction_count_ui(server: &Server) -> u64 {
 /// against the tweaked aggregate key and sweep the UTXO with a
 /// single-key taproot wallet. Returns None if the federation wallet has
 /// not been initialized yet.
-pub fn restore_keys_ui(server: &Server) -> Option<(String, String)> {
-    let wallet = federation_wallet_ui(server)?;
+pub fn restore_keys(server: &Server, dbtx: &impl DbRead) -> Option<(String, String)> {
+    let wallet = federation_wallet(dbtx)?;
 
     Some((
         tweaked_agg_pk(server, &wallet.tweak).0.to_string(),
