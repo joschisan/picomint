@@ -1065,10 +1065,11 @@ impl Client {
         let mut stream = ctx.subscribe_operation_events(operation);
         while let Some(entry) = stream.next().await {
             if let Some(ev) = entry.to_event::<SendSuccessEvent>() {
-                return Ok(ev
+                return ev
                     .ecash
                     .parse()
-                    .expect("logged ecash is its own to_string, which from_str reverses"));
+                    .map(Ok)
+                    .expect("logged ecash is its own to_string, which from_str reverses");
             }
             if entry.to_event::<SendFailureEvent>().is_some() {
                 return Err(SendECashError::Failure);
