@@ -40,7 +40,7 @@ impl FederationApi {
 
     /// The federation's announced gateway list, agreed by a threshold of
     /// guardians. Each guardian maintains their own vetted-gateway list
-    /// via the admin CLI; the response is byte-canonical (sorted via redb
+    /// via the admin CLI; the response is byte-canonical (sorted via db
     /// iteration) so threshold equality is deterministic.
     pub async fn ln_gateways(&self) -> anyhow::Result<Vec<picomint_core::ln::gateway::GatewayPk>> {
         self.request_current_consensus::<GatewaysResponse>(Method::Ln(LnMethod::Gateways(

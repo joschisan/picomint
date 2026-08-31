@@ -7,8 +7,8 @@ use picomint_core::TransactionId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
-use picomint_eventlog::{Event, EventLogEntry, EventLogger};
-use picomint_redb::{Database, WriteTx};
+use picomint_eventlog::{Event, EventLogEntry};
+use picomint_sqlite::{Database, WriteTx};
 use tokio::sync::Notify;
 
 use crate::{TxAcceptEvent, TxRejectEvent};
@@ -19,23 +19,12 @@ use crate::{TxAcceptEvent, TxRejectEvent};
 pub struct ClientContext {
     api: FederationApi,
     db: Database,
-    logger: EventLogger,
     config: ConsensusConfig,
 }
 
 impl ClientContext {
-    pub fn new(
-        api: FederationApi,
-        db: Database,
-        logger: EventLogger,
-        config: ConsensusConfig,
-    ) -> Self {
-        Self {
-            api,
-            db,
-            logger,
-            config,
-        }
+    pub fn new(api: FederationApi, db: Database, config: ConsensusConfig) -> Self {
+        Self { api, db, config }
     }
 
     pub fn network(&self) -> bitcoin::Network {
@@ -84,7 +73,7 @@ impl ClientContext {
 
     /// Shared [`Notify`] that fires on every commit touching the event log.
     pub fn event_notify(&self) -> Arc<Notify> {
-        self.logger.event_notify(&self.db)
+        picomint_eventlog::event_notify(&self.db)
     }
 
     /// Stream every event belonging to `operation`, starting from the
@@ -93,9 +82,8 @@ impl ClientContext {
         &self,
         operation: OperationId,
     ) -> BoxStream<'static, EventLogEntry> {
-        Box::pin(self.logger.subscribe_operation_events(
+        Box::pin(picomint_eventlog::subscribe_operation_events(
             self.db.clone(),
-            self.event_notify(),
             operation,
         ))
     }
@@ -104,11 +92,6 @@ impl ClientContext {
     where
         E: Event + Send,
     {
-        self.logger
-            .log_event(dbtx, self.federation(), account, operation, event);
-    }
-
-    pub fn logger(&self) -> &EventLogger {
-        &self.logger
+        picomint_eventlog::log_event(dbtx, self.federation(), account, operation, event);
     }
 }

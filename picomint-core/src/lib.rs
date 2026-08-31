@@ -74,8 +74,6 @@ pub mod wire;
 )]
 pub struct TransactionId(pub bitcoin::hashes::sha256::Hash);
 
-picomint_redb::consensus_key!(TransactionId);
-
 /// `OutPoint` represents a globally unique output in a transaction
 ///
 /// Hence, a transaction ID and the output index is required.
@@ -110,5 +108,3 @@ impl std::fmt::Display for OutPoint {
         write!(f, "{}:{}", self.txid, self.out_idx)
     }
 }
-
-picomint_redb::consensus_key!(OutPoint);

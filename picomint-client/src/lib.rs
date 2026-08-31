@@ -15,34 +15,6 @@
 //! balances against the wallet and submits via its own
 //! [`crate::tx::TxSubmissionStateMachine`].
 
-/// Declare a per-federation table. Expands to a tuple struct
-/// `Name(pub FederationId)` implementing [`picomint_redb::Table`] with
-/// resolved name `"{federation}/{label}"`. Multiple federation clients sharing
-/// one root [`picomint_redb::Database`] (as in the gateway daemon) get
-/// disjoint on-disk keyspaces this way.
-#[macro_export]
-macro_rules! client_table {
-    (
-        $(#[$attr:meta])*
-        $name:ident,
-        $k:ty => $v:ty,
-        $label:literal $(,)?
-    ) => {
-        $(#[$attr])*
-        #[derive(Copy, Clone, Debug)]
-        pub struct $name(pub ::picomint_core::config::FederationId);
-
-        impl ::picomint_redb::Table for $name {
-            type Key = $k;
-            type Value = $v;
-
-            fn resolved_name(&self) -> ::std::string::String {
-                format!("{}/{}", self.0, $label)
-            }
-        }
-    };
-}
-
 /// Federation API transport
 /// Core [`Client`]
 pub mod api;

@@ -4,8 +4,8 @@ use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_eventlog::{EventLogEntry, EventLogId};
-use picomint_redb::table;
+use picomint_eventlog::EventLogId;
+use picomint_sqlite::table;
 
 // BIP39 entropy for the daemon's mnemonic, written once on first start.
 // Drives both federation-client derivation and the iroh secret key, so the
@@ -65,22 +65,6 @@ table!(
     "event-cursor",
 );
 
-// Daemon-wide event log. The two tables are owned here (not by
-// `picomint-eventlog`) so the daemon controls the on-disk schema; an
-// [`picomint_eventlog::EventLogger`] is constructed over these at startup
-// and handed to every consumer (federation clients, trailer, analytics).
-table!(
-    EventLogTable,
-    EventLogId => EventLogEntry,
-    "event-log",
-);
-
-table!(
-    EventLogByOperationTable,
-    (OperationId, EventLogId) => EventLogEntry,
-    "operation-event-log",
-);
-
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct OutgoingContractRow {
     pub federation: FederationId,
@@ -89,13 +73,9 @@ pub struct OutgoingContractRow {
     pub invoice: LightningInvoice,
 }
 
-picomint_redb::consensus_value!(OutgoingContractRow);
-
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct IncomingOfferRow {
     pub federation: FederationId,
     pub offer: contracts::IncomingOffer,
     pub invoice: LightningInvoice,
 }
-
-picomint_redb::consensus_value!(IncomingOfferRow);

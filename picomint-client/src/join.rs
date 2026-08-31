@@ -18,7 +18,7 @@ use picomint_core::core::Account;
 use picomint_core::invite::InviteCode;
 use picomint_core::methods::{ConfigRequest, ConfigResponse, CoreMethod};
 use picomint_core::module::Method;
-use picomint_redb::WriteTx;
+use picomint_sqlite::WriteTx;
 use tracing::debug;
 
 use crate::api::FederationApi;

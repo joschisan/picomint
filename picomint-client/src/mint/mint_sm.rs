@@ -1,8 +1,9 @@
-use picomint_redb::WriteTx;
+use picomint_sqlite::{WriteTx, table};
 use std::collections::BTreeMap;
 
 use crate::executor::{SmId, StateMachine};
 use anyhow::ensure;
+use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::mint::{Denomination, verify_note};
 use picomint_core::{PeerId, TransactionId};
@@ -13,9 +14,9 @@ use super::client_db::NoteTable;
 use super::events::{MintFailureEvent, MintSuccessEvent};
 use super::{MintSmContext, NoteIssuanceRequest, SpendableNote};
 
-crate::client_table!(
+table!(
     MintStateMachineTable,
-    SmId => MintStateMachine,
+    (FederationId, SmId) => MintStateMachine,
     "mint-mint-sm",
 );
 
@@ -43,8 +44,6 @@ pub struct MintStateMachine {
     /// output of the transaction it is charging.
     pub issuance_requests: Vec<NoteIssuanceRequest>,
 }
-
-picomint_redb::consensus_value!(MintStateMachine);
 
 impl StateMachine for MintStateMachine {
     type Context = MintSmContext;
@@ -77,8 +76,8 @@ impl StateMachine for MintStateMachine {
         let Ok(signature_shares) = outcome else {
             for note in &self.spendable_notes {
                 dbtx.insert(
-                    &NoteTable(ctx.federation),
-                    &(self.account, note.clone()),
+                    &NoteTable,
+                    &(ctx.federation, self.account, note.clone()),
                     &(),
                 );
             }
@@ -110,8 +109,8 @@ impl StateMachine for MintStateMachine {
 
             assert!(
                 dbtx.insert(
-                    &NoteTable(ctx.federation),
-                    &(request.account(), spendable_note),
+                    &NoteTable,
+                    &(ctx.federation, request.account(), spendable_note),
                     &()
                 )
                 .is_none()

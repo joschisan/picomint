@@ -15,8 +15,6 @@ use crate::Amount;
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, PartialOrd, Ord, Encodable, Decodable)]
 pub struct GatewayPk(pub iroh_base::PublicKey);
 
-picomint_redb::consensus_key!(GatewayPk);
-
 impl Serialize for GatewayPk {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -64,8 +62,6 @@ pub struct GatewayInfo {
     /// direct swaps as well.
     pub expiry_delta: u64,
 }
-
-picomint_redb::consensus_value!(GatewayInfo);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable, Copy)]
 pub struct PaymentFee {

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitcoin — two binaries (federation guardian + Lightning gateway), Iroh networking, redb storage, static module set (mint, wallet, ln). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. See README.md for deployment.
+Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitcoin — two binaries (federation guardian + Lightning gateway), Iroh networking, SQLite storage, static module set (mint, wallet, ln). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. See README.md for deployment.
 
 ## Build and development
 
@@ -25,7 +25,7 @@ Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitco
 - `picomint-gateway-daemon` — Lightning gateway binary with embedded LDK node
 - `picomint-gateway-cli` / `picomint-gateway-cli-core` — admin CLI for the gateway daemon + shared route/request types
 - `picomint-client` — client library; owns the concrete per-module client state machines
-- `picomint-redb` — redb-based database layer
+- `picomint-sqlite` — SQLite-based typed database layer
 - `picomint-eventlog` — append-only client event log
 - `picomint-bitcoin-rpc` — bitcoind RPC client used by the wallet module
 - `picomint-lnurl-daemon` — standalone LNURL proxy daemon for receiving Lightning payments
@@ -34,7 +34,7 @@ Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitco
 
 ### Wire + storage
 - Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-core::encoding`
-- Storage: redb only. No RocksDB. No migrations (types implement redb's `Key`/`Value` directly via macros in `picomint-redb`)
+- Storage: SQLite only. No RocksDB. No migrations (tables are declared via the `table!` macro in `picomint-sqlite`; keys/values use consensus encoding)
 - Transport: Iroh-only (QUIC + hole-punching). No TLS/websocket/DNS announcements
 - Each guardian binds exactly one iroh `Endpoint` (one secret key, one node id) for both federation p2p and the public client API; the accept loop demuxes by remote node-id (peer set → P2P path, otherwise → public API path).
 

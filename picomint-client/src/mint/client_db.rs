@@ -1,4 +1,6 @@
+use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
+use picomint_sqlite::table;
 
 use super::SpendableNote;
 
@@ -7,18 +9,18 @@ use super::SpendableNote;
 // account: notes can only be reissued once, and an attempt to receive the
 // same bundle into a second account is rejected rather than left to fail
 // against already-spent notes.
-client_table!(
+table!(
     ReceiveOperationTable,
-    OperationId => (),
+    (FederationId, OperationId) => (),
     "mint-receive-operation",
 );
 
-// Every account's notes share one table, split by the key's leading
-// [`Account`]. Nonces derive from per-account secrets, so two accounts can
-// never produce the same note.
-client_table!(
+// Every federation's accounts share one table, split by the key's leading
+// [`FederationId`] and [`Account`]. Nonces derive from per-account secrets,
+// so two accounts can never produce the same note.
+table!(
     NoteTable,
-    (Account, SpendableNote) => (),
+    (FederationId, Account, SpendableNote) => (),
     "mint-note",
 );
 
@@ -31,8 +33,8 @@ client_table!(
 // Restore rewrites an account's counter to the high-water mark it scanned to;
 // a restored wallet that resumed from zero would re-derive nonces the
 // federation has already signed.
-client_table!(
+table!(
     CounterTable,
-    Account => u64,
+    (FederationId, Account) => u64,
     "mint-counter",
 );

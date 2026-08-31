@@ -1001,6 +1001,27 @@ impl WriteTx {
         )
     }
 
+    /// Iterate every entry whose key starts with `prefix`, in descending key
+    /// order.
+    pub fn prefix_rev<D: Table, P: Prefix<D>, R>(
+        &self,
+        def: &D,
+        prefix: &P,
+        f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
+    ) -> R {
+        self.ensure_table(def);
+
+        let sql = scan_sql(def.name(), D::KEY_COLS, &[where_key(P::LEN)], true);
+
+        scan(
+            &self.conn(),
+            &sql,
+            prefix.encode_prefix(),
+            || unreachable!("table was just created"),
+            f,
+        )
+    }
+
     /// Iterate the entries within a typed key range, in ascending key order.
     pub fn range<D: Table, B: RangeBounds<D::Key>, R>(
         &self,
@@ -1071,6 +1092,19 @@ impl ReadTx {
         scan(&self.conn(), &sql, prefix.encode_prefix(), R::default, f)
     }
 
+    /// Iterate every entry whose key starts with `prefix`, in descending key
+    /// order.
+    pub fn prefix_rev<D: Table, P: Prefix<D>, R: Default>(
+        &self,
+        def: &D,
+        prefix: &P,
+        f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
+    ) -> R {
+        let sql = scan_sql(def.name(), D::KEY_COLS, &[where_key(P::LEN)], true);
+
+        scan(&self.conn(), &sql, prefix.encode_prefix(), R::default, f)
+    }
+
     /// Iterate the entries within a typed key range, in ascending key order.
     pub fn range<D: Table, B: RangeBounds<D::Key>, R: Default>(
         &self,
@@ -1105,6 +1139,13 @@ pub trait DbRead {
     ) -> R;
 
     fn prefix<D: Table, P: Prefix<D>, R: Default>(
+        &self,
+        def: &D,
+        prefix: &P,
+        f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
+    ) -> R;
+
+    fn prefix_rev<D: Table, P: Prefix<D>, R: Default>(
         &self,
         def: &D,
         prefix: &P,
@@ -1161,6 +1202,15 @@ macro_rules! impl_db_read_via_inherent {
                 f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
             ) -> R {
                 <$ty>::prefix(self, def, prefix, f)
+            }
+
+            fn prefix_rev<D: Table, P: Prefix<D>, R: Default>(
+                &self,
+                def: &D,
+                prefix: &P,
+                f: impl FnOnce(&mut SqliteIter<'_, D>) -> R,
+            ) -> R {
+                <$ty>::prefix_rev(self, def, prefix, f)
             }
 
             fn range<D: Table, B: RangeBounds<D::Key>, R: Default>(
@@ -1321,7 +1371,7 @@ mod tests {
         let keys = tx.range(
             &AddressTable,
             (1u64, 2u32, u64::MIN)..=(1u64, 2u32, u64::MAX),
-            |r| r.map(|(k, ())| k).collect::<Vec<_>>(),
+            |r| r.map(|entry| entry.0).collect::<Vec<_>>(),
         );
 
         assert_eq!(keys, vec![(1, 2, 5), (1, 2, 9)]);
@@ -1345,7 +1395,7 @@ mod tests {
         let tx = db.begin_read();
 
         let fed = tx.prefix(&NotesTable, &1u64, |r| {
-            r.map(|(k, ())| k).collect::<Vec<_>>()
+            r.map(|entry| entry.0).collect::<Vec<_>>()
         });
         assert_eq!(
             fed,
@@ -1357,12 +1407,33 @@ mod tests {
         );
 
         let account = tx.prefix(&NotesTable, &(1u64, 1u32), |r| {
-            r.map(|(k, ())| k).collect::<Vec<_>>()
+            r.map(|entry| entry.0).collect::<Vec<_>>()
         });
         assert_eq!(
             account,
             vec![(1, 1, "a".to_string()), (1, 1, "c".to_string())]
         );
+    }
+
+    #[test]
+    fn prefix_rev_reverses_order() {
+        let (_dir, db) = test_db();
+
+        let tx = db.begin_write();
+        for key in [(1u64, 1u32, 1u64), (1, 2, 2), (1, 3, 3), (2, 1, 4)] {
+            tx.insert(&AddressTable, &key, &());
+        }
+        tx.commit();
+
+        let tx = db.begin_read();
+
+        let last = tx.prefix_rev(&AddressTable, &1u64, |r| r.next().map(|entry| entry.0));
+        assert_eq!(last, Some((1, 3, 3)));
+
+        let keys = tx.prefix_rev(&AddressTable, &1u64, |r| {
+            r.map(|entry| entry.0).collect::<Vec<_>>()
+        });
+        assert_eq!(keys, vec![(1, 3, 3), (1, 2, 2), (1, 1, 1)]);
     }
 
     #[test]
@@ -1377,7 +1448,9 @@ mod tests {
         tx.commit();
 
         let tx = db.begin_read();
-        let keys = tx.iter(&AddressTable, |r| r.map(|(k, ())| k).collect::<Vec<_>>());
+        let keys = tx.iter(&AddressTable, |r| {
+            r.map(|entry| entry.0).collect::<Vec<_>>()
+        });
 
         assert_eq!(keys, vec![(2, 1, 3)]);
     }
@@ -1393,7 +1466,9 @@ mod tests {
         tx.commit();
 
         let tx = db.begin_read();
-        let keys = tx.iter_rev(&BalancesTable, |r| r.map(|(k, _)| k).collect::<Vec<_>>());
+        let keys = tx.iter_rev(&BalancesTable, |r| {
+            r.map(|entry| entry.0).collect::<Vec<_>>()
+        });
 
         assert_eq!(keys, vec![3, 2, 1, 0]);
     }

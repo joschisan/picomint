@@ -9,7 +9,7 @@ mod mint_sm;
 mod secret;
 mod send_sm;
 
-use picomint_redb::WriteTx;
+use picomint_sqlite::{DbRead, WriteTx};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -72,8 +72,6 @@ pub struct SpendableNote {
     pub signature: tbs::Signature,
 }
 
-picomint_redb::consensus_key!(SpendableNote);
-
 impl SpendableNote {
     pub fn amount(&self) -> Amount {
         self.denomination.amount()
@@ -124,15 +122,15 @@ pub(crate) struct Restore {
 /// more notes than that could not be restored through at all.
 pub(crate) fn commit_scan(dbtx: &WriteTx, account: Account, restore: &Restore) {
     dbtx.insert(
-        &CounterTable(restore.federation),
-        &account,
+        &CounterTable,
+        &(restore.federation, account),
         &restore.counter,
     );
 
     for note in &restore.notes {
         dbtx.insert(
-            &NoteTable(restore.federation),
-            &(account, note.clone()),
+            &NoteTable,
+            &(restore.federation, account, note.clone()),
             &(),
         );
     }
@@ -270,10 +268,10 @@ impl MintClientModule {
     /// blinded message is committed to.
     fn next_counter(&self, dbtx: &WriteTx, account: Account) -> u64 {
         let counter = dbtx
-            .get(&CounterTable(self.federation), &account)
+            .get(&CounterTable, &(self.federation, account))
             .unwrap_or(0);
 
-        dbtx.insert(&CounterTable(self.federation), &account, &(counter + 1));
+        dbtx.insert(&CounterTable, &(self.federation, account), &(counter + 1));
 
         counter
     }
@@ -395,25 +393,27 @@ impl MintClientModule {
 
         let mint_executor = ModuleExecutor::new(
             context.db().clone(),
-            MintStateMachineTable(federation),
+            federation,
+            MintStateMachineTable,
             sm_context.clone(),
             tg.clone(),
         );
 
         let send_executor = ModuleExecutor::new(
             context.db().clone(),
-            SendStateMachineTable(federation),
+            federation,
+            SendStateMachineTable,
             sm_context,
             tg.clone(),
         );
 
         let tx_submission_executor = ModuleExecutor::new(
             context.db().clone(),
-            TxSubmissionStateMachineTable(federation),
+            federation,
+            TxSubmissionStateMachineTable,
             TxSubmissionSmContext {
                 api: context.api(),
                 federation,
-                logger: context.logger().clone(),
             },
             tg.clone(),
         );
@@ -629,7 +629,7 @@ impl MintClientModule {
         txid
     }
 
-    pub fn get_balance(&self, dbtx: &impl picomint_redb::DbRead, account: Account) -> Amount {
+    pub fn get_balance(&self, dbtx: &impl DbRead, account: Account) -> Amount {
         Self::get_count_by_denomination_dbtx(dbtx, self.federation, account)
             .into_iter()
             .map(|(denomination, count)| denomination.amount().mul_u64(count))
@@ -637,9 +637,7 @@ impl MintClientModule {
     }
 
     pub fn balance_notify(&self) -> Arc<tokio::sync::Notify> {
-        self.client_ctx
-            .db()
-            .notify_for_table(&NoteTable(self.federation))
+        self.client_ctx.db().notify_for_table(&NoteTable)
     }
 
     /// Value `account`'s notes can deliver to a transaction's outputs when
@@ -798,7 +796,7 @@ impl MintClientModule {
     }
 
     fn get_count_by_denomination_dbtx(
-        dbtx: &impl picomint_redb::DbRead,
+        dbtx: &impl DbRead,
         federation: FederationId,
         account: Account,
     ) -> BTreeMap<Denomination, u64> {
@@ -987,7 +985,7 @@ impl MintClientModule {
         }
 
         for note in &notes {
-            dbtx.remove(&NoteTable(self.federation), &(account, note.clone()))
+            dbtx.remove(&NoteTable, &(self.federation, account, note.clone()))
                 .expect("Must delete existing spendable note");
         }
 
@@ -1064,7 +1062,7 @@ impl MintClientModule {
         let dbtx = self.client_ctx.db().begin_write();
 
         if dbtx
-            .insert(&ReceiveOperationTable(self.federation), &operation, &())
+            .insert(&ReceiveOperationTable, &(self.federation, operation), &())
             .is_some()
         {
             return Err(ReceiveECashError::AlreadyAttempted);
@@ -1088,23 +1086,20 @@ impl MintClientModule {
         account: Account,
         spendable_note: &SpendableNote,
     ) {
-        dbtx.remove(&NoteTable(federation), &(account, spendable_note.clone()))
+        dbtx.remove(&NoteTable, &(federation, account, spendable_note.clone()))
             .expect("Must delete existing spendable note");
     }
 }
 
-/// Every note `account` holds. All accounts share one table, so this filters
-/// on the key's leading [`Account`]; a wallet's note count is small enough
-/// that walking the other accounts' rows costs nothing worth ranging over.
+/// Every note `account` holds — an indexed prefix scan over the key's
+/// leading `(federation, account)` columns.
 fn account_notes(
-    dbtx: &impl picomint_redb::DbRead,
+    dbtx: &impl DbRead,
     federation: FederationId,
     account: Account,
 ) -> Vec<SpendableNote> {
-    dbtx.iter(&NoteTable(federation), |r| {
-        r.filter(|((a, _), ())| *a == account)
-            .map(|((_, note), ())| note)
-            .collect()
+    dbtx.prefix(&NoteTable, &(federation, account), |r| {
+        r.map(|entry| entry.0.2).collect()
     })
 }
 
@@ -1138,21 +1133,21 @@ fn send_ecash_dbtx(
     }
 
     for spendable_note in &notes {
-        dbtx.remove(&NoteTable(federation), &(account, spendable_note.clone()))
+        dbtx.remove(&NoteTable, &(federation, account, spendable_note.clone()))
             .expect("Must delete existing spendable note");
     }
 
     Some(ECash::new(federation, notes))
 }
 
-/// Drop every redb table this module owns under the caller's prefix.
+/// Remove every row this module owns under the caller's federation prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
-    dbtx.delete_table(&NoteTable(federation));
-    dbtx.delete_table(&ReceiveOperationTable(federation));
-    dbtx.delete_table(&CounterTable(federation));
-    dbtx.delete_table(&MintStateMachineTable(federation));
-    dbtx.delete_table(&SendStateMachineTable(federation));
+    dbtx.remove_prefix(&NoteTable, &federation);
+    dbtx.remove_prefix(&ReceiveOperationTable, &federation);
+    dbtx.remove_prefix(&CounterTable, &federation);
+    dbtx.remove_prefix(&MintStateMachineTable, &federation);
+    dbtx.remove_prefix(&SendStateMachineTable, &federation);
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]

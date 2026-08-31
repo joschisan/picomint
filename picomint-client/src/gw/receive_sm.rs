@@ -1,7 +1,8 @@
-use picomint_redb::WriteTx;
+use picomint_sqlite::{WriteTx, table};
 use std::collections::BTreeMap;
 
 use anyhow::{Context, anyhow};
+use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInput;
 use picomint_core::ln::contracts::IncomingOffer;
@@ -20,9 +21,9 @@ use crate::executor::{SmId, StateMachine};
 use crate::tx::{Input, TxBuilder};
 use picomint_rpc::query::FilterMapThreshold;
 
-crate::client_table!(
+table!(
     ReceiveStateMachineTable,
-    SmId => ReceiveStateMachine,
+    (FederationId, SmId) => ReceiveStateMachine,
     "gw-receive-sm",
 );
 
@@ -39,8 +40,6 @@ pub struct ReceiveStateMachine {
     pub outpoint: OutPoint,
     pub refund_keypair: Keypair,
 }
-
-picomint_redb::consensus_value!(ReceiveStateMachine);
 
 impl StateMachine for ReceiveStateMachine {
     type Context = GwSmContext;

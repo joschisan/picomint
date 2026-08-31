@@ -5,11 +5,11 @@ pub use builder::*;
 pub use picomint_core::tx::{ConsensusItem, Transaction, TxError};
 pub use sm::*;
 
-/// Drop every redb table this module owns under the caller's prefix.
+/// Remove every row this module owns under the caller's federation prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
 pub(crate) fn wipe_tables(
-    dbtx: &picomint_redb::WriteTx,
+    dbtx: &picomint_sqlite::WriteTx,
     federation: picomint_core::config::FederationId,
 ) {
-    dbtx.delete_table(&TxSubmissionStateMachineTable(federation));
+    dbtx.remove_prefix(&TxSubmissionStateMachineTable, &federation);
 }

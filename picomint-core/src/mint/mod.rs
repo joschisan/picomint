@@ -29,8 +29,6 @@ pub mod methods;
 )]
 pub struct Denomination(pub u8);
 
-picomint_redb::consensus_key!(Denomination);
-
 impl Denomination {
     /// Convert to Amount (only call at boundaries)
     pub fn amount(self) -> Amount {

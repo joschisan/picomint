@@ -68,7 +68,8 @@ impl WalletClientModule {
         let federation = context.federation();
         let send_executor = ModuleExecutor::new(
             context.db().clone(),
-            SendStateMachineTable(federation),
+            federation,
+            SendStateMachineTable,
             context.clone(),
             tg.clone(),
         );
@@ -248,12 +249,12 @@ impl WalletClientModule {
 
     /// The largest valid address index `account` has reached, or `None` before
     /// the scanner has seeded it. All accounts share one table, so this reads
-    /// the tail of the account's own key range rather than the table's.
+    /// the tail of the account's own key prefix rather than the table's.
     fn highest_valid_index(&self, account: Account) -> Option<u64> {
-        self.client_ctx.db().begin_read().range(
-            &ValidAddressIndexTable(self.client_ctx.federation()),
-            (account, u64::MIN)..=(account, u64::MAX),
-            |r| r.next_back().map(|((_, idx), ())| idx),
+        self.client_ctx.db().begin_read().prefix_rev(
+            &ValidAddressIndexTable,
+            &(self.client_ctx.federation(), account),
+            |r| r.next().map(|entry| entry.0.2),
         )
     }
 
@@ -354,8 +355,8 @@ impl WalletClientModule {
             let dbtx = module.client_ctx.db().begin_write();
             assert!(
                 dbtx.insert(
-                    &ValidAddressIndexTable(module.client_ctx.federation()),
-                    &(account, index),
+                    &ValidAddressIndexTable,
+                    &(module.client_ctx.federation(), account, index),
                     &()
                 )
                 .is_none(),
@@ -388,15 +389,16 @@ impl WalletClientModule {
         let dbtx = self.client_ctx.db().begin_read();
 
         let next_output_index = dbtx
-            .get(&NextOutputIndexTable(self.client_ctx.federation()), &())
+            .get(&NextOutputIndexTable, &self.client_ctx.federation())
             .unwrap_or(0);
 
-        // Every account's indices come out of one iteration, already tagged
+        // Every account's indices come out of one prefix scan, already tagged
         // with the account they belong to.
-        let valid_indices: Vec<(Account, u64)> = dbtx
-            .iter(&ValidAddressIndexTable(self.client_ctx.federation()), |r| {
-                r.map(|(key, ())| key).collect()
-            });
+        let valid_indices: Vec<(Account, u64)> = dbtx.prefix(
+            &ValidAddressIndexTable,
+            &self.client_ctx.federation(),
+            |r| r.map(|entry| (entry.0.1, entry.0.2)).collect(),
+        );
 
         drop(dbtx);
 
@@ -441,8 +443,8 @@ impl WalletClientModule {
                     let dbtx = self.client_ctx.db().begin_write();
 
                     dbtx.insert(
-                        &ValidAddressIndexTable(self.client_ctx.federation()),
-                        &(account, index),
+                        &ValidAddressIndexTable,
+                        &(self.client_ctx.federation(), account, index),
                         &(),
                     );
 
@@ -499,8 +501,8 @@ impl WalletClientModule {
             let dbtx = self.client_ctx.db().begin_write();
 
             dbtx.insert(
-                &NextOutputIndexTable(self.client_ctx.federation()),
-                &(),
+                &NextOutputIndexTable,
+                &self.client_ctx.federation(),
                 &(output.index + 1),
             );
 
@@ -511,15 +513,15 @@ impl WalletClientModule {
     }
 }
 
-/// Drop every redb table this module owns under the caller's prefix.
+/// Remove every row this module owns under the caller's federation prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
 pub(crate) fn wipe_tables(
-    dbtx: &picomint_redb::WriteTx,
+    dbtx: &picomint_sqlite::WriteTx,
     federation: picomint_core::config::FederationId,
 ) {
-    dbtx.delete_table(&NextOutputIndexTable(federation));
-    dbtx.delete_table(&ValidAddressIndexTable(federation));
-    dbtx.delete_table(&SendStateMachineTable(federation));
+    dbtx.remove(&NextOutputIndexTable, &federation);
+    dbtx.remove_prefix(&ValidAddressIndexTable, &federation);
+    dbtx.remove_prefix(&SendStateMachineTable, &federation);
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]

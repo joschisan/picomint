@@ -34,12 +34,8 @@ pub struct BlindingKey(#[serde(with = "bls_serde::scalar")] pub Scalar);
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct BlindedMessage(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
-picomint_redb::consensus_key!(BlindedMessage);
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct BlindedSignatureShare(#[serde(with = "bls_serde::g1")] pub G1Affine);
-
-picomint_redb::consensus_value!(BlindedSignatureShare);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct BlindedSignature(#[serde(with = "bls_serde::g1")] pub G1Affine);

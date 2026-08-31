@@ -21,7 +21,6 @@ bitcoin = { workspace = true }
 bls12_381 = { workspace = true }
 group = { workspace = true }
 picomint-encoding = { workspace = true }
-picomint-redb = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 serde = { workspace = true }

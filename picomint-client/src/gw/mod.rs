@@ -4,7 +4,7 @@ mod receive_sm;
 mod secret;
 
 use anyhow::Context as _;
-use picomint_redb::WriteTx;
+use picomint_sqlite::WriteTx;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -56,7 +56,8 @@ impl GatewayClientModule {
 
         let receive_executor = ModuleExecutor::new(
             context.db().clone(),
-            ReceiveStateMachineTable(federation),
+            federation,
+            ReceiveStateMachineTable,
             sm_context,
             tg.clone(),
         );
@@ -278,8 +279,8 @@ impl GatewayClientModule {
     }
 }
 
-/// Drop every redb table this module owns under the caller's prefix.
+/// Remove every row this module owns under the caller's federation prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: picomint_core::config::FederationId) {
-    dbtx.delete_table(&ReceiveStateMachineTable(federation));
+    dbtx.remove_prefix(&ReceiveStateMachineTable, &federation);
 }

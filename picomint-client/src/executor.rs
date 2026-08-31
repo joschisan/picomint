@@ -2,9 +2,10 @@
 //!
 //! Each module (and the client-level tx submission) owns a single
 //! [`ModuleExecutor<S, T>`] parameterised by its state type and the
-//! per-federation [`Table`] that persists it. The executor stores active
-//! states in `T` keyed by a random [`SmId`] and drives transitions in a
-//! typed reactor loop.
+//! [`Table`] that persists it. Tables are shared across federations, so the
+//! executor scopes every op by its federation's slice of the key space.
+//! Active states are keyed by `(federation, SmId)` and driven in a typed
+//! reactor loop.
 //!
 //! Each driver iteration: wait for [`StateMachine::trigger`] to resolve,
 //! then apply [`StateMachine::transition`] atomically in a DB tx. A
@@ -16,16 +17,15 @@ use std::future::Future;
 use std::sync::Arc;
 
 use crate::task::TaskGroup;
+use picomint_core::config::FederationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::{Database, Table, WriteTx, redb};
+use picomint_sqlite::{Database, Prefix, Table, WriteTx};
 
 /// Random opaque identifier assigned by the executor when a state
 /// machine is first inserted. Used as the table key; the state machine
 /// struct is the stored value.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Encodable, Decodable)]
 pub struct SmId([u8; 16]);
-
-picomint_redb::consensus_key!(SmId);
 
 impl SmId {
     fn random() -> Self {
@@ -40,9 +40,7 @@ impl SmId {
 /// owning [`ModuleExecutor`] hands the resolved outcome to
 /// [`Self::transition`], which runs atomically in a write tx and either
 /// produces the next state or `None` to terminate.
-pub trait StateMachine:
-    Debug + Clone + for<'a> redb::Value<SelfType<'a> = Self> + Send + Sync + 'static
-{
+pub trait StateMachine: Debug + Clone + Encodable + Decodable + Send + Sync + 'static {
     /// Per-module context handed to `trigger` and `transition`.
     type Context: Clone + Send + Sync + 'static;
 
@@ -73,8 +71,8 @@ pub trait StateMachine:
     ) -> Option<Self>;
 }
 
-/// Per-module reactor driving state machines of type `S` persisted in `T`.
-/// Cheaply cloneable ([`Arc`]-backed).
+/// Per-module reactor driving state machines of type `S` persisted in `T`
+/// under `federation`'s key prefix. Cheaply cloneable ([`Arc`]-backed).
 #[derive(Clone)]
 pub struct ModuleExecutor<S: StateMachine, T> {
     inner: Arc<Inner<S, T>>,
@@ -82,6 +80,7 @@ pub struct ModuleExecutor<S: StateMachine, T> {
 
 struct Inner<S: StateMachine, T> {
     db: Database,
+    federation: FederationId,
     table: T,
     context: S::Context,
     tg: TaskGroup,
@@ -90,13 +89,21 @@ struct Inner<S: StateMachine, T> {
 impl<S, T> ModuleExecutor<S, T>
 where
     S: StateMachine,
-    T: Table<Key = SmId, Value = S> + Copy + Send + Sync + 'static,
+    T: Table<Key = (FederationId, SmId), Value = S> + Copy + Send + Sync + 'static,
+    FederationId: Prefix<T>,
 {
-    /// persisted from a previous run. `table` is the (per-federation)
-    /// [`Table`] this executor reads and writes through.
-    pub fn new(db: Database, table: T, context: S::Context, tg: TaskGroup) -> Self {
+    /// Resume every state machine `federation` persisted in `table` from a
+    /// previous run, and drive new ones as they are added.
+    pub fn new(
+        db: Database,
+        federation: FederationId,
+        table: T,
+        context: S::Context,
+        tg: TaskGroup,
+    ) -> Self {
         let inner = Arc::new(Inner {
             db,
+            federation,
             table,
             context,
             tg,
@@ -115,7 +122,8 @@ where
     pub fn add_state_machine_dbtx(&self, dbtx: &WriteTx, state: S) {
         let id = SmId::random();
         assert!(
-            dbtx.insert(&self.inner.table, &id, &state).is_none(),
+            dbtx.insert(&self.inner.table, &(self.inner.federation, id), &state)
+                .is_none(),
             "SmId collision"
         );
 
@@ -134,10 +142,15 @@ where
 impl<S, T> Inner<S, T>
 where
     S: StateMachine,
-    T: Table<Key = SmId, Value = S> + Copy + Send + Sync + 'static,
+    T: Table<Key = (FederationId, SmId), Value = S> + Copy + Send + Sync + 'static,
+    FederationId: Prefix<T>,
 {
     fn get_active_states(&self) -> Vec<(SmId, S)> {
-        self.db.begin_read().iter(&self.table, |r| r.collect())
+        self.db
+            .begin_read()
+            .prefix(&self.table, &self.federation, |r| {
+                r.map(|entry| (entry.0.1, entry.1)).collect()
+            })
     }
 
     fn spawn_drive(self: Arc<Self>, id: SmId, state: S) {
@@ -156,12 +169,12 @@ where
 
             match state.transition(&self.context, &dbtx, outcome) {
                 Some(new_state) => {
-                    dbtx.insert(&self.table, &id, &new_state);
+                    dbtx.insert(&self.table, &(self.federation, id), &new_state);
                     dbtx.commit();
                     state = new_state;
                 }
                 None => {
-                    dbtx.remove(&self.table, &id);
+                    dbtx.remove(&self.table, &(self.federation, id));
                     dbtx.commit();
                     return;
                 }

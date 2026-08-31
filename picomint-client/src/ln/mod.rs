@@ -8,7 +8,7 @@ mod secret;
 mod send_sm;
 
 use anyhow::Context;
-use picomint_redb::WriteTx;
+use picomint_sqlite::WriteTx;
 use std::sync::Arc;
 
 use crate::executor::ModuleExecutor;
@@ -117,7 +117,8 @@ impl LightningClientModule {
 
         let executor = ModuleExecutor::new(
             client_ctx.db().clone(),
-            SendStateMachineTable(federation),
+            federation,
+            SendStateMachineTable,
             sm_context,
             tg.clone(),
         );
@@ -160,10 +161,10 @@ impl LightningClientModule {
 
         let dbtx = module.client_ctx.db().begin_write();
 
-        dbtx.delete_table(&GatewayPkTable(module.federation));
+        dbtx.remove_prefix(&GatewayPkTable, &module.federation);
 
         for gateway_pk in &list {
-            dbtx.insert(&GatewayPkTable(module.federation), gateway_pk, &());
+            dbtx.insert(&GatewayPkTable, &(module.federation, *gateway_pk), &());
         }
 
         dbtx.commit();
@@ -178,13 +179,14 @@ impl LightningClientModule {
     /// concurrently with [`Self::update_gateway_pks`]) and probes over it; a
     /// gateway that fails to answer is left unselectable.
     pub async fn update_gateway_info(module: LightningClientModule) {
-        let list: Vec<GatewayPk> = module
-            .client_ctx
-            .db()
-            .begin_read()
-            .iter(&GatewayPkTable(module.federation), |it| {
-                it.map(|(pk, ())| pk).collect()
-            });
+        let list: Vec<GatewayPk> =
+            module
+                .client_ctx
+                .db()
+                .begin_read()
+                .prefix(&GatewayPkTable, &module.federation, |it| {
+                    it.map(|entry| entry.0.1).collect()
+                });
 
         module.gateways.reconcile(&list, false);
 
@@ -337,7 +339,7 @@ impl LightningClientModule {
         let dbtx = self.client_ctx.db().begin_write();
 
         if dbtx
-            .insert(&SendOperationTable(self.federation), &operation, &())
+            .insert(&SendOperationTable, &(self.federation, operation), &())
             .is_some()
         {
             return Err(SendPaymentError::InvoiceAlreadyAttempted);
@@ -560,7 +562,7 @@ impl LightningClientModule {
                 .client_ctx
                 .db()
                 .begin_read()
-                .get(&IncomingContractStreamIndexTable(module.federation), &())
+                .get(&IncomingContractStreamIndexTable, &module.federation)
                 .unwrap_or(0);
 
             let (entries, next_index) = module
@@ -578,8 +580,8 @@ impl LightningClientModule {
             }
 
             dbtx.insert(
-                &IncomingContractStreamIndexTable(module.federation),
-                &(),
+                &IncomingContractStreamIndexTable,
+                &module.federation,
                 &next_index,
             );
 
@@ -637,11 +639,11 @@ pub enum RefreshGatewaysError {
     FailedToRequestGateways,
 }
 
-/// Drop every redb table this module owns under the caller's prefix.
+/// Remove every row this module owns under the caller's federation prefix.
 /// Called by [`crate::Client::wipe`] for end-of-life client cleanup.
-pub(crate) fn wipe_tables(dbtx: &picomint_redb::WriteTx, federation: FederationId) {
-    dbtx.delete_table(&IncomingContractStreamIndexTable(federation));
-    dbtx.delete_table(&SendOperationTable(federation));
-    dbtx.delete_table(&GatewayPkTable(federation));
-    dbtx.delete_table(&SendStateMachineTable(federation));
+pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
+    dbtx.remove(&IncomingContractStreamIndexTable, &federation);
+    dbtx.remove_prefix(&SendOperationTable, &federation);
+    dbtx.remove_prefix(&GatewayPkTable, &federation);
+    dbtx.remove_prefix(&SendStateMachineTable, &federation);
 }

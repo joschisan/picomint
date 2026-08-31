@@ -17,5 +17,3 @@ pub struct ExpiryStatus {
     /// Optional invite code for the successor federation.
     pub successor: Option<InviteCode>,
 }
-
-picomint_redb::consensus_value!(ExpiryStatus);

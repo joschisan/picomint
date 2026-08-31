@@ -48,8 +48,6 @@ pub struct IncomingContract {
     pub refund_pk: XOnlyPublicKey,
 }
 
-picomint_redb::consensus_value!(IncomingContract);
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct Commitment {
     pub payment_hash: sha256::Hash,
@@ -191,8 +189,6 @@ pub struct IncomingContractSummary {
     pub offer_id: OfferId,
 }
 
-picomint_redb::consensus_value!(IncomingContractSummary);
-
 impl IncomingContractSummary {
     pub fn new(outpoint: OutPoint, offer: &IncomingOffer) -> Self {
         Self {
@@ -279,8 +275,6 @@ pub struct OutgoingContract {
     /// let the sender find it again.
     pub refund_pk: XOnlyPublicKey,
 }
-
-picomint_redb::consensus_value!(OutgoingContract);
 
 impl OutgoingContract {
     pub fn contract_id(&self) -> ContractId {

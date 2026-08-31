@@ -9,15 +9,13 @@ use picomint_client::{Client, Mnemonic};
 use picomint_core::config::{ConsensusConfig, FederationId};
 use picomint_core::invite::InviteCode;
 use picomint_core::secret::Secret;
-use picomint_eventlog::EventLogger;
-use picomint_redb::Database;
+use picomint_sqlite::Database;
 
 use crate::db::{ClientConfigTable, RootEntropyTable};
 
 #[derive(Clone)]
 pub struct GatewayClientFactory {
     db: Database,
-    logger: EventLogger,
     mnemonic: Mnemonic,
     endpoint: Endpoint,
     network: Network,
@@ -29,7 +27,6 @@ impl GatewayClientFactory {
     /// so the daemon's `GatewayPk` is reproducible from this row alone.
     pub async fn init(
         db: Database,
-        logger: EventLogger,
         mnemonic: Mnemonic,
         network: Network,
         api_addr: SocketAddr,
@@ -56,7 +53,6 @@ impl GatewayClientFactory {
         Ok(Self {
             endpoint,
             db,
-            logger,
             mnemonic,
             network,
         })
@@ -65,7 +61,6 @@ impl GatewayClientFactory {
     /// Try to load an existing factory from the database.
     pub async fn try_load(
         db: Database,
-        logger: EventLogger,
         network: Network,
         api_addr: SocketAddr,
     ) -> anyhow::Result<Option<Self>> {
@@ -89,7 +84,6 @@ impl GatewayClientFactory {
         Ok(Some(Self {
             endpoint,
             db,
-            logger,
             mnemonic,
             network,
         }))
@@ -150,7 +144,6 @@ impl GatewayClientFactory {
         Some(Client::new_gateway(
             self.endpoint.clone(),
             self.db.clone(),
-            self.logger.clone(),
             &self.mnemonic,
             config,
         ))

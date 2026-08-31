@@ -16,9 +16,9 @@ use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::fee::FeeConfig;
-use picomint_eventlog::{EventLogEntry, EventLogId, EventLogger};
-use picomint_redb::Database;
+use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_rpc::connection::ConnStatus;
+use picomint_sqlite::Database;
 use tracing::debug;
 
 /// LN-flavor selection used by the two constructors below.
@@ -50,7 +50,6 @@ pub struct Client {
     config: ConsensusConfig,
     db: Database,
     federation: FederationId,
-    logger: EventLogger,
     pub(crate) mint: Arc<MintClientModule>,
     pub(crate) wallet: Arc<WalletClientModule>,
     pub(crate) ln: LnFlavor,
@@ -76,20 +75,11 @@ impl Client {
     pub fn new(
         endpoint: Endpoint,
         db: Database,
-        logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
         fee: Option<FeeConfig>,
     ) -> Arc<Self> {
-        Self::build(
-            endpoint,
-            db,
-            logger,
-            mnemonic,
-            config,
-            fee,
-            LnChoice::Regular,
-        )
+        Self::build(endpoint, db, mnemonic, config, fee, LnChoice::Regular)
     }
 
     /// Gateway-flavor counterpart of [`Client::new`]. Used by the gateway
@@ -102,25 +92,15 @@ impl Client {
     pub fn new_gateway(
         endpoint: Endpoint,
         db: Database,
-        logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
     ) -> Arc<Self> {
-        Self::build(
-            endpoint,
-            db,
-            logger,
-            mnemonic,
-            config,
-            None,
-            LnChoice::Gateway,
-        )
+        Self::build(endpoint, db, mnemonic, config, None, LnChoice::Gateway)
     }
 
     fn build(
         endpoint: Endpoint,
         db: Database,
-        logger: EventLogger,
         mnemonic: &Mnemonic,
         config: ConsensusConfig,
         fee: Option<FeeConfig>,
@@ -142,12 +122,8 @@ impl Client {
 
         let tg = TaskGroup::new();
 
-        let mint_context = crate::module::ClientContext::new(
-            api.clone(),
-            db.clone(),
-            logger.clone(),
-            config.clone(),
-        );
+        let mint_context =
+            crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
         let mint = Arc::new(MintClientModule::new(
             federation,
             config.mint.clone(),
@@ -157,12 +133,8 @@ impl Client {
             &tg,
         ));
 
-        let wallet_context = crate::module::ClientContext::new(
-            api.clone(),
-            db.clone(),
-            logger.clone(),
-            config.clone(),
-        );
+        let wallet_context =
+            crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
         let wallet = Arc::new(WalletClientModule::new(
             config.wallet.clone(),
             wallet_context,
@@ -173,12 +145,8 @@ impl Client {
 
         let ln = match ln_choice {
             LnChoice::Regular => {
-                let ln_context = crate::module::ClientContext::new(
-                    api.clone(),
-                    db.clone(),
-                    logger.clone(),
-                    config.clone(),
-                );
+                let ln_context =
+                    crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
                 LnFlavor::Regular(Arc::new(LightningClientModule::new(
                     federation,
                     config.ln.clone(),
@@ -189,12 +157,8 @@ impl Client {
                 )))
             }
             LnChoice::Gateway => {
-                let gw_context = crate::module::ClientContext::new(
-                    api.clone(),
-                    db.clone(),
-                    logger.clone(),
-                    config.clone(),
-                );
+                let gw_context =
+                    crate::module::ClientContext::new(api.clone(), db.clone(), config.clone());
                 LnFlavor::Gateway(Arc::new(GatewayClientModule::new(
                     federation,
                     config.ln.clone(),
@@ -210,7 +174,6 @@ impl Client {
             config,
             db,
             federation,
-            logger,
             mint,
             wallet,
             ln,
@@ -241,10 +204,10 @@ impl Client {
         self.tg.shutdown().await;
     }
 
-    /// Drop every redb table this client owns under its DB prefix.
+    /// Remove every row this client owns under its federation's key prefix.
     /// Intended for shared-database deployments (e.g. the gateway daemon's
-    /// per-federation isolated client DBs) where a "leave federation"
-    /// operation needs to wipe just one client's data.
+    /// per-federation clients) where a "leave federation" operation needs to
+    /// wipe just one client's data.
     ///
     /// `dbtx` is supplied by the caller so the wipe commits atomically
     /// with whatever else the caller is doing — typically removing
@@ -253,7 +216,7 @@ impl Client {
     /// entries, …) and dropping the live `Arc<Client>` from any cache.
     /// The caller is responsible for [`Client::shutdown`] before calling
     /// this so no task is mid-write.
-    pub fn wipe(&self, dbtx: &picomint_redb::WriteTx) {
+    pub fn wipe(&self, dbtx: &picomint_sqlite::WriteTx) {
         crate::mint::wipe_tables(dbtx, self.federation);
         crate::wallet::wipe_tables(dbtx, self.federation);
         crate::ln::wipe_tables(dbtx, self.federation);
@@ -317,8 +280,8 @@ impl Client {
     }
 
     /// Yields `account`'s balance whenever the note table is written. The same
-    /// value may be yielded repeatedly — every account shares one table, so
-    /// writes to another account wake this stream too.
+    /// value may be yielded repeatedly — every federation's accounts share one
+    /// table, so writes to another account or federation wake this stream too.
     pub fn subscribe_balance_changes(&self, account: Account) -> BoxStream<'static, Amount> {
         let notify = self.mint.balance_notify();
         let mint = self.mint.clone();
@@ -358,18 +321,18 @@ impl Client {
     }
 
     pub fn get_event_log(&self, pos: EventLogId, limit: u64) -> Vec<(EventLogId, EventLogEntry)> {
-        self.logger.get_event_log(&self.db, pos, limit)
+        picomint_eventlog::get_event_log(&self.db, pos, limit)
     }
 
     /// Shared [`Notify`] that fires on every commit touching the event log.
     pub fn event_notify(&self) -> Arc<tokio::sync::Notify> {
-        self.logger.event_notify(&self.db)
+        picomint_eventlog::event_notify(&self.db)
     }
 
     /// One-shot snapshot of every event currently logged for `operation`,
     /// in insertion order.
     pub fn read_operation_events(&self, operation: OperationId) -> Vec<EventLogEntry> {
-        self.logger.read_operation_events(&self.db, operation)
+        picomint_eventlog::read_operation_events(&self.db, operation)
     }
 
     /// Stream every event belonging to `operation`, starting from the
@@ -378,9 +341,8 @@ impl Client {
         &self,
         operation: OperationId,
     ) -> BoxStream<'static, EventLogEntry> {
-        Box::pin(self.logger.subscribe_operation_events(
+        Box::pin(picomint_eventlog::subscribe_operation_events(
             self.db.clone(),
-            self.event_notify(),
             operation,
         ))
     }
