@@ -128,7 +128,7 @@ pub async fn post_add(
         return Html(gateway_section(&gateways, Some("Name must not be empty")).into_string());
     }
 
-    ln::add_gateway(&state.server, pk, name).await;
+    ln::add_gateway(&state.server, pk, name);
 
     let gateways = ln::gateways(&state.server.db.begin_read());
 
@@ -142,7 +142,7 @@ pub async fn post_remove(
     Form(form): Form<RemoveGatewayForm>,
 ) -> impl IntoResponse {
     if let Ok(pk) = form.pk.trim().parse::<GatewayPk>() {
-        ln::remove_gateway(&state.server, pk).await;
+        ln::remove_gateway(&state.server, pk);
     }
 
     let gateways = ln::gateways(&state.server.db.begin_read());

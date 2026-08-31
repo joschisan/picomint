@@ -22,14 +22,14 @@ pub struct DkgHandle<'a> {
     #[doc(hidden)]
     pub identity: PeerId,
     #[doc(hidden)]
-    pub connections: &'a ReconnectP2PConnections<P2PMessage>,
+    pub connections: &'a ReconnectP2PConnections,
 }
 
 impl<'a> DkgHandle<'a> {
     pub fn new(
         num_peers: NumPeers,
         identity: PeerId,
-        connections: &'a ReconnectP2PConnections<P2PMessage>,
+        connections: &'a ReconnectP2PConnections,
     ) -> Self {
         Self {
             num_peers,

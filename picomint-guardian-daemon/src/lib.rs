@@ -164,7 +164,7 @@ async fn run_dkg_then_consensus(
 
     info!("Starting consensus...");
 
-    Box::pin(consensus::run(
+    consensus::run(
         cfg,
         settings,
         db,
@@ -172,7 +172,7 @@ async fn run_dkg_then_consensus(
         connections,
         status_rxs,
         conn_rx,
-    ))
+    )
     .await
 }
 
@@ -206,7 +206,7 @@ async fn run_consensus(
 
     info!("Starting consensus...");
 
-    Box::pin(consensus::run(
+    consensus::run(
         cfg,
         settings,
         db,
@@ -214,7 +214,7 @@ async fn run_consensus(
         connections,
         status_rxs,
         conn_rx,
-    ))
+    )
     .await?;
 
     Ok(())

@@ -148,7 +148,7 @@ impl DkgG1 {
 pub async fn run_dkg_g1(
     num_peers: NumPeers,
     identity: PeerId,
-    connections: &ReconnectP2PConnections<P2PMessage>,
+    connections: &ReconnectP2PConnections,
 ) -> anyhow::Result<(Vec<G1Projective>, Scalar)> {
     let mut dkg = DkgG1::new(num_peers, identity);
 

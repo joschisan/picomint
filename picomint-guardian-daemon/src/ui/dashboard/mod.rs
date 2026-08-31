@@ -59,7 +59,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
         .iter()
         .map(|(peer, receiver)| (*peer, receiver.borrow().clone()))
         .collect();
-    let audit_summary = api.federation_audit().await;
+    let audit_summary = api.federation_audit();
     let bitcoin_rpc_status = api.server.btc_rpc.status();
 
     // One read snapshot for the whole page, so every value rendered below

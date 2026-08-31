@@ -123,7 +123,7 @@ impl P2PConnection {
     }
 
     /// Send a single message over a fresh uni stream. Not cancel-safe.
-    pub async fn send<M: Encodable>(&self, message: M) -> anyhow::Result<()> {
+    pub async fn send(&self, message: P2PMessage) -> anyhow::Result<()> {
         let mut sink = self.connection.open_uni().await?;
 
         sink.write_all(&message.consensus_encode_to_vec()).await?;
@@ -145,12 +145,10 @@ impl P2PConnection {
     /// Drain a uni stream previously returned by [`Self::accept_stream`]
     /// and decode it as `M`. Not cancel-safe — do not call inside
     /// `select!`.
-    pub async fn read_frame<M: Decodable + Send + 'static>(
-        stream: &mut RecvStream,
-    ) -> anyhow::Result<M> {
+    pub async fn read_frame(stream: &mut RecvStream) -> anyhow::Result<P2PMessage> {
         let bytes = stream.read_to_end(MAX_P2P_MESSAGE_SIZE).await?;
 
-        Ok(M::consensus_decode(&bytes)?)
+        Ok(P2PMessage::consensus_decode(&bytes)?)
     }
 
     /// Snapshot the connection's selected network path: its transport
@@ -286,13 +284,13 @@ pub fn p2p_status_channels(peers: Vec<PeerId>) -> (P2PStatusSenders, P2PStatusRe
 }
 
 /// Connection manager that tries to keep iroh connections open to all peers
-/// and exchanges consensus-encoded messages of type `M` with them.
+/// and exchanges consensus-encoded [`P2PMessage`]s with them.
 #[derive(Clone)]
-pub struct ReconnectP2PConnections<M> {
-    connections: BTreeMap<PeerId, PeerChannel<M>>,
+pub struct ReconnectP2PConnections {
+    connections: BTreeMap<PeerId, PeerChannel>,
 }
 
-impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<M> {
+impl ReconnectP2PConnections {
     pub fn new(
         identity: PeerId,
         connector: P2PConnector,
@@ -360,7 +358,7 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
 
     /// Send `message` to `recipient`. Drops the message if the outgoing
     /// channel is full (the consensus layer is expected to resend).
-    pub fn send(&self, recipient: Recipient, message: M) {
+    pub fn send(&self, recipient: Recipient, message: P2PMessage) {
         match recipient {
             Recipient::Everyone => {
                 for connection in self.connections.values() {
@@ -379,7 +377,7 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
     }
 
     /// Await the next message from any peer; `None` when shutting down.
-    pub async fn receive(&self) -> Option<(PeerId, M)> {
+    pub async fn receive(&self) -> Option<(PeerId, P2PMessage)> {
         select_all(self.connections.iter().map(|(&peer, connection)| {
             Box::pin(connection.receive().map(move |m| m.map(|m| (peer, m))))
         }))
@@ -388,7 +386,7 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
     }
 
     /// Await the next message from `peer`; `None` when shutting down.
-    pub async fn receive_from_peer(&self, peer: PeerId) -> Option<M> {
+    pub async fn receive_from_peer(&self, peer: PeerId) -> Option<P2PMessage> {
         self.connections
             .get(&peer)
             .expect("No connection found for peer")
@@ -400,12 +398,12 @@ impl<M: Encodable + Decodable + Clone + Send + 'static> ReconnectP2PConnections<
 /// Per-peer outgoing queue and incoming queue, backed by a background state
 /// machine that (re)establishes the underlying iroh connection.
 #[derive(Clone)]
-struct PeerChannel<M> {
-    outgoing_tx: Sender<M>,
-    incoming_rx: Receiver<M>,
+struct PeerChannel {
+    outgoing_tx: Sender<P2PMessage>,
+    incoming_rx: Receiver<P2PMessage>,
 }
 
-impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
+impl PeerChannel {
     fn new(
         our_id: PeerId,
         peer: PeerId,
@@ -453,25 +451,25 @@ impl<M: Encodable + Decodable + Send + 'static> PeerChannel<M> {
         }
     }
 
-    fn try_send(&self, message: M) {
+    fn try_send(&self, message: P2PMessage) {
         if self.outgoing_tx.try_send(message).is_err() {
             debug!("Outgoing message channel is full");
         }
     }
 
-    async fn receive(&self) -> Option<M> {
+    async fn receive(&self) -> Option<P2PMessage> {
         self.incoming_rx.recv().await.ok()
     }
 }
 
-struct P2PConnectionStateMachine<M> {
+struct P2PConnectionStateMachine {
     state: P2PConnectionSMState,
-    common: P2PConnectionSMCommon<M>,
+    common: P2PConnectionSMCommon,
 }
 
-struct P2PConnectionSMCommon<M> {
-    incoming_tx: async_channel::Sender<M>,
-    outgoing_rx: async_channel::Receiver<M>,
+struct P2PConnectionSMCommon {
+    incoming_tx: async_channel::Sender<P2PMessage>,
+    outgoing_rx: async_channel::Receiver<P2PMessage>,
     our_id: PeerId,
     peer: PeerId,
     connector: P2PConnector,
@@ -484,7 +482,7 @@ enum P2PConnectionSMState {
     Connected(P2PConnection),
 }
 
-impl<M: Encodable + Decodable + Send + 'static> P2PConnectionStateMachine<M> {
+impl P2PConnectionStateMachine {
     async fn state_transition(mut self) -> Option<Self> {
         match self.state {
             P2PConnectionSMState::Disconnected(backoff) => {
@@ -515,7 +513,7 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionStateMachine<M> {
     }
 }
 
-impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
+impl P2PConnectionSMCommon {
     async fn transition_connected(
         &mut self,
         connection: P2PConnection,
@@ -535,7 +533,7 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
                     Err(e) => return Some(self.disconnect(e)),
                 };
 
-                match P2PConnection::read_frame::<M>(&mut stream).await {
+                match P2PConnection::read_frame(&mut stream).await {
                     Ok(message) => {
                         if self.incoming_tx.try_send(message).is_err() {
                             debug!("Incoming message channel is full");
@@ -558,7 +556,7 @@ impl<M: Encodable + Decodable + Send + 'static> P2PConnectionSMCommon<M> {
     async fn send_message(
         &mut self,
         connection: P2PConnection,
-        peer_message: M,
+        peer_message: P2PMessage,
     ) -> P2PConnectionSMState {
         if let Err(e) = connection.send(peer_message).await {
             return self.disconnect(e);

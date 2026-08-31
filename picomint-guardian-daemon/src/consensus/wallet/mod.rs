@@ -118,7 +118,7 @@ pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<WalletConsensusItem> {
+pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<WalletConsensusItem> {
     let mut items: Vec<WalletConsensusItem> = dbtx
         .get(&UnsignedTxTable, &())
         .and_then(|unsigned_tx| signing_session_proposal(server, dbtx, &unsigned_tx))
@@ -274,7 +274,7 @@ pub async fn process_consensus_item(
     }
 }
 
-pub async fn process_input(
+pub fn process_input(
     server: &Server,
     dbtx: &WriteTx,
     input: &WalletInput,
@@ -415,7 +415,7 @@ pub async fn process_input(
     Ok((amount, input.tweak))
 }
 
-pub async fn process_output(
+pub fn process_output(
     server: &Server,
     dbtx: &WriteTx,
     output: &WalletOutput,
@@ -531,7 +531,7 @@ pub async fn process_output(
         .ok_or(WalletOutputError::ArithmeticOverflow)
 }
 
-pub async fn audit(_server: &Server, dbtx: &WriteTx) -> i64 {
+pub fn audit(dbtx: &WriteTx) -> i64 {
     dbtx.get(&FederationWalletTable, &())
         .map_or(0, |wallet| 1000 * wallet.value.to_sat() as i64)
 }

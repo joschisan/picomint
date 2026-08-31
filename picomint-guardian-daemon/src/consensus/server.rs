@@ -39,45 +39,43 @@ impl Server {
                 wallet::process_consensus_item(self, dbtx, peer, ci.clone()).await
             }
             wire::ModuleConsensusItem::Ln(ci) => {
-                ln::process_consensus_item(self, dbtx, peer, ci.clone()).await
+                ln::process_consensus_item(self, dbtx, peer, ci.clone())
             }
         }
     }
 
-    pub async fn process_input(
+    pub fn process_input(
         &self,
         dbtx: &WriteTx,
         input: &wire::Input,
     ) -> Result<(Amount, XOnlyPublicKey), wire::InputError> {
         match input {
-            wire::Input::Mint(i) => mint::process_input(self, dbtx, i)
-                .await
-                .map_err(wire::InputError::Mint),
-            wire::Input::Wallet(i) => wallet::process_input(self, dbtx, i)
-                .await
-                .map_err(wire::InputError::Wallet),
-            wire::Input::Ln(i) => ln::process_input(self, dbtx, i)
-                .await
-                .map_err(wire::InputError::Ln),
+            wire::Input::Mint(i) => {
+                mint::process_input(self, dbtx, i).map_err(wire::InputError::Mint)
+            }
+            wire::Input::Wallet(i) => {
+                wallet::process_input(self, dbtx, i).map_err(wire::InputError::Wallet)
+            }
+            wire::Input::Ln(i) => ln::process_input(self, dbtx, i).map_err(wire::InputError::Ln),
         }
     }
 
-    pub async fn process_output(
+    pub fn process_output(
         &self,
         dbtx: &WriteTx,
         output: &wire::Output,
         out_point: OutPoint,
     ) -> Result<Amount, wire::OutputError> {
         match output {
-            wire::Output::Mint(o) => mint::process_output(self, dbtx, o, out_point)
-                .await
-                .map_err(wire::OutputError::Mint),
-            wire::Output::Wallet(o) => wallet::process_output(self, dbtx, o, out_point)
-                .await
-                .map_err(wire::OutputError::Wallet),
-            wire::Output::Ln(o) => ln::process_output(self, dbtx, o, out_point)
-                .await
-                .map_err(wire::OutputError::Ln),
+            wire::Output::Mint(o) => {
+                mint::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::Mint)
+            }
+            wire::Output::Wallet(o) => {
+                wallet::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::Wallet)
+            }
+            wire::Output::Ln(o) => {
+                ln::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::Ln)
+            }
         }
     }
 
@@ -97,16 +95,13 @@ impl Server {
         }
     }
 
-    pub async fn audit(&self, dbtx: &WriteTx) -> AuditSummary {
-        let mint = mint::audit(self, dbtx).await;
-        let wallet = wallet::audit(self, dbtx).await;
-        let ln = ln::audit(self, dbtx).await;
-        AuditSummary::new(mint, wallet, ln)
+    pub fn audit(&self, dbtx: &WriteTx) -> AuditSummary {
+        AuditSummary::new(mint::audit(dbtx), wallet::audit(dbtx), ln::audit(dbtx))
     }
 
     /// Dispatch the inputs and outputs of a transaction to the relevant
     /// modules.
-    pub async fn process_tx(&self, dbtx: &WriteTx, tx: &Transaction) -> Result<(), TxError> {
+    pub fn process_tx(&self, dbtx: &WriteTx, tx: &Transaction) -> Result<(), TxError> {
         if tx.inputs.is_empty() {
             return Err(TxError::EmptyInputs);
         }
@@ -138,10 +133,7 @@ impl Server {
         let txid = tx.compute_txid();
 
         for input in &tx.inputs {
-            let (amount, pub_key) = self
-                .process_input(dbtx, input)
-                .await
-                .map_err(TxError::Input)?;
+            let (amount, pub_key) = self.process_input(dbtx, input).map_err(TxError::Input)?;
 
             funding_verifier.add_input(amount, self.input_fee(input))?;
             public_keys.push(pub_key);
@@ -152,7 +144,6 @@ impl Server {
         for (output, out_idx) in tx.outputs.iter().zip(0u16..) {
             let amount = self
                 .process_output(dbtx, output, OutPoint { txid, out_idx })
-                .await
                 .map_err(TxError::Output)?;
 
             funding_verifier.add_output(amount, self.output_fee(output))?;

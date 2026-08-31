@@ -28,7 +28,7 @@ use crate::config::{ConfigGenSettings, ServerConfig};
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::ConsensusVersionVoteTable;
 use crate::consensus::server::Server;
-use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
+use crate::p2p::{P2PStatusReceivers, ReconnectP2PConnections};
 
 /// How many txs can be stored in memory before blocking the API.
 ///
@@ -47,7 +47,7 @@ pub async fn run(
     settings: ConfigGenSettings,
     db: Database,
     bitcoin_backend: Arc<BitcoindClient>,
-    connections: ReconnectP2PConnections<P2PMessage>,
+    connections: ReconnectP2PConnections,
     p2p_status_receivers: P2PStatusReceivers,
     foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
 ) -> anyhow::Result<()> {
@@ -93,21 +93,18 @@ pub async fn run(
 
     tokio::spawn({
         let server = consensus_api.server.clone();
-        let db = db.clone();
         let submission_tx = submission_tx.clone();
-        let identity = cfg.private.identity;
-        let default_version = cfg.consensus.default_version;
         async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             loop {
-                let dbtx = db.begin_read();
+                let dbtx = server.db.begin_read();
                 // Upgrading the binary is the whole of casting a vote: we
                 // announce what we support until consensus has recorded it,
                 // then stay quiet until the next upgrade raises it again. A
                 // federation created by this binary has nothing to announce.
                 if dbtx
-                    .get(&ConsensusVersionVoteTable, &identity)
-                    .unwrap_or(default_version)
+                    .get(&ConsensusVersionVoteTable, &server.cfg.private.identity)
+                    .unwrap_or(server.cfg.consensus.default_version)
                     < CONSENSUS_VERSION
                 {
                     submission_tx
@@ -115,13 +112,7 @@ pub async fn run(
                         .await
                         .ok();
                 }
-                for item in mint::consensus_proposal(&server, &dbtx).await {
-                    submission_tx
-                        .send(ConsensusItem::Module(wire::ModuleConsensusItem::Mint(item)))
-                        .await
-                        .ok();
-                }
-                for item in wallet::consensus_proposal(&server, &dbtx).await {
+                for item in wallet::consensus_proposal(&server, &dbtx) {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
                             item,
@@ -129,7 +120,7 @@ pub async fn run(
                         .await
                         .ok();
                 }
-                for item in ln::consensus_proposal(&server, &dbtx).await {
+                for item in ln::consensus_proposal(&server, &dbtx) {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
                         .await

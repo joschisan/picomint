@@ -163,7 +163,7 @@ impl DkgSecp {
 pub async fn run_dkg_secp(
     num_peers: NumPeers,
     identity: PeerId,
-    connections: &ReconnectP2PConnections<P2PMessage>,
+    connections: &ReconnectP2PConnections,
 ) -> anyhow::Result<(Vec<PublicKey>, SecretKey)> {
     let mut dkg = DkgSecp::new(num_peers, identity);
 

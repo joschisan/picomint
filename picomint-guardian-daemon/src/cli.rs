@@ -101,7 +101,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
     async fn session_count(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<u64>, CliError> {
-        Ok(Json(api.session_count().await))
+        Ok(Json(api.session_count()))
     }
 
     async fn invite(
@@ -124,7 +124,7 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<AuditResponse>, CliError> {
         Ok(Json(AuditResponse {
-            audit: api.federation_audit().await,
+            audit: api.federation_audit(),
         }))
     }
 
@@ -170,16 +170,14 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<LnGatewayAddRequest>,
     ) -> Result<Json<bool>, CliError> {
-        Ok(Json(
-            ln::add_gateway(&api.server, payload.pk, payload.name).await,
-        ))
+        Ok(Json(ln::add_gateway(&api.server, payload.pk, payload.name)))
     }
 
     async fn ln_gateway_remove(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<LnGatewayRemoveRequest>,
     ) -> Result<Json<bool>, CliError> {
-        Ok(Json(ln::remove_gateway(&api.server, payload.pk).await))
+        Ok(Json(ln::remove_gateway(&api.server, payload.pk)))
     }
 
     async fn ln_gateway_list(

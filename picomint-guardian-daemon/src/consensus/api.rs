@@ -135,8 +135,8 @@ impl ConsensusApi {
         }
     }
 
-    pub async fn session_count(&self) -> u64 {
-        get_finished_session_count(&self.server.db.begin_read()).await
+    pub fn session_count(&self) -> u64 {
+        get_finished_session_count(&self.server.db.begin_read())
     }
 
     /// Generate a fresh invite code expiring `expiry_days` from now and
@@ -204,11 +204,11 @@ impl ConsensusApi {
         Ok(())
     }
 
-    pub async fn federation_audit(&self) -> AuditSummary {
+    pub fn federation_audit(&self) -> AuditSummary {
         // Modules read their own tables during `audit`; we open a write tx and
         // drop it without commit after building the audit view.
         let dbtx = self.server.db.begin_write();
-        self.server.audit(&dbtx).await
+        self.server.audit(&dbtx)
     }
 
     /// Read this guardian's announced expiry status from the local

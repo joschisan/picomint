@@ -72,7 +72,7 @@ const SESSION_OUTCOME_ITEM_LIMIT: usize = 10_000;
 #[instrument(name = "run", skip_all, fields(id=%server.cfg.private.identity))]
 pub async fn run(
     server: Server,
-    connections: ReconnectP2PConnections<P2PMessage>,
+    connections: ReconnectP2PConnections,
     submission_rx: Receiver<ConsensusItem>,
     tx_reject_tx: broadcast::Sender<(TransactionId, TxError)>,
 ) -> anyhow::Result<()> {
@@ -80,7 +80,7 @@ pub async fn run(
     assert!(server.cfg.consensus.peers.to_num_peers().total() >= 4);
 
     loop {
-        let session_index = get_finished_session_count(&server.db.begin_read()).await;
+        let session_index = get_finished_session_count(&server.db.begin_read());
 
         info!(session_index, "Starting consensus session");
 
@@ -103,7 +103,7 @@ pub async fn run(
 
 async fn run_session(
     server: &Server,
-    connections: &ReconnectP2PConnections<P2PMessage>,
+    connections: &ReconnectP2PConnections,
     submission_rx: &Receiver<ConsensusItem>,
     tx_reject_tx: &broadcast::Sender<(TransactionId, TxError)>,
     session_index: u64,
@@ -174,14 +174,14 @@ async fn run_session(
     bft_handle.abort();
     bft_handle.await.ok();
 
-    complete_session(server, session_index, signed_session_outcome).await;
+    complete_session(server, session_index, signed_session_outcome);
 
     Some(())
 }
 
 async fn complete_signed_session_outcome(
     server: &Server,
-    connections: &ReconnectP2PConnections<P2PMessage>,
+    connections: &ReconnectP2PConnections,
     tx_reject_tx: &broadcast::Sender<(TransactionId, TxError)>,
     session_index: u64,
     outcomes_rx: Receiver<(PeerId, SignedSessionOutcome)>,
@@ -272,7 +272,7 @@ async fn complete_signed_session_outcome(
                         "Received SignedSessionOutcome via P2P while collection signatures"
                     );
 
-                    let pending_accepted_items = pending_accepted_items(server).await;
+                    let pending_accepted_items = pending_accepted_items(server);
 
                     // this panics if we have more accepted items than the signed session outcome
                     let (processed, unprocessed) = p2p_outcome
@@ -327,7 +327,7 @@ async fn complete_signed_session_outcome(
         }
     }
 
-    let items = pending_accepted_items(server).await;
+    let items = pending_accepted_items(server);
 
     let session_outcome = SessionOutcome { items };
 
@@ -438,14 +438,14 @@ fn validate_signed_session_outcome(
         .all(|(signer_id, sig)| keychain.verify(session_index, &header, sig, *signer_id))
 }
 
-async fn pending_accepted_items(server: &Server) -> Vec<AcceptedItem> {
+fn pending_accepted_items(server: &Server) -> Vec<AcceptedItem> {
     server
         .db
         .begin_read()
         .iter(&AcceptedItemTable, |r| r.map(|(_, item)| item).collect())
 }
 
-async fn complete_session(
+fn complete_session(
     server: &Server,
     session_index: u64,
     signed_session_outcome: SignedSessionOutcome,
@@ -490,7 +490,7 @@ async fn process_consensus_item(
                 "Transaction is already accepted"
             );
 
-            if let Err(error) = server.process_tx(dbtx, tx).await {
+            if let Err(error) = server.process_tx(dbtx, tx) {
                 // Only our own submission has a submission RPC waiting on
                 // it, and copies of an already accepted transaction bail at
                 // the check above - so every rejection we broadcast is
@@ -504,7 +504,7 @@ async fn process_consensus_item(
 
             dbtx.insert(&AcceptedTxTable, &txid, &());
 
-            let audit = server.audit(dbtx).await;
+            let audit = server.audit(dbtx);
 
             assert!(audit.total >= 0, "Failed audit: {audit:?}");
         }
@@ -544,7 +544,7 @@ async fn process_consensus_item(
     Ok(())
 }
 
-pub async fn get_finished_session_count(dbtx: &ReadTx) -> u64 {
+pub fn get_finished_session_count(dbtx: &ReadTx) -> u64 {
     dbtx.iter_rev(&SignedSessionOutcomeTable, |r| {
         r.next().map_or(0, |entry| entry.0 + 1)
     })

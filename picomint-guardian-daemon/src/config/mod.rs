@@ -183,7 +183,7 @@ impl ServerConfig {
     /// Runs the distributed key gen algorithm
     pub async fn generate(
         params: &ConfigGenParams,
-        connections: ReconnectP2PConnections<P2PMessage>,
+        connections: ReconnectP2PConnections,
         p2p_status_receivers: P2PStatusReceivers,
     ) -> anyhow::Result<Self> {
         info!("Waiting for all p2p connections to open...");

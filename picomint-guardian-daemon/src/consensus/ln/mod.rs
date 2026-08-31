@@ -72,7 +72,7 @@ pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<LightningConsensusItem> {
+pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<LightningConsensusItem> {
     let mut items = Vec::new();
 
     if let Ok(block_count) = get_block_count(server)
@@ -87,7 +87,7 @@ pub async fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<Lightning
     items
 }
 
-pub async fn process_consensus_item(
+pub fn process_consensus_item(
     _server: &Server,
     dbtx: &WriteTx,
     peer: PeerId,
@@ -106,7 +106,7 @@ pub async fn process_consensus_item(
     }
 }
 
-pub async fn process_input(
+pub fn process_input(
     server: &Server,
     dbtx: &WriteTx,
     input: &LightningInput,
@@ -189,7 +189,7 @@ pub async fn process_input(
     }
 }
 
-pub async fn process_output(
+pub fn process_output(
     server: &Server,
     dbtx: &WriteTx,
     output: &LightningOutput,
@@ -251,7 +251,7 @@ pub async fn process_output(
 /// or the sender does on refund); incoming locks `amount - fee` (the
 /// recipient claims that on success, with `fee` accruing to the
 /// federation as implicit revenue).
-pub async fn audit(_server: &Server, dbtx: &WriteTx) -> i64 {
+pub fn audit(dbtx: &WriteTx) -> i64 {
     let outgoing: i64 = dbtx.iter(&OutgoingContractTable, |r| {
         r.map(|(_, contract)| -((contract.amount.msat + contract.fee.msat) as i64))
             .sum()
@@ -311,14 +311,14 @@ pub(crate) fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u64 
     counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
 }
 
-pub async fn add_gateway(server: &Server, pk: GatewayPk, name: String) -> bool {
+pub fn add_gateway(server: &Server, pk: GatewayPk, name: String) -> bool {
     let dbtx = server.db.begin_write();
     let is_new_entry = dbtx.insert(&GatewayTable, &pk, &name).is_none();
     dbtx.commit();
     is_new_entry
 }
 
-pub async fn remove_gateway(server: &Server, pk: GatewayPk) -> bool {
+pub fn remove_gateway(server: &Server, pk: GatewayPk) -> bool {
     let dbtx = server.db.begin_write();
     let entry_existed = dbtx.remove(&GatewayTable, &pk).is_some();
     dbtx.commit();

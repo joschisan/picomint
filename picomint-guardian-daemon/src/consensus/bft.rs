@@ -1,5 +1,5 @@
 //! Adapters binding `picomint-bft` to the daemon's transport and
-//! mempool — an `INetwork` impl over `ReconnectP2PConnections<P2PMessage>`
+//! mempool — an `INetwork` impl over `ReconnectP2PConnections`
 //! and a `DataProvider` impl pulling from the submission channel.
 //!
 //! Storage is owned by `picomint-bft` directly via the daemon-declared
@@ -27,7 +27,7 @@ use tracing::error;
 use crate::consensus::db::SignedSessionOutcomeTable;
 use crate::p2p::{P2PMessage, Recipient as P2PRecipient, ReconnectP2PConnections};
 
-/// `INetwork` adapter wrapping `ReconnectP2PConnections<P2PMessage>`.
+/// `INetwork` adapter wrapping `ReconnectP2PConnections`.
 /// Bft traffic flows on the `P2PMessage::Bft` variant; non-bft
 /// variants (`SessionSignature`, `SessionIndex`, `SignedSessionOutcome`)
 /// are dispatched to their respective channels here so the engine sees
@@ -37,7 +37,7 @@ use crate::p2p::{P2PMessage, Recipient as P2PRecipient, ReconnectP2PConnections}
 /// its own `session` field, and the graph rejects mismatches — so the
 /// adapter forwards bft traffic uninterpreted regardless of session.
 pub struct Network {
-    connections: ReconnectP2PConnections<P2PMessage>,
+    connections: ReconnectP2PConnections,
     signed_outcomes_tx: Sender<(PeerId, SignedSessionOutcome)>,
     signatures_tx: Sender<(PeerId, schnorr::Signature)>,
     db: Database,
@@ -45,7 +45,7 @@ pub struct Network {
 
 impl Network {
     pub fn new(
-        connections: ReconnectP2PConnections<P2PMessage>,
+        connections: ReconnectP2PConnections,
         signed_outcomes_tx: Sender<(PeerId, SignedSessionOutcome)>,
         signatures_tx: Sender<(PeerId, schnorr::Signature)>,
         db: Database,
