@@ -3,9 +3,9 @@
 //! and a `DataProvider` impl pulling from the submission channel.
 //!
 //! Storage is owned by `picomint-bft` directly via the daemon-declared
-//! `BFT_UNITS` table. The application consumer that drains
-//! committed items lives in [`crate::consensus::engine`] and receives
-//! through the `ordered_tx` channel passed to `BftEngine::new`.
+//! `BFT_UNITS` / `BFT_EMITTED` tables. Committed items are processed
+//! inline by the [`crate::consensus::engine::ItemProcessor`] consumer
+//! passed to `BftEngine::new`.
 
 use std::collections::VecDeque;
 use std::future::pending;

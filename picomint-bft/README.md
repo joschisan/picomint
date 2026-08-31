@@ -100,11 +100,13 @@ push of their column. Other peers' envelopes flow only on explicit
 
 ## Storage
 
-All persisted state lives in one database table. It is *declared by the
-daemon* and passed into `Engine::new`; bft only reads and writes it:
+All persisted state lives in two database tables. They are *declared by
+the daemon* and passed into `Engine::new`; bft only reads and writes
+them:
 
 ```rust
-units_table: UnitHash => UnitEnvelope<D>   // BFT_UNITS
+units_table:   UnitHash => UnitEnvelope<D>   // BFT_UNITS
+emitted_table: UnitHash => ()                // units whose payload the consumer processed
 ```
 
 Everything else is in-memory state on `Engine<P, D>`, rebuilt on
@@ -113,7 +115,8 @@ startup and never persisted:
 ```rust
 rounds:             BTreeMap<Round, BTreeSet<UnitHash>>,  // round index over units_table
 extended:           BTreeMap<UnitHash, Unit>,       // stored + all parents extended; the bare units
-emitted:            BTreeSet<UnitHash>,             // already sent through ordered_tx
+emitted:            BTreeSet<UnitHash>,             // in-memory mirror of emitted_table
+done:               bool,                           // consumer broke; extender stopped for good
 next_decide_round:  Round,                          // extender cursor
 decided:            BTreeMap<UnitHash, bool>,       // candidate decisions, kept for the engine's lifetime
 votes:              BTreeMap<(UnitHash, UnitHash), bool>, // memoized virtual votes, kept with decided
@@ -137,14 +140,15 @@ re-fetched via anti-entropy after a crash. The fsync barrier is
 own-unit creation, whose durable commit before broadcast both
 prevents our own equivocation and flushes the relaxed backlog.
 
-On restart `replay` rebuilds the indexes with one table scan, re-runs
-`try_extend` from every round-0 unit, and then `run_extender` once.
-Because `try_extend` is a fixpoint over the parent-extended predicate
-and the extender is deterministic over the stored unit set, this
-reconstructs the exact same `extended` / `emitted` /
-`next_decide_round` and re-emits every previously-committed item
-through `ordered_tx`; the caller's idempotency check absorbs the
-redelivery.
+Ordered items are handed to the caller's `ItemConsumer` inline, inside
+the write transaction that installed the deciding unit — the consumer's
+effects, the emitted marks, and the DAG state that caused them commit
+atomically. On restart `rebuild` reconstructs the indexes with one
+table scan per table and re-runs `try_extend` from every round-0 unit
+(a fixpoint over the parent-extended predicate); a single extender pass
+then fast-forwards `next_decide_round` past the already-emitted heads.
+Nothing is redelivered — an item is on disk as emitted exactly iff its
+effects are.
 
 ## Lifecycle of a unit
 
@@ -253,8 +257,7 @@ three-message-delay include; the fixed 0 at `R+3` excludes invisible
 candidates fast, keeping the walk moving past crashed peers; the
 seeded bits break middle-band ties within an expected extra round.
 Decisions are stable once reached, so they are cached in `decided`
-for the engine's lifetime, and startup replay reproduces the exact
-live emission sequence.
+for the engine's lifetime and recompute identically on restart.
 
 On commit, the head's not-yet-emitted causal ancestors are extracted
 BFS-style and emitted as the round's batch (oldest-first): rounds
@@ -296,7 +299,7 @@ From these: if any unit decides `v`, every unit of its round votes
 round's default *is* `v` — so every round above inherits `v`
 unanimously and no contrary decision can ever form. Decisions are
 exclusive and stable, which also makes the engine-lifetime `decided`
-and `votes` caches and startup replay sound.
+and `votes` caches and the startup rebuild sound.
 
 The **coverage lemma** closes head choice: a round-`R+3` vote-1 for a
 branch requires a unanimous parent set, and every vote-1 implies
@@ -370,7 +373,8 @@ orders of magnitude smaller. Catch-up under loss is O(n × R) Request
 - [`network.rs`] — `Message<D>`, `Recipient`, `INetwork` trait.
 - [`keychain.rs`] — schnorr `sign(session, value)` / `verify(session,
   value, sig, peer)` with session-binding hash prefix.
-- [`data.rs`] — `DataProvider<D>` trait for unit payload sourcing.
+- [`data.rs`] — `DataProvider<D>` trait for unit payload sourcing and
+  `ItemConsumer<D>` for inline processing of the ordered items.
 
 [`lib.rs`]: src/lib.rs
 [`unit.rs`]: src/unit.rs

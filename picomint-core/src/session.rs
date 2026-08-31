@@ -11,14 +11,11 @@ use crate::{PeerId, secp256k1};
 /// only guaranteed to be seen by all correct nodes if a correct node decides to
 /// accept it.
 ///
-/// `index` is the position of this item in the bft delivery stream for
-/// the session (sparse w.r.t. accepted items, since rejected items also
-/// consume positions). It lets guardians recovering via P2P place each
-/// accepted item back into `ACCEPTED_ITEM` at the same key the local bft
-/// replay would assign on a subsequent restart.
+/// Its position in the session — both in a [`SessionOutcome`]'s items
+/// and as its `ACCEPTED_ITEM` key — is dense over the *accepted* items;
+/// rejected items consume no position.
 #[derive(Clone, Debug, PartialEq, Eq, Encodable, Decodable)]
 pub struct AcceptedItem {
-    pub index: u64,
     pub peer: PeerId,
     pub item: ConsensusItem,
 }

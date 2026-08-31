@@ -27,7 +27,7 @@ mod keychain;
 mod network;
 mod unit;
 
-pub use data::DataProvider;
+pub use data::{DataProvider, ItemConsumer};
 pub use engine::Engine;
 pub use keychain::Keychain;
 pub use network::{DynNetwork, INetwork, Message, Recipient};

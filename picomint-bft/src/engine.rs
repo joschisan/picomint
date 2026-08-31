@@ -2,14 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
-use async_channel::Sender;
 use picomint_core::{NumPeers, PeerId};
 use picomint_encoding::Encodable;
 use picomint_sqlite::{Database, DbRead, Table, WriteTx};
 use tokio::time::{Instant, sleep_until};
 use tracing::warn;
 
-use crate::data::DataProvider;
+use crate::data::{DataProvider, ItemConsumer};
 use crate::keychain::Keychain;
 use crate::network::{DynNetwork, Message, Recipient};
 use crate::unit::{Round, Unit, UnitData, UnitEnvelope, UnitHash};
@@ -24,20 +23,23 @@ const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
 const REQUEST_DEDUP_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Drives a single peer's growth indefinitely. The caller constructs
-/// the engine, then awaits `run()` (typically in a spawned task) and
-/// keeps the receiving end of `ordered_tx` for items as they commit.
+/// the engine with an [`ItemConsumer`] and awaits `run()` (typically in
+/// a spawned task); items are processed inline as they commit, inside
+/// the same write transaction that installed the deciding unit.
 ///
-/// On startup `run()` replays `BFT_UNITS` through `try_extend` +
-/// `run_extender` to rebuild the in-memory `rounds` / `extended` /
-/// `emitted` / `next_decide_round` and re-emit every
-/// previously-committed item through `ordered_tx`. The caller-side
-/// idempotency check (e.g. the daemon's `item_index` probe against
-/// `ACCEPTED_ITEM`) absorbs the redelivery.
-pub struct Engine<P, D, T>
+/// On startup `run()` rebuilds the in-memory `rounds` / `extended` /
+/// `emitted` / `unordered_own_data` from the persisted tables — no
+/// redelivery: emitted marks commit atomically with the consumer's
+/// processing, so an item is on disk as emitted exactly iff its effects
+/// are. A single extender pass then fast-forwards `next_decide_round`
+/// past the already-emitted heads.
+pub struct Engine<P, D, T, E, C>
 where
     D: UnitData,
     P: DataProvider<D>,
     T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
+    E: Table<Key = UnitHash, Value = ()>,
+    C: ItemConsumer<D>,
 {
     pub(crate) id: PeerId,
     session: u64,
@@ -46,11 +48,15 @@ where
     keychain: Keychain,
     network: DynNetwork<D>,
     data_provider: P,
-    pub(crate) ordered_tx: Sender<(Round, PeerId, D)>,
+    pub(crate) consumer: C,
 
     /// Daemon-declared units table (`UnitHash => UnitEnvelope<D>`).
     /// Bft only reads/writes it.
     pub(crate) units_table: T,
+    /// Daemon-declared emitted-marks table (`UnitHash => ()`), the
+    /// persisted counterpart of `emitted`. Written by the extender in
+    /// the same tx as the consumer's processing.
+    pub(crate) emitted_table: E,
 
     /// Hashes of every stored unit keyed by round — the round index
     /// over `units_table`. Drives the extension cascade and, filtered
@@ -64,9 +70,14 @@ where
     /// read payloads at emission. Rebuilt from disk on startup; never
     /// persisted.
     pub(crate) extended: BTreeMap<UnitHash, Unit>,
-    /// Units whose payload has been sent through `ordered_tx`.
-    /// Prevents re-emission across batches and within one BFS.
+    /// Units whose payload has been handed to the consumer, mirroring
+    /// `emitted_table`. Prevents re-emission across batches and within
+    /// one BFS.
     pub(crate) emitted: BTreeSet<UnitHash>,
+    /// Set once the consumer breaks: the session is full, so the
+    /// extender stops delivering while the engine keeps growing and
+    /// serving the DAG for lagging peers.
+    pub(crate) done: bool,
     /// Extender cursor: the next leader round to attempt deciding.
     pub(crate) next_decide_round: Round,
     /// Include/exclude decisions already reached per candidate, kept
@@ -92,11 +103,13 @@ where
     request_sent_at: BTreeMap<UnitHash, Instant>,
 }
 
-impl<P, D, T> Engine<P, D, T>
+impl<P, D, T, E, C> Engine<P, D, T, E, C>
 where
     D: UnitData,
     P: DataProvider<D>,
     T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
+    E: Table<Key = UnitHash, Value = ()>,
+    C: ItemConsumer<D>,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -107,8 +120,9 @@ where
         keychain: Keychain,
         network: DynNetwork<D>,
         data_provider: P,
-        ordered_tx: Sender<(Round, PeerId, D)>,
+        consumer: C,
         units_table: T,
+        emitted_table: E,
     ) -> Self {
         Self {
             id,
@@ -118,11 +132,13 @@ where
             keychain,
             network,
             data_provider,
-            ordered_tx,
+            consumer,
             units_table,
+            emitted_table,
             rounds: BTreeMap::new(),
             extended: BTreeMap::new(),
             emitted: BTreeSet::new(),
+            done: false,
             next_decide_round: 0,
             decided: BTreeMap::new(),
             votes: BTreeMap::new(),
@@ -133,7 +149,19 @@ where
     }
 
     pub async fn run(mut self) {
-        self.replay().await;
+        self.rebuild();
+
+        // Every commit leaves the extender at its fixpoint over the
+        // persisted units, so this pass normally only fast-forwards
+        // `next_decide_round` past the already-emitted heads and writes
+        // nothing. Durable rather than relaxed because it is the run's
+        // first commit — there is no earlier durable commit for a
+        // relaxed one to lean on.
+        let dbtx = self.db.begin_write();
+
+        self.run_extender(&dbtx).await;
+
+        dbtx.commit();
 
         self.create_units().await;
 
@@ -177,28 +205,26 @@ where
     }
 
     /// Rebuild the in-memory `rounds` / `extended` / `emitted` /
-    /// `next_decide_round` / `own_top` from persisted `BFT_UNITS`, and
-    /// re-emit every committed item through `ordered_tx`.
-    ///
-    /// Correctness rests on determinism: `try_extend` is a fixpoint over
-    /// the parent-extended predicate, and the extender's vote tally +
-    /// `bfs_batch` are both deterministic over the final unit set.
-    /// So calling `try_extend` for every round-zero unit (the cascade
-    /// root) and then `run_extender` once produces the same `extended`
-    /// set and the same channel emission sequence as the live
-    /// unit-by-unit growth did before the restart.
-    async fn replay(&mut self) {
+    /// `unordered_own_data` / `own_top` from the persisted tables.
+    /// Reads only — nothing is redelivered, since emitted marks commit
+    /// atomically with the consumer's processing. `extended` is rebuilt
+    /// by rerunning the `try_extend` fixpoint from every round-zero
+    /// unit (the cascade root), which is deterministic over the unit
+    /// set.
+    fn rebuild(&mut self) {
         let dbtx = self.db.begin_read();
 
         let units: Vec<(UnitHash, Unit)> = dbtx.iter(&self.units_table, |it| {
             it.map(|(hash, ev)| (hash, ev.unit)).collect()
         });
 
+        self.emitted = dbtx.iter(&self.emitted_table, |it| it.map(|entry| entry.0).collect());
+
         for (hash, unit) in units {
             self.rounds.entry(unit.round).or_default().insert(hash);
 
             if unit.creator == self.id {
-                if unit.data.is_some() {
+                if unit.data.is_some() && !self.emitted.contains(&hash) {
                     self.unordered_own_data.insert(unit.round);
                 }
 
@@ -211,21 +237,22 @@ where
         for hash in self.round_units(0) {
             self.try_extend(&dbtx, hash);
         }
-
-        self.run_extender(&dbtx).await;
     }
 
-    /// One write tx per inbound message; on Ok commit it, on Err drop
-    /// it (any partial writes roll back). All reads in handlers see
+    /// One write tx per inbound message — covering the unit install,
+    /// the emitted marks, and the consumer's processing of every item
+    /// the unit's arrival decided; on Ok commit it, on Err drop it
+    /// (any partial writes roll back). All reads in handlers see
     /// their own writes via `WriteTx`'s read-your-own-writes.
-    /// In-memory mutations (`rounds`, `extended`, `emitted`, channel
-    /// sends) are not rolled back on Err — only the persistent
-    /// `BFT_UNITS` writes are. The mutators only run after the dbtx
-    /// writes succeed via `?`.
+    /// In-memory mutations (`rounds`, `extended`, `emitted`) are not
+    /// rolled back on Err — they only run after the dbtx writes
+    /// succeed via `?`.
     ///
     /// These commits use **relaxed** (non-fsync) durability: inbound units
     /// are peer-originated and re-fetched via anti-entropy after a crash, so
-    /// they need not be individually durable. The fsync barrier is
+    /// they need not be individually durable — and a crash that loses them
+    /// loses the consumer's processing *with* them, so refetch-and-reprocess
+    /// reconverges deterministically. The fsync barrier is
     /// [`Self::try_create_unit`], whose durable commit before broadcast both
     /// prevents our own equivocation and flushes this relaxed backlog.
     async fn handle_message(&mut self, sender: PeerId, msg: Message<D>) -> Result<()> {
@@ -433,7 +460,7 @@ where
     // --- in-memory extension state ---
 
     /// True while any of our own units carries items that have not yet
-    /// been emitted through `ordered_tx`.
+    /// been handed to the consumer.
     pub fn has_unordered_own_data(&self) -> bool {
         !self.unordered_own_data.is_empty()
     }

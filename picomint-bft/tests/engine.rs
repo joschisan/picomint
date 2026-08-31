@@ -1,40 +1,64 @@
 //! End-to-end tests of the per-peer engine driving DAG growth, order
-//! extraction, and emission of ordered items through the bft engine's
-//! `ordered_tx` channel over a mock channel-based network. N engines
-//! spawn as tasks, each owns a per-peer in-memory `Database`, a
-//! `Keychain`, a `MockChannel`, and the receiving end of its own
-//! `ordered_tx`. Each peer feeds its own per-unit payload of one
-//! `u64`. The engines never stop on their own — each test drains the
-//! peers' `ordered_rx` until `ROUND_LIMIT` is reached, then aborts the
-//! engine tasks and asserts every peer observed the same total order
-//! of `(creator, item)` pairs. The Byzantine tests replace peer 0 with
-//! hand-built forked units covering the three fork outcomes — split
-//! votes (both branches decide 0), unanimous votes (commit), and a
-//! forked voter one round up — plus units with spoofed parent
-//! positions; the replay
-//! test restarts an engine on its persisted units and asserts the
-//! emission sequence reproduces exactly.
+//! extraction, and inline processing of ordered items through an
+//! [`ItemConsumer`] over a mock channel-based network. N engines
+//! spawn as tasks, each owns a per-peer on-disk `Database`, a
+//! `Keychain`, a `MockChannel`, and a consumer forwarding processed
+//! items into a test-side channel. Each peer feeds its own per-unit
+//! payload of one `u64`. The engines never stop on their own — each
+//! test drains the consumer channels until `ROUND_LIMIT` is reached,
+//! then aborts the engine tasks and asserts every peer observed the
+//! same total order of `(creator, item)` pairs. The Byzantine tests
+//! replace peer 0 with hand-built forked units covering the three
+//! fork outcomes — split votes (both branches decide 0), unanimous
+//! votes (commit), and a forked voter one round up — plus units with
+//! spoofed parent positions; the restart test restarts an engine on
+//! its persisted state and asserts nothing is redelivered.
 
 use std::collections::BTreeMap;
 use std::future::pending;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
 use async_trait::async_trait;
 use picomint_bft::{
-    DataProvider, Engine, INetwork, Keychain, Message, Recipient, Round, Unit, UnitEnvelope,
-    UnitHash,
+    DataProvider, Engine, INetwork, ItemConsumer, Keychain, Message, Recipient, Round, Unit,
+    UnitEnvelope, UnitHash,
 };
 use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
 use picomint_core::{NumPeers, PeerId};
 use picomint_encoding::Encodable;
-use picomint_sqlite::{Database, table};
+use picomint_sqlite::{Database, WriteTx, table};
 use rand::Rng;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 table!(BftUnits, UnitHash => UnitEnvelope<u64>, "bft-units");
+table!(BftEmitted, UnitHash => (), "bft-emitted");
+
+/// Consumer forwarding every processed item into an unbounded test
+/// channel, never breaking. The send happens inside the engine's tx,
+/// before its commit — an aborted engine can thus have "sent" items
+/// whose marks rolled back, which the restart test accounts for.
+struct ChannelConsumer(Sender<(Round, PeerId, u64)>);
+
+#[async_trait]
+impl ItemConsumer<u64> for ChannelConsumer {
+    async fn process(
+        &mut self,
+        _dbtx: &WriteTx,
+        round: Round,
+        creator: PeerId,
+        item: u64,
+    ) -> ControlFlow<()> {
+        self.0
+            .try_send((round, creator, item))
+            .expect("test channel is unbounded");
+
+        ControlFlow::Continue(())
+    }
+}
 
 /// Per-recipient probability of silently dropping a message in the mock
 /// network, used by the 4-peer tests. Each unicast send and each
@@ -259,8 +283,9 @@ fn spawn_engines(
             keychains.get(&peer).expect("built above").clone(),
             Arc::new(channel),
             TimestampDataProvider,
-            ordered_tx,
+            ChannelConsumer(ordered_tx),
             BftUnits,
+            BftEmitted,
         );
 
         engines.handles.push(tokio::spawn(engine.run()));
@@ -645,13 +670,16 @@ async fn engines_ignore_spoofed_parent_positions() {
     }
 }
 
-/// Restarting an engine on its persisted unit table must reproduce the
-/// exact live emission sequence — including under forks. Runs the
-/// forking-peer scenario, then replays peer 1's engine on a clone of
-/// its database behind a sink network and compares the streams under
-/// the same `ROUND_LIMIT` cut.
+/// Restarting an engine on its persisted state must not redeliver —
+/// emitted marks commit atomically with the consumer's processing.
+/// Runs the forking-peer scenario, aborts peer 1's engine, restarts it
+/// on its database behind a sink network, and asserts the restarted
+/// consumer sees at most the rolled-back tail: the abort can interrupt
+/// a tx after the consumer observed items whose emitted marks never
+/// committed, and exactly those items — a suffix of the live sequence
+/// — are correctly delivered again.
 #[tokio::test]
-async fn replay_reproduces_order_under_forks() {
+async fn restart_does_not_redeliver() {
     let n = NumPeers::from(N_PEERS);
     let keychains = build_keychains(n);
     let mut channels = MockChannel::mesh(n, DROP_RATE);
@@ -677,25 +705,26 @@ async fn replay_reproduces_order_under_forks() {
 
     assert_agreement(&sequences);
 
-    let replayer = PeerId::from(1u8);
+    let restarter = PeerId::from(1u8);
 
     let (ordered_tx, ordered_rx) = async_channel::unbounded();
 
     let engine = Engine::new(
-        replayer,
+        restarter,
         SESSION,
         n,
-        engines.dbs.remove(&replayer).expect("spawned above"),
-        keychains[&replayer].clone(),
+        engines.dbs.remove(&restarter).expect("spawned above"),
+        keychains[&restarter].clone(),
         Arc::new(NullNetwork),
         TimestampDataProvider,
-        ordered_tx,
+        ChannelConsumer(ordered_tx),
         BftUnits,
+        BftEmitted,
     );
 
     let handle = tokio::spawn(engine.run());
 
-    let mut replayed: Vec<(PeerId, u64)> = Vec::new();
+    let mut redelivered: Vec<(PeerId, u64)> = Vec::new();
 
     while let Ok(Ok((round, creator, datum))) =
         timeout(Duration::from_secs(2), ordered_rx.recv()).await
@@ -703,13 +732,13 @@ async fn replay_reproduces_order_under_forks() {
         if round > ROUND_LIMIT {
             break;
         }
-        replayed.push((creator, datum));
+        redelivered.push((creator, datum));
     }
 
     handle.abort();
 
-    assert_eq!(
-        replayed, sequences[&replayer],
-        "replay must reproduce the live emission sequence",
+    assert!(
+        sequences[&restarter].ends_with(&redelivered),
+        "restart may only redeliver the rolled-back tail, got {redelivered:?}",
     );
 }

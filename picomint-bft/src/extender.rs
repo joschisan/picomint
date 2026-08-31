@@ -56,9 +56,9 @@ use std::collections::VecDeque;
 
 use bitcoin::hashes::Hash as _;
 use picomint_encoding::Encodable;
-use picomint_sqlite::{DbRead, Table};
+use picomint_sqlite::{DbRead, Table, WriteTx};
 
-use crate::data::DataProvider;
+use crate::data::{DataProvider, ItemConsumer};
 use crate::engine::Engine;
 use crate::unit::{Round, UnitData, UnitEnvelope, UnitHash};
 
@@ -79,34 +79,46 @@ fn common_vote(candidate: UnitHash, candidate_round: Round, round: Round) -> boo
     }
 }
 
-impl<P, D, T> Engine<P, D, T>
+impl<P, D, T, E, C> Engine<P, D, T, E, C>
 where
     D: UnitData,
     P: DataProvider<D>,
     T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
+    E: Table<Key = UnitHash, Value = ()>,
+    C: ItemConsumer<D>,
 {
     /// Drain round heads from `self.next_decide_round` upward while
     /// each round resolves. For every head, BFS-extract the
-    /// not-yet-emitted causal ancestors (oldest-first) and send each
-    /// item through `self.ordered_tx`.
-    pub(crate) async fn run_extender(&mut self, dbtx: &impl DbRead) {
+    /// not-yet-emitted causal ancestors (oldest-first) and process
+    /// each item through `self.consumer` inside `dbtx`. Heads whose
+    /// batch is already emitted (a restarted engine catching its
+    /// cursor up) are skipped.
+    pub(crate) async fn run_extender(&mut self, dbtx: &WriteTx) {
+        if self.done {
+            return;
+        }
+
         while let Some(head) = self.choose_head(self.next_decide_round) {
-            let batch = self.bfs_batch(dbtx, head);
+            if !self.emitted.contains(&head) {
+                let batch = self.bfs_batch(dbtx, head);
 
-            for ev in batch {
-                for item in ev.data {
-                    // Unbounded channel; send() returns Err only
-                    // when the receiver is dropped — which means
-                    // the daemon is gone and we'd be shutting
-                    // down anyway.
-                    let _ = self
-                        .ordered_tx
-                        .send((ev.unit.round, ev.unit.creator, item))
-                        .await;
-                }
+                for ev in batch {
+                    for item in ev.data {
+                        let flow = self
+                            .consumer
+                            .process(dbtx, ev.unit.round, ev.unit.creator, item)
+                            .await;
 
-                if ev.unit.creator == self.id {
-                    self.unordered_own_data.remove(&ev.unit.round);
+                        if flow.is_break() {
+                            self.done = true;
+
+                            return;
+                        }
+                    }
+
+                    if ev.unit.creator == self.id {
+                        self.unordered_own_data.remove(&ev.unit.round);
+                    }
                 }
             }
 
@@ -237,19 +249,21 @@ where
     }
 
     /// BFS over the head's not-yet-emitted ancestors, marking each
-    /// visited unit in `self.emitted` as we enqueue it. Returns the
-    /// envelopes oldest-first (reversed BFS): rounds ascend since
-    /// parents sit exactly one round down, so every peer's own units
-    /// emit in submission order. Within a round the order is BFS
-    /// discovery — a deterministic function of the head and the
-    /// emitted set, hence identical on every peer, which is all the
-    /// ordering needs; the paper's hash tie-break within rounds is
-    /// not load-bearing.
-    fn bfs_batch(&mut self, dbtx: &impl DbRead, head: UnitHash) -> Vec<UnitEnvelope<D>> {
+    /// visited unit in `self.emitted` — and its persisted mirror
+    /// `emitted_table` — as we enqueue it. Returns the envelopes
+    /// oldest-first (reversed BFS): rounds ascend since parents sit
+    /// exactly one round down, so every peer's own units emit in
+    /// submission order. Within a round the order is BFS discovery — a
+    /// deterministic function of the head and the emitted set, hence
+    /// identical on every peer, which is all the ordering needs; the
+    /// paper's hash tie-break within rounds is not load-bearing.
+    fn bfs_batch(&mut self, dbtx: &WriteTx, head: UnitHash) -> Vec<UnitEnvelope<D>> {
         let mut batch = Vec::new();
         let mut queue = VecDeque::new();
 
         assert!(self.emitted.insert(head));
+
+        dbtx.insert(&self.emitted_table, &head, &());
 
         let ev = dbtx
             .get(&self.units_table, &head)
@@ -269,6 +283,8 @@ where
 
                 // Tentatively mark so the deeper BFS doesn't enqueue twice.
                 self.emitted.insert(*parent);
+
+                dbtx.insert(&self.emitted_table, parent, &());
 
                 queue.push_back(p);
             }

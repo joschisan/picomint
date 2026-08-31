@@ -13,7 +13,7 @@ table!(
     "accepted-item",
 );
 
-// bft table — owned by the daemon, lent to `picomint_bft::Engine`
+// bft tables — owned by the daemon, lent to `picomint_bft::Engine`
 // via `Engine::new`. Cleaned up at session boundary by
 // `complete_session` alongside `AcceptedItemTable`.
 
@@ -21,6 +21,24 @@ table!(
     BftUnitsTable,
     UnitHash => UnitEnvelope<ConsensusItem>,
     "bft-units",
+);
+
+table!(
+    BftEmittedTable,
+    UnitHash => (),
+    "bft-emitted",
+);
+
+// Set (with a unit value under the unit key) once the running session has
+// been cut — its accepted items are final and only signing remains. Written
+// by [`crate::consensus::engine::ItemProcessor`] in the same tx as the
+// delivery that crossed a session limit, so the cut point survives a crash
+// byte-identical to what the federation's peers cut at; the daemon waits on
+// this table's notify to move to signature collection.
+table!(
+    SessionCutTable,
+    () => (),
+    "session-cut",
 );
 
 table!(
