@@ -4,7 +4,7 @@ use crate::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
     LightningOutputError,
 };
-use crate::mint::{MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError};
+use crate::mint::{MintInput, MintInputError, MintOutput, MintOutputError};
 use crate::wallet::{
     WalletConsensusItem, WalletInput, WalletInputError, WalletOutput, WalletOutputError,
 };
@@ -63,15 +63,8 @@ impl From<WalletOutput> for Output {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum ModuleConsensusItem {
-    Mint(MintConsensusItem),
     Wallet(WalletConsensusItem),
     Ln(LightningConsensusItem),
-}
-
-impl From<MintConsensusItem> for ModuleConsensusItem {
-    fn from(v: MintConsensusItem) -> Self {
-        Self::Mint(v)
-    }
 }
 
 impl From<LightningConsensusItem> for ModuleConsensusItem {

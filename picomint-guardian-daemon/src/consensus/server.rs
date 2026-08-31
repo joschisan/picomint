@@ -34,7 +34,6 @@ impl Server {
         item: &wire::ModuleConsensusItem,
     ) -> anyhow::Result<()> {
         match item {
-            wire::ModuleConsensusItem::Mint(ci) => match *ci {},
             wire::ModuleConsensusItem::Wallet(ci) => {
                 wallet::process_consensus_item(self, dbtx, peer, ci.clone()).await
             }

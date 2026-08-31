@@ -36,10 +36,6 @@ impl Denomination {
     }
 }
 
-/// The mint module does not define any consensus items.
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub enum MintConsensusItem {}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct MintOutputBlindSignature(pub tbs::BlindedSignature);
 
