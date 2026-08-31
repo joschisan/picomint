@@ -15,7 +15,7 @@ use picomint_core::ln::{
     LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
     LightningOutputError, OutgoingWitness,
 };
-use picomint_core::module::{InputMeta, TxItemAmounts};
+use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{Amount, NumPeersExt, OutPoint, PeerId};
 use picomint_sqlite::{DbRead, ReadTx, WriteTx};
 use tpe::{PublicKeyShare, SecretKeyShare};
@@ -110,8 +110,8 @@ pub async fn process_input(
     server: &Server,
     dbtx: &WriteTx,
     input: &LightningInput,
-) -> Result<InputMeta, LightningInputError> {
-    let (pub_key, amount) = match input {
+) -> Result<(Amount, XOnlyPublicKey), LightningInputError> {
+    match input {
         LightningInput::Outgoing(outpoint, outgoing_witness) => {
             let contract = dbtx
                 .remove(&OutgoingContractTable, outpoint)
@@ -152,7 +152,7 @@ pub async fn process_input(
                 .checked_add(contract.fee)
                 .ok_or(LightningInputError::ArithmeticOverflow)?;
 
-            (pub_key, amount)
+            Ok((amount, pub_key))
         }
         LightningInput::Incoming(outpoint, agg_decryption_key) => {
             let contract = dbtx
@@ -184,17 +184,9 @@ pub async fn process_input(
                 .checked_sub(contract.offer.commitment.fee)
                 .ok_or(LightningInputError::ArithmeticOverflow)?;
 
-            (pub_key, amount)
+            Ok((amount, pub_key))
         }
-    };
-
-    Ok(InputMeta {
-        amount: TxItemAmounts {
-            amount,
-            fee: server.cfg.consensus.ln.input_fee,
-        },
-        pub_key,
-    })
+    }
 }
 
 pub async fn process_output(
@@ -202,8 +194,8 @@ pub async fn process_output(
     dbtx: &WriteTx,
     output: &LightningOutput,
     outpoint: OutPoint,
-) -> Result<TxItemAmounts, LightningOutputError> {
-    let amount = match output {
+) -> Result<Amount, LightningOutputError> {
+    match output {
         LightningOutput::Outgoing(contract) => {
             let amount = contract
                 .amount
@@ -212,7 +204,7 @@ pub async fn process_output(
 
             dbtx.insert(&OutgoingContractTable, &outpoint, contract);
 
-            amount
+            Ok(amount)
         }
         LightningOutput::Incoming(contract) => {
             if !contract.offer.verify() {
@@ -246,14 +238,9 @@ pub async fn process_output(
                 .commitment
                 .amount
                 .checked_sub(contract.offer.commitment.fee)
-                .ok_or(LightningOutputError::ArithmeticOverflow)?
+                .ok_or(LightningOutputError::ArithmeticOverflow)
         }
-    };
-
-    Ok(TxItemAmounts {
-        amount,
-        fee: server.cfg.consensus.ln.output_fee,
-    })
+    }
 }
 
 /// Both incoming and outgoing contracts represent liabilities to the

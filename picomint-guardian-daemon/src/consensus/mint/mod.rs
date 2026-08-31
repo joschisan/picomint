@@ -12,7 +12,7 @@ use picomint_core::mint::methods::MintMethod;
 use picomint_core::mint::{
     MintConsensusItem, MintInput, MintInputError, MintOutput, MintOutputError, verify_note,
 };
-use picomint_core::module::{InputMeta, TxItemAmounts};
+use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{Amount, OutPoint, PeerId};
 use picomint_sqlite::{DbRead, ReadTx, WriteTx};
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
@@ -93,7 +93,7 @@ pub async fn process_input(
     server: &Server,
     dbtx: &WriteTx,
     input: &MintInput,
-) -> Result<InputMeta, MintInputError> {
+) -> Result<(Amount, XOnlyPublicKey), MintInputError> {
     if dbtx
         .insert(&NoteNonceTable, &input.note.nonce, &())
         .is_some()
@@ -121,15 +121,7 @@ pub async fn process_input(
 
     dbtx.insert(&IssuanceCounterTable, &input.note.denomination, &new_count);
 
-    let amount = input.note.amount();
-
-    Ok(InputMeta {
-        amount: TxItemAmounts {
-            amount,
-            fee: server.cfg.consensus.mint.input_fee,
-        },
-        pub_key: input.note.nonce,
-    })
+    Ok((input.note.amount(), input.note.nonce))
 }
 
 pub async fn process_output(
@@ -137,7 +129,7 @@ pub async fn process_output(
     dbtx: &WriteTx,
     output: &MintOutput,
     outpoint: OutPoint,
-) -> Result<TxItemAmounts, MintOutputError> {
+) -> Result<Amount, MintOutputError> {
     // Signing a blinded nonce twice mints two notes that share a nonce, so
     // spending either strands the other. A client derives nonces from an
     // issuance counter, so a wallet restored without running restore would
@@ -176,12 +168,7 @@ pub async fn process_output(
 
     dbtx.insert(&IssuanceCounterTable, &output.denomination, &new_count);
 
-    let amount = output.amount();
-
-    Ok(TxItemAmounts {
-        amount,
-        fee: server.cfg.consensus.mint.output_fee,
-    })
+    Ok(output.amount())
 }
 
 pub async fn audit(_server: &Server, dbtx: &WriteTx) -> i64 {

@@ -7,11 +7,11 @@
 use std::time::Instant;
 
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
-use picomint_core::module::InputMeta;
 use picomint_core::module::audit::AuditSummary;
+use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
-use picomint_core::{OutPoint, PeerId};
+use picomint_core::{Amount, OutPoint, PeerId};
 use picomint_sqlite::{Database, WriteTx};
 use tracing::info;
 
@@ -48,7 +48,7 @@ impl Server {
         &self,
         dbtx: &WriteTx,
         input: &wire::Input,
-    ) -> Result<InputMeta, wire::InputError> {
+    ) -> Result<(Amount, XOnlyPublicKey), wire::InputError> {
         match input {
             wire::Input::Mint(i) => mint::process_input(self, dbtx, i)
                 .await
@@ -67,7 +67,7 @@ impl Server {
         dbtx: &WriteTx,
         output: &wire::Output,
         out_point: OutPoint,
-    ) -> Result<picomint_core::module::TxItemAmounts, wire::OutputError> {
+    ) -> Result<Amount, wire::OutputError> {
         match output {
             wire::Output::Mint(o) => mint::process_output(self, dbtx, o, out_point)
                 .await
@@ -78,6 +78,22 @@ impl Server {
             wire::Output::Ln(o) => ln::process_output(self, dbtx, o, out_point)
                 .await
                 .map_err(wire::OutputError::Ln),
+        }
+    }
+
+    fn input_fee(&self, input: &wire::Input) -> Amount {
+        match input {
+            wire::Input::Mint(..) => self.cfg.consensus.mint.input_fee,
+            wire::Input::Wallet(..) => self.cfg.consensus.wallet.input_fee,
+            wire::Input::Ln(..) => self.cfg.consensus.ln.input_fee,
+        }
+    }
+
+    fn output_fee(&self, output: &wire::Output) -> Amount {
+        match output {
+            wire::Output::Mint(..) => self.cfg.consensus.mint.output_fee,
+            wire::Output::Wallet(..) => self.cfg.consensus.wallet.output_fee,
+            wire::Output::Ln(..) => self.cfg.consensus.ln.output_fee,
         }
     }
 
@@ -126,13 +142,13 @@ pub async fn process_tx_with_server(
     let txid = tx.compute_txid();
 
     for input in &tx.inputs {
-        let meta = server
+        let (amount, pub_key) = server
             .process_input(dbtx, input)
             .await
             .map_err(TxError::Input)?;
 
-        funding_verifier.add_input(meta.amount)?;
-        public_keys.push(meta.pub_key);
+        funding_verifier.add_input(amount, server.input_fee(input))?;
+        public_keys.push(pub_key);
     }
 
     tx.validate_signatures(&public_keys)?;
@@ -143,7 +159,7 @@ pub async fn process_tx_with_server(
             .await
             .map_err(TxError::Output)?;
 
-        funding_verifier.add_output(amount)?;
+        funding_verifier.add_output(amount, server.output_fee(output))?;
     }
 
     funding_verifier.verify_funding()?;

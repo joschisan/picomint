@@ -19,7 +19,7 @@ use common::config::WalletConfigConsensus;
 use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletOutput};
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::backoff::{Retryable, networking_backoff};
-use picomint_core::module::{InputMeta, TxItemAmounts};
+use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::wallet as common;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
@@ -278,7 +278,7 @@ pub async fn process_input(
     server: &Server,
     dbtx: &WriteTx,
     input: &WalletInput,
-) -> Result<InputMeta, WalletInputError> {
+) -> Result<(picomint_core::Amount, XOnlyPublicKey), WalletInputError> {
     if dbtx
         .insert(&SpentOutputTable, &input.output_index, &())
         .is_some()
@@ -412,13 +412,7 @@ pub async fn process_input(
         .map(picomint_core::Amount::from_msat)
         .ok_or(WalletInputError::ArithmeticOverflow)?;
 
-    Ok(InputMeta {
-        amount: TxItemAmounts {
-            amount,
-            fee: server.cfg.consensus.wallet.input_fee,
-        },
-        pub_key: input.tweak,
-    })
+    Ok((amount, input.tweak))
 }
 
 pub async fn process_output(
@@ -426,7 +420,7 @@ pub async fn process_output(
     dbtx: &WriteTx,
     output: &WalletOutput,
     outpoint: OutPoint,
-) -> Result<TxItemAmounts, WalletOutputError> {
+) -> Result<picomint_core::Amount, WalletOutputError> {
     if output.value < server.cfg.consensus.wallet.dust_limit {
         return Err(WalletOutputError::UnderDustLimit);
     }
@@ -530,16 +524,11 @@ pub async fn process_output(
         return Err(WalletOutputError::PendingTransaction);
     }
 
-    let amount = output_value
+    output_value
         .to_sat()
         .checked_mul(1000)
         .map(picomint_core::Amount::from_msat)
-        .ok_or(WalletOutputError::ArithmeticOverflow)?;
-
-    Ok(TxItemAmounts {
-        amount,
-        fee: server.cfg.consensus.wallet.output_fee,
-    })
+        .ok_or(WalletOutputError::ArithmeticOverflow)
 }
 
 pub async fn audit(_server: &Server, dbtx: &WriteTx) -> i64 {
