@@ -152,8 +152,6 @@ impl ServerConfig {
     }
 
     pub fn validate_config(&self) -> anyhow::Result<()> {
-        let identity = &self.private.identity;
-
         let peers = &self.consensus.peers;
         let my_public_key = self
             .private
@@ -162,7 +160,7 @@ impl ServerConfig {
             .x_only_public_key()
             .0;
 
-        if Some(my_public_key) != peers.get(identity).map(|p| p.broadcast_pk) {
+        if Some(my_public_key) != peers.get(&self.private.identity).map(|p| p.broadcast_pk) {
             bail!("Broadcast secret key doesn't match corresponding public key");
         }
         if peers.keys().max().copied().map(PeerId::to_usize) != Some(peers.len() - 1) {

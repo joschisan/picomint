@@ -64,13 +64,11 @@ pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<MintConfig
 /// Verify our private tbs shares match the public shares in the consensus
 /// config.
 pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
-    let identity = &cfg.private.identity;
-
     for denomination in consensus_denominations() {
         let pk = derive_pk_share(&cfg.private.mint.tbs_sks[&denomination]);
 
         ensure!(
-            pk == cfg.consensus.mint.tbs_pks[&denomination][identity],
+            pk == cfg.consensus.mint.tbs_pks[&denomination][&cfg.private.identity],
             "Mint private key doesn't match pubkey share"
         );
     }
