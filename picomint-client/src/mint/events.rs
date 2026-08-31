@@ -3,8 +3,6 @@ use picomint_core::TransactionId;
 use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
-use super::ECash;
-
 /// Emitted immediately when a send operation is initiated, before the
 /// wallet has assembled the actual ecash. On the fast path
 /// `SendSuccessEvent` lands atomically in the same dbtx; on the slow
@@ -23,12 +21,15 @@ impl Event for SendEvent {
 }
 
 /// Terminal success event for [`crate::mint::Mint::send`].
-/// `ecash` is the assembled bundle the caller can hand off out-of-band;
-/// in the event log it serialises as the `picomint`-prefixed base32
-/// string (see `ECash`'s serde impl).
+/// `ecash` is the assembled bundle as its `picomint`-prefixed base32
+/// string — the exact form callers hand off and `ECash::from_str`
+/// reverses. Kept encoded so a client replaying history does not decode
+/// every bundle it scrolls past. The logged bytes are unchanged from
+/// when this field was typed: `ECash`'s serde impl serialises as this
+/// same string.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SendSuccessEvent {
-    pub ecash: ECash,
+    pub ecash: String,
 }
 
 impl Event for SendSuccessEvent {

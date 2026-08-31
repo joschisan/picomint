@@ -73,7 +73,9 @@ impl StateMachine for SendStateMachine {
                         dbtx,
                         self.account,
                         self.operation,
-                        SendSuccessEvent { ecash },
+                        SendSuccessEvent {
+                            ecash: ecash.to_string(),
+                        },
                     ),
                     None => ctx.log_event(dbtx, self.account, self.operation, SendFailureEvent),
                 }
