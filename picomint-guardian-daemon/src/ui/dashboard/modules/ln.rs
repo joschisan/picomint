@@ -4,6 +4,7 @@ use axum::extract::{Form, State};
 use axum::response::{Html, IntoResponse};
 use maud::{Markup, html};
 use picomint_core::ln::gateway::GatewayPk;
+use picomint_sqlite::ReadTx;
 
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::ln;
@@ -25,9 +26,9 @@ pub struct RemoveGatewayForm {
     pub pk: String,
 }
 
-pub async fn render(server: &crate::consensus::server::Server) -> Markup {
-    let gateways = ln::gateways_ui(server);
-    let consensus_block_count = ln::consensus_block_count_ui(server);
+pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Markup {
+    let gateways = ln::gateways(dbtx);
+    let consensus_block_count = ln::consensus_block_count(server, dbtx);
 
     html! {
         div class="card h-100" {
@@ -115,7 +116,7 @@ pub async fn post_add(
     State(state): State<Arc<ConsensusApi>>,
     Form(form): Form<AddGatewayForm>,
 ) -> impl IntoResponse {
-    let gateways = ln::gateways_ui(&state.server);
+    let gateways = ln::gateways(&state.server.db.begin_read());
 
     let Ok(pk) = form.pk.trim().parse::<GatewayPk>() else {
         return Html(gateway_section(&gateways, Some("Invalid gateway code")).into_string());
@@ -127,9 +128,9 @@ pub async fn post_add(
         return Html(gateway_section(&gateways, Some("Name must not be empty")).into_string());
     }
 
-    ln::add_gateway_ui(&state.server, pk, name).await;
+    ln::add_gateway(&state.server, pk, name).await;
 
-    let gateways = ln::gateways_ui(&state.server);
+    let gateways = ln::gateways(&state.server.db.begin_read());
 
     Html(gateway_section(&gateways, None).into_string())
 }
@@ -141,10 +142,10 @@ pub async fn post_remove(
     Form(form): Form<RemoveGatewayForm>,
 ) -> impl IntoResponse {
     if let Ok(pk) = form.pk.trim().parse::<GatewayPk>() {
-        ln::remove_gateway_ui(&state.server, pk).await;
+        ln::remove_gateway(&state.server, pk).await;
     }
 
-    let gateways = ln::gateways_ui(&state.server);
+    let gateways = ln::gateways(&state.server.db.begin_read());
 
     Html(gateway_section(&gateways, None).into_string())
 }

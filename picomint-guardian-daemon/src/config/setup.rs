@@ -324,7 +324,7 @@ impl SetupApi {
     }
 
     pub async fn restore_config(&self, cfg: ServerConfig) -> anyhow::Result<()> {
-        cfg.validate_config(&cfg.private.identity)
+        cfg.validate_config()
             .context("Restored config failed validation")?;
 
         store_server_config(&self.db, &cfg).await;

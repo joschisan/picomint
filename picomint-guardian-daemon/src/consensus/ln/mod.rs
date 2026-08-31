@@ -57,14 +57,14 @@ pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<LightningC
 
 /// Verify our private tpe share matches the public share in the consensus
 /// config.
-pub fn validate_config(identity: &PeerId, cfg: &ServerConfig) -> anyhow::Result<()> {
+pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
     ensure!(
         tpe::derive_pk_share(&cfg.private.ln.sk)
             == *cfg
                 .consensus
                 .ln
                 .tpe_pks
-                .get(identity)
+                .get(&cfg.private.identity)
                 .context("Public key set has no key for our identity")?,
         "Preimge encryption secret key share does not match our public key share"
     );
@@ -311,26 +311,21 @@ pub(crate) fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u64 
     counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
 }
 
-#[must_use]
-pub fn consensus_block_count_ui(server: &Server) -> u64 {
-    consensus_block_count(server, &server.db.begin_read())
-}
-
-pub async fn add_gateway_ui(server: &Server, pk: GatewayPk, name: String) -> bool {
+pub async fn add_gateway(server: &Server, pk: GatewayPk, name: String) -> bool {
     let dbtx = server.db.begin_write();
     let is_new_entry = dbtx.insert(&GatewayTable, &pk, &name).is_none();
     dbtx.commit();
     is_new_entry
 }
 
-pub async fn remove_gateway_ui(server: &Server, pk: GatewayPk) -> bool {
+pub async fn remove_gateway(server: &Server, pk: GatewayPk) -> bool {
     let dbtx = server.db.begin_write();
     let entry_existed = dbtx.remove(&GatewayTable, &pk).is_some();
     dbtx.commit();
     entry_existed
 }
 
-#[must_use]
-pub fn gateways_ui(server: &Server) -> Vec<(GatewayPk, String)> {
-    server.db.begin_read().iter(&GatewayTable, |r| r.collect())
+/// The named gateways this guardian has registered, for display and admin.
+pub fn gateways(dbtx: &impl DbRead) -> Vec<(GatewayPk, String)> {
+    dbtx.iter(&GatewayTable, |r| r.collect())
 }

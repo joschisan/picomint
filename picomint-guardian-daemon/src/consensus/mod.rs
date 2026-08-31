@@ -29,7 +29,6 @@ use tracing::{info, warn};
 use crate::config::ServerConfig;
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::ConsensusVersionVoteTable;
-use crate::consensus::engine::ConsensusEngine;
 use crate::consensus::server::Server;
 use crate::p2p::{P2PMessage, P2PStatusReceivers, ReconnectP2PConnections};
 
@@ -56,7 +55,7 @@ pub async fn run(
     ui_addr: SocketAddr,
     data_dir: &Path,
 ) -> anyhow::Result<()> {
-    cfg.validate_config(&cfg.private.identity)?;
+    cfg.validate_config()?;
 
     let bitcoin_rpc_connection = BitcoinRpcMonitor::new(
         bitcoin_backend,
@@ -200,14 +199,7 @@ pub async fn run(
 
     info!("Starting Consensus Engine...");
 
-    ConsensusEngine {
-        server: consensus_api.server.clone(),
-        connections,
-        submission_rx,
-        tx_reject_tx,
-    }
-    .run()
-    .await?;
+    engine::run(server, connections, submission_rx, tx_reject_tx).await?;
 
     Ok(())
 }

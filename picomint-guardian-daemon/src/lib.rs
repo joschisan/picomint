@@ -95,11 +95,7 @@ pub async fn run_server(
 
     info!("Setup UI running at http://{} 🚀", settings.ui_addr);
 
-    let cli_state = cli::CliState {
-        setup_api: setup_api.clone(),
-    };
-
-    let setup_cli_handle = tokio::spawn(cli::run_cli(data.clone(), cli_state));
+    let setup_cli_handle = tokio::spawn(cli::run_cli(data.clone(), setup_api.clone()));
 
     let setup_result = setup_rx
         .recv()

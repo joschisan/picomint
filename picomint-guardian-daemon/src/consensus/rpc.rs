@@ -34,7 +34,7 @@ pub fn expiry_status(
     _: ExpiryStatusRequest,
 ) -> Result<ExpiryStatusResponse, String> {
     Ok(ExpiryStatusResponse {
-        status: api.expiry_status_ui(),
+        status: api.expiry_status(),
     })
 }
 

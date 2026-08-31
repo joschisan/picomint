@@ -8,11 +8,7 @@ use picomint_core::wallet::methods::{
     TxChainResponse, TxIdRequest, TxIdResponse,
 };
 
-use picomint_sqlite::DbRead;
-
 use crate::consensus::server::Server;
-
-use super::db::FederationWalletTable;
 
 pub fn consensus_block_count(
     server: &Server,
@@ -39,7 +35,7 @@ pub fn federation_wallet(
     _: FederationWalletRequest,
 ) -> Result<FederationWalletResponse, String> {
     Ok(FederationWalletResponse {
-        wallet: server.db.begin_read().get(&FederationWalletTable, &()),
+        wallet: super::federation_wallet(&server.db.begin_read()),
     })
 }
 

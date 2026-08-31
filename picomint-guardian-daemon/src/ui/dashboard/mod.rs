@@ -15,7 +15,10 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use maud::html;
 
+use picomint_sqlite::DbRead;
+
 use crate::consensus::api::ConsensusApi;
+use crate::consensus::db::ExpiryStatusTable;
 use crate::ui::assets::WithStaticRoutesExt;
 use crate::ui::dashboard::modules::{ln, wallet};
 use crate::ui::{ROOT_ROUTE, dashboard_layout};
@@ -58,7 +61,12 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
         .collect();
     let audit_summary = api.federation_audit().await;
     let bitcoin_rpc_status = api.server.btc_rpc.status();
-    let expiry_status = api.expiry_status_ui();
+
+    // One read snapshot for the whole page, so every value rendered below
+    // reflects the same database state.
+    let dbtx = api.server.db.begin_read();
+
+    let expiry_status = dbtx.get(&ExpiryStatusTable, &());
 
     let content = html! {
         div class="row gy-4" {
@@ -69,11 +77,11 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
 
         div class="row gy-4 mt-2" {
             div class="col-lg-6" {
-                (invite::render(crate::consensus::wallet::consensus_block_count_ui(&api.server)))
+                (invite::render(crate::consensus::wallet::consensus_block_count(&api.server, &dbtx)))
             }
 
             div class="col-lg-6" {
-                (ln::render(&api.server).await)
+                (ln::render(&api.server, &dbtx))
             }
         }
 
@@ -89,7 +97,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
 
         div class="row gy-4 mt-2" {
             div class="col-12" {
-                (wallet::render(&api.server).await)
+                (wallet::render(&api.server, &dbtx))
             }
         }
 

@@ -151,7 +151,9 @@ impl ServerConfig {
         )
     }
 
-    pub fn validate_config(&self, identity: &PeerId) -> anyhow::Result<()> {
+    pub fn validate_config(&self) -> anyhow::Result<()> {
+        let identity = &self.private.identity;
+
         let peers = &self.consensus.peers;
         let my_public_key = self
             .private
@@ -170,9 +172,9 @@ impl ServerConfig {
             bail!("Peer ids are not indexed from 0");
         }
 
-        crate::consensus::mint::validate_config(identity, self)?;
-        crate::consensus::ln::validate_config(identity, self)?;
-        crate::consensus::wallet::validate_config(identity, self)?;
+        crate::consensus::mint::validate_config(self)?;
+        crate::consensus::ln::validate_config(self)?;
+        crate::consensus::wallet::validate_config(self)?;
 
         Ok(())
     }
