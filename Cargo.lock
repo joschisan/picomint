@@ -3347,8 +3347,9 @@ dependencies = [
  "bitcoin",
  "picomint-core",
  "picomint-encoding",
- "picomint-redb",
+ "picomint-sqlite",
  "rand 0.8.6",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -3593,8 +3594,8 @@ dependencies = [
  "picomint-core",
  "picomint-encoding",
  "picomint-guardian-cli-core",
- "picomint-redb",
  "picomint-rpc",
+ "picomint-sqlite",
  "picomint-tbs",
  "picomint-tpe",
  "picomint-tss",
@@ -3705,6 +3706,17 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "picomint-sqlite"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "picomint-encoding",
+ "rusqlite",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

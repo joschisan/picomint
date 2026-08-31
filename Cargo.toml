@@ -21,6 +21,7 @@ members = [
     "picomint-lnurl-daemon",
     "picomint-redb",
     "picomint-rpc",
+    "picomint-sqlite",
     "picomint-tbs",
     "picomint-tpe",
     "picomint-tss",
@@ -98,6 +99,7 @@ picomint-guardian-daemon = { path = "./picomint-guardian-daemon", version = "=0.
 picomint-lnurl = { path = "./picomint-lnurl", version = "=0.1.0" }
 picomint-redb = { path = "./picomint-redb", version = "=0.1.0" }
 picomint-rpc = { path = "./picomint-rpc", version = "=0.1.0" }
+picomint-sqlite = { path = "./picomint-sqlite", version = "=0.1.0" }
 proc-macro2 = "1.0"
 qrcode = "0.14"
 quote = "1.0"
