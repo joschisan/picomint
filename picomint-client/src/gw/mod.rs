@@ -4,7 +4,9 @@ mod receive_sm;
 mod secret;
 
 use anyhow::Context as _;
-use picomint_sqlite::WriteTx;
+use picomint_sqlite::{Database, DbRead, ReadTx, WriteTx};
+use std::sync::Arc;
+use tokio::sync::Notify;
 
 use crate::client::Client;
 use crate::module::ClientContext;
@@ -39,6 +41,24 @@ pub(crate) fn resume(ctx: &ClientContext) {
 /// Called by [`crate::Client::remove`] for end-of-life cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
     dbtx.remove_prefix(&ReceiveStateMachineTable, &federation);
+}
+
+/// Whether any of this module's state machines for `operation` is still
+/// active under `federation`.
+pub(crate) fn operation_is_active(
+    dbtx: &ReadTx,
+    federation: FederationId,
+    operation: OperationId,
+) -> bool {
+    dbtx.prefix(&ReceiveStateMachineTable, &federation, |r| {
+        r.any(|entry| entry.1.operation == operation)
+    })
+}
+
+/// Notify handles for this module's state machine tables, fired on every
+/// commit that writes them.
+pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
+    vec![db.notify_for_table(&ReceiveStateMachineTable)]
 }
 
 // ─── Flat federation-keyed surface ───────────────────────────────────────
