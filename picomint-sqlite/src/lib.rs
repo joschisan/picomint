@@ -599,6 +599,24 @@ impl WriteTx {
         }
     }
 
+    /// Begin a savepoint scoping the writes made until it is resolved.
+    /// Dropping the guard rolls those writes back while the enclosing tx
+    /// lives on; [`Savepoint::release`] keeps them. Not nestable.
+    ///
+    /// A rolled-back savepoint does not retract table-notify wakeups or
+    /// `on_commit` callbacks registered under it — waiters re-check state,
+    /// so a spurious wakeup is benign.
+    pub fn savepoint(&self) -> Savepoint<'_> {
+        self.conn()
+            .execute_batch("SAVEPOINT sp")
+            .expect("sqlite savepoint failed");
+
+        Savepoint {
+            tx: self,
+            released: false,
+        }
+    }
+
     /// Idempotently create the backing SQLite table. Runs inside the write
     /// tx, so a rollback also rolls the creation back — mirroring redb,
     /// where any write-tx table open creates the table.
@@ -650,6 +668,46 @@ impl Drop for WriteTx {
             true => self.db.checkin_writer(conn),
             false => self.db.checkin_writer(self.db.open_writer()),
         }
+    }
+}
+
+/// Scope over a [`WriteTx`]'s writes opened by [`WriteTx::savepoint`].
+/// Rollback is the default resolution — a guard that goes out of scope on
+/// an error path discards the scoped writes without any explicit call.
+pub struct Savepoint<'a> {
+    tx: &'a WriteTx,
+    released: bool,
+}
+
+impl Savepoint<'_> {
+    /// Keep the scoped writes in the enclosing transaction.
+    pub fn release(mut self) {
+        self.tx
+            .conn()
+            .execute_batch("RELEASE sp")
+            .expect("sqlite release failed");
+
+        self.released = true;
+    }
+}
+
+impl Drop for Savepoint<'_> {
+    fn drop(&mut self) {
+        if self.released {
+            return;
+        }
+
+        // During unwind the enclosing tx is dropped too, and its full
+        // ROLLBACK subsumes the savepoint — and a panic here would abort
+        // the process.
+        if std::thread::panicking() {
+            return;
+        }
+
+        self.tx
+            .conn()
+            .execute_batch("ROLLBACK TO sp; RELEASE sp")
+            .expect("sqlite savepoint rollback failed");
     }
 }
 
@@ -1091,6 +1149,33 @@ mod tests {
 
         let tx = db.begin_write();
         assert!(tx.iter(&NotesTable, |r| r.all(|entry| entry.0.0 > 0)));
+    }
+
+    #[test]
+    fn savepoints_scope_writes_within_a_tx() {
+        let (_dir, db) = test_db();
+
+        let tx = db.begin_write();
+        tx.insert(&BalancesTable, &1, &100);
+
+        let savepoint = tx.savepoint();
+        tx.insert(&BalancesTable, &1, &200);
+        tx.insert(&BalancesTable, &2, &50);
+        drop(savepoint);
+
+        assert_eq!(tx.get(&BalancesTable, &1), Some(100));
+        assert_eq!(tx.get(&BalancesTable, &2), None);
+
+        let savepoint = tx.savepoint();
+        tx.insert(&BalancesTable, &3, &75);
+        savepoint.release();
+
+        tx.commit();
+
+        let tx = db.begin_read();
+        assert_eq!(tx.get(&BalancesTable, &1), Some(100));
+        assert_eq!(tx.get(&BalancesTable, &2), None);
+        assert_eq!(tx.get(&BalancesTable, &3), Some(75));
     }
 
     #[test]
