@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// `total` is the sum of the three module fields and must never drop below
 /// zero — that's the federation's balance-sheet invariant, checked on every
-/// accepted transaction in `ConsensusEngine`.
+/// accepted transaction by the consensus engine.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct AuditSummary {
     pub mint: i64,
