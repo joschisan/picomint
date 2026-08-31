@@ -1,4 +1,4 @@
-//! Freestanding API handlers for [`super::Wallet`].
+//! Freestanding API handlers for the wallet module.
 
 use picomint_core::wallet::methods::{
     ConsensusBlockCountRequest, ConsensusBlockCountResponse, ConsensusFeerateRequest,
@@ -10,76 +10,77 @@ use picomint_core::wallet::methods::{
 
 use picomint_sqlite::DbRead;
 
-use super::Wallet;
+use crate::consensus::server::Server;
+
 use super::db::FederationWalletTable;
 
 pub fn consensus_block_count(
-    wallet: &Wallet,
+    server: &Server,
     _: ConsensusBlockCountRequest,
 ) -> Result<ConsensusBlockCountResponse, String> {
-    let dbtx = wallet.db.begin_read();
+    let dbtx = server.db.begin_read();
     Ok(ConsensusBlockCountResponse {
-        count: wallet.consensus_block_count(&dbtx),
+        count: super::consensus_block_count(server, &dbtx),
     })
 }
 
 pub fn consensus_feerate(
-    wallet: &Wallet,
+    server: &Server,
     _: ConsensusFeerateRequest,
 ) -> Result<ConsensusFeerateResponse, String> {
-    let dbtx = wallet.db.begin_read();
+    let dbtx = server.db.begin_read();
     Ok(ConsensusFeerateResponse {
-        feerate: wallet.consensus_feerate(&dbtx),
+        feerate: super::consensus_feerate(server, &dbtx),
     })
 }
 
 pub fn federation_wallet(
-    wallet: &Wallet,
+    server: &Server,
     _: FederationWalletRequest,
 ) -> Result<FederationWalletResponse, String> {
     Ok(FederationWalletResponse {
-        wallet: wallet.db.begin_read().get(&FederationWalletTable, &()),
+        wallet: server.db.begin_read().get(&FederationWalletTable, &()),
     })
 }
 
-pub fn send_fee(wallet: &Wallet, _: SendFeeRequest) -> Result<SendFeeResponse, String> {
+pub fn send_fee(server: &Server, _: SendFeeRequest) -> Result<SendFeeResponse, String> {
     Ok(SendFeeResponse {
-        fee: wallet.send_fee(&wallet.db.begin_read()),
+        fee: super::send_fee(server, &server.db.begin_read()),
     })
 }
 
-pub fn receive_fee(wallet: &Wallet, _: ReceiveFeeRequest) -> Result<ReceiveFeeResponse, String> {
+pub fn receive_fee(server: &Server, _: ReceiveFeeRequest) -> Result<ReceiveFeeResponse, String> {
     Ok(ReceiveFeeResponse {
-        fee: wallet.receive_fee(&wallet.db.begin_read()),
+        fee: super::receive_fee(server, &server.db.begin_read()),
     })
 }
 
-pub fn tx_id(wallet: &Wallet, req: TxIdRequest) -> Result<TxIdResponse, String> {
+pub fn tx_id(server: &Server, req: TxIdRequest) -> Result<TxIdResponse, String> {
     Ok(TxIdResponse {
-        txid: Wallet::tx_id(&wallet.db.begin_read(), req.outpoint),
+        txid: super::tx_id(&server.db.begin_read(), req.outpoint),
     })
 }
 
 pub fn output_info_slice(
-    wallet: &Wallet,
+    server: &Server,
     req: OutputInfoSliceRequest,
 ) -> Result<OutputInfoSliceResponse, String> {
     Ok(OutputInfoSliceResponse {
-        outputs: Wallet::get_outputs(&wallet.db.begin_read(), req.start, req.end),
+        outputs: super::get_outputs(&server.db.begin_read(), req.start, req.end),
     })
 }
 
 pub fn pending_tx_chain(
-    wallet: &Wallet,
+    server: &Server,
     _: PendingTxChainRequest,
 ) -> Result<PendingTxChainResponse, String> {
     Ok(PendingTxChainResponse {
-        txs: Wallet::pending_tx_chain(&wallet.db.begin_read()),
+        txs: super::pending_tx_chain(&server.db.begin_read()),
     })
 }
 
-pub fn tx_chain(wallet: &Wallet, _: TxChainRequest) -> Result<TxChainResponse, String> {
+pub fn tx_chain(server: &Server, _: TxChainRequest) -> Result<TxChainResponse, String> {
     Ok(TxChainResponse {
-        txs: Wallet::tx_chain(&wallet.db.begin_read()),
+        txs: super::tx_chain(&server.db.begin_read()),
     })
 }

@@ -21,7 +21,7 @@ pub fn config(api: &ConsensusApi, req: ConfigRequest) -> Result<ConfigResponse, 
     api.register_config_download(req.invite_id)?;
 
     Ok(ConfigResponse {
-        config: api.cfg.consensus.clone(),
+        config: api.server.cfg.consensus.clone(),
     })
 }
 
@@ -45,5 +45,5 @@ pub fn federation_info(
     api: &ConsensusApi,
     _: FederationInfoRequest,
 ) -> Result<FederationInfoResponse, String> {
-    Ok(FederationInfoResponse::new(&api.cfg.consensus))
+    Ok(FederationInfoResponse::new(&api.server.cfg.consensus))
 }

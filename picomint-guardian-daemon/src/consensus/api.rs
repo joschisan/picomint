@@ -4,7 +4,6 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use chrono::{Days, Utc};
-use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::TransactionId;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
@@ -14,11 +13,10 @@ use picomint_core::tx::{ConsensusItem, Transaction, TxError};
 
 use crate::consensus::rpc;
 use crate::{handler, handler_async};
-use picomint_sqlite::{Database, DbRead};
+use picomint_sqlite::DbRead;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
-use crate::config::ServerConfig;
 use crate::consensus::db::{
     AcceptedItemTable, AcceptedTxTable, ExpiryStatusTable, InviteMeta, InviteMetaTable,
     InviteUserCountTable, SignedSessionOutcomeTable,
@@ -29,17 +27,12 @@ use crate::p2p::P2PStatusReceivers;
 
 #[derive(Clone)]
 pub struct ConsensusApi {
-    /// Our server configuration
-    pub cfg: ServerConfig,
-    /// Database for serving the API
-    pub db: Database,
-    /// Static wire-dispatch handle to the fixed module set
+    /// The shared server context: config, database, bitcoin backend
     pub server: Server,
     /// For sending API events to consensus such as transactions
     pub submission_tx: async_channel::Sender<ConsensusItem>,
     pub tx_reject_tx: broadcast::Sender<(TransactionId, TxError)>,
     pub p2p_status_receivers: P2PStatusReceivers,
-    pub bitcoin_rpc_connection: BitcoinRpcMonitor,
 }
 
 impl ConsensusApi {
@@ -78,13 +71,14 @@ impl ConsensusApi {
         // Subscribe before submitting so a rejection cannot land in the gap.
         let mut rejections = self.tx_reject_tx.subscribe();
 
-        let notify_item = self.db.notify_for_table(&AcceptedItemTable);
-        let notify_session = self.db.notify_for_table(&SignedSessionOutcomeTable);
+        let notify_item = self.server.db.notify_for_table(&AcceptedItemTable);
+        let notify_session = self.server.db.notify_for_table(&SignedSessionOutcomeTable);
 
         let mut notified_item = Box::pin(notify_item.notified());
         let mut notified_session = Box::pin(notify_session.notified());
 
         if self
+            .server
             .db
             .begin_read()
             .get(&AcceptedTxTable, &tx.compute_txid())
@@ -105,7 +99,7 @@ impl ConsensusApi {
         loop {
             tokio::select! {
                 _ = &mut notified_item => {
-                    if self.db.begin_read().get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
+                    if self.server.db.begin_read().get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
                         info!(
                             txid = %tx.compute_txid(),
                             elapsed_ms = start.elapsed().as_millis() as u64,
@@ -142,7 +136,7 @@ impl ConsensusApi {
     }
 
     pub async fn session_count(&self) -> u64 {
-        get_finished_session_count_static(&self.db.begin_read()).await
+        get_finished_session_count_static(&self.server.db.begin_read()).await
     }
 
     /// Generate a fresh invite code expiring `expiry_days` from now and
@@ -168,13 +162,13 @@ impl ConsensusApi {
 
         let invite_id = rand::random::<[u8; 16]>();
 
-        let dbtx = self.db.begin_write();
+        let dbtx = self.server.db.begin_write();
 
         dbtx.insert(&InviteMetaTable, &invite_id, &meta);
 
         dbtx.commit();
 
-        (self.cfg.get_invite_code(invite_id), meta)
+        (self.server.cfg.get_invite_code(invite_id), meta)
     }
 
     /// Check the expiration date and user limit of the invite code with this
@@ -182,7 +176,7 @@ impl ConsensusApi {
     /// error string (surfaced to the client) for unknown, expired, or
     /// exhausted invite codes.
     pub fn register_config_download(&self, invite_id: [u8; 16]) -> Result<(), String> {
-        let dbtx = self.db.begin_write();
+        let dbtx = self.server.db.begin_write();
 
         let meta = dbtx
             .get(&InviteMetaTable, &invite_id)
@@ -213,7 +207,7 @@ impl ConsensusApi {
     pub async fn federation_audit(&self) -> AuditSummary {
         // Modules read their own tables during `audit`; we open a write tx and
         // drop it without commit after building the audit view.
-        let dbtx = self.db.begin_write();
+        let dbtx = self.server.db.begin_write();
         self.server.audit(&dbtx).await
     }
 
@@ -222,14 +216,14 @@ impl ConsensusApi {
     /// `ExpiryStatus` RPC and surfaced on the dashboard.
     #[must_use]
     pub fn expiry_status_ui(&self) -> Option<ExpiryStatus> {
-        self.db.begin_read().get(&ExpiryStatusTable, &())
+        self.server.db.begin_read().get(&ExpiryStatusTable, &())
     }
 
     /// Set or clear this guardian's announced expiry status. All
     /// guardians must announce byte-equal values for clients to accept the
     /// announcement (threshold-consensus read).
     pub fn set_expiry_status_ui(&self, status: Option<ExpiryStatus>) {
-        let dbtx = self.db.begin_write();
+        let dbtx = self.server.db.begin_write();
         match status {
             Some(s) => {
                 dbtx.insert(&ExpiryStatusTable, &(), &s);

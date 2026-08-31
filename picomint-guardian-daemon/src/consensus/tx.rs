@@ -1,5 +1,4 @@
 use picomint_core::Amount;
-use picomint_core::module::TxItemAmounts;
 use picomint_core::tx::TxError;
 
 #[derive(Clone, Debug, Default)]
@@ -10,27 +9,20 @@ pub struct FundingVerifier {
 }
 
 impl FundingVerifier {
-    pub fn add_input(&mut self, input: TxItemAmounts) -> Result<&mut Self, TxError> {
-        self.inputs = self
-            .inputs
-            .checked_add(input.amount)
-            .ok_or(TxError::Overflow)?;
+    /// The amount funds the transaction while the fee consumes funding.
+    pub fn add_input(&mut self, amount: Amount, fee: Amount) -> Result<&mut Self, TxError> {
+        self.inputs = self.inputs.checked_add(amount).ok_or(TxError::Overflow)?;
 
-        self.fees = self.fees.checked_add(input.fee).ok_or(TxError::Overflow)?;
+        self.fees = self.fees.checked_add(fee).ok_or(TxError::Overflow)?;
 
         Ok(self)
     }
 
-    pub fn add_output(&mut self, output_amounts: TxItemAmounts) -> Result<&mut Self, TxError> {
-        self.outputs = self
-            .outputs
-            .checked_add(output_amounts.amount)
-            .ok_or(TxError::Overflow)?;
+    /// Both the amount and the fee consume funding.
+    pub fn add_output(&mut self, amount: Amount, fee: Amount) -> Result<&mut Self, TxError> {
+        self.outputs = self.outputs.checked_add(amount).ok_or(TxError::Overflow)?;
 
-        self.fees = self
-            .fees
-            .checked_add(output_amounts.fee)
-            .ok_or(TxError::Overflow)?;
+        self.fees = self.fees.checked_add(fee).ok_or(TxError::Overflow)?;
 
         Ok(self)
     }
@@ -52,38 +44,23 @@ impl FundingVerifier {
 #[cfg(test)]
 mod tests {
     use picomint_core::Amount;
-    use picomint_core::module::TxItemAmounts;
 
     #[test]
     fn sanity_test_funding_verifier() {
         let mut v = super::FundingVerifier::default();
 
-        v.add_input(TxItemAmounts {
-            amount: Amount::from_msat(3),
-            fee: Amount::from_msat(1),
-        })
-        .unwrap()
-        .add_output(TxItemAmounts {
-            amount: Amount::from_msat(1),
-            fee: Amount::from_msat(1),
-        })
-        .unwrap();
+        v.add_input(Amount::from_msat(3), Amount::from_msat(1))
+            .unwrap()
+            .add_output(Amount::from_msat(1), Amount::from_msat(1))
+            .unwrap();
 
         assert!(v.clone().verify_funding().is_ok());
 
-        v.add_output(TxItemAmounts {
-            amount: Amount::from_msat(1),
-            fee: Amount::ZERO,
-        })
-        .unwrap();
+        v.add_output(Amount::from_msat(1), Amount::ZERO).unwrap();
 
         assert!(v.clone().verify_funding().is_err());
 
-        v.add_input(TxItemAmounts {
-            amount: Amount::from_msat(10),
-            fee: Amount::ZERO,
-        })
-        .unwrap();
+        v.add_input(Amount::from_msat(10), Amount::ZERO).unwrap();
 
         // Overfunding is always allowed
         assert!(v.clone().verify_funding().is_ok());

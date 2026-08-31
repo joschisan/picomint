@@ -11,7 +11,7 @@ use picomint_core::tx::{ConsensusItem, TxError};
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::{NumPeers, NumPeersExt, PeerId, TransactionId};
 use picomint_encoding::Encodable;
-use picomint_sqlite::{Database, DbRead, ReadTx, WriteTx};
+use picomint_sqlite::{DbRead, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
 use tokio::sync::broadcast;
 use tracing::{info, instrument};
@@ -71,8 +71,6 @@ const SESSION_OUTCOME_ITEM_LIMIT: usize = 10_000;
 /// Runs the main server consensus loop
 pub struct ConsensusEngine {
     pub server: crate::consensus::server::Server,
-    pub db: Database,
-    pub cfg: ServerConfig,
     pub submission_rx: Receiver<ConsensusItem>,
     pub connections: ReconnectP2PConnections<P2PMessage>,
     pub tx_reject_tx: broadcast::Sender<(TransactionId, TxError)>,
@@ -80,14 +78,14 @@ pub struct ConsensusEngine {
 
 impl ConsensusEngine {
     fn num_peers(&self) -> NumPeers {
-        self.cfg.consensus.peers.to_num_peers()
+        self.server.cfg.consensus.peers.to_num_peers()
     }
 
     fn identity(&self) -> PeerId {
-        self.cfg.private.identity
+        self.server.cfg.private.identity
     }
 
-    #[instrument(name = "run", skip_all, fields(id=%self.cfg.private.identity))]
+    #[instrument(name = "run", skip_all, fields(id=%self.server.cfg.private.identity))]
     pub async fn run(self) -> anyhow::Result<()> {
         // We need four peers to run the atomic broadcast
         assert!(self.num_peers().total() >= 4);
@@ -136,7 +134,7 @@ impl ConsensusEngine {
             connections.clone(),
             outcomes_tx,
             signatures_tx,
-            self.db.clone(),
+            self.server.db.clone(),
         )
         .into_dyn();
 
@@ -144,8 +142,8 @@ impl ConsensusEngine {
             self.identity(),
             session_index,
             self.num_peers(),
-            self.db.clone(),
-            build_keychain(&self.cfg),
+            self.server.db.clone(),
+            build_keychain(&self.server.cfg),
             network,
             DataProvider::new(self.submission_rx.clone()),
             ordered_tx,
@@ -193,7 +191,7 @@ impl ConsensusEngine {
     ) -> Option<SignedSessionOutcome> {
         // We request the signed session outcome from a random peer at a fixed
         // interval (3s prod / 300ms regtest).
-        let broadcast_interval = if self.cfg.consensus.network == bitcoin::Network::Regtest {
+        let broadcast_interval = if self.server.cfg.consensus.network == bitcoin::Network::Regtest {
             Duration::from_millis(300)
         } else {
             Duration::from_secs(3)
@@ -207,6 +205,7 @@ impl ConsensusEngine {
         // including it was already processed (accepted *or* rejected) by
         // the prior run.
         let resume_from = self
+            .server
             .db
             .begin_read()
             .iter_rev(&AcceptedItemTable, |r| r.next().map(|entry| entry.0))
@@ -215,14 +214,18 @@ impl ConsensusEngine {
         // The byte budget resumes where the prior run left it for the same
         // reason: a session that cut at a different item than its peers is one
         // they never sign together.
-        let mut n_bytes: usize = self.db.begin_read().iter(&AcceptedItemTable, |r| {
+        let mut n_bytes: usize = self.server.db.begin_read().iter(&AcceptedItemTable, |r| {
             r.map(|(_, accepted)| accepted.item.consensus_encode_to_vec().len())
                 .sum()
         });
 
         // As does the item count, which cuts a session of items too small for
         // the byte budget to reach.
-        let mut n_items: usize = self.db.begin_read().iter(&AcceptedItemTable, |r| r.count());
+        let mut n_items: usize = self
+            .server
+            .db
+            .begin_read()
+            .iter(&AcceptedItemTable, |r| r.count());
 
         let mut ordered_rx = Box::pin(ordered_rx.enumerate());
 
@@ -247,11 +250,11 @@ impl ConsensusEngine {
                         continue;
                     }
 
-                    if round >= rounds_per_session(&self.cfg) {
+                    if round >= rounds_per_session(&self.server.cfg) {
                         break;
                     }
 
-                    let dbtx = self.db.begin_write();
+                    let dbtx = self.server.db.begin_write();
 
                     if self.process_consensus_item(&dbtx, index as u64, creator, &item).await.is_ok() {
                         dbtx.commit();
@@ -292,7 +295,7 @@ impl ConsensusEngine {
                             "Consensus Failure: pending accepted items disagree with federation consensus"
                         );
 
-                        let dbtx = self.db.begin_write();
+                        let dbtx = self.server.db.begin_write();
 
                         for accepted_item in unprocessed {
                             self.process_consensus_item(
@@ -333,7 +336,7 @@ impl ConsensusEngine {
 
         info!(?session_index, "Signing session header...");
 
-        let keychain = build_keychain(&self.cfg);
+        let keychain = build_keychain(&self.server.cfg);
 
         let our_signature = keychain.sign(session_index, &header);
 
@@ -426,7 +429,7 @@ impl ConsensusEngine {
 
         let header = outcome.session_outcome.header(session_index);
 
-        let keychain = build_keychain(&self.cfg);
+        let keychain = build_keychain(&self.server.cfg);
 
         outcome
             .signatures
@@ -435,7 +438,8 @@ impl ConsensusEngine {
     }
 
     pub async fn pending_accepted_items(&self) -> Vec<AcceptedItem> {
-        self.db
+        self.server
+            .db
             .begin_read()
             .iter(&AcceptedItemTable, |r| r.map(|(_, item)| item).collect())
     }
@@ -445,7 +449,7 @@ impl ConsensusEngine {
         session_index: u64,
         signed_session_outcome: SignedSessionOutcome,
     ) {
-        let dbtx = self.db.begin_write();
+        let dbtx = self.server.db.begin_write();
 
         dbtx.clear_table(&AcceptedItemTable);
 
@@ -503,7 +507,7 @@ impl ConsensusEngine {
                 assert!(audit.total >= 0, "Failed audit: {audit:?}");
             }
             ConsensusItem::Version(vote) => {
-                let default_version = self.cfg.consensus.default_version;
+                let default_version = self.server.cfg.consensus.default_version;
 
                 let current_vote = dbtx
                     .insert(&ConsensusVersionVoteTable, &peer, vote)
@@ -537,7 +541,7 @@ impl ConsensusEngine {
     /// Returns the number of sessions already saved in the database. This count
     /// **does not** include the currently running session.
     async fn get_finished_session_count(&self) -> u64 {
-        get_finished_session_count_static(&self.db.begin_read()).await
+        get_finished_session_count_static(&self.server.db.begin_read()).await
     }
 }
 

@@ -1,4 +1,4 @@
-//! Freestanding API handlers for [`super::Mint`].
+//! Freestanding API handlers for the mint module.
 
 use picomint_core::OutPoint;
 use picomint_core::TransactionId;
@@ -10,20 +10,21 @@ use picomint_core::mint::methods::{
 use picomint_sqlite::{DbRead, ReadTx};
 use tbs::BlindedSignatureShare;
 
-use super::Mint;
+use crate::consensus::server::Server;
+
 use super::db::{
     BlindedNonceTable, BlindedSignatureShareRestoreTable, BlindedSignatureShareTable,
     NoteNonceTable,
 };
 
 pub async fn signature_shares(
-    mint: &Mint,
+    server: &Server,
     req: SignatureSharesRequest,
 ) -> Result<SignatureSharesResponse, String> {
     // Wait until any BlindedSignatureShareTable for this txid exists. All mint
     // outputs of a given tx are signed atomically in the same consensus
     // commit, so observing one implies all are present.
-    let (shares, _dbtx) = mint
+    let (shares, _dbtx) = server
         .db
         .wait_table_check(&BlindedSignatureShareTable, |dbtx| {
             Some(collect_signature_shares(dbtx, req.txid)).filter(|s| !s.is_empty())
@@ -36,12 +37,12 @@ pub async fn signature_shares(
 /// Callers establish membership through [`issuance_state`] first, so every
 /// message here is expected to resolve and a miss is an error.
 pub fn signature_shares_restore(
-    mint: &Mint,
+    server: &Server,
     req: SignatureSharesRestoreRequest,
 ) -> Result<SignatureSharesRestoreResponse, String> {
     let mut shares = Vec::new();
 
-    let dbtx = mint.db.begin_read();
+    let dbtx = server.db.begin_read();
 
     for message in req.messages {
         let share = dbtx
@@ -55,10 +56,10 @@ pub fn signature_shares_restore(
 }
 
 pub fn issuance_state(
-    mint: &Mint,
+    server: &Server,
     req: IssuanceStateRequest,
 ) -> Result<IssuanceStateResponse, String> {
-    let dbtx = mint.db.begin_read();
+    let dbtx = server.db.begin_read();
 
     let issued = req
         .messages
@@ -69,8 +70,8 @@ pub fn issuance_state(
     Ok(IssuanceStateResponse { issued })
 }
 
-pub fn spend_state(mint: &Mint, req: SpendStateRequest) -> Result<SpendStateResponse, String> {
-    let dbtx = mint.db.begin_read();
+pub fn spend_state(server: &Server, req: SpendStateRequest) -> Result<SpendStateResponse, String> {
+    let dbtx = server.db.begin_read();
 
     let spent = req
         .nonces

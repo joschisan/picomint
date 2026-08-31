@@ -25,7 +25,7 @@ pub const SET_EXPIRY_ROUTE: &str = "/expiry/set";
 pub const CLEAR_EXPIRY_ROUTE: &str = "/expiry/clear";
 
 async fn backup_config(State(state): State<Arc<ConsensusApi>>) -> impl IntoResponse {
-    let body = serde_json::to_vec_pretty(&state.cfg).expect("ServerConfig is serializable");
+    let body = serde_json::to_vec_pretty(&state.server.cfg).expect("ServerConfig is serializable");
 
     (
         [
@@ -43,20 +43,21 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
     let api = &*state;
 
     let guardian_names: BTreeMap<_, _> = api
+        .server
         .cfg
         .consensus
         .peers
         .iter()
         .map(|(peer, endpoint)| (*peer, endpoint.name.clone()))
         .collect();
-    let federation_name = api.cfg.consensus.name.clone();
+    let federation_name = api.server.cfg.consensus.name.clone();
     let p2p_connection_status: BTreeMap<_, _> = api
         .p2p_status_receivers
         .iter()
         .map(|(peer, receiver)| (*peer, receiver.borrow().clone()))
         .collect();
     let audit_summary = api.federation_audit().await;
-    let bitcoin_rpc_status = api.bitcoin_rpc_connection.status();
+    let bitcoin_rpc_status = api.server.btc_rpc.status();
     let expiry_status = api.expiry_status_ui();
 
     let content = html! {
@@ -68,11 +69,11 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
 
         div class="row gy-4 mt-2" {
             div class="col-lg-6" {
-                (invite::render(api.server.wallet.consensus_block_count_ui()))
+                (invite::render(crate::consensus::wallet::consensus_block_count_ui(&api.server)))
             }
 
             div class="col-lg-6" {
-                (ln::render(&api.server.ln).await)
+                (ln::render(&api.server).await)
             }
         }
 
@@ -88,7 +89,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
 
         div class="row gy-4 mt-2" {
             div class="col-12" {
-                (wallet::render(&api.server.wallet).await)
+                (wallet::render(&api.server).await)
             }
         }
 

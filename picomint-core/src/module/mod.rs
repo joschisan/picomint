@@ -3,29 +3,11 @@ pub mod audit;
 
 use serde::{Deserialize, Serialize};
 
-use crate::Amount;
 use crate::ln::methods::LnMethod;
 use crate::methods::CoreMethod;
 use crate::mint::methods::MintMethod;
 use crate::wallet::methods::WalletMethod;
 use picomint_encoding::{Decodable, Encodable};
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct InputMeta {
-    pub amount: TxItemAmounts,
-    pub pub_key: secp256k1::XOnlyPublicKey,
-}
-
-/// Information about the amount represented by an input or output.
-///
-/// * For **inputs** the amount is funding the transaction while the fee is
-///   consuming funding
-/// * For **outputs** the amount and the fee consume funding
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct TxItemAmounts {
-    pub amount: Amount,
-    pub fee: Amount,
-}
 
 /// The wire method dispatched to a guardian over iroh. Each variant carries
 /// the concrete request for its module; the response type is determined by

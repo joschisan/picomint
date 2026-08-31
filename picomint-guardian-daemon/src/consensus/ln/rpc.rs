@@ -1,4 +1,4 @@
-//! Freestanding API handlers for [`super::Lightning`].
+//! Freestanding API handlers for the lightning module.
 
 use std::time::Duration;
 
@@ -13,28 +13,29 @@ use tokio::time::timeout;
 
 use picomint_sqlite::DbRead;
 
-use super::Lightning;
+use crate::consensus::server::Server;
+
 use super::db::{
     DecryptionKeyShareTable, GatewayTable, IncomingContractStreamIndexTable,
     IncomingContractStreamTable, OutgoingContractTable, PreimageTable,
 };
 
 pub fn consensus_block_count(
-    ln: &Lightning,
+    server: &Server,
     _: ConsensusBlockCountRequest,
 ) -> Result<ConsensusBlockCountResponse, String> {
-    let dbtx = ln.db.begin_read();
+    let dbtx = server.db.begin_read();
     Ok(ConsensusBlockCountResponse {
-        count: ln.consensus_block_count(&dbtx),
+        count: super::consensus_block_count(server, &dbtx),
     })
 }
 
 pub async fn await_preimage(
-    ln: &Lightning,
+    server: &Server,
     req: AwaitPreimageRequest,
 ) -> Result<AwaitPreimageResponse, String> {
     loop {
-        let wait = ln.db.wait_table_check(&PreimageTable, |dbtx| {
+        let wait = server.db.wait_table_check(&PreimageTable, |dbtx| {
             dbtx.get(&PreimageTable, &req.outpoint)
         });
 
@@ -44,7 +45,7 @@ pub async fn await_preimage(
             });
         }
 
-        let dbtx = ln.db.begin_read();
+        let dbtx = server.db.begin_read();
 
         if let Some(preimage) = dbtx.get(&PreimageTable, &req.outpoint) {
             return Ok(AwaitPreimageResponse {
@@ -52,17 +53,18 @@ pub async fn await_preimage(
             });
         }
 
-        if req.expiry <= ln.consensus_block_count(&dbtx) {
+        if req.expiry <= super::consensus_block_count(server, &dbtx) {
             return Ok(AwaitPreimageResponse { preimage: None });
         }
     }
 }
 
 pub fn decryption_key_share(
-    ln: &Lightning,
+    server: &Server,
     req: DecryptionKeyShareRequest,
 ) -> Result<DecryptionKeyShareResponse, String> {
-    ln.db
+    server
+        .db
         .begin_read()
         .get(&DecryptionKeyShareTable, &req.outpoint)
         .map(|share| DecryptionKeyShareResponse { share })
@@ -70,10 +72,10 @@ pub fn decryption_key_share(
 }
 
 pub fn outgoing_contract_expiry(
-    ln: &Lightning,
+    server: &Server,
     req: OutgoingContractExpiryRequest,
 ) -> Result<OutgoingContractExpiryResponse, String> {
-    let dbtx = ln.db.begin_read();
+    let dbtx = server.db.begin_read();
 
     let Some(contract) = dbtx.get(&OutgoingContractTable, &req.outpoint) else {
         return Ok(OutgoingContractExpiryResponse { contract: None });
@@ -81,7 +83,7 @@ pub fn outgoing_contract_expiry(
 
     let expiry = contract
         .expiry
-        .saturating_sub(ln.consensus_block_count(&dbtx));
+        .saturating_sub(super::consensus_block_count(server, &dbtx));
 
     Ok(OutgoingContractExpiryResponse {
         contract: Some((contract.contract_id(), expiry)),
@@ -89,14 +91,14 @@ pub fn outgoing_contract_expiry(
 }
 
 pub async fn await_incoming_contracts(
-    ln: &Lightning,
+    server: &Server,
     req: AwaitIncomingContractsRequest,
 ) -> Result<AwaitIncomingContractsResponse, String> {
     if req.batch == 0 {
         return Err("Batch size must be greater than 0".to_string());
     }
 
-    let (mut next_index, dbtx) = ln
+    let (mut next_index, dbtx) = server
         .db
         .wait_table_check(&IncomingContractStreamIndexTable, |dbtx| {
             dbtx.get(&IncomingContractStreamIndexTable, &())
@@ -121,9 +123,9 @@ pub async fn await_incoming_contracts(
     })
 }
 
-pub fn gateways(ln: &Lightning, _: GatewaysRequest) -> Result<GatewaysResponse, String> {
+pub fn gateways(server: &Server, _: GatewaysRequest) -> Result<GatewaysResponse, String> {
     Ok(GatewaysResponse {
-        gateways: ln
+        gateways: server
             .db
             .begin_read()
             .iter(&GatewayTable, |r| r.map(|(pk, _)| pk).collect()),
@@ -134,10 +136,10 @@ pub fn gateways(ln: &Lightning, _: GatewaysRequest) -> Result<GatewaysResponse, 
 /// `federation_info`: it is public to every client, and a caller holding a
 /// hash of it out of band can check what it gets.
 pub fn tpe_aggregate_pk(
-    ln: &Lightning,
+    server: &Server,
     _: TpeAggregatePkRequest,
 ) -> Result<TpeAggregatePkResponse, String> {
     Ok(TpeAggregatePkResponse {
-        tpe_agg_pk: ln.cfg.consensus.tpe_agg_pk,
+        tpe_agg_pk: server.cfg.consensus.ln.tpe_agg_pk,
     })
 }

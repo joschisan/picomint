@@ -17,7 +17,6 @@ use std::time::Duration;
 use bitcoin::Network;
 use futures::TryFutureExt;
 use picomint_bitcoin_rpc::{BitcoinRpcMonitor, BitcoindClient};
-use picomint_core::NumPeers;
 use picomint_core::module::Method;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::CONSENSUS_VERSION;
@@ -68,47 +67,27 @@ pub async fn run(
         },
     );
 
-    // Wait for the bitcoin backend to come up before instantiating modules that
-    // read its status during startup (the wallet module broadcast loop).
-    let _num_peers = NumPeers::from(cfg.consensus.peers.len());
+    let server = Server {
+        cfg: cfg.clone(),
+        db: db.clone(),
+        btc_rpc: bitcoin_rpc_connection.clone(),
+    };
 
-    info!("Initialise module mint...");
-    let mint = Arc::new(crate::consensus::mint::Mint::new(
-        cfg.mint_config(),
-        db.clone(),
-    ));
-
-    info!("Initialise module wallet...");
-    let wallet = Arc::new(crate::consensus::wallet::Wallet::new(
-        cfg.private.identity,
-        cfg.wallet_config(),
-        db.clone(),
+    wallet::spawn_broadcast_unconfirmed_txs_task(
         bitcoin_rpc_connection.clone(),
+        db.clone(),
         cfg.consensus.network,
-    ));
-
-    info!("Initialise module ln...");
-    let ln = Arc::new(crate::consensus::ln::Lightning::new(
-        cfg.private.identity,
-        cfg.ln_config(),
-        db.clone(),
-        bitcoin_rpc_connection.clone(),
-    ));
-
-    let server = Server { mint, wallet, ln };
+    );
 
     let (submission_tx, submission_rx) = async_channel::bounded(TX_BUFFER);
 
     let (tx_reject_tx, _) = tokio::sync::broadcast::channel(TX_REJECT_BUFFER);
 
     let consensus_api = Arc::new(ConsensusApi {
-        cfg: cfg.clone(),
-        db: db.clone(),
         server: server.clone(),
         submission_tx: submission_tx.clone(),
         tx_reject_tx: tx_reject_tx.clone(),
         p2p_status_receivers,
-        bitcoin_rpc_connection: bitcoin_rpc_connection.clone(),
     });
 
     info!("Starting Consensus Api...");
@@ -141,13 +120,13 @@ pub async fn run(
                         .await
                         .ok();
                 }
-                for item in server.mint.consensus_proposal(&dbtx).await {
+                for item in mint::consensus_proposal(&server, &dbtx).await {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Mint(item)))
                         .await
                         .ok();
                 }
-                for item in server.wallet.consensus_proposal(&dbtx).await {
+                for item in wallet::consensus_proposal(&server, &dbtx).await {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
                             item,
@@ -155,7 +134,7 @@ pub async fn run(
                         .await
                         .ok();
                 }
-                for item in server.ln.consensus_proposal(&dbtx).await {
+                for item in ln::consensus_proposal(&server, &dbtx).await {
                     submission_tx
                         .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
                         .await
@@ -222,11 +201,9 @@ pub async fn run(
     info!("Starting Consensus Engine...");
 
     ConsensusEngine {
-        db,
-        cfg: cfg.clone(),
+        server: consensus_api.server.clone(),
         connections,
         submission_rx,
-        server: consensus_api.server.clone(),
         tx_reject_tx,
     }
     .run()
@@ -255,8 +232,8 @@ async fn run_iroh_api(
 async fn dispatch(consensus_api: Arc<ConsensusApi>, method: Method) -> Result<Vec<u8>, String> {
     match method {
         Method::Core(m) => consensus_api.handle_api(m).await,
-        Method::Mint(m) => consensus_api.server.mint.handle_api(m).await,
-        Method::Wallet(m) => consensus_api.server.wallet.handle_api(m).await,
-        Method::Ln(m) => consensus_api.server.ln.handle_api(m).await,
+        Method::Mint(m) => mint::handle_api(&consensus_api.server, m).await,
+        Method::Wallet(m) => wallet::handle_api(&consensus_api.server, m).await,
+        Method::Ln(m) => ln::handle_api(&consensus_api.server, m).await,
     }
 }
