@@ -66,17 +66,17 @@ pub type SendResult = Result<OperationId, SendPaymentError>;
 pub struct LightningClientContext {
     pub(crate) federation: FederationId,
     pub(crate) client_ctx: ClientContext,
-    pub(crate) mint: crate::mint::MintClientModule,
+    pub(crate) mint: crate::mint::Mint,
     pub(crate) input_fee: Amount,
     pub(crate) gateways: Gateways,
 }
 
 #[derive(Clone)]
-pub struct LightningClientModule {
+pub struct Ln {
     federation: FederationId,
     cfg: LightningConfigConsensus,
     client_ctx: ClientContext,
-    mint: crate::mint::MintClientModule,
+    mint: crate::mint::Mint,
     secret: LnSecret,
     executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
     // Pool of announced gateways, each holding its kept-alive connection and
@@ -87,20 +87,12 @@ pub struct LightningClientModule {
     gateways: Gateways,
 }
 
-impl LightningClientModule {
-    pub fn input_fee(&self) -> Amount {
-        self.cfg.input_fee
-    }
-
-    pub fn output_fee(&self) -> Amount {
-        self.cfg.output_fee
-    }
-
+impl Ln {
     pub fn new(
         federation: FederationId,
         cfg: LightningConfigConsensus,
         client_ctx: ClientContext,
-        mint: crate::mint::MintClientModule,
+        mint: crate::mint::Mint,
         secret: LnSecret,
         tg: &TaskGroup,
     ) -> Self {
@@ -148,9 +140,7 @@ impl LightningClientModule {
     /// set), and reconcile the connection pool to match — a deregistered
     /// gateway is dropped here, its connection aborted. Info is filled in
     /// separately by [`Self::update_gateway_info`].
-    pub async fn update_gateway_pks(
-        module: LightningClientModule,
-    ) -> Result<(), RefreshGatewaysError> {
+    pub async fn update_gateway_pks(module: Ln) -> Result<(), RefreshGatewaysError> {
         let list = module
             .client_ctx
             .api()
@@ -177,7 +167,7 @@ impl LightningClientModule {
     /// a connection to each (add-only — never removing a gateway, so it can run
     /// concurrently with [`Self::update_gateway_pks`]) and probes over it; a
     /// gateway that fails to answer is left unselectable.
-    pub async fn update_gateway_info(module: LightningClientModule) {
+    pub async fn update_gateway_info(module: Ln) {
         let list: Vec<GatewayPk> =
             module
                 .client_ctx
@@ -192,6 +182,16 @@ impl LightningClientModule {
         module.gateways.probe(&list, module.federation).await;
     }
 
+    /// The largest whole-sat invoice amount a max send from `account`
+    /// through this gateway can pay: the account's notes spent in full cover
+    /// the invoice, the gateway's fee, the federation's transaction fee and
+    /// the integrator's cut, with the sub-sat remainder donated.
+    fn send_max_amount(&self, account: Account, gateway_info: &GatewayInfo) -> Amount {
+        self.mint.largest_affordable_amount(account, |amount| {
+            gateway_info.send_fee.fee(amount.msat) + self.cfg.output_fee
+        })
+    }
+
     /// Pick any gateway from the pool that has info, at random for load
     /// distribution. A gateway charges the same fee however a payment
     /// settles, so there is nothing about an invoice to match a gateway
@@ -202,43 +202,9 @@ impl LightningClientModule {
             .ok_or(SelectGatewayError::NoGatewaysAvailable)
     }
 
-    /// Pay an invoice through a caller-selected gateway.
-    ///
-    /// The caller obtains `(gateway_pk, gateway_info)` via
-    /// [`Self::select_gateway`] and inspects `gateway_info` to preview the
-    /// cost before passing both back here. The library still enforces
-    /// `PaymentFee::SEND_FEE_LIMIT` and `EXPIRY_DELTA_LIMIT` on the supplied
-    /// `gateway_info` as a backstop against an abusive gateway.
-    pub async fn send(
-        &self,
-        account: Account,
-        gateway_pk: GatewayPk,
-        gateway_info: GatewayInfo,
-        invoice: Bolt11Invoice,
-    ) -> Result<OperationId, SendPaymentError> {
-        self.send_inner(account, gateway_pk, gateway_info, invoice, false)
-            .await
-    }
-
-    /// The largest whole-sat invoice amount a [`Self::send_max`] from
-    /// `account` through this gateway can pay: the account's notes spent in
-    /// full cover the invoice, the gateway's fee, the federation's
-    /// transaction fee and the integrator's cut, with the sub-sat remainder
-    /// donated. This is the amount at which [`Self::send_max`] empties the
-    /// account; anything else leaves change behind.
-    ///
-    /// Needs no invoice: the gateway's fee is the same however the payment
-    /// settles, so the figure holds for whatever invoice is later resolved
-    /// for it.
-    pub fn send_max_amount(&self, account: Account, gateway_info: &GatewayInfo) -> Amount {
-        self.mint.largest_affordable_amount(account, |amount| {
-            gateway_info.send_fee.fee(amount.msat) + self.cfg.output_fee
-        })
-    }
-
     /// Empty `account` to `lnurl` through a caller-selected gateway: resolve
     /// it, size the max, pay — the Lightning shape of
-    /// [`crate::wallet::WalletClientModule::send_max`]. The max needs no
+    /// [`crate::wallet::Wallet::send_max`]. The max needs no
     /// invoice to price, so the one invoice resolved is the one paid, for
     /// the figure that empties the account: every note goes in and no change
     /// comes back. An account that moved since the caller previewed
@@ -371,31 +337,6 @@ impl LightningClientModule {
         Ok(operation)
     }
 
-    /// Request an invoice from a caller-selected gateway.
-    ///
-    /// The caller obtains `(gateway_pk, gateway_info)` via
-    /// [`Self::select_gateway`] and inspects `gateway_info.receive_fee` to
-    /// preview the cost before passing both back here. The library still
-    /// enforces `PaymentFee::RECEIVE_FEE_LIMIT` on the supplied
-    /// `gateway_info` as a backstop against an abusive gateway.
-    pub async fn receive(
-        &self,
-        account: Account,
-        gateway_pk: GatewayPk,
-        gateway_info: GatewayInfo,
-        amount: Amount,
-    ) -> Result<Bolt11Invoice, ReceiveError> {
-        let receive_keypair = self.secret.receive_keypair(account);
-
-        self.create_offer_and_fetch_invoice(
-            gateway_pk,
-            gateway_info,
-            receive_keypair.public_key(),
-            amount,
-        )
-        .await
-    }
-
     /// Create an incoming offer locked to a public key derived from the
     /// recipient's static module public key and fetch the invoice the gateway
     /// issues against it.
@@ -507,52 +448,11 @@ impl LightningClientModule {
             .expect("Cannot claim input, additional funding needed");
     }
 
-    /// Generate an lnurl for the client.
-    ///
-    /// Offline and infallible: every field is read from the federation config
-    /// this client was built with, so an lnurl can be produced on a device
-    /// that has never reached the network — which is precisely when someone
-    /// wants to show one.
-    ///
-    /// Nothing perishable goes into the payload. The gateway set is resolved
-    /// by the daemon at pay time, from the peer set inside the [`LnurlInfo`]
-    /// that `info` pins, so an lnurl handed out today still routes after
-    /// every gateway in the federation has been replaced.
-    pub fn generate_lnurl(&self, account: Account, lnurl_daemon: String) -> String {
-        let config = self.client_ctx.get_config();
-
-        let recipient = self.secret.receive_keypair(account).public_key();
-
-        // `f + 1` guardians, sampled fresh per lnurl: enough that one is
-        // honest and reachable whenever the federation itself is, and random
-        // so bootstrap load spreads instead of pinning the lowest peer ids.
-        let guardians = config
-            .peers
-            .values()
-            .map(|endpoint| endpoint.iroh_pk)
-            .choose_multiple(
-                &mut rand::thread_rng(),
-                config.peers.to_num_peers().one_honest(),
-            );
-
-        let info = FederationInfoResponse::new(config).consensus_hash_sha256();
-
-        let request = LnurlRequest {
-            recipient,
-            guardians,
-            info,
-        };
-
-        let payload = picomint_base32::encode(&request);
-
-        picomint_lnurl::encode_lnurl(&format!("{lnurl_daemon}pay/{payload}"))
-    }
-
     /// Walks the federation-wide contract stream once, trialling every
     /// account's receive key against each entry. The stream and its cursor are
     /// shared, so each extra account costs one ECDH per contract rather than
     /// another sweep.
-    async fn receive_scan(module: LightningClientModule) {
+    async fn receive_scan(module: Ln) {
         let keys = Account::USER_ACCOUNTS
             .map(|account| (account, module.secret.receive_keypair(account).secret_key()));
 
@@ -680,10 +580,12 @@ impl crate::Client {
         gateway_info: GatewayInfo,
         invoice: Bolt11Invoice,
     ) -> Result<OperationId, SendPaymentError> {
-        self.runtime(federation)
-            .map_err(|_| SendPaymentError::NotJoined)?
-            .ln
-            .send(account, gateway_pk, gateway_info, invoice)
+        let runtime = self
+            .runtime(federation)
+            .map_err(|_| SendPaymentError::NotJoined)?;
+        let ln = &runtime.ln;
+
+        ln.send_inner(account, gateway_pk, gateway_info, invoice, false)
             .await
     }
 
@@ -727,11 +629,20 @@ impl crate::Client {
         gateway_info: GatewayInfo,
         amount: Amount,
     ) -> Result<Bolt11Invoice, ReceiveError> {
-        self.runtime(federation)
-            .map_err(|_| ReceiveError::NotJoined)?
-            .ln
-            .receive(account, gateway_pk, gateway_info, amount)
-            .await
+        let runtime = self
+            .runtime(federation)
+            .map_err(|_| ReceiveError::NotJoined)?;
+        let ln = &runtime.ln;
+
+        let receive_keypair = ln.secret.receive_keypair(account);
+
+        ln.create_offer_and_fetch_invoice(
+            gateway_pk,
+            gateway_info,
+            receive_keypair.public_key(),
+            amount,
+        )
+        .await
     }
 
     /// A shareable lnurl for `account`, served by `lnurl_daemon`. Nothing
@@ -743,10 +654,38 @@ impl crate::Client {
         account: Account,
         lnurl_daemon: String,
     ) -> anyhow::Result<String> {
-        Ok(self
-            .runtime(federation)?
-            .ln
-            .generate_lnurl(account, lnurl_daemon))
+        let runtime = self.runtime(federation)?;
+        let ln = &runtime.ln;
+
+        let config = ln.client_ctx.get_config();
+
+        let recipient = ln.secret.receive_keypair(account).public_key();
+
+        // `f + 1` guardians, sampled fresh per lnurl: enough that one is
+        // honest and reachable whenever the federation itself is, and random
+        // so bootstrap load spreads instead of pinning the lowest peer ids.
+        let guardians = config
+            .peers
+            .values()
+            .map(|endpoint| endpoint.iroh_pk)
+            .choose_multiple(
+                &mut rand::thread_rng(),
+                config.peers.to_num_peers().one_honest(),
+            );
+
+        let info = FederationInfoResponse::new(config).consensus_hash_sha256();
+
+        let request = LnurlRequest {
+            recipient,
+            guardians,
+            info,
+        };
+
+        let payload = picomint_base32::encode(&request);
+
+        Ok(picomint_lnurl::encode_lnurl(&format!(
+            "{lnurl_daemon}pay/{payload}"
+        )))
     }
 
     /// Re-run the threshold-consensus gateway query and re-probe every
@@ -755,9 +694,9 @@ impl crate::Client {
     pub async fn ln_refresh_gateways(&self, federation: FederationId) -> anyhow::Result<()> {
         let runtime = self.runtime(federation)?;
 
-        LightningClientModule::update_gateway_pks(runtime.ln.clone()).await?;
+        Ln::update_gateway_pks(runtime.ln.clone()).await?;
 
-        LightningClientModule::update_gateway_info(runtime.ln.clone()).await;
+        Ln::update_gateway_info(runtime.ln.clone()).await;
 
         Ok(())
     }

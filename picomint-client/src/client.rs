@@ -4,12 +4,12 @@ use std::sync::{Arc, RwLock};
 
 use crate::Endpoint;
 use crate::api::FederationApi;
-use crate::gw::GatewayClientModule;
-use crate::ln::LightningClientModule;
-use crate::mint::MintClientModule;
+use crate::gw::Gw;
+use crate::ln::Ln;
+use crate::mint::Mint;
 use crate::secret::{ClientSecret, Mnemonic};
 use crate::task::TaskGroup;
-use crate::wallet::WalletClientModule;
+use crate::wallet::Wallet;
 use anyhow::{Context as _, ensure};
 use futures::stream::BoxStream;
 use iroh::endpoint::presets::N0;
@@ -339,10 +339,10 @@ impl Client {
 /// outside the crate can hold a runtime across a [`Client::remove`].
 pub(crate) struct FederationRuntime {
     pub(crate) api: FederationApi,
-    pub(crate) mint: MintClientModule,
-    pub(crate) wallet: WalletClientModule,
-    pub(crate) ln: LightningClientModule,
-    pub(crate) gw: GatewayClientModule,
+    pub(crate) mint: Mint,
+    pub(crate) wallet: Wallet,
+    pub(crate) ln: Ln,
+    pub(crate) gw: Gw,
     tg: TaskGroup,
 }
 
@@ -372,7 +372,7 @@ impl FederationRuntime {
 
         let mint_context =
             crate::module::ClientContext::new(api.clone(), client.db.clone(), config.clone());
-        let mint = MintClientModule::new(
+        let mint = Mint::new(
             federation,
             config.mint.clone(),
             mint_context,
@@ -383,7 +383,7 @@ impl FederationRuntime {
 
         let wallet_context =
             crate::module::ClientContext::new(api.clone(), client.db.clone(), config.clone());
-        let wallet = WalletClientModule::new(
+        let wallet = Wallet::new(
             config.wallet.clone(),
             wallet_context,
             mint.clone(),
@@ -393,7 +393,7 @@ impl FederationRuntime {
 
         let ln_context =
             crate::module::ClientContext::new(api.clone(), client.db.clone(), config.clone());
-        let ln = LightningClientModule::new(
+        let ln = Ln::new(
             federation,
             config.ln.clone(),
             ln_context,
@@ -404,7 +404,7 @@ impl FederationRuntime {
 
         let gw_context =
             crate::module::ClientContext::new(api.clone(), client.db.clone(), config.clone());
-        let gw = GatewayClientModule::new(
+        let gw = Gw::new(
             federation,
             config.ln.clone(),
             gw_context,

@@ -41,32 +41,24 @@ use tracing::warn;
 const SLICE_SIZE: u64 = 1000;
 
 #[derive(Clone)]
-pub struct WalletClientModule {
+pub struct Wallet {
     secret: WalletSecret,
     cfg: WalletConfigConsensus,
     client_ctx: ClientContext,
-    mint: crate::mint::MintClientModule,
+    mint: crate::mint::Mint,
     send_executor: ModuleExecutor<SendStateMachine, SendStateMachineTable>,
 }
 
-impl WalletClientModule {
-    pub fn input_fee(&self) -> Amount {
-        self.cfg.input_fee
-    }
+impl Wallet {}
 
-    pub fn output_fee(&self) -> Amount {
-        self.cfg.output_fee
-    }
-}
-
-impl WalletClientModule {
+impl Wallet {
     pub fn new(
         cfg: WalletConfigConsensus,
         context: ClientContext,
-        mint: crate::mint::MintClientModule,
+        mint: crate::mint::Mint,
         secret: WalletSecret,
         tg: &TaskGroup,
-    ) -> WalletClientModule {
+    ) -> Wallet {
         let federation = context.federation();
         let send_executor = ModuleExecutor::new(
             context.db().clone(),
@@ -76,7 +68,7 @@ impl WalletClientModule {
             tg.clone(),
         );
 
-        let module = WalletClientModule {
+        let module = Wallet {
             secret,
             cfg,
             client_ctx: context,
@@ -90,31 +82,7 @@ impl WalletClientModule {
     }
 }
 
-impl WalletClientModule {
-    /// Returns the Bitcoin network for this federation.
-    pub fn get_network(&self) -> bitcoin::Network {
-        self.client_ctx.network()
-    }
-
-    /// Fetch the total value of bitcoin controlled by the federation.
-    pub async fn total_value(&self) -> anyhow::Result<bitcoin::Amount> {
-        self.client_ctx
-            .api()
-            .wallet_federation_wallet()
-            .await
-            .map(|tx_out| tx_out.map_or(bitcoin::Amount::ZERO, |tx_out| tx_out.value))
-    }
-
-    /// Fetch the consensus block count of the federation.
-    pub async fn block_count(&self) -> anyhow::Result<u64> {
-        self.client_ctx.api().wallet_consensus_block_count().await
-    }
-
-    /// Fetch the current consensus feerate.
-    pub async fn feerate(&self) -> anyhow::Result<Option<u64>> {
-        self.client_ctx.api().wallet_consensus_feerate().await
-    }
-
+impl Wallet {
     /// Fetch the current fee required to send an onchain payment.
     pub async fn send_fee(&self) -> Result<bitcoin::Amount, SendError> {
         self.client_ctx
@@ -125,56 +93,12 @@ impl WalletClientModule {
             .ok_or(SendError::NoConsensusFeerateAvailable)
     }
 
-    /// Send an onchain payment with the given fee, funded from `account`.
-    pub async fn send(
-        &self,
-        account: Account,
-        address: Address<NetworkUnchecked>,
-        amount: bitcoin::Amount,
-        fee: Option<bitcoin::Amount>,
-    ) -> Result<OperationId, SendError> {
-        let fee = match fee {
-            Some(fee) => fee,
-            None => self.send_fee().await?,
-        };
-
-        self.submit_send(account, address, amount, fee, false)
-    }
-
-    /// The largest whole-sat amount a [`Self::send_max`] from `account` can
-    /// pay onchain at the current consensus feerate: the account's notes
-    /// spent in full cover the payment, its onchain fee, the federation's
-    /// transaction fee and the integrator's cut, with less than a sat left
-    /// over. The send itself re-prices at the moment it is submitted, so
-    /// this is a quote — a feerate that moves in between moves the amount
-    /// with it.
-    pub async fn send_max_amount(&self, account: Account) -> Result<bitcoin::Amount, SendError> {
-        Ok(self.max_amount_at(account, self.send_fee().await?))
-    }
-
     fn max_amount_at(&self, account: Account, fee: bitcoin::Amount) -> bitcoin::Amount {
         let amount = self.mint.largest_affordable_amount(account, |_| {
             Amount::from_sat(fee.to_sat()) + self.cfg.output_fee
         });
 
         bitcoin::Amount::from_sat(amount.msat / 1000)
-    }
-
-    /// Send `account`'s whole balance onchain by spending every note it
-    /// holds. Identical to [`Self::send`] except that the amount is
-    /// [`Self::send_max_amount`]'s to compute rather than the caller's to
-    /// choose, and that change is minted at the max-send floor: no change
-    /// comes back and the sub-sat remainder is donated to the federation.
-    pub async fn send_max(
-        &self,
-        account: Account,
-        address: Address<NetworkUnchecked>,
-    ) -> Result<OperationId, SendError> {
-        let fee = self.send_fee().await?;
-
-        let amount = self.max_amount_at(account, fee);
-
-        self.submit_send(account, address, amount, fee, true)
     }
 
     fn submit_send(
@@ -235,18 +159,6 @@ impl WalletClientModule {
         dbtx.commit();
 
         Ok(operation)
-    }
-
-    /// Returns `account`'s next unused receive address, polling until the
-    /// initial address derivation has completed.
-    pub async fn receive(&self, account: Account) -> Address {
-        loop {
-            if let Some(idx) = self.highest_valid_index(account) {
-                return self.derive_address(account, idx);
-            }
-
-            sleep(Duration::from_secs(1)).await;
-        }
     }
 
     /// The largest valid address index `account` has reached, or `None` before
@@ -347,7 +259,7 @@ impl WalletClientModule {
     /// addresses in the same pass. The stream and its cursor are shared, so a
     /// each extra account costs another entry in the address map rather than
     /// another sweep.
-    async fn output_scanner(module: WalletClientModule) {
+    async fn output_scanner(module: Wallet) {
         for account in Account::USER_ACCOUNTS {
             if module.highest_valid_index(account).is_some() {
                 continue;
@@ -555,8 +467,15 @@ impl crate::Client {
         account: Account,
     ) -> anyhow::Result<Address> {
         let runtime = self.runtime(federation)?;
+        let wallet = &runtime.wallet;
 
-        Ok(runtime.wallet.receive(account).await)
+        loop {
+            if let Some(idx) = wallet.highest_valid_index(account) {
+                return Ok(wallet.derive_address(account, idx));
+            }
+
+            sleep(Duration::from_secs(1)).await;
+        }
     }
 
     /// Send an onchain payment funded from `account`. `fee` defaults to the
@@ -569,11 +488,15 @@ impl crate::Client {
         amount: bitcoin::Amount,
         fee: Option<bitcoin::Amount>,
     ) -> Result<OperationId, SendError> {
-        self.runtime(federation)
-            .map_err(|_| SendError::NotJoined)?
-            .wallet
-            .send(account, address, amount, fee)
-            .await
+        let runtime = self.runtime(federation).map_err(|_| SendError::NotJoined)?;
+        let wallet = &runtime.wallet;
+
+        let fee = match fee {
+            Some(fee) => fee,
+            None => wallet.send_fee().await?,
+        };
+
+        wallet.submit_send(account, address, amount, fee, false)
     }
 
     /// The largest whole-sat amount a [`Self::wallet_send_max`] from
@@ -584,11 +507,10 @@ impl crate::Client {
         federation: FederationId,
         account: Account,
     ) -> Result<bitcoin::Amount, SendError> {
-        self.runtime(federation)
-            .map_err(|_| SendError::NotJoined)?
-            .wallet
-            .send_max_amount(account)
-            .await
+        let runtime = self.runtime(federation).map_err(|_| SendError::NotJoined)?;
+        let wallet = &runtime.wallet;
+
+        Ok(wallet.max_amount_at(account, wallet.send_fee().await?))
     }
 
     /// Send `account`'s whole balance onchain by spending every note it
@@ -599,11 +521,14 @@ impl crate::Client {
         account: Account,
         address: Address<NetworkUnchecked>,
     ) -> Result<OperationId, SendError> {
-        self.runtime(federation)
-            .map_err(|_| SendError::NotJoined)?
-            .wallet
-            .send_max(account, address)
-            .await
+        let runtime = self.runtime(federation).map_err(|_| SendError::NotJoined)?;
+        let wallet = &runtime.wallet;
+
+        let fee = wallet.send_fee().await?;
+
+        let amount = wallet.max_amount_at(account, fee);
+
+        wallet.submit_send(account, address, amount, fee, true)
     }
 
     /// The current fee required to send an onchain payment.
@@ -623,16 +548,30 @@ impl crate::Client {
         &self,
         federation: FederationId,
     ) -> anyhow::Result<bitcoin::Amount> {
-        self.runtime(federation)?.wallet.total_value().await
+        let runtime = self.runtime(federation)?;
+        let wallet = &runtime.wallet;
+
+        wallet
+            .client_ctx
+            .api()
+            .wallet_federation_wallet()
+            .await
+            .map(|tx_out| tx_out.map_or(bitcoin::Amount::ZERO, |tx_out| tx_out.value))
     }
 
     /// The consensus block count of the federation.
     pub async fn wallet_block_count(&self, federation: FederationId) -> anyhow::Result<u64> {
-        self.runtime(federation)?.wallet.block_count().await
+        let runtime = self.runtime(federation)?;
+        let wallet = &runtime.wallet;
+
+        wallet.client_ctx.api().wallet_consensus_block_count().await
     }
 
     /// The current consensus feerate.
     pub async fn wallet_feerate(&self, federation: FederationId) -> anyhow::Result<Option<u64>> {
-        self.runtime(federation)?.wallet.feerate().await
+        let runtime = self.runtime(federation)?;
+        let wallet = &runtime.wallet;
+
+        wallet.client_ctx.api().wallet_consensus_feerate().await
     }
 }

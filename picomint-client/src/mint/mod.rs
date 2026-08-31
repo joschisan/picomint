@@ -11,7 +11,6 @@ mod send_sm;
 
 use picomint_sqlite::{DbRead, WriteTx};
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use crate::api::FederationApi;
 use crate::executor::ModuleExecutor;
@@ -46,7 +45,7 @@ const TARGET_PER_DENOMINATION: usize = 3;
 /// of them; a max send skips the two smallest, which lifts the change
 /// threshold (smallest change denomination + output fee = 2148 msat) above
 /// the largest sub-sat remainder an amount sized by
-/// [`MintClientModule::largest_affordable_amount`] can leave — one whole-sat
+/// [`Mint::largest_affordable_amount`] can leave — one whole-sat
 /// pricing step plus the gateway fee limits' ppm rates and the app cut's
 /// dust wrap, ~1.65 sat. A freshly priced max send therefore pulls every
 /// note and mints no change at all, while an amount gone stale against a
@@ -262,7 +261,7 @@ async fn scan_counters(
     }
 }
 
-impl MintClientModule {
+impl Mint {
     /// Hand out `account`'s next counter and persist the bump in the caller's
     /// dbtx, so a counter is only spent once the transaction carrying its
     /// blinded message is committed to.
@@ -375,7 +374,7 @@ impl MintClientModule {
     }
 }
 
-impl MintClientModule {
+impl Mint {
     pub fn new(
         federation: FederationId,
         cfg: MintConfigConsensus,
@@ -383,7 +382,7 @@ impl MintClientModule {
         secret: MintSecret,
         app_fee_ppm: u64,
         tg: &TaskGroup,
-    ) -> MintClientModule {
+    ) -> Mint {
         let sm_context = MintSmContext {
             client_ctx: context.clone(),
             federation,
@@ -418,7 +417,7 @@ impl MintClientModule {
             tg.clone(),
         );
 
-        MintClientModule {
+        Mint {
             federation,
             cfg,
             secret,
@@ -432,7 +431,7 @@ impl MintClientModule {
 }
 
 #[derive(Clone)]
-pub struct MintClientModule {
+pub struct Mint {
     federation: FederationId,
     cfg: MintConfigConsensus,
     secret: MintSecret,
@@ -456,15 +455,7 @@ pub struct MintSmContext {
     pub tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, tbs::PublicKeyShare>>,
 }
 
-impl MintClientModule {
-    pub fn input_fee(&self) -> Amount {
-        self.cfg.input_fee
-    }
-
-    pub fn output_fee(&self) -> Amount {
-        self.cfg.output_fee
-    }
-
+impl Mint {
     /// Balance the builder against mint's wallet (pulling funding notes when
     /// underfunded, generating change outputs when overfunded), sign and
     /// submit the resulting transaction, and spawn the
@@ -633,10 +624,6 @@ impl MintClientModule {
         balance(dbtx, self.federation, account)
     }
 
-    pub fn balance_notify(&self) -> Arc<tokio::sync::Notify> {
-        self.client_ctx.db().notify_for_table(&NoteTable)
-    }
-
     /// Value `account`'s notes can deliver to a transaction's outputs when
     /// spent in full — their face value minus one input fee per note. The
     /// budget a max-send amount is solved against.
@@ -784,14 +771,7 @@ impl MintClientModule {
     }
 }
 
-impl MintClientModule {
-    /// Count `account`'s `ECash` notes by denomination.
-    pub fn get_count_by_denomination(&self, account: Account) -> BTreeMap<Denomination, u64> {
-        let dbtx = self.client_ctx.db().begin_write();
-
-        Self::get_count_by_denomination_dbtx(&dbtx, self.federation, account)
-    }
-
+impl Mint {
     fn get_count_by_denomination_dbtx(
         dbtx: &impl DbRead,
         federation: FederationId,
@@ -806,275 +786,6 @@ impl MintClientModule {
         }
 
         acc
-    }
-
-    /// Send `ECash` for the given amount. The
-    /// amount will be rounded up to a multiple of 512 msat which is the
-    /// smallest denomination used throughout the client. If the rounded
-    /// amount cannot be covered with the ecash notes in the client's
-    /// database the client will create a transaction to reissue the
-    /// required denominations. It is safe to cancel the send method call
-    /// before the reissue is complete in which case the reissued notes are
-    /// returned to the regular balance. To cancel a successful ecash send
-    /// simply receive it yourself.
-    pub async fn send(&self, account: Account, amount: Amount) -> Result<ECash, SendECashError> {
-        let amount = round_to_multiple(amount, client_denominations().next().unwrap().amount());
-
-        let operation = OperationId::new_random();
-
-        // Fast path: the account already has notes that sum exactly to
-        // `amount`. Pull them out and emit `SendEvent` + `SendSuccessEvent`
-        // atomically in one dbtx — no tx, no SM.
-        let dbtx = self.client_ctx.db().begin_write();
-
-        if let Some(ecash) = send_ecash_dbtx(&dbtx, self.federation, account, amount) {
-            self.client_ctx
-                .log_event(&dbtx, account, operation, SendEvent { amount });
-            self.client_ctx.log_event(
-                &dbtx,
-                account,
-                operation,
-                SendSuccessEvent {
-                    ecash: ecash.clone(),
-                },
-            );
-            dbtx.commit();
-            return Ok(ecash);
-        }
-
-        // Slow path: send_ecash_dbtx is read-only when it returns None,
-        // so dropping this dbtx without committing is harmless.
-        drop(dbtx);
-
-        self.client_ctx
-            .api()
-            .liveness()
-            .await
-            .map_err(|_| SendECashError::Offline)?;
-
-        let dbtx = self.client_ctx.db().begin_write();
-
-        // Build target issuance requests up-front. Their outputs go into the
-        // builder first; the balance loop then pulls funding from the wallet
-        // and appends change outputs. We extend `issuance_requests` with the
-        // change requests after balance so the order matches the transaction's
-        // outputs and a single `MintStateMachine` can process both.
-        let mut issuance_requests: Vec<NoteIssuanceRequest> = Vec::new();
-        for d in represent_amount(amount) {
-            let counter = self.next_counter(&dbtx, account);
-
-            issuance_requests.push(NoteIssuanceRequest::new(account, d, counter, &self.secret));
-        }
-
-        let mut builder = TxBuilder::new();
-        for request in &issuance_requests {
-            builder.add_output(Output {
-                output: wire::Output::Mint(request.output()),
-                amount: request.denomination.amount(),
-                fee: self.cfg.output_fee,
-            });
-        }
-
-        // Between the targets and the change on both sides of the ledger:
-        // in the builder's outputs, and in the issuance order that mirrors
-        // them.
-        let fee_requests = self.add_fee_outputs(&dbtx, account, &mut builder);
-
-        let app_fee = fee_requests.iter().map(|r| r.denomination.amount()).sum();
-
-        issuance_requests.extend(fee_requests);
-
-        let deficit = builder.deficit();
-
-        let (funding_notes, change_requests) = self
-            .balance(&dbtx, account, &mut builder, false)
-            .ok_or(SendECashError::InsufficientBalance)?;
-
-        let funding: Amount = funding_notes.iter().map(|n| n.amount()).sum();
-
-        let remint = funding.saturating_sub(deficit);
-
-        let tx_fee = builder.total_fee();
-        let tx = builder.build();
-
-        let txid = tx.compute_txid();
-
-        // Everything past this point lands in the same dbtx that submits
-        // the reissuance: SendEvent → RemintEvent → TxCreateEvent →
-        // MintSM + SendSM. A crash before the commit leaves no half-state
-        // behind; on restart the operation simply doesn't exist.
-        self.tx_submission_executor.add_state_machine_dbtx(
-            &dbtx,
-            TxSubmissionStateMachine {
-                account,
-                operation,
-                tx,
-            },
-        );
-
-        self.client_ctx
-            .log_event(&dbtx, account, operation, SendEvent { amount });
-
-        self.client_ctx
-            .log_event(&dbtx, account, operation, RemintEvent { txid });
-
-        self.client_ctx.log_event(
-            &dbtx,
-            account,
-            operation,
-            crate::TxCreateEvent {
-                txid,
-                remint,
-                tx_fee,
-                app_fee,
-            },
-        );
-
-        issuance_requests.extend(change_requests);
-
-        let mint_sm = MintStateMachine {
-            account,
-            operation,
-            spendable_notes: funding_notes,
-            txid,
-            issuance_requests,
-        };
-
-        self.mint_executor.add_state_machine_dbtx(&dbtx, mint_sm);
-
-        let send_sm = SendStateMachine {
-            account,
-            operation,
-            amount,
-        };
-
-        self.send_executor.add_state_machine_dbtx(&dbtx, send_sm);
-
-        dbtx.commit();
-
-        // Wait for the SendStateMachine to fire its terminal event on
-        // the operation's event log.
-        let mut stream = self.client_ctx.subscribe_operation_events(operation);
-        while let Some(entry) = stream.next().await {
-            if let Some(ev) = entry.to_event::<SendSuccessEvent>() {
-                return Ok(ev.ecash);
-            }
-            if entry.to_event::<SendFailureEvent>().is_some() {
-                return Err(SendECashError::Failure);
-            }
-        }
-        unreachable!("subscribe_operation_events only ends at client shutdown")
-    }
-
-    /// Send everything `account` holds. `None` when it holds nothing.
-    ///
-    /// Takes the notes as they are rather than naming an amount, so there is
-    /// no denomination to round to and no subset to find: always one dbtx,
-    /// no transaction, no fee — and so, unlike `send`, not async.
-    pub fn send_max(&self, account: Account) -> Option<ECash> {
-        let operation = OperationId::new_random();
-        let dbtx = self.client_ctx.db().begin_write();
-
-        let notes = account_notes(&dbtx, self.federation, account);
-
-        if notes.is_empty() {
-            return None;
-        }
-
-        for note in &notes {
-            dbtx.remove(&NoteTable, &(self.federation, account, note.clone()))
-                .expect("Must delete existing spendable note");
-        }
-
-        let ecash = ECash::new(self.federation, notes);
-        let amount = ecash.amount();
-
-        self.client_ctx
-            .log_event(&dbtx, account, operation, SendEvent { amount });
-        self.client_ctx.log_event(
-            &dbtx,
-            account,
-            operation,
-            SendSuccessEvent {
-                ecash: ecash.clone(),
-            },
-        );
-
-        dbtx.commit();
-
-        Some(ecash)
-    }
-
-    /// Receive the `ECash` into `account` by reissuing the notes.
-    ///
-    /// The [`OperationId`] is derived from the ecash bytes alone, and the
-    /// guard it keys spans every account: a bundle can be reissued exactly
-    /// once per federation, and a second attempt — into this account or the
-    /// other one — fails with [`ReceiveECashError::AlreadyAttempted`] rather
-    /// than submitting a transaction doomed against already-spent notes.
-    pub fn receive(
-        &self,
-        account: Account,
-        ecash: &ECash,
-    ) -> Result<OperationId, ReceiveECashError> {
-        let operation = OperationId::from_encodable(ecash);
-
-        // A scan of a seed that never held anything produces one of these, so
-        // this is the ordinary shape of an empty restore — not an edge case.
-        // Without the guard it would balance to a transaction with no inputs
-        // and no outputs and submit it.
-        if ecash.notes.is_empty() {
-            return Err(ReceiveECashError::Empty);
-        }
-
-        // Every note in the bundle is an input, and they are the only inputs
-        // the account did not choose, so this is the one place a transaction
-        // can be handed more of them than it may carry.
-        if ecash.notes.len() > Transaction::MAX_INPUTS {
-            return Err(ReceiveECashError::TooManyNotes);
-        }
-
-        if ecash.mint != self.federation {
-            return Err(ReceiveECashError::WrongFederation);
-        }
-
-        if ecash
-            .notes
-            .iter()
-            .any(|note| note.amount() <= self.cfg.input_fee)
-        {
-            return Err(ReceiveECashError::UneconomicalDenomination);
-        }
-
-        let mut tx_builder = TxBuilder::new();
-        for note in &ecash.notes {
-            tx_builder.add_input(Input {
-                input: wire::Input::Mint(MintInput { note: note.note() }),
-                keypair: note.keypair,
-                amount: note.amount(),
-                fee: self.cfg.input_fee,
-            });
-        }
-
-        let dbtx = self.client_ctx.db().begin_write();
-
-        if dbtx
-            .insert(&ReceiveOperationTable, &(self.federation, operation), &())
-            .is_some()
-        {
-            return Err(ReceiveECashError::AlreadyAttempted);
-        }
-
-        let amount = ecash.amount();
-
-        self.finalize_and_submit_tx(&dbtx, account, operation, tx_builder, false, |txid| {
-            ReceiveEvent { txid, amount }
-        })
-        .ok_or(ReceiveECashError::InsufficientFunds)?;
-
-        dbtx.commit();
-
-        Ok(operation)
     }
 
     fn remove_spendable_note(
@@ -1245,23 +956,172 @@ impl crate::Client {
         federation: FederationId,
         account: Account,
     ) -> BTreeMap<Denomination, u64> {
-        MintClientModule::get_count_by_denomination_dbtx(&self.db.begin_read(), federation, account)
+        Mint::get_count_by_denomination_dbtx(&self.db.begin_read(), federation, account)
     }
 
-    /// Send [`ECash`] for the given amount from `account`, reissuing notes
-    /// through the federation when the balance's denominations cannot cover
-    /// it exactly. See [`MintClientModule::send`] on cancellation semantics.
+    /// Send [`ECash`] for the given amount from `account`. The amount is
+    /// rounded up to a multiple of the smallest client denomination; when the
+    /// balance's denominations cannot cover it exactly, a reissue transaction
+    /// mints them first. Safe to cancel before the reissue completes — the
+    /// reissued notes return to the regular balance. To cancel a successful
+    /// send, receive the ecash yourself.
     pub async fn mint_send(
         &self,
         federation: FederationId,
         account: Account,
         amount: Amount,
     ) -> Result<ECash, SendECashError> {
-        self.runtime(federation)
-            .map_err(|_| SendECashError::NotJoined)?
-            .mint
-            .send(account, amount)
+        let runtime = self
+            .runtime(federation)
+            .map_err(|_| SendECashError::NotJoined)?;
+        let mint = &runtime.mint;
+
+        let amount = round_to_multiple(amount, client_denominations().next().unwrap().amount());
+
+        let operation = OperationId::new_random();
+
+        // Fast path: the account already has notes that sum exactly to
+        // `amount`. Pull them out and emit `SendEvent` + `SendSuccessEvent`
+        // atomically in one dbtx — no tx, no SM.
+        let dbtx = mint.client_ctx.db().begin_write();
+
+        if let Some(ecash) = send_ecash_dbtx(&dbtx, mint.federation, account, amount) {
+            mint.client_ctx
+                .log_event(&dbtx, account, operation, SendEvent { amount });
+            mint.client_ctx.log_event(
+                &dbtx,
+                account,
+                operation,
+                SendSuccessEvent {
+                    ecash: ecash.clone(),
+                },
+            );
+            dbtx.commit();
+            return Ok(ecash);
+        }
+
+        // Slow path: send_ecash_dbtx is read-only when it returns None,
+        // so dropping this dbtx without committing is harmless.
+        drop(dbtx);
+
+        mint.client_ctx
+            .api()
+            .liveness()
             .await
+            .map_err(|_| SendECashError::Offline)?;
+
+        let dbtx = mint.client_ctx.db().begin_write();
+
+        // Build target issuance requests up-front. Their outputs go into the
+        // builder first; the balance loop then pulls funding from the wallet
+        // and appends change outputs. We extend `issuance_requests` with the
+        // change requests after balance so the order matches the transaction's
+        // outputs and a single `MintStateMachine` can process both.
+        let mut issuance_requests: Vec<NoteIssuanceRequest> = Vec::new();
+        for d in represent_amount(amount) {
+            let counter = mint.next_counter(&dbtx, account);
+
+            issuance_requests.push(NoteIssuanceRequest::new(account, d, counter, &mint.secret));
+        }
+
+        let mut builder = TxBuilder::new();
+        for request in &issuance_requests {
+            builder.add_output(Output {
+                output: wire::Output::Mint(request.output()),
+                amount: request.denomination.amount(),
+                fee: mint.cfg.output_fee,
+            });
+        }
+
+        // Between the targets and the change on both sides of the ledger:
+        // in the builder's outputs, and in the issuance order that mirrors
+        // them.
+        let fee_requests = mint.add_fee_outputs(&dbtx, account, &mut builder);
+
+        let app_fee = fee_requests.iter().map(|r| r.denomination.amount()).sum();
+
+        issuance_requests.extend(fee_requests);
+
+        let deficit = builder.deficit();
+
+        let (funding_notes, change_requests) = mint
+            .balance(&dbtx, account, &mut builder, false)
+            .ok_or(SendECashError::InsufficientBalance)?;
+
+        let funding: Amount = funding_notes.iter().map(|n| n.amount()).sum();
+
+        let remint = funding.saturating_sub(deficit);
+
+        let tx_fee = builder.total_fee();
+        let tx = builder.build();
+
+        let txid = tx.compute_txid();
+
+        // Everything past this point lands in the same dbtx that submits
+        // the reissuance: SendEvent → RemintEvent → TxCreateEvent →
+        // MintSM + SendSM. A crash before the commit leaves no half-state
+        // behind; on restart the operation simply doesn't exist.
+        mint.tx_submission_executor.add_state_machine_dbtx(
+            &dbtx,
+            TxSubmissionStateMachine {
+                account,
+                operation,
+                tx,
+            },
+        );
+
+        mint.client_ctx
+            .log_event(&dbtx, account, operation, SendEvent { amount });
+
+        mint.client_ctx
+            .log_event(&dbtx, account, operation, RemintEvent { txid });
+
+        mint.client_ctx.log_event(
+            &dbtx,
+            account,
+            operation,
+            crate::TxCreateEvent {
+                txid,
+                remint,
+                tx_fee,
+                app_fee,
+            },
+        );
+
+        issuance_requests.extend(change_requests);
+
+        let mint_sm = MintStateMachine {
+            account,
+            operation,
+            spendable_notes: funding_notes,
+            txid,
+            issuance_requests,
+        };
+
+        mint.mint_executor.add_state_machine_dbtx(&dbtx, mint_sm);
+
+        let send_sm = SendStateMachine {
+            account,
+            operation,
+            amount,
+        };
+
+        mint.send_executor.add_state_machine_dbtx(&dbtx, send_sm);
+
+        dbtx.commit();
+
+        // Wait for the SendStateMachine to fire its terminal event on
+        // the operation's event log.
+        let mut stream = mint.client_ctx.subscribe_operation_events(operation);
+        while let Some(entry) = stream.next().await {
+            if let Some(ev) = entry.to_event::<SendSuccessEvent>() {
+                return Ok(ev.ecash);
+            }
+            if entry.to_event::<SendFailureEvent>().is_some() {
+                return Err(SendECashError::Failure);
+            }
+        }
+        unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 
     /// Send everything `account` holds as one [`ECash`] bundle. `None` when
@@ -1271,7 +1131,40 @@ impl crate::Client {
         federation: FederationId,
         account: Account,
     ) -> anyhow::Result<Option<ECash>> {
-        Ok(self.runtime(federation)?.mint.send_max(account))
+        let runtime = self.runtime(federation)?;
+        let mint = &runtime.mint;
+
+        let operation = OperationId::new_random();
+        let dbtx = mint.client_ctx.db().begin_write();
+
+        let notes = account_notes(&dbtx, mint.federation, account);
+
+        if notes.is_empty() {
+            return Ok(None);
+        }
+
+        for note in &notes {
+            dbtx.remove(&NoteTable, &(mint.federation, account, note.clone()))
+                .expect("Must delete existing spendable note");
+        }
+
+        let ecash = ECash::new(mint.federation, notes);
+        let amount = ecash.amount();
+
+        mint.client_ctx
+            .log_event(&dbtx, account, operation, SendEvent { amount });
+        mint.client_ctx.log_event(
+            &dbtx,
+            account,
+            operation,
+            SendSuccessEvent {
+                ecash: ecash.clone(),
+            },
+        );
+
+        dbtx.commit();
+
+        Ok(Some(ecash))
     }
 
     /// Receive an [`ECash`] bundle into `account` by reissuing its notes.
@@ -1282,10 +1175,69 @@ impl crate::Client {
         account: Account,
         ecash: &ECash,
     ) -> Result<OperationId, ReceiveECashError> {
-        self.runtime(federation)
-            .map_err(|_| ReceiveECashError::NotJoined)?
-            .mint
-            .receive(account, ecash)
+        let runtime = self
+            .runtime(federation)
+            .map_err(|_| ReceiveECashError::NotJoined)?;
+        let mint = &runtime.mint;
+
+        let operation = OperationId::from_encodable(ecash);
+
+        // A scan of a seed that never held anything produces one of these, so
+        // this is the ordinary shape of an empty restore — not an edge case.
+        // Without the guard it would balance to a transaction with no inputs
+        // and no outputs and submit it.
+        if ecash.notes.is_empty() {
+            return Err(ReceiveECashError::Empty);
+        }
+
+        // Every note in the bundle is an input, and they are the only inputs
+        // the account did not choose, so this is the one place a transaction
+        // can be handed more of them than it may carry.
+        if ecash.notes.len() > Transaction::MAX_INPUTS {
+            return Err(ReceiveECashError::TooManyNotes);
+        }
+
+        if ecash.mint != mint.federation {
+            return Err(ReceiveECashError::WrongFederation);
+        }
+
+        if ecash
+            .notes
+            .iter()
+            .any(|note| note.amount() <= mint.cfg.input_fee)
+        {
+            return Err(ReceiveECashError::UneconomicalDenomination);
+        }
+
+        let mut tx_builder = TxBuilder::new();
+        for note in &ecash.notes {
+            tx_builder.add_input(Input {
+                input: wire::Input::Mint(MintInput { note: note.note() }),
+                keypair: note.keypair,
+                amount: note.amount(),
+                fee: mint.cfg.input_fee,
+            });
+        }
+
+        let dbtx = mint.client_ctx.db().begin_write();
+
+        if dbtx
+            .insert(&ReceiveOperationTable, &(mint.federation, operation), &())
+            .is_some()
+        {
+            return Err(ReceiveECashError::AlreadyAttempted);
+        }
+
+        let amount = ecash.amount();
+
+        mint.finalize_and_submit_tx(&dbtx, account, operation, tx_builder, false, |txid| {
+            ReceiveEvent { txid, amount }
+        })
+        .ok_or(ReceiveECashError::InsufficientFunds)?;
+
+        dbtx.commit();
+
+        Ok(operation)
     }
 }
 
