@@ -23,7 +23,7 @@ use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::wallet as common;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_sqlite::{Database, DbRead, ReadTx, WriteTx};
+use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 use tokio::time::sleep;
 
 use crate::config::ServerConfig;

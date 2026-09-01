@@ -15,11 +15,11 @@ pub mod ui;
 use std::sync::Arc;
 
 /// Name of the server daemon's database file on disk.
-pub const DB_FILE: &str = "database.sqlite";
+pub const DB_FILE: &str = "database.redb";
 
 use config::ServerConfig;
 use picomint_bitcoin_rpc::BitcoindClient;
-use picomint_sqlite::{Database, DbRead};
+use picomint_redb::{Database, DbRead};
 use tokio::net::TcpListener;
 use tracing::info;
 

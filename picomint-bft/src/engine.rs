@@ -5,7 +5,7 @@ use anyhow::{Result, ensure};
 use async_channel::Sender;
 use picomint_core::{NumPeers, PeerId};
 use picomint_encoding::Encodable;
-use picomint_sqlite::{Database, DbRead, Table, WriteTx};
+use picomint_redb::{Database, DbRead, Table, WriteTx};
 use tokio::time::{Instant, sleep_until};
 use tracing::warn;
 

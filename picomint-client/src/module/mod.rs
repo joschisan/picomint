@@ -9,7 +9,7 @@ use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_eventlog::{Event, EventLogEntry};
-use picomint_sqlite::{Database, WriteTx};
+use picomint_redb::{Database, WriteTx};
 
 use crate::{TxAcceptEvent, TxRejectEvent};
 

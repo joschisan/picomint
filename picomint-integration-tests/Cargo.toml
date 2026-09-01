@@ -31,7 +31,7 @@ picomint-gateway-cli-core = { workspace = true }
 picomint-guardian-cli-core = { workspace = true }
 picomint-lnurl = { workspace = true }
 picomint-rpc = { workspace = true }
-picomint-sqlite = { workspace = true }
+picomint-redb = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

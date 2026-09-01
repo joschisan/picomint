@@ -40,7 +40,7 @@ picomint-bitcoin-rpc = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-guardian-cli-core = { workspace = true }
-picomint-sqlite = { workspace = true }
+picomint-redb = { workspace = true }
 picomint-rpc = { workspace = true }
 qrcode = { workspace = true }
 rand = { workspace = true }

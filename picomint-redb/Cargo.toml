@@ -1,21 +1,21 @@
 [package]
 authors = { workspace = true }
-description = "picomint-sqlite provides a SQLite-backed database implementation for Picomint."
+description = "picomint-redb provides a redb-backed database implementation for Picomint."
 edition = { workspace = true }
 license = { workspace = true }
-name = "picomint-sqlite"
+name = "picomint-redb"
 readme = { workspace = true }
 repository = { workspace = true }
 version = { workspace = true }
 
 [lib]
-name = "picomint_sqlite"
+name = "picomint_redb"
 path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
 picomint-encoding = { workspace = true }
-rusqlite = { workspace = true }
+redb = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt"] }
 
 [dev-dependencies]

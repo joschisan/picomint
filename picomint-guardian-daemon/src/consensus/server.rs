@@ -12,7 +12,7 @@ use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, PeerId};
-use picomint_sqlite::{Database, WriteTx};
+use picomint_redb::{Database, WriteTx};
 use tracing::info;
 
 use crate::config::ServerConfig;

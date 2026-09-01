@@ -32,7 +32,7 @@ picomint-encoding = { workspace = true }
 picomint-eventlog = { workspace = true }
 picomint-lnurl = { workspace = true }
 picomint-rpc = { workspace = true }
-picomint-sqlite = { workspace = true }
+picomint-redb = { workspace = true }
 rand = { workspace = true }
 secp256k1 = { workspace = true }
 serde = { workspace = true }

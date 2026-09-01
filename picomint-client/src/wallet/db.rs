@@ -1,6 +1,6 @@
 use picomint_core::config::FederationId;
 use picomint_core::core::Account;
-use picomint_sqlite::table;
+use picomint_redb::table;
 
 // How far the scanner has walked the federation's output stream. The stream
 // is federation-wide and one sweep serves every account, so this is a single

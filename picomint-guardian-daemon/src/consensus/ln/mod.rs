@@ -17,7 +17,7 @@ use picomint_core::ln::{
 };
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{Amount, NumPeersExt, OutPoint, PeerId};
-use picomint_sqlite::{DbRead, ReadTx, WriteTx};
+use picomint_redb::{DbRead, ReadTx, WriteTx};
 use tpe::{PublicKeyShare, SecretKeyShare};
 use tracing::trace;
 

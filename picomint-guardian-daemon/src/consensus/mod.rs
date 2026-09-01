@@ -19,7 +19,7 @@ use picomint_core::module::Method;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::wire;
-use picomint_sqlite::{Database, DbRead};
+use picomint_redb::{Database, DbRead};
 use tokio::net::TcpListener;
 use tokio::time::sleep;
 use tracing::{info, warn};

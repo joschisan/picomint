@@ -2,7 +2,7 @@ use bitcoin::{TxOut, Txid};
 use picomint_core::PeerId;
 use picomint_core::wallet::TxInfo;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_sqlite::table;
+use picomint_redb::table;
 use serde::Serialize;
 
 use super::{FederationTx, FederationWallet};

@@ -14,7 +14,7 @@ use picomint_core::ln::{LightningInput, OutgoingWitness};
 use picomint_core::wire;
 use picomint_core::{OutPoint, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_sqlite::{WriteTx, table};
+use picomint_redb::{WriteTx, table};
 use secp256k1::Keypair;
 use secp256k1::schnorr::Signature;
 use tracing::{error, instrument};

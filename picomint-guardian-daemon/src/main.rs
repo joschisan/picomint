@@ -65,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting picomint-guardian-daemon (version: {picomint_version})");
 
-    let db = picomint_sqlite::Database::open(server_opts.data_dir.join(DB_FILE))
+    let db = picomint_redb::Database::open(server_opts.data_dir.join(DB_FILE))
         .expect("Failed to open picomint-guardian-daemon database");
 
     let settings = ConfigGenSettings {

@@ -25,7 +25,7 @@ use picomint_gateway_daemon::db::{
     IncomingOfferTable, OutgoingContractTable, ProcessedLdkEventTable,
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
-use picomint_sqlite::{DbRead, WriteTx};
+use picomint_redb::{DbRead, WriteTx};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
@@ -146,7 +146,7 @@ fn main() -> anyhow::Result<()> {
         .install_default()
         .ok();
 
-    let gateway_db = picomint_sqlite::Database::open(opts.data_dir.join(DB_FILE))?;
+    let gateway_db = picomint_redb::Database::open(opts.data_dir.join(DB_FILE))?;
 
     // 3. Load or init the gateway identity: the mnemonic (federation-client
     // seed + LDK entropy) and the independent iroh key the public API is

@@ -18,7 +18,7 @@ use futures::Stream;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_sqlite::{Database, DbRead, WriteTx, table};
+use picomint_redb::{Database, DbRead, WriteTx, table};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 

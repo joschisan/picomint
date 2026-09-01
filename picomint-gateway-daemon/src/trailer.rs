@@ -22,7 +22,7 @@ use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use picomint_client::gw::events::{ReceiveRefundEvent, ReceiveSuccessEvent};
 use picomint_core::core::OperationId;
 use picomint_eventlog::EventLogEntry;
-use picomint_sqlite::{DbRead, WriteTx};
+use picomint_redb::{DbRead, WriteTx};
 
 use crate::AppState;
 use crate::db::{EventCursorTable, IncomingOfferTable, OutgoingContractTable};

@@ -3,7 +3,7 @@ use std::sync::atomic::AtomicU8;
 
 use anyhow::bail;
 use futures::StreamExt as _;
-use picomint_sqlite::Database;
+use picomint_redb::Database;
 use tokio::try_join;
 use tracing::info;
 
@@ -11,9 +11,7 @@ use super::{EventKind, EventSource, log_event_raw, subscribe_operation_events};
 
 #[test_log::test(tokio::test)]
 async fn sanity_subscribe_operation_events() {
-    let dir = tempfile::TempDir::new().expect("failed to create temp dir");
-
-    let db = Database::open(dir.path().join("test.sqlite")).expect("sqlite open failed");
+    let db = Database::open_in_memory();
 
     let operation = picomint_core::core::OperationId::new_random();
     let counter = Arc::new(AtomicU8::new(0));

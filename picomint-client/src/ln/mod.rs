@@ -8,7 +8,7 @@ mod secret;
 mod send_sm;
 
 use anyhow::Context;
-use picomint_sqlite::{Database, DbRead, ReadTx, WriteTx};
+use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 use std::sync::Arc;
 use tokio::sync::Notify;
 

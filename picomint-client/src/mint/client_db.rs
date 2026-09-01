@@ -1,6 +1,6 @@
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
-use picomint_sqlite::table;
+use picomint_redb::table;
 
 use super::SpendableNote;
 

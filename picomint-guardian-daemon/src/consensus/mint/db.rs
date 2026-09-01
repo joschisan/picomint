@@ -1,7 +1,7 @@
 use picomint_core::OutPoint;
 use picomint_core::mint::Denomination;
 use picomint_core::secp256k1::XOnlyPublicKey;
-use picomint_sqlite::table;
+use picomint_redb::table;
 use tbs::{BlindedMessage, BlindedSignatureShare};
 
 table!(

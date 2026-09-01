@@ -18,8 +18,8 @@ use picomint_core::fee::FeeConfig;
 use picomint_core::invite::InviteCode;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_eventlog::{EventLogEntry, EventLogId};
+use picomint_redb::{Database, DbRead, table};
 use picomint_rpc::connection::ConnStatus;
-use picomint_sqlite::{Database, DbRead, table};
 use tracing::debug;
 
 // The config of every joined federation. The row is what makes a federation

@@ -1,7 +1,7 @@
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::ln::gateway::GatewayPk;
-use picomint_sqlite::table;
+use picomint_redb::table;
 
 table!(
     IncomingContractStreamIndexTable,

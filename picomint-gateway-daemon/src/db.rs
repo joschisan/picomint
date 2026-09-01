@@ -6,7 +6,7 @@ use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_eventlog::EventLogId;
-use picomint_sqlite::{Database, DbRead, table};
+use picomint_redb::{Database, DbRead, table};
 use rand::rngs::OsRng;
 
 // BIP39 entropy for the daemon's mnemonic, written once on first start.
