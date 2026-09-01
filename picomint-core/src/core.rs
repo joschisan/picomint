@@ -108,6 +108,8 @@ pub enum UserAccount {
     Primary,
     Secondary,
     Tertiary,
+    Quaternary,
+    Quinary,
 }
 
 impl From<UserAccount> for Account {
@@ -123,6 +125,8 @@ impl Account {
     pub const PRIMARY: Account = Account::User(UserAccount::Primary);
     pub const SECONDARY: Account = Account::User(UserAccount::Secondary);
     pub const TERTIARY: Account = Account::User(UserAccount::Tertiary);
+    pub const QUATERNARY: Account = Account::User(UserAccount::Quaternary);
+    pub const QUINARY: Account = Account::User(UserAccount::Quinary);
 
     /// Every account a counterparty can pay into, in key order — and so the
     /// ones the address and contract scanners trial their keys against.
@@ -134,8 +138,13 @@ impl Account {
     ///
     /// The set is fixed on purpose: every account exists from the moment a
     /// client is built, so no account ever joins a stream late.
-    pub const USER_ACCOUNTS: [Account; 3] =
-        [Account::PRIMARY, Account::SECONDARY, Account::TERTIARY];
+    pub const USER_ACCOUNTS: [Account; 5] = [
+        Account::PRIMARY,
+        Account::SECONDARY,
+        Account::TERTIARY,
+        Account::QUATERNARY,
+        Account::QUINARY,
+    ];
 
     /// Every account that holds notes, in key order — the set a seed scan has
     /// to walk.
@@ -148,10 +157,12 @@ impl Account {
     /// like any other — cuts collected but not yet swept when the wallet was
     /// lost. Its counter space is walked from zero by the next client either
     /// way, so leaving it out strands whatever it re-derives.
-    pub const ALL: [Account; 4] = [
+    pub const ALL: [Account; 6] = [
         Account::PRIMARY,
         Account::SECONDARY,
         Account::TERTIARY,
+        Account::QUATERNARY,
+        Account::QUINARY,
         Account::AppFee,
     ];
 }
