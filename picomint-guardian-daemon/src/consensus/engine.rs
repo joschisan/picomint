@@ -479,9 +479,6 @@ async fn process_consensus_item(
     item: &ConsensusItem,
 ) -> anyhow::Result<()> {
     match item {
-        ConsensusItem::Module(ci) => {
-            server.process_module_ci(dbtx, peer, ci).await?;
-        }
         ConsensusItem::Tx(tx) => {
             let txid = tx.compute_txid();
 
@@ -507,6 +504,9 @@ async fn process_consensus_item(
             let audit = server.audit(dbtx);
 
             assert!(audit.total >= 0, "Failed audit: {audit:?}");
+        }
+        ConsensusItem::Module(ci) => {
+            server.process_module_ci(dbtx, peer, ci).await?;
         }
         ConsensusItem::Version(vote) => {
             let default_version = server.cfg.consensus.default_version;

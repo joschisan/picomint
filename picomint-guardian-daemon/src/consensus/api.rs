@@ -1,26 +1,16 @@
 //! Implements the client API through which users interact with the federation
 
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
-
-use anyhow::Result;
 use chrono::{Days, Utc};
 use picomint_core::TransactionId;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
-use picomint_core::methods::CoreMethod;
 use picomint_core::module::audit::AuditSummary;
-use picomint_core::tx::{ConsensusItem, Transaction, TxError};
+use picomint_core::tx::{ConsensusItem, TxError};
 
-use crate::consensus::rpc;
-use crate::{handler, handler_async};
 use picomint_redb::DbRead;
 use tokio::sync::broadcast;
-use tracing::{info, warn};
 
-use crate::consensus::db::{
-    AcceptedItemTable, AcceptedTxTable, ExpiryStatusTable, InviteMeta, InviteMetaTable,
-    InviteUserCountTable, SignedSessionOutcomeTable,
-};
+use crate::consensus::db::{ExpiryStatusTable, InviteMeta, InviteMetaTable};
 use crate::consensus::engine::get_finished_session_count;
 use crate::consensus::server::Server;
 use crate::p2p::P2PStatusReceivers;
@@ -36,105 +26,6 @@ pub struct ConsensusApi {
 }
 
 impl ConsensusApi {
-    /// Submit a transaction and long-poll until it is either accepted by
-    /// consensus or becomes invalid. On acceptance, logs the wall-clock from
-    /// submission to confirmation, so the server side of client-observed
-    /// latency can be profiled straight from the guardian's `info` logs.
-    pub async fn submit_tx(&self, tx: Transaction) -> Result<(), TxError> {
-        // Consensus checks these too, but that is after the transaction has
-        // been proposed, and a transaction we propose travels in a bft unit
-        // our peers have to be able to receive. The counts are what hold a
-        // submission to a size that fits one; the rest is refusing to carry a
-        // transaction consensus is certain to throw out.
-        if tx.inputs.is_empty() {
-            return Err(TxError::EmptyInputs);
-        }
-
-        if tx.outputs.is_empty() {
-            return Err(TxError::EmptyOutputs);
-        }
-
-        if tx.inputs.len() > Transaction::MAX_INPUTS {
-            return Err(TxError::TooManyInputs);
-        }
-
-        if tx.outputs.len() > Transaction::MAX_OUTPUTS {
-            return Err(TxError::TooManyOutputs);
-        }
-
-        if tx.signatures.len() != tx.inputs.len() {
-            return Err(TxError::InvalidWitnessLength);
-        }
-
-        let start = Instant::now();
-
-        // Subscribe before submitting so a rejection cannot land in the gap.
-        let mut rejections = self.tx_reject_tx.subscribe();
-
-        let notify_item = self.server.db.notify_for_table(&AcceptedItemTable);
-        let notify_session = self.server.db.notify_for_table(&SignedSessionOutcomeTable);
-
-        let mut notified_item = Box::pin(notify_item.notified());
-        let mut notified_session = Box::pin(notify_session.notified());
-
-        if self
-            .server
-            .db
-            .begin_read()
-            .get(&AcceptedTxTable, &tx.compute_txid())
-            .is_some()
-        {
-            return Ok(());
-        }
-
-        if self
-            .submission_tx
-            .send(ConsensusItem::Tx(tx.clone()))
-            .await
-            .is_err()
-        {
-            warn!("Unable to submit the tx into consensus");
-        }
-
-        loop {
-            tokio::select! {
-                _ = &mut notified_item => {
-                    if self.server.db.begin_read().get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
-                        info!(
-                            txid = %tx.compute_txid(),
-                            elapsed_ms = start.elapsed().as_millis() as u64,
-                            "Submission RPC confirmed tx",
-                        );
-
-                        return Ok(());
-                    }
-
-                    notified_item = Box::pin(notify_item.notified());
-                }
-                rejection = rejections.recv() => {
-                    let (rejected, error) =
-                        rejection.expect("The tx rejection broadcast failed");
-
-                    if rejected == tx.compute_txid() {
-                        return Err(error);
-                    }
-                }
-                _ = &mut notified_session => {
-                    if self
-                        .submission_tx
-                        .send(ConsensusItem::Tx(tx.clone()))
-                        .await
-                        .is_err()
-                    {
-                        warn!("Unable to submit the tx into consensus");
-                    }
-
-                    notified_session = Box::pin(notify_session.notified());
-                }
-            }
-        }
-    }
-
     pub fn session_count(&self) -> u64 {
         get_finished_session_count(&self.server.db.begin_read())
     }
@@ -171,44 +62,10 @@ impl ConsensusApi {
         (self.server.cfg.get_invite_code(invite_id), meta)
     }
 
-    /// Check the expiration date and user limit of the invite code with this
-    /// invite id and count the download towards its user limit. Returns an
-    /// error string (surfaced to the client) for unknown, expired, or
-    /// exhausted invite codes.
-    pub fn register_config_download(&self, invite_id: [u8; 16]) -> Result<(), String> {
-        let dbtx = self.server.db.begin_write();
-
-        let meta = dbtx
-            .get(&InviteMetaTable, &invite_id)
-            .ok_or_else(|| "Unknown invite id".to_string())?;
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock is after the unix epoch")
-            .as_secs();
-
-        if meta.expires_at <= now {
-            return Err("Invite code is expired".to_string());
-        }
-
-        let users = dbtx.get(&InviteUserCountTable, &invite_id).unwrap_or(0);
-
-        if users >= meta.user_limit {
-            return Err("Invite code has reached its user limit".to_string());
-        }
-
-        dbtx.insert(&InviteUserCountTable, &invite_id, &(users + 1));
-
-        dbtx.commit();
-
-        Ok(())
-    }
-
     pub fn federation_audit(&self) -> AuditSummary {
         // Modules read their own tables during `audit`; we open a write tx and
         // drop it without commit after building the audit view.
-        let dbtx = self.server.db.begin_write();
-        self.server.audit(&dbtx)
+        self.server.audit(&self.server.db.begin_write())
     }
 
     /// Read this guardian's announced expiry status from the local
@@ -233,17 +90,5 @@ impl ConsensusApi {
             }
         }
         dbtx.commit();
-    }
-}
-
-impl ConsensusApi {
-    pub async fn handle_api(&self, method: CoreMethod) -> Result<Vec<u8>, String> {
-        match method {
-            CoreMethod::SubmitTx(req) => handler_async!(submit_tx, self, req).await,
-            CoreMethod::Config(req) => handler!(config, self, req).await,
-            CoreMethod::Liveness(req) => handler!(liveness, self, req).await,
-            CoreMethod::ExpiryStatus(req) => handler!(expiry_status, self, req).await,
-            CoreMethod::FederationInfo(req) => handler!(federation_info, self, req).await,
-        }
     }
 }
