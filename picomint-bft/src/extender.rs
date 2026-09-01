@@ -56,7 +56,7 @@ use std::collections::VecDeque;
 
 use bitcoin::hashes::Hash as _;
 use picomint_encoding::Encodable;
-use picomint_sqlite::{DbRead, Table};
+use picomint_redb::{DbRead, Table};
 
 use crate::data::DataProvider;
 use crate::engine::Engine;

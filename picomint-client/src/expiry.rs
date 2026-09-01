@@ -9,7 +9,7 @@
 
 use picomint_core::config::FederationId;
 use picomint_core::expiry::ExpiryStatus;
-use picomint_sqlite::{Database, DbRead, WriteTx, table};
+use picomint_redb::{Database, DbRead, WriteTx, table};
 use thiserror::Error;
 use tracing::warn;
 

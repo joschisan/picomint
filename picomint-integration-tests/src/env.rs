@@ -15,7 +15,7 @@ use picomint_client::{Client, Mnemonic};
 use picomint_core::config::FederationId;
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::gateway::GatewayPk;
-use picomint_sqlite::Database;
+use picomint_redb::Database;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::block_in_place;

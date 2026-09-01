@@ -1,4 +1,4 @@
-use picomint_sqlite::{WriteTx, table};
+use picomint_redb::{WriteTx, table};
 use std::collections::BTreeMap;
 
 use anyhow::{Context, anyhow};

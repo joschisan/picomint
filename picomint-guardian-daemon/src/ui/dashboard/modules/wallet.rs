@@ -1,5 +1,5 @@
 use maud::{Markup, html};
-use picomint_sqlite::ReadTx;
+use picomint_redb::ReadTx;
 
 use crate::consensus::wallet;
 use crate::ui::copiable_text;

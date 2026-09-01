@@ -102,7 +102,7 @@ picomint-guardian-cli config > config.json
 
 This single file is the only state you need to keep. It contains your
 guardian's secret keys plus the federation's consensus config. The live
-`database.sqlite` is operational state (BFT sessions, block sync) which is
+`database.redb` is operational state (BFT sessions, block sync) which is
 reconstructed from peers when a restored guardian rejoins.
 
 If your deployment is ever lost, copy the backup back into a fresh container:

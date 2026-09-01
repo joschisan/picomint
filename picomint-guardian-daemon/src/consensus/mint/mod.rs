@@ -12,7 +12,7 @@ use picomint_core::mint::methods::MintMethod;
 use picomint_core::mint::{MintInput, MintInputError, MintOutput, MintOutputError, verify_note};
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{Amount, OutPoint};
-use picomint_sqlite::{DbRead, WriteTx};
+use picomint_redb::{DbRead, WriteTx};
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
 
 use crate::config::ServerConfig;

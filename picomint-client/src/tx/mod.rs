@@ -7,7 +7,7 @@ pub use builder::*;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 pub use picomint_core::tx::{ConsensusItem, Transaction, TxError};
-use picomint_sqlite::{Database, DbRead, ReadTx, WriteTx};
+use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 pub use sm::*;
 use tokio::sync::Notify;
 

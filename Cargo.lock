@@ -3347,9 +3347,8 @@ dependencies = [
  "bitcoin",
  "picomint-core",
  "picomint-encoding",
- "picomint-sqlite",
+ "picomint-redb",
  "rand 0.8.6",
- "tempfile",
  "tokio",
  "tracing",
 ]
@@ -3385,8 +3384,8 @@ dependencies = [
  "picomint-encoding",
  "picomint-eventlog",
  "picomint-lnurl",
+ "picomint-redb",
  "picomint-rpc",
- "picomint-sqlite",
  "picomint-tbs",
  "picomint-tpe",
  "rand 0.8.6",
@@ -3461,10 +3460,9 @@ dependencies = [
  "futures",
  "picomint-core",
  "picomint-encoding",
- "picomint-sqlite",
+ "picomint-redb",
  "serde",
  "serde_json",
- "tempfile",
  "test-log",
  "tokio",
  "tracing",
@@ -3531,8 +3529,8 @@ dependencies = [
  "picomint-encoding",
  "picomint-eventlog",
  "picomint-gateway-cli-core",
+ "picomint-redb",
  "picomint-rpc",
- "picomint-sqlite",
  "rand 0.8.6",
  "reqwest 0.13.3",
  "rusqlite",
@@ -3595,8 +3593,8 @@ dependencies = [
  "picomint-core",
  "picomint-encoding",
  "picomint-guardian-cli-core",
+ "picomint-redb",
  "picomint-rpc",
- "picomint-sqlite",
  "picomint-tbs",
  "picomint-tpe",
  "picomint-tss",
@@ -3635,8 +3633,8 @@ dependencies = [
  "picomint-gateway-cli-core",
  "picomint-guardian-cli-core",
  "picomint-lnurl",
+ "picomint-redb",
  "picomint-rpc",
- "picomint-sqlite",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3685,6 +3683,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-redb"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "picomint-encoding",
+ "redb",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "picomint-rpc"
 version = "0.1.0"
 dependencies = [
@@ -3696,17 +3705,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
-]
-
-[[package]]
-name = "picomint-sqlite"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "picomint-encoding",
- "rusqlite",
- "tempfile",
- "tokio",
 ]
 
 [[package]]
@@ -4220,6 +4218,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caa0f4137e1c0a72f4c651489402276c8e8e1cf081f3b0ba156d2cbeef09e86a"
 dependencies = [
  "rand_core 0.10.1",
+]
+
+[[package]]
+name = "redb"
+version = "4.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de6c3b63e007e90ce536ec2ae4690826136a20ec8dbbbb400daef1bb999d2e36"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

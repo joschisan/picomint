@@ -15,7 +15,7 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use maud::html;
 
-use picomint_sqlite::DbRead;
+use picomint_redb::DbRead;
 
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::ExpiryStatusTable;

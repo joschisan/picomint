@@ -31,7 +31,7 @@ picomint-encoding = { workspace = true }
 picomint-eventlog = { workspace = true }
 picomint-gateway-cli-core = { workspace = true }
 picomint-rpc = { workspace = true }
-picomint-sqlite = { workspace = true }
+picomint-redb = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }

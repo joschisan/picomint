@@ -7,7 +7,7 @@ use picomint_core::mint::methods::{
     SignatureSharesRestoreRequest, SignatureSharesRestoreResponse, SpendStateRequest,
     SpendStateResponse,
 };
-use picomint_sqlite::{DbRead, ReadTx};
+use picomint_redb::{DbRead, ReadTx};
 use tbs::BlindedSignatureShare;
 
 use crate::consensus::server::Server;

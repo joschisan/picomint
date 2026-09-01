@@ -25,7 +25,7 @@ use picomint_core::wallet::{
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, TransactionId};
 use picomint_encoding::Encodable;
-use picomint_sqlite::{Database, DbRead, ReadTx, WriteTx};
+use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 use std::sync::Arc;
 use tokio::sync::Notify;
 

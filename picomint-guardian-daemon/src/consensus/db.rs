@@ -5,7 +5,7 @@ use picomint_core::tx::ConsensusItem;
 use picomint_core::version::ConsensusVersion;
 use picomint_core::{NumPeers, PeerId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
-use picomint_sqlite::{DbRead, table};
+use picomint_redb::{DbRead, table};
 
 table!(
     AcceptedItemTable,

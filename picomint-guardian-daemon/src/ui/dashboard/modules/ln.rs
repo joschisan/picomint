@@ -4,7 +4,7 @@ use axum::extract::{Form, State};
 use axum::response::{Html, IntoResponse};
 use maud::{Markup, html};
 use picomint_core::ln::gateway::GatewayPk;
-use picomint_sqlite::ReadTx;
+use picomint_redb::ReadTx;
 
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::ln;

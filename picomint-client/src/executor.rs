@@ -18,7 +18,7 @@ use std::future::Future;
 use crate::module::ClientContext;
 use picomint_core::config::FederationId;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_sqlite::{DbRead, Prefix, Table, WriteTx};
+use picomint_redb::{DbRead, Prefix, Table, WriteTx};
 
 /// Random opaque identifier assigned by the executor when a state
 /// machine is first inserted. Used as the table key; the state machine

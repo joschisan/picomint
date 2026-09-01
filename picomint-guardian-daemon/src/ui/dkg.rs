@@ -13,7 +13,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse};
 use maud::{Markup, html};
-use picomint_sqlite::{Database, DbRead};
+use picomint_redb::{Database, DbRead};
 
 use crate::config::db::ConfigGenParamsTable;
 use crate::config::setup::PeerSetupCode;

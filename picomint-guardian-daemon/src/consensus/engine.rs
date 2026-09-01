@@ -11,7 +11,7 @@ use picomint_core::tx::{ConsensusItem, TxError};
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::{NumPeersExt, PeerId, TransactionId};
 use picomint_encoding::Encodable;
-use picomint_sqlite::{DbRead, ReadTx, WriteTx};
+use picomint_redb::{DbRead, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
 use tokio::sync::broadcast;
 use tracing::{info, instrument};

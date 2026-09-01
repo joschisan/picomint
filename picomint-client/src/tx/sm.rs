@@ -5,7 +5,7 @@ use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::tx::Transaction;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_sqlite::{WriteTx, table};
+use picomint_redb::{WriteTx, table};
 
 use crate::executor::{SmId, StateMachine};
 use crate::{TxAcceptEvent, TxRejectEvent};
