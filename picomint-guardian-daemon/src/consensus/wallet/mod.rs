@@ -60,8 +60,9 @@ const MIN_FEERATE_VOTE_SATS_PER_KVB: u32 = 1000;
 // marker + flag 2, one-byte in/out count varints 8, nLockTime 16), 230 per
 // input (txid 128, vout 16, empty scriptSig length 4, nSequence 16, witness
 // 66), 172 per output with a 34-byte scriptPubKey (nValue 32, length 4,
-// script 136). Verified against a finalized pegout on regtest: 568 wu
-// measured with a 22-byte P2WPKH destination = 616 - 12 * 4.
+// script 136). Both figures are verified exactly by the integration suite:
+// the finalized taproot-destination pegout logs 154 vbytes and the second
+// pegin's sweep logs 169 via the "Finalized federation tx" line.
 
 /// A send spends the federation UTXO into a destination output and a change
 /// output: 42 + 230 + 172 + 172 = 616 wu. Sized for the largest destination
@@ -69,11 +70,11 @@ const MIN_FEERATE_VOTE_SATS_PER_KVB: u32 = 1000;
 /// destinations are overcharged by up to 3 vbytes.
 ///
 /// [`StandardScript`]: picomint_core::wallet::StandardScript
-const SEND_TX_VBYTES: u64 = 616_u64.div_ceil(4);
+const SEND_TX_VBYTES: u64 = 154;
 
 /// A receive sweeps the deposit and the federation UTXO into one change
 /// output: 42 + 230 + 230 + 172 = 674 wu.
-const RECEIVE_TX_VBYTES: u64 = 674_u64.div_ceil(4);
+const RECEIVE_TX_VBYTES: u64 = 169;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Encodable, Decodable)]
 pub struct FederationTx {
@@ -973,6 +974,13 @@ fn finalize_tx(
                 sighash_type: TapSighashType::Default,
             });
     }
+
+    info!(
+        inputs = federation_tx.tx.input.len(),
+        outputs = federation_tx.tx.output.len(),
+        vbytes = federation_tx.tx.vsize(),
+        "Finalized federation tx"
+    );
 }
 
 fn tx_id(dbtx: &impl DbRead, outpoint: OutPoint) -> Option<Txid> {
