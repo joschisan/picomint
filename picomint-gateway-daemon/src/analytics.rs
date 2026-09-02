@@ -12,7 +12,9 @@
 //! source of truth; the trailer replays from position 0 on every boot.
 //!
 //! Operators and agents inspect the db with read-only SQL via
-//! `picomint-gateway-cli analytics <query>`, served by [`query`].
+//! `picomint-gateway-cli analytics <query>`, served by [`query`] — the only
+//! reader there is: the musl-static distroless image ships no `sqlite3`
+//! binary, so nothing outside the daemon ever opens the file.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -66,11 +68,11 @@ impl Analytics {
 
         let conn = Connection::open(dir.join(ANALYTICS_FILE))
             .context("failed to open analytics.sqlite")?;
-        // WAL mode: readers don't block the writer, writer doesn't block
-        // readers. Critical for concurrent `sqlite3` CLI access while the
-        // gateway is running.
+        // WAL mode: readers don't block the writer, so a CLI query never
+        // waits behind a trailer insert batch. Synchronous is off because
+        // durability is worthless for state we wipe on every boot anyway.
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "synchronous", "NORMAL")?;
+        conn.pragma_update(None, "synchronous", "OFF")?;
 
         conn.execute_batch(SCHEMA_SQL)
             .context("failed to install analytics schema")?;
