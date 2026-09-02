@@ -53,6 +53,28 @@ use tss::{
 /// below what Bitcoin Core will relay.
 const MIN_FEERATE_VOTE_SATS_PER_KVB: u32 = 1000;
 
+// A federation tx is a taproot key spend whose witness is always exactly one
+// 64-byte BIP340 signature, no matter how many guardians signed — so both tx
+// shapes have a constant size known upfront. In BIP-141 weight units
+// (non-witness bytes count 4, witness bytes 1): 42 overhead (nVersion 16,
+// marker + flag 2, one-byte in/out count varints 8, nLockTime 16), 230 per
+// input (txid 128, vout 16, empty scriptSig length 4, nSequence 16, witness
+// 66), 172 per output with a 34-byte scriptPubKey (nValue 32, length 4,
+// script 136). Verified against a finalized pegout on regtest: 568 wu
+// measured with a 22-byte P2WPKH destination = 616 - 12 * 4.
+
+/// A send spends the federation UTXO into a destination output and a change
+/// output: 42 + 230 + 172 + 172 = 616 wu. Sized for the largest destination
+/// script a [`StandardScript`] can carry (34 bytes, P2WSH/P2TR), so smaller
+/// destinations are overcharged by up to 3 vbytes.
+///
+/// [`StandardScript`]: picomint_core::wallet::StandardScript
+const SEND_TX_VBYTES: u64 = 616_u64.div_ceil(4);
+
+/// A receive sweeps the deposit and the federation UTXO into one change
+/// output: 42 + 230 + 230 + 172 = 674 wu.
+const RECEIVE_TX_VBYTES: u64 = 674_u64.div_ceil(4);
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Encodable, Decodable)]
 pub struct FederationTx {
     pub tx: Transaction,
@@ -338,7 +360,7 @@ pub fn process_input(
                 txid: tx.compute_txid(),
                 input: wallet.value,
                 output: change_value,
-                vbytes: server.cfg.consensus.wallet.receive_tx_vbytes,
+                vbytes: RECEIVE_TX_VBYTES,
                 fee: input.fee,
                 created,
             },
@@ -356,7 +378,7 @@ pub fn process_input(
                     tweak: input.tweak.consensus_hash(),
                 },
             ],
-            vbytes: server.cfg.consensus.wallet.receive_tx_vbytes,
+            vbytes: RECEIVE_TX_VBYTES,
             fee: input.fee,
         };
 
@@ -471,7 +493,7 @@ pub fn process_output(
             txid: tx.compute_txid(),
             input: wallet.value,
             output: change_value,
-            vbytes: server.cfg.consensus.wallet.send_tx_vbytes,
+            vbytes: SEND_TX_VBYTES,
             fee: output.fee,
             created,
         },
@@ -485,7 +507,7 @@ pub fn process_output(
             value: wallet.value,
             tweak: wallet.tweak,
         }],
-        vbytes: server.cfg.consensus.wallet.send_tx_vbytes,
+        vbytes: SEND_TX_VBYTES,
         fee: output.fee,
     };
 
@@ -802,11 +824,11 @@ pub fn consensus_fee(server: &Server, dbtx: &impl DbRead, tx_vbytes: u64) -> Opt
 }
 
 pub fn send_fee(server: &Server, dbtx: &impl DbRead) -> Option<Amount> {
-    consensus_fee(server, dbtx, server.cfg.consensus.wallet.send_tx_vbytes)
+    consensus_fee(server, dbtx, SEND_TX_VBYTES)
 }
 
 pub fn receive_fee(server: &Server, dbtx: &impl DbRead) -> Option<Amount> {
-    consensus_fee(server, dbtx, server.cfg.consensus.wallet.receive_tx_vbytes)
+    consensus_fee(server, dbtx, RECEIVE_TX_VBYTES)
 }
 
 fn script_pubkey(server: &Server, tweak: &sha256::Hash) -> ScriptBuf {
