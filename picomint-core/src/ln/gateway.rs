@@ -66,7 +66,7 @@ pub struct GatewayInfo {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable, Copy)]
 pub struct PaymentFee {
     pub base: Amount,
-    pub ppm: u64,
+    pub ppm: u16,
 }
 
 impl PaymentFee {
@@ -105,7 +105,7 @@ impl PaymentFee {
     }
 
     fn absolute_fee(&self, msat: u64) -> u64 {
-        msat.saturating_mul(self.ppm)
+        msat.saturating_mul(u64::from(self.ppm))
             .saturating_div(1_000_000)
             .checked_add(self.base.msat)
             .expect("The division creates sufficient headroom to add the base fee")

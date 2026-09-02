@@ -80,7 +80,7 @@ pub struct GatewayOpts {
 
     /// Send fee rate in parts per million: the gateway's tx cut on outgoing payments.
     #[arg(long, env = "SEND_FEE_PPM", default_value_t = 3000)]
-    pub send_fee_ppm: u64,
+    pub send_fee_ppm: u16,
 
     /// Base receive fee in millisatoshis: the gateway's tx cut on incoming payments.
     #[arg(long, env = "RECEIVE_FEE_BASE_MSAT", default_value_t = 10_000)]
@@ -88,7 +88,7 @@ pub struct GatewayOpts {
 
     /// Receive fee rate in parts per million: the gateway's tx cut on incoming payments.
     #[arg(long, env = "RECEIVE_FEE_PPM", default_value_t = 1000)]
-    pub receive_fee_ppm: u64,
+    pub receive_fee_ppm: u16,
 
     /// BOLT11 invoice expiry, in seconds, for invoices the gateway issues.
     #[arg(long, env = "INVOICE_EXPIRY_SECS", default_value_t = 86_400)]
