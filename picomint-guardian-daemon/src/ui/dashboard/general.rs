@@ -14,7 +14,7 @@ pub fn render(
     guardian_names: &BTreeMap<PeerId, String>,
     p2p_connection_status: &BTreeMap<PeerId, P2PConnectionStatus>,
     session_count: u64,
-    block_count: u64,
+    block_count: u32,
     version: ConsensusVersion,
 ) -> Markup {
     html! {

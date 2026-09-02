@@ -161,7 +161,7 @@ impl AppState {
         );
 
         ensure!(
-            expiry >= self.cltv_expiry_delta as u64 + 144,
+            expiry >= self.cltv_expiry_delta + 144,
             "Contract expiry does not leave enough room for routing"
         );
 

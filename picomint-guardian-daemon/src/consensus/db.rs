@@ -41,7 +41,7 @@ table!(
 // missing entry means the peer has not voted since the federation was created.
 table!(
     BlockCountVoteTable,
-    PeerId => u64,
+    PeerId => u32,
     "block-count-vote",
 );
 
@@ -50,10 +50,10 @@ table!(
 /// Sorted descending and indexed at `threshold() - 1`, so any threshold of
 /// correct peers can increase the consensus block count and any consensus
 /// block count has been confirmed by a threshold of peers.
-pub fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u64 {
+pub fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u32 {
     let num_peers = server.cfg.consensus.peers.to_num_peers();
 
-    let mut counts: Vec<u64> = dbtx.iter(&BlockCountVoteTable, |r| r.map(|(_, v)| v).collect());
+    let mut counts: Vec<u32> = dbtx.iter(&BlockCountVoteTable, |r| r.map(|(_, v)| v).collect());
 
     assert!(counts.len() <= num_peers.total());
 

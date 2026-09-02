@@ -12,7 +12,7 @@ use picomint_core::module::Method;
 pub async fn outgoing_contract_expiry(
     api: &FederationApi,
     outpoint: OutPoint,
-) -> anyhow::Result<Option<(ContractId, u64)>> {
+) -> anyhow::Result<Option<(ContractId, u32)>> {
     api.request_current_consensus::<OutgoingContractExpiryResponse>(Method::Ln(
         LnMethod::OutgoingContractExpiry(OutgoingContractExpiryRequest { outpoint }),
     ))

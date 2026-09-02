@@ -48,7 +48,7 @@ pub struct BlockCountRequest;
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct BlockCountResponse {
-    pub count: u64,
+    pub count: u32,
 }
 
 // ── liveness ────────────────────────────────────────────────────────────────

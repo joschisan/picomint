@@ -548,8 +548,8 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
 pub async fn sync_blocks(
     server: &Server,
     dbtx: &WriteTx,
-    old_block_count: u64,
-    new_block_count: u64,
+    old_block_count: u32,
+    new_block_count: u32,
 ) {
     // We do not sync blocks that predate the federation itself.
     if old_block_count == 0 {
@@ -737,7 +737,7 @@ async fn process_signatures(
     Ok(())
 }
 
-async fn await_local_sync_to_block_count(server: &Server, block_count: u64) {
+async fn await_local_sync_to_block_count(server: &Server, block_count: u32) {
     loop {
         if server
             .btc_rpc

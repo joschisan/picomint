@@ -73,7 +73,7 @@ pub struct TxInfo {
     pub output: bitcoin::Amount,
     pub fee: bitcoin::Amount,
     pub vbytes: u64,
-    pub created: u64,
+    pub created: u32,
 }
 
 impl TxInfo {

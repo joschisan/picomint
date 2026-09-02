@@ -130,7 +130,7 @@ pub struct WalletTotalValueResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlockCountResponse {
-    pub block_count: u64,
+    pub block_count: u32,
 }
 
 // --- /p2p ---
@@ -155,7 +155,7 @@ pub struct PeerInfo {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BitcoinConnectionResponse {
     pub network: String,
-    pub block_count: u64,
+    pub block_count: u32,
     pub fee_rate_sat_per_vb: Option<u64>,
     pub sync_progress: Option<f64>,
 }

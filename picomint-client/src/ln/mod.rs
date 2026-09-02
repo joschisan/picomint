@@ -48,7 +48,7 @@ use self::send_sm::{SendSMCommon, SendSMState, SendStateMachine, SendStateMachin
 const EXPIRY_DELTA_LIMIT: u64 = 1000;
 
 /// A two hour buffer in case either the client or gateway go offline
-const CONTRACT_CONFIRMATION_BUFFER: u64 = 12;
+const CONTRACT_CONFIRMATION_BUFFER: u32 = 12;
 
 /// Contracts pulled per round trip when walking the incoming-contract
 /// stream.
@@ -224,7 +224,9 @@ async fn send_inner(
         payment_hash: *invoice.payment_hash(),
         amount,
         fee,
-        expiry: consensus_block_count + gateway_info.expiry_delta + CONTRACT_CONFIRMATION_BUFFER,
+        expiry: consensus_block_count
+            + gateway_info.expiry_delta as u32
+            + CONTRACT_CONFIRMATION_BUFFER,
         claim_pk: gateway_info.module_public_key,
         refund_pk: refund_keypair.x_only_public_key().0,
     };

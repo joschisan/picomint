@@ -60,7 +60,7 @@ impl ConsensusApi {
     }
 
     /// The federation's current consensus block count.
-    pub fn block_count(&self) -> u64 {
+    pub fn block_count(&self) -> u32 {
         consensus_block_count(&self.server, &self.server.db.begin_read())
     }
 

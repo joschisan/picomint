@@ -28,7 +28,7 @@ pub async fn submit_tx(api: &FederationApi, tx: Transaction) -> Result<(), TxErr
 
 /// Fetch the federation's consensus block count, which trails the chain
 /// tip by the confirmation finality delay.
-pub async fn block_count(api: &FederationApi) -> anyhow::Result<u64> {
+pub async fn block_count(api: &FederationApi) -> anyhow::Result<u32> {
     api.request_current_consensus::<BlockCountResponse>(Method::Core(CoreMethod::BlockCount(
         BlockCountRequest,
     )))

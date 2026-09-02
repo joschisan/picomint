@@ -271,7 +271,7 @@ impl Client {
     }
 
     /// The consensus block count of the federation.
-    pub async fn block_count(&self, federation: FederationId) -> anyhow::Result<u64> {
+    pub async fn block_count(&self, federation: FederationId) -> anyhow::Result<u32> {
         crate::api::block_count(&self.ctx(federation)?.api).await
     }
 
