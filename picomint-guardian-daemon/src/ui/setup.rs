@@ -38,7 +38,7 @@ pub(crate) struct PeerInfoInput {
 
 fn peer_list_section(
     connected_peers: &[String],
-    federation_size: Option<u32>,
+    federation_size: Option<u8>,
     cfg_federation_name: &Option<String>,
     error: Option<&str>,
 ) -> Markup {
@@ -247,7 +247,7 @@ async fn setup_submit(
         if s.is_empty() {
             None
         } else {
-            match s.parse::<u32>() {
+            match s.parse::<u8>() {
                 Ok(size) => Some(size),
                 Err(_) => {
                     return Html(setup_form_content(Some("Invalid federation size")).into_string())

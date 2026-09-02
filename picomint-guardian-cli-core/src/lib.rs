@@ -60,7 +60,7 @@ pub struct SetupSetLocalParamsRequest {
     pub federation_name: Option<String>,
     /// Federation size (leader only)
     #[arg(long)]
-    pub federation_size: Option<u32>,
+    pub federation_size: Option<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
