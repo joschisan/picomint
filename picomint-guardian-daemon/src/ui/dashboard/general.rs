@@ -19,18 +19,7 @@ pub fn render(
         div class="card h-100" {
             div class="card-header dashboard-header" { (federation_name) }
             div class="card-body" {
-                table class="table mb-4" {
-                    tr {
-                        th { "Session Count" }
-                        td { (session_count) }
-                    }
-                    tr {
-                        th { "Block Count" }
-                        td { (block_count) }
-                    }
-                }
-
-                table class="table table-striped mb-0" {
+                table class="table table-striped mb-4" {
                     thead {
                         tr {
                             th { "ID" }
@@ -48,6 +37,17 @@ pub fn render(
                                 (connection_cells(status))
                             }
                         }
+                    }
+                }
+
+                table class="table mb-0" {
+                    tr {
+                        th { "Session Count" }
+                        td { (session_count) }
+                    }
+                    tr {
+                        th { "Block Count" }
+                        td { (block_count) }
                     }
                 }
             }
