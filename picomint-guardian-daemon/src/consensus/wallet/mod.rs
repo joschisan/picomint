@@ -5,9 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use self::db::{
-    BlockCountVoteTable, FederationWalletTable, FeeRateVoteTable, NonceEntry, NonceLogTable,
-    Output, OutputTable, SignaturesTable, SpentOutputTable, TxInfoIndexTable, TxInfoTable,
-    UnconfirmedTxTable, UnsignedTxTable,
+    BlockCountVoteTable, ConfirmedVoteTable, FederationWalletTable, FeeRateVoteTable, NonceEntry,
+    NonceLogTable, ObservedConfirmedTable, ObservedOutputTable, Output, OutputTable, OutputVote,
+    OutputVotePositionTable, OutputVoteTable, ScanCursorTable, SignaturesTable, SpentOutputTable,
+    StartHeightTable, TxInfoIndexTable, TxInfoTable, UnconfirmedTxTable, UnsignedTxTable,
 };
 use anyhow::{Context, anyhow, ensure};
 use bitcoin::absolute::LockTime;
@@ -18,7 +19,6 @@ use bitcoin::{Amount, Network, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Tx
 use common::config::WalletConfigConsensus;
 use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletOutput};
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
-use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::wallet as common;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
@@ -52,9 +52,14 @@ use tss::{
 /// not count towards the number of confirmations.
 pub const CONFIRMATION_FINALITY_DELAY: u64 = 6;
 
-/// Maximum number of blocks the consensus block count can advance in a single
-/// consensus item to limit the work done in one `process_consensus_item` step.
-const MAX_BLOCK_COUNT_INCREMENT: u64 = 50;
+/// Most output votes a peer may hold pending past the tracked head. Honest
+/// peers vote the same log, so only fabricated entries can sit pending
+/// forever — this caps what a Byzantine peer can make everyone store.
+const MAX_PENDING_OUTPUT_VOTES: u64 = 1000;
+
+/// Most output votes proposed per submission tick, which paces catch-up
+/// after this guardian's scanner was behind.
+const OUTPUT_VOTE_BATCH: u64 = 10;
 
 /// Minimum fee rate vote of 1 sat/vB to ensure we never propose a fee rate
 /// below what Bitcoin Core will relay.
@@ -142,13 +147,6 @@ pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<WalletConsensus
             .block_count
             .saturating_sub(CONFIRMATION_FINALITY_DELAY);
 
-        let consensus_block_count = consensus_block_count(server, dbtx);
-
-        let block_count_vote = match consensus_block_count {
-            0 => block_count_vote,
-            _ => block_count_vote.min(consensus_block_count + MAX_BLOCK_COUNT_INCREMENT),
-        };
-
         if block_count_vote
             > dbtx
                 .get(&BlockCountVoteTable, &server.cfg.private.identity)
@@ -156,6 +154,43 @@ pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<WalletConsensus
         {
             items.push(WalletConsensusItem::BlockCount(block_count_vote));
         }
+    }
+
+    let position = dbtx
+        .get(&OutputVotePositionTable, &server.cfg.private.identity)
+        .unwrap_or(0);
+
+    let observed = dbtx.iter_rev(&ObservedOutputTable, |r| {
+        r.next().map_or(0, |entry| entry.0 + 1)
+    });
+
+    let vote_limit = next_output_index(dbtx) + MAX_PENDING_OUTPUT_VOTES;
+
+    for index in position..observed.min(vote_limit).min(position + OUTPUT_VOTE_BATCH) {
+        let Output(outpoint, tx_out) = dbtx
+            .get(&ObservedOutputTable, &index)
+            .expect("every index below the observed head is populated");
+
+        items.push(WalletConsensusItem::Output(index, outpoint, tx_out));
+    }
+
+    let unconfirmed: Vec<Txid> =
+        dbtx.iter(&UnconfirmedTxTable, |r| r.map(|entry| entry.0).collect());
+
+    for txid in unconfirmed {
+        if dbtx.get(&ObservedConfirmedTable, &txid).is_none() {
+            continue;
+        }
+
+        if dbtx
+            .get(&ConfirmedVoteTable, &txid)
+            .unwrap_or_default()
+            .contains(&server.cfg.private.identity)
+        {
+            continue;
+        }
+
+        items.push(WalletConsensusItem::Confirmed(txid));
     }
 
     items
@@ -250,7 +285,7 @@ fn threshold(server: &Server) -> usize {
     server.cfg.consensus.wallet.pks.to_num_peers().threshold()
 }
 
-pub async fn process_consensus_item(
+pub fn process_consensus_item(
     server: &Server,
     dbtx: &WriteTx,
     peer: PeerId,
@@ -258,7 +293,7 @@ pub async fn process_consensus_item(
 ) -> anyhow::Result<()> {
     match consensus_item {
         WalletConsensusItem::BlockCount(block_count_vote) => {
-            process_block_count(server, dbtx, peer, block_count_vote).await
+            process_block_count(server, dbtx, peer, block_count_vote)
         }
         WalletConsensusItem::Feerate(feerate) => {
             if Some(feerate) == dbtx.insert(&FeeRateVoteTable, &peer, &feerate) {
@@ -267,9 +302,13 @@ pub async fn process_consensus_item(
 
             Ok(())
         }
+        WalletConsensusItem::Output(index, outpoint, tx_out) => {
+            process_output_vote(server, dbtx, peer, index, Output(outpoint, tx_out))
+        }
+        WalletConsensusItem::Confirmed(txid) => process_confirmed_vote(server, dbtx, peer, txid),
         WalletConsensusItem::Nonces(txid, nonces) => process_nonces(dbtx, peer, txid, nonces),
         WalletConsensusItem::Signatures(txid, shares, nonces) => {
-            process_signatures(server, dbtx, peer, txid, shares, nonces).await
+            process_signatures(server, dbtx, peer, txid, shares, nonces)
         }
     }
 }
@@ -561,7 +600,7 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
         loop {
             let unconfirmed_txs: Vec<FederationTx> = db
                 .begin_read()
-                .iter(&UnconfirmedTxTable, |r| r.map(|(_, v)| v).collect());
+                .iter(&UnconfirmedTxTable, |r| r.map(|entry| entry.1).collect());
 
             for unconfirmed_tx in unconfirmed_txs {
                 btc_rpc.submit_tx(unconfirmed_tx.tx).await;
@@ -576,7 +615,101 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
     });
 }
 
-async fn process_block_count(
+/// Follows the chain up to the consensus block count and records what this
+/// guardian observes into local tables: outputs passing the receive filter
+/// in block order, and pending federation transactions seen buried under
+/// the finality delay. Consensus never reads the chain — it counts the
+/// votes [`consensus_proposal`] casts from these observations.
+pub fn spawn_block_scan_task(server: Server) {
+    tokio::spawn(async move {
+        loop {
+            scan_available_blocks(&server).await;
+
+            if server.cfg.consensus.network == Network::Regtest {
+                sleep(Duration::from_secs(1)).await;
+            } else {
+                sleep(Duration::from_secs(10)).await;
+            }
+        }
+    });
+}
+
+/// Scans one block per committed write transaction, from the start height
+/// up to the consensus block count. Trailing consensus rather than our
+/// local tip is what makes observed confirmations complete across
+/// restarts: a pending transaction entered UNCONFIRMED_TX before any peer
+/// could have voted the count past its block, so a recovering guardian
+/// re-inserts it before the scanner may read that block. Any error waits
+/// for the caller's next attempt.
+async fn scan_available_blocks(server: &Server) {
+    loop {
+        let dbtx = server.db.begin_read();
+
+        let consensus_block_count = consensus_block_count(server, &dbtx);
+
+        let Some(height) = dbtx
+            .get(&ScanCursorTable, &())
+            .or(dbtx.get(&StartHeightTable, &()))
+        else {
+            return;
+        };
+
+        if height >= consensus_block_count {
+            return;
+        }
+
+        // A threshold of peers voted this block final, but our own backend
+        // has to reach that depth before it can serve us the final block
+        // rather than a fresh tip that may yet be reorged out.
+        await_local_sync_to_block_count(server, height + CONFIRMATION_FINALITY_DELAY).await;
+
+        let Ok(block_hash) = server.btc_rpc.get_block_hash(height).await else {
+            return;
+        };
+
+        let Ok(block) = server.btc_rpc.get_block(&block_hash).await else {
+            return;
+        };
+
+        assert_eq!(block.block_hash(), block_hash, "Block hash mismatch");
+
+        let pks_hash = server.cfg.consensus.wallet.agg_pk.consensus_hash();
+
+        let dbtx = server.db.begin_write();
+
+        for tx in block.txdata {
+            if dbtx.get(&UnconfirmedTxTable, &tx.compute_txid()).is_some() {
+                dbtx.insert(&ObservedConfirmedTable, &tx.compute_txid(), &());
+            }
+
+            for (vout, tx_out) in tx.output.iter().enumerate() {
+                if is_potential_receive(&pks_hash, &tx_out.script_pubkey) {
+                    let outpoint = bitcoin::OutPoint {
+                        txid: tx.compute_txid(),
+                        vout: u32::try_from(vout)
+                            .expect("Bitcoin transaction has more than u32::MAX outputs"),
+                    };
+
+                    let index = dbtx.iter_rev(&ObservedOutputTable, |r| {
+                        r.next().map_or(0, |entry| entry.0 + 1)
+                    });
+
+                    dbtx.insert(
+                        &ObservedOutputTable,
+                        &index,
+                        &Output(outpoint, tx_out.clone()),
+                    );
+                }
+            }
+        }
+
+        dbtx.insert(&ScanCursorTable, &(), &(height + 1));
+
+        dbtx.commit();
+    }
+}
+
+fn process_block_count(
     server: &Server,
     dbtx: &WriteTx,
     peer: PeerId,
@@ -607,58 +740,118 @@ async fn process_block_count(
         );
     }
 
-    // We do not sync blocks that predate the federation itself.
-    if old_consensus_block_count == 0 {
+    // The first consensus block count anchors the observed output logs:
+    // every peer scans from the same height, so log indexes line up, and
+    // blocks that predate the federation are never scanned.
+    if old_consensus_block_count == 0 && new_consensus_block_count != 0 {
+        dbtx.insert(&StartHeightTable, &(), &new_consensus_block_count);
+    }
+
+    Ok(())
+}
+
+fn process_output_vote(
+    server: &Server,
+    dbtx: &WriteTx,
+    peer: PeerId,
+    index: u64,
+    output: Output,
+) -> anyhow::Result<()> {
+    let position = dbtx.get(&OutputVotePositionTable, &peer).unwrap_or(0);
+
+    ensure!(index == position, "Output vote is out of sequence");
+
+    let tracked = next_output_index(dbtx);
+
+    // A vote below the tracked head arrives after its entry was decided;
+    // it advances the peer's position — or permanently stalls a peer that
+    // disagrees with consensus — but changes nothing else.
+    if index < tracked {
+        let tracked_output = dbtx
+            .get(&OutputTable, &index)
+            .expect("every index below the tracked head is tracked");
+
+        ensure!(
+            output == tracked_output,
+            "Output vote disagrees with the tracked output"
+        );
+
+        dbtx.insert(&OutputVotePositionTable, &peer, &(index + 1));
+
         return Ok(());
     }
 
-    // Our bitcoin backend needs to be synced for the following calls to the
-    // get_block rpc to be safe for consensus.
-    await_local_sync_to_block_count(
-        server,
-        new_consensus_block_count + CONFIRMATION_FINALITY_DELAY,
-    )
-    .await;
+    ensure!(
+        index < tracked + MAX_PENDING_OUTPUT_VOTES,
+        "Output vote is too far ahead of the tracked head"
+    );
 
-    for height in old_consensus_block_count..new_consensus_block_count {
-        let block_hash = (|| server.btc_rpc.get_block_hash(height))
-            .retry(networking_backoff())
-            .await
-            .expect("networking_backoff retries forever");
+    let mut votes = dbtx.get(&OutputVoteTable, &index).unwrap_or_default();
 
-        let block = (|| server.btc_rpc.get_block(&block_hash))
-            .retry(networking_backoff())
-            .await
-            .expect("networking_backoff retries forever");
+    votes.push(OutputVote(peer, output));
 
-        assert_eq!(block.block_hash(), block_hash, "Block hash mismatch");
+    dbtx.insert(&OutputVoteTable, &index, &votes);
 
-        let pks_hash = server.cfg.consensus.wallet.agg_pk.consensus_hash();
+    dbtx.insert(&OutputVotePositionTable, &peer, &(index + 1));
 
-        for tx in block.txdata {
-            dbtx.remove(&UnconfirmedTxTable, &tx.compute_txid());
+    // A Byzantine peer can vote wrong at one index and right at the next,
+    // so indexes past the head can reach threshold while the head is still
+    // short of it — once the head fills, track as far as the votes carry.
+    let mut next = tracked;
 
-            // We maintain an append-only log of transaction outputs that pass
-            // the probabilistic receive filter created since the federation was
-            // established. This is downloaded by clients to detect pegins and
-            // claim them by index.
+    while let Some(votes) = dbtx.get(&OutputVoteTable, &next) {
+        let Some(agreed) = threshold_agreed_output(server, &votes) else {
+            break;
+        };
 
-            for (vout, tx_out) in tx.output.iter().enumerate() {
-                if is_potential_receive(&pks_hash, &tx_out.script_pubkey) {
-                    let outpoint = bitcoin::OutPoint {
-                        txid: tx.compute_txid(),
-                        vout: u32::try_from(vout)
-                            .expect("Bitcoin transaction has more than u32::MAX outputs"),
-                    };
+        dbtx.insert(&OutputTable, &next, &agreed);
 
-                    let index =
-                        dbtx.iter_rev(&OutputTable, |r| r.next().map_or(0, |entry| entry.0 + 1));
+        dbtx.remove(&OutputVoteTable, &next);
 
-                    dbtx.insert(&OutputTable, &index, &Output(outpoint, tx_out.clone()));
-                }
-            }
-        }
+        next += 1;
     }
+
+    Ok(())
+}
+
+/// The output at least a threshold of the votes agree on, if any. Two
+/// values can never both reach threshold, since two disjoint sets of
+/// `2f + 1` voters exceed the peer set.
+fn threshold_agreed_output(server: &Server, votes: &[OutputVote]) -> Option<Output> {
+    votes
+        .iter()
+        .find(|candidate| {
+            votes.iter().filter(|vote| vote.1 == candidate.1).count() >= threshold(server)
+        })
+        .map(|candidate| candidate.1.clone())
+}
+
+fn process_confirmed_vote(
+    server: &Server,
+    dbtx: &WriteTx,
+    peer: PeerId,
+    txid: Txid,
+) -> anyhow::Result<()> {
+    ensure!(
+        dbtx.get(&UnconfirmedTxTable, &txid).is_some(),
+        "No unconfirmed transaction with this txid"
+    );
+
+    let mut votes = dbtx.get(&ConfirmedVoteTable, &txid).unwrap_or_default();
+
+    ensure!(!votes.contains(&peer), "Confirmation vote is redundant");
+
+    votes.push(peer);
+
+    if votes.len() < threshold(server) {
+        dbtx.insert(&ConfirmedVoteTable, &txid, &votes);
+
+        return Ok(());
+    }
+
+    dbtx.remove(&ConfirmedVoteTable, &txid);
+
+    dbtx.remove(&UnconfirmedTxTable, &txid);
 
     Ok(())
 }
@@ -695,7 +888,7 @@ fn process_nonces(
     Ok(())
 }
 
-async fn process_signatures(
+fn process_signatures(
     server: &Server,
     dbtx: &WriteTx,
     peer: PeerId,
@@ -793,7 +986,14 @@ async fn process_signatures(
 
         dbtx.insert(&UnconfirmedTxTable, &txid, &unsigned);
 
-        server.btc_rpc.submit_tx(unsigned.tx).await;
+        // Spawned so the finished transaction hits the mempool now rather
+        // than at the broadcast task's next tick, without making item
+        // processing async. Losing the race against our commit is fine: a
+        // threshold-signed transaction is valid to broadcast regardless,
+        // and the broadcast task retries it either way.
+        let btc_rpc = server.btc_rpc.clone();
+
+        tokio::spawn(async move { btc_rpc.submit_tx(unsigned.tx).await });
     }
 
     Ok(())
@@ -1075,6 +1275,11 @@ pub fn tx_chain(dbtx: &impl DbRead) -> Vec<TxInfo> {
 
 pub fn total_txs(dbtx: &impl DbRead) -> u64 {
     dbtx.iter_rev(&TxInfoTable, |r| r.next().map_or(0, |entry| entry.0 + 1))
+}
+
+/// The tracked head — the index the next threshold-agreed output lands on.
+fn next_output_index(dbtx: &impl DbRead) -> u64 {
+    dbtx.iter_rev(&OutputTable, |r| r.next().map_or(0, |entry| entry.0 + 1))
 }
 
 /// The current federation wallet, if a first receive has established one.

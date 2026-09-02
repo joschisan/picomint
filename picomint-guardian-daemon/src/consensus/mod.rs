@@ -72,6 +72,8 @@ pub async fn run(
         cfg.consensus.network,
     );
 
+    wallet::spawn_block_scan_task(server.clone());
+
     let (submission_tx, submission_rx) = async_channel::bounded(TX_BUFFER);
 
     let consensus_api = Arc::new(ConsensusApi {

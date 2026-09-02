@@ -32,7 +32,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn process_module_ci(
+    pub fn process_module_ci(
         &self,
         dbtx: &WriteTx,
         peer: PeerId,
@@ -40,7 +40,7 @@ impl Server {
     ) -> anyhow::Result<()> {
         match item {
             wire::ModuleConsensusItem::Wallet(ci) => {
-                wallet::process_consensus_item(self, dbtx, peer, ci.clone()).await
+                wallet::process_consensus_item(self, dbtx, peer, ci.clone())
             }
             wire::ModuleConsensusItem::Ln(ci) => {
                 ln::process_consensus_item(self, dbtx, peer, ci.clone())

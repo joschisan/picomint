@@ -7,8 +7,12 @@ use serde::Serialize;
 
 use super::{FederationTx, FederationWallet};
 
-#[derive(Clone, Debug, Encodable, Decodable, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize)]
 pub struct Output(pub bitcoin::OutPoint, pub TxOut);
+
+/// One peer's vote for an entry of the tracked output log.
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub struct OutputVote(pub PeerId, pub Output);
 
 /// One peer's entry in a transaction's nonce log — one public nonce pair
 /// per tx input.
@@ -82,6 +86,65 @@ table!(
     BlockCountVoteTable,
     PeerId => u64,
     "wallet-block-count-vote",
+);
+
+// The first block height the federation tracks — the first nonzero
+// consensus block count. Blocks before it predate the federation and are
+// never scanned, and every peer's observed output log starts here, which
+// is what lines the log indexes up across peers.
+table!(
+    StartHeightTable,
+    () => u64,
+    "wallet-start-height",
+);
+
+// One peer's next unvoted index into its observed output log, advanced by
+// every accepted vote. Sequencing per peer is what makes proposing a
+// single counter comparison and caps every peer at one vote per index.
+table!(
+    OutputVotePositionTable,
+    PeerId => u64,
+    "wallet-output-vote-position",
+);
+
+// The pending votes for output log indexes at or past the tracked head,
+// evicted once their index is tracked.
+table!(
+    OutputVoteTable,
+    u64 => Vec<OutputVote>,
+    "wallet-output-vote",
+);
+
+// The peers that have seen an unconfirmed federation transaction buried
+// under the finality delay; at threshold the transaction is retired from
+// UNCONFIRMED_TX and the votes are evicted.
+table!(
+    ConfirmedVoteTable,
+    Txid => Vec<PeerId>,
+    "wallet-confirmed-vote",
+);
+
+// Local, not consensus state: this guardian's observed output log,
+// written by the block scanner in block order.
+table!(
+    ObservedOutputTable,
+    u64 => Output,
+    "wallet-observed-output",
+);
+
+// Local: the pending federation txids this guardian has seen buried under
+// the finality delay.
+table!(
+    ObservedConfirmedTable,
+    Txid => (),
+    "wallet-observed-confirmed",
+);
+
+// Local: the next block height the scanner will read.
+table!(
+    ScanCursorTable,
+    () => u64,
+    "wallet-scan-cursor",
 );
 
 table!(

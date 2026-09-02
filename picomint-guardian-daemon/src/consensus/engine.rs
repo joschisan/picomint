@@ -142,12 +142,11 @@ async fn run_session(
 
     // A validated threshold-signed outcome from a peer supersedes local
     // participation in any phase, so the two race for the whole session.
-    // Cancelling participation at an await inside item processing has to be
-    // equivalent to crashing there: the dropped WriteTx rolls back, and
-    // [`finalize_session`] re-applies the item from the adopted outcome.
-    // That holds because module processing keeps no state outside the
-    // WriteTx and its only external effect, the wallet's tx broadcast,
-    // tolerates replay — new module code has to preserve both properties.
+    // Item processing is synchronous, so cancelling participation can only
+    // land between committed items — the same states a crash can leave,
+    // which recovery already handles — and its one external effect, the
+    // wallet's spawned tx broadcast, tolerates replay. New module code has
+    // to preserve both properties.
     let signed_session_outcome = tokio::select! {
         outcome = adopt_session(server, connections, session_index, outcomes_rx) => outcome?,
         outcome = participate_in_session(
@@ -173,7 +172,7 @@ async fn run_session(
     bft_handle.abort();
     bft_handle.await.ok();
 
-    finalize_session(server, session_index, signed_session_outcome).await;
+    finalize_session(server, session_index, signed_session_outcome);
 
     Some(())
 }
@@ -301,10 +300,7 @@ async fn order_items_until_cut(
 
         let dbtx = server.db.begin_write();
 
-        if process_consensus_item(server, &dbtx, peer, item.clone())
-            .await
-            .is_ok()
-        {
+        if process_consensus_item(server, &dbtx, peer, item.clone()).is_ok() {
             dbtx.insert(
                 &AcceptedItemTable,
                 &(index as u64),
@@ -421,7 +417,7 @@ fn pending_accepted_items(server: &Server) -> Vec<AcceptedItem> {
 ///
 /// Determinism of item processing guarantees the items we accepted ourselves
 /// form a prefix of the signed outcome; anything else is a consensus failure.
-async fn finalize_session(
+fn finalize_session(
     server: &Server,
     session_index: u64,
     signed_session_outcome: SignedSessionOutcome,
@@ -459,7 +455,6 @@ async fn finalize_session(
             accepted_item.peer,
             accepted_item.item.clone(),
         )
-        .await
         .expect("Rejected item accepted by federation consensus");
     }
 
@@ -486,7 +481,7 @@ async fn finalize_session(
 }
 
 #[instrument(skip(server, dbtx, item), level = "info")]
-async fn process_consensus_item(
+fn process_consensus_item(
     server: &Server,
     dbtx: &WriteTx,
     peer: PeerId,
@@ -522,7 +517,7 @@ async fn process_consensus_item(
             assert!(audit.total >= 0, "Failed audit: {audit:?}");
         }
         ConsensusItem::Module(ci) => {
-            server.process_module_ci(dbtx, peer, ci).await?;
+            server.process_module_ci(dbtx, peer, ci)?;
         }
         ConsensusItem::Version(vote) => {
             let default_version = server.cfg.consensus.default_version;

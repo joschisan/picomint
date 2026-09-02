@@ -94,6 +94,15 @@ pub struct OutputInfo {
 pub enum WalletConsensusItem {
     BlockCount(u64),
     Feerate(Option<u64>),
+    /// The entry at this index of the peer's observed output log — the
+    /// outputs passing the receive filter, in block order, from the
+    /// federation's start height. Honest peers observe identical logs, so
+    /// a threshold of equal votes at an index is what makes the output
+    /// consensus. Votes are sequential per peer.
+    Output(u64, bitcoin::OutPoint, bitcoin::TxOut),
+    /// The peer has seen this pending federation transaction buried under
+    /// the finality delay. A threshold of votes retires it.
+    Confirmed(Txid),
     /// One public nonce pair per input of the unsigned transaction - a
     /// peer's first entry into the transaction's append-only nonce log.
     /// Consecutive chunks of threshold entries form the signing sessions.
