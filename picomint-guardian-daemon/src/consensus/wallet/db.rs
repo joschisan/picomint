@@ -80,6 +80,6 @@ table!(
 
 table!(
     FeeRateVoteTable,
-    PeerId => Option<u64>,
+    PeerId => Option<u32>,
     "wallet-fee-rate-vote",
 );

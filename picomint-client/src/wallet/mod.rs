@@ -513,7 +513,7 @@ impl Client {
     }
 
     /// The current consensus feerate.
-    pub async fn wallet_feerate(&self, federation: FederationId) -> anyhow::Result<Option<u64>> {
+    pub async fn wallet_feerate(&self, federation: FederationId) -> anyhow::Result<Option<u32>> {
         api::consensus_feerate(&self.ctx(federation)?.api).await
     }
 }

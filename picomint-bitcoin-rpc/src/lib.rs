@@ -23,7 +23,7 @@ const MUTINYNET: &str = "000002855893a0a9b24eaffc5efc770558a326fee4fc10c9da22fc1
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Feerate {
-    pub sat_per_kvb: u64,
+    pub sat_per_kvb: u32,
 }
 
 /// Status of the Bitcoin RPC backend as reported by the monitor.

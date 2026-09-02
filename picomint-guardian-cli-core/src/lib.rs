@@ -156,7 +156,7 @@ pub struct PeerInfo {
 pub struct BitcoinConnectionResponse {
     pub network: String,
     pub block_count: u32,
-    pub fee_rate_sat_per_vb: Option<u64>,
+    pub fee_rate_sat_per_vb: Option<u32>,
     pub sync_progress: Option<f64>,
 }
 
@@ -164,7 +164,7 @@ pub struct BitcoinConnectionResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WalletFeerateResponse {
-    pub sat_per_vbyte: Option<u64>,
+    pub sat_per_vbyte: Option<u32>,
 }
 
 // --- /module/wallet/pending-txs ---

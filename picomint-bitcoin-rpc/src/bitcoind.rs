@@ -49,7 +49,8 @@ impl BitcoindClient {
         })?
         .fee_rate
         .map(|per_kb| Feerate {
-            sat_per_kvb: per_kb.to_sat(),
+            sat_per_kvb: u32::try_from(per_kb.to_sat())
+                .expect("bitcoind feerate estimates fit u32 sat/kvb"),
         });
 
         Ok(feerate)

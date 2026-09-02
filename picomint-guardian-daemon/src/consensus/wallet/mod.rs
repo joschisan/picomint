@@ -51,7 +51,7 @@ use tss::{
 
 /// Minimum fee rate vote of 1 sat/vB to ensure we never propose a fee rate
 /// below what Bitcoin Core will relay.
-const MIN_FEERATE_VOTE_SATS_PER_KVB: u64 = 1000;
+const MIN_FEERATE_VOTE_SATS_PER_KVB: u32 = 1000;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Encodable, Decodable)]
 pub struct FederationTx {
@@ -757,10 +757,10 @@ async fn await_local_sync_to_block_count(server: &Server, block_count: u32) {
     }
 }
 
-pub fn consensus_feerate(server: &Server, dbtx: &impl DbRead) -> Option<u64> {
+pub fn consensus_feerate(server: &Server, dbtx: &impl DbRead) -> Option<u32> {
     let num_peers = server.cfg.consensus.wallet.pks.to_num_peers();
 
-    let mut rates: Vec<u64> = dbtx.iter(&FeeRateVoteTable, |r| r.filter_map(|(_, v)| v).collect());
+    let mut rates: Vec<u32> = dbtx.iter(&FeeRateVoteTable, |r| r.filter_map(|(_, v)| v).collect());
 
     assert!(rates.len() <= num_peers.total());
 
@@ -779,8 +779,8 @@ pub fn consensus_fee(server: &Server, dbtx: &impl DbRead, tx_vbytes: u64) -> Opt
 
     assert!(pending_txs.len() <= 32);
 
-    let feerate = consensus_feerate(server, dbtx)?
-        .max(server.cfg.consensus.wallet.feerate_base << pending_txs.len());
+    let feerate = u64::from(consensus_feerate(server, dbtx)?)
+        .max(u64::from(server.cfg.consensus.wallet.feerate_base) << pending_txs.len());
 
     let tx_fee = tx_vbytes.saturating_mul(feerate).saturating_div(1000);
 

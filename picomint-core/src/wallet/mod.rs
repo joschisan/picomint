@@ -92,7 +92,7 @@ pub struct OutputInfo {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub enum WalletConsensusItem {
-    Feerate(Option<u64>),
+    Feerate(Option<u32>),
     /// One public nonce pair per input of the unsigned transaction - a
     /// peer's first entry into the transaction's append-only nonce log.
     /// Consecutive chunks of threshold entries form the signing sessions.

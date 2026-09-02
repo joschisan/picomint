@@ -28,7 +28,7 @@ pub struct WalletConfigConsensus {
     pub receive_tx_vbytes: u64,
     /// The minimum feerate doubles for each pending transaction in the stack,
     /// protecting against catastrophic feerate estimation errors
-    pub feerate_base: u64,
+    pub feerate_base: u32,
     /// The minimum amount a user can send on chain
     pub dust_limit: bitcoin::Amount,
     /// Fee charged per wallet input
