@@ -15,7 +15,7 @@
 use std::fmt::Debug;
 use std::future::Future;
 
-use crate::module::ClientContext;
+use crate::context::ClientContext;
 use picomint_core::config::FederationId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{DbRead, Prefix, Table, WriteTx};

@@ -26,6 +26,8 @@
 pub mod api;
 
 mod client;
+/// The per-federation [`context::ClientContext`]
+mod context;
 /// Shared kept-alive iroh connection primitive (federation peers + gateways).
 /// Per-module typed state machine executor
 mod executor;
@@ -41,8 +43,6 @@ mod join;
 pub mod ln;
 /// Mint module client.
 pub mod mint;
-/// Module client interface definitions
-mod module;
 /// Client query-consensus strategies
 /// Secret handling & derivation
 pub mod secret;

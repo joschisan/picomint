@@ -23,7 +23,7 @@ impl TaskGroup {
     }
 
     /// Spawn `fut` onto the runtime. The task is dropped at its next await
-    /// point after [`Self::cancel`] (or [`Self::shutdown`]) is called.
+    /// point after [`Self::shutdown`] is called.
     pub fn spawn<R, Fut>(&self, fut: Fut)
     where
         Fut: Future<Output = R> + Send + 'static,
@@ -33,12 +33,6 @@ impl TaskGroup {
         self.tracker.spawn(async move {
             token.run_until_cancelled(fut).await;
         });
-    }
-
-    /// Signal cancellation to every spawned task. Returns immediately —
-    /// tasks observe cancellation at their next await. Suitable for `Drop`.
-    pub fn cancel(&self) {
-        self.token.cancel();
     }
 
     /// Cancel and await every spawned task to completion.

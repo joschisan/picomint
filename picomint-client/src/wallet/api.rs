@@ -10,72 +10,70 @@ use picomint_core::wallet::methods::{
 };
 use picomint_core::wallet::{FederationWallet, OutputInfo, TxInfo};
 
-impl FederationApi {
-    pub async fn wallet_consensus_block_count(&self) -> anyhow::Result<u64> {
-        self.request_current_consensus::<ConsensusBlockCountResponse>(Method::Wallet(
-            WalletMethod::ConsensusBlockCount(ConsensusBlockCountRequest),
-        ))
-        .await
-        .map(|resp| resp.count)
-    }
+pub async fn consensus_block_count(api: &FederationApi) -> anyhow::Result<u64> {
+    api.request_current_consensus::<ConsensusBlockCountResponse>(Method::Wallet(
+        WalletMethod::ConsensusBlockCount(ConsensusBlockCountRequest),
+    ))
+    .await
+    .map(|resp| resp.count)
+}
 
-    pub async fn wallet_consensus_feerate(&self) -> anyhow::Result<Option<u64>> {
-        self.request_current_consensus::<ConsensusFeerateResponse>(Method::Wallet(
-            WalletMethod::ConsensusFeerate(ConsensusFeerateRequest),
-        ))
-        .await
-        .map(|resp| resp.feerate)
-    }
+pub async fn consensus_feerate(api: &FederationApi) -> anyhow::Result<Option<u64>> {
+    api.request_current_consensus::<ConsensusFeerateResponse>(Method::Wallet(
+        WalletMethod::ConsensusFeerate(ConsensusFeerateRequest),
+    ))
+    .await
+    .map(|resp| resp.feerate)
+}
 
-    pub async fn wallet_federation_wallet(&self) -> anyhow::Result<Option<FederationWallet>> {
-        self.request_current_consensus::<FederationWalletResponse>(Method::Wallet(
-            WalletMethod::FederationWallet(FederationWalletRequest),
-        ))
-        .await
-        .map(|resp| resp.wallet)
-    }
+pub async fn federation_wallet(api: &FederationApi) -> anyhow::Result<Option<FederationWallet>> {
+    api.request_current_consensus::<FederationWalletResponse>(Method::Wallet(
+        WalletMethod::FederationWallet(FederationWalletRequest),
+    ))
+    .await
+    .map(|resp| resp.wallet)
+}
 
-    pub async fn wallet_send_fee(&self) -> anyhow::Result<Option<bitcoin::Amount>> {
-        self.request_current_consensus::<SendFeeResponse>(Method::Wallet(WalletMethod::SendFee(
-            SendFeeRequest,
-        )))
-        .await
-        .map(|resp| resp.fee)
-    }
+pub async fn send_fee(api: &FederationApi) -> anyhow::Result<Option<bitcoin::Amount>> {
+    api.request_current_consensus::<SendFeeResponse>(Method::Wallet(WalletMethod::SendFee(
+        SendFeeRequest,
+    )))
+    .await
+    .map(|resp| resp.fee)
+}
 
-    pub async fn wallet_receive_fee(&self) -> anyhow::Result<Option<bitcoin::Amount>> {
-        self.request_current_consensus::<ReceiveFeeResponse>(Method::Wallet(
-            WalletMethod::ReceiveFee(ReceiveFeeRequest),
-        ))
-        .await
-        .map(|resp| resp.fee)
-    }
+pub async fn receive_fee(api: &FederationApi) -> anyhow::Result<Option<bitcoin::Amount>> {
+    api.request_current_consensus::<ReceiveFeeResponse>(Method::Wallet(WalletMethod::ReceiveFee(
+        ReceiveFeeRequest,
+    )))
+    .await
+    .map(|resp| resp.fee)
+}
 
-    pub async fn wallet_pending_tx_chain(&self) -> anyhow::Result<Vec<TxInfo>> {
-        self.request_current_consensus::<PendingTxChainResponse>(Method::Wallet(
-            WalletMethod::PendingTxChain(PendingTxChainRequest),
-        ))
-        .await
-        .map(|resp| resp.txs)
-    }
+pub async fn pending_tx_chain(api: &FederationApi) -> anyhow::Result<Vec<TxInfo>> {
+    api.request_current_consensus::<PendingTxChainResponse>(Method::Wallet(
+        WalletMethod::PendingTxChain(PendingTxChainRequest),
+    ))
+    .await
+    .map(|resp| resp.txs)
+}
 
-    pub async fn wallet_output_info_slice(
-        &self,
-        start: u64,
-        end: u64,
-    ) -> anyhow::Result<Vec<OutputInfo>> {
-        self.request_current_consensus::<OutputInfoSliceResponse>(Method::Wallet(
-            WalletMethod::OutputInfoSlice(OutputInfoSliceRequest { start, end }),
-        ))
-        .await
-        .map(|resp| resp.outputs)
-    }
+pub async fn output_info_slice(
+    api: &FederationApi,
+    start: u64,
+    end: u64,
+) -> anyhow::Result<Vec<OutputInfo>> {
+    api.request_current_consensus::<OutputInfoSliceResponse>(Method::Wallet(
+        WalletMethod::OutputInfoSlice(OutputInfoSliceRequest { start, end }),
+    ))
+    .await
+    .map(|resp| resp.outputs)
+}
 
-    pub async fn wallet_tx_id(&self, outpoint: OutPoint) -> Option<bitcoin::Txid> {
-        self.request_current_consensus_retry::<TxIdResponse>(Method::Wallet(WalletMethod::TxId(
-            TxIdRequest { outpoint },
-        )))
-        .await
-        .txid
-    }
+pub async fn tx_id(api: &FederationApi, outpoint: OutPoint) -> Option<bitcoin::Txid> {
+    api.request_current_consensus_retry::<TxIdResponse>(Method::Wallet(WalletMethod::TxId(
+        TxIdRequest { outpoint },
+    )))
+    .await
+    .txid
 }

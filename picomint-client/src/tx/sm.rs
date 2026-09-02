@@ -1,6 +1,6 @@
 //! State machine for submitting transactions
 
-use crate::module::ClientContext;
+use crate::context::ClientContext;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::tx::Transaction;
@@ -33,8 +33,7 @@ impl StateMachine for TxSubmissionStateMachine {
     type Outcome = Result<(), String>;
 
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
-        ctx.api
-            .submit_tx(self.tx.clone())
+        crate::api::submit_tx(&ctx.api, self.tx.clone())
             .await
             .map_err(|e| e.to_string())
     }

@@ -34,23 +34,23 @@ use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 /// request. Each task's status feeds [`Self::connection_status_stream`].
 #[derive(Clone, Debug)]
 pub struct FederationApi {
-    peer_node_ids: BTreeMap<PeerId, PublicKey>,
+    peers: BTreeMap<PeerId, PublicKey>,
     states: BTreeMap<PeerId, watch::Receiver<Option<ConnState>>>,
     endpoint: Endpoint,
 }
 
 impl FederationApi {
-    pub fn new(endpoint: Endpoint, peer_node_ids: BTreeMap<PeerId, PublicKey>) -> Self {
+    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, PublicKey>) -> Self {
         let mut states = BTreeMap::new();
 
-        for (peer, node_id) in &peer_node_ids {
+        for (peer, node_id) in &peers {
             let (tx, rx) = watch::channel(None);
             tokio::spawn(connection_task(*node_id, endpoint.clone(), tx));
             states.insert(*peer, rx);
         }
 
         Self {
-            peer_node_ids,
+            peers,
             states,
             endpoint,
         }
@@ -58,13 +58,13 @@ impl FederationApi {
 
     /// Every peer in the pool.
     pub fn all_peers(&self) -> BTreeSet<PeerId> {
-        self.peer_node_ids.keys().copied().collect()
+        self.peers.keys().copied().collect()
     }
 
     /// Federation size, derived from the peer set. Panics unless the pool
     /// spans a whole federation — a subset has no such shape.
     pub fn num_peers(&self) -> NumPeers {
-        self.peer_node_ids.to_num_peers()
+        self.peers.to_num_peers()
     }
 
     /// Iroh endpoint this pool dials over. Re-used by callers that need to

@@ -1,5 +1,5 @@
 use bitcoin::key::Keypair;
-use bitcoin::secp256k1::{self, Secp256k1};
+use bitcoin::secp256k1::{self, SECP256K1};
 use bitcoin_hashes::Hash;
 use picomint_core::Amount;
 use picomint_core::tx::Transaction;
@@ -100,7 +100,7 @@ impl TxBuilder {
         let signatures = self
             .inputs
             .iter()
-            .map(|i| Secp256k1::new().sign_schnorr(&message, &i.keypair))
+            .map(|i| SECP256K1.sign_schnorr(&message, &i.keypair))
             .collect();
 
         Transaction {

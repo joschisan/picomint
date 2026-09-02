@@ -9,7 +9,7 @@ use crate::TxRejectEvent;
 use crate::executor::{SmId, StateMachine};
 
 use super::events::{MintFailureEvent, MintSuccessEvent, SendFailureEvent, SendSuccessEvent};
-use crate::module::ClientContext;
+use crate::context::ClientContext;
 
 table!(
     SendStateMachineTable,

@@ -13,19 +13,19 @@ use crate::secp256k1::XOnlyPublicKey;
 // ── signature-shares ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SignatureSharesRequest {
+pub struct SignaturesRequest {
     pub txid: TransactionId,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct SignatureSharesResponse {
+pub struct SignaturesResponse {
     pub shares: Vec<BlindedSignatureShare>,
 }
 
 // ── restore-signature-shares ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SignatureSharesRestoreRequest {
+pub struct SignaturesRestoreRequest {
     pub messages: Vec<BlindedMessage>,
 }
 
@@ -33,7 +33,7 @@ pub struct SignatureSharesRestoreRequest {
 /// once [`IssuanceStateResponse`] has already confirmed every message, so a
 /// miss here is a genuine fault rather than the expected outcome of probing.
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct SignatureSharesRestoreResponse {
+pub struct SignaturesRestoreResponse {
     pub shares: Vec<BlindedSignatureShare>,
 }
 
@@ -78,8 +78,8 @@ pub struct SpendStateResponse {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum MintMethod {
-    SignatureShares(SignatureSharesRequest),
-    SignatureSharesRestore(SignatureSharesRestoreRequest),
+    Signatures(SignaturesRequest),
+    SignaturesRestore(SignaturesRestoreRequest),
     SpendState(SpendStateRequest),
     IssuanceState(IssuanceStateRequest),
 }

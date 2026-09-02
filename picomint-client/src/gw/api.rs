@@ -6,15 +6,16 @@ use picomint_core::ln::methods::{
 };
 use picomint_core::module::Method;
 
-impl FederationApi {
-    pub async fn gw_outgoing_contract_expiry(
-        &self,
-        outpoint: OutPoint,
-    ) -> anyhow::Result<Option<(ContractId, u64)>> {
-        self.request_current_consensus::<OutgoingContractExpiryResponse>(Method::Ln(
-            LnMethod::OutgoingContractExpiry(OutgoingContractExpiryRequest { outpoint }),
-        ))
-        .await
-        .map(|resp| resp.contract)
-    }
+/// The contract id and expiry of a confirmed outgoing contract, or `None`
+/// while it is unconfirmed. Called by the gateway daemon to validate a
+/// send request against the federation before paying its invoice.
+pub async fn outgoing_contract_expiry(
+    api: &FederationApi,
+    outpoint: OutPoint,
+) -> anyhow::Result<Option<(ContractId, u64)>> {
+    api.request_current_consensus::<OutgoingContractExpiryResponse>(Method::Ln(
+        LnMethod::OutgoingContractExpiry(OutgoingContractExpiryRequest { outpoint }),
+    ))
+    .await
+    .map(|resp| resp.contract)
 }

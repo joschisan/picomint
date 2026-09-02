@@ -165,10 +165,8 @@ pub fn audit(dbtx: &WriteTx) -> i64 {
 
 pub async fn handle_api(server: &Server, method: MintMethod) -> Result<Vec<u8>, String> {
     match method {
-        MintMethod::SignatureShares(req) => handler_async!(signature_shares, server, req).await,
-        MintMethod::SignatureSharesRestore(req) => {
-            handler!(signature_shares_restore, server, req).await
-        }
+        MintMethod::Signatures(req) => handler_async!(signatures, server, req).await,
+        MintMethod::SignaturesRestore(req) => handler!(signatures_restore, server, req).await,
         MintMethod::SpendState(req) => handler!(spend_state, server, req).await,
         MintMethod::IssuanceState(req) => handler!(issuance_state, server, req).await,
     }

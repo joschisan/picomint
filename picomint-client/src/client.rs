@@ -3,8 +3,8 @@ use std::sync::{Arc, RwLock};
 
 use crate::Endpoint;
 use crate::api::FederationApi;
+use crate::context::ClientContext;
 use crate::ln::Gateways;
-use crate::module::ClientContext;
 use crate::secret::{ClientSecret, Mnemonic};
 use crate::task::TaskGroup;
 use anyhow::{Context as _, ensure};
@@ -42,12 +42,16 @@ table!(
 /// on; there is no per-federation handle to hold or leak. Policy stays with
 /// the integrator: the client never decides when to bring a federation up
 /// or whether removing is allowed.
+///
+/// Teardown is explicit: call [`Self::shutdown`] (or [`Self::remove`] per
+/// federation) before letting go of the client. Dropping it without one
+/// leaks the connected federations' tasks until process exit.
 pub struct Client {
-    endpoint: Endpoint,
+    pub(crate) endpoint: Endpoint,
     pub(crate) db: Database,
     pub(crate) mnemonic: Mnemonic,
     pub(crate) fee: Option<FeeConfig>,
-    federations: RwLock<BTreeMap<FederationId, Arc<FederationRuntime>>>,
+    federations: RwLock<BTreeMap<FederationId, ClientContext>>,
 }
 
 impl Client {
@@ -103,8 +107,7 @@ impl Client {
         invite: &InviteCode,
         network: Option<bitcoin::Network>,
     ) -> anyhow::Result<FederationId> {
-        let (config, restores) =
-            crate::join::join(&self.endpoint, &self.mnemonic, invite, network).await?;
+        let (config, restores) = crate::join::join(self, invite, network).await?;
 
         let federation = config.calculate_federation_id();
 
@@ -135,7 +138,7 @@ impl Client {
     /// and relies on operations connecting lazily, so a dormant federation
     /// costs no connections.
     pub fn connect(&self, federation: FederationId) -> anyhow::Result<()> {
-        self.runtime(federation).map(|_| ())
+        self.ctx(federation).map(|_| ())
     }
 
     /// Remove a federation: shut its runtime down, then remove its config
@@ -143,7 +146,7 @@ impl Client {
     /// nothing halfway. Re-joining later runs a fresh scan against clean
     /// state.
     pub async fn remove(&self, federation: FederationId) -> anyhow::Result<()> {
-        let runtime = self
+        let ctx = self
             .federations
             .write()
             .expect("federations lock poisoned")
@@ -151,8 +154,8 @@ impl Client {
 
         // Wait for every task to observe cancellation before the wipe, so no
         // state machine is mid-write while its rows disappear.
-        if let Some(runtime) = runtime {
-            runtime.ctx.tg.shutdown().await;
+        if let Some(ctx) = ctx {
+            ctx.tg.shutdown().await;
         }
 
         let dbtx = self.db.begin_write();
@@ -174,29 +177,26 @@ impl Client {
         Ok(())
     }
 
-    /// The joined federation's runtime, brought up from the persisted config
+    /// The joined federation's context, brought up from the persisted config
     /// on first use. Errors for a federation that is not joined.
     ///
     /// Double-checked: the read-lock fast path serves the hot case, and a
     /// cache miss re-checks under the write lock in case another caller
     /// raced and inserted.
-    pub(crate) fn runtime(
-        &self,
-        federation: FederationId,
-    ) -> anyhow::Result<Arc<FederationRuntime>> {
-        if let Some(runtime) = self
+    pub(crate) fn ctx(&self, federation: FederationId) -> anyhow::Result<ClientContext> {
+        if let Some(ctx) = self
             .federations
             .read()
             .expect("federations lock poisoned")
             .get(&federation)
         {
-            return Ok(runtime.clone());
+            return Ok(ctx.clone());
         }
 
         let mut federations = self.federations.write().expect("federations lock poisoned");
 
-        if let Some(runtime) = federations.get(&federation) {
-            return Ok(runtime.clone());
+        if let Some(ctx) = federations.get(&federation) {
+            return Ok(ctx.clone());
         }
 
         let config = self
@@ -205,17 +205,11 @@ impl Client {
             .get(&ClientConfigTable, &federation)
             .context("Federation is not joined")?;
 
-        let runtime = FederationRuntime::build(self, config);
+        let ctx = self.build_ctx(config);
 
-        federations.insert(federation, runtime.clone());
+        federations.insert(federation, ctx.clone());
 
-        Ok(runtime)
-    }
-
-    /// The connected federation's context, bringing the federation up on
-    /// first use. Errors for a federation that is not joined.
-    pub(crate) fn ctx(&self, federation: FederationId) -> anyhow::Result<ClientContext> {
-        Ok(self.runtime(federation)?.ctx.clone())
+        Ok(ctx)
     }
 
     /// Every joined federation, whether or not it is currently up.
@@ -238,17 +232,11 @@ impl Client {
     }
 
     /// The guardians' iroh node ids, read from the persisted config.
-    pub fn peer_node_ids(
+    pub fn peers(
         &self,
         federation: FederationId,
     ) -> Option<BTreeMap<PeerId, iroh_base::PublicKey>> {
-        self.config(federation).map(|config| {
-            config
-                .peers
-                .iter()
-                .map(|entry| (*entry.0, entry.1.iroh_pk))
-                .collect()
-        })
+        self.config(federation).map(|config| config.iroh_pks())
     }
 
     /// The guardians' broadcast public keys, read from the persisted config.
@@ -274,12 +262,12 @@ impl Client {
         &self,
         federation: FederationId,
     ) -> anyhow::Result<BoxStream<'static, BTreeMap<PeerId, ConnStatus>>> {
-        Ok(self.runtime(federation)?.ctx.api.connection_status_stream())
+        Ok(self.ctx(federation)?.api.connection_status_stream())
     }
 
     /// The federation's API handle. Brings the federation up.
     pub fn api(&self, federation: FederationId) -> anyhow::Result<FederationApi> {
-        Ok(self.runtime(federation)?.ctx.api.clone())
+        Ok(self.ctx(federation)?.api.clone())
     }
 
     /// Cancel every federation's tasks and wait for them to finish.
@@ -287,8 +275,8 @@ impl Client {
         let federations =
             std::mem::take(&mut *self.federations.write().expect("federations lock poisoned"));
 
-        for runtime in federations.into_values() {
-            runtime.ctx.tg.shutdown().await;
+        for ctx in federations.into_values() {
+            ctx.tg.shutdown().await;
         }
     }
 
@@ -375,42 +363,24 @@ impl Client {
             operation,
         ))
     }
-}
 
-/// Unique owner of a connected federation's [`ClientContext`]. State
-/// machines and background tasks run against context *clones*, so the
-/// cancel-on-drop below has to live on this wrapper rather than the context
-/// itself. Internal: the public surface is [`Client`]'s federation-keyed
-/// methods, so nothing outside the crate can hold a runtime across a
-/// [`Client::remove`].
-pub(crate) struct FederationRuntime {
-    pub(crate) ctx: ClientContext,
-}
-
-impl FederationRuntime {
     /// Bring up a federation against `config`.
     ///
     /// Not inert: resuming the persisted state machines and the background
     /// refreshes commit writes of their own. So this goes last, after the
     /// dbtx that persists `config` and the join's scan results — and the
-    /// resumes run before the runtime is published in the federation map,
+    /// resumes run before the context is published in the federation map,
     /// so no concurrent operation can add a state machine mid-resume.
-    fn build(client: &Client, config: ConsensusConfig) -> Arc<Self> {
+    fn build_ctx(&self, config: ConsensusConfig) -> ClientContext {
         let federation = config.calculate_federation_id();
 
-        let peer_node_ids: BTreeMap<PeerId, iroh_base::PublicKey> = config
-            .peers
-            .iter()
-            .map(|entry| (*entry.0, entry.1.iroh_pk))
-            .collect();
-
         let ctx = ClientContext::new(
-            FederationApi::new(client.endpoint.clone(), peer_node_ids),
-            client.db.clone(),
+            FederationApi::new(self.endpoint.clone(), config.iroh_pks()),
+            self.db.clone(),
             config,
-            ClientSecret::new(&client.mnemonic, federation),
-            client.fee.as_ref().map_or(0, |fee| fee.ppm),
-            Gateways::new(client.endpoint.clone()),
+            ClientSecret::new(&self.mnemonic, federation),
+            self.fee.as_ref().map_or(0, |fee| fee.ppm),
+            Gateways::new(self.endpoint.clone()),
             TaskGroup::new(),
         );
 
@@ -422,29 +392,16 @@ impl FederationRuntime {
 
         crate::gw::resume(&ctx);
 
-        ctx.tg.spawn(crate::expiry::refresh(
-            ctx.api.clone(),
-            ctx.db.clone(),
-            federation,
-        ));
+        ctx.tg.spawn(crate::expiry::refresh(ctx.clone()));
 
         // Only when there is a cut to collect: a client that charges nothing
         // has nothing accruing in the account, and a sweep would wake every
         // half minute to read a balance that is always zero.
-        if let Some(fee) = client.fee.clone() {
+        if let Some(fee) = self.fee.clone() {
             ctx.tg
                 .spawn(crate::fee::sweep(ctx.clone(), Account::AppFee, fee.lnurl));
         }
 
-        Arc::new(FederationRuntime { ctx })
-    }
-}
-
-/// Cancel-only on drop. Spawned tasks observe the cancellation token at
-/// the next await and unwind. [`Client::remove`] and [`Client::shutdown`]
-/// wait for them instead.
-impl Drop for FederationRuntime {
-    fn drop(&mut self) {
-        self.ctx.tg.cancel();
+        ctx
     }
 }

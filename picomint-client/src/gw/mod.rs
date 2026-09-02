@@ -1,4 +1,4 @@
-mod api;
+pub mod api;
 pub mod events;
 mod receive_sm;
 mod secret;
@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 
 use crate::client::Client;
-use crate::module::ClientContext;
+use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
 use picomint_core::config::FederationId;
@@ -138,6 +138,7 @@ impl Client {
             GATEWAY_ACCOUNT,
             operation,
             tx_builder,
+            Vec::new(),
             false,
             |txid| ReceiveEvent { txid, amount, fee },
         )
@@ -192,6 +193,7 @@ impl Client {
                     GATEWAY_ACCOUNT,
                     operation,
                     tx_builder,
+                    Vec::new(),
                     false,
                     |txid| SendSuccessEvent {
                         preimage,

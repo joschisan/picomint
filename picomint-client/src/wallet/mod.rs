@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::client::Client;
-use crate::module::ClientContext;
+use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use anyhow::{Context, anyhow};
 use bitcoin::address::NetworkUnchecked;
@@ -50,8 +50,7 @@ pub(crate) fn resume(ctx: &ClientContext) {
 
 /// Fetch the current fee required to send an onchain payment.
 pub(crate) async fn send_fee(ctx: &ClientContext) -> Result<bitcoin::Amount, SendError> {
-    ctx.api
-        .wallet_send_fee()
+    api::send_fee(&ctx.api)
         .await
         .map_err(|_| SendError::FederationError)?
         .ok_or(SendError::NoConsensusFeerateAvailable)
@@ -104,6 +103,7 @@ fn submit_send(
         account,
         operation,
         tx_builder,
+        Vec::new(),
         max,
         |txid| SendEvent {
             txid,
@@ -206,6 +206,7 @@ fn receive_output(
         account,
         operation,
         tx_builder,
+        Vec::new(),
         false,
         |txid| ReceiveEvent {
             txid,
@@ -268,7 +269,7 @@ async fn output_scanner(ctx: ClientContext) {
 async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
     let dbtx = ctx.db.begin_read();
 
-    let next_output_index = dbtx
+    let start = dbtx
         .get(&NextOutputIndexTable, &ctx.federation)
         .unwrap_or(0);
 
@@ -301,9 +302,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
             .or_insert(i);
     }
 
-    let outputs = ctx
-        .api
-        .wallet_output_info_slice(next_output_index, next_output_index + SLICE_SIZE)
+    let outputs = api::output_info_slice(&ctx.api, start, start + SLICE_SIZE)
         .await
         .map_err(|_| anyhow!("Failed to fetch wallet output info slice"))?;
 
@@ -339,9 +338,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
             if !output.spent {
                 // In order to not overpay on fees we choose to wait,
                 // the congestion will clear up within a few blocks.
-                if ctx
-                    .api
-                    .wallet_pending_tx_chain()
+                if api::pending_tx_chain(&ctx.api)
                     .await
                     .map_err(|_| anyhow!("Failed to request wallet pending tx chain"))?
                     .len()
@@ -350,9 +347,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
                     return Ok(false);
                 }
 
-                let receive_fee = ctx
-                    .api
-                    .wallet_receive_fee()
+                let receive_fee = api::receive_fee(&ctx.api)
                     .await
                     .map_err(|_| anyhow!("Failed to request wallet receive fee"))?
                     .context("No consensus feerate is available")?;
@@ -516,22 +511,18 @@ impl Client {
     ) -> anyhow::Result<bitcoin::Amount> {
         let ctx = self.ctx(federation)?;
 
-        ctx.api
-            .wallet_federation_wallet()
+        api::federation_wallet(&ctx.api)
             .await
             .map(|tx_out| tx_out.map_or(bitcoin::Amount::ZERO, |tx_out| tx_out.value))
     }
 
     /// The consensus block count of the federation.
     pub async fn wallet_block_count(&self, federation: FederationId) -> anyhow::Result<u64> {
-        self.ctx(federation)?
-            .api
-            .wallet_consensus_block_count()
-            .await
+        api::consensus_block_count(&self.ctx(federation)?.api).await
     }
 
     /// The current consensus feerate.
     pub async fn wallet_feerate(&self, federation: FederationId) -> anyhow::Result<Option<u64>> {
-        self.ctx(federation)?.api.wallet_consensus_feerate().await
+        api::consensus_feerate(&self.ctx(federation)?.api).await
     }
 }

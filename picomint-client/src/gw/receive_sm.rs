@@ -16,8 +16,8 @@ use tpe::{DecryptionKeyShare, aggregate_dk_shares};
 use tracing::warn;
 
 use super::events::{ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent};
+use crate::context::ClientContext;
 use crate::executor::{SmId, StateMachine};
-use crate::module::ClientContext;
 use crate::tx::{Input, TxBuilder};
 use picomint_rpc::query::FilterMapThreshold;
 
@@ -138,6 +138,7 @@ impl StateMachine for ReceiveStateMachine {
             super::GATEWAY_ACCOUNT,
             self.operation,
             tx_builder,
+            Vec::new(),
             false,
             |txid| ReceiveRefundEvent { txid },
         )
