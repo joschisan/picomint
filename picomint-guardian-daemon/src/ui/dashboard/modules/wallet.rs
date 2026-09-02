@@ -1,12 +1,13 @@
 use maud::{Markup, html};
 use picomint_redb::ReadTx;
 
+use crate::consensus::db::consensus_block_count;
 use crate::consensus::wallet;
 use crate::ui::copiable_text;
 
 pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Markup {
     let federation_wallet = wallet::federation_wallet(dbtx);
-    let consensus_block_count = wallet::consensus_block_count(server, dbtx);
+    let consensus_block_count = consensus_block_count(server, dbtx);
     let consensus_fee_rate = wallet::consensus_feerate(server, dbtx).map(|f| f / 1000);
     let send_fee = wallet::send_fee(server, dbtx);
     let receive_fee = wallet::receive_fee(server, dbtx);
@@ -54,10 +55,6 @@ pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Marku
                             }
                         }
                         tr {
-                            th { "Consensus Block Count" }
-                            td { (consensus_block_count) }
-                        }
-                        tr {
                             th { "Consensus Fee Rate" }
                             td {
                                 @if let Some(fee_rate) = consensus_fee_rate {
@@ -92,7 +89,7 @@ pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Marku
 
                 @if !pending_tx_chain.is_empty() {
                     div class="mb-4" {
-                        h5 { "Pending Transaction Chain" }
+                        h5 { "Pending Transactions" }
                         @if stale_chain {
                             div class="alert alert-danger" role="alert" {
                                 "Warning: Transaction has been pending for more than 18 blocks!"

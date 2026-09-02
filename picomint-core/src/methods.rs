@@ -41,6 +41,16 @@ pub struct SubmitTxResponse {
     pub outcome: Result<(), TxError>,
 }
 
+// ── block-count ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct BlockCountRequest;
+
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct BlockCountResponse {
+    pub count: u64,
+}
+
 // ── liveness ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
@@ -91,6 +101,7 @@ impl FederationInfoResponse {
 pub enum CoreMethod {
     Config(ConfigRequest),
     SubmitTx(SubmitTxRequest),
+    BlockCount(BlockCountRequest),
     Liveness(LivenessRequest),
     ExpiryStatus(ExpiryStatusRequest),
     FederationInfo(FederationInfoRequest),

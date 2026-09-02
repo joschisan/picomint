@@ -8,16 +8,6 @@ use picomint_encoding::{Decodable, Encodable};
 use crate::OutPoint;
 use crate::wallet::{FederationWallet, OutputInfo, TxInfo};
 
-// ── consensus-block-count ───────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct ConsensusBlockCountRequest;
-
-#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct ConsensusBlockCountResponse {
-    pub count: u64,
-}
-
 // ── consensus-feerate ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
@@ -107,7 +97,6 @@ pub struct TxChainResponse {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum WalletMethod {
-    ConsensusBlockCount(ConsensusBlockCountRequest),
     ConsensusFeerate(ConsensusFeerateRequest),
     FederationWallet(FederationWalletRequest),
     SendFee(SendFeeRequest),

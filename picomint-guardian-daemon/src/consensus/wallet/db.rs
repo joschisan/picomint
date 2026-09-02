@@ -79,12 +79,6 @@ table!(
 );
 
 table!(
-    BlockCountVoteTable,
-    PeerId => u64,
-    "wallet-block-count-vote",
-);
-
-table!(
     FeeRateVoteTable,
     PeerId => Option<u64>,
     "wallet-fee-rate-vote",

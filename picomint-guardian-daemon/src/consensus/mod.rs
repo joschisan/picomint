@@ -28,9 +28,14 @@ use tracing::{info, warn};
 
 use crate::config::{ConfigGenSettings, ServerConfig};
 use crate::consensus::api::ConsensusApi;
-use crate::consensus::db::ConsensusVersionVoteTable;
+use crate::consensus::db::{BlockCountVoteTable, ConsensusVersionVoteTable};
 use crate::consensus::server::Server;
 use crate::p2p::{P2PStatusReceivers, ReconnectP2PConnections};
+
+/// Number of confirmations required for a transaction to be considered as
+/// final by the federation. The block that mines the transaction does
+/// not count towards the number of confirmations.
+pub const CONFIRMATION_FINALITY_DELAY: u64 = 6;
 
 /// How many txs can be stored in memory before blocking the API.
 ///
@@ -147,6 +152,24 @@ async fn submit_ci_proposals(server: Server, submission_tx: async_channel::Sende
 
     loop {
         let dbtx = server.db.begin_read();
+
+        if let Some(status) = server.btc_rpc.status() {
+            let block_count_vote = status
+                .block_count
+                .saturating_sub(CONFIRMATION_FINALITY_DELAY);
+
+            let current_vote = dbtx
+                .get(&BlockCountVoteTable, &server.cfg.private.identity)
+                .unwrap_or(0);
+
+            if block_count_vote > current_vote {
+                submission_tx
+                    .send(ConsensusItem::BlockCount(block_count_vote))
+                    .await
+                    .ok();
+            }
+        }
+
         // Upgrading the binary is the whole of casting a vote: we
         // announce what we support until consensus has recorded it,
         // then stay quiet until the next upgrade raises it again. A
@@ -167,13 +190,6 @@ async fn submit_ci_proposals(server: Server, submission_tx: async_channel::Sende
                 .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
                     item,
                 )))
-                .await
-                .ok();
-        }
-
-        for item in ln::consensus_proposal(&server, &dbtx) {
-            submission_tx
-                .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
                 .await
                 .ok();
         }

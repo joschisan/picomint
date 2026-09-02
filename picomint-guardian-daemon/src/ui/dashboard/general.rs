@@ -6,17 +6,30 @@ use picomint_core::PeerId;
 use crate::p2p::{P2PConnectionStatus, Transport};
 
 /// Renders the federation card: one row per peer with its name and p2p
-/// connection status. The running guardian has no connection to itself
-/// and is omitted.
+/// connection status, with the federation's consensus progress below. The
+/// running guardian has no connection to itself and is omitted.
 pub fn render(
     federation_name: &str,
     guardian_names: &BTreeMap<PeerId, String>,
     p2p_connection_status: &BTreeMap<PeerId, P2PConnectionStatus>,
+    session_count: u64,
+    block_count: u64,
 ) -> Markup {
     html! {
         div class="card h-100" {
             div class="card-header dashboard-header" { (federation_name) }
             div class="card-body" {
+                table class="table mb-4" {
+                    tr {
+                        th { "Session Count" }
+                        td { (session_count) }
+                    }
+                    tr {
+                        th { "Block Count" }
+                        td { (block_count) }
+                    }
+                }
+
                 table class="table table-striped mb-0" {
                     thead {
                         tr {

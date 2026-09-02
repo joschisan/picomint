@@ -3,9 +3,9 @@
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use picomint_core::methods::{
-    ConfigRequest, ConfigResponse, ExpiryStatusRequest, ExpiryStatusResponse,
-    FederationInfoRequest, FederationInfoResponse, LivenessRequest, LivenessResponse,
-    SubmitTxRequest, SubmitTxResponse,
+    BlockCountRequest, BlockCountResponse, ConfigRequest, ConfigResponse, ExpiryStatusRequest,
+    ExpiryStatusResponse, FederationInfoRequest, FederationInfoResponse, LivenessRequest,
+    LivenessResponse, SubmitTxRequest, SubmitTxResponse,
 };
 use picomint_core::tx::{ConsensusItem, Transaction, TxError};
 use picomint_redb::DbRead;
@@ -24,6 +24,7 @@ pub async fn handle_api(api: &ConsensusApi, method: CoreMethod) -> Result<Vec<u8
     match method {
         CoreMethod::SubmitTx(req) => handler_async!(submit_tx, api, req).await,
         CoreMethod::Config(req) => handler!(config, api, req).await,
+        CoreMethod::BlockCount(req) => handler!(block_count, api, req).await,
         CoreMethod::Liveness(req) => handler!(liveness, api, req).await,
         CoreMethod::ExpiryStatus(req) => handler!(expiry_status, api, req).await,
         CoreMethod::FederationInfo(req) => handler!(federation_info, api, req).await,
@@ -168,6 +169,12 @@ pub fn config(api: &ConsensusApi, req: ConfigRequest) -> Result<ConfigResponse, 
 
     Ok(ConfigResponse {
         config: api.server.cfg.consensus.clone(),
+    })
+}
+
+pub fn block_count(api: &ConsensusApi, _: BlockCountRequest) -> Result<BlockCountResponse, String> {
+    Ok(BlockCountResponse {
+        count: api.block_count(),
     })
 }
 

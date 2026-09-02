@@ -12,23 +12,22 @@ use picomint_core::ln::contracts::IncomingContractSummary;
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_core::ln::methods::LnMethod;
 use picomint_core::ln::{
-    LightningConsensusItem, LightningInput, LightningInputError, LightningOutput,
-    LightningOutputError, OutgoingWitness,
+    LightningInput, LightningInputError, LightningOutput, LightningOutputError, OutgoingWitness,
 };
 use picomint_core::secp256k1::XOnlyPublicKey;
-use picomint_core::{Amount, NumPeersExt, OutPoint, PeerId};
-use picomint_redb::{DbRead, ReadTx, WriteTx};
+use picomint_core::{Amount, OutPoint};
+use picomint_redb::{DbRead, WriteTx};
 use tpe::{PublicKeyShare, SecretKeyShare};
-use tracing::trace;
 
 use crate::config::ServerConfig;
 use crate::config::dkg::DkgHandle;
 use crate::config::poly::eval_poly_g1;
+use crate::consensus::db::consensus_block_count;
 use crate::consensus::server::Server;
 use crate::{handler, handler_async};
 
 use self::db::{
-    BlockCountVoteTable, DecryptionKeyShareTable, GatewayTable, IncomingContractIndexTable,
+    DecryptionKeyShareTable, GatewayTable, IncomingContractIndexTable,
     IncomingContractStreamIndexTable, IncomingContractStreamTable, IncomingContractTable,
     OutgoingContractTable, PreimageTable,
 };
@@ -70,40 +69,6 @@ pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
     );
 
     Ok(())
-}
-
-pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<LightningConsensusItem> {
-    let mut items = Vec::new();
-
-    if let Ok(block_count) = get_block_count(server)
-        && block_count
-            > dbtx
-                .get(&BlockCountVoteTable, &server.cfg.private.identity)
-                .unwrap_or(0)
-    {
-        items.push(LightningConsensusItem::BlockCount(block_count));
-    }
-
-    items
-}
-
-pub fn process_consensus_item(
-    _server: &Server,
-    dbtx: &WriteTx,
-    peer: PeerId,
-    consensus_item: LightningConsensusItem,
-) -> anyhow::Result<()> {
-    trace!(?consensus_item, "Processing consensus item proposal");
-
-    match consensus_item {
-        LightningConsensusItem::BlockCount(vote) => {
-            let current_vote = dbtx.insert(&BlockCountVoteTable, &peer, &vote).unwrap_or(0);
-
-            ensure!(current_vote < vote, "Block count vote is redundant");
-
-            Ok(())
-        }
-    }
 }
 
 pub fn process_input(
@@ -269,7 +234,6 @@ pub fn audit(dbtx: &WriteTx) -> i64 {
 
 pub async fn handle_api(server: &Server, method: LnMethod) -> Result<Vec<u8>, String> {
     match method {
-        LnMethod::ConsensusBlockCount(req) => handler!(consensus_block_count, server, req).await,
         LnMethod::AwaitPreimage(req) => handler_async!(await_preimage, server, req).await,
         LnMethod::DecryptionKeyShare(req) => handler!(decryption_key_share, server, req).await,
         LnMethod::OutgoingContractExpiry(req) => {
@@ -281,34 +245,6 @@ pub async fn handle_api(server: &Server, method: LnMethod) -> Result<Vec<u8>, St
         LnMethod::Gateways(req) => handler!(gateways, server, req).await,
         LnMethod::TpeAggregatePk(req) => handler!(tpe_aggregate_pk, server, req).await,
     }
-}
-
-fn get_block_count(server: &Server) -> anyhow::Result<u64> {
-    server
-        .btc_rpc
-        .status()
-        .map(|status| status.block_count)
-        .context("Block count not available yet")
-}
-
-pub(crate) fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u64 {
-    let num_peers = server.cfg.consensus.ln.tpe_pks.to_num_peers();
-
-    let mut counts = dbtx.iter(&BlockCountVoteTable, |r| {
-        r.map(|(_, v)| v).collect::<Vec<u64>>()
-    });
-
-    counts.sort_unstable();
-
-    counts.reverse();
-
-    assert!(counts.last() <= counts.first());
-
-    // The block count we select guarantees that any threshold of correct peers can
-    // increase the consensus block count and any consensus block count has been
-    // confirmed by a threshold of peers.
-
-    counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
 }
 
 pub fn add_gateway(server: &Server, pk: GatewayPk, name: String) -> bool {

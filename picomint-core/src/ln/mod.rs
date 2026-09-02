@@ -94,8 +94,3 @@ pub enum LightningOutputError {
     #[error("Amount arithmetic overflowed u64 msat")]
     ArithmeticOverflow,
 }
-
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub enum LightningConsensusItem {
-    BlockCount(u64),
-}

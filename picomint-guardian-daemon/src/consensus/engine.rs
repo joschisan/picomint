@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, ensure};
 use async_channel::Receiver;
-use futures::StreamExt;
+use futures::{StreamExt, stream};
 use picomint_bft::{Engine as BftEngine, INetwork, Keychain as BftKeychain, Round as BftRound};
 use picomint_core::secp256k1::{SECP256K1, schnorr};
 use picomint_core::session::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
@@ -18,10 +18,11 @@ use tracing::{info, instrument};
 use crate::config::ServerConfig;
 use crate::consensus::bft::{DataProvider, Network};
 use crate::consensus::db::{
-    AcceptedItemTable, AcceptedTxTable, BftUnitsTable, ConsensusVersionVoteTable,
-    SignedSessionOutcomeTable, consensus_version,
+    AcceptedItemTable, AcceptedTxTable, BftUnitsTable, BlockCountVoteTable,
+    ConsensusVersionVoteTable, SignedSessionOutcomeTable, consensus_block_count, consensus_version,
 };
 use crate::consensus::server::Server;
+use crate::consensus::wallet;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
 /// BFT rounds a session runs for, which is what sets how long one lasts.
@@ -48,23 +49,11 @@ fn rounds_per_session(cfg: &ServerConfig) -> u32 {
 /// Unlike the unit fill target this one is consensus: every guardian has to
 /// cut the session at the same item, which is why it counts accepted items in
 /// delivery order — the same items in the same order on every peer — and
-/// resumes the count from the database after a restart. The cut overshoots by
-/// the item that crossed it, itself bounded by the transaction caps.
+/// resumes the count from the database after a restart. Each item counts at
+/// its full [`AcceptedItem`] encoding, peer id included, so the tally is the
+/// wire size of the outcome's item list. The cut overshoots by the item that
+/// crossed it, itself bounded by the transaction caps.
 const SESSION_OUTCOME_BYTE_TARGET: usize = 1_000_000;
-
-/// Most accepted items a session may collect before it closes.
-///
-/// The byte budget alone would let a session of items too small to spend it
-/// run to near a hundred thousand entries, every one of which a recovering
-/// guardian has to walk. A count is what bounds that, and it is a cut on the
-/// same terms as the byte budget: read back from the database on restart,
-/// checked before the next delivery. A session lands on it exactly rather
-/// than overshooting, since an item moves the count by one.
-///
-/// Under load the byte budget cuts first, so what this sets is the cadence of
-/// an idle federation — the block count votes two modules cast per peer per
-/// block are all such a session collects, which is a session every few days.
-const SESSION_OUTCOME_ITEM_LIMIT: usize = 10_000;
 
 /// Runs the main server consensus loop.
 #[instrument(name = "run", skip_all, fields(id=%server.cfg.private.identity))]
@@ -244,8 +233,8 @@ async fn participate_in_session(
 }
 
 /// Processes bft deliveries one committed write transaction at a time until
-/// the session cut — the byte target, the item limit, or the round cap,
-/// whichever comes first. Accepted items land in ACCEPTED_ITEM under their
+/// the session cut — the byte target or the round cap, whichever comes
+/// first. Accepted items land in ACCEPTED_ITEM under their
 /// delivery position; rejected ones leave no trace beyond their position
 /// being skipped.
 async fn order_items_until_cut(
@@ -261,31 +250,23 @@ async fn order_items_until_cut(
         .db
         .begin_read()
         .iter_rev(&AcceptedItemTable, |r| r.next().map(|entry| entry.0))
-        .map_or(0, |k| k as usize + 1);
+        .map_or(0, |k| k + 1);
 
     // The byte budget resumes where the prior run left it for the same
     // reason: a session that cut at a different item than its peers is one
     // they never sign together.
     let mut n_bytes: usize = server.db.begin_read().iter(&AcceptedItemTable, |r| {
-        r.map(|entry| entry.1.item.consensus_encode_to_vec().len())
-            .sum()
+        r.map(|entry| entry.1.consensus_encode_to_vec().len()).sum()
     });
 
-    // As does the item count, which cuts a session of items too small for
-    // the byte budget to reach.
-    let mut n_items: usize = server
-        .db
-        .begin_read()
-        .iter(&AcceptedItemTable, |r| r.count());
-
-    let mut deliveries = Box::pin(ordered_rx.enumerate());
+    let mut deliveries = Box::pin(stream::iter(0u64..).zip(ordered_rx));
 
     loop {
         // Ahead of the next delivery rather than after the last one: a run
         // that crashed between crossing the target and closing the session
         // comes back with the count already past it, and has to cut where
         // its peers did rather than one item further on.
-        if n_bytes >= SESSION_OUTCOME_BYTE_TARGET || n_items >= SESSION_OUTCOME_ITEM_LIMIT {
+        if n_bytes >= SESSION_OUTCOME_BYTE_TARGET {
             return Some(());
         }
 
@@ -305,20 +286,13 @@ async fn order_items_until_cut(
             .await
             .is_ok()
         {
-            dbtx.insert(
-                &AcceptedItemTable,
-                &(index as u64),
-                &AcceptedItem {
-                    peer,
-                    item: item.clone(),
-                },
-            );
+            let accepted_item = AcceptedItem { peer, item };
+
+            dbtx.insert(&AcceptedItemTable, &index, &accepted_item);
 
             dbtx.commit();
 
-            n_bytes += item.consensus_encode_to_vec().len();
-
-            n_items += 1;
+            n_bytes += accepted_item.consensus_encode_to_vec().len();
         }
     }
 }
@@ -523,6 +497,29 @@ async fn process_consensus_item(
         }
         ConsensusItem::Module(ci) => {
             server.process_module_ci(dbtx, peer, ci).await?;
+        }
+        ConsensusItem::BlockCount(vote) => {
+            let old_block_count = consensus_block_count(server, dbtx);
+
+            let current_vote = dbtx.insert(&BlockCountVoteTable, &peer, vote).unwrap_or(0);
+
+            ensure!(current_vote < *vote, "Block count vote is redundant");
+
+            let new_block_count = consensus_block_count(server, dbtx);
+
+            assert!(old_block_count <= new_block_count);
+
+            if new_block_count != old_block_count {
+                info!(
+                    %peer,
+                    vote,
+                    old_block_count,
+                    new_block_count,
+                    "consensus block count advanced"
+                );
+
+                wallet::sync_blocks(server, dbtx, old_block_count, new_block_count).await;
+            }
         }
         ConsensusItem::Version(vote) => {
             let default_version = server.cfg.consensus.default_version;

@@ -18,7 +18,8 @@ use maud::html;
 use picomint_redb::DbRead;
 
 use crate::consensus::api::ConsensusApi;
-use crate::consensus::db::ExpiryStatusTable;
+use crate::consensus::db::{ExpiryStatusTable, consensus_block_count};
+use crate::consensus::engine::get_finished_session_count;
 use crate::ui::assets::WithStaticRoutesExt;
 use crate::ui::dashboard::modules::{ln, wallet};
 use crate::ui::{ROOT_ROUTE, dashboard_layout};
@@ -68,26 +69,29 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
 
     let expiry_status = dbtx.get(&ExpiryStatusTable, &());
 
+    let session_count = get_finished_session_count(&dbtx);
+    let block_count = consensus_block_count(&api.server, &dbtx);
+
     let content = html! {
         div class="row gy-4" {
             div class="col-12" {
-                (general::render(&federation_name, &guardian_names, &p2p_connection_status))
+                (general::render(&federation_name, &guardian_names, &p2p_connection_status, session_count, block_count))
             }
         }
 
         div class="row gy-4 mt-2" {
             div class="col-lg-6" {
-                (invite::render(crate::consensus::wallet::consensus_block_count(&api.server, &dbtx)))
+                (invite::render(block_count))
             }
 
-            div class="col-lg-6" {
-                (ln::render(&api.server, &dbtx))
-            }
-        }
-
-        div class="row gy-4 mt-2" {
             div class="col-lg-6" {
                 (bitcoin::render(&bitcoin_rpc_status))
+            }
+        }
+
+        div class="row gy-4 mt-2" {
+            div class="col-lg-6" {
+                (ln::render(&dbtx))
             }
 
             div class="col-lg-6" {

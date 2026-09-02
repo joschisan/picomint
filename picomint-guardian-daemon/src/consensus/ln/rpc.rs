@@ -4,31 +4,21 @@ use std::time::Duration;
 
 use picomint_core::ln::methods::{
     AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitPreimageRequest,
-    AwaitPreimageResponse, ConsensusBlockCountRequest, ConsensusBlockCountResponse,
-    DecryptionKeyShareRequest, DecryptionKeyShareResponse, GatewaysRequest, GatewaysResponse,
-    OutgoingContractExpiryRequest, OutgoingContractExpiryResponse, TpeAggregatePkRequest,
-    TpeAggregatePkResponse,
+    AwaitPreimageResponse, DecryptionKeyShareRequest, DecryptionKeyShareResponse, GatewaysRequest,
+    GatewaysResponse, OutgoingContractExpiryRequest, OutgoingContractExpiryResponse,
+    TpeAggregatePkRequest, TpeAggregatePkResponse,
 };
 use tokio::time::timeout;
 
 use picomint_redb::DbRead;
 
+use crate::consensus::db::consensus_block_count;
 use crate::consensus::server::Server;
 
 use super::db::{
     DecryptionKeyShareTable, GatewayTable, IncomingContractStreamIndexTable,
     IncomingContractStreamTable, OutgoingContractTable, PreimageTable,
 };
-
-pub fn consensus_block_count(
-    server: &Server,
-    _: ConsensusBlockCountRequest,
-) -> Result<ConsensusBlockCountResponse, String> {
-    let dbtx = server.db.begin_read();
-    Ok(ConsensusBlockCountResponse {
-        count: super::consensus_block_count(server, &dbtx),
-    })
-}
 
 pub async fn await_preimage(
     server: &Server,
@@ -53,7 +43,7 @@ pub async fn await_preimage(
             });
         }
 
-        if req.expiry <= super::consensus_block_count(server, &dbtx) {
+        if req.expiry <= consensus_block_count(server, &dbtx) {
             return Ok(AwaitPreimageResponse { preimage: None });
         }
     }
@@ -83,7 +73,7 @@ pub fn outgoing_contract_expiry(
 
     let expiry = contract
         .expiry
-        .saturating_sub(super::consensus_block_count(server, &dbtx));
+        .saturating_sub(consensus_block_count(server, &dbtx));
 
     Ok(OutgoingContractExpiryResponse {
         contract: Some((contract.contract_id(), expiry)),

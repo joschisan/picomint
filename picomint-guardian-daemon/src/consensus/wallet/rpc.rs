@@ -1,24 +1,13 @@
 //! Freestanding API handlers for the wallet module.
 
 use picomint_core::wallet::methods::{
-    ConsensusBlockCountRequest, ConsensusBlockCountResponse, ConsensusFeerateRequest,
-    ConsensusFeerateResponse, FederationWalletRequest, FederationWalletResponse,
-    OutputInfoSliceRequest, OutputInfoSliceResponse, PendingTxChainRequest, PendingTxChainResponse,
-    ReceiveFeeRequest, ReceiveFeeResponse, SendFeeRequest, SendFeeResponse, TxChainRequest,
-    TxChainResponse, TxIdRequest, TxIdResponse,
+    ConsensusFeerateRequest, ConsensusFeerateResponse, FederationWalletRequest,
+    FederationWalletResponse, OutputInfoSliceRequest, OutputInfoSliceResponse,
+    PendingTxChainRequest, PendingTxChainResponse, ReceiveFeeRequest, ReceiveFeeResponse,
+    SendFeeRequest, SendFeeResponse, TxChainRequest, TxChainResponse, TxIdRequest, TxIdResponse,
 };
 
 use crate::consensus::server::Server;
-
-pub fn consensus_block_count(
-    server: &Server,
-    _: ConsensusBlockCountRequest,
-) -> Result<ConsensusBlockCountResponse, String> {
-    let dbtx = server.db.begin_read();
-    Ok(ConsensusBlockCountResponse {
-        count: super::consensus_block_count(server, &dbtx),
-    })
-}
 
 pub fn consensus_feerate(
     server: &Server,

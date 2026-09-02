@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use self::db::{
-    BlockCountVoteTable, FederationWalletTable, FeeRateVoteTable, NonceEntry, NonceLogTable,
-    Output, OutputTable, SignaturesTable, SpentOutputTable, TxInfoIndexTable, TxInfoTable,
-    UnconfirmedTxTable, UnsignedTxTable,
+    FederationWalletTable, FeeRateVoteTable, NonceEntry, NonceLogTable, Output, OutputTable,
+    SignaturesTable, SpentOutputTable, TxInfoIndexTable, TxInfoTable, UnconfirmedTxTable,
+    UnsignedTxTable,
 };
 use anyhow::{Context, anyhow, ensure};
 use bitcoin::absolute::LockTime;
@@ -29,6 +29,8 @@ use tokio::time::sleep;
 use crate::config::ServerConfig;
 use crate::config::dkg::DkgHandle;
 use crate::config::dkg_secp::eval_poly;
+use crate::consensus::CONFIRMATION_FINALITY_DELAY;
+use crate::consensus::db::consensus_block_count;
 use crate::consensus::server::Server;
 use crate::handler;
 use picomint_core::secret::Secret;
@@ -46,15 +48,6 @@ use tss::{
     aggregate_signature_shares, derive_nonce, derive_pk_share, derive_public_nonce, sign_share,
     verify_signature_share,
 };
-
-/// Number of confirmations required for a transaction to be considered as
-/// final by the federation. The block that mines the transaction does
-/// not count towards the number of confirmations.
-pub const CONFIRMATION_FINALITY_DELAY: u64 = 6;
-
-/// Maximum number of blocks the consensus block count can advance in a single
-/// consensus item to limit the work done in one `process_consensus_item` step.
-const MAX_BLOCK_COUNT_INCREMENT: u64 = 50;
 
 /// Minimum fee rate vote of 1 sat/vB to ensure we never propose a fee rate
 /// below what Bitcoin Core will relay.
@@ -135,27 +128,6 @@ pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<WalletConsensus
     // still syncing and thus unable to estimate fees.
     if dbtx.get(&FeeRateVoteTable, &server.cfg.private.identity) != Some(feerate_vote) {
         items.push(WalletConsensusItem::Feerate(feerate_vote));
-    }
-
-    if let Some(status) = server.btc_rpc.status() {
-        let block_count_vote = status
-            .block_count
-            .saturating_sub(CONFIRMATION_FINALITY_DELAY);
-
-        let consensus_block_count = consensus_block_count(server, dbtx);
-
-        let block_count_vote = match consensus_block_count {
-            0 => block_count_vote,
-            _ => block_count_vote.min(consensus_block_count + MAX_BLOCK_COUNT_INCREMENT),
-        };
-
-        if block_count_vote
-            > dbtx
-                .get(&BlockCountVoteTable, &server.cfg.private.identity)
-                .unwrap_or(0)
-        {
-            items.push(WalletConsensusItem::BlockCount(block_count_vote));
-        }
     }
 
     items
@@ -257,9 +229,6 @@ pub async fn process_consensus_item(
     consensus_item: WalletConsensusItem,
 ) -> anyhow::Result<()> {
     match consensus_item {
-        WalletConsensusItem::BlockCount(block_count_vote) => {
-            process_block_count(server, dbtx, peer, block_count_vote).await
-        }
         WalletConsensusItem::Feerate(feerate) => {
             if Some(feerate) == dbtx.insert(&FeeRateVoteTable, &peer, &feerate) {
                 return Err(anyhow!("Fee rate vote is redundant"));
@@ -538,9 +507,6 @@ pub fn audit(dbtx: &WriteTx) -> i64 {
 
 pub async fn handle_api(server: &Server, method: WalletMethod) -> Result<Vec<u8>, String> {
     match method {
-        WalletMethod::ConsensusBlockCount(req) => {
-            handler!(consensus_block_count, server, req).await
-        }
         WalletMethod::ConsensusFeerate(req) => handler!(consensus_feerate, server, req).await,
         WalletMethod::FederationWallet(req) => handler!(federation_wallet, server, req).await,
         WalletMethod::SendFee(req) => handler!(send_fee, server, req).await,
@@ -576,51 +542,25 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
     });
 }
 
-async fn process_block_count(
+/// Scan the blocks the consensus block count advanced over for pegins and
+/// confirmations of the federation's own transactions. Called by the
+/// consensus engine whenever the consensus block count advances.
+pub async fn sync_blocks(
     server: &Server,
     dbtx: &WriteTx,
-    peer: PeerId,
-    block_count_vote: u64,
-) -> anyhow::Result<()> {
-    let old_consensus_block_count = consensus_block_count(server, dbtx);
-
-    let current_vote = dbtx
-        .insert(&BlockCountVoteTable, &peer, &block_count_vote)
-        .unwrap_or(0);
-
-    ensure!(
-        current_vote < block_count_vote,
-        "Block count vote is redundant"
-    );
-
-    let new_consensus_block_count = consensus_block_count(server, dbtx);
-
-    assert!(old_consensus_block_count <= new_consensus_block_count);
-
-    if new_consensus_block_count != old_consensus_block_count {
-        info!(
-            %peer,
-            block_count_vote,
-            old_consensus_block_count,
-            new_consensus_block_count,
-            "consensus_block_count advanced"
-        );
-    }
-
+    old_block_count: u64,
+    new_block_count: u64,
+) {
     // We do not sync blocks that predate the federation itself.
-    if old_consensus_block_count == 0 {
-        return Ok(());
+    if old_block_count == 0 {
+        return;
     }
 
     // Our bitcoin backend needs to be synced for the following calls to the
     // get_block rpc to be safe for consensus.
-    await_local_sync_to_block_count(
-        server,
-        new_consensus_block_count + CONFIRMATION_FINALITY_DELAY,
-    )
-    .await;
+    await_local_sync_to_block_count(server, new_block_count + CONFIRMATION_FINALITY_DELAY).await;
 
-    for height in old_consensus_block_count..new_consensus_block_count {
+    for height in old_block_count..new_block_count {
         let block_hash = (|| server.btc_rpc.get_block_hash(height))
             .retry(networking_backoff())
             .await
@@ -659,8 +599,6 @@ async fn process_block_count(
             }
         }
     }
-
-    Ok(())
 }
 
 fn process_nonces(
@@ -817,26 +755,6 @@ async fn await_local_sync_to_block_count(server: &Server, block_count: u64) {
             sleep(Duration::from_secs(60)).await;
         }
     }
-}
-
-pub fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u64 {
-    let num_peers = server.cfg.consensus.wallet.pks.to_num_peers();
-
-    let mut counts: Vec<u64> = dbtx.iter(&BlockCountVoteTable, |r| r.map(|(_, v)| v).collect());
-
-    assert!(counts.len() <= num_peers.total());
-
-    counts.sort_unstable();
-
-    counts.reverse();
-
-    assert!(counts.last() <= counts.first());
-
-    // The block count we select guarantees that any threshold of correct peers can
-    // increase the consensus block count and any consensus block count has been
-    // confirmed by a threshold of peers.
-
-    counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
 }
 
 pub fn consensus_feerate(server: &Server, dbtx: &impl DbRead) -> Option<u64> {

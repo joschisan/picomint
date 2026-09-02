@@ -8,7 +8,7 @@ use picomint_core::tx::ConsensusItem;
 
 use picomint_redb::DbRead;
 
-use crate::consensus::db::{ExpiryStatusTable, InviteMeta, InviteMetaTable};
+use crate::consensus::db::{ExpiryStatusTable, InviteMeta, InviteMetaTable, consensus_block_count};
 use crate::consensus::engine::get_finished_session_count;
 use crate::consensus::server::Server;
 use crate::p2p::P2PStatusReceivers;
@@ -57,6 +57,11 @@ impl ConsensusApi {
         dbtx.commit();
 
         (self.server.cfg.get_invite_code(invite_id), meta)
+    }
+
+    /// The federation's current consensus block count.
+    pub fn block_count(&self) -> u64 {
+        consensus_block_count(&self.server, &self.server.db.begin_read())
     }
 
     pub fn federation_audit(&self) -> AuditSummary {
