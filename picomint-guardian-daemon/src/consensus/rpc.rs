@@ -71,8 +71,7 @@ async fn await_tx_outcome(api: &ConsensusApi, tx: Transaction) -> Result<(), TxE
 
     let start = Instant::now();
 
-    // Subscribe before submitting so a rejection cannot land in the gap.
-    let mut rejections = api.server.tx_reject_tx.subscribe();
+    let mut rejected = api.server.rejected.subscribe();
 
     let notify_item = api.server.db.notify_for_table(&AcceptedItemTable);
     let notify_session = api.server.db.notify_for_table(&SignedSessionOutcomeTable);
@@ -100,6 +99,10 @@ async fn await_tx_outcome(api: &ConsensusApi, tx: Transaction) -> Result<(), TxE
     }
 
     loop {
+        if let Some(error) = rejected.borrow_and_update().get(&tx.compute_txid()) {
+            return Err(error.clone());
+        }
+
         tokio::select! {
             _ = &mut notified_item => {
                 if api.server.db.begin_read().get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
@@ -114,13 +117,8 @@ async fn await_tx_outcome(api: &ConsensusApi, tx: Transaction) -> Result<(), TxE
 
                 notified_item = Box::pin(notify_item.notified());
             }
-            rejection = rejections.recv() => {
-                let (rejected, error) =
-                    rejection.expect("The tx rejection broadcast failed");
-
-                if rejected == tx.compute_txid() {
-                    return Err(error);
-                }
+            result = rejected.changed() => {
+                result.expect("The server holds the rejection watch for the daemon's lifetime");
             }
             _ = &mut notified_session => {
                 if api

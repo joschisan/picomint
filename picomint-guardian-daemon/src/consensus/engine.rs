@@ -478,6 +478,11 @@ async fn finalize_session(
     );
 
     dbtx.commit();
+
+    // Rejections only land during ordering, and a waiting submission RPC
+    // has either read its entry by now or resubmits on the session close
+    // this commit signals — so clearing here is what bounds the map.
+    server.rejected.send_modify(|rejected| rejected.clear());
 }
 
 #[instrument(skip(server, dbtx, item), level = "info")]
@@ -499,10 +504,12 @@ async fn process_consensus_item(
             if let Err(error) = server.process_tx(dbtx, tx) {
                 // Only our own submission has a submission RPC waiting on
                 // it, and copies of an already accepted transaction bail at
-                // the check above - so every rejection we broadcast is
-                // final and has a caller to fail.
+                // the check above - so every rejection we record is final
+                // and has a caller to fail.
                 if peer == server.cfg.private.identity {
-                    server.tx_reject_tx.send((txid, error.clone())).ok();
+                    server.rejected.send_modify(|rejected| {
+                        rejected.insert(txid, error.clone());
+                    });
                 }
 
                 return Err(anyhow!(error.to_string()));
