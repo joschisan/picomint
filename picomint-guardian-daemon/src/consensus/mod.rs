@@ -35,7 +35,7 @@ use crate::p2p::{P2PStatusReceivers, ReconnectP2PConnections};
 /// Number of confirmations required for a transaction to be considered as
 /// final by the federation. The block that mines the transaction does
 /// not count towards the number of confirmations.
-pub const CONFIRMATION_FINALITY_DELAY: u32 = 6;
+pub const CONFIRMATION_FINALITY_DELAY: u32 = 9;
 
 /// How many txs can be stored in memory before blocking the API.
 ///
