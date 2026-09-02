@@ -114,7 +114,7 @@ pub struct InviteMeta {
     /// Unix timestamp in seconds after which the invite code is expired.
     pub expires_at: u64,
     /// Maximum number of users that may download the config via this invite.
-    pub user_limit: u64,
+    pub user_limit: u32,
 }
 
 // Expiration date and user limit for each invite code this guardian issued,
@@ -130,6 +130,6 @@ table!(
 // entry means zero. Incremented in the same transaction that serves the config.
 table!(
     InviteUserCountTable,
-    [u8; 16] => u64,
+    [u8; 16] => u32,
     "invite-user-count",
 );

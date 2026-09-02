@@ -34,7 +34,7 @@ impl ConsensusApi {
     pub fn create_invite_code(
         &self,
         expiry_days: u64,
-        user_limit: u64,
+        user_limit: u32,
     ) -> (InviteCode, InviteMeta) {
         let expires_at = Utc::now()
             .checked_add_days(Days::new(expiry_days))

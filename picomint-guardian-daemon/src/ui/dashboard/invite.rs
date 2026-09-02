@@ -108,7 +108,7 @@ fn qr_code(data: &str) -> Markup {
 #[derive(Deserialize)]
 pub struct CreateInviteForm {
     expiry_days: u64,
-    user_limit: u64,
+    user_limit: u32,
 }
 
 // Creates an invite code with the submitted expiration and user limit and

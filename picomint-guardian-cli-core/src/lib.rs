@@ -95,7 +95,7 @@ pub const DEFAULT_INVITE_EXPIRY_DAYS: u64 = 30;
 pub const INVITE_EXPIRY_DAYS_LIMIT: u64 = 365;
 
 /// Default number of users an invite code may onboard.
-pub const DEFAULT_INVITE_USER_LIMIT: u64 = 50;
+pub const DEFAULT_INVITE_USER_LIMIT: u32 = 50;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct InviteRequest {
@@ -104,7 +104,7 @@ pub struct InviteRequest {
     pub expiry_days: u64,
     /// Maximum number of users that may onboard with this invite code.
     #[arg(long = "users", default_value_t = DEFAULT_INVITE_USER_LIMIT)]
-    pub user_limit: u64,
+    pub user_limit: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
