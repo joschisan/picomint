@@ -4,6 +4,7 @@
 //! are functions over it; dispatch match-dispatches on the wire enum variant
 //! directly — no trait indirection.
 
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 use picomint_bitcoin_rpc::BitcoinRpcMonitor;
@@ -11,8 +12,9 @@ use picomint_core::module::audit::AuditSummary;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
-use picomint_core::{Amount, OutPoint, PeerId};
+use picomint_core::{Amount, OutPoint, PeerId, TransactionId};
 use picomint_redb::{Database, WriteTx};
+use tokio::sync::watch;
 use tracing::info;
 
 use crate::config::ServerConfig;
@@ -24,6 +26,9 @@ pub struct Server {
     pub cfg: ServerConfig,
     pub db: Database,
     pub btc_rpc: BitcoinRpcMonitor,
+    /// The finally rejected txs of the running session, watched by their
+    /// waiting submission RPCs and cleared at the session boundary.
+    pub rejected: watch::Sender<BTreeMap<TransactionId, TxError>>,
 }
 
 impl Server {

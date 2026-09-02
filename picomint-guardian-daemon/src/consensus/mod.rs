@@ -9,6 +9,7 @@ pub mod server;
 pub mod tx;
 pub mod wallet;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,6 +22,7 @@ use picomint_core::tx::ConsensusItem;
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::wire;
 use picomint_redb::{Database, DbRead};
+use tokio::sync::watch;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
@@ -36,11 +38,6 @@ use crate::p2p::{P2PStatusReceivers, ReconnectP2PConnections};
 /// by the inputs and outputs it may carry — so this is what turns that bound
 /// into a bound on the memory a client can make us hold.
 const TX_BUFFER: usize = 100;
-
-/// How many rejected txs a waiting submission RPC can fall behind before it
-/// misses one. Only finally rejected txs are broadcast, so the steady-state
-/// rate is zero and the buffer only has to absorb bursts of invalid txs.
-const TX_REJECT_BUFFER: usize = 1000;
 
 pub async fn run(
     cfg: ServerConfig,
@@ -66,6 +63,7 @@ pub async fn run(
         cfg: cfg.clone(),
         db: db.clone(),
         btc_rpc: btc_rpc.clone(),
+        rejected: watch::Sender::new(BTreeMap::new()),
     };
 
     wallet::spawn_broadcast_unconfirmed_txs_task(
@@ -76,12 +74,9 @@ pub async fn run(
 
     let (submission_tx, submission_rx) = async_channel::bounded(TX_BUFFER);
 
-    let tx_reject_tx = tokio::sync::broadcast::channel(TX_REJECT_BUFFER).0;
-
     let consensus_api = Arc::new(ConsensusApi {
         server: server.clone(),
         submission_tx: submission_tx.clone(),
-        tx_reject_tx: tx_reject_tx.clone(),
         p2p_status_receivers,
     });
 
@@ -108,7 +103,7 @@ pub async fn run(
 
     info!("Starting Consensus Engine...");
 
-    engine::run(server, connections, submission_rx, tx_reject_tx).await?;
+    engine::run(server, connections, submission_rx).await?;
 
     Ok(())
 }
