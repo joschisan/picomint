@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 
 use crate::client::Client;
-use crate::module::ClientContext;
+use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
 use db::{GatewayPkTable, IncomingContractStreamIndexTable, SendOperationTable};
@@ -58,7 +58,7 @@ const CONTRACT_CONFIRMATION_BUFFER: u64 = 12;
 /// to every guardian. A thousand summaries is ~150 kB per peer, which is a
 /// reasonable unit of work against a set that only grows with the
 /// federation's unclaimed contracts.
-const CONTRACT_STREAM_BATCH: u64 = 1000;
+const BATCH: u64 = 1000;
 
 pub type SendResult = Result<OperationId, SendPaymentError>;
 
@@ -85,9 +85,7 @@ pub(crate) fn resume(ctx: &ClientContext) {
 /// gateway is dropped here, its connection aborted. Info is filled in
 /// separately by [`update_gateway_info`].
 async fn update_gateway_pks(ctx: ClientContext) -> Result<(), RefreshGatewaysError> {
-    let list = ctx
-        .api
-        .ln_gateways()
+    let list = api::gateways(&ctx.api)
         .await
         .map_err(|_| RefreshGatewaysError::FailedToRequestGateways)?;
 
@@ -218,9 +216,7 @@ async fn send_inner(
     let fee = gateway_info.send_fee.fee(amount);
     let amount = Amount::from_msat(amount);
 
-    let consensus_block_count = ctx
-        .api
-        .ln_consensus_block_count()
+    let consensus_block_count = api::consensus_block_count(&ctx.api)
         .await
         .map_err(|_| SendPaymentError::FailedToRequestBlockCount)?;
 
@@ -254,6 +250,7 @@ async fn send_inner(
         account,
         operation,
         tx_builder,
+        Vec::new(),
         max,
         |txid| SendEvent { txid, amount, fee },
     )
@@ -265,8 +262,8 @@ async fn send_inner(
             operation,
             outpoint: OutPoint { txid, out_idx: 0 },
             contract,
-            gateway_pk: Some(gateway_pk),
-            invoice: Some(LightningInvoice::Bolt11(invoice.clone())),
+            gateway_pk,
+            invoice: LightningInvoice::Bolt11(invoice.clone()),
             refund_keypair,
         },
         state: SendSMState::Funding,
@@ -383,9 +380,16 @@ fn receive_incoming_contract(
     let amount = summary.amount;
     let fee = summary.fee;
 
-    crate::mint::finalize_and_submit_tx(ctx, dbtx, account, operation, tx_builder, false, |txid| {
-        ReceiveEvent { txid, amount, fee }
-    })
+    crate::mint::finalize_and_submit_tx(
+        ctx,
+        dbtx,
+        account,
+        operation,
+        tx_builder,
+        Vec::new(),
+        false,
+        |txid| ReceiveEvent { txid, amount, fee },
+    )
     .expect("Cannot claim input, additional funding needed");
 }
 
@@ -402,16 +406,13 @@ async fn receive_scan(ctx: ClientContext) {
     });
 
     loop {
-        let stream_index = ctx
+        let start = ctx
             .db
             .begin_read()
             .get(&IncomingContractStreamIndexTable, &ctx.federation)
             .unwrap_or(0);
 
-        let (entries, next_index) = ctx
-            .api
-            .ln_await_incoming_contracts(stream_index, CONTRACT_STREAM_BATCH)
-            .await;
+        let (entries, next) = api::await_incoming_contracts(&ctx.api, start, BATCH).await;
 
         let dbtx = ctx.db.begin_write();
 
@@ -421,11 +422,7 @@ async fn receive_scan(ctx: ClientContext) {
             }
         }
 
-        dbtx.insert(
-            &IncomingContractStreamIndexTable,
-            &ctx.federation,
-            &next_index,
-        );
+        dbtx.insert(&IncomingContractStreamIndexTable, &ctx.federation, &next);
 
         dbtx.commit();
     }

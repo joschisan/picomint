@@ -1,5 +1,5 @@
+use crate::context::ClientContext;
 use crate::executor::{SmId, StateMachine};
-use crate::module::ClientContext;
 use picomint_core::OutPoint;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
@@ -42,7 +42,7 @@ impl StateMachine for SendStateMachine {
             return AwaitFundingResult::Aborted(error);
         }
 
-        match ctx.api.wallet_tx_id(self.outpoint).await {
+        match super::api::tx_id(&ctx.api, self.outpoint).await {
             Some(txid) => AwaitFundingResult::Success(txid),
             None => AwaitFundingResult::Failure,
         }

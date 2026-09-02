@@ -13,7 +13,7 @@ use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 use super::client_db::NoteTable;
 use super::events::{MintFailureEvent, MintSuccessEvent};
 use super::{NoteIssuanceRequest, SpendableNote};
-use crate::module::ClientContext;
+use crate::context::ClientContext;
 
 table!(
     MintStateMachineTable,
@@ -52,14 +52,13 @@ impl StateMachine for MintStateMachine {
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         ctx.await_tx_accepted(self.operation, self.txid).await?;
 
-        let shares = ctx
-            .api
-            .signature_shares(
-                self.txid,
-                self.issuance_requests.clone(),
-                ctx.config.mint.tbs_pks.clone(),
-            )
-            .await;
+        let shares = super::api::signatures(
+            &ctx.api,
+            self.txid,
+            self.issuance_requests.clone(),
+            ctx.config.mint.tbs_pks.clone(),
+        )
+        .await;
 
         Ok(shares)
     }
@@ -70,7 +69,7 @@ impl StateMachine for MintStateMachine {
         dbtx: &WriteTx,
         outcome: Self::Outcome,
     ) -> Option<Self> {
-        let Ok(signature_shares) = outcome else {
+        let Ok(signatures) = outcome else {
             for note in &self.spendable_notes {
                 dbtx.insert(
                     &NoteTable,
@@ -84,7 +83,7 @@ impl StateMachine for MintStateMachine {
 
         for (i, request) in self.issuance_requests.iter().enumerate() {
             let agg_blind_signature = aggregate_signature_shares(
-                &signature_shares
+                &signatures
                     .iter()
                     .map(|(peer, shares)| (peer.to_usize() as u64, shares[i]))
                     .collect(),
@@ -136,16 +135,16 @@ impl StateMachine for MintStateMachine {
 
 pub fn verify_blind_shares(
     peer: PeerId,
-    signature_shares: Vec<BlindedSignatureShare>,
+    signatures: Vec<BlindedSignatureShare>,
     issuance_requests: &[NoteIssuanceRequest],
     tbs_pks: &BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
 ) -> anyhow::Result<Vec<BlindedSignatureShare>> {
     ensure!(
-        signature_shares.len() == issuance_requests.len(),
+        signatures.len() == issuance_requests.len(),
         "Invalid number of signatures shares"
     );
 
-    for (request, share) in issuance_requests.iter().zip(signature_shares.iter()) {
+    for (request, share) in issuance_requests.iter().zip(signatures.iter()) {
         let amount_key = tbs_pks
             .get(&request.denomination)
             .expect("No pk shares found for denomination")
@@ -158,5 +157,5 @@ pub fn verify_blind_shares(
         );
     }
 
-    Ok(signature_shares)
+    Ok(signatures)
 }

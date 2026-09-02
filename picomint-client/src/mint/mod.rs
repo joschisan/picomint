@@ -16,7 +16,7 @@ use tokio::sync::Notify;
 
 use crate::api::FederationApi;
 use crate::client::Client;
-use crate::module::ClientContext;
+use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use crate::tx::{TxSubmissionStateMachine, TxSubmissionStateMachineTable};
 use anyhow::ensure;
@@ -76,9 +76,7 @@ impl SpendableNote {
     pub fn amount(&self) -> Amount {
         self.denomination.amount()
     }
-}
 
-impl SpendableNote {
     fn nonce(&self) -> XOnlyPublicKey {
         self.keypair.x_only_public_key().0
     }
@@ -162,9 +160,7 @@ pub(crate) async fn scan(
     let mut notes = Vec::with_capacity(requests.len());
 
     if !requests.is_empty() {
-        let shares = api
-            .signature_shares_restore(requests.clone(), cfg.tbs_pks.clone())
-            .await;
+        let shares = api::signatures_restore(api, requests.clone(), cfg.tbs_pks.clone()).await;
 
         for (i, request) in requests.iter().enumerate() {
             let shares = shares
@@ -224,9 +220,9 @@ async fn scan_counters(
             .map(|c| NoteIssuance::new(account, c, secret))
             .collect();
 
-        let spent = api
-            .spend_state(candidates.iter().map(NoteIssuance::nonce).collect())
-            .await;
+        let nonces = candidates.iter().map(NoteIssuance::nonce).collect();
+
+        let spent = api::spend_state(api, nonces).await;
 
         // Deriving a blinded message costs some twenty times what the nonce
         // did, so it is paid only for counters that survived the spend check.
@@ -245,7 +241,7 @@ async fn scan_counters(
         .await
         .expect("Blinded message derivation cannot panic");
 
-        let issued = api.issuance_state(messages).await;
+        let issued = api::issuance_state(api, messages).await;
 
         if issued.iter().all(Option::is_none) && !spent.contains(&true) {
             return (counter, found);
@@ -384,27 +380,35 @@ fn app_fee_total(ctx: &ClientContext, account: Account, basis: Amount) -> Amount
 /// note the account holds and mints no change at all, so a committed
 /// submission leaves the account empty.
 ///
+/// `targets` are issuance requests whose outputs the caller already added
+/// to the builder, ahead of everything this method adds. They are prepended
+/// to the state machine's request list, which must mirror the transaction's
+/// mint-output order — the signature shares come back indexed by it.
+///
 /// `event` builds the module's initiating event (e.g. `SendEvent`)
 /// from the txid; this method logs it before the bookkeeping
 /// `TxCreateEvent` so the operation's event log opens with the
 /// module event.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn finalize_and_submit_tx<E: picomint_eventlog::Event + Send>(
     ctx: &ClientContext,
     dbtx: &WriteTx,
     account: Account,
     operation: OperationId,
     mut builder: TxBuilder,
+    targets: Vec<NoteIssuanceRequest>,
     max: bool,
     event: impl FnOnce(TransactionId) -> E,
 ) -> Option<TransactionId> {
     // Ahead of the deficit the funding has to cover, so the cut is funded
     // like any other output rather than out of the change.
-    let mut issuance_requests = add_fee_outputs(ctx, dbtx, account, &mut builder);
+    let fee_requests = add_fee_outputs(ctx, dbtx, account, &mut builder);
 
-    let app_fee = issuance_requests
-        .iter()
-        .map(|r| r.denomination.amount())
-        .sum();
+    let app_fee = fee_requests.iter().map(|r| r.denomination.amount()).sum();
+
+    let mut issuance_requests = targets;
+
+    issuance_requests.extend(fee_requests);
 
     let deficit = builder.deficit();
 
@@ -757,8 +761,7 @@ fn send_ecash_dbtx(
     }
 
     for spendable_note in &notes {
-        dbtx.remove(&NoteTable, &(federation, account, spendable_note.clone()))
-            .expect("Must delete existing spendable note");
+        remove_spendable_note(dbtx, federation, account, spendable_note);
     }
 
     Some(ECash::new(federation, notes))
@@ -924,7 +927,13 @@ impl Client {
             .ctx(federation)
             .map_err(|_| SendECashError::NotJoined)?;
 
-        let amount = round_to_multiple(amount, client_denominations().next().unwrap().amount());
+        let amount = round_to_multiple(
+            amount,
+            client_denominations()
+                .next()
+                .expect("There is at least one client denomination")
+                .amount(),
+        );
 
         let operation = OperationId::new_random();
 
@@ -951,32 +960,27 @@ impl Client {
         // so dropping this dbtx without committing is harmless.
         drop(dbtx);
 
-        ctx.api
-            .liveness()
+        crate::api::liveness(&ctx.api)
             .await
             .map_err(|_| SendECashError::Offline)?;
 
         let dbtx = ctx.db.begin_write();
 
-        // Build target issuance requests up-front. Their outputs go into the
-        // builder first; the balance loop then pulls funding from the wallet
-        // and appends change outputs. We extend `issuance_requests` with the
-        // change requests after balance so the order matches the transaction's
-        // outputs and a single `MintStateMachine` can process both.
-        let mut issuance_requests: Vec<NoteIssuanceRequest> = Vec::new();
-        for d in represent_amount(amount) {
-            let counter = next_counter(&ctx, &dbtx, account);
+        // Target issuance requests up-front; their outputs go into the
+        // builder first, so the funding and change the finalize call adds
+        // land behind them.
+        let targets: Vec<NoteIssuanceRequest> = represent_amount(amount)
+            .into_iter()
+            .map(|d| {
+                let counter = next_counter(&ctx, &dbtx, account);
 
-            issuance_requests.push(NoteIssuanceRequest::new(
-                account,
-                d,
-                counter,
-                &ctx.secret.mint_secret(),
-            ));
-        }
+                NoteIssuanceRequest::new(account, d, counter, &ctx.secret.mint_secret())
+            })
+            .collect();
 
         let mut builder = TxBuilder::new();
-        for request in &issuance_requests {
+
+        for request in &targets {
             builder.add_output(Output {
                 output: wire::Output::Mint(request.output()),
                 amount: request.denomination.amount(),
@@ -984,71 +988,23 @@ impl Client {
             });
         }
 
-        // Between the targets and the change on both sides of the ledger:
-        // in the builder's outputs, and in the issuance order that mirrors
-        // them.
-        let fee_requests = add_fee_outputs(&ctx, &dbtx, account, &mut builder);
-
-        let app_fee = fee_requests.iter().map(|r| r.denomination.amount()).sum();
-
-        issuance_requests.extend(fee_requests);
-
-        let deficit = builder.deficit();
-
-        let (funding_notes, change_requests) = fund(&ctx, &dbtx, account, &mut builder, false)
-            .ok_or(SendECashError::InsufficientBalance)?;
-
-        let funding: Amount = funding_notes.iter().map(|n| n.amount()).sum();
-
-        let remint = funding.saturating_sub(deficit);
-
-        let tx_fee = builder.total_fee();
-        let tx = builder.build();
-
-        let txid = tx.compute_txid();
-
-        // Everything past this point lands in the same dbtx that submits
-        // the reissuance: SendEvent → RemintEvent → TxCreateEvent →
+        // Everything below lands in the same dbtx that submits the
+        // reissuance: SendEvent → RemintEvent → TxCreateEvent →
         // MintSM + SendSM. A crash before the commit leaves no half-state
         // behind; on restart the operation simply doesn't exist.
-        crate::executor::add_state_machine_dbtx(
-            &ctx,
-            TxSubmissionStateMachineTable,
-            &dbtx,
-            TxSubmissionStateMachine {
-                account,
-                operation,
-                tx,
-            },
-        );
-
         ctx.log_event(&dbtx, account, operation, SendEvent { amount });
 
-        ctx.log_event(&dbtx, account, operation, RemintEvent { txid });
-
-        ctx.log_event(
+        finalize_and_submit_tx(
+            &ctx,
             &dbtx,
             account,
             operation,
-            crate::TxCreateEvent {
-                txid,
-                remint,
-                tx_fee,
-                app_fee,
-            },
-        );
-
-        issuance_requests.extend(change_requests);
-
-        let mint_sm = MintStateMachine {
-            account,
-            operation,
-            spendable_notes: funding_notes,
-            txid,
-            issuance_requests,
-        };
-
-        crate::executor::add_state_machine_dbtx(&ctx, MintStateMachineTable, &dbtx, mint_sm);
+            builder,
+            targets,
+            false,
+            |txid| RemintEvent { txid },
+        )
+        .ok_or(SendECashError::InsufficientBalance)?;
 
         let send_sm = SendStateMachine {
             account,
@@ -1097,8 +1053,7 @@ impl Client {
         }
 
         for note in &notes {
-            dbtx.remove(&NoteTable, &(ctx.federation, account, note.clone()))
-                .expect("Must delete existing spendable note");
+            remove_spendable_note(&dbtx, ctx.federation, account, note);
         }
 
         let ecash = ECash::new(ctx.federation, notes);
@@ -1181,9 +1136,16 @@ impl Client {
 
         let amount = ecash.amount();
 
-        finalize_and_submit_tx(&ctx, &dbtx, account, operation, tx_builder, false, |txid| {
-            ReceiveEvent { txid, amount }
-        })
+        finalize_and_submit_tx(
+            &ctx,
+            &dbtx,
+            account,
+            operation,
+            tx_builder,
+            Vec::new(),
+            false,
+            |txid| ReceiveEvent { txid, amount },
+        )
         .ok_or(ReceiveECashError::InsufficientFunds)?;
 
         dbtx.commit();
@@ -1211,7 +1173,14 @@ impl Client {
         let ctx = self.ctx(federation)?;
 
         Ok(finalize_and_submit_tx(
-            &ctx, dbtx, account, operation, tx_builder, max, event,
+            &ctx,
+            dbtx,
+            account,
+            operation,
+            tx_builder,
+            Vec::new(),
+            max,
+            event,
         ))
     }
 }

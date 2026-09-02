@@ -15,7 +15,7 @@ use picomint_core::core::Account;
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::module::ClientContext;
+use crate::context::ClientContext;
 
 /// How long between passes, and how long the first one waits.
 ///

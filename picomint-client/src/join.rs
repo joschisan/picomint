@@ -21,8 +21,9 @@ use picomint_core::module::Method;
 use tracing::debug;
 
 use crate::api::FederationApi;
+use crate::client::Client;
 use crate::mint::Restore;
-use crate::secret::{ClientSecret, Mnemonic};
+use crate::secret::ClientSecret;
 
 /// Download a federation's config, check it against `network` if given, and
 /// rebuild whatever the seed already owns there.
@@ -36,12 +37,11 @@ use crate::secret::{ClientSecret, Mnemonic};
 /// The scans walk disjoint counter spaces and share nothing, so they run
 /// concurrently and the wait is the slowest of them rather than their sum.
 pub(crate) async fn join(
-    endpoint: &Endpoint,
-    mnemonic: &Mnemonic,
+    client: &Client,
     invite: &InviteCode,
     network: Option<bitcoin::Network>,
 ) -> anyhow::Result<(ConsensusConfig, BTreeMap<Account, Restore>)> {
-    let config = download(endpoint, invite).await?;
+    let config = download(&client.endpoint, invite).await?;
 
     if network.is_some_and(|network| config.network != network) {
         bail!("Unsupported network {}", config.network);
@@ -49,15 +49,9 @@ pub(crate) async fn join(
 
     let federation = config.calculate_federation_id();
 
-    let peer_node_ids = config
-        .peers
-        .iter()
-        .map(|entry| (*entry.0, entry.1.iroh_pk))
-        .collect();
+    let api = FederationApi::new(client.endpoint.clone(), config.iroh_pks());
 
-    let api = FederationApi::new(endpoint.clone(), peer_node_ids);
-
-    let secret = ClientSecret::new(mnemonic, federation).mint_secret();
+    let secret = ClientSecret::new(&client.mnemonic, federation).mint_secret();
 
     let scans = try_join_all(
         Account::ALL

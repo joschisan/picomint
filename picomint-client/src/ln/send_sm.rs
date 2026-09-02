@@ -21,7 +21,7 @@ use tracing::{error, instrument};
 
 use super::LightningInvoice;
 use super::events::{SendFailureEvent, SendRefundEvent, SendSuccessEvent};
-use crate::module::ClientContext;
+use crate::context::ClientContext;
 
 table!(
     SendStateMachineTable,
@@ -51,8 +51,8 @@ pub struct SendSMCommon {
     pub operation: OperationId,
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
-    pub gateway_pk: Option<GatewayPk>,
-    pub invoice: Option<LightningInvoice>,
+    pub gateway_pk: GatewayPk,
+    pub invoice: LightningInvoice,
     pub refund_keypair: Keypair,
 }
 
@@ -91,16 +91,14 @@ impl StateMachine for SendStateMachine {
                     .await,
             ),
             SendSMState::Funded => {
-                let gateway_pk = self.common.gateway_pk.unwrap();
-                let invoice = self.common.invoice.clone().unwrap();
                 tokio::select! {
                     response = gateway_send_sm(
                         ctx.gateways.clone(),
-                        gateway_pk,
+                        self.common.gateway_pk,
                         ctx.federation,
                         self.common.outpoint,
                         self.common.contract.clone(),
-                        invoice,
+                        self.common.invoice.clone(),
                         self.common.refund_keypair,
                     ) => SendOutcome::GatewayResponse(response),
                     preimage = await_preimage_sm(
@@ -124,11 +122,13 @@ impl StateMachine for SendStateMachine {
                         // is gone — the gateway must have claimed it. Re-poll the
                         // federation for the preimage one more time before giving
                         // up.
-                        let p = ctx
-                            .api
-                            .ln_await_preimage(self.common.outpoint, self.common.contract.expiry)
-                            .await
-                            .filter(|p| self.common.contract.verify_preimage(p));
+                        let p = super::api::await_preimage(
+                            &ctx.api,
+                            self.common.outpoint,
+                            self.common.contract.expiry,
+                        )
+                        .await
+                        .filter(|p| self.common.contract.verify_preimage(p));
                         match p {
                             Some(p) => SendOutcome::PreimageTable(p),
                             None => SendOutcome::Failure,
@@ -220,6 +220,7 @@ fn submit_refund(
         old_state.common.account,
         operation,
         tx_builder,
+        Vec::new(),
         false,
         |txid| SendRefundEvent { txid, expired },
     )
@@ -268,7 +269,7 @@ async fn await_preimage_sm(
     contract: OutgoingContract,
     ctx: ClientContext,
 ) -> Option<[u8; 32]> {
-    let preimage = ctx.api.ln_await_preimage(outpoint, contract.expiry).await?;
+    let preimage = super::api::await_preimage(&ctx.api, outpoint, contract.expiry).await?;
 
     if contract.verify_preimage(&preimage) {
         return Some(preimage);

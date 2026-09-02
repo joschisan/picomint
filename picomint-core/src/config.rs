@@ -90,4 +90,12 @@ impl ConsensusConfig {
     pub fn calculate_federation_id(&self) -> FederationId {
         FederationId(self.consensus_hash())
     }
+
+    /// The peers' iroh public keys — the node ids a client dials.
+    pub fn iroh_pks(&self) -> BTreeMap<PeerId, iroh_base::PublicKey> {
+        self.peers
+            .iter()
+            .map(|entry| (*entry.0, entry.1.iroh_pk))
+            .collect()
+    }
 }

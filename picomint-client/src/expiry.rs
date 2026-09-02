@@ -9,12 +9,12 @@
 
 use picomint_core::config::FederationId;
 use picomint_core::expiry::ExpiryStatus;
-use picomint_redb::{Database, DbRead, WriteTx, table};
+use picomint_redb::{DbRead, WriteTx, table};
 use thiserror::Error;
 use tracing::warn;
 
 use crate::Client;
-use crate::api::FederationApi;
+use crate::context::ClientContext;
 
 table!(
     ExpiryStatusTable,
@@ -47,37 +47,32 @@ impl Client {
             .ctx(federation)
             .map_err(|_| RefreshExpiryStatusError::FailedToRequestExpiryStatus)?;
 
-        refresh_once(&ctx.api, &self.db, federation).await
+        refresh_once(&ctx).await
     }
 }
 
 /// One-shot bring-up task: fetch the announced expiry and reconcile the
 /// cache, logging instead of failing — the cache simply stays stale until
 /// the next refresh.
-pub(crate) async fn refresh(api: FederationApi, db: Database, federation: FederationId) {
-    if refresh_once(&api, &db, federation).await.is_err() {
-        warn!(%federation, "Failed to refresh the expiry status");
+pub(crate) async fn refresh(ctx: ClientContext) {
+    if refresh_once(&ctx).await.is_err() {
+        warn!(federation = %ctx.federation, "Failed to refresh the expiry status");
     }
 }
 
-async fn refresh_once(
-    api: &FederationApi,
-    db: &Database,
-    federation: FederationId,
-) -> Result<(), RefreshExpiryStatusError> {
-    let status = api
-        .expiry_status()
+async fn refresh_once(ctx: &ClientContext) -> Result<(), RefreshExpiryStatusError> {
+    let status = crate::api::expiry_status(&ctx.api)
         .await
         .map_err(|_| RefreshExpiryStatusError::FailedToRequestExpiryStatus)?;
 
-    let dbtx = db.begin_write();
+    let dbtx = ctx.db.begin_write();
 
     match status {
         Some(s) => {
-            dbtx.insert(&ExpiryStatusTable, &federation, &s);
+            dbtx.insert(&ExpiryStatusTable, &ctx.federation, &s);
         }
         None => {
-            dbtx.remove(&ExpiryStatusTable, &federation);
+            dbtx.remove(&ExpiryStatusTable, &ctx.federation);
         }
     }
 

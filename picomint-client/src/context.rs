@@ -62,18 +62,21 @@ impl ClientContext {
         query_txid: TransactionId,
     ) -> Result<(), String> {
         let mut stream = self.subscribe_operation_events(operation);
+
         while let Some(entry) = stream.next().await {
             if let Some(ev) = entry.to_event::<TxAcceptEvent>()
                 && ev.txid == query_txid
             {
                 return Ok(());
             }
+
             if let Some(ev) = entry.to_event::<TxRejectEvent>()
                 && ev.txid == query_txid
             {
                 return Err(ev.error);
             }
         }
+
         unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 

@@ -17,6 +17,7 @@ use lightning::types::payment::PaymentHash;
 use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
+use picomint_client::gw::api;
 use picomint_client::gw::events::ReceiveSuccessEvent;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::Amount;
@@ -116,10 +117,9 @@ impl AppState {
             "Invalid auth signature for the invoice data"
         );
 
-        let (contract_id, expiry) = self
-            .client
-            .api(payload.federation)?
-            .gw_outgoing_contract_expiry(payload.outpoint)
+        let api = self.client.api(payload.federation)?;
+
+        let (contract_id, expiry) = api::outgoing_contract_expiry(&api, payload.outpoint)
             .await
             .map_err(|_| anyhow!("The gateway cannot reach the federation"))?
             .ok_or(anyhow!("The outgoing contract has not yet been confirmed"))?;
