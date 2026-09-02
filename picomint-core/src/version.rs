@@ -10,11 +10,13 @@ use serde::{Deserialize, Serialize};
 /// module set, so there is nothing for a per-module version to say that this
 /// one does not.
 ///
-/// A single counter rather than a major/minor pair. A minor bump elsewhere
-/// means "adds wire variants that older peers ignore", which this encoding
-/// cannot express — an unknown discriminant is a hard decode error, never a
-/// skip. Every rule change is therefore breaking, and one monotonic number
-/// says all there is to say about it.
+/// The major/minor split is about clients, not guardians. For guardians
+/// every bump is breaking — an unknown discriminant is a hard decode error,
+/// never a skip, so there is no such thing as a change an older guardian can
+/// run through. Clients are different: a rule change confined to the
+/// guardian side is a minor bump they can ignore, while a change to what
+/// clients see is a major bump they must support. Votes compare
+/// lexicographically via the field order below.
 #[derive(
     Debug,
     Clone,
@@ -30,7 +32,13 @@ use serde::{Deserialize, Serialize};
     Decodable,
     Display,
 )]
-pub struct ConsensusVersion(pub u32);
+#[display("{major}.{minor}")]
+pub struct ConsensusVersion {
+    /// Incremented for changes clients must support.
+    pub major: u8,
+    /// Incremented for changes clients can ignore.
+    pub minor: u8,
+}
 
 /// Highest consensus version this binary can run.
 ///
@@ -46,4 +54,4 @@ pub struct ConsensusVersion(pub u32);
 /// makes new ones start at the top with nothing to vote about.
 ///
 /// [`ConsensusConfig::default_version`]: crate::config::ConsensusConfig::default_version
-pub const CONSENSUS_VERSION: ConsensusVersion = ConsensusVersion(0);
+pub const CONSENSUS_VERSION: ConsensusVersion = ConsensusVersion { major: 1, minor: 0 };
