@@ -102,7 +102,7 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
 
     async fn session_count(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<u64>, CliError> {
+    ) -> Result<Json<u32>, CliError> {
         Ok(Json(api.session_count()))
     }
 

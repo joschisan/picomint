@@ -195,7 +195,7 @@ impl DataProvider<u64> for TimestampDataProvider {
 
 const N_PEERS: usize = 4;
 const ROUND_LIMIT: Round = 100;
-const SESSION: u64 = 0;
+const SESSION: u32 = 0;
 
 fn build_keychains(n: NumPeers) -> BTreeMap<PeerId, Keychain> {
     let keypairs: BTreeMap<PeerId, Keypair> = n

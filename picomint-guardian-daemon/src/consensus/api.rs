@@ -23,7 +23,7 @@ pub struct ConsensusApi {
 }
 
 impl ConsensusApi {
-    pub fn session_count(&self) -> u64 {
+    pub fn session_count(&self) -> u32 {
         get_finished_session_count(&self.server.db.begin_read())
     }
 

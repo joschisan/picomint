@@ -33,7 +33,7 @@ table!(
 
 table!(
     SignedSessionOutcomeTable,
-    u64 => session::SignedSessionOutcome,
+    u32 => session::SignedSessionOutcome,
     "signed-session-outcome",
 );
 

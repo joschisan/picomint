@@ -85,7 +85,7 @@ async fn run_session(
     server: &Server,
     connections: &ReconnectP2PConnections,
     submission_rx: &Receiver<ConsensusItem>,
-    session_index: u64,
+    session_index: u32,
 ) -> Option<()> {
     // The bft engine creates units unpaced but work-gated: as fast as
     // new parents arrive while items await ordering, not at all while
@@ -174,7 +174,7 @@ async fn run_session(
 async fn adopt_session(
     server: &Server,
     connections: &ReconnectP2PConnections,
-    session_index: u64,
+    session_index: u32,
     outcomes_rx: Receiver<(PeerId, SignedSessionOutcome)>,
 ) -> Option<SignedSessionOutcome> {
     let request_interval = if server.cfg.consensus.network == bitcoin::Network::Regtest {
@@ -212,7 +212,7 @@ async fn adopt_session(
 async fn participate_in_session(
     server: &Server,
     connections: &ReconnectP2PConnections,
-    session_index: u64,
+    session_index: u32,
     ordered_rx: Receiver<(BftRound, PeerId, ConsensusItem)>,
     signatures_rx: Receiver<(PeerId, schnorr::Signature)>,
 ) -> Option<SignedSessionOutcome> {
@@ -302,7 +302,7 @@ async fn order_items_until_cut(
 async fn collect_threshold_signatures(
     server: &Server,
     connections: &ReconnectP2PConnections,
-    session_index: u64,
+    session_index: u32,
     session_outcome: SessionOutcome,
     signatures_rx: Receiver<(PeerId, schnorr::Signature)>,
 ) -> Option<SignedSessionOutcome> {
@@ -363,7 +363,7 @@ fn random_peer(cfg: &ServerConfig) -> PeerId {
 /// Validate a SignedSessionOutcome received via P2P
 fn validate_signed_session_outcome(
     cfg: &ServerConfig,
-    session_index: u64,
+    session_index: u32,
     outcome: &SignedSessionOutcome,
 ) -> bool {
     if outcome.signatures.len() != cfg.consensus.peers.to_num_peers().threshold() {
@@ -397,7 +397,7 @@ fn pending_accepted_items(server: &Server) -> Vec<AcceptedItem> {
 /// form a prefix of the signed outcome; anything else is a consensus failure.
 async fn finalize_session(
     server: &Server,
-    session_index: u64,
+    session_index: u32,
     signed_session_outcome: SignedSessionOutcome,
 ) {
     let pending_accepted_items = pending_accepted_items(server);
@@ -543,7 +543,7 @@ async fn process_consensus_item(
     Ok(())
 }
 
-pub fn get_finished_session_count(dbtx: &ReadTx) -> u64 {
+pub fn get_finished_session_count(dbtx: &ReadTx) -> u32 {
     dbtx.iter_rev(&SignedSessionOutcomeTable, |r| {
         r.next().map_or(0, |entry| entry.0 + 1)
     })
