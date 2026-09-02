@@ -72,7 +72,7 @@ async fn await_tx_outcome(api: &ConsensusApi, tx: Transaction) -> Result<(), TxE
     let start = Instant::now();
 
     // Subscribe before submitting so a rejection cannot land in the gap.
-    let mut rejections = api.tx_reject_tx.subscribe();
+    let mut rejections = api.server.tx_reject_tx.subscribe();
 
     let notify_item = api.server.db.notify_for_table(&AcceptedItemTable);
     let notify_session = api.server.db.notify_for_table(&SignedSessionOutcomeTable);

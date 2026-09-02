@@ -1,14 +1,12 @@
 //! Implements the client API through which users interact with the federation
 
 use chrono::{Days, Utc};
-use picomint_core::TransactionId;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::module::audit::AuditSummary;
-use picomint_core::tx::{ConsensusItem, TxError};
+use picomint_core::tx::ConsensusItem;
 
 use picomint_redb::DbRead;
-use tokio::sync::broadcast;
 
 use crate::consensus::db::{ExpiryStatusTable, InviteMeta, InviteMetaTable};
 use crate::consensus::engine::get_finished_session_count;
@@ -21,7 +19,6 @@ pub struct ConsensusApi {
     pub server: Server,
     /// For sending API events to consensus such as transactions
     pub submission_tx: async_channel::Sender<ConsensusItem>,
-    pub tx_reject_tx: broadcast::Sender<(TransactionId, TxError)>,
     pub p2p_status_receivers: P2PStatusReceivers,
 }
 

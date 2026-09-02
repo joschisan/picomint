@@ -66,6 +66,7 @@ pub async fn run(
         cfg: cfg.clone(),
         db: db.clone(),
         btc_rpc: btc_rpc.clone(),
+        tx_reject_tx: tokio::sync::broadcast::channel(TX_REJECT_BUFFER).0,
     };
 
     wallet::spawn_broadcast_unconfirmed_txs_task(
@@ -76,12 +77,9 @@ pub async fn run(
 
     let (submission_tx, submission_rx) = async_channel::bounded(TX_BUFFER);
 
-    let tx_reject_tx = tokio::sync::broadcast::channel(TX_REJECT_BUFFER).0;
-
     let consensus_api = Arc::new(ConsensusApi {
         server: server.clone(),
         submission_tx: submission_tx.clone(),
-        tx_reject_tx: tx_reject_tx.clone(),
         p2p_status_receivers,
     });
 
@@ -108,7 +106,7 @@ pub async fn run(
 
     info!("Starting Consensus Engine...");
 
-    engine::run(server, connections, submission_rx, tx_reject_tx).await?;
+    engine::run(server, connections, submission_rx).await?;
 
     Ok(())
 }

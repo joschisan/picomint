@@ -11,8 +11,9 @@ use picomint_core::module::audit::AuditSummary;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
-use picomint_core::{Amount, OutPoint, PeerId};
+use picomint_core::{Amount, OutPoint, PeerId, TransactionId};
 use picomint_redb::{Database, WriteTx};
+use tokio::sync::broadcast;
 use tracing::info;
 
 use crate::config::ServerConfig;
@@ -24,6 +25,7 @@ pub struct Server {
     pub cfg: ServerConfig,
     pub db: Database,
     pub btc_rpc: BitcoinRpcMonitor,
+    pub tx_reject_tx: broadcast::Sender<(TransactionId, TxError)>,
 }
 
 impl Server {

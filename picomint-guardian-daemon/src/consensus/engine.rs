@@ -7,13 +7,12 @@ use futures::StreamExt;
 use picomint_bft::{Engine as BftEngine, INetwork, Keychain as BftKeychain, Round as BftRound};
 use picomint_core::secp256k1::{SECP256K1, schnorr};
 use picomint_core::session::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
-use picomint_core::tx::{ConsensusItem, TxError};
+use picomint_core::tx::ConsensusItem;
 use picomint_core::version::CONSENSUS_VERSION;
-use picomint_core::{NumPeersExt, PeerId, TransactionId};
+use picomint_core::{NumPeersExt, PeerId};
 use picomint_encoding::Encodable;
 use picomint_redb::{DbRead, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
-use tokio::sync::broadcast;
 use tracing::{info, instrument};
 
 use crate::config::ServerConfig;
@@ -73,7 +72,6 @@ pub async fn run(
     server: Server,
     connections: ReconnectP2PConnections,
     submission_rx: Receiver<ConsensusItem>,
-    tx_reject_tx: broadcast::Sender<(TransactionId, TxError)>,
 ) -> anyhow::Result<()> {
     // We need four peers to run the atomic broadcast
     assert!(server.cfg.consensus.peers.to_num_peers().total() >= 4);
@@ -83,15 +81,9 @@ pub async fn run(
 
         info!(session_index, "Starting consensus session");
 
-        if run_session(
-            &server,
-            &connections,
-            &submission_rx,
-            &tx_reject_tx,
-            session_index,
-        )
-        .await
-        .is_none()
+        if run_session(&server, &connections, &submission_rx, session_index)
+            .await
+            .is_none()
         {
             return Ok(());
         }
@@ -104,7 +96,6 @@ async fn run_session(
     server: &Server,
     connections: &ReconnectP2PConnections,
     submission_rx: &Receiver<ConsensusItem>,
-    tx_reject_tx: &broadcast::Sender<(TransactionId, TxError)>,
     session_index: u64,
 ) -> Option<()> {
     // The bft engine creates units unpaced but work-gated: as fast as
@@ -165,7 +156,6 @@ async fn run_session(
             session_index,
             ordered_rx,
             signatures_rx,
-            tx_reject_tx,
         ) => outcome?,
     };
 
@@ -183,7 +173,7 @@ async fn run_session(
     bft_handle.abort();
     bft_handle.await.ok();
 
-    finalize_session(server, session_index, signed_session_outcome, tx_reject_tx).await;
+    finalize_session(server, session_index, signed_session_outcome).await;
 
     Some(())
 }
@@ -236,9 +226,8 @@ async fn participate_in_session(
     session_index: u64,
     ordered_rx: Receiver<(BftRound, PeerId, ConsensusItem)>,
     signatures_rx: Receiver<(PeerId, schnorr::Signature)>,
-    tx_reject_tx: &broadcast::Sender<(TransactionId, TxError)>,
 ) -> Option<SignedSessionOutcome> {
-    order_items_until_cut(server, ordered_rx, tx_reject_tx).await?;
+    order_items_until_cut(server, ordered_rx).await?;
 
     let session_outcome = SessionOutcome {
         items: pending_accepted_items(server),
@@ -262,7 +251,6 @@ async fn participate_in_session(
 async fn order_items_until_cut(
     server: &Server,
     ordered_rx: Receiver<(BftRound, PeerId, ConsensusItem)>,
-    tx_reject_tx: &broadcast::Sender<(TransactionId, TxError)>,
 ) -> Option<()> {
     // We enumerate every bft delivery for this session; ACCEPTED_ITEM is
     // sparse (rejected positions are absent). On crash replay bft re-emits
@@ -313,7 +301,7 @@ async fn order_items_until_cut(
 
         let dbtx = server.db.begin_write();
 
-        if process_consensus_item(server, &dbtx, peer, item.clone(), tx_reject_tx)
+        if process_consensus_item(server, &dbtx, peer, item.clone())
             .await
             .is_ok()
         {
@@ -437,7 +425,6 @@ async fn finalize_session(
     server: &Server,
     session_index: u64,
     signed_session_outcome: SignedSessionOutcome,
-    tx_reject_tx: &broadcast::Sender<(TransactionId, TxError)>,
 ) {
     let pending_accepted_items = pending_accepted_items(server);
 
@@ -471,7 +458,6 @@ async fn finalize_session(
             &dbtx,
             accepted_item.peer,
             accepted_item.item.clone(),
-            tx_reject_tx,
         )
         .await
         .expect("Rejected item accepted by federation consensus");
@@ -494,13 +480,12 @@ async fn finalize_session(
     dbtx.commit();
 }
 
-#[instrument(skip(server, tx_reject_tx, dbtx, item), level = "info")]
+#[instrument(skip(server, dbtx, item), level = "info")]
 async fn process_consensus_item(
     server: &Server,
     dbtx: &WriteTx,
     peer: PeerId,
     item: ConsensusItem,
-    tx_reject_tx: &broadcast::Sender<(TransactionId, TxError)>,
 ) -> anyhow::Result<()> {
     match &item {
         ConsensusItem::Tx(tx) => {
@@ -517,7 +502,7 @@ async fn process_consensus_item(
                 // the check above - so every rejection we broadcast is
                 // final and has a caller to fail.
                 if peer == server.cfg.private.identity {
-                    tx_reject_tx.send((txid, error.clone())).ok();
+                    server.tx_reject_tx.send((txid, error.clone())).ok();
                 }
 
                 return Err(anyhow!(error.to_string()));
