@@ -60,7 +60,7 @@ pub struct GatewayInfo {
     /// Expiry delta in blocks for outgoing contracts. Sized for
     /// external LN sends (accounts for intermediate LN hops) and used for
     /// direct swaps as well.
-    pub expiry_delta: u64,
+    pub expiry_delta: u16,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable, Copy)]
