@@ -3,7 +3,7 @@ use picomint_core::expiry;
 use picomint_core::session;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::ConsensusVersion;
-use picomint_core::{NumPeers, NumPeersExt, PeerId, TransactionId};
+use picomint_core::{NumPeersExt, PeerId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{DbRead, table};
 
@@ -81,17 +81,15 @@ table!(
 /// rather than indexed short because a peer that has not voted still counts:
 /// it supports `default_version` and nothing beyond, and that has to weigh on
 /// the result the same as a vote would.
-pub fn consensus_version(
-    dbtx: &impl DbRead,
-    num_peers: NumPeers,
-    default_version: ConsensusVersion,
-) -> ConsensusVersion {
+pub fn consensus_version(server: &Server, dbtx: &impl DbRead) -> ConsensusVersion {
+    let num_peers = server.cfg.consensus.peers.to_num_peers();
+
     let mut versions = dbtx.iter(&ConsensusVersionVoteTable, |r| {
         r.map(|(_, version)| version).collect::<Vec<_>>()
     });
 
     while versions.len() < num_peers.total() {
-        versions.push(default_version);
+        versions.push(server.cfg.consensus.default_version);
     }
 
     versions.sort_unstable();

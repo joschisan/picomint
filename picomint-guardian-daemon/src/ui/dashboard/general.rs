@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use maud::{Markup, html};
 use picomint_core::PeerId;
+use picomint_core::version::ConsensusVersion;
 
 use crate::p2p::{P2PConnectionStatus, Transport};
 
@@ -14,6 +15,7 @@ pub fn render(
     p2p_connection_status: &BTreeMap<PeerId, P2PConnectionStatus>,
     session_count: u64,
     block_count: u64,
+    version: ConsensusVersion,
 ) -> Markup {
     html! {
         div class="card h-100" {
@@ -48,6 +50,10 @@ pub fn render(
                     tr {
                         th { "Block Count" }
                         td { (block_count) }
+                    }
+                    tr {
+                        th { "Version" }
+                        td { (version) }
                     }
                 }
             }

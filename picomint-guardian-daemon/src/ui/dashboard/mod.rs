@@ -18,7 +18,7 @@ use maud::html;
 use picomint_redb::DbRead;
 
 use crate::consensus::api::ConsensusApi;
-use crate::consensus::db::{ExpiryStatusTable, consensus_block_count};
+use crate::consensus::db::{ExpiryStatusTable, consensus_block_count, consensus_version};
 use crate::consensus::engine::get_finished_session_count;
 use crate::ui::assets::WithStaticRoutesExt;
 use crate::ui::dashboard::modules::{ln, wallet};
@@ -71,11 +71,12 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
 
     let session_count = get_finished_session_count(&dbtx);
     let block_count = consensus_block_count(&api.server, &dbtx);
+    let version = consensus_version(&api.server, &dbtx);
 
     let content = html! {
         div class="row gy-4" {
             div class="col-12" {
-                (general::render(&federation_name, &guardian_names, &p2p_connection_status, session_count, block_count))
+                (general::render(&federation_name, &guardian_names, &p2p_connection_status, session_count, block_count, version))
             }
         }
 

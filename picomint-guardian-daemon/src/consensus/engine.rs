@@ -534,11 +534,7 @@ async fn process_consensus_item(
             // every rule we would run from here on is the wrong one.
             // Halting is the only correct move left.
             assert!(
-                consensus_version(
-                    dbtx,
-                    server.cfg.consensus.peers.to_num_peers(),
-                    default_version
-                ) <= CONSENSUS_VERSION,
+                consensus_version(server, dbtx) <= CONSENSUS_VERSION,
                 "Guardian does not support the active consensus version, please upgrade"
             );
         }
