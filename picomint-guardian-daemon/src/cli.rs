@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
@@ -77,7 +77,7 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
 
 /// Build the Dashboard-phase CLI router that exposes read-only federation
 /// endpoints (audit, invite) plus the LN/wallet module-admin routes.
-pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
+pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     use axum::Json;
     use axum::routing::post;
     use picomint_core::expiry::ExpiryStatus;
@@ -240,8 +240,9 @@ pub fn dashboard_cli_router(api: Arc<crate::consensus::api::ConsensusApi>) -> Ro
 /// Dashboard CLI server — runs during consensus phase. Binds a Unix
 /// socket at `{data_dir}/{CLI_SOCKET_FILENAME}`; a stale socket from a
 /// previous (crashed) run is unlinked before we bind.
-pub async fn run_dashboard_cli(data_dir: &Path, router: Router) {
+pub async fn run(data_dir: PathBuf, router: Router) {
     let socket_path = data_dir.join(CLI_SOCKET_FILENAME);
+
     std::fs::remove_file(&socket_path).ok();
 
     let listener = UnixListener::bind(&socket_path).expect("Failed to bind module CLI server");

@@ -20,7 +20,6 @@ pub const DB_FILE: &str = "database.redb";
 use config::ServerConfig;
 use picomint_bitcoin_rpc::BitcoindClient;
 use picomint_redb::{Database, DbRead};
-use tokio::net::TcpListener;
 use tracing::info;
 
 /// Dispatch helper for module `handle_api` match arms.
@@ -79,17 +78,10 @@ pub async fn run_server(
 
     let setup_api = Arc::new(SetupApi::new(settings.clone(), setup_tx, db.clone()));
 
-    let ui_service = ui::setup::router(setup_api.clone()).into_make_service();
-
-    let ui_listener = TcpListener::bind(settings.ui_addr)
-        .await
-        .expect("Failed to bind setup UI");
-
-    let setup_ui_handle = tokio::spawn(async move {
-        axum::serve(ui_listener, ui_service)
-            .await
-            .expect("Failed to serve setup UI");
-    });
+    let setup_ui_handle = tokio::spawn(ui::run(
+        settings.ui_addr,
+        ui::setup::router(setup_api.clone()),
+    ));
 
     info!("Setup UI running at http://{} 🚀", settings.ui_addr);
 
@@ -142,17 +134,7 @@ async fn run_dkg_then_consensus(
     // Operators reloading the page during DKG — or opening it
     // for the first time after an auto-resume restart — get a
     // coherent waiting screen instead of a connection error.
-    let ui_service = ui::dkg::router(db.clone()).into_make_service();
-
-    let ui_listener = TcpListener::bind(settings.ui_addr)
-        .await
-        .expect("Failed to bind DKG UI");
-
-    let dkg_ui_handle = tokio::spawn(async move {
-        axum::serve(ui_listener, ui_service)
-            .await
-            .expect("Failed to serve DKG UI");
-    });
+    let dkg_ui_handle = tokio::spawn(ui::run(settings.ui_addr, ui::dkg::router(db.clone())));
 
     let cfg = ServerConfig::generate(&cgp, connections.clone(), status_rxs.clone()).await?;
 

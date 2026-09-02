@@ -4,7 +4,7 @@ pub mod db;
 pub mod engine;
 pub mod ln;
 pub mod mint;
-mod rpc;
+pub mod rpc;
 pub mod server;
 pub mod tx;
 pub mod wallet;
@@ -12,6 +12,7 @@ pub mod wallet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::ensure;
 use bitcoin::Network;
 use futures::TryFutureExt;
 use picomint_bitcoin_rpc::{BitcoinRpcMonitor, BitcoindClient};
@@ -20,7 +21,6 @@ use picomint_core::tx::ConsensusItem;
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::wire;
 use picomint_redb::{Database, DbRead};
-use tokio::net::TcpListener;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
@@ -46,37 +46,37 @@ pub async fn run(
     cfg: ServerConfig,
     settings: ConfigGenSettings,
     db: Database,
-    bitcoin_backend: Arc<BitcoindClient>,
+    btc_rpc: Arc<BitcoindClient>,
     connections: ReconnectP2PConnections,
     p2p_status_receivers: P2PStatusReceivers,
     foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
 ) -> anyhow::Result<()> {
     cfg.validate_config()?;
 
-    let bitcoin_rpc_connection = BitcoinRpcMonitor::new(
-        bitcoin_backend,
+    let btc_rpc = BitcoinRpcMonitor::new(
+        btc_rpc,
         if cfg.consensus.network == Network::Regtest {
-            Duration::from_millis(100)
+            Duration::from_secs(1)
         } else {
-            Duration::from_mins(1)
+            Duration::from_secs(10)
         },
     );
 
     let server = Server {
         cfg: cfg.clone(),
         db: db.clone(),
-        btc_rpc: bitcoin_rpc_connection.clone(),
+        btc_rpc: btc_rpc.clone(),
     };
 
     wallet::spawn_broadcast_unconfirmed_txs_task(
-        bitcoin_rpc_connection.clone(),
+        btc_rpc.clone(),
         db.clone(),
         cfg.consensus.network,
     );
 
     let (submission_tx, submission_rx) = async_channel::bounded(TX_BUFFER);
 
-    let (tx_reject_tx, _) = tokio::sync::broadcast::channel(TX_REJECT_BUFFER);
+    let tx_reject_tx = tokio::sync::broadcast::channel(TX_REJECT_BUFFER).0;
 
     let consensus_api = Arc::new(ConsensusApi {
         server: server.clone(),
@@ -91,81 +91,43 @@ pub async fn run(
 
     info!("Starting Submission of Module CI proposals...");
 
-    tokio::spawn({
-        let server = consensus_api.server.clone();
-        let submission_tx = submission_tx.clone();
-        async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(1));
-            loop {
-                let dbtx = server.db.begin_read();
-                // Upgrading the binary is the whole of casting a vote: we
-                // announce what we support until consensus has recorded it,
-                // then stay quiet until the next upgrade raises it again. A
-                // federation created by this binary has nothing to announce.
-                if dbtx
-                    .get(&ConsensusVersionVoteTable, &server.cfg.private.identity)
-                    .unwrap_or(server.cfg.consensus.default_version)
-                    < CONSENSUS_VERSION
-                {
-                    submission_tx
-                        .send(ConsensusItem::Version(CONSENSUS_VERSION))
-                        .await
-                        .ok();
-                }
-                for item in wallet::consensus_proposal(&server, &dbtx) {
-                    submission_tx
-                        .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
-                            item,
-                        )))
-                        .await
-                        .ok();
-                }
-                for item in ln::consensus_proposal(&server, &dbtx) {
-                    submission_tx
-                        .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
-                        .await
-                        .ok();
-                }
-                interval.tick().await;
-            }
-        }
-    });
+    tokio::spawn(submit_ci_proposals(
+        consensus_api.server.clone(),
+        submission_tx.clone(),
+    ));
 
-    let ui_service = crate::ui::dashboard::router(consensus_api.clone()).into_make_service();
+    let ui_router = crate::ui::dashboard::router(consensus_api.clone());
 
-    let ui_listener = TcpListener::bind(settings.ui_addr)
-        .await
-        .expect("Failed to bind dashboard UI");
+    tokio::spawn(crate::ui::run(settings.ui_addr, ui_router));
 
-    tokio::spawn(async move {
-        axum::serve(ui_listener, ui_service)
-            .await
-            .expect("Failed to serve dashboard UI");
-    });
+    let cli_router = crate::cli::router(consensus_api.clone());
 
-    info!("Dashboard UI running at http://{} 🚀", settings.ui_addr);
+    tokio::spawn(crate::cli::run(settings.data_dir.clone(), cli_router));
 
-    {
-        let data_dir = settings.data_dir.clone();
-        let dashboard_router = crate::cli::dashboard_cli_router(consensus_api.clone());
-        tokio::spawn(async move {
-            crate::cli::run_dashboard_cli(&data_dir, dashboard_router).await;
-        });
-    }
+    await_bitcoin_sync(&btc_rpc, cfg.consensus.network).await?;
 
+    info!("Starting Consensus Engine...");
+
+    engine::run(server, connections, submission_rx, tx_reject_tx).await?;
+
+    Ok(())
+}
+
+async fn await_bitcoin_sync(
+    bitcoin_rpc_connection: &BitcoinRpcMonitor,
+    network: Network,
+) -> anyhow::Result<()> {
     loop {
         match bitcoin_rpc_connection.status() {
             Some(status) => {
-                anyhow::ensure!(
-                    status.network == cfg.consensus.network,
-                    "Bitcoin backend network {} does not match federation network {}",
-                    status.network,
-                    cfg.consensus.network,
+                ensure!(
+                    status.network == network,
+                    "Bitcoin backend network does not match",
                 );
 
                 if let Some(progress) = status.sync_progress {
                     if progress >= 0.999 {
-                        break;
+                        return Ok(());
                     }
 
                     info!(
@@ -173,7 +135,7 @@ pub async fn run(
                         progress * 100.0
                     );
                 } else {
-                    break;
+                    return Ok(());
                 }
             }
             None => {
@@ -183,12 +145,46 @@ pub async fn run(
 
         sleep(Duration::from_secs(1)).await;
     }
+}
 
-    info!("Starting Consensus Engine...");
+async fn submit_ci_proposals(server: Server, submission_tx: async_channel::Sender<ConsensusItem>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
 
-    engine::run(server, connections, submission_rx, tx_reject_tx).await?;
+    loop {
+        let dbtx = server.db.begin_read();
+        // Upgrading the binary is the whole of casting a vote: we
+        // announce what we support until consensus has recorded it,
+        // then stay quiet until the next upgrade raises it again. A
+        // federation created by this binary has nothing to announce.
+        if dbtx
+            .get(&ConsensusVersionVoteTable, &server.cfg.private.identity)
+            .unwrap_or(server.cfg.consensus.default_version)
+            < CONSENSUS_VERSION
+        {
+            submission_tx
+                .send(ConsensusItem::Version(CONSENSUS_VERSION))
+                .await
+                .ok();
+        }
 
-    Ok(())
+        for item in wallet::consensus_proposal(&server, &dbtx) {
+            submission_tx
+                .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
+                    item,
+                )))
+                .await
+                .ok();
+        }
+
+        for item in ln::consensus_proposal(&server, &dbtx) {
+            submission_tx
+                .send(ConsensusItem::Module(wire::ModuleConsensusItem::Ln(item)))
+                .await
+                .ok();
+        }
+
+        interval.tick().await;
+    }
 }
 
 async fn run_iroh_api(
@@ -210,7 +206,7 @@ async fn run_iroh_api(
 
 async fn dispatch(consensus_api: Arc<ConsensusApi>, method: Method) -> Result<Vec<u8>, String> {
     match method {
-        Method::Core(m) => consensus_api.handle_api(m).await,
+        Method::Core(m) => rpc::handle_api(&consensus_api, m).await,
         Method::Mint(m) => mint::handle_api(&consensus_api.server, m).await,
         Method::Wallet(m) => wallet::handle_api(&consensus_api.server, m).await,
         Method::Ln(m) => ln::handle_api(&consensus_api.server, m).await,

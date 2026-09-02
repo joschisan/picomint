@@ -23,9 +23,27 @@ pub mod dashboard;
 pub mod dkg;
 pub mod setup;
 
+use std::net::SocketAddr;
+
+use axum::Router;
 use maud::{DOCTYPE, Markup, PreEscaped, html};
+use tokio::net::TcpListener;
+use tracing::info;
 
 pub const ROOT_ROUTE: &str = "/";
+
+/// Phase UI server — binds `ui_addr` and serves `router` until the caller
+/// aborts the task, which drops the listener and releases the port for the
+/// next phase to rebind.
+pub async fn run(ui_addr: SocketAddr, router: Router) {
+    info!("Running UI at http://{} 🚀", ui_addr);
+
+    let listener = TcpListener::bind(ui_addr).await.expect("Failed to bind UI");
+
+    axum::serve(listener, router.into_make_service())
+        .await
+        .expect("Failed to serve UI");
+}
 
 pub fn common_head(title: &str) -> Markup {
     html! {
