@@ -71,10 +71,12 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let mut send_events = pin!(wallet_event_stream(client_send));
 
-    let pegin_addr = client_send
-        .client
-        .wallet_deposit_address(client_send.fed, Account::PRIMARY)
-        .await?;
+    let pegin_addr = retry("deposit address derived", || async {
+        client_send
+            .client
+            .wallet_deposit_address(client_send.fed, Account::PRIMARY)
+    })
+    .await?;
     info!(addr = %pegin_addr, "Pegin address ready");
 
     let pegin_txid = env.send_to_address(&pegin_addr, bitcoin::Amount::from_sat(100_000_000))?;

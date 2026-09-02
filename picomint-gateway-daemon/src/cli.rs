@@ -864,11 +864,12 @@ async fn federation_module_wallet_receive(
     Json(payload): Json<FederationWalletReceiveRequest>,
 ) -> Result<Json<FederationWalletReceiveResponse>, CliError> {
     let federation = resolve_federation(&state, payload.federation)?;
+
     let address = state
         .client
         .wallet_deposit_address(federation, GATEWAY_ACCOUNT)
-        .await
         .map_err(CliError::internal)?;
+
     Ok(Json(FederationWalletReceiveResponse {
         address: address.as_unchecked().clone(),
     }))

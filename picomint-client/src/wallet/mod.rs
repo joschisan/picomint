@@ -426,22 +426,18 @@ pub enum SendError {
 // ─── Flat federation-keyed surface ───────────────────────────────────────
 
 impl Client {
-    /// `account`'s next unused onchain deposit address, polling until the
-    /// initial address derivation has completed.
-    pub async fn wallet_deposit_address(
+    /// `account`'s next unused onchain deposit address. Errors while the
+    /// initial address derivation has not completed yet.
+    pub fn wallet_deposit_address(
         &self,
         federation: FederationId,
         account: Account,
     ) -> anyhow::Result<Address> {
         let ctx = self.ctx(federation)?;
 
-        loop {
-            if let Some(idx) = highest_valid_index(&ctx, account) {
-                return Ok(derive_address(&ctx, account, idx));
-            }
-
-            sleep(Duration::from_secs(1)).await;
-        }
+        highest_valid_index(&ctx, account)
+            .map(|index| derive_address(&ctx, account, index))
+            .context("Deposit address derivation has not completed yet")
     }
 
     /// Send an onchain payment funded from `account`. `fee` defaults to the
