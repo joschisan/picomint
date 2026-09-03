@@ -198,6 +198,7 @@ impl P2PConnector {
         let endpoint = Endpoint::builder(N0)
             .secret_key(secret_key)
             .alpns(vec![picomint_rpc::ALPN.to_vec()])
+            .transport_config(picomint_rpc::transport_config())
             .bind_addr(p2p_addr)?
             .address_lookup(MdnsAddressLookup::builder())
             .bind()
