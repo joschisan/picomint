@@ -29,7 +29,7 @@ use receive_sm::{ReceiveStateMachine, ReceiveStateMachineTable};
 /// module makes names this one. Accounts are a wallet-facing split; the
 /// gateway has no use for a second balance and [`GwSecret`] grows no account
 /// hop to derive one.
-pub const GATEWAY_ACCOUNT: Account = Account::PRIMARY;
+pub const GATEWAY_ACCOUNT: Account = Account::Primary;
 
 /// Resume this federation's persisted receive state machines. Called
 /// exactly once, at federation bring-up.

@@ -49,12 +49,6 @@ impl OperationId {
 /// hop in the derivation tree, so variant order is load-bearing — reordering
 /// silently re-keys every client.
 ///
-/// The user's balances are one nested variant rather than a variant each, so
-/// that they and the accounts the client keeps for itself grow in separate
-/// namespaces. A user balance added later is appended inside
-/// [`UserAccount`], which leaves every path outside that subtree — including
-/// [`Account::AppFee`]'s — exactly where it was.
-///
 /// Deliberately has no `Default` impl: every entry point that touches
 /// account-scoped state takes one of these explicitly, so an omitted argument
 /// is a compile error rather than a silent write to the wrong balance.
@@ -74,37 +68,6 @@ impl OperationId {
     Display,
 )]
 pub enum Account {
-    /// A balance the user spends and is shown.
-    User(UserAccount),
-    /// Where an integrator's per-transaction cut accrues, if it configured
-    /// one. Never a destination a counterparty can pay into: it is funded
-    /// only by outputs the client adds to its own transactions, and drained
-    /// only by the integrator spending from it.
-    AppFee,
-}
-
-/// One of the balances belonging to the user of a client, as opposed to one
-/// the client keeps for its integrator.
-///
-/// Its own enum so that the set can grow without disturbing anything: a
-/// variant appended here extends [`Account::User`]'s subtree of the
-/// derivation tree and leaves the rest of it untouched.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    Encodable,
-    Decodable,
-    Display,
-)]
-pub enum UserAccount {
     Primary,
     Secondary,
     Tertiary,
@@ -112,57 +75,18 @@ pub enum UserAccount {
     Quinary,
 }
 
-impl From<UserAccount> for Account {
-    fn from(account: UserAccount) -> Self {
-        Account::User(account)
-    }
-}
-
 impl Account {
-    /// Spelt out rather than written [`Account::User`] of each, since these
-    /// are what a caller names when it means one particular balance and
-    /// nothing about the enclosing enum is what it is saying.
-    pub const PRIMARY: Account = Account::User(UserAccount::Primary);
-    pub const SECONDARY: Account = Account::User(UserAccount::Secondary);
-    pub const TERTIARY: Account = Account::User(UserAccount::Tertiary);
-    pub const QUATERNARY: Account = Account::User(UserAccount::Quaternary);
-    pub const QUINARY: Account = Account::User(UserAccount::Quinary);
-
-    /// Every account a counterparty can pay into, in key order — and so the
-    /// ones the address and contract scanners trial their keys against.
-    ///
-    /// [`Account::AppFee`] is reachable only from inside a transaction the
-    /// client builds, so a scanner that swept for it would derive a key per
-    /// entry of a federation-wide stream to match something that cannot be
-    /// there.
+    /// Every account, in key order — the set a counterparty can pay into,
+    /// the one the address and contract scanners trial their keys against,
+    /// and the one a seed scan walks on restore.
     ///
     /// The set is fixed on purpose: every account exists from the moment a
     /// client is built, so no account ever joins a stream late.
-    pub const USER_ACCOUNTS: [Account; 5] = [
-        Account::PRIMARY,
-        Account::SECONDARY,
-        Account::TERTIARY,
-        Account::QUATERNARY,
-        Account::QUINARY,
-    ];
-
-    /// Every account that holds notes, in key order — the set a seed scan has
-    /// to walk.
-    ///
-    /// A superset of [`Account::USER_ACCOUNTS`] because the two answer
-    /// different questions. A scanner asks who can be paid;
-    /// [`Account::AppFee`] cannot, so sweeping for it would derive a key per
-    /// entry of a federation-wide stream to match something that is never
-    /// there. A restore asks where notes live, and the fee account holds them
-    /// like any other — cuts collected but not yet swept when the wallet was
-    /// lost. Its counter space is walked from zero by the next client either
-    /// way, so leaving it out strands whatever it re-derives.
-    pub const ALL: [Account; 6] = [
-        Account::PRIMARY,
-        Account::SECONDARY,
-        Account::TERTIARY,
-        Account::QUATERNARY,
-        Account::QUINARY,
-        Account::AppFee,
+    pub const ALL: [Account; 5] = [
+        Account::Primary,
+        Account::Secondary,
+        Account::Tertiary,
+        Account::Quaternary,
+        Account::Quinary,
     ];
 }

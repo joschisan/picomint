@@ -227,7 +227,7 @@ fn receive_output(
 /// each extra account costs another entry in the address map rather than
 /// another sweep.
 async fn output_scanner(ctx: ClientContext) {
-    for account in Account::USER_ACCOUNTS {
+    for account in Account::ALL {
         if highest_valid_index(&ctx, account).is_some() {
             continue;
         }

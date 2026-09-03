@@ -271,104 +271,6 @@ fn next_counter(ctx: &ClientContext, dbtx: &WriteTx, account: Account) -> u64 {
     counter
 }
 
-/// Blinded outputs paying the integrator's cut of the value a transaction
-/// moves, and the issuance requests that redeem them into
-/// [`Account::AppFee`].
-///
-/// Called on a builder holding its caller's outputs and no funding, where
-/// the imbalance is still the operation's own amount — a payment's
-/// outputs on the way out, a claim's inputs on the way in, and exactly one
-/// of the two. A transaction that moves nothing pays nothing.
-///
-/// Charged on transactions funded from a user's balance and on nothing
-/// else. Spending the fee account is how the integrator collects, and a
-/// collection pays no cut — it would leave a remainder that could never
-/// be swept.
-fn add_fee_outputs(
-    ctx: &ClientContext,
-    dbtx: &WriteTx,
-    account: Account,
-    builder: &mut TxBuilder,
-) -> Vec<NoteIssuanceRequest> {
-    // Gated on [`Account::User`] rather than on a list of the accounts to
-    // skip, so an account added later is exempt by being what it is.
-    if ctx.app_fee_ppm == 0 || !matches!(account, Account::User(_)) {
-        return Vec::new();
-    }
-
-    let basis = builder.deficit() + builder.excess_input();
-
-    let requests = fee_requests(ctx, dbtx, basis);
-
-    for request in &requests {
-        builder.add_output(Output {
-            output: wire::Output::Mint(request.output()),
-            amount: request.denomination.amount(),
-            fee: ctx.config.mint.output_fee,
-        });
-    }
-
-    requests
-}
-
-/// The cut's issuance requests, in denominations totalling the
-/// configured parts per million of `basis`.
-///
-/// The cut absorbs the federation's fee on the outputs carrying it, so
-/// what is charged is what is charged; a cut too small to buy the
-/// smallest denomination buys nothing at all and is left behind as
-/// federation revenue, the same way change dust is.
-fn fee_requests(ctx: &ClientContext, dbtx: &WriteTx, basis: Amount) -> Vec<NoteIssuanceRequest> {
-    let mut denominations = select_output_denominations(
-        ctx.config.mint.output_fee,
-        app_fee_cut(ctx, basis),
-        client_denominations(),
-    );
-
-    // Sorted for the same reason the change outputs are: the shape of a
-    // transaction's outputs should say as little as possible about which
-    // of them are whose.
-    denominations.sort();
-
-    denominations
-        .into_iter()
-        .map(|d| {
-            let counter = next_counter(ctx, dbtx, Account::AppFee);
-
-            NoteIssuanceRequest::new(Account::AppFee, d, counter, &ctx.secret.mint_secret())
-        })
-        .collect()
-}
-
-fn app_fee_cut(ctx: &ClientContext, basis: Amount) -> Amount {
-    Amount::from_msat(
-        basis
-            .msat
-            .saturating_mul(ctx.app_fee_ppm)
-            .saturating_div(1_000_000),
-    )
-}
-
-/// Output value plus federation fees the integrator's cut adds to a
-/// transaction from `account` whose caller outputs and their fees total
-/// `basis`. Mirrors [`add_fee_outputs`] exactly, so
-/// [`largest_affordable_amount`] can price the cut without building
-/// a transaction.
-fn app_fee_total(ctx: &ClientContext, account: Account, basis: Amount) -> Amount {
-    if ctx.app_fee_ppm == 0 || !matches!(account, Account::User(_)) {
-        return Amount::ZERO;
-    }
-
-    select_output_denominations(
-        ctx.config.mint.output_fee,
-        app_fee_cut(ctx, basis),
-        client_denominations(),
-    )
-    .into_iter()
-    .map(|d| d.amount() + ctx.config.mint.output_fee)
-    .sum()
-}
-
 /// Balance the builder against mint's wallet (pulling funding notes when
 /// underfunded, generating change outputs when overfunded), sign and
 /// submit the resulting transaction, and spawn the
@@ -400,15 +302,7 @@ pub(crate) fn finalize_and_submit_tx<E: crate::eventlog::Event + Send>(
     max: bool,
     event: impl FnOnce(TransactionId) -> E,
 ) -> Option<TransactionId> {
-    // Ahead of the deficit the funding has to cover, so the cut is funded
-    // like any other output rather than out of the change.
-    let fee_requests = add_fee_outputs(ctx, dbtx, account, &mut builder);
-
-    let app_fee = fee_requests.iter().map(|r| r.denomination.amount()).sum();
-
     let mut issuance_requests = targets;
-
-    issuance_requests.extend(fee_requests);
 
     let deficit = builder.deficit();
 
@@ -420,9 +314,7 @@ pub(crate) fn finalize_and_submit_tx<E: crate::eventlog::Event + Send>(
 
     let remint = funding.saturating_sub(deficit);
 
-    let txid = submit(
-        ctx, dbtx, account, operation, builder, remint, app_fee, event,
-    );
+    let txid = submit(ctx, dbtx, account, operation, builder, remint, event);
 
     if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
         let sm = MintStateMachine {
@@ -506,7 +398,6 @@ fn fund(
 
 /// Sign the builder, spawn the `TxSubmissionStateMachine`, log the
 /// caller's `event` followed by `TxCreateEvent`.
-#[allow(clippy::too_many_arguments)]
 fn submit<E: crate::eventlog::Event + Send>(
     ctx: &ClientContext,
     dbtx: &WriteTx,
@@ -514,10 +405,9 @@ fn submit<E: crate::eventlog::Event + Send>(
     operation: OperationId,
     builder: TxBuilder,
     remint: Amount,
-    app_fee: Amount,
     event: impl FnOnce(TransactionId) -> E,
 ) -> TransactionId {
-    let tx_fee = builder.total_fee();
+    let fee = builder.total_fee();
     let tx = builder.build();
 
     let txid = tx.compute_txid();
@@ -536,12 +426,7 @@ fn submit<E: crate::eventlog::Event + Send>(
         dbtx,
         account,
         operation,
-        crate::TxCreateEvent {
-            txid,
-            remint,
-            tx_fee,
-            app_fee,
-        },
+        crate::TxCreateEvent { txid, remint, fee },
     );
 
     txid
@@ -565,9 +450,7 @@ fn max_spendable(ctx: &ClientContext, account: Account) -> Amount {
 ///
 /// `rail_fees` prices everything the rail's outputs add on top of the
 /// amount itself — the rail's own fees and the federation's fee on the
-/// outputs that carry them — and must be monotone. The integrator's cut
-/// is priced in here, mirroring [`add_fee_outputs`], so a rail
-/// cannot size against a different cut than the one it will pay.
+/// outputs that carry them — and must be monotone.
 ///
 /// Whole sats because that is the granularity every rail's amount entry
 /// works in.
@@ -578,11 +461,7 @@ pub(crate) fn largest_affordable_amount(
 ) -> Amount {
     let spendable = max_spendable(ctx, account);
 
-    let total = |amount: Amount| {
-        let basis = amount + rail_fees(amount);
-
-        basis + app_fee_total(ctx, account, basis)
-    };
+    let total = |amount: Amount| amount + rail_fees(amount);
 
     if spendable < total(Amount::ZERO) {
         return Amount::ZERO;
