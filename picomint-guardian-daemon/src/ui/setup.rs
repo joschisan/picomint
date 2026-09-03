@@ -5,7 +5,7 @@ use axum::extract::{Multipart, State};
 use axum::response::{Html, IntoResponse, Redirect};
 use axum::routing::{get, post};
 use axum_extra::extract::Form;
-use maud::{Markup, PreEscaped, html};
+use maud::{Markup, html};
 use serde::Deserialize;
 
 use crate::config::ServerConfig;
@@ -49,21 +49,23 @@ fn peer_list_section(
     html! {
         div id="peer-list-section" {
             @if let Some(expected) = federation_size {
-                p { (format!("{total_guardians} of {expected} guardians connected.")) }
+                span { (format!("{total_guardians} of {expected} guardians connected.")) }
             } @else {
-                p { "Add setup code for every other guardian." }
+                span { "Add setup code for every other guardian." }
             }
 
             @if !connected_peers.is_empty() {
-                ul class="list-group mb-2" {
+                div class="list list-bordered" {
                     @for peer in connected_peers {
-                        li class="list-group-item" { (peer) }
+                        div class="list-row" {
+                            span class="list-row-name" { (peer) }
+                        }
                     }
                 }
 
-                form id="reset-form" method="post" action=(RESET_SETUP_CODES_ROUTE) class="d-none" {}
-                div class="text-center mb-4" {
-                    button type="button" class="btn btn-link text-danger text-decoration-none p-0" onclick="if(confirm('Are you sure you want to reset all guardians?')){document.getElementById('reset-form').submit();}" {
+                form id="reset-form" method="post" action=(RESET_SETUP_CODES_ROUTE) hidden {}
+                div style="display: flex; justify-content: center" {
+                    button type="button" class="btn btn-danger" style="border: none" onclick="if(confirm('Are you sure you want to reset all guardians?')){document.getElementById('reset-form').submit();}" {
                         "Reset Guardians"
                     }
                 }
@@ -72,15 +74,15 @@ fn peer_list_section(
             @if can_start_dkg {
                 @let has_settings = cfg_federation_name.is_some() || federation_size.is_some();
 
-                form id="start-dkg-form" hx-post=(START_DKG_ROUTE) hx-target="#peer-list-section" hx-swap="outerHTML" {
+                form id="start-dkg-form" class="form-stack" hx-post=(START_DKG_ROUTE) hx-target="#peer-list-section" hx-swap="outerHTML" {
                     @if let Some(error) = error {
-                        div class="alert alert-danger mb-3" { (error) }
+                        div class="alert alert-danger" { (error) }
                     }
-                    button type="submit" class="btn btn-warning w-100 py-2" { "Confirm" }
+                    button type="submit" class="btn btn-primary btn-lg btn-block" { "Confirm" }
                 }
 
                 @if has_settings {
-                    p class="text-muted mt-3 mb-0" style="font-size: 0.85rem;" {
+                    span class="hint" {
                         @if let Some(name) = cfg_federation_name {
                             (name) " federation has been configured"
                         } @else {
@@ -90,21 +92,14 @@ fn peer_list_section(
                     }
                 }
             } @else {
-                form id="add-setup-code-form" hx-post=(ADD_SETUP_CODE_ROUTE) hx-target="#peer-list-section" hx-swap="outerHTML" {
-                    div class="mb-3" {
-                        div class="input-group" {
-                            input type="text" class="form-control" id="peer_info" name="peer_info"
-                                placeholder="Paste Setup Code" required;
-                            button type="button" class="btn btn-outline-secondary" onclick="startQrScanner()" title="Scan QR Code" {
-                                i class="bi bi-qr-code-scan" {}
-                            }
-                        }
-                    }
+                form id="add-setup-code-form" class="form-stack" hx-post=(ADD_SETUP_CODE_ROUTE) hx-target="#peer-list-section" hx-swap="outerHTML" {
+                    input type="text" id="peer_info" name="peer_info"
+                        placeholder="Paste Setup Code" required;
 
                     @if let Some(error) = error {
-                        div class="alert alert-danger mb-3" { (error) }
+                        div class="alert alert-danger" { (error) }
                     }
-                    button type="submit" class="btn btn-primary w-100 py-2" { "Add Guardian" }
+                    button type="submit" class="btn btn-primary btn-lg btn-block" { "Add Guardian" }
                 }
             }
         }
@@ -114,79 +109,66 @@ fn peer_list_section(
 fn restore_form_content(error: Option<&str>) -> Markup {
     html! {
         form id="restore-form"
+            class="form-stack"
             hx-post=(RESTORE_CONFIG_ROUTE)
             hx-encoding="multipart/form-data"
             hx-target="#restore-form"
             hx-swap="outerHTML"
         {
-            div class="alert alert-info mb-3" {
+            div class="alert alert-info" {
                 "Upload your saved server config to restore."
             }
 
-            div class="form-group mb-3" {
-                input type="file" class="form-control" id="config_file" name="config_file"
-                    accept="application/json" required;
-            }
+            input type="file" id="config_file" name="config_file"
+                accept="application/json" required;
 
             @if let Some(error) = error {
-                div class="alert alert-danger mb-3" { (error) }
+                div class="alert alert-danger" { (error) }
             }
 
-            button type="submit" class="btn btn-outline-primary w-100 py-2" { "Restore from Config" }
+            button type="submit" class="btn btn-outline btn-lg btn-block" { "Restore from Config" }
         }
     }
 }
 
 fn setup_form_content(error: Option<&str>) -> Markup {
     html! {
-        form id="setup-form" hx-post=(ROOT_ROUTE) hx-target="#setup-form" hx-swap="outerHTML" {
-            style {
-                r#"
-                .toggle-content {
-                    display: none;
-                }
+        form id="setup-form" class="form-stack" hx-post=(ROOT_ROUTE) hx-target="#setup-form" hx-swap="outerHTML" {
+            input type="text" id="name" name="name" placeholder="Your Guardian Name" required;
 
-                .toggle-control:checked ~ .toggle-content {
-                    display: block;
-                }
-                "#
-            }
-
-            div class="form-group mb-4" {
-                input type="text" class="form-control" id="name" name="name" placeholder="Your Guardian Name" required;
-            }
-
-            div class="alert alert-warning mb-3" style="font-size: 0.875rem;" {
+            div class="alert alert-warning" {
                 "Exactly one guardian must set the global config."
             }
 
-            div class="form-group mb-4" {
-                input type="checkbox" class="form-check-input toggle-control" id="is_lead" name="is_lead" value="true";
+            div class="inset-panel" {
+                div class="check-row" {
+                    input type="checkbox" class="toggle-control" id="is_lead" name="is_lead" value="true";
 
-                label class="form-check-label ms-2" for="is_lead" {
-                    "Set the global config"
+                    label for="is_lead" {
+                        "Set the global config"
+                    }
                 }
 
-                div class="toggle-content mt-3" {
-                    input type="text" class="form-control" id="federation_name" name="federation_name" placeholder="Federation Name";
+                div class="toggle-content form-stack" {
+                    input type="text" id="federation_name" name="federation_name" placeholder="Federation Name";
 
-                    div class="form-group mt-3" {
-                        label class="form-label d-block" {
+                    div class="field" {
+                        span class="field-label" {
                             "Total number of guardians (including you)"
                         }
-                        @for size in [4u32, 7, 10, 13, 16, 19] {
-                            div class="form-check form-check-inline" {
+                        div class="pill-group" {
+                            @for size in [4u32, 7, 10, 13, 16, 19] {
                                 // `required` is intentionally omitted: the
                                 // radios are hidden when `is_lead` is off, and
                                 // browsers refuse to focus a hidden required
                                 // control — they silently block submit even
                                 // for non-leader guardians. The server
                                 // re-validates that a leader supplied a size.
-                                input type="radio" class="form-check-input"
+                                input type="radio"
                                     id=(format!("federation_size_{size}"))
                                     name="federation_size"
                                     value=(size.to_string());
-                                label class="form-check-label" for=(format!("federation_size_{size}")) {
+                                label class="pill" for=(format!("federation_size_{size}")) {
                                     (size.to_string())
                                 }
                             }
@@ -196,12 +178,12 @@ fn setup_form_content(error: Option<&str>) -> Markup {
             }
 
             @if let Some(error) = error {
-                div class="alert alert-danger mb-3" { (error) }
+                div class="alert alert-danger" { (error) }
             }
-            button type="submit" class="btn btn-primary w-100 py-2" { "Confirm" }
+            button type="submit" class="btn btn-primary btn-lg btn-block" { "Confirm" }
 
-            div class="text-center mt-3" {
-                a href=(RESTORE_PAGE_ROUTE) class="text-decoration-none" {
+            div style="display: flex; justify-content: center" {
+                a href=(RESTORE_PAGE_ROUTE) {
                     "Restore from Config"
                 }
             }
@@ -287,104 +269,11 @@ async fn federation_setup(State(state): State<Arc<SetupApi>>) -> impl IntoRespon
     let cfg_federation_name = state.cfg_federation_name().await;
 
     let content = html! {
-        p { "Share this with your fellow guardians." }
+        span { "Share this with your fellow guardians." }
 
-        div class="mb-4" {
-            (copiable_text(&our_connection_info))
-        }
+        (copiable_text(&our_connection_info))
 
         (peer_list_section(&connected_peers, federation_size, &cfg_federation_name, None))
-
-        // QR Scanner Modal
-        div class="modal fade" id="qrScannerModal" tabindex="-1" aria-labelledby="qrScannerModalLabel" aria-hidden="true" {
-            div class="modal-dialog modal-dialog-centered" {
-                div class="modal-content" {
-                    div class="modal-header" {
-                        h5 class="modal-title" id="qrScannerModalLabel" { "Scan Setup Code" }
-                        button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" {}
-                    }
-                    div class="modal-body" {
-                        div id="qr-reader" style="width: 100%;" {}
-                        div id="qr-reader-error" class="alert alert-danger mt-3 d-none" {}
-                    }
-                    div class="modal-footer" {
-                        button type="button" class="btn btn-secondary" data-bs-dismiss="modal" { "Cancel" }
-                    }
-                }
-            }
-        }
-
-        script src="/assets/html5-qrcode.min.js" {}
-
-        script {
-            (PreEscaped(r#"
-            var html5QrCode = null;
-            var qrScannerModal = null;
-
-            function startQrScanner() {
-                if (typeof window.picomintQrScannerOverride === 'function') {
-                    window.picomintQrScannerOverride(function(result) {
-                        if (result) {
-                            document.getElementById('peer_info').value = result;
-                        }
-                    });
-                    return;
-                }
-
-                var modalEl = document.getElementById('qrScannerModal');
-                qrScannerModal = new bootstrap.Modal(modalEl);
-
-                var errorEl = document.getElementById('qr-reader-error');
-                errorEl.classList.add('d-none');
-                errorEl.textContent = '';
-
-                qrScannerModal.show();
-
-                modalEl.addEventListener('shown.bs.modal', function onShown() {
-                    modalEl.removeEventListener('shown.bs.modal', onShown);
-                    initializeScanner();
-                });
-
-                modalEl.addEventListener('hidden.bs.modal', function onHidden() {
-                    modalEl.removeEventListener('hidden.bs.modal', onHidden);
-                    stopQrScanner();
-                });
-            }
-
-            function initializeScanner() {
-                html5QrCode = new Html5Qrcode("qr-reader");
-
-                var config = {
-                    fps: 10,
-                    qrbox: { width: 250, height: 250 },
-                    aspectRatio: 1.0
-                };
-
-                html5QrCode.start(
-                    { facingMode: "environment" },
-                    config,
-                    function(decodedText, decodedResult) {
-                        document.getElementById('peer_info').value = decodedText;
-                        qrScannerModal.hide();
-                    },
-                    function(errorMessage) {
-                    }
-                ).catch(function(err) {
-                    var errorEl = document.getElementById('qr-reader-error');
-                    errorEl.textContent = 'Unable to access camera: ' + err;
-                    errorEl.classList.remove('d-none');
-                });
-            }
-
-            function stopQrScanner() {
-                if (html5QrCode && html5QrCode.isScanning) {
-                    html5QrCode.stop().catch(function(err) {
-                        console.error('Error stopping scanner:', err);
-                    });
-                }
-            }
-            "#))
-        }
     };
 
     Html(single_card_layout("Federation Setup", content).into_string()).into_response()
@@ -487,7 +376,7 @@ async fn post_restore_config(
     }
 
     let waiting = html! {
-        div class="alert alert-info mb-3" {
+        div class="alert alert-info" {
             "Config restored. The guardian is rejoining the federation — you'll be redirected once it's back online."
         }
 
@@ -501,12 +390,9 @@ async fn post_restore_config(
             style="display: none;"
         {}
 
-        div class="text-center mt-4" {
-            div class="spinner-border text-primary" role="status" {
-                span class="visually-hidden" { "Loading..." }
-            }
-            p class="mt-2 text-muted" { "Waiting for guardian to come online..." }
-        }
+        div class="spinner" {}
+
+        span class="hint" style="text-align: center" { "Waiting for guardian to come online..." }
     };
 
     (
