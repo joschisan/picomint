@@ -25,6 +25,7 @@ async-trait = { workspace = true }
 axum = { workspace = true, features = ["macros", "multipart"] }
 axum-extra = { workspace = true, features = ["cookie", "form"] }
 bitcoin = { workspace = true }
+bitcoincore-rpc = { workspace = true }
 bls12_381 = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
@@ -36,7 +37,6 @@ iroh-mdns-address-lookup = { workspace = true }
 maud = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-bft = { workspace = true }
-picomint-bitcoin-rpc = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-guardian-cli-core = { workspace = true }

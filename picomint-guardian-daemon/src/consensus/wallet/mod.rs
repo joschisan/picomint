@@ -9,6 +9,7 @@ use self::db::{
     SignaturesTable, SpentOutputTable, TxInfoIndexTable, TxInfoTable, UnconfirmedTxTable,
     UnsignedTxTable,
 };
+use crate::bitcoind::BitcoindRpcMonitor;
 use anyhow::{Context, anyhow, ensure};
 use bitcoin::absolute::LockTime;
 use bitcoin::hashes::{Hash, sha256};
@@ -17,7 +18,6 @@ use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
 use common::config::WalletConfigConsensus;
 use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletOutput};
-use picomint_bitcoin_rpc::BitcoinRpcMonitor;
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::wallet as common;
@@ -542,7 +542,7 @@ pub async fn handle_api(server: &Server, method: WalletMethod) -> Result<Vec<u8>
 }
 
 pub fn spawn_broadcast_unconfirmed_txs_task(
-    btc_rpc: BitcoinRpcMonitor,
+    btc_rpc: BitcoindRpcMonitor,
     db: Database,
     network: Network,
 ) {

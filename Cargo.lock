@@ -3376,19 +3376,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-bitcoin-rpc"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bitcoin",
- "bitcoincore-rpc",
- "picomint-core",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
 name = "picomint-client"
 version = "0.1.0"
 dependencies = [
@@ -3600,6 +3587,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "bitcoin",
+ "bitcoincore-rpc",
  "bls12_381",
  "chrono",
  "clap",
@@ -3611,7 +3599,6 @@ dependencies = [
  "maud",
  "picomint-base32",
  "picomint-bft",
- "picomint-bitcoin-rpc",
  "picomint-core",
  "picomint-encoding",
  "picomint-guardian-cli-core",

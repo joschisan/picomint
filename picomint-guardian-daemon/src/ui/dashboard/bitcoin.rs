@@ -1,7 +1,7 @@
+use crate::bitcoind::BitcoindRpcStatus;
 use maud::{Markup, html};
-use picomint_bitcoin_rpc::BitcoinRpcStatus;
 
-pub fn render(status: &Option<BitcoinRpcStatus>) -> Markup {
+pub fn render(status: &Option<BitcoindRpcStatus>) -> Markup {
     html! {
         div class="card h-100" {
             div class="card-header dashboard-header" { "Bitcoin Connection" }

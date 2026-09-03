@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use bitcoin::Network;
 use clap::Parser;
-use picomint_bitcoin_rpc::BitcoindClient;
+use picomint_guardian_daemon::bitcoind::BitcoindClient;
 use picomint_guardian_daemon::config::ConfigGenSettings;
 use picomint_guardian_daemon::{DB_FILE, run_server};
 use tracing::info;

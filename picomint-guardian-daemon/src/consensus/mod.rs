@@ -13,10 +13,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::bitcoind::{BitcoindClient, BitcoindRpcMonitor};
 use anyhow::ensure;
 use bitcoin::Network;
 use futures::TryFutureExt;
-use picomint_bitcoin_rpc::{BitcoinRpcMonitor, BitcoindClient};
 use picomint_core::module::Method;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::CONSENSUS_VERSION;
@@ -55,7 +55,7 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     cfg.validate_config()?;
 
-    let btc_rpc = BitcoinRpcMonitor::new(
+    let btc_rpc = BitcoindRpcMonitor::new(
         btc_rpc,
         if cfg.consensus.network == Network::Regtest {
             Duration::from_secs(1)
@@ -114,7 +114,7 @@ pub async fn run(
 }
 
 async fn await_bitcoin_sync(
-    bitcoin_rpc_connection: &BitcoinRpcMonitor,
+    bitcoin_rpc_connection: &BitcoindRpcMonitor,
     network: Network,
 ) -> anyhow::Result<()> {
     loop {
