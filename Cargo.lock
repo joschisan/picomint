@@ -3376,19 +3376,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-bitcoin-rpc"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bitcoin",
- "bitcoincore-rpc",
- "picomint-core",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
 name = "picomint-client"
 version = "0.1.0"
 dependencies = [
@@ -3592,7 +3579,6 @@ dependencies = [
  "maud",
  "picomint-base32",
  "picomint-bft",
- "picomint-bitcoin-rpc",
  "picomint-core",
  "picomint-encoding",
  "picomint-guardian-cli-core",
@@ -3603,6 +3589,7 @@ dependencies = [
  "picomint-tss",
  "qrcode",
  "rand 0.8.6",
+ "reqwest 0.13.3",
  "secp256k1",
  "serde",
  "serde_json",

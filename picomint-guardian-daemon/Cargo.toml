@@ -36,7 +36,6 @@ iroh-mdns-address-lookup = { workspace = true }
 maud = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-bft = { workspace = true }
-picomint-bitcoin-rpc = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-guardian-cli-core = { workspace = true }
@@ -44,6 +43,7 @@ picomint-redb = { workspace = true }
 picomint-rpc = { workspace = true }
 qrcode = { workspace = true }
 rand = { workspace = true }
+reqwest = { workspace = true }
 secp256k1 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

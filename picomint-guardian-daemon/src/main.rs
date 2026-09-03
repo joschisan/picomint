@@ -7,9 +7,10 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use anyhow::ensure;
 use bitcoin::Network;
 use clap::Parser;
-use picomint_bitcoin_rpc::BitcoindClient;
+use picomint_guardian_daemon::bitcoind::BitcoindClient;
 use picomint_guardian_daemon::config::ConfigGenSettings;
 use picomint_guardian_daemon::{DB_FILE, run_server};
 use tracing::info;
@@ -54,9 +55,15 @@ async fn main() -> anyhow::Result<()> {
 
     let server_opts = ServerOpts::parse();
 
+    ensure!(
+        server_opts.bitcoind_url.password().is_some(),
+        "BITCOIND_URL must embed credentials: http://user:pass@host"
+    );
+
     let filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::INFO.into())
         .from_env_lossy();
+
     tracing_subscriber::registry()
         .with(filter)
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
@@ -75,11 +82,13 @@ async fn main() -> anyhow::Result<()> {
         data_dir: server_opts.data_dir,
     };
 
-    let bitcoind = Arc::new(BitcoindClient::new(&server_opts.bitcoind_url)?);
-
+    // The reqwest client inside `BitcoindClient` requires an installed
+    // rustls crypto provider at construction time.
     tokio_rustls::rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
+
+    let bitcoind = Arc::new(BitcoindClient::new(server_opts.bitcoind_url));
 
     // Run consensus on the main task. Inner spawned tasks are fire-and-forget
     // — process death (SIGTERM/SIGKILL) is the shutdown protocol; db commits

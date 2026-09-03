@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use picomint_bitcoin_rpc::BitcoinRpcMonitor;
+use crate::bitcoind::BitcoindRpcMonitor;
 use picomint_core::module::audit::AuditSummary;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::tx::{Transaction, TxError};
@@ -25,7 +25,7 @@ use crate::consensus::{ln, mint, wallet};
 pub struct Server {
     pub cfg: ServerConfig,
     pub db: Database,
-    pub btc_rpc: BitcoinRpcMonitor,
+    pub btc_rpc: BitcoindRpcMonitor,
     /// The finally rejected txs of the running session, watched by their
     /// waiting submission RPCs and cleared at the session boundary.
     pub rejected: watch::Sender<BTreeMap<TransactionId, TxError>>,

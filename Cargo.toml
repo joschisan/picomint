@@ -3,7 +3,6 @@
 members = [
     "picomint-base32",
     "picomint-bft",
-    "picomint-bitcoin-rpc",
     "picomint-client",
     "picomint-core",
     "picomint-derive",
@@ -82,7 +81,6 @@ lightning-types = "0.3.1"
 maud = "0.27.0"
 picomint-base32 = { path = "./picomint-base32", version = "=0.1.0" }
 picomint-bft = { path = "./picomint-bft", version = "=0.1.0" }
-picomint-bitcoin-rpc = { path = "./picomint-bitcoin-rpc", version = "=0.1.0" }
 picomint-client = { path = "./picomint-client", version = "=0.1.0" }
 picomint-core = { path = "./picomint-core", version = "=0.1.0" }
 picomint-derive = { path = "./picomint-derive", version = "=0.1.0" }
