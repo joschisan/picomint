@@ -14,8 +14,7 @@ use futures::stream::BoxStream;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
-use picomint_core::core::{Account, OperationId};
-use picomint_core::fee::FeeConfig;
+use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_redb::{Database, DbRead, table};
@@ -50,7 +49,6 @@ pub struct Client {
     pub(crate) endpoint: Endpoint,
     pub(crate) db: Database,
     pub(crate) mnemonic: Mnemonic,
-    pub(crate) fee: Option<FeeConfig>,
     federations: RwLock<BTreeMap<FederationId, ClientContext>>,
 }
 
@@ -66,18 +64,7 @@ impl Client {
     /// persisted iroh key so the `GatewayPk` clients connect to survives
     /// restarts.
     ///
-    /// `fee` is the integrator's cut: [`FeeConfig::ppm`] parts per million of
-    /// the value every transaction this client builds moves, paid into
-    /// [`Account::AppFee`] as an output of that same transaction and swept
-    /// from there to [`FeeConfig::lnurl`] as it accumulates. `None` charges
-    /// nothing and starts no sweep — which is what a gateway passes, since
-    /// its transactions are the other half of its users' payments.
-    pub fn new(
-        endpoint: Endpoint,
-        db: Database,
-        mnemonic: Mnemonic,
-        fee: Option<FeeConfig>,
-    ) -> Client {
+    pub fn new(endpoint: Endpoint, db: Database, mnemonic: Mnemonic) -> Client {
         debug!(
             version = %env!("CARGO_PKG_VERSION"),
             "Building picomint client",
@@ -87,7 +74,6 @@ impl Client {
             endpoint,
             db,
             mnemonic,
-            fee,
             federations: RwLock::new(BTreeMap::new()),
         }
     }
@@ -384,7 +370,6 @@ impl Client {
             self.db.clone(),
             config,
             ClientSecret::new(&self.mnemonic, federation),
-            self.fee.as_ref().map_or(0, |fee| fee.ppm),
             Gateways::new(self.endpoint.clone()),
             TaskGroup::new(),
         );
@@ -398,14 +383,6 @@ impl Client {
         crate::gw::resume(&ctx);
 
         ctx.tg.spawn(crate::expiry::refresh(ctx.clone()));
-
-        // Only when there is a cut to collect: a client that charges nothing
-        // has nothing accruing in the account, and a sweep would wake every
-        // half minute to read a balance that is always zero.
-        if let Some(fee) = self.fee.clone() {
-            ctx.tg
-                .spawn(crate::fee::sweep(ctx.clone(), Account::AppFee, fee.lnurl));
-        }
 
         ctx
     }

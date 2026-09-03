@@ -169,7 +169,6 @@ fn main() -> anyhow::Result<()> {
         endpoint.clone(),
         gateway_db.clone(),
         mnemonic.clone(),
-        None,
     ));
 
     // 4. Build LDK node

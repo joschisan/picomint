@@ -255,7 +255,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             .client
             .ln_receive(
                 client.fed,
-                Account::PRIMARY,
+                Account::Primary,
                 gateway_pk,
                 gateway_info.clone(),
                 Amount::from_msat(500_000),
@@ -266,7 +266,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             .client
             .ln_send(
                 client.fed,
-                Account::PRIMARY,
+                Account::Primary,
                 gateway_pk,
                 gateway_info,
                 invoice,
@@ -304,7 +304,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             .client
             .ln_send(
                 client.fed,
-                Account::PRIMARY,
+                Account::Primary,
                 gateway_pk,
                 gateway_info,
                 invoice,
@@ -342,7 +342,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             .client
             .ln_send(
                 client.fed,
-                Account::PRIMARY,
+                Account::Primary,
                 gateway_pk,
                 gateway_info,
                 invoice,
@@ -382,7 +382,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             .client
             .ln_receive(
                 client.fed,
-                Account::PRIMARY,
+                Account::Primary,
                 gateway_pk,
                 gateway_info,
                 Amount::from_msat(500_000),
@@ -430,7 +430,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             .client
             .ln_send(
                 client.fed,
-                Account::PRIMARY,
+                Account::Primary,
                 gateway_pk,
                 gateway_info,
                 invoice,
@@ -527,7 +527,7 @@ async fn test_mock_send_exactly_once(client: &TestClient) -> anyhow::Result<()> 
         .client
         .ln_send(
             client.fed,
-            Account::PRIMARY,
+            Account::Primary,
             gateway_pk,
             gateway_info.clone(),
             invoice.clone(),
@@ -544,7 +544,7 @@ async fn test_mock_send_exactly_once(client: &TestClient) -> anyhow::Result<()> 
         .client
         .ln_send(
             client.fed,
-            Account::PRIMARY,
+            Account::Primary,
             gateway_pk,
             gateway_info,
             invoice,
@@ -571,7 +571,7 @@ async fn test_mock_send_refund_forfeit(client: &TestClient) -> anyhow::Result<()
         .client
         .ln_send(
             client.fed,
-            Account::PRIMARY,
+            Account::Primary,
             gateway_pk,
             gateway_info,
             invoice,
@@ -599,7 +599,7 @@ async fn test_mock_wrong_network(client: &TestClient) -> anyhow::Result<()> {
         .client
         .ln_send(
             client.fed,
-            Account::PRIMARY,
+            Account::Primary,
             gateway_pk,
             gateway_info,
             invoice,
@@ -634,7 +634,7 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
         .client
         .ln_send(
             client.fed,
-            Account::PRIMARY,
+            Account::Primary,
             gateway_pk,
             gateway_info,
             invoice,
@@ -680,7 +680,7 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
         .mint_finalize_and_submit_tx(
             client.fed,
             &dbtx,
-            Account::PRIMARY,
+            Account::Primary,
             OperationId::new_random(),
             tx_builder,
             false,
@@ -714,7 +714,7 @@ async fn test_unilateral_refund(env: &TestEnv, client: &TestClient) -> anyhow::R
         .client
         .ln_send(
             client.fed,
-            Account::PRIMARY,
+            Account::Primary,
             gateway_pk,
             gateway_info,
             invoice,
@@ -748,7 +748,7 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
 
     let lnurl = client
         .client
-        .ln_generate_lnurl(client.fed, Account::PRIMARY, lnurl_daemon)?;
+        .ln_generate_lnurl(client.fed, Account::Primary, lnurl_daemon)?;
 
     let pay_url = parse_lnurl(&lnurl).ok_or_else(|| anyhow::anyhow!("parse_lnurl"))?;
 

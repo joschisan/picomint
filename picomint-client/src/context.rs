@@ -29,7 +29,6 @@ pub struct ClientContext {
     /// never go stale: the config it is derived from is immutable beside it.
     pub(crate) federation: FederationId,
     pub(crate) secret: ClientSecret,
-    pub(crate) app_fee_ppm: u64,
     pub(crate) gateways: Gateways,
     pub(crate) tg: TaskGroup,
 }
@@ -40,7 +39,6 @@ impl ClientContext {
         db: Database,
         config: ConsensusConfig,
         secret: ClientSecret,
-        app_fee_ppm: u64,
         gateways: Gateways,
         tg: TaskGroup,
     ) -> Self {
@@ -50,7 +48,6 @@ impl ClientContext {
             federation: config.calculate_federation_id(),
             config,
             secret,
-            app_fee_ppm,
             gateways,
             tg,
         }

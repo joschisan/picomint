@@ -36,7 +36,6 @@ mod executor;
 /// Federation expiry-status cache + refresh.
 pub mod expiry;
 /// Federation fee announcement cache, and paying out a collected cut.
-mod fee;
 /// Gateway lightning module (mounted by the gateway daemon).
 pub mod gw;
 /// Downloading a federation's config and rebuilding what the seed owns there.
@@ -76,15 +75,7 @@ pub struct TxCreateEvent {
     pub remint: Amount,
     /// Federation fee paid by this transaction (sum of per-input and
     /// per-output fees the federation deducts).
-    pub tx_fee: Amount,
-    /// Integrator's cut, issued into [`Account::AppFee`] by this
-    /// transaction. Zero for a client built with no cut, and for the
-    /// collections that spend the account.
-    ///
-    /// What the cut cost the federation to issue is in [`Self::tx_fee`] with
-    /// every other per-output fee, so the two do not overlap and this is what
-    /// actually reached the account.
-    pub app_fee: Amount,
+    pub fee: Amount,
 }
 
 impl Event for TxCreateEvent {

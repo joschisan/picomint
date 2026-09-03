@@ -273,7 +273,7 @@ async fn build_client(
         .bind()
         .await?;
 
-    let client = Arc::new(Client::new(endpoint, db.clone(), mnemonic, None));
+    let client = Arc::new(Client::new(endpoint, db.clone(), mnemonic));
 
     let fed = client
         .add(&invite_code, Some(bitcoin::Network::Regtest))

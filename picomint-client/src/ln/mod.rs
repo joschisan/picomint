@@ -123,8 +123,8 @@ async fn update_gateway_info(ctx: ClientContext) {
 
 /// The largest whole-sat invoice amount a max send from `account`
 /// through this gateway can pay: the account's notes spent in full cover
-/// the invoice, the gateway's fee, the federation's transaction fee and
-/// the integrator's cut, with the sub-sat remainder donated.
+/// the invoice, the gateway's fee and the federation's transaction fee,
+/// with the sub-sat remainder donated.
 fn send_max_amount(ctx: &ClientContext, account: Account, gateway_info: &GatewayInfo) -> Amount {
     crate::mint::largest_affordable_amount(ctx, account, |amount| {
         gateway_info.send_fee.fee(amount.msat) + ctx.config.ln.output_fee
@@ -400,7 +400,7 @@ fn receive_incoming_contract(
 /// shared, so each extra account costs one ECDH per contract rather than
 /// another sweep.
 async fn receive_scan(ctx: ClientContext) {
-    let keys = Account::USER_ACCOUNTS.map(|account| {
+    let keys = Account::ALL.map(|account| {
         (
             account,
             ctx.secret.ln_secret().receive_keypair(account).secret_key(),
