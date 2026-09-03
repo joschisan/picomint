@@ -108,8 +108,14 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     info!(addr = %pegin_addr, "Pegin Balance is available");
 
-    let external_address = block_in_place(|| env.bitcoind.get_new_address(None, None))?
-        .require_network(bitcoin::Network::Regtest)?;
+    // A taproot destination has the largest scriptPubKey the wallet pays
+    // (34 bytes), so this send exercises the worst-case transaction size the
+    // fee constants are derived from.
+    let external_address = block_in_place(|| {
+        env.bitcoind
+            .get_new_address(None, Some(bitcoincore_rpc::json::AddressType::Bech32m))
+    })?
+    .require_network(bitcoin::Network::Regtest)?;
 
     info!(address = %external_address, "Sending on-chain to external address");
 
@@ -245,6 +251,61 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     client.client.shutdown().await;
 
     info!("wallet: send_max passed");
+
+    info!("wallet: second pegin sweeps the deposit and the federation utxo");
+
+    let pegin_addr = retry("second deposit address derived", || async {
+        client_send
+            .client
+            .wallet_deposit_address(client_send.fed, Account::PRIMARY)
+    })
+    .await?;
+
+    let pegin_txid = env.send_to_address(&pegin_addr, bitcoin::Amount::from_sat(100_000_000))?;
+
+    retry("second pegin tx in mempool", || async {
+        block_in_place(|| env.bitcoind.get_mempool_entry(&pegin_txid))
+            .map(|_| ())
+            .context("second pegin tx not in mempool yet")
+    })
+    .await?;
+
+    env.mine_blocks(10);
+
+    // Locate the deposit output before the claim can spend it.
+    let deposit_vout = (0..2)
+        .find(|vout| {
+            block_in_place(|| env.bitcoind.get_tx_out(&pegin_txid, *vout, Some(false)))
+                .ok()
+                .flatten()
+                .is_some_and(|out| {
+                    out.script_pub_key.hex == pegin_addr.script_pubkey().into_bytes()
+                })
+        })
+        .expect("the deposit output pays the pegin address");
+
+    let Some((_, WalletEvent::Receive(_))) = send_events.next().await else {
+        panic!("Expected second pegin Receive event");
+    };
+
+    // Unlike the first pegin, whose deposit simply becomes the federation
+    // wallet, this claim creates the two-input sweep transaction. The deposit
+    // utxo leaving the confirmed set proves the signing session completed and
+    // the sweep was broadcast and mined.
+    retry("sweep tx confirmed", || async {
+        ensure!(
+            block_in_place(|| env
+                .bitcoind
+                .get_tx_out(&pegin_txid, deposit_vout, Some(false)))?
+            .is_none(),
+            "deposit utxo not swept yet"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    info!("wallet: second pegin sweep passed");
 
     Ok(())
 }

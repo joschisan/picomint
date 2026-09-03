@@ -23,7 +23,7 @@ pub struct ConsensusApi {
 }
 
 impl ConsensusApi {
-    pub fn session_count(&self) -> u64 {
+    pub fn session_count(&self) -> u32 {
         get_finished_session_count(&self.server.db.begin_read())
     }
 
@@ -34,7 +34,7 @@ impl ConsensusApi {
     pub fn create_invite_code(
         &self,
         expiry_days: u64,
-        user_limit: u64,
+        user_limit: u32,
     ) -> (InviteCode, InviteMeta) {
         let expires_at = Utc::now()
             .checked_add_days(Days::new(expiry_days))
@@ -60,7 +60,7 @@ impl ConsensusApi {
     }
 
     /// The federation's current consensus block count.
-    pub fn block_count(&self) -> u64 {
+    pub fn block_count(&self) -> u32 {
         consensus_block_count(&self.server, &self.server.db.begin_read())
     }
 

@@ -11,7 +11,7 @@ use picomint_core::module::Method;
 pub async fn await_preimage(
     api: &FederationApi,
     outpoint: OutPoint,
-    expiry: u64,
+    expiry: u32,
 ) -> Option<[u8; 32]> {
     api.request_current_consensus_retry::<AwaitPreimageResponse>(Method::Ln(
         LnMethod::AwaitPreimage(AwaitPreimageRequest { outpoint, expiry }),

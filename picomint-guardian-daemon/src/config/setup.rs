@@ -25,7 +25,7 @@ pub struct PeerSetupCode {
     pub federation_name: Option<String>,
     /// Total number of guardians (including the one who sets this), set by the
     /// leader
-    pub federation_size: Option<u32>,
+    pub federation_size: Option<u8>,
 }
 
 /// The state of the server while config gen is running.
@@ -59,7 +59,7 @@ pub struct LocalParams {
     federation_name: Option<String>,
     /// Total number of guardians (including the one who sets this), set by the
     /// leader
-    federation_size: Option<u32>,
+    federation_size: Option<u8>,
 }
 
 impl LocalParams {
@@ -147,7 +147,7 @@ impl SetupApi {
         &self,
         name: String,
         federation_name: Option<String>,
-        federation_size: Option<u32>,
+        federation_size: Option<u8>,
     ) -> anyhow::Result<String> {
         if let Some(existing_local_parameters) = self.state.lock().await.local_params.clone()
             && existing_local_parameters.name == name
@@ -337,7 +337,7 @@ impl SetupApi {
         Ok(())
     }
 
-    pub async fn federation_size(&self) -> Option<u32> {
+    pub async fn federation_size(&self) -> Option<u8> {
         let state = self.state.lock().await;
         let local_setup_code = state.local_params.as_ref().map(LocalParams::setup_code);
         state

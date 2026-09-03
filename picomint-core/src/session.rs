@@ -36,7 +36,7 @@ impl SessionOutcome {
     /// [`AcceptedItem`]s. Headers are only ever generated for signing
     /// and verification — never persisted or sent — so the empty
     /// session needs no special case.
-    pub fn header(&self, index: u64) -> (u64, sha256::Hash) {
+    pub fn header(&self, index: u32) -> (u32, sha256::Hash) {
         (index, self.items.consensus_hash())
     }
 }

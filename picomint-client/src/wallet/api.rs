@@ -9,7 +9,7 @@ use picomint_core::wallet::methods::{
 };
 use picomint_core::wallet::{FederationWallet, OutputInfo, TxInfo};
 
-pub async fn consensus_feerate(api: &FederationApi) -> anyhow::Result<Option<u64>> {
+pub async fn consensus_feerate(api: &FederationApi) -> anyhow::Result<Option<u32>> {
     api.request_current_consensus::<ConsensusFeerateResponse>(Method::Wallet(
         WalletMethod::ConsensusFeerate(ConsensusFeerateRequest),
     ))

@@ -23,14 +23,14 @@ const MUTINYNET: &str = "000002855893a0a9b24eaffc5efc770558a326fee4fc10c9da22fc1
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Feerate {
-    pub sat_per_kvb: u64,
+    pub sat_per_kvb: u32,
 }
 
 /// Status of the Bitcoin RPC backend as reported by the monitor.
 #[derive(Debug, Clone)]
 pub struct BitcoinRpcStatus {
     pub network: Network,
-    pub block_count: u64,
+    pub block_count: u32,
     /// `None` while the backend is still syncing — fee estimation has no
     /// data until the node is at the tip, and consensus (the only consumer
     /// that needs a feerate) doesn't start until then either.
@@ -113,7 +113,7 @@ impl BitcoinRpcMonitor {
         self.rpc.get_block(hash).await
     }
 
-    pub async fn get_block_hash(&self, height: u64) -> Result<BlockHash> {
+    pub async fn get_block_hash(&self, height: u32) -> Result<BlockHash> {
         ensure!(
             self.status_rx.borrow().is_some(),
             "Not connected to bitcoin backend"

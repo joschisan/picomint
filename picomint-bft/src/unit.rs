@@ -47,7 +47,7 @@ pub struct UnitHash(pub sha256::Hash);
 /// is *not* carried in the unit — instead, signatures are produced
 /// over the tuple `(session, unit)`, so a stale unit from a previous
 /// session arriving at a peer in the current session fails signature
-/// verification and is discarded. This saves 8 bytes per unit on the
+/// verification and is discarded. This saves 4 bytes per unit on the
 /// wire vs. embedding the session in the unit.
 ///
 /// `parents` maps each parent's creator to the hash of its unit at

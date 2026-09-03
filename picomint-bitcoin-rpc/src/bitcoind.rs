@@ -27,15 +27,15 @@ impl BitcoindClient {
         )?))
     }
 
-    pub async fn get_block_count(&self) -> anyhow::Result<u64> {
+    pub async fn get_block_count(&self) -> anyhow::Result<u32> {
         // The RPC function is confusingly named and actually returns the block height
         block_in_place(|| self.0.get_block_count())
-            .map(|height| height + 1)
+            .map(|height| u32::try_from(height + 1).expect("Bitcoin block heights fit in a u32"))
             .map_err(anyhow::Error::from)
     }
 
-    pub async fn get_block_hash(&self, height: u64) -> anyhow::Result<BlockHash> {
-        block_in_place(|| self.0.get_block_hash(height)).map_err(anyhow::Error::from)
+    pub async fn get_block_hash(&self, height: u32) -> anyhow::Result<BlockHash> {
+        block_in_place(|| self.0.get_block_hash(height.into())).map_err(anyhow::Error::from)
     }
 
     pub async fn get_block(&self, hash: &BlockHash) -> anyhow::Result<bitcoin::Block> {
@@ -49,7 +49,8 @@ impl BitcoindClient {
         })?
         .fee_rate
         .map(|per_kb| Feerate {
-            sat_per_kvb: per_kb.to_sat(),
+            sat_per_kvb: u32::try_from(per_kb.to_sat())
+                .expect("bitcoind feerate estimates fit u32 sat/kvb"),
         });
 
         Ok(feerate)

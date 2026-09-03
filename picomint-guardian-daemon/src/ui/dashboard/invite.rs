@@ -18,7 +18,7 @@ pub const INVITE_CREATE_ROUTE: &str = "/invite/create";
 // Card with a button that generates an invite code with the default
 // expiration date and user limit. The generated code replaces the button via
 // htmx.
-pub fn render(consensus_block_count: u64) -> Markup {
+pub fn render(consensus_block_count: u32) -> Markup {
     html! {
         div class="card h-100" {
             div class="card-header dashboard-header" { "Generate Invite" }
@@ -108,7 +108,7 @@ fn qr_code(data: &str) -> Markup {
 #[derive(Deserialize)]
 pub struct CreateInviteForm {
     expiry_days: u64,
-    user_limit: u64,
+    user_limit: u32,
 }
 
 // Creates an invite code with the submitted expiration and user limit and

@@ -51,7 +51,30 @@ use tss::{
 
 /// Minimum fee rate vote of 1 sat/vB to ensure we never propose a fee rate
 /// below what Bitcoin Core will relay.
-const MIN_FEERATE_VOTE_SATS_PER_KVB: u64 = 1000;
+const MIN_FEERATE_VOTE_SATS_PER_KVB: u32 = 1000;
+
+// A federation tx is a taproot key spend whose witness is always exactly one
+// 64-byte BIP340 signature, no matter how many guardians signed — so both tx
+// shapes have a constant size known upfront. In BIP-141 weight units
+// (non-witness bytes count 4, witness bytes 1): 42 overhead (nVersion 16,
+// marker + flag 2, one-byte in/out count varints 8, nLockTime 16), 230 per
+// input (txid 128, vout 16, empty scriptSig length 4, nSequence 16, witness
+// 66), 172 per output with a 34-byte scriptPubKey (nValue 32, length 4,
+// script 136). Both figures are verified exactly by the integration suite:
+// the finalized taproot-destination pegout logs 154 vbytes and the second
+// pegin's sweep logs 169 via the "Finalized federation tx" line.
+
+/// A send spends the federation UTXO into a destination output and a change
+/// output: 42 + 230 + 172 + 172 = 616 wu. Sized for the largest destination
+/// script a [`StandardScript`] can carry (34 bytes, P2WSH/P2TR), so smaller
+/// destinations are overcharged by up to 3 vbytes.
+///
+/// [`StandardScript`]: picomint_core::wallet::StandardScript
+const SEND_TX_VBYTES: u64 = 154;
+
+/// A receive sweeps the deposit and the federation UTXO into one change
+/// output: 42 + 230 + 230 + 172 = 674 wu.
+const RECEIVE_TX_VBYTES: u64 = 169;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Encodable, Decodable)]
 pub struct FederationTx {
@@ -338,7 +361,7 @@ pub fn process_input(
                 txid: tx.compute_txid(),
                 input: wallet.value,
                 output: change_value,
-                vbytes: server.cfg.consensus.wallet.receive_tx_vbytes,
+                vbytes: RECEIVE_TX_VBYTES,
                 fee: input.fee,
                 created,
             },
@@ -356,7 +379,7 @@ pub fn process_input(
                     tweak: input.tweak.consensus_hash(),
                 },
             ],
-            vbytes: server.cfg.consensus.wallet.receive_tx_vbytes,
+            vbytes: RECEIVE_TX_VBYTES,
             fee: input.fee,
         };
 
@@ -471,7 +494,7 @@ pub fn process_output(
             txid: tx.compute_txid(),
             input: wallet.value,
             output: change_value,
-            vbytes: server.cfg.consensus.wallet.send_tx_vbytes,
+            vbytes: SEND_TX_VBYTES,
             fee: output.fee,
             created,
         },
@@ -485,7 +508,7 @@ pub fn process_output(
             value: wallet.value,
             tweak: wallet.tweak,
         }],
-        vbytes: server.cfg.consensus.wallet.send_tx_vbytes,
+        vbytes: SEND_TX_VBYTES,
         fee: output.fee,
     };
 
@@ -548,8 +571,8 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
 pub async fn sync_blocks(
     server: &Server,
     dbtx: &WriteTx,
-    old_block_count: u64,
-    new_block_count: u64,
+    old_block_count: u32,
+    new_block_count: u32,
 ) {
     // We do not sync blocks that predate the federation itself.
     if old_block_count == 0 {
@@ -737,7 +760,7 @@ async fn process_signatures(
     Ok(())
 }
 
-async fn await_local_sync_to_block_count(server: &Server, block_count: u64) {
+async fn await_local_sync_to_block_count(server: &Server, block_count: u32) {
     loop {
         if server
             .btc_rpc
@@ -757,10 +780,10 @@ async fn await_local_sync_to_block_count(server: &Server, block_count: u64) {
     }
 }
 
-pub fn consensus_feerate(server: &Server, dbtx: &impl DbRead) -> Option<u64> {
+pub fn consensus_feerate(server: &Server, dbtx: &impl DbRead) -> Option<u32> {
     let num_peers = server.cfg.consensus.wallet.pks.to_num_peers();
 
-    let mut rates: Vec<u64> = dbtx.iter(&FeeRateVoteTable, |r| r.filter_map(|(_, v)| v).collect());
+    let mut rates: Vec<u32> = dbtx.iter(&FeeRateVoteTable, |r| r.filter_map(|(_, v)| v).collect());
 
     assert!(rates.len() <= num_peers.total());
 
@@ -779,8 +802,8 @@ pub fn consensus_fee(server: &Server, dbtx: &impl DbRead, tx_vbytes: u64) -> Opt
 
     assert!(pending_txs.len() <= 32);
 
-    let feerate = consensus_feerate(server, dbtx)?
-        .max(server.cfg.consensus.wallet.feerate_base << pending_txs.len());
+    let feerate = u64::from(consensus_feerate(server, dbtx)?)
+        .max(u64::from(server.cfg.consensus.wallet.feerate_base) << pending_txs.len());
 
     let tx_fee = tx_vbytes.saturating_mul(feerate).saturating_div(1000);
 
@@ -802,11 +825,11 @@ pub fn consensus_fee(server: &Server, dbtx: &impl DbRead, tx_vbytes: u64) -> Opt
 }
 
 pub fn send_fee(server: &Server, dbtx: &impl DbRead) -> Option<Amount> {
-    consensus_fee(server, dbtx, server.cfg.consensus.wallet.send_tx_vbytes)
+    consensus_fee(server, dbtx, SEND_TX_VBYTES)
 }
 
 pub fn receive_fee(server: &Server, dbtx: &impl DbRead) -> Option<Amount> {
-    consensus_fee(server, dbtx, server.cfg.consensus.wallet.receive_tx_vbytes)
+    consensus_fee(server, dbtx, RECEIVE_TX_VBYTES)
 }
 
 fn script_pubkey(server: &Server, tweak: &sha256::Hash) -> ScriptBuf {
@@ -951,6 +974,13 @@ fn finalize_tx(
                 sighash_type: TapSighashType::Default,
             });
     }
+
+    info!(
+        inputs = federation_tx.tx.input.len(),
+        outputs = federation_tx.tx.output.len(),
+        vbytes = federation_tx.tx.vsize(),
+        "Finalized federation tx"
+    );
 }
 
 fn tx_id(dbtx: &impl DbRead, outpoint: OutPoint) -> Option<Txid> {

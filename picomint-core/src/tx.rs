@@ -105,7 +105,7 @@ pub enum ConsensusItem {
     Module(wire::ModuleConsensusItem),
     /// The submitting peer's bitcoin block count, trailing the chain tip by
     /// the confirmation finality delay.
-    BlockCount(u64),
+    BlockCount(u32),
     /// Highest consensus version the submitting peer's binary can run.
     Version(ConsensusVersion),
 }

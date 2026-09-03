@@ -15,7 +15,7 @@ pub struct ConsensusFeerateRequest;
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct ConsensusFeerateResponse {
-    pub feerate: Option<u64>,
+    pub feerate: Option<u32>,
 }
 
 // ── federation-wallet ───────────────────────────────────────────────────────

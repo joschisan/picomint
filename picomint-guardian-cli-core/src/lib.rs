@@ -60,7 +60,7 @@ pub struct SetupSetLocalParamsRequest {
     pub federation_name: Option<String>,
     /// Federation size (leader only)
     #[arg(long)]
-    pub federation_size: Option<u32>,
+    pub federation_size: Option<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -95,7 +95,7 @@ pub const DEFAULT_INVITE_EXPIRY_DAYS: u64 = 30;
 pub const INVITE_EXPIRY_DAYS_LIMIT: u64 = 365;
 
 /// Default number of users an invite code may onboard.
-pub const DEFAULT_INVITE_USER_LIMIT: u64 = 50;
+pub const DEFAULT_INVITE_USER_LIMIT: u32 = 50;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct InviteRequest {
@@ -104,7 +104,7 @@ pub struct InviteRequest {
     pub expiry_days: u64,
     /// Maximum number of users that may onboard with this invite code.
     #[arg(long = "users", default_value_t = DEFAULT_INVITE_USER_LIMIT)]
-    pub user_limit: u64,
+    pub user_limit: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -130,7 +130,7 @@ pub struct WalletTotalValueResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlockCountResponse {
-    pub block_count: u64,
+    pub block_count: u32,
 }
 
 // --- /p2p ---
@@ -155,8 +155,8 @@ pub struct PeerInfo {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BitcoinConnectionResponse {
     pub network: String,
-    pub block_count: u64,
-    pub fee_rate_sat_per_vb: Option<u64>,
+    pub block_count: u32,
+    pub fee_rate_sat_per_vb: Option<u32>,
     pub sync_progress: Option<f64>,
 }
 
@@ -164,7 +164,7 @@ pub struct BitcoinConnectionResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WalletFeerateResponse {
-    pub sat_per_vbyte: Option<u64>,
+    pub sat_per_vbyte: Option<u32>,
 }
 
 // --- /module/wallet/pending-txs ---

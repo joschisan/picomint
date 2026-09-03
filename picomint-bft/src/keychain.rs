@@ -27,7 +27,7 @@ impl Keychain {
     /// session it was produced under: a stale signature from session N
     /// arriving at a peer in session N+1 will hash under a different
     /// tuple at the verifier and fail to match, so it's discarded.
-    pub fn sign<E: Encodable>(&self, session: u64, value: &E) -> schnorr::Signature {
+    pub fn sign<E: Encodable>(&self, session: u32, value: &E) -> schnorr::Signature {
         self.keypair.sign_schnorr(Message::from_digest(
             (session, value).consensus_hash_sha256().to_byte_array(),
         ))
@@ -37,7 +37,7 @@ impl Keychain {
     /// consensus-hash of `(session, value)`.
     pub fn verify<E: Encodable>(
         &self,
-        session: u64,
+        session: u32,
         value: &E,
         signature: &schnorr::Signature,
         peer: PeerId,

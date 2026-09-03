@@ -89,7 +89,8 @@ impl AppState {
             module_public_key: self.client.gw_pk(*federation)?,
             send_fee: self.send_fee,
             receive_fee: self.receive_fee,
-            expiry_delta: self.cltv_expiry_delta as u64 + 144,
+            expiry_delta: u16::try_from(self.cltv_expiry_delta + 144)
+                .expect("the configured cltv expiry delta fits the LN protocol's u16"),
         })
     }
 
@@ -161,7 +162,7 @@ impl AppState {
         );
 
         ensure!(
-            expiry >= self.cltv_expiry_delta as u64 + 144,
+            expiry >= self.cltv_expiry_delta + 144,
             "Contract expiry does not leave enough room for routing"
         );
 

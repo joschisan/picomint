@@ -376,7 +376,7 @@ async fn run_dkg(peer_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
     for (peer, data_dir) in peer_data_dirs.iter().enumerate() {
         let name = format!("Guardian {peer}");
         let (federation_name, federation_size) = if peer == 0 {
-            (Some("Test Federation"), Some(NUM_GUARDIANS as u32))
+            (Some("Test Federation"), Some(NUM_GUARDIANS as u8))
         } else {
             (None, None)
         };

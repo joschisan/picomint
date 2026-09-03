@@ -153,7 +153,7 @@ pub fn guardian_setup_set_local_params(
     data_dir: &Path,
     name: &str,
     federation_name: Option<&str>,
-    federation_size: Option<u32>,
+    federation_size: Option<u8>,
 ) -> Result<Value> {
     let mut cmd = guardian_cmd(data_dir);
     cmd.arg("setup").arg("set-local-params").arg(name);

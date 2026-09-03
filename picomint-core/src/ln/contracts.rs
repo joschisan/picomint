@@ -268,7 +268,7 @@ pub struct OutgoingContract {
     /// Gateway's combined cut (LN routing + tx fee). The client funds
     /// `amount + fee` so the gateway claims that on preimage delivery.
     pub fee: Amount,
-    pub expiry: u64,
+    pub expiry: u32,
     pub claim_pk: XOnlyPublicKey,
     /// Freshly generated per contract, and kept only by the sender's send
     /// state machine — nothing derives it, so nothing has to travel here to

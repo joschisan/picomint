@@ -22,7 +22,7 @@ use crate::ln::gateway::{GatewayInfo, GatewayPk};
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct AwaitPreimageRequest {
     pub outpoint: OutPoint,
-    pub expiry: u64,
+    pub expiry: u32,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
@@ -51,7 +51,7 @@ pub struct OutgoingContractExpiryRequest {
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct OutgoingContractExpiryResponse {
-    pub contract: Option<(ContractId, u64)>,
+    pub contract: Option<(ContractId, u32)>,
 }
 
 // ── await-incoming-contracts ────────────────────────────────────────────────

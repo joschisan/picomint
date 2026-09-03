@@ -3,7 +3,7 @@ use picomint_core::expiry;
 use picomint_core::session;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::ConsensusVersion;
-use picomint_core::{NumPeers, NumPeersExt, PeerId, TransactionId};
+use picomint_core::{NumPeersExt, PeerId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{DbRead, table};
 
@@ -33,7 +33,7 @@ table!(
 
 table!(
     SignedSessionOutcomeTable,
-    u64 => session::SignedSessionOutcome,
+    u32 => session::SignedSessionOutcome,
     "signed-session-outcome",
 );
 
@@ -41,7 +41,7 @@ table!(
 // missing entry means the peer has not voted since the federation was created.
 table!(
     BlockCountVoteTable,
-    PeerId => u64,
+    PeerId => u32,
     "block-count-vote",
 );
 
@@ -50,10 +50,10 @@ table!(
 /// Sorted descending and indexed at `threshold() - 1`, so any threshold of
 /// correct peers can increase the consensus block count and any consensus
 /// block count has been confirmed by a threshold of peers.
-pub fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u64 {
+pub fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u32 {
     let num_peers = server.cfg.consensus.peers.to_num_peers();
 
-    let mut counts: Vec<u64> = dbtx.iter(&BlockCountVoteTable, |r| r.map(|(_, v)| v).collect());
+    let mut counts: Vec<u32> = dbtx.iter(&BlockCountVoteTable, |r| r.map(|(_, v)| v).collect());
 
     assert!(counts.len() <= num_peers.total());
 
@@ -81,17 +81,15 @@ table!(
 /// rather than indexed short because a peer that has not voted still counts:
 /// it supports `default_version` and nothing beyond, and that has to weigh on
 /// the result the same as a vote would.
-pub fn consensus_version(
-    dbtx: &impl DbRead,
-    num_peers: NumPeers,
-    default_version: ConsensusVersion,
-) -> ConsensusVersion {
+pub fn consensus_version(server: &Server, dbtx: &impl DbRead) -> ConsensusVersion {
+    let num_peers = server.cfg.consensus.peers.to_num_peers();
+
     let mut versions = dbtx.iter(&ConsensusVersionVoteTable, |r| {
         r.map(|(_, version)| version).collect::<Vec<_>>()
     });
 
     while versions.len() < num_peers.total() {
-        versions.push(default_version);
+        versions.push(server.cfg.consensus.default_version);
     }
 
     versions.sort_unstable();
@@ -116,7 +114,7 @@ pub struct InviteMeta {
     /// Unix timestamp in seconds after which the invite code is expired.
     pub expires_at: u64,
     /// Maximum number of users that may download the config via this invite.
-    pub user_limit: u64,
+    pub user_limit: u32,
 }
 
 // Expiration date and user limit for each invite code this guardian issued,
@@ -132,6 +130,6 @@ table!(
 // entry means zero. Incremented in the same transaction that serves the config.
 table!(
     InviteUserCountTable,
-    [u8; 16] => u64,
+    [u8; 16] => u32,
     "invite-user-count",
 );

@@ -40,7 +40,7 @@ where
     T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
 {
     pub(crate) id: PeerId,
-    session: u64,
+    session: u32,
     pub(crate) n: NumPeers,
     db: Database,
     keychain: Keychain,
@@ -101,7 +101,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: PeerId,
-        session: u64,
+        session: u32,
         n: NumPeers,
         db: Database,
         keychain: Keychain,

@@ -75,7 +75,7 @@ pub enum P2PMessage {
     /// fails sig verification against the local-session unit hash.
     Bft(BftMessage<ConsensusItem>),
     SessionSignature(secp256k1::schnorr::Signature),
-    SessionIndex(u64),
+    SessionIndex(u32),
     SignedSessionOutcome(SignedSessionOutcome),
     Checksum(sha256::Hash),
     DkgG1(DkgMessageG1),
