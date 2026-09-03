@@ -906,6 +906,7 @@ fn mock_invoice_msat(
 async fn spawn_mock_gateway() -> anyhow::Result<GatewayPk> {
     let endpoint = Endpoint::builder(N0)
         .alpns(vec![picomint_rpc::ALPN.to_vec()])
+        .transport_config(picomint_rpc::transport_config())
         .address_lookup(MdnsAddressLookup::builder())
         .bind()
         .await?;

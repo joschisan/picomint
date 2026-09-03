@@ -159,6 +159,7 @@ fn main() -> anyhow::Result<()> {
         iroh::Endpoint::builder(N0)
             .secret_key(iroh_secret_key)
             .alpns(vec![picomint_rpc::ALPN.to_vec()])
+            .transport_config(picomint_rpc::transport_config())
             .bind_addr(opts.api_addr)?
             .address_lookup(MdnsAddressLookup::builder())
             .bind(),

@@ -71,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
     let cli_opts = CliOpts::parse();
 
     let endpoint = Endpoint::builder(N0)
+        .transport_config(picomint_rpc::transport_config())
         .address_lookup(MdnsAddressLookup::builder())
         .bind()
         .await?;

@@ -268,6 +268,7 @@ async fn build_client(
     // No secret key: a wallet's network identity is ephemeral — nothing
     // dials it.
     let endpoint = Endpoint::builder(N0)
+        .transport_config(picomint_rpc::transport_config())
         .address_lookup(MdnsAddressLookup::builder())
         .bind()
         .await?;

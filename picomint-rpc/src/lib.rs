@@ -22,9 +22,11 @@ pub mod api;
 pub mod connection;
 pub mod query;
 
+use std::time::Duration;
+
 use anyhow::{Context, anyhow};
 use futures::TryFutureExt;
-use iroh::endpoint::Connection;
+use iroh::endpoint::{Connection, IdleTimeout, QuicTransportConfig};
 use iroh::{Endpoint, PublicKey};
 use picomint_encoding::{Decodable, Encodable};
 use tracing::warn;
@@ -36,6 +38,21 @@ pub const ALPN: &[u8] = b"picomint";
 
 /// Maximum on-the-wire payload size for a single request or response.
 pub const MAX_BYTES: usize = 100_000_000;
+
+/// QUIC transport config for every picomint endpoint: a 1s keep-alive under
+/// a 5s idle timeout, so a dead connection surfaces within ~5s instead of
+/// the 30s QUIC default. The negotiated idle timeout is the minimum of both
+/// sides', so the daemons setting this caps detection latency for clients
+/// whose endpoints keep iroh's defaults. The path-level settings stay
+/// untouched — iroh tunes those for hole punching.
+pub fn transport_config() -> QuicTransportConfig {
+    let idle_timeout = IdleTimeout::try_from(Duration::from_secs(5)).expect("valid timeout");
+
+    QuicTransportConfig::builder()
+        .keep_alive_interval(Duration::from_secs(1))
+        .max_idle_timeout(Some(idle_timeout))
+        .build()
+}
 
 /// Open a fresh iroh connection to `node_id`, send `request`, read the
 /// response, close. The wire envelope (`Result<Vec<u8>, String>`) is
