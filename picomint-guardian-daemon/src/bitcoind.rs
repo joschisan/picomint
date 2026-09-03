@@ -1,16 +1,16 @@
 //! Bitcoind RPC client + background status monitor.
 
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result, ensure};
-use bitcoincore_rpc::Error::JsonRpc;
-use bitcoincore_rpc::bitcoincore_rpc_json::EstimateMode;
-use bitcoincore_rpc::jsonrpc::Error::Rpc;
-use bitcoincore_rpc::{Auth, Client, RpcApi};
+use anyhow::{Context, Result, bail};
+use picomint_core::bitcoin::consensus::encode::{deserialize_hex, serialize_hex};
 use picomint_core::bitcoin::{Block, BlockHash, Network, Transaction};
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
 use tokio::sync::watch;
-use tokio::task::block_in_place;
 use tracing::{info, warn};
 use url::Url;
 
@@ -28,73 +28,6 @@ const MUTINYNET: &str = "000002855893a0a9b24eaffc5efc770558a326fee4fc10c9da22fc1
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Feerate {
     pub sat_per_kvb: u32,
-}
-
-#[derive(Debug)]
-pub struct BitcoindClient(Client);
-
-impl BitcoindClient {
-    pub fn new(url: &Url) -> anyhow::Result<Self> {
-        let username = url.username().to_owned();
-        let password = url
-            .password()
-            .context("BITCOIND_URL must embed credentials: http://user:pass@host")?
-            .to_owned();
-
-        Ok(Self(Client::new(
-            url.as_str(),
-            Auth::UserPass(username, password),
-        )?))
-    }
-
-    pub async fn get_block_count(&self) -> anyhow::Result<u32> {
-        // The RPC function is confusingly named and actually returns the block height
-        block_in_place(|| self.0.get_block_count())
-            .map(|height| u32::try_from(height + 1).expect("Bitcoin block heights fit in a u32"))
-            .map_err(anyhow::Error::from)
-    }
-
-    pub async fn get_block_hash(&self, height: u32) -> anyhow::Result<BlockHash> {
-        block_in_place(|| self.0.get_block_hash(height.into())).map_err(anyhow::Error::from)
-    }
-
-    pub async fn get_block(&self, hash: &BlockHash) -> anyhow::Result<Block> {
-        block_in_place(|| self.0.get_block(hash)).map_err(anyhow::Error::from)
-    }
-
-    pub async fn get_feerate(&self) -> anyhow::Result<Option<Feerate>> {
-        let feerate = block_in_place(|| {
-            self.0
-                .estimate_smart_fee(1, Some(EstimateMode::Conservative))
-        })?
-        .fee_rate
-        .map(|per_kb| Feerate {
-            sat_per_kvb: u32::try_from(per_kb.to_sat())
-                .expect("bitcoind feerate estimates fit u32 sat/kvb"),
-        });
-
-        Ok(feerate)
-    }
-
-    pub async fn submit_tx(&self, tx: Transaction) {
-        match block_in_place(|| self.0.send_raw_transaction(&tx)) {
-            // Bitcoin core's RPC will return error code -27 if a transaction is already in a block.
-            // This is considered a success case, so we don't surface the error log.
-            //
-            // https://github.com/bitcoin/bitcoin/blob/daa56f7f665183bcce3df146f143be37f33c123e/src/rpc/protocol.h#L48
-            Err(JsonRpc(Rpc(e))) if e.code == -27 => (),
-            Err(e) => {
-                info!(e = %e, "Error broadcasting transaction")
-            }
-            Ok(_) => (),
-        }
-    }
-
-    pub async fn get_sync_progress(&self) -> anyhow::Result<Option<f64>> {
-        Ok(Some(
-            block_in_place(|| self.0.get_blockchain_info())?.verification_progress,
-        ))
-    }
 }
 
 /// Status of the bitcoind backend as reported by the monitor.
@@ -119,27 +52,28 @@ impl BitcoindRpcMonitor {
     pub fn new(rpc: Arc<BitcoindClient>, update_interval: Duration) -> Self {
         let (status_tx, status_rx) = watch::channel(None);
 
-        let rpc_clone = rpc.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(update_interval);
-            loop {
-                interval.tick().await;
-                match Self::fetch_status(&rpc_clone).await {
-                    Ok(new_status) => {
-                        status_tx.send_replace(Some(new_status));
-                    }
-                    Err(err) => {
-                        warn!(
-                            err = %format_args!("{err:#}"),
-                            "Bitcoin status update failed"
-                        );
-                        status_tx.send_replace(None);
-                    }
-                }
-            }
-        });
+        tokio::spawn(Self::update_status(rpc.clone(), update_interval, status_tx));
 
         Self { rpc, status_rx }
+    }
+
+    async fn update_status(
+        rpc: Arc<BitcoindClient>,
+        update_interval: Duration,
+        status_tx: watch::Sender<Option<BitcoindRpcStatus>>,
+    ) {
+        let mut interval = tokio::time::interval(update_interval);
+
+        loop {
+            let status = Self::fetch_status(&rpc)
+                .await
+                .inspect_err(|e| warn!(?e, "Bitcoin status update failed"))
+                .ok();
+
+            status_tx.send_replace(status);
+
+            interval.tick().await;
+        }
     }
 
     async fn fetch_status(rpc: &BitcoindClient) -> Result<BitcoindRpcStatus> {
@@ -149,7 +83,9 @@ impl BitcoindRpcMonitor {
             SIGNET_4 | MUTINYNET => Network::Signet,
             _ => Network::Regtest,
         };
+
         let block_count = rpc.get_block_count().await?;
+
         let sync_progress = rpc.get_sync_progress().await?;
 
         let fee_rate = if network == Network::Regtest {
@@ -171,20 +107,10 @@ impl BitcoindRpcMonitor {
     }
 
     pub async fn get_block(&self, hash: &BlockHash) -> Result<Block> {
-        ensure!(
-            self.status_rx.borrow().is_some(),
-            "Not connected to bitcoin backend"
-        );
-
         self.rpc.get_block(hash).await
     }
 
     pub async fn get_block_hash(&self, height: u32) -> Result<BlockHash> {
-        ensure!(
-            self.status_rx.borrow().is_some(),
-            "Not connected to bitcoin backend"
-        );
-
         self.rpc.get_block_hash(height).await
     }
 
@@ -192,5 +118,138 @@ impl BitcoindRpcMonitor {
         if self.status_rx.borrow().is_some() {
             self.rpc.submit_tx(tx).await;
         }
+    }
+}
+
+#[derive(Deserialize)]
+struct RpcResponse<T> {
+    result: Option<T>,
+    error: Option<RpcError>,
+}
+
+/// JSON-RPC error object returned by bitcoind. A typed error so callers
+/// can match on well-known codes via [`anyhow::Error::downcast_ref`].
+#[derive(Debug, Deserialize)]
+struct RpcError {
+    code: i64,
+    message: String,
+}
+
+impl fmt::Display for RpcError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} (code {})", self.message, self.code)
+    }
+}
+
+impl std::error::Error for RpcError {}
+
+/// Subset of the `estimatesmartfee` response; `feerate` is in BTC/kvB
+/// and absent while the node has no estimate yet.
+#[derive(Deserialize)]
+struct EstimateSmartFee {
+    feerate: Option<f64>,
+}
+
+/// Subset of the `getblockchaininfo` response.
+#[derive(Deserialize)]
+struct BlockchainInfo {
+    verificationprogress: f64,
+}
+
+#[derive(Debug)]
+pub struct BitcoindClient {
+    client: reqwest::Client,
+    /// Keeps its embedded credentials — reqwest extracts userinfo from the
+    /// url into a basic auth header on every request.
+    url: Url,
+}
+
+impl BitcoindClient {
+    pub fn new(url: Url) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            url,
+        }
+    }
+
+    async fn call<T: DeserializeOwned>(&self, method: &str, params: Value) -> anyhow::Result<T> {
+        let request = json!({
+            "jsonrpc": "1.0",
+            "id": "picomint",
+            "method": method,
+            "params": params,
+        });
+
+        let http_response = self
+            .client
+            .post(self.url.clone())
+            .json(&request)
+            .send()
+            .await?;
+
+        let status = http_response.status();
+
+        // Bitcoind signals RPC errors with a non-success status but still
+        // sends the JSON-RPC error envelope, so decode before checking the
+        // status and only surface it when there is no envelope to blame.
+        let response: RpcResponse<T> = http_response
+            .json()
+            .await
+            .with_context(|| format!("bitcoind returned {status} with a non-JSON-RPC body"))?;
+
+        match (response.result, response.error) {
+            (Some(result), None) => Ok(result),
+            (_, Some(error)) => Err(anyhow::Error::new(error)),
+            _ => bail!("JSON-RPC response carries neither result nor error"),
+        }
+    }
+
+    pub async fn get_block_count(&self) -> anyhow::Result<u32> {
+        // The RPC method is confusingly named and actually returns the block height
+        self.call::<u32>("getblockcount", json!([]))
+            .await
+            .map(|height| height + 1)
+    }
+
+    pub async fn get_block_hash(&self, height: u32) -> anyhow::Result<BlockHash> {
+        self.call("getblockhash", json!([height])).await
+    }
+
+    pub async fn get_block(&self, hash: &BlockHash) -> anyhow::Result<Block> {
+        let hex: String = self.call("getblock", json!([hash, 0])).await?;
+
+        Ok(deserialize_hex(&hex)?)
+    }
+
+    pub async fn get_feerate(&self) -> anyhow::Result<Option<Feerate>> {
+        let response: EstimateSmartFee = self
+            .call("estimatesmartfee", json!([1, "CONSERVATIVE"]))
+            .await?;
+
+        Ok(response.feerate.map(|btc_per_kvb| Feerate {
+            sat_per_kvb: u32::try_from((btc_per_kvb * 100_000_000.0).round() as u64)
+                .expect("bitcoind feerate estimates fit u32 sat/kvb"),
+        }))
+    }
+
+    pub async fn submit_tx(&self, tx: Transaction) {
+        match self
+            .call::<String>("sendrawtransaction", json!([serialize_hex(&tx)]))
+            .await
+        {
+            // Bitcoin core's RPC will return error code -27 if a transaction is already in a block.
+            // This is considered a success case, so we don't surface the error log.
+            //
+            // https://github.com/bitcoin/bitcoin/blob/daa56f7f665183bcce3df146f143be37f33c123e/src/rpc/protocol.h#L48
+            Err(e) if e.downcast_ref::<RpcError>().is_some_and(|e| e.code == -27) => (),
+            Err(e) => info!(e = %e, "Error broadcasting transaction"),
+            Ok(_) => (),
+        }
+    }
+
+    pub async fn get_sync_progress(&self) -> anyhow::Result<Option<f64>> {
+        self.call::<BlockchainInfo>("getblockchaininfo", json!([]))
+            .await
+            .map(|info| Some(info.verificationprogress))
     }
 }
