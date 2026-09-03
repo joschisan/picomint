@@ -390,7 +390,7 @@ fn app_fee_total(ctx: &ClientContext, account: Account, basis: Amount) -> Amount
 /// `TxCreateEvent` so the operation's event log opens with the
 /// module event.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn finalize_and_submit_tx<E: picomint_eventlog::Event + Send>(
+pub(crate) fn finalize_and_submit_tx<E: crate::eventlog::Event + Send>(
     ctx: &ClientContext,
     dbtx: &WriteTx,
     account: Account,
@@ -507,7 +507,7 @@ fn fund(
 /// Sign the builder, spawn the `TxSubmissionStateMachine`, log the
 /// caller's `event` followed by `TxCreateEvent`.
 #[allow(clippy::too_many_arguments)]
-fn submit<E: picomint_eventlog::Event + Send>(
+fn submit<E: crate::eventlog::Event + Send>(
     ctx: &ClientContext,
     dbtx: &WriteTx,
     account: Account,
@@ -1160,7 +1160,7 @@ impl Client {
     /// inputs; not part of the supported surface.
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
-    pub fn mint_finalize_and_submit_tx<E: picomint_eventlog::Event + Send>(
+    pub fn mint_finalize_and_submit_tx<E: crate::eventlog::Event + Send>(
         &self,
         federation: FederationId,
         dbtx: &WriteTx,

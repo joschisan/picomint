@@ -1,6 +1,6 @@
+use crate::eventlog::{Event, EventKind, EventSource};
 use picomint_core::Amount;
 use picomint_core::TransactionId;
-use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
 /// Emitted when a send operation is created. `amount` is the invoice

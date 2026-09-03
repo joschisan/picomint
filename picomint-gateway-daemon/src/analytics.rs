@@ -22,11 +22,11 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use hex::ToHex as _;
 use picomint_client::TxCreateEvent;
+use picomint_client::eventlog::{EventLogEntry, EventLogId};
 use picomint_client::gw::events::{
     ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent, SendCancelEvent,
     SendEvent, SendSuccessEvent,
 };
-use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_gateway_cli_core::AnalyticsResponse;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};

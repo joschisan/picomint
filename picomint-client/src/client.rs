@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 use crate::Endpoint;
 use crate::api::FederationApi;
 use crate::context::ClientContext;
+use crate::eventlog::{EventLogEntry, EventLogId};
 use crate::ln::Gateways;
 use crate::secret::{ClientSecret, Mnemonic};
 use crate::task::TaskGroup;
@@ -17,7 +18,6 @@ use picomint_core::core::{Account, OperationId};
 use picomint_core::fee::FeeConfig;
 use picomint_core::invite::InviteCode;
 use picomint_core::secp256k1::XOnlyPublicKey;
-use picomint_eventlog::{EventLogEntry, EventLogId};
 use picomint_redb::{Database, DbRead, table};
 use picomint_rpc::connection::ConnStatus;
 use tracing::debug;
@@ -286,18 +286,18 @@ impl Client {
     }
 
     pub fn get_event_log(&self, pos: EventLogId, limit: u64) -> Vec<(EventLogId, EventLogEntry)> {
-        picomint_eventlog::get_event_log(&self.db, pos, limit)
+        crate::eventlog::get_event_log(&self.db, pos, limit)
     }
 
     /// Shared [`Notify`] that fires on every commit touching the event log.
     pub fn event_notify(&self) -> Arc<tokio::sync::Notify> {
-        picomint_eventlog::event_notify(&self.db)
+        crate::eventlog::event_notify(&self.db)
     }
 
     /// One-shot snapshot of every event currently logged for `operation`,
     /// in insertion order.
     pub fn read_operation_events(&self, operation: OperationId) -> Vec<EventLogEntry> {
-        picomint_eventlog::read_operation_events(&self.db, operation)
+        crate::eventlog::read_operation_events(&self.db, operation)
     }
 
     /// Whether any state machine is still driving `operation` under
@@ -363,7 +363,7 @@ impl Client {
         &self,
         operation: OperationId,
     ) -> BoxStream<'static, EventLogEntry> {
-        Box::pin(picomint_eventlog::subscribe_operation_events(
+        Box::pin(crate::eventlog::subscribe_operation_events(
             self.db.clone(),
             operation,
         ))

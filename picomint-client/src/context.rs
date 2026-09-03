@@ -1,4 +1,5 @@
 use crate::api::FederationApi;
+use crate::eventlog::{Event, EventLogEntry};
 use crate::ln::Gateways;
 use crate::secret::ClientSecret;
 use crate::task::TaskGroup;
@@ -8,7 +9,6 @@ use picomint_core::TransactionId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
-use picomint_eventlog::{Event, EventLogEntry};
 use picomint_redb::{Database, WriteTx};
 
 use crate::{TxAcceptEvent, TxRejectEvent};
@@ -86,7 +86,7 @@ impl ClientContext {
         &self,
         operation: OperationId,
     ) -> BoxStream<'static, EventLogEntry> {
-        Box::pin(picomint_eventlog::subscribe_operation_events(
+        Box::pin(crate::eventlog::subscribe_operation_events(
             self.db.clone(),
             operation,
         ))
@@ -96,6 +96,6 @@ impl ClientContext {
     where
         E: Event + Send,
     {
-        picomint_eventlog::log_event(dbtx, self.federation, account, operation, event);
+        crate::eventlog::log_event(dbtx, self.federation, account, operation, event);
     }
 }

@@ -19,9 +19,9 @@
 //! trailer just re-runs the last event on restart.
 use bitcoin::hashes::Hash as _;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
+use picomint_client::eventlog::EventLogEntry;
 use picomint_client::gw::events::{ReceiveRefundEvent, ReceiveSuccessEvent};
 use picomint_core::core::OperationId;
-use picomint_eventlog::EventLogEntry;
 use picomint_redb::{DbRead, WriteTx};
 
 use crate::AppState;

@@ -22,6 +22,7 @@ async-stream = { workspace = true }
 bip39 = { workspace = true, features = ["rand"] }
 bitcoin = { workspace = true, features = ["rand-std"] }
 bitcoin_hashes = { workspace = true }
+derive_more = { workspace = true }
 futures = { workspace = true }
 iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false }
@@ -29,19 +30,16 @@ lightning-invoice = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
-picomint-eventlog = { workspace = true }
 picomint-lnurl = { workspace = true }
 picomint-rpc = { workspace = true }
 picomint-redb = { workspace = true }
 rand = { workspace = true }
 secp256k1 = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tbs = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time", "macros", "rt", "sync"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tpe = { workspace = true }
 tracing = { workspace = true }
-
-[dev-dependencies]
-serde_json = { workspace = true }

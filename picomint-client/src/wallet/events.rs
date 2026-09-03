@@ -1,7 +1,7 @@
+use crate::eventlog::{Event, EventKind, EventSource};
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, Txid};
 use picomint_core::TransactionId;
-use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
 /// Emitted when a pegout (send to onchain) operation is initiated.
