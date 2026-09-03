@@ -96,23 +96,24 @@ pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Marku
                 span class="card-title" { "Wallet" }
             }
 
-            (kv("Network", html! { (server.cfg.consensus.network) }))
-
-            @if let Some(wallet) = federation_wallet {
-                div class="kv" {
-                    span class="kv-label" { "Transaction Tip" }
+            div class="kv" {
+                span class="kv-label" { "Transaction Tip" }
+                @if let Some(wallet) = federation_wallet {
                     a href={ "https://mempool.space/tx/" (wallet.outpoint.txid) } target="_blank" {
                         "mempool.space"
                     }
+                } @else {
+                    span class="kv-value mono" { "n/a" }
                 }
-                (kv("Transaction Count", html! { (transaction_count) }))
             }
+
+            (kv("Transaction Count", html! { (transaction_count) }))
 
             (kv("Fee Rate", html! {
                 @if let Some(fee_rate) = consensus_fee_rate {
                     (fee_rate) " sat/vbyte"
                 } @else {
-                    "No fee rate available"
+                    "n/a"
                 }
             }))
         }
