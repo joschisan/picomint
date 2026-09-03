@@ -10,7 +10,6 @@ pub fn render(status: &Option<BitcoindRpcStatus>) -> Markup {
                 span class="card-title" { "Bitcoin Connection" }
             }
             @if let Some(status) = status {
-                (kv("Network", html! { (format!("{:?}", status.network)) }))
                 (kv("Block Count", html! { (status.block_count) }))
 
                 @if let Some(fee_rate) = status.fee_rate {
