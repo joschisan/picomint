@@ -1,6 +1,6 @@
+use crate::eventlog::{Event, EventKind, EventSource};
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::{Amount, OutPoint, TransactionId};
-use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
 // --- Outgoing payment ---

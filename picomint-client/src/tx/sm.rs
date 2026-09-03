@@ -48,7 +48,7 @@ impl StateMachine for TxSubmissionStateMachine {
 
         match outcome {
             Ok(()) => {
-                picomint_eventlog::log_event(
+                crate::eventlog::log_event(
                     dbtx,
                     ctx.federation,
                     self.account,
@@ -57,7 +57,7 @@ impl StateMachine for TxSubmissionStateMachine {
                 );
             }
             Err(error) => {
-                picomint_eventlog::log_event(
+                crate::eventlog::log_event(
                     dbtx,
                     ctx.federation,
                     self.account,

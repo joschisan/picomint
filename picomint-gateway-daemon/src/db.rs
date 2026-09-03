@@ -1,3 +1,4 @@
+use picomint_client::eventlog::EventLogId;
 use picomint_client::{Mnemonic, random_mnemonic};
 use picomint_core::OutPoint;
 use picomint_core::config::FederationId;
@@ -5,7 +6,6 @@ use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_eventlog::EventLogId;
 use picomint_redb::{Database, DbRead, table};
 use rand::rngs::OsRng;
 

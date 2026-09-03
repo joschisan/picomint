@@ -28,6 +28,8 @@ pub mod api;
 mod client;
 /// The per-federation [`context::ClientContext`]
 mod context;
+/// Append-only event log shared by all federations on this host.
+pub mod eventlog;
 /// Shared kept-alive iroh connection primitive (federation peers + gateways).
 /// Per-module typed state machine executor
 mod executor;
@@ -60,8 +62,8 @@ pub use picomint_core::core::{Account, OperationId};
 pub use picomint_rpc::connection::ConnStatus;
 pub use secret::{Mnemonic, random as random_mnemonic};
 
+use crate::eventlog::{Event, EventKind, EventSource};
 use picomint_core::{Amount, TransactionId};
-use picomint_eventlog::{Event, EventKind, EventSource};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

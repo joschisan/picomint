@@ -3,11 +3,11 @@ use std::pin::pin;
 use anyhow::ensure;
 use async_stream::stream;
 use futures::StreamExt;
+use picomint_client::eventlog::{EventLogEntry, EventLogId};
 use picomint_client::mint::{MintSuccessEvent, ReceiveEvent, SendEvent};
 use picomint_client::{Account, Mnemonic, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
-use picomint_eventlog::{EventLogEntry, EventLogId};
 use tracing::info;
 
 use crate::env::{CLIENT_FEE_PPM, TestClient, TestEnv};

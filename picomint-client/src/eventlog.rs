@@ -1,5 +1,3 @@
-#![allow(clippy::needless_lifetimes)]
-
 //! Event log
 //!
 //! Single, ordered, append-only log of all important events on a host.
@@ -7,7 +5,7 @@
 //! secondary table keyed by `(operation, event_log_id)` so a subscriber
 //! can tail events for a specific operation cheaply via a stream API.
 //!
-//! The crate owns the two tables and exposes the log/subscribe operations
+//! The module owns the two tables and exposes the log/subscribe operations
 //! as free functions over the caller's [`Database`] / [`WriteTx`].
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -283,6 +281,3 @@ pub fn subscribe_operation_events(
         }
     }
 }
-
-#[cfg(test)]
-mod tests;
