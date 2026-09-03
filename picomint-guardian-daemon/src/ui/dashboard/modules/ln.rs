@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use axum::extract::{Form, State};
 use axum::response::{Html, IntoResponse};
-use maud::{Markup, html};
+use maud::{Markup, PreEscaped, html};
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_redb::ReadTx;
 
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::ln;
+use crate::ui::modal_header;
 
 pub const LN_ADD_ROUTE: &str = "/ln/add";
 pub const LN_REMOVE_ROUTE: &str = "/ln/remove";
@@ -26,75 +27,73 @@ pub struct RemoveGatewayForm {
     pub pk: String,
 }
 
+// Gateway management — htmx swaps this section in place on add/remove and
+// on a validation error, so no full reload. The add form lives in a
+// <dialog> the Actions launcher opens; a swap re-renders the dialog
+// closed, and the error fragment reopens it so the inline error is
+// visible. The section wraps the card rather than the other way around,
+// so the card disappears with the last gateway while the dialog stays
+// reachable.
 pub fn render(dbtx: &ReadTx) -> Markup {
     let gateways = ln::gateways(dbtx);
 
     html! {
-        div class="card h-100" {
-            div class="card-header dashboard-header" { "Lightning" }
-            div class="card-body" {
-                // Gateway management — htmx swaps this section in place on
-                // add/remove and on a validation error, so no full reload.
-                div id="gateway-section" {
-                    (gateway_section(&gateways, None))
-                }
-            }
+        div id="gateway-section" {
+            (gateway_section(&gateways, None))
         }
     }
 }
 
-// Swappable gateway management: list of named gateways stacked above the
-// add form. `error`, when set, renders an inline alert above the form
-// inputs. Returned both by `render` for the initial page and by the
-// add/remove handlers as the htmx fragment.
+// Swappable gateway management: the card listing named gateways (absent
+// when there are none) plus the add-gateway modal. `error`, when set,
+// renders an inline alert above the form inputs and reopens the modal
+// after the swap. Returned both by `render` for the initial page and by
+// the add/remove handlers as the htmx fragment.
 fn gateway_section(gateways: &[(GatewayPk, String)], error: Option<&str>) -> Markup {
     html! {
-        div class="alert alert-warning mb-3" {
-            "All guardians have to enter the exact same set of gateways."
-        }
         @if !gateways.is_empty() {
-            div class="list-group mb-3" {
-                @for (pk, name) in gateways {
-                    div class="list-group-item d-flex align-items-center gap-2" {
-                        span class="text-truncate flex-grow-1" style="min-width: 0;" {
-                            (name)
-                        }
-                        form hx-post=(LN_REMOVE_ROUTE) hx-target="#gateway-section" hx-swap="innerHTML" class="flex-shrink-0" {
-                            input type="hidden" name="pk" value=(picomint_base32::encode(pk));
-                            button type="submit" class="btn btn-sm btn-danger" {
-                                "Remove"
+            div class="card" {
+                div class="card-header" {
+                    span class="card-title" { "Lightning Gateways" }
+                }
+                div class="list" {
+                    @for (pk, name) in gateways {
+                        @let encoded = picomint_base32::encode(pk);
+                        div class="list-row" {
+                            span class="list-row-name" { (name) }
+                            span class="mono muted" style="font-size: 12px" title=(encoded) {
+                                (encoded[..6]) "…" (encoded[encoded.len() - 4..])
+                            }
+                            form hx-post=(LN_REMOVE_ROUTE) hx-target="#gateway-section" hx-swap="innerHTML" {
+                                input type="hidden" name="pk" value=(encoded);
+                                button type="submit" class="link-danger" { "Remove" }
                             }
                         }
                     }
                 }
             }
         }
-        form hx-post=(LN_ADD_ROUTE) hx-target="#gateway-section" hx-swap="innerHTML" {
-            @if let Some(error) = error {
-                div class="alert alert-danger mb-3" { (error) }
-            }
-            div class="mb-3" {
-                input
-                    type="text"
-                    class="form-control"
-                    id="gateway-node-id"
-                    name="pk"
-                    placeholder="Enter Gateway Code"
-                    required;
-            }
-            div class="mb-3" {
-                input
-                    type="text"
-                    class="form-control"
-                    id="gateway-name"
-                    name="name"
-                    placeholder="Enter Nickname"
-                    required;
-            }
-            div class="d-grid" {
-                button type="submit" class="btn btn-primary" {
-                    "Add Gateway"
+
+        dialog id="gateway-modal" autofocus {
+            (modal_header("Add Gateway"))
+            div class="modal-body" {
+                form class="form-stack" hx-post=(LN_ADD_ROUTE) hx-target="#gateway-section" hx-swap="innerHTML" {
+                    div class="alert alert-warning" {
+                        "All guardians have to enter the exact same set of gateways."
+                    }
+                    @if let Some(error) = error {
+                        div class="alert alert-danger" { (error) }
+                    }
+                    input type="text" name="pk" placeholder="Enter Gateway Code" required;
+                    input type="text" name="name" placeholder="Enter Nickname" required;
+                    button type="submit" class="btn btn-primary btn-lg btn-block" { "Add Gateway" }
                 }
+            }
+        }
+
+        @if error.is_some() {
+            script {
+                (PreEscaped("document.getElementById('gateway-modal').showModal()"))
             }
         }
     }

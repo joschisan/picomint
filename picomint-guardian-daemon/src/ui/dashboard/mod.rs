@@ -1,6 +1,5 @@
-pub mod audit;
+pub mod actions;
 pub mod bitcoin;
-pub mod config;
 pub mod expiry;
 pub mod general;
 pub mod invite;
@@ -13,15 +12,16 @@ use axum::Router;
 use axum::extract::State;
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
-use maud::html;
+use maud::{Markup, html};
 
 use picomint_redb::DbRead;
 
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::{ExpiryStatusTable, consensus_block_count, consensus_version};
 use crate::consensus::engine::get_finished_session_count;
+use crate::consensus::wallet;
 use crate::ui::assets::WithStaticRoutesExt;
-use crate::ui::dashboard::modules::{ln, wallet};
+use crate::ui::dashboard::modules::ln;
 use crate::ui::{ROOT_ROUTE, dashboard_layout};
 
 pub const BACKUP_CONFIG_ROUTE: &str = "/backup-config";
@@ -43,6 +43,25 @@ async fn backup_config(State(state): State<Arc<ConsensusApi>>) -> impl IntoRespo
     )
 }
 
+fn tile(label: &str, value: Markup) -> Markup {
+    html! {
+        div class="tile" {
+            span class="tile-label" { (label) }
+            span class="tile-value" { (value) }
+        }
+    }
+}
+
+/// Renders one key-value row of a status card.
+pub fn kv(label: &str, value: Markup) -> Markup {
+    html! {
+        div class="kv" {
+            span class="kv-label" { (label) }
+            span class="kv-value mono" { (value) }
+        }
+    }
+}
+
 async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResponse {
     let api = &*state;
 
@@ -60,7 +79,6 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
         .iter()
         .map(|(peer, receiver)| (*peer, receiver.borrow().clone()))
         .collect();
-    let audit_summary = api.federation_audit();
     let bitcoin_rpc_status = api.server.btc_rpc.status();
 
     // One read snapshot for the whole page, so every value rendered below
@@ -73,51 +91,39 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
     let block_count = consensus_block_count(&api.server, &dbtx);
     let version = consensus_version(&api.server, &dbtx);
 
+    let value_in_custody = wallet::federation_wallet(&dbtx)
+        .map(|wallet| wallet.value.to_btc())
+        .unwrap_or(0.0);
+
     let content = html! {
-        div class="row gy-4" {
-            div class="col-12" {
-                (general::render(&federation_name, &guardian_names, &p2p_connection_status, session_count, block_count, version))
-            }
+        div class="tiles" {
+            (tile("Value in Custody", html! {
+                (format!("{value_in_custody:.8}")) " " span class="tile-unit" { "BTC" }
+            }))
+            (tile("Session Count", html! { (session_count) }))
+            (tile("Block Count", html! { (block_count) }))
+            (tile("Consensus Version", html! { (version) }))
         }
 
-        div class="row gy-4 mt-2" {
-            div class="col-lg-6" {
-                (invite::render(block_count))
+        div class="grid" {
+            div class="grid-col" {
+                (general::render(&federation_name, &guardian_names, &p2p_connection_status))
+                (modules::wallet::render_pending(&api.server, &dbtx))
+                (modules::wallet::render(&api.server, &dbtx))
             }
 
-            div class="col-lg-6" {
+            div class="grid-col" {
                 (bitcoin::render(&bitcoin_rpc_status))
-            }
-        }
-
-        div class="row gy-4 mt-2" {
-            div class="col-lg-6" {
                 (ln::render(&dbtx))
             }
-
-            div class="col-lg-6" {
-                (audit::render(&audit_summary))
-            }
         }
 
-        div class="row gy-4 mt-2" {
-            div class="col-12" {
-                (wallet::render(&api.server, &dbtx))
-            }
-        }
-
-        div class="row gy-4 mt-2" {
-            div class="col-lg-6" {
-                (config::render())
-            }
-
-            div class="col-lg-6" {
-                (expiry::render(expiry_status.as_ref()))
-            }
-        }
+        (actions::render(&api.server, &dbtx, expiry_status.as_ref()))
+        (invite::render(block_count))
     };
 
-    Html(dashboard_layout(content, env!("CARGO_PKG_VERSION")).into_string()).into_response()
+    Html(dashboard_layout(&federation_name, env!("CARGO_PKG_VERSION"), content).into_string())
+        .into_response()
 }
 
 pub fn router(api: Arc<ConsensusApi>) -> Router {

@@ -1,21 +1,29 @@
-//! Static asset routes for the admin UI (vendored CSS/JS/fonts + style
-//! sheet). Every file under `picomint-guardian-daemon/assets/` gets mounted
-//! under `/assets/...` by [`WithStaticRoutesExt::with_static_routes`].
+//! Static asset routes for the admin UI (vendored htmx + style sheet).
+//! Every file under `picomint-guardian-daemon/assets/` gets mounted under
+//! `/assets/...` by [`WithStaticRoutesExt::with_static_routes`].
+
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::LazyLock;
 
 use axum::Router;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 
-pub const BOOTSTRAP_CSS_ROUTE: &str = "/assets/bootstrap.min.css";
-pub const BOOTSTRAP_JS_ROUTE: &str = "/assets/bootstrap.bundle.min.js";
-pub const BOOTSTRAP_ICONS_CSS_ROUTE: &str = "/assets/bootstrap-icons.min.css";
-pub const BOOTSTRAP_ICONS_WOFF2_ROUTE: &str = "/assets/fonts/bootstrap-icons.woff2";
-pub const BOOTSTRAP_ICONS_WOFF_ROUTE: &str = "/assets/fonts/bootstrap-icons.woff";
 pub const HTMX_JS_ROUTE: &str = "/assets/htmx.org-2.0.4.min.js";
-pub const HTML5_QRCODE_JS_ROUTE: &str = "/assets/html5-qrcode.min.js";
 pub const STYLE_CSS_ROUTE: &str = "/assets/style.css";
-pub const LOGO_PNG_ROUTE: &str = "/assets/logo.png";
+
+pub const STYLE_CSS: &str = include_str!("../../assets/style.css");
+
+/// Stylesheet href with a content-hash query param, so the aggressive
+/// cache-control below can never serve a stale stylesheet after an upgrade.
+pub static STYLE_CSS_HREF: LazyLock<String> = LazyLock::new(|| {
+    let mut hasher = DefaultHasher::new();
+
+    STYLE_CSS.hash(&mut hasher);
+
+    format!("{STYLE_CSS_ROUTE}?v={:016x}", hasher.finish())
+});
 
 pub(crate) fn get_static_asset(content_type: &'static str, body: &'static [u8]) -> Response {
     (
@@ -30,20 +38,8 @@ pub(crate) fn get_static_css(body: &'static str) -> Response {
     get_static_asset("text/css", body.as_bytes())
 }
 
-pub(crate) fn get_static_png(body: &'static [u8]) -> Response {
-    get_static_asset("image/png", body)
-}
-
 pub(crate) fn get_static_js(body: &'static str) -> Response {
     get_static_asset("application/javascript", body.as_bytes())
-}
-
-fn get_static_font(body: &'static [u8]) -> Response {
-    get_static_asset("font/woff2", body)
-}
-
-fn get_static_woff(body: &'static [u8]) -> Response {
-    get_static_asset("font/woff", body)
 }
 
 pub trait WithStaticRoutesExt {
@@ -56,50 +52,14 @@ where
 {
     fn with_static_routes(self) -> Self {
         self.route(
-            BOOTSTRAP_CSS_ROUTE,
-            get(|| async move {
-                get_static_css(include_str!("../../assets/bootstrap.min.css"))
-            }),
-        )
-        .route(
-            BOOTSTRAP_JS_ROUTE,
-            get(|| async move {
-                get_static_js(include_str!("../../assets/bootstrap.bundle.min.js"))
-            }),
-        )
-        .route(
-            BOOTSTRAP_ICONS_CSS_ROUTE,
-            get(|| async move {
-                get_static_css(include_str!("../../assets/bootstrap-icons.min.css"))
-            }),
-        )
-        .route(
-            BOOTSTRAP_ICONS_WOFF2_ROUTE,
-            get(|| async move {
-                get_static_font(include_bytes!("../../assets/fonts/bootstrap-icons.woff2"))
-            }),
-        )
-        .route(
-            BOOTSTRAP_ICONS_WOFF_ROUTE,
-            get(|| async move {
-                get_static_woff(include_bytes!("../../assets/fonts/bootstrap-icons.woff"))
-            }),
-        )
-        .route(
             HTMX_JS_ROUTE,
-            get(|| async move { get_static_js(include_str!("../../assets/htmx.org-2.0.4.min.js")) }),
-        )
-        .route(
-            HTML5_QRCODE_JS_ROUTE,
-            get(|| async move { get_static_js(include_str!("../../assets/html5-qrcode.min.js")) }),
+            get(
+                || async move { get_static_js(include_str!("../../assets/htmx.org-2.0.4.min.js")) },
+            ),
         )
         .route(
             STYLE_CSS_ROUTE,
-            get(|| async move { get_static_css(include_str!("../../assets/style.css")) }),
-        )
-        .route(
-            LOGO_PNG_ROUTE,
-            get(|| async move { get_static_png(include_bytes!("../../assets/logo.png")) }),
+            get(|| async move { get_static_css(STYLE_CSS) }),
         )
     }
 }

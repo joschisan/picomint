@@ -29,13 +29,11 @@ use crate::ui::{ROOT_ROUTE, copiable_text, single_card_layout};
 /// the same process).
 pub fn loading_card(setup_code: &PeerSetupCode) -> Markup {
     let content = html! {
-        p { "Share with guardians who still need it." }
+        span { "Share with guardians who still need it." }
 
-        div class="mb-4" {
-            (copiable_text(&picomint_base32::encode(setup_code)))
-        }
+        (copiable_text(&picomint_base32::encode(setup_code)))
 
-        div class="alert alert-info mb-3" {
+        div class="alert alert-info" {
             "All guardians need to confirm and start the DKG. Once the DKG is complete you will be redirected to the dashboard."
         }
 
@@ -50,7 +48,7 @@ pub fn loading_card(setup_code: &PeerSetupCode) -> Markup {
         {}
     };
 
-    single_card_layout("DKG Started", content)
+    single_card_layout("Generating Keys...", content)
 }
 
 async fn loading_page(State(db): State<Database>) -> impl IntoResponse {

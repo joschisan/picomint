@@ -11,26 +11,26 @@ use qrcode::QrCode;
 use serde::Deserialize;
 
 use crate::consensus::api::ConsensusApi;
-use crate::ui::copiable_text;
+use crate::ui::{copiable_text, modal_header};
 
 pub const INVITE_CREATE_ROUTE: &str = "/invite/create";
 
-// Card with a button that generates an invite code with the default
-// expiration date and user limit. The generated code replaces the button via
+// Invite dialog, opened from the Actions launcher. It starts on the
+// generation form; the generated code replaces the dialog content via
 // htmx.
 pub fn render(consensus_block_count: u32) -> Markup {
     html! {
-        div class="card h-100" {
-            div class="card-header dashboard-header" { "Generate Invite" }
-            div class="card-body" {
-                @if consensus_block_count == 0 {
+        dialog id="invite-modal" autofocus {
+            (modal_header("Generate Invite"))
+            @if consensus_block_count == 0 {
+                div class="modal-body" {
                     div class="alert alert-warning" {
                         "Invite codes will be available once the federation has reached consensus on a block count."
                     }
-                } @else {
-                    div id="invite-container" {
-                        (generate_form(None))
-                    }
+                }
+            } @else {
+                div id="invite-container" {
+                    (generate_form(None))
                 }
             }
         }
@@ -43,46 +43,36 @@ pub fn render(consensus_block_count: u32) -> Markup {
 // inline alert above the inputs.
 fn generate_form(error: Option<&str>) -> Markup {
     html! {
-        div class="alert alert-info" {
-            "Generate an invite code to onboard users to your federation."
-        }
+        div class="modal-body" {
+            form class="form-stack" hx-post=(INVITE_CREATE_ROUTE) hx-target="#invite-container" hx-swap="innerHTML" {
+                @if let Some(error) = error {
+                    div class="alert alert-danger" { (error) }
+                }
 
-        @if let Some(error) = error {
-            div class="alert alert-danger" { (error) }
-        }
+                div class="field" {
+                    label class="field-label" for="expiry_days" { "Expiration (days)" }
+                    input
+                        type="number"
+                        id="expiry_days"
+                        name="expiry_days"
+                        min="1"
+                        max=(INVITE_EXPIRY_DAYS_LIMIT)
+                        value=(DEFAULT_INVITE_EXPIRY_DAYS)
+                        required;
+                }
 
-        form
-            hx-post=(INVITE_CREATE_ROUTE)
-            hx-target="#invite-container"
-            hx-swap="innerHTML"
-        {
-            div class="mb-3" {
-                label class="form-label" for="expiry_days" { "Expiration (days)" }
-                input
-                    class="form-control"
-                    type="number"
-                    id="expiry_days"
-                    name="expiry_days"
-                    min="1"
-                    max=(INVITE_EXPIRY_DAYS_LIMIT)
-                    value=(DEFAULT_INVITE_EXPIRY_DAYS)
-                    required;
-            }
+                div class="field" {
+                    label class="field-label" for="user_limit" { "Maximum users" }
+                    input
+                        type="number"
+                        id="user_limit"
+                        name="user_limit"
+                        min="1"
+                        value=(DEFAULT_INVITE_USER_LIMIT)
+                        required;
+                }
 
-            div class="mb-3" {
-                label class="form-label" for="user_limit" { "Maximum users" }
-                input
-                    class="form-control"
-                    type="number"
-                    id="user_limit"
-                    name="user_limit"
-                    min="1"
-                    value=(DEFAULT_INVITE_USER_LIMIT)
-                    required;
-            }
-
-            button class="btn btn-primary w-100 py-2" type="submit" {
-                "Generate Invite"
+                button type="submit" class="btn btn-primary btn-lg btn-block" { "Generate Invite" }
             }
         }
     }
@@ -95,12 +85,8 @@ fn qr_code(data: &str) -> Markup {
         .build();
 
     html! {
-        div class="mb-3" {
-            div class="border rounded p-2 bg-white" style="width: 100%;" {
-                div style="width: 100%; height: auto; overflow: hidden;" {
-                    (PreEscaped(format!(r#"<div style="width: 100%; height: auto;">{}</div>"#, qr_svg.replace("width=", "data-width=").replace("height=", "data-height=").replace("<svg", r#"<svg style="width: 100%; height: auto; display: block;""#))))
-                }
-            }
+        div class="qr-box" {
+            (PreEscaped(qr_svg))
         }
     }
 }
@@ -112,7 +98,7 @@ pub struct CreateInviteForm {
 }
 
 // Creates an invite code with the submitted expiration and user limit and
-// returns the fragment htmx swaps into the invite card.
+// returns the fragment htmx swaps into the invite modal.
 pub async fn post_create_invite(
     State(state): State<Arc<ConsensusApi>>,
     Form(form): Form<CreateInviteForm>,
@@ -135,16 +121,16 @@ pub async fn post_create_invite(
 
     Html(
         html! {
-            (qr_code(&invite_string))
+            div class="modal-body" {
+                (qr_code(&invite_string))
 
-            div class="mb-3" {
                 (copiable_text(&invite_string))
-            }
 
-            div class="alert alert-info" {
-                "This invite code expires on " (expiry) " and can be used by up to "
-                (meta.user_limit)
-                " users."
+                div class="alert alert-info" {
+                    "This invite code expires on " (expiry) " and can be used by up to "
+                    (meta.user_limit)
+                    " users."
+                }
             }
         }
         .into_string(),

@@ -1,45 +1,36 @@
-use crate::bitcoind::BitcoindRpcStatus;
 use maud::{Markup, html};
+
+use crate::bitcoind::BitcoindRpcStatus;
+use crate::ui::dashboard::kv;
 
 pub fn render(status: &Option<BitcoindRpcStatus>) -> Markup {
     html! {
-        div class="card h-100" {
-            div class="card-header dashboard-header" { "Bitcoin Connection" }
-            div class="card-body" {
-                @if let Some(status) = status {
-                    table class="table table-sm mb-0" {
-                        tbody {
-                            tr {
-                                th { "Network" }
-                                td { (format!("{:?}", status.network)) }
-                            }
-                            tr {
-                                th { "Block Count" }
-                                td { (status.block_count) }
-                            }
-                            @if let Some(fee_rate) = status.fee_rate {
-                                tr {
-                                    th { "Fee Rate" }
-                                    td { (format!("{} sat/vB", fee_rate.sat_per_kvb / 1000)) }
-                                }
-                            }
-                            @if let Some(sync) = status.sync_progress {
-                                tr {
-                                    th { "Sync Progress" }
-                                    td { (format!("{:.1}%", sync * 100.0)) }
-                                }
-                            }
-                        }
-                    }
-                    @if let Some(sync) = status.sync_progress {
-                        @if sync < 0.999 {
-                            div class="alert alert-warning mt-3 mb-0" {
+        div class="card" {
+            div class="card-header" {
+                span class="card-title" { "Bitcoin Connection" }
+            }
+            @if let Some(status) = status {
+                (kv("Network", html! { (format!("{:?}", status.network)) }))
+                (kv("Block Count", html! { (status.block_count) }))
+
+                @if let Some(fee_rate) = status.fee_rate {
+                    (kv("Fee Rate", html! { (fee_rate.sat_per_kvb / 1000) " sat/vB" }))
+                }
+
+                @if let Some(sync) = status.sync_progress {
+                    (kv("Sync Progress", html! { (format!("{:.1}%", sync * 100.0)) }))
+
+                    @if sync < 0.999 {
+                        div class="card-section" {
+                            div class="alert alert-warning" {
                                 "The bitcoin backend is not fully synced yet. We need to wait for it to sync before we can participate in consensus."
                             }
                         }
                     }
-                } @else {
-                    div class="alert alert-danger mb-0" {
+                }
+            } @else {
+                div class="card-section" {
+                    div class="alert alert-danger" {
                         "Failed to connect to bitcoin backend. Please establish a connection in order to participate in consensus."
                     }
                 }
