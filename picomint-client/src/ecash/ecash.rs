@@ -2,7 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use picomint_core::Amount;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_encoding::{Decodable, Encodable};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -14,12 +14,12 @@ use super::SpendableNote;
 /// carrying an `ECash` log it the same way it travels on the wire.
 #[derive(Clone, Debug, Encodable, Decodable)]
 pub struct ECash {
-    pub mint: FederationId,
+    pub mint: MintId,
     pub notes: Vec<SpendableNote>,
 }
 
 impl ECash {
-    pub fn new(mint: FederationId, notes: Vec<SpendableNote>) -> Self {
+    pub fn new(mint: MintId, notes: Vec<SpendableNote>) -> Self {
         Self { mint, notes }
     }
 

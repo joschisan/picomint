@@ -252,7 +252,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     info!("onchain: send_max passed");
 
-    info!("onchain: second pegin sweeps the deposit and the federation utxo");
+    info!("onchain: second pegin sweeps the deposit and the mint utxo");
 
     let pegin_addr = retry("second deposit address derived", || async {
         client_send
@@ -288,7 +288,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
         panic!("Expected second pegin Receive event");
     };
 
-    // Unlike the first pegin, whose deposit simply becomes the federation
+    // Unlike the first pegin, whose deposit simply becomes the mint
     // wallet, this claim creates the two-input sweep transaction. The deposit
     // utxo leaving the confirmed set proves the signing session completed and
     // the sweep was broadcast and mined.

@@ -1,4 +1,4 @@
-//! Integration test for the federation expiry announcement: each
+//! Integration test for the mint expiry announcement: each
 //! guardian sets the same `(date, successor)` pair via the admin CLI; a
 //! fresh client then fetches the announcement via threshold consensus
 //! and surfaces it through `Client::expiry_status`.
@@ -13,9 +13,9 @@ use crate::env::{NUM_ONLINE_GUARDIANS, TestEnv};
 pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     info!("expiry: announce + client refresh");
 
-    // Use the federation's own invite code as the successor — this is just
+    // Use the mint's own invite code as the successor — this is just
     // a value the guardians have to agree on byte-for-byte. A real
-    // deployment would point at a successor federation; here we want the
+    // deployment would point at a successor mint; here we want the
     // successor field exercised end-to-end.
     let timestamp = 4_102_444_800; // 2100-01-01 UTC
 
@@ -69,7 +69,7 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
 
     ensure!(
         client.client.expiry_status(client.fed).is_none(),
-        "client cache should be empty after a federation-wide clear"
+        "client cache should be empty after a mint-wide clear"
     );
 
     info!("expiry: passed");

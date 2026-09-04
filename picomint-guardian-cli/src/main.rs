@@ -44,21 +44,21 @@ enum Commands {
     /// Setup commands (DKG)
     #[command(subcommand)]
     Setup(SetupCommands),
-    /// Generate a federation invite code
+    /// Generate a mint invite code
     Invite(InviteRequest),
-    /// Show federation audit summary
+    /// Show mint audit summary
     Audit,
     /// Dump full server config as JSON (use `> config.json` to save)
     Config,
     /// Number of consensus sessions this guardian has finalized
     SessionCount,
-    /// Get the federation's consensus block count
+    /// Get the mint's consensus block count
     BlockCount,
     /// Per-peer p2p connection status
     P2p,
     /// Status of the local bitcoin backend
     BitcoinConnection,
-    /// Federation expiry announcement
+    /// Mint expiry announcement
     #[command(subcommand)]
     Expiry(ExpiryCommands),
     /// Module admin commands
@@ -68,7 +68,7 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum ExpiryCommands {
-    /// Announce a federation expiry
+    /// Announce a mint expiry
     Set(ExpirySetRequest),
     /// Clear the announced expiry
     Clear,

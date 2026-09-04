@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use crate::Endpoint;
-use crate::api::FederationApi;
+use crate::api::MintApi;
 use crate::context::ClientContext;
 use crate::eventlog::{EventLogEntry, EventLogId};
 use crate::lightning::Gateways;
@@ -13,48 +13,48 @@ use futures::future::select_all;
 use futures::stream::BoxStream;
 use picomint_core::PeerId;
 use picomint_core::config::ConsensusConfig;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
 use picomint_redb::{Database, DbRead, WriteTx, table};
 use picomint_rpc::connection::ConnStatus;
 use tracing::debug;
 
-// The config of every added federation. The row is what makes a federation
-// added: [`Client::add`] inserts it and [`Client::begin_remove`] removes it,
-// atomically with the federation's other rows.
+// The config of every added mint. The row is what makes a mint
+// added: [`Client::add_mint`] inserts it and [`Client::begin_remove_mint`] removes it,
+// atomically with the mint's other rows.
 table!(
     ClientConfigTable,
-    FederationId => ConsensusConfig,
+    MintId => ConsensusConfig,
     "client-config",
 );
 
 /// Main client type: one instance per application, holding every added
-/// federation as data.
+/// mint as data.
 ///
 /// Owns the shared resources — database handle, iroh endpoint, seed, event
-/// log — and a private map of per-federation runtimes. An added federation
+/// log — and a private map of per-mint runtimes. An added mint
 /// is always up: [`Client::new`] brings every one up at construction,
-/// [`Client::add`] brings a new one up on add, and [`Client::begin_remove`]
+/// [`Client::add_mint`] brings a new one up on add, and [`Client::begin_remove_mint`]
 /// shuts one down as it removes it — there is no dormant state in between.
-/// Every operation takes the [`FederationId`] it acts on; there is no
-/// per-federation handle to hold or leak. Policy stays with the integrator:
+/// Every operation takes the [`MintId`] it acts on; there is no
+/// per-mint handle to hold or leak. Policy stays with the integrator:
 /// the client never decides whether removing is allowed.
 ///
 /// Teardown is explicit: call [`Self::shutdown`] before letting go of the
-/// client. Dropping it without one leaks the added federations' tasks until
+/// client. Dropping it without one leaks the added mints' tasks until
 /// process exit.
 pub struct Client {
     pub(crate) endpoint: Endpoint,
     pub(crate) db: Database,
     pub(crate) mnemonic: Mnemonic,
-    federations: RwLock<BTreeMap<FederationId, ClientContext>>,
+    mints: RwLock<BTreeMap<MintId, ClientContext>>,
 }
 
 impl Client {
     /// Build a client over the embedder's `endpoint`, `db` and seed, and
-    /// bring every added federation up. Must run inside a tokio runtime,
-    /// since bringing a federation up spawns its background tasks.
+    /// bring every added mint up. Must run inside a tokio runtime,
+    /// since bringing a mint up spawns its background tasks.
     ///
     /// Seed storage is the embedder's job — pass the same mnemonic on every
     /// start. The endpoint is the embedder's network identity choice: a
@@ -69,7 +69,7 @@ impl Client {
             "Building picomint client",
         );
 
-        let federations = db
+        let mints = db
             .begin_read()
             .iter(&ClientConfigTable, |r| r.collect::<Vec<_>>())
             .into_iter()
@@ -80,36 +80,36 @@ impl Client {
             endpoint,
             db,
             mnemonic,
-            federations: RwLock::new(federations),
+            mints: RwLock::new(mints),
         }
     }
 
-    /// Add the federation behind `invite`: download its config, verify it
+    /// Add the mint behind `invite`: download its config, verify it
     /// against `network` if given, scan every account the seed could hold
     /// notes under, land config, counter marks and restored notes in one
-    /// dbtx, and bring the federation up.
+    /// dbtx, and bring the mint up.
     ///
     /// The scan matters as much on a first add: a seed that has been here
     /// before holds notes behind counters a fresh client would re-derive
     /// from zero, stranding them. A seed that never held anything scans to
     /// nothing, which costs a round trip and is otherwise indistinguishable.
-    pub async fn add(
+    pub async fn add_mint(
         &self,
         invite: &InviteCode,
         network: Option<bitcoin::Network>,
-    ) -> anyhow::Result<FederationId> {
-        let (config, restores) = crate::add::add(self, invite, network).await?;
+    ) -> anyhow::Result<MintId> {
+        let (config, restores) = crate::add_mint::add_mint(self, invite, network).await?;
 
-        let federation = config.calculate_federation_id();
+        let mint = config.calculate_mint_id();
 
         let dbtx = self.db.begin_write();
 
         ensure!(
-            dbtx.get(&ClientConfigTable, &federation).is_none(),
-            "Federation is already added"
+            dbtx.get(&ClientConfigTable, &mint).is_none(),
+            "Mint is already added"
         );
 
-        dbtx.insert(&ClientConfigTable, &federation, &config);
+        dbtx.insert(&ClientConfigTable, &mint, &config);
 
         for (account, restore) in &restores {
             crate::ecash::commit_scan(&dbtx, *account, restore);
@@ -119,32 +119,32 @@ impl Client {
 
         let ctx = build_ctx(&self.endpoint, &self.db, &self.mnemonic, config);
 
-        self.federations
+        self.mints
             .write()
-            .expect("federations lock poisoned")
-            .insert(federation, ctx);
+            .expect("mints lock poisoned")
+            .insert(mint, ctx);
 
-        Ok(federation)
+        Ok(mint)
     }
 
-    /// Remove a federation: shut its runtime down, then remove its config
+    /// Remove a mint: shut its runtime down, then remove its config
     /// and every row it holds in the returned dbtx — the caller commits it,
     /// so a crash mid-remove loses nothing halfway, and an embedder sharing
-    /// the database can delete its own federation-scoped rows in the same
-    /// transaction: an embedder row referencing a federation then always
-    /// implies the federation is added. Re-adding later runs a fresh scan
+    /// the database can delete its own mint-scoped rows in the same
+    /// transaction: an embedder row referencing a mint then always
+    /// implies the mint is added. Re-adding later runs a fresh scan
     /// against clean state.
     ///
     /// The shutdown must complete before the dbtx opens — a task blocked in
     /// `begin_write` cannot observe cancellation — which is why this method
     /// owns the ordering and hands back the open tx rather than accepting
     /// one.
-    pub async fn begin_remove(&self, federation: FederationId) -> anyhow::Result<WriteTx> {
+    pub async fn begin_remove_mint(&self, mint: MintId) -> anyhow::Result<WriteTx> {
         let ctx = self
-            .federations
+            .mints
             .write()
-            .expect("federations lock poisoned")
-            .remove(&federation);
+            .expect("mints lock poisoned")
+            .remove(&mint);
 
         // Wait for every task to observe cancellation before the wipe, so no
         // state machine is mid-write while its rows disappear.
@@ -155,87 +155,87 @@ impl Client {
         let dbtx = self.db.begin_write();
 
         ensure!(
-            dbtx.remove(&ClientConfigTable, &federation).is_some(),
-            "Federation is not added"
+            dbtx.remove(&ClientConfigTable, &mint).is_some(),
+            "Mint is not added"
         );
 
-        crate::ecash::wipe_tables(&dbtx, federation);
-        crate::onchain::wipe_tables(&dbtx, federation);
-        crate::lightning::wipe_tables(&dbtx, federation);
-        crate::gateway::wipe_tables(&dbtx, federation);
-        crate::tx::wipe_tables(&dbtx, federation);
-        crate::expiry::wipe_tables(&dbtx, federation);
+        crate::ecash::wipe_tables(&dbtx, mint);
+        crate::onchain::wipe_tables(&dbtx, mint);
+        crate::lightning::wipe_tables(&dbtx, mint);
+        crate::gateway::wipe_tables(&dbtx, mint);
+        crate::tx::wipe_tables(&dbtx, mint);
+        crate::expiry::wipe_tables(&dbtx, mint);
 
         Ok(dbtx)
     }
 
-    /// The added federation's context. Errors for a federation that is not
+    /// The added mint's context. Errors for a mint that is not
     /// added.
-    pub(crate) fn ctx(&self, federation: FederationId) -> anyhow::Result<ClientContext> {
-        self.federations
+    pub(crate) fn ctx(&self, mint: MintId) -> anyhow::Result<ClientContext> {
+        self.mints
             .read()
-            .expect("federations lock poisoned")
-            .get(&federation)
+            .expect("mints lock poisoned")
+            .get(&mint)
             .cloned()
-            .context("Federation is not added")
+            .context("Mint is not added")
     }
 
-    /// Whether `federation` is added — the membership check without
+    /// Whether `mint` is added — the membership check without
     /// [`Self::ctx`]'s context clone.
-    pub(crate) fn is_added(&self, federation: FederationId) -> bool {
-        self.federations
+    pub(crate) fn is_added(&self, mint: MintId) -> bool {
+        self.mints
             .read()
-            .expect("federations lock poisoned")
-            .contains_key(&federation)
+            .expect("mints lock poisoned")
+            .contains_key(&mint)
     }
 
-    /// Every added federation.
-    pub fn federations(&self) -> Vec<FederationId> {
+    /// Every added mint.
+    pub fn mints(&self) -> Vec<MintId> {
         self.db
             .begin_read()
             .iter(&ClientConfigTable, |r| r.map(|entry| entry.0).collect())
     }
 
-    /// Every added federation's persisted config.
-    pub fn federation_configs(&self) -> BTreeMap<FederationId, ConsensusConfig> {
+    /// Every added mint's persisted config.
+    pub fn mint_configs(&self) -> BTreeMap<MintId, ConsensusConfig> {
         self.db
             .begin_read()
             .iter(&ClientConfigTable, |r| r.collect())
     }
 
-    /// The added federation's persisted config.
-    pub fn config(&self, federation: FederationId) -> Option<ConsensusConfig> {
-        self.db.begin_read().get(&ClientConfigTable, &federation)
+    /// The added mint's persisted config.
+    pub fn config(&self, mint: MintId) -> Option<ConsensusConfig> {
+        self.db.begin_read().get(&ClientConfigTable, &mint)
     }
 
     /// Stream of per-peer guardian reachability, emitting a fresh
     /// `peer -> status` map on every change (current state first). Backed by
-    /// the federation's pooled connections, so it reflects the same links
+    /// the mint's pooled connections, so it reflects the same links
     /// requests travel over; the `Connected` status carries the RTT sampled
     /// at connect.
     pub fn connection_status_stream(
         &self,
-        federation: FederationId,
+        mint: MintId,
     ) -> anyhow::Result<BoxStream<'static, BTreeMap<PeerId, ConnStatus>>> {
-        Ok(self.ctx(federation)?.api.connection_status_stream())
+        Ok(self.ctx(mint)?.api.connection_status_stream())
     }
 
-    /// The federation's API handle.
-    pub fn api(&self, federation: FederationId) -> anyhow::Result<FederationApi> {
-        Ok(self.ctx(federation)?.api.clone())
+    /// The mint's API handle.
+    pub fn api(&self, mint: MintId) -> anyhow::Result<MintApi> {
+        Ok(self.ctx(mint)?.api.clone())
     }
 
-    /// The consensus block count of the federation.
-    pub async fn block_count(&self, federation: FederationId) -> anyhow::Result<u32> {
-        crate::api::block_count(&self.ctx(federation)?.api).await
+    /// The consensus block count of the mint.
+    pub async fn block_count(&self, mint: MintId) -> anyhow::Result<u32> {
+        crate::api::block_count(&self.ctx(mint)?.api).await
     }
 
-    /// Cancel every federation's tasks and wait for them to finish.
+    /// Cancel every mint's tasks and wait for them to finish.
     pub async fn shutdown(&self) {
-        let federations =
-            std::mem::take(&mut *self.federations.write().expect("federations lock poisoned"));
+        let mints =
+            std::mem::take(&mut *self.mints.write().expect("mints lock poisoned"));
 
-        for ctx in federations.into_values() {
+        for ctx in mints.into_values() {
             ctx.tg.shutdown().await;
         }
     }
@@ -256,22 +256,22 @@ impl Client {
     }
 
     /// Whether any state machine is still driving `operation` under
-    /// `federation`. The synchronous companion to
+    /// `mint`. The synchronous companion to
     /// [`Self::subscribe_completion`]: read the current state with this,
     /// subscribe to the transition with that — a subscription alone leaves
     /// the caller guessing until its first resolution arrives.
-    pub fn operation_is_active(&self, federation: FederationId, operation: OperationId) -> bool {
+    pub fn operation_is_active(&self, mint: MintId, operation: OperationId) -> bool {
         let dbtx = self.db.begin_read();
 
-        crate::tx::operation_is_active(&dbtx, federation, operation)
-            || crate::ecash::operation_is_active(&dbtx, federation, operation)
-            || crate::lightning::operation_is_active(&dbtx, federation, operation)
-            || crate::onchain::operation_is_active(&dbtx, federation, operation)
-            || crate::gateway::operation_is_active(&dbtx, federation, operation)
+        crate::tx::operation_is_active(&dbtx, mint, operation)
+            || crate::ecash::operation_is_active(&dbtx, mint, operation)
+            || crate::lightning::operation_is_active(&dbtx, mint, operation)
+            || crate::onchain::operation_is_active(&dbtx, mint, operation)
+            || crate::gateway::operation_is_active(&dbtx, mint, operation)
     }
 
     /// Resolve once no state machine is still driving `operation` under
-    /// `federation`. Resolves immediately for a settled or unknown
+    /// `mint`. Resolves immediately for a settled or unknown
     /// operation.
     ///
     /// This answers "is anything still running", not "did the payment
@@ -282,9 +282,9 @@ impl Client {
     /// state machines logged — including the terminal one, committed in
     /// the same tx that removed its state machine.
     ///
-    /// Purely db-backed: for a federation that is no longer added it simply
+    /// Purely db-backed: for a mint that is no longer added it simply
     /// stays pending, since nothing is driving the operation forward.
-    pub async fn subscribe_completion(&self, federation: FederationId, operation: OperationId) {
+    pub async fn subscribe_completion(&self, mint: MintId, operation: OperationId) {
         let notifies = [
             crate::tx::sm_notifies(&self.db),
             crate::ecash::sm_notifies(&self.db),
@@ -303,7 +303,7 @@ impl Client {
                 .map(|notify| Box::pin(notify.notified()))
                 .collect();
 
-            if !self.operation_is_active(federation, operation) {
+            if !self.operation_is_active(mint, operation) {
                 return;
             }
 
@@ -324,12 +324,12 @@ impl Client {
     }
 }
 
-/// Bring up a federation against `config`.
+/// Bring up a mint against `config`.
 ///
 /// Not inert: resuming the persisted state machines and the background
 /// refreshes commit writes of their own. So this goes last, after the
 /// dbtx that persists `config` and the add's scan results — and the
-/// resumes run before the context is published in the federation map,
+/// resumes run before the context is published in the mint map,
 /// so no concurrent operation can add a state machine mid-resume.
 fn build_ctx(
     endpoint: &Endpoint,
@@ -337,13 +337,13 @@ fn build_ctx(
     mnemonic: &Mnemonic,
     config: ConsensusConfig,
 ) -> ClientContext {
-    let federation = config.calculate_federation_id();
+    let mint = config.calculate_mint_id();
 
     let ctx = ClientContext::new(
-        FederationApi::new(endpoint.clone(), config.iroh_pks()),
+        MintApi::new(endpoint.clone(), config.iroh_pks()),
         db.clone(),
         config,
-        ClientSecret::new(mnemonic, federation),
+        ClientSecret::new(mnemonic, mint),
         Gateways::new(endpoint.clone()),
         TaskGroup::new(),
     );

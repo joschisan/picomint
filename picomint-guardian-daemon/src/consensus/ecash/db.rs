@@ -7,7 +7,7 @@ use tbs::{BlindedMessage, BlindedSignatureShare};
 table!(
     NoteNonceTable,
     XOnlyPublicKey => (),
-    "mint-note-nonce",
+    "ecash-note-nonce",
 );
 
 table!(
@@ -25,23 +25,23 @@ table!(
     /// a membership probe still has no reason to read.
     BlindedNonceTable,
     BlindedMessage => Denomination,
-    "mint-blinded-nonce",
+    "ecash-blinded-nonce",
 );
 
 table!(
     BlindedSignatureShareTable,
     OutPoint => BlindedSignatureShare,
-    "mint-blinded-signature-share",
+    "ecash-blinded-signature-share",
 );
 
 table!(
     BlindedSignatureShareRestoreTable,
     BlindedMessage => BlindedSignatureShare,
-    "mint-blinded-signature-share-restore",
+    "ecash-blinded-signature-share-restore",
 );
 
 table!(
     IssuanceCounterTable,
     Denomination => u64,
-    "mint-issuance-counter",
+    "ecash-issuance-counter",
 );

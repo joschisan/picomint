@@ -12,7 +12,7 @@ use crate::client::Client;
 use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::lightning::contracts::{IncomingContract, IncomingOffer, OutgoingContract};
 use picomint_core::lightning::{LightningInput, LightningOutput, OutgoingWitness};
@@ -31,26 +31,26 @@ use receive_sm::{ReceiveStateMachine, ReceiveStateMachineTable};
 /// hop to derive one.
 pub const GATEWAY_ACCOUNT: Account = Account::Primary;
 
-/// Resume this federation's persisted receive state machines. Called
-/// exactly once, at federation bring-up.
+/// Resume this mint's persisted receive state machines. Called
+/// exactly once, at mint bring-up.
 pub(crate) fn resume(ctx: &ClientContext) {
     crate::executor::resume::<ReceiveStateMachine, _>(ctx, ReceiveStateMachineTable);
 }
 
-/// Remove every row this module owns under the caller's federation prefix.
+/// Remove every row this module owns under the caller's mint prefix.
 /// Called by [`crate::Client::remove`] for end-of-life cleanup.
-pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
-    dbtx.remove_prefix(&ReceiveStateMachineTable, &federation);
+pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
+    dbtx.remove_prefix(&ReceiveStateMachineTable, &mint);
 }
 
 /// Whether any of this module's state machines for `operation` is still
-/// active under `federation`.
+/// active under `mint`.
 pub(crate) fn operation_is_active(
     dbtx: &ReadTx,
-    federation: FederationId,
+    mint: MintId,
     operation: OperationId,
 ) -> bool {
-    dbtx.prefix(&ReceiveStateMachineTable, &federation, |r| {
+    dbtx.prefix(&ReceiveStateMachineTable, &mint, |r| {
         r.any(|entry| entry.1.operation == operation)
     })
 }
@@ -61,12 +61,12 @@ pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
     vec![db.notify_for_table(&ReceiveStateMachineTable)]
 }
 
-// ─── Flat federation-keyed surface ───────────────────────────────────────
+// ─── Flat mint-keyed surface ───────────────────────────────────────
 
 impl Client {
-    /// The public key this gateway's contracts are keyed to on `federation`.
-    pub fn gateway_pk(&self, federation: FederationId) -> anyhow::Result<XOnlyPublicKey> {
-        let ctx = self.ctx(federation)?;
+    /// The public key this gateway's contracts are keyed to on `mint`.
+    pub fn gateway_pk(&self, mint: MintId) -> anyhow::Result<XOnlyPublicKey> {
+        let ctx = self.ctx(mint)?;
 
         Ok(ctx
             .secret
@@ -76,23 +76,23 @@ impl Client {
             .0)
     }
 
-    /// Log a `SendEvent` on the federation's event log. Called by the
+    /// Log a `SendEvent` on the mint's event log. Called by the
     /// daemon's public `Send` handler after it has inserted the outgoing
     /// contract row in the daemon DB; at most once per operation id.
     pub fn gateway_log_send_started(
         &self,
-        federation: FederationId,
+        mint: MintId,
         dbtx: &WriteTx,
         operation: OperationId,
         outpoint: OutPoint,
         amount: Amount,
         fee: Amount,
     ) -> anyhow::Result<()> {
-        ensure!(self.is_added(federation), "Federation is not added");
+        ensure!(self.is_added(mint), "Mint is not added");
 
         crate::eventlog::log_event(
             dbtx,
-            federation,
+            mint,
             GATEWAY_ACCOUNT,
             operation,
             SendEvent {
@@ -110,12 +110,12 @@ impl Client {
     /// that drives it to settlement. Idempotent on `operation`.
     pub fn gateway_start_receive(
         &self,
-        federation: FederationId,
+        mint: MintId,
         dbtx: &WriteTx,
         operation: OperationId,
         offer: IncomingOffer,
     ) -> anyhow::Result<()> {
-        let ctx = self.ctx(federation)?;
+        let ctx = self.ctx(mint)?;
 
         let refund_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
@@ -167,14 +167,14 @@ impl Client {
     /// upstream markers, committed in the same dbtx.
     pub fn gateway_finalize_send(
         &self,
-        federation: FederationId,
+        mint: MintId,
         dbtx: &WriteTx,
         operation: OperationId,
         contract: OutgoingContract,
         outpoint: OutPoint,
         success: Option<([u8; 32], Amount)>,
     ) -> anyhow::Result<()> {
-        let ctx = self.ctx(federation)?;
+        let ctx = self.ctx(mint)?;
 
         match success {
             Some((preimage, lightning_fee)) => {
@@ -227,10 +227,10 @@ impl Client {
     /// completed operation returns immediately.
     pub async fn gateway_subscribe_send(
         &self,
-        federation: FederationId,
+        mint: MintId,
         operation: OperationId,
     ) -> anyhow::Result<Result<[u8; 32], Signature>> {
-        let ctx = self.ctx(federation)?;
+        let ctx = self.ctx(mint)?;
 
         use futures::StreamExt as _;
 

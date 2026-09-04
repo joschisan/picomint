@@ -12,17 +12,17 @@ use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_gateway_cli_core::{
-    CLI_SOCKET_FILENAME, FederationAddRequest, FederationBalanceRequest, FederationConfigRequest,
-    FederationMintCountRequest, FederationMintReceiveRequest, FederationMintSendRequest,
-    FederationRemoveRequest, FederationWalletReceiveRequest, FederationOnchainSendFeeRequest,
-    FederationOnchainSendRequest, LdkChannelCloseRequest, LdkChannelOpenRequest,
+    CLI_SOCKET_FILENAME, MintAddRequest, MintBalanceRequest, MintConfigRequest,
+    MintMintCountRequest, MintMintReceiveRequest, MintMintSendRequest,
+    MintRemoveRequest, MintWalletReceiveRequest, MintOnchainSendFeeRequest,
+    MintOnchainSendRequest, LdkChannelCloseRequest, LdkChannelOpenRequest,
     LdkChannelSpliceInRequest, LdkChannelSpliceOutRequest, LdkLnProbeRequest, LdkLnReceiveRequest,
     LdkLnSendRequest, LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
-    QueryRequest, ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
-    ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_ECASH_COUNT,
-    ROUTE_FEDERATION_MODULE_ECASH_RECEIVE, ROUTE_FEDERATION_MODULE_ECASH_SEND,
-    ROUTE_FEDERATION_MODULE_ONCHAIN_RECEIVE, ROUTE_FEDERATION_MODULE_ONCHAIN_SEND,
-    ROUTE_FEDERATION_MODULE_ONCHAIN_SEND_FEE, ROUTE_FEDERATION_REMOVE, ROUTE_INFO,
+    QueryRequest, ROUTE_MINT_ADD, ROUTE_MINT_BALANCE, ROUTE_MINT_CONFIG,
+    ROUTE_MINT_LIST, ROUTE_MINT_MODULE_ECASH_COUNT,
+    ROUTE_MINT_MODULE_ECASH_RECEIVE, ROUTE_MINT_MODULE_ECASH_SEND,
+    ROUTE_MINT_MODULE_ONCHAIN_RECEIVE, ROUTE_MINT_MODULE_ONCHAIN_SEND,
+    ROUTE_MINT_MODULE_ONCHAIN_SEND_FEE, ROUTE_MINT_REMOVE, ROUTE_INFO,
     ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE,
     ROUTE_LDK_LIGHTNING_RECEIVE, ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
@@ -58,9 +58,9 @@ enum Commands {
     /// LDK lightning node management
     #[command(subcommand)]
     Ldk(LdkCommands),
-    /// Federation management
+    /// Mint management
     #[command(subcommand)]
-    Federation(FederationCommands),
+    Mint(MintCommands),
 }
 
 #[derive(Subcommand)]
@@ -124,20 +124,20 @@ enum LdkPeerCommands {
 }
 
 #[derive(Subcommand)]
-enum FederationCommands {
-    /// Add a federation
-    Add(FederationAddRequest),
-    /// Remove a federation and delete all of its data. Destructive:
+enum MintCommands {
+    /// Add a mint
+    Add(MintAddRequest),
+    /// Remove a mint and delete all of its data. Destructive:
     /// check for in-flight payments via `query` first — failing to
     /// check might result in loss of funds.
-    Remove(FederationRemoveRequest),
-    /// List connected federations
+    Remove(MintRemoveRequest),
+    /// List connected mints
     List,
-    /// Get a connected federation's JSON client config
-    Config(FederationConfigRequest),
-    /// Get a federation's ecash balance
-    Balance(FederationBalanceRequest),
-    /// Per-federation module commands
+    /// Get a connected mint's JSON client config
+    Config(MintConfigRequest),
+    /// Get a mint's ecash balance
+    Balance(MintBalanceRequest),
+    /// Per-mint module commands
     #[command(subcommand)]
     Module(ModuleCommands),
 }
@@ -155,21 +155,21 @@ enum ModuleCommands {
 #[derive(Subcommand)]
 enum ECashCommands {
     /// Count ecash notes by denomination
-    Count(FederationMintCountRequest),
+    Count(MintMintCountRequest),
     /// Send ecash
-    Send(FederationMintSendRequest),
+    Send(MintMintSendRequest),
     /// Receive ecash
-    Receive(FederationMintReceiveRequest),
+    Receive(MintMintReceiveRequest),
 }
 
 #[derive(Subcommand)]
 enum OnchainCommands {
     /// Get send fee estimate
-    SendFee(FederationOnchainSendFeeRequest),
-    /// Send onchain from the federation
-    Send(FederationOnchainSendRequest),
+    SendFee(MintOnchainSendFeeRequest),
+    /// Send onchain from the mint
+    Send(MintOnchainSendRequest),
     /// Get receive address
-    Receive(FederationWalletReceiveRequest),
+    Receive(MintWalletReceiveRequest),
 }
 
 /// Tiny connector that dials a fixed Unix socket path, ignoring the URI
@@ -280,33 +280,33 @@ async fn main() -> Result<()> {
             },
         },
 
-        Commands::Federation(cmd) => match cmd {
-            FederationCommands::Add(req) => request(d, ROUTE_FEDERATION_ADD, req).await?,
-            FederationCommands::Remove(req) => request(d, ROUTE_FEDERATION_REMOVE, req).await?,
-            FederationCommands::List => request(d, ROUTE_FEDERATION_LIST, ()).await?,
-            FederationCommands::Config(req) => request(d, ROUTE_FEDERATION_CONFIG, req).await?,
-            FederationCommands::Balance(req) => request(d, ROUTE_FEDERATION_BALANCE, req).await?,
-            FederationCommands::Module(cmd) => match cmd {
+        Commands::Mint(cmd) => match cmd {
+            MintCommands::Add(req) => request(d, ROUTE_MINT_ADD, req).await?,
+            MintCommands::Remove(req) => request(d, ROUTE_MINT_REMOVE, req).await?,
+            MintCommands::List => request(d, ROUTE_MINT_LIST, ()).await?,
+            MintCommands::Config(req) => request(d, ROUTE_MINT_CONFIG, req).await?,
+            MintCommands::Balance(req) => request(d, ROUTE_MINT_BALANCE, req).await?,
+            MintCommands::Module(cmd) => match cmd {
                 ModuleCommands::ECash(cmd) => match cmd {
                     ECashCommands::Count(req) => {
-                        request(d, ROUTE_FEDERATION_MODULE_ECASH_COUNT, req).await?
+                        request(d, ROUTE_MINT_MODULE_ECASH_COUNT, req).await?
                     }
                     ECashCommands::Send(req) => {
-                        request(d, ROUTE_FEDERATION_MODULE_ECASH_SEND, req).await?
+                        request(d, ROUTE_MINT_MODULE_ECASH_SEND, req).await?
                     }
                     ECashCommands::Receive(req) => {
-                        request(d, ROUTE_FEDERATION_MODULE_ECASH_RECEIVE, req).await?
+                        request(d, ROUTE_MINT_MODULE_ECASH_RECEIVE, req).await?
                     }
                 },
                 ModuleCommands::Onchain(cmd) => match cmd {
                     OnchainCommands::SendFee(req) => {
-                        request(d, ROUTE_FEDERATION_MODULE_ONCHAIN_SEND_FEE, req).await?
+                        request(d, ROUTE_MINT_MODULE_ONCHAIN_SEND_FEE, req).await?
                     }
                     OnchainCommands::Send(req) => {
-                        request(d, ROUTE_FEDERATION_MODULE_ONCHAIN_SEND, req).await?
+                        request(d, ROUTE_MINT_MODULE_ONCHAIN_SEND, req).await?
                     }
                     OnchainCommands::Receive(req) => {
-                        request(d, ROUTE_FEDERATION_MODULE_ONCHAIN_RECEIVE, req).await?
+                        request(d, ROUTE_MINT_MODULE_ONCHAIN_RECEIVE, req).await?
                     }
                 },
             },

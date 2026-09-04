@@ -9,7 +9,7 @@
 //!   returns the same waiting page for every path with status 503. The
 //!   page polls `/` and redirects once the consensus UI starts answering
 //!   with status 200.
-//! - Dashboard UI (once the federation is running). Served by
+//! - Dashboard UI (once the mint is running). Served by
 //!   [`dashboard::router`] which takes an `Arc<ConsensusApi>` and reaches
 //!   straight into the three typed module instances (`ecash`, `wallet`, `lightning`)
 //!   hanging off it.
@@ -165,7 +165,7 @@ pub fn modal_header(title: &str) -> Markup {
     }
 }
 
-pub fn dashboard_layout(federation_name: &str, version: &str, content: Markup) -> Markup {
+pub fn dashboard_layout(mint_name: &str, version: &str, content: Markup) -> Markup {
     html! {
         (DOCTYPE)
         html {
@@ -175,7 +175,7 @@ pub fn dashboard_layout(federation_name: &str, version: &str, content: Markup) -
             body {
                 div class="topbar" {
                     div style="display: flex; align-items: baseline; gap: 10px" {
-                        span class="topbar-name" { (federation_name) }
+                        span class="topbar-name" { (mint_name) }
                         span style="font-size: 13px; color: var(--ink-muted)" { "v" (version) }
                     }
                     button type="button" class="btn btn-primary"

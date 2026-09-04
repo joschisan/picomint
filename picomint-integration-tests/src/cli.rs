@@ -6,7 +6,7 @@ use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
-    FederationBalanceResponse, FederationListResponse, InfoResponse, LdkChannelListResponse,
+    MintBalanceResponse, MintListResponse, InfoResponse, LdkChannelListResponse,
     LdkLnReceiveResponse, LdkOnchainReceiveResponse,
 };
 use picomint_guardian_cli_core::{InviteResponse, SetupStatus};
@@ -58,39 +58,39 @@ pub fn gateway_info(gateway_data_dir: &Path) -> Result<InfoResponse> {
         .run_cli::<InfoResponse>()
 }
 
-pub fn gateway_federation_add(gateway_data_dir: &Path, invite: &InviteCode) -> Result<Value> {
+pub fn gateway_mint_add(gateway_data_dir: &Path, invite: &InviteCode) -> Result<Value> {
     gateway_cmd(gateway_data_dir)
-        .arg("federation")
+        .arg("mint")
         .arg("add")
         .arg(picomint_base32::encode(invite))
         .run_cli::<Value>()
 }
 
-pub fn gateway_federation_remove(gateway_data_dir: &Path, federation: &str) -> Result<Value> {
+pub fn gateway_mint_remove(gateway_data_dir: &Path, mint: &str) -> Result<Value> {
     gateway_cmd(gateway_data_dir)
-        .arg("federation")
+        .arg("mint")
         .arg("remove")
-        .arg(federation)
+        .arg(mint)
         .run_cli::<Value>()
 }
 
-pub fn gateway_federation_list(gateway_data_dir: &Path) -> Result<FederationListResponse> {
+pub fn gateway_mint_list(gateway_data_dir: &Path) -> Result<MintListResponse> {
     gateway_cmd(gateway_data_dir)
-        .arg("federation")
+        .arg("mint")
         .arg("list")
-        .run_cli::<FederationListResponse>()
+        .run_cli::<MintListResponse>()
 }
 
-pub fn gateway_federation_balance(
+pub fn gateway_mint_balance(
     gateway_data_dir: &Path,
-    federation: &str,
-) -> Result<FederationBalanceResponse> {
+    mint: &str,
+) -> Result<MintBalanceResponse> {
     gateway_cmd(gateway_data_dir)
-        .arg("federation")
+        .arg("mint")
         .arg("balance")
         .arg("--id")
-        .arg(federation)
-        .run_cli::<FederationBalanceResponse>()
+        .arg(mint)
+        .run_cli::<MintBalanceResponse>()
 }
 
 pub fn gateway_ldk_onchain_receive(gateway_data_dir: &Path) -> Result<LdkOnchainReceiveResponse> {
@@ -167,16 +167,16 @@ pub fn guardian_setup_status(data_dir: &Path) -> Result<SetupStatus> {
 pub fn guardian_setup_set_local_params(
     data_dir: &Path,
     name: &str,
-    federation_name: Option<&str>,
-    federation_size: Option<u8>,
+    mint_name: Option<&str>,
+    mint_size: Option<u8>,
 ) -> Result<Value> {
     let mut cmd = guardian_cmd(data_dir);
     cmd.arg("setup").arg("set-local-params").arg(name);
-    if let Some(fed_name) = federation_name {
-        cmd.arg("--federation-name").arg(fed_name);
+    if let Some(fed_name) = mint_name {
+        cmd.arg("--mint-name").arg(fed_name);
     }
-    if let Some(size) = federation_size {
-        cmd.arg("--federation-size").arg(size.to_string());
+    if let Some(size) = mint_size {
+        cmd.arg("--mint-size").arg(size.to_string());
     }
     cmd.run_cli::<Value>()
 }

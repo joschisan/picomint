@@ -4,7 +4,7 @@ use bitcoin::address::NetworkUnchecked;
 use clap::Args;
 use lightning_invoice::Bolt11Invoice;
 use picomint_client::ecash::ECash;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::invite::InviteCode;
 use picomint_core::ecash::Denomination;
 use picomint_core::{Amount, secp256k1};
@@ -38,20 +38,20 @@ pub const ROUTE_LDK_PEER_LIST: &str = "/ldk/peer/list";
 // Analytics
 pub const ROUTE_QUERY: &str = "/query";
 
-// Federation management
-pub const ROUTE_FEDERATION_ADD: &str = "/federation/add";
-pub const ROUTE_FEDERATION_LIST: &str = "/federation/list";
-pub const ROUTE_FEDERATION_CONFIG: &str = "/federation/config";
-pub const ROUTE_FEDERATION_BALANCE: &str = "/federation/balance";
-pub const ROUTE_FEDERATION_REMOVE: &str = "/federation/remove";
+// Mint management
+pub const ROUTE_MINT_ADD: &str = "/mint/add";
+pub const ROUTE_MINT_LIST: &str = "/mint/list";
+pub const ROUTE_MINT_CONFIG: &str = "/mint/config";
+pub const ROUTE_MINT_BALANCE: &str = "/mint/balance";
+pub const ROUTE_MINT_REMOVE: &str = "/mint/remove";
 
-// Per-federation module commands
-pub const ROUTE_FEDERATION_MODULE_ECASH_COUNT: &str = "/federation/module/ecash/count";
-pub const ROUTE_FEDERATION_MODULE_ECASH_SEND: &str = "/federation/module/ecash/send";
-pub const ROUTE_FEDERATION_MODULE_ECASH_RECEIVE: &str = "/federation/module/ecash/receive";
-pub const ROUTE_FEDERATION_MODULE_ONCHAIN_SEND_FEE: &str = "/federation/module/onchain/send-fee";
-pub const ROUTE_FEDERATION_MODULE_ONCHAIN_SEND: &str = "/federation/module/onchain/send";
-pub const ROUTE_FEDERATION_MODULE_ONCHAIN_RECEIVE: &str = "/federation/module/onchain/receive";
+// Per-mint module commands
+pub const ROUTE_MINT_MODULE_ECASH_COUNT: &str = "/mint/module/ecash/count";
+pub const ROUTE_MINT_MODULE_ECASH_SEND: &str = "/mint/module/ecash/send";
+pub const ROUTE_MINT_MODULE_ECASH_RECEIVE: &str = "/mint/module/ecash/receive";
+pub const ROUTE_MINT_MODULE_ONCHAIN_SEND_FEE: &str = "/mint/module/onchain/send-fee";
+pub const ROUTE_MINT_MODULE_ONCHAIN_SEND: &str = "/mint/module/onchain/send";
+pub const ROUTE_MINT_MODULE_ONCHAIN_RECEIVE: &str = "/mint/module/onchain/receive";
 
 // --- /info ---
 
@@ -60,7 +60,7 @@ pub struct InfoResponse {
     /// Lightning node public key (LDK node id).
     pub lightning_pk: secp256k1::PublicKey,
     /// Iroh public key the gateway accepts on for the picomint API.
-    /// Federation guardians register this via `module lightning gateway add`.
+    /// Mint guardians register this via `module lightning gateway add`.
     pub gateway_pk: picomint_core::lightning::gateway::GatewayPk,
     pub alias: String,
     pub network: String,
@@ -289,56 +289,56 @@ pub struct PeerInfo {
     pub is_connected: bool,
 }
 
-// --- /federation/add ---
+// --- /mint/add ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationAddRequest {
+pub struct MintAddRequest {
     pub invite: InviteCode,
 }
 
-// --- /federation/remove ---
+// --- /mint/remove ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationRemoveRequest {
-    pub federation: FederationId,
+pub struct MintRemoveRequest {
+    pub mint: MintId,
 }
 
-// --- /federation/balance ---
+// --- /mint/balance ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationBalanceRequest {
+pub struct MintBalanceRequest {
     #[arg(long = "id")]
-    pub federation: Option<FederationId>,
+    pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FederationBalanceResponse {
+pub struct MintBalanceResponse {
     pub balance_msat: Amount,
 }
 
-// --- /federation/list ---
+// --- /mint/list ---
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FederationListResponse {
-    pub federations: Vec<FederationInfo>,
+pub struct MintListResponse {
+    pub mints: Vec<MintInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct FederationInfo {
-    pub federation: FederationId,
-    pub federation_name: String,
+pub struct MintInfo {
+    pub mint: MintId,
+    pub mint_name: String,
 }
 
-// --- /federation/config ---
+// --- /mint/config ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationConfigRequest {
+pub struct MintConfigRequest {
     #[arg(long = "id")]
-    pub federation: Option<FederationId>,
+    pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct FederationConfigResponse {
+pub struct MintConfigResponse {
     pub config: serde_json::Value,
 }
 
@@ -355,85 +355,85 @@ pub struct QueryRequest {
 /// `sqlite3 --json` prints.
 pub type QueryResponse = Vec<serde_json::Map<String, serde_json::Value>>;
 
-// --- /federation/module/ecash/count ---
+// --- /mint/module/ecash/count ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationMintCountRequest {
+pub struct MintMintCountRequest {
     #[arg(long = "id")]
-    pub federation: Option<FederationId>,
+    pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FederationMintCountResponse {
+pub struct MintMintCountResponse {
     /// Count of held ecash notes keyed by denomination.
     pub counts: BTreeMap<Denomination, u64>,
 }
 
-// --- /federation/module/ecash/send ---
+// --- /mint/module/ecash/send ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationMintSendRequest {
+pub struct MintMintSendRequest {
     pub amount: bitcoin::Amount,
     #[arg(long = "id")]
-    pub federation: Option<FederationId>,
+    pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FederationMintSendResponse {
+pub struct MintMintSendResponse {
     pub ecash: ECash,
 }
 
-// --- /federation/module/ecash/receive ---
+// --- /mint/module/ecash/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationMintReceiveRequest {
+pub struct MintMintReceiveRequest {
     pub ecash: ECash,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FederationMintReceiveResponse {
+pub struct MintMintReceiveResponse {
     pub amount: Amount,
 }
 
-// --- /federation/module/onchain/send-fee ---
+// --- /mint/module/onchain/send-fee ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationOnchainSendFeeRequest {
+pub struct MintOnchainSendFeeRequest {
     #[arg(long = "id")]
-    pub federation: Option<FederationId>,
+    pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FederationOnchainSendFeeResponse {
+pub struct MintOnchainSendFeeResponse {
     pub fee: bitcoin::Amount,
 }
 
-// --- /federation/module/onchain/send ---
+// --- /mint/module/onchain/send ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationOnchainSendRequest {
+pub struct MintOnchainSendRequest {
     pub address: bitcoin::Address<NetworkUnchecked>,
     pub amount: bitcoin::Amount,
     #[arg(long)]
     pub fee: Option<bitcoin::Amount>,
     #[arg(long = "id")]
-    pub federation: Option<FederationId>,
+    pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FederationOnchainSendResponse {
+pub struct MintOnchainSendResponse {
     pub txid: bitcoin::Txid,
 }
 
-// --- /federation/module/onchain/receive ---
+// --- /mint/module/onchain/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationWalletReceiveRequest {
+pub struct MintWalletReceiveRequest {
     #[arg(long = "id")]
-    pub federation: Option<FederationId>,
+    pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FederationWalletReceiveResponse {
+pub struct MintWalletReceiveResponse {
     pub address: bitcoin::Address<bitcoin::address::NetworkUnchecked>,
 }

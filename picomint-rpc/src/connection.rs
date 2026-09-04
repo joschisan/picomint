@@ -1,7 +1,7 @@
 //! A single kept-alive, self-reconnecting iroh connection, published as a
-//! `watch<Option<ConnState>>`. Both the federation peer pool ([`crate::api`])
+//! `watch<Option<ConnState>>`. Both the mint peer pool ([`crate::api`])
 //! and the client's gateway connection pool are just this primitive
-//! mapped over a set of node ids — the federation over its fixed peer set, the
+//! mapped over a set of node ids — the mint over its fixed peer set, the
 //! gateway pool over an append-only set of announced gateways.
 
 use std::time::Duration;

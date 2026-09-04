@@ -15,7 +15,7 @@ use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::Amount;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::lightning::MINIMUM_INCOMING_CONTRACT_AMOUNT;
 use picomint_core::lightning::contracts::IncomingOffer;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
@@ -26,13 +26,13 @@ use picomint_core::lightning::methods::{
     VerifyResponse as WireVerifyResponse,
 };
 use picomint_core::lightning::secret::IncomingContractSecret;
-use picomint_core::methods::{CoreMethod, FederationInfoRequest, FederationInfoResponse};
+use picomint_core::methods::{CoreMethod, MintInfoRequest, MintInfoResponse};
 use picomint_core::module::Method;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_lnurl::{
     InvoiceResponse, LnurlResponse, PayResponse, VerifyResponse, pay_request_tag,
 };
-use picomint_rpc::api::FederationApi;
+use picomint_rpc::api::MintApi;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::net::TcpListener;
@@ -181,7 +181,7 @@ async fn invoice(
     }))
 }
 
-/// Resolve the federation from the payload's guardians, then buy an invoice
+/// Resolve the mint from the payload's guardians, then buy an invoice
 /// from one of its currently announced gateways. Nothing perishable comes out
 /// of the lnurl itself, which is what keeps an outstanding one valid across
 /// gateway churn.
@@ -190,7 +190,7 @@ async fn resolve_and_fetch_invoice(
     request: &LnurlRequest,
     amount: u64,
 ) -> anyhow::Result<(GatewayPk, Bolt11Invoice)> {
-    let info = fetch_federation_info(endpoint, &request.guardians, request.info).await?;
+    let info = fetch_mint_info(endpoint, &request.guardians, request.info).await?;
 
     let peers = info
         .peers
@@ -198,11 +198,11 @@ async fn resolve_and_fetch_invoice(
         .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
         .collect();
 
-    let api = FederationApi::new(endpoint.clone(), peers);
+    let api = MintApi::new(endpoint.clone(), peers);
 
     let (aggregate_pk, gateways) = try_join!(fetch_aggregate_pk(&api), fetch_gateways(&api))?;
 
-    let (gateway_info, gateway_pk) = select_gateway(endpoint, gateways, info.federation).await?;
+    let (gateway_info, gateway_pk) = select_gateway(endpoint, gateways, info.mint).await?;
 
     ensure!(
         gateway_info
@@ -250,7 +250,7 @@ async fn resolve_and_fetch_invoice(
     );
 
     let receive = ReceiveRequest {
-        federation: info.federation,
+        mint: info.mint,
         offer,
     };
 
@@ -275,24 +275,24 @@ async fn resolve_and_fetch_invoice(
 /// Take the first guardian response that hashes to the payload's commitment.
 /// That commitment is what makes a single guardian enough: one can stall or
 /// refuse, but a forged peer set will not hash. The payload carries `f + 1` of
-/// them, so one is honest and reachable whenever the federation itself is.
+/// them, so one is honest and reachable whenever the mint itself is.
 ///
 /// One request per guardian and no reuse, so this dials directly rather than
-/// standing up a [`FederationApi`] — and the guardians are a subset, which a
-/// federation-shaped peer set has no room for.
-async fn fetch_federation_info(
+/// standing up a [`MintApi`] — and the guardians are a subset, which a
+/// mint-shaped peer set has no room for.
+async fn fetch_mint_info(
     endpoint: &Endpoint,
     guardians: &[iroh::PublicKey],
     info: sha256::Hash,
-) -> anyhow::Result<FederationInfoResponse> {
+) -> anyhow::Result<MintInfoResponse> {
     ensure!(!guardians.is_empty(), "Lnurl names no guardians");
 
     let attempts = guardians.iter().copied().map(|guardian| {
         Box::pin(async move {
-            let response: FederationInfoResponse = picomint_rpc::request(
+            let response: MintInfoResponse = picomint_rpc::request(
                 endpoint,
                 guardian,
-                Method::Core(CoreMethod::FederationInfo(FederationInfoRequest)),
+                Method::Core(CoreMethod::MintInfo(MintInfoRequest)),
             )
             .await?;
 
@@ -313,10 +313,10 @@ async fn fetch_federation_info(
     Ok(response)
 }
 
-/// Threshold-read the federation's tpe aggregate key. Not committed to by the
+/// Threshold-read the mint's tpe aggregate key. Not committed to by the
 /// lnurl: the peer set it is read from is, and `2f + 1` guardians agreeing on
-/// a value is the same assumption the rest of the federation already rests on.
-async fn fetch_aggregate_pk(api: &FederationApi) -> anyhow::Result<AggregatePublicKey> {
+/// a value is the same assumption the rest of the mint already rests on.
+async fn fetch_aggregate_pk(api: &MintApi) -> anyhow::Result<AggregatePublicKey> {
     let response: TpeAggregatePkResponse = api
         .request_current_consensus(Method::Lightning(LightningMethod::TpeAggregatePk(TpeAggregatePkRequest)))
         .await?;
@@ -324,9 +324,9 @@ async fn fetch_aggregate_pk(api: &FederationApi) -> anyhow::Result<AggregatePubl
     Ok(response.tpe_agg_pk)
 }
 
-/// Threshold-read the federation's announced gateway set — `2f + 1` guardians
+/// Threshold-read the mint's announced gateway set — `2f + 1` guardians
 /// returning byte-identical lists.
-async fn fetch_gateways(api: &FederationApi) -> anyhow::Result<Vec<GatewayPk>> {
+async fn fetch_gateways(api: &MintApi) -> anyhow::Result<Vec<GatewayPk>> {
     let response: GatewaysResponse = api
         .request_current_consensus(Method::Lightning(LightningMethod::Gateways(GatewaysRequest)))
         .await?;
@@ -337,7 +337,7 @@ async fn fetch_gateways(api: &FederationApi) -> anyhow::Result<Vec<GatewayPk>> {
 async fn select_gateway(
     endpoint: &Endpoint,
     gateways: Vec<GatewayPk>,
-    federation: FederationId,
+    mint: MintId,
 ) -> anyhow::Result<(GatewayInfo, GatewayPk)> {
     let mut probes = JoinSet::new();
 
@@ -347,7 +347,7 @@ async fn select_gateway(
             let response = gateway_request::<InfoResponse>(
                 &endpoint,
                 gateway_pk,
-                GatewayMethod::Info(InfoRequest { federation }),
+                GatewayMethod::Info(InfoRequest { mint }),
             )
             .await
             .ok()?;
@@ -361,7 +361,7 @@ async fn select_gateway(
         }
     }
 
-    bail!("All gateways are offline or do not support this federation")
+    bail!("All gateways are offline or do not support this mint")
 }
 
 /// Proxy LUD-21 verify: external LNURL wallet hits us at

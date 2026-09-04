@@ -5,11 +5,11 @@ use picomint_core::PeerId;
 
 use crate::p2p::{P2PConnectionStatus, Transport};
 
-/// Renders the federation card: one row per peer with its name and p2p
+/// Renders the mint card: one row per peer with its name and p2p
 /// connection status. The running guardian has no connection to itself and
 /// is omitted.
 pub fn render(
-    federation_name: &str,
+    mint_name: &str,
     guardian_names: &BTreeMap<PeerId, String>,
     p2p_connection_status: &BTreeMap<PeerId, P2PConnectionStatus>,
 ) -> Markup {
@@ -21,7 +21,7 @@ pub fn render(
     html! {
         div class="card" {
             div class="card-header" {
-                span class="card-title" { (federation_name) }
+                span class="card-title" { (mint_name) }
                 span class="card-sub" {
                     (format!("{connected} of {} peers connected", p2p_connection_status.len()))
                 }

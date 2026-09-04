@@ -241,10 +241,10 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
 
     let mut events = pin!(lightning_event_stream(client));
 
-    info!("Testing self-pay refund when the gateway has no federation liquidity yet...");
+    info!("Testing self-pay refund when the gateway has no mint liquidity yet...");
 
     // First scenario in the suite, so the gateway hasn't been funded by the
-    // client→LDK send below — its federation balance is zero. The self-pay
+    // client→LDK send below — its mint balance is zero. The self-pay
     // routes through the gateway as a direct swap, which has to fund the
     // incoming contract from gateway ecash. With no ecash available the
     // gateway must signal a cancel so the client gets a gateway-signed refund
@@ -326,7 +326,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
         );
     }
 
-    info!("Testing payment from client to LDK node (funds gateway federation liquidity)...");
+    info!("Testing payment from client to LDK node (funds gateway mint liquidity)...");
 
     {
         let invoice = env.ldk_node.bolt11_payment().receive(
@@ -360,15 +360,15 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
         assert_eq!(op, send_op);
     }
 
-    info!("Polling gateway federation balance...");
+    info!("Polling gateway mint balance...");
 
-    let federation = env.invite.federation.to_string();
-    retry("gateway federation balance", || {
-        let federation = federation.clone();
+    let mint = env.invite.mint.to_string();
+    retry("gateway mint balance", || {
+        let mint = mint.clone();
         async move {
             let balance =
-                cli::gateway_federation_balance(&env.gateway_data_dir, &federation)?.balance_msat;
-            ensure!(balance.msat > 0, "gateway federation balance is zero");
+                cli::gateway_mint_balance(&env.gateway_data_dir, &mint)?.balance_msat;
+            ensure!(balance.msat > 0, "gateway mint balance is zero");
             Ok(())
         }
     })
@@ -608,7 +608,7 @@ async fn test_mock_wrong_network(client: &TestClient) -> anyhow::Result<()> {
     {
         Err(SendPaymentError::WrongCurrency {
             invoice_currency: Currency::Signet,
-            federation_currency: Currency::Regtest,
+            mint_currency: Currency::Regtest,
         }) => {}
         other => panic!("Expected WrongCurrency, got {other:?}"),
     }
@@ -668,7 +668,7 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
         fee: client
             .client
             .config(client.fed)
-            .expect("federation is added")
+            .expect("mint is added")
             .lightning
             .input_fee,
     });
@@ -838,7 +838,7 @@ const INVOICE_SECRET: [u8; 32] = [2; 32];
 
 // Scenario selectors: embedded in the invoice's `payment_secret` to pick a
 // branch in `mock_handler`'s `Send` arm; the preimage defines the invoice's
-// `payment_hash` (so the federation's preimage check succeeds server-side
+// `payment_hash` (so the mint's preimage check succeeds server-side
 // and each test's operation — derived from the payment hash — is unique).
 const PAYABLE_PREIMAGE: [u8; 32] = [10; 32];
 const UNPAYABLE_PREIMAGE: [u8; 32] = [11; 32];
@@ -922,7 +922,7 @@ async fn mock_handler(method: GatewayMethod) -> Result<Vec<u8>, String> {
     match method {
         GatewayMethod::Info(_) => {
             // Short expiry deltas keep the unilateral-refund test
-            // fast — the federation's consensus block count must advance
+            // fast — the mint's consensus block count must advance
             // past the contract's expiry for `await_preimage` to
             // return `None`.
             let tx_fee = PaymentFee {

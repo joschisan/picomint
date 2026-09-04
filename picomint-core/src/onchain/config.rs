@@ -18,7 +18,7 @@ pub struct OnchainConfigPrivate {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct OnchainConfigConsensus {
-    /// The aggregate public key of the federation's taproot wallet
+    /// The aggregate public key of the mint's taproot wallet
     pub agg_pk: AggregatePublicKey,
     /// The public key shares of the guardians
     pub pks: BTreeMap<PeerId, PublicKeyShare>,

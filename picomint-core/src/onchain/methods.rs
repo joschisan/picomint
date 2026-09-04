@@ -6,7 +6,7 @@
 use picomint_encoding::{Decodable, Encodable};
 
 use crate::OutPoint;
-use crate::onchain::{FederationUtxo, OutputInfo, TxInfo};
+use crate::onchain::{MintUtxo, OutputInfo, TxInfo};
 
 // ── consensus-feerate ───────────────────────────────────────────────────────
 
@@ -18,14 +18,14 @@ pub struct ConsensusFeerateResponse {
     pub feerate: Option<u32>,
 }
 
-// ── federation-utxo ───────────────────────────────────────────────────────
+// ── mint-utxo ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct FederationUtxoRequest;
+pub struct MintUtxoRequest;
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct FederationUtxoResponse {
-    pub utxo: Option<FederationUtxo>,
+pub struct MintUtxoResponse {
+    pub utxo: Option<MintUtxo>,
 }
 
 // ── send-fee ────────────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ pub struct TxChainResponse {
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum OnchainMethod {
     ConsensusFeerate(ConsensusFeerateRequest),
-    FederationUtxo(FederationUtxoRequest),
+    MintUtxo(MintUtxoRequest),
     SendFee(SendFeeRequest),
     ReceiveFee(ReceiveFeeRequest),
     TxId(TxIdRequest),

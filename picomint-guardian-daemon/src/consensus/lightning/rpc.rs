@@ -122,8 +122,8 @@ pub fn gateways(server: &Server, _: GatewaysRequest) -> Result<GatewaysResponse,
     })
 }
 
-/// The federation's tpe aggregate key. Ungated for the same reason as
-/// `federation_info`: it is public to every client, and a caller holding a
+/// The mint's tpe aggregate key. Ungated for the same reason as
+/// `mint_info`: it is public to every client, and a caller holding a
 /// hash of it out of band can check what it gets.
 pub fn tpe_aggregate_pk(
     server: &Server,

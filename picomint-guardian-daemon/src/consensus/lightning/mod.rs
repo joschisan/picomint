@@ -209,13 +209,13 @@ pub fn process_output(
 }
 
 /// Both incoming and outgoing contracts represent liabilities to the
-/// federation since they are obligations to issue notes. The amount
-/// the federation has actually locked per contract has to match the
+/// mint since they are obligations to issue notes. The amount
+/// the mint has actually locked per contract has to match the
 /// arithmetic in [`process_input`] / [`process_output`]:
 /// outgoing locks `amount + fee` (the gateway claims that on payout,
 /// or the sender does on refund); incoming locks `amount - fee` (the
 /// recipient claims that on success, with `fee` accruing to the
-/// federation as implicit revenue).
+/// mint as implicit revenue).
 pub fn audit(dbtx: &WriteTx) -> i64 {
     let outgoing: i64 = dbtx.iter(&OutgoingContractTable, |r| {
         r.map(|(_, contract)| -((contract.amount.msat + contract.fee.msat) as i64))

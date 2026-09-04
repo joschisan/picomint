@@ -28,9 +28,9 @@ use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 /// BFT rounds a session runs for, which is what sets how long one lasts.
 ///
 /// Follows from the network rather than being agreed at DKG: every guardian
-/// on a federation is on the same network by construction, so the two can
-/// never disagree, and a federation that wants shorter sessions is a
-/// federation running a different binary.
+/// on a mint is on the same network by construction, so the two can
+/// never disagree, and a mint that wants shorter sessions is a
+/// mint running a different binary.
 fn rounds_per_session(cfg: &ServerConfig) -> u32 {
     if cfg.consensus.network == bitcoin::Network::Regtest {
         100
@@ -91,7 +91,7 @@ async fn run_session(
     // new parents arrive while items await ordering, not at all while
     // idle. The session stops ordering items once it reaches
     // [`rounds_per_session`] rounds (see [`order_items_until_cut`]),
-    // which on a quiet federation can take arbitrarily long in wall
+    // which on a quiet mint can take arbitrarily long in wall
     // clock.
 
     // Both of these are filled straight from the p2p reader, so leaving
@@ -404,7 +404,7 @@ async fn finalize_session(
 
     assert!(
         pending_accepted_items.len() <= signed_session_outcome.session_outcome.items.len(),
-        "Consensus Failure: we accepted more items than federation consensus"
+        "Consensus Failure: we accepted more items than mint consensus"
     );
 
     let (processed, unprocessed) = signed_session_outcome
@@ -414,7 +414,7 @@ async fn finalize_session(
 
     assert!(
         processed.iter().eq(pending_accepted_items.iter()),
-        "Consensus Failure: pending accepted items disagree with federation consensus"
+        "Consensus Failure: pending accepted items disagree with mint consensus"
     );
 
     info!(
@@ -434,7 +434,7 @@ async fn finalize_session(
             accepted_item.item.clone(),
         )
         .await
-        .expect("Rejected item accepted by federation consensus");
+        .expect("Rejected item accepted by mint consensus");
     }
 
     dbtx.clear_table(&AcceptedItemTable);

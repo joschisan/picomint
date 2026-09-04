@@ -1,15 +1,15 @@
-use crate::api::FederationApi;
+use crate::api::MintApi;
 use picomint_core::OutPoint;
 use picomint_core::module::Method;
 use picomint_core::onchain::methods::{
-    ConsensusFeerateRequest, ConsensusFeerateResponse, FederationUtxoRequest,
-    FederationUtxoResponse, OutputInfoSliceRequest, OutputInfoSliceResponse,
+    ConsensusFeerateRequest, ConsensusFeerateResponse, MintUtxoRequest,
+    MintUtxoResponse, OutputInfoSliceRequest, OutputInfoSliceResponse,
     PendingTxChainRequest, PendingTxChainResponse, ReceiveFeeRequest, ReceiveFeeResponse,
     SendFeeRequest, SendFeeResponse, TxIdRequest, TxIdResponse, OnchainMethod,
 };
-use picomint_core::onchain::{FederationUtxo, OutputInfo, TxInfo};
+use picomint_core::onchain::{MintUtxo, OutputInfo, TxInfo};
 
-pub async fn consensus_feerate(api: &FederationApi) -> anyhow::Result<Option<u32>> {
+pub async fn consensus_feerate(api: &MintApi) -> anyhow::Result<Option<u32>> {
     api.request_current_consensus::<ConsensusFeerateResponse>(Method::Onchain(
         OnchainMethod::ConsensusFeerate(ConsensusFeerateRequest),
     ))
@@ -17,15 +17,15 @@ pub async fn consensus_feerate(api: &FederationApi) -> anyhow::Result<Option<u32
     .map(|resp| resp.feerate)
 }
 
-pub async fn federation_utxo(api: &FederationApi) -> anyhow::Result<Option<FederationUtxo>> {
-    api.request_current_consensus::<FederationUtxoResponse>(Method::Onchain(
-        OnchainMethod::FederationUtxo(FederationUtxoRequest),
+pub async fn mint_utxo(api: &MintApi) -> anyhow::Result<Option<MintUtxo>> {
+    api.request_current_consensus::<MintUtxoResponse>(Method::Onchain(
+        OnchainMethod::MintUtxo(MintUtxoRequest),
     ))
     .await
     .map(|resp| resp.utxo)
 }
 
-pub async fn send_fee(api: &FederationApi) -> anyhow::Result<Option<bitcoin::Amount>> {
+pub async fn send_fee(api: &MintApi) -> anyhow::Result<Option<bitcoin::Amount>> {
     api.request_current_consensus::<SendFeeResponse>(Method::Onchain(OnchainMethod::SendFee(
         SendFeeRequest,
     )))
@@ -33,7 +33,7 @@ pub async fn send_fee(api: &FederationApi) -> anyhow::Result<Option<bitcoin::Amo
     .map(|resp| resp.fee)
 }
 
-pub async fn receive_fee(api: &FederationApi) -> anyhow::Result<Option<bitcoin::Amount>> {
+pub async fn receive_fee(api: &MintApi) -> anyhow::Result<Option<bitcoin::Amount>> {
     api.request_current_consensus::<ReceiveFeeResponse>(Method::Onchain(OnchainMethod::ReceiveFee(
         ReceiveFeeRequest,
     )))
@@ -41,7 +41,7 @@ pub async fn receive_fee(api: &FederationApi) -> anyhow::Result<Option<bitcoin::
     .map(|resp| resp.fee)
 }
 
-pub async fn pending_tx_chain(api: &FederationApi) -> anyhow::Result<Vec<TxInfo>> {
+pub async fn pending_tx_chain(api: &MintApi) -> anyhow::Result<Vec<TxInfo>> {
     api.request_current_consensus::<PendingTxChainResponse>(Method::Onchain(
         OnchainMethod::PendingTxChain(PendingTxChainRequest),
     ))
@@ -50,7 +50,7 @@ pub async fn pending_tx_chain(api: &FederationApi) -> anyhow::Result<Vec<TxInfo>
 }
 
 pub async fn output_info_slice(
-    api: &FederationApi,
+    api: &MintApi,
     start: u64,
     end: u64,
 ) -> anyhow::Result<Vec<OutputInfo>> {
@@ -61,7 +61,7 @@ pub async fn output_info_slice(
     .map(|resp| resp.outputs)
 }
 
-pub async fn tx_id(api: &FederationApi, outpoint: OutPoint) -> Option<bitcoin::Txid> {
+pub async fn tx_id(api: &MintApi, outpoint: OutPoint) -> Option<bitcoin::Txid> {
     api.request_current_consensus_retry::<TxIdResponse>(Method::Onchain(OnchainMethod::TxId(
         TxIdRequest { outpoint },
     )))

@@ -38,7 +38,7 @@ pub fn render(
             div {
                 (action_item(
                     "Generate Invite",
-                    "Onboard users to your federation.",
+                    "Onboard users to your mint.",
                     "this.closest('dialog').close();document.getElementById('invite-modal').showModal()",
                 ))
                 (action_item(
@@ -104,7 +104,7 @@ pub fn render(
                 (modal_header("Sweep Wallet"))
                 div class="modal-body" {
                     div class="alert alert-warning" {
-                        "To restore your remaining funds after decommissioning the federation, please go to the "
+                        "To restore your remaining funds after decommissioning the mint, please go to the "
                         a href="https://restore.picomint.org" target="_blank" { "restore tool" }
                         " and follow the instructions."
                     }

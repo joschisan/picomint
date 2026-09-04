@@ -1,7 +1,7 @@
 use crate::context::ClientContext;
 use crate::executor::{SmId, StateMachine};
 use picomint_core::OutPoint;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{WriteTx, table};
@@ -10,8 +10,8 @@ use super::events::{SendFailureEvent, SendSuccessEvent};
 
 table!(
     SendStateMachineTable,
-    (FederationId, SmId) => SendStateMachine,
-    "wallet-send-sm",
+    (MintId, SmId) => SendStateMachine,
+    "onchain-send-sm",
 );
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]

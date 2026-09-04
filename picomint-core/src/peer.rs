@@ -46,19 +46,19 @@ impl From<PeerId> for u8 {
     }
 }
 
-/// Allowed federation sizes — every entry is `3f + 1` for some f ≥ 1.
+/// Allowed mint sizes — every entry is `3f + 1` for some f ≥ 1.
 /// `From<usize>` rejects anything outside this list.
-pub const ALLOWED_FEDERATION_SIZES: &[usize] = &[4, 7, 10, 13, 16, 19, 22];
+pub const ALLOWED_MINT_SIZES: &[usize] = &[4, 7, 10, 13, 16, 19, 22];
 
-/// The size of a federation, parameterized by `f` (the maximum tolerated
-/// number of byzantine peers). picomint only supports federations of
+/// The size of a mint, parameterized by `f` (the maximum tolerated
+/// number of byzantine peers). picomint only supports mints of
 /// size `3f + 1`, so storing `f` lets every derived quantity drop out
 /// of one multiplication or addition with no rounding involved.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NumPeers(usize);
 
 impl NumPeers {
-    /// Returns an iterator over all peer IDs in the federation.
+    /// Returns an iterator over all peer IDs in the mint.
     pub fn peer_ids(self) -> impl Iterator<Item = PeerId> {
         (0u8..(self.total() as u8)).map(PeerId)
     }
@@ -87,8 +87,8 @@ impl NumPeers {
 impl From<usize> for NumPeers {
     fn from(total: usize) -> Self {
         assert!(
-            ALLOWED_FEDERATION_SIZES.contains(&total),
-            "federation size of {total} is not supported",
+            ALLOWED_MINT_SIZES.contains(&total),
+            "mint size of {total} is not supported",
         );
 
         Self(total / 3)

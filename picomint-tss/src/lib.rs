@@ -36,7 +36,7 @@ pub struct SecretKeyShare(pub SecretKey);
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable, Serialize, Deserialize)]
 pub struct PublicKeyShare(pub PublicKey);
 
-/// The public key of the federation; its x-only form is the BIP340 public
+/// The public key of the mint; its x-only form is the BIP340 public
 /// key our signatures verify under.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable, Serialize, Deserialize)]
 pub struct AggregatePublicKey(pub PublicKey);

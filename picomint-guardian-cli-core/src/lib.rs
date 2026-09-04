@@ -55,12 +55,12 @@ pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/lightning/gateway/list";
 pub struct SetupSetLocalParamsRequest {
     /// Guardian name
     pub name: String,
-    /// Federation name (leader only)
+    /// Mint name (leader only)
     #[arg(long)]
-    pub federation_name: Option<String>,
-    /// Federation size (leader only)
+    pub mint_name: Option<String>,
+    /// Mint size (leader only)
     #[arg(long)]
-    pub federation_size: Option<u8>,
+    pub mint_size: Option<u8>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -217,7 +217,7 @@ pub struct ExpirySetRequest {
     /// Expiry date as a unix timestamp in seconds (midnight UTC).
     #[arg(long)]
     pub timestamp: u64,
-    /// Optional successor-federation invite code (base32-encoded).
+    /// Optional successor-mint invite code (base32-encoded).
     #[arg(long)]
     pub successor: Option<InviteCode>,
 }

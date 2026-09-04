@@ -20,7 +20,7 @@ impl GatewaySecret {
         Self(module_root)
     }
 
-    /// The gateway's federation-facing identity keypair. Used as `claim_pk`
+    /// The gateway's mint-facing identity keypair. Used as `claim_pk`
     /// on outgoing contracts and to sign forfeit messages on cancelled
     /// sends — both places a sender has to name the gateway in advance, so
     /// both have to be static and public.

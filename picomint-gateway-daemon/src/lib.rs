@@ -21,14 +21,14 @@ use picomint_client::gateway::api;
 use picomint_client::gateway::events::ReceiveSuccessEvent;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::Amount;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::OperationId;
 use picomint_core::lightning::LightningInvoice;
 use picomint_core::lightning::gateway::{GatewayInfo, PaymentFee};
 use picomint_core::lightning::methods::{ReceiveRequest, SendRequest, VerifyResponse};
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
-use picomint_gateway_cli_core::FederationInfo;
+use picomint_gateway_cli_core::MintInfo;
 use picomint_redb::{Database, DbRead};
 
 use crate::db::{IncomingOfferRow, IncomingOfferTable, OutgoingContractRow, OutgoingContractTable};
@@ -56,15 +56,15 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// List every federation the gateway has added, with its config-declared
+    /// List every mint the gateway has added, with its config-declared
     /// name.
-    pub fn federation_list(&self) -> Vec<FederationInfo> {
+    pub fn mint_list(&self) -> Vec<MintInfo> {
         self.client
-            .federation_configs()
+            .mint_configs()
             .into_iter()
-            .map(|entry| FederationInfo {
-                federation: entry.0,
-                federation_name: entry.1.name,
+            .map(|entry| MintInfo {
+                mint: entry.0,
+                mint_name: entry.1.name,
             })
             .collect()
     }
@@ -72,9 +72,9 @@ impl AppState {
 
 // Lightning Gateway implementation
 impl AppState {
-    pub async fn gateway_info(&self, federation: &FederationId) -> anyhow::Result<GatewayInfo> {
+    pub async fn gateway_info(&self, mint: &MintId) -> anyhow::Result<GatewayInfo> {
         Ok(GatewayInfo {
-            module_public_key: self.client.gateway_pk(*federation)?,
+            module_public_key: self.client.gateway_pk(*mint)?,
             send_fee: self.send_fee,
             receive_fee: self.receive_fee,
             expiry_delta: u16::try_from(self.cltv_expiry_delta + 144)
@@ -85,7 +85,7 @@ impl AppState {
     /// Orchestrates an outgoing payment. Verifies the request, registers the
     /// contract in the daemon-global outgoing_contract table, logs
     /// `SendEvent` on F1, and kicks off either a direct-swap receive on the
-    /// target federation or an LN send via LDK. Returns once a terminal event
+    /// target mint or an LN send via LDK. Returns once a terminal event
     /// (`SendSuccessEvent` / `SendCancelEvent`) is observed in F1's event log.
     pub async fn send(
         &self,
@@ -94,7 +94,7 @@ impl AppState {
         // --- Verify the request ---------------------------------------------
 
         ensure!(
-            payload.contract.claim_pk == self.client.gateway_pk(payload.federation)?,
+            payload.contract.claim_pk == self.client.gateway_pk(payload.mint)?,
             "The outgoing contract is keyed to another gateway"
         );
 
@@ -106,16 +106,16 @@ impl AppState {
             "Invalid auth signature for the invoice data"
         );
 
-        let api = self.client.api(payload.federation)?;
+        let api = self.client.api(payload.mint)?;
 
         let (contract_id, expiry) = api::outgoing_contract_expiry(&api, payload.outpoint)
             .await
-            .map_err(|_| anyhow!("The gateway cannot reach the federation"))?
+            .map_err(|_| anyhow!("The gateway cannot reach the mint"))?
             .ok_or(anyhow!("The outgoing contract has not yet been confirmed"))?;
 
         ensure!(
             contract_id == payload.contract.contract_id(),
-            "Contract Id returned by the federation does not match contract in request"
+            "Contract Id returned by the mint does not match contract in request"
         );
 
         let amount = payload
@@ -165,7 +165,7 @@ impl AppState {
                 &OutgoingContractTable,
                 &operation,
                 &OutgoingContractRow {
-                    federation: payload.federation,
+                    mint: payload.mint,
                     contract: payload.contract.clone(),
                     outpoint: payload.outpoint,
                     invoice: payload.invoice.clone(),
@@ -175,12 +175,12 @@ impl AppState {
         {
             return self
                 .client
-                .gateway_subscribe_send(payload.federation, operation)
+                .gateway_subscribe_send(payload.mint, operation)
                 .await;
         }
 
         self.client.gateway_log_send_started(
-            payload.federation,
+            payload.mint,
             &dbtx,
             operation,
             payload.outpoint,
@@ -208,7 +208,7 @@ impl AppState {
             // a successful kick-off instead of cancelling an in-flight send.
             if !matches!(result, Ok(_) | Err(ldk_node::NodeError::DuplicatePayment)) {
                 self.client.gateway_finalize_send(
-                    payload.federation,
+                    payload.mint,
                     &dbtx,
                     operation,
                     payload.contract,
@@ -229,7 +229,7 @@ impl AppState {
             if self
                 .client
                 .gateway_start_receive(
-                    incoming_row.federation,
+                    incoming_row.mint,
                     &dbtx,
                     operation,
                     incoming_row.offer,
@@ -237,7 +237,7 @@ impl AppState {
                 .is_err()
             {
                 self.client.gateway_finalize_send(
-                    payload.federation,
+                    payload.mint,
                     &dbtx,
                     operation,
                     payload.contract,
@@ -251,7 +251,7 @@ impl AppState {
 
         // --- Await terminal event on F1 -------------------------------------
         self.client
-            .gateway_subscribe_send(payload.federation, operation)
+            .gateway_subscribe_send(payload.mint, operation)
             .await
     }
 
@@ -263,8 +263,8 @@ impl AppState {
         ensure!(payload.offer.verify(), "The offer is invalid");
 
         ensure!(
-            self.client.config(payload.federation).is_some(),
-            "Federation is not added"
+            self.client.config(payload.mint).is_some(),
+            "Mint is not added"
         );
 
         let receive_fee = self.receive_fee.fee(payload.offer.commitment.amount.msat);
@@ -292,7 +292,7 @@ impl AppState {
                 &IncomingOfferTable,
                 &OperationId::from_encodable(&payload.offer.commitment.payment_hash),
                 &IncomingOfferRow {
-                    federation: payload.federation,
+                    mint: payload.mint,
                     offer: payload.offer,
                     invoice: LightningInvoice::Bolt11(invoice.clone()),
                 },

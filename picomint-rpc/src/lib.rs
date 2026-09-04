@@ -1,8 +1,8 @@
 //! iroh RPC primitives shared by picomint client and server.
 //!
 //! One request = one bidirectional stream. Connections are kept alive and
-//! reused: the federation client holds a pooled connection per peer (see
-//! `picomint-client`'s `FederationApi`) and multiplexes every request as a
+//! reused: the mint client holds a pooled connection per peer (see
+//! `picomint-client`'s `MintApi`) and multiplexes every request as a
 //! fresh bi stream over it via [`request_on_connection`], paying the QUIC
 //! handshake and hole-punched path once rather than per request. [`request`]
 //! remains a one-shot convenience (connect → one request → close) for
@@ -77,7 +77,7 @@ pub async fn request<Req: Encodable, Resp: Decodable>(
 
 /// Send one request over an existing, kept-alive [`Connection`] by opening a
 /// fresh bi stream on it. The connection is left open for reuse — the caller
-/// owns its lifecycle. The federation client multiplexes every per-peer
+/// owns its lifecycle. The mint client multiplexes every per-peer
 /// request over a single pooled connection this way; the server's
 /// [`handle_request`] accept loop serves them as independent streams.
 pub async fn request_on_connection<Req: Encodable, Resp: Decodable>(

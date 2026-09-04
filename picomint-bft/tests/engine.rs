@@ -459,7 +459,7 @@ async fn engines_agree_when_fork_branch_commits() {
 /// Peer 0 turns Byzantine one round up: it publishes an honest-looking
 /// round-0 unit to everyone, then signs two round-1 units over the
 /// same parent set (differing payloads) and shows them to disjoint
-/// halves of the federation — a forked *voter*. The vote and
+/// halves of the mint — a forked *voter*. The vote and
 /// certificate tallies over round 1 must handle the forker appearing
 /// once per branch without double-counting its creator, and the honest
 /// engines must still agree. The forker's round-0 unit is referenced

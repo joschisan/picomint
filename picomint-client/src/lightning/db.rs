@@ -1,22 +1,22 @@
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::OperationId;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_redb::table;
 
 table!(
     IncomingContractStreamIndexTable,
-    FederationId => u64,
+    MintId => u64,
     "lightning-incoming-contract-stream-index",
 );
 
-// The federation's announced gateway pks, mirrored to disk by
+// The mint's announced gateway pks, mirrored to disk by
 // `update_gateway_pks`. On a cold start they are probed straight away by
 // `update_gateway_info` to repopulate the in-memory pool, so the client need
 // not wait on the threshold-consensus gateway query before `select_gateway`
 // can return. The probed `GatewayInfo` itself stays in memory, never persisted.
 table!(
     GatewayPkTable,
-    (FederationId, GatewayPk) => (),
+    (MintId, GatewayPk) => (),
     "lightning-gateway-pk",
 );
 
@@ -25,6 +25,6 @@ table!(
 // derived from the invoice payment hash).
 table!(
     SendOperationTable,
-    (FederationId, OperationId) => (),
+    (MintId, OperationId) => (),
     "lightning-send-operation",
 );

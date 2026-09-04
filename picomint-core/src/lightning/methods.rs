@@ -1,4 +1,4 @@
-//! Lightning module wire methods. Federation-side methods are framed by the
+//! Lightning module wire methods. Mint-side methods are framed by the
 //! [`LightningMethod`] enum; client↔gateway methods are framed by [`GatewayMethod`].
 //! Each method has a `Request` and a `Response` type; on the wire, every call
 //! returns `Result<Vec<u8>, String>` with the bytes being the response struct
@@ -11,7 +11,7 @@ use picomint_encoding::{Decodable, Encodable};
 use tpe::{AggregatePublicKey, DecryptionKeyShare};
 
 use crate::OutPoint;
-use crate::config::FederationId;
+use crate::config::MintId;
 use crate::lightning::ContractId;
 use crate::lightning::LightningInvoice;
 use crate::lightning::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
@@ -104,7 +104,7 @@ pub enum LightningMethod {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct InfoRequest {
-    pub federation: FederationId,
+    pub mint: MintId,
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]
@@ -116,7 +116,7 @@ pub struct InfoResponse {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct SendRequest {
-    pub federation: FederationId,
+    pub mint: MintId,
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
     pub invoice: LightningInvoice,
@@ -132,7 +132,7 @@ pub struct SendResponse {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct ReceiveRequest {
-    pub federation: FederationId,
+    pub mint: MintId,
     pub offer: IncomingOffer,
 }
 

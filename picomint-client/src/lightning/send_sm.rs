@@ -1,5 +1,5 @@
 use super::gateway::Gateways;
-use crate::api::FederationApi;
+use crate::api::MintApi;
 use crate::executor::{SmId, StateMachine};
 use crate::tx::{Input, TxBuilder};
 use anyhow::ensure;
@@ -7,7 +7,7 @@ use bitcoin::hashes::sha256;
 use futures::future::pending;
 use picomint_core::TransactionId;
 use picomint_core::backoff::{Retryable, networking_backoff};
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::lightning::contracts::OutgoingContract;
 use picomint_core::lightning::gateway::GatewayPk;
@@ -26,7 +26,7 @@ use crate::context::ClientContext;
 
 table!(
     SendStateMachineTable,
-    (FederationId, SmId) => SendStateMachine,
+    (MintId, SmId) => SendStateMachine,
     "lightning-send-sm",
 );
 
@@ -81,7 +81,7 @@ pub enum SendOutcome {
 }
 
 /// State machine that requests the lightning gateway to pay an invoice on
-/// behalf of a federation client.
+/// behalf of a mint client.
 impl StateMachine for SendStateMachine {
     type Outcome = SendOutcome;
 
@@ -96,7 +96,7 @@ impl StateMachine for SendStateMachine {
                     response = gateway_send_sm(
                         ctx.gateways.clone(),
                         self.common.gateway_pk,
-                        ctx.federation,
+                        ctx.mint,
                         self.common.outpoint,
                         self.common.contract.clone(),
                         self.common.invoice.clone(),
@@ -121,7 +121,7 @@ impl StateMachine for SendStateMachine {
                     Err(_) => {
                         // Refund tx was rejected, which means the contract input
                         // is gone — the gateway must have claimed it. Re-poll the
-                        // federation for the preimage one more time before giving
+                        // mint for the preimage one more time before giving
                         // up.
                         let p = super::api::await_preimage(
                             &ctx.api,
@@ -232,7 +232,7 @@ fn submit_refund(
 async fn gateway_send_sm(
     gateways: Gateways,
     gateway_pk: GatewayPk,
-    federation: FederationId,
+    mint: MintId,
     outpoint: OutPoint,
     contract: OutgoingContract,
     invoice: LightningInvoice,
@@ -242,7 +242,7 @@ async fn gateway_send_sm(
         let payment_result = gateways
             .send(
                 gateway_pk,
-                federation,
+                mint,
                 outpoint,
                 contract.clone(),
                 invoice.clone(),
@@ -268,7 +268,7 @@ async fn gateway_send_sm(
 async fn await_preimage_sm(
     outpoint: OutPoint,
     contract: OutgoingContract,
-    api: FederationApi,
+    api: MintApi,
 ) -> Option<[u8; 32]> {
     let preimage = super::api::await_preimage(&api, outpoint, contract.expiry).await?;
 
@@ -276,7 +276,7 @@ async fn await_preimage_sm(
         return Some(preimage);
     }
 
-    error!("Federation returned invalid preimage {:?}", preimage);
+    error!("Mint returned invalid preimage {:?}", preimage);
 
     pending().await
 }

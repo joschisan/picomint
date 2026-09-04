@@ -4,7 +4,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use picomint_core::methods::{
     BlockCountRequest, BlockCountResponse, ConfigRequest, ConfigResponse, ExpiryStatusRequest,
-    ExpiryStatusResponse, FederationInfoRequest, FederationInfoResponse, LivenessRequest,
+    ExpiryStatusResponse, MintInfoRequest, MintInfoResponse, LivenessRequest,
     LivenessResponse, SubmitTxRequest, SubmitTxResponse,
 };
 use picomint_core::tx::{ConsensusItem, Transaction, TxError};
@@ -27,7 +27,7 @@ pub async fn handle_api(api: &ConsensusApi, method: CoreMethod) -> Result<Vec<u8
         CoreMethod::BlockCount(req) => handler!(block_count, api, req).await,
         CoreMethod::Liveness(req) => handler!(liveness, api, req).await,
         CoreMethod::ExpiryStatus(req) => handler!(expiry_status, api, req).await,
-        CoreMethod::FederationInfo(req) => handler!(federation_info, api, req).await,
+        CoreMethod::MintInfo(req) => handler!(mint_info, api, req).await,
     }
 }
 
@@ -191,12 +191,12 @@ pub fn expiry_status(
     })
 }
 
-/// Ungated, unlike [`config`]: the federation id and peer set are already held
+/// Ungated, unlike [`config`]: the mint id and peer set are already held
 /// by any joined client, and a caller that got them out of band can pin them
 /// against a hash. Serving them grants nothing an invite would otherwise gate.
-pub fn federation_info(
+pub fn mint_info(
     api: &ConsensusApi,
-    _: FederationInfoRequest,
-) -> Result<FederationInfoResponse, String> {
-    Ok(FederationInfoResponse::new(&api.server.cfg.consensus))
+    _: MintInfoRequest,
+) -> Result<MintInfoResponse, String> {
+    Ok(MintInfoResponse::new(&api.server.cfg.consensus))
 }

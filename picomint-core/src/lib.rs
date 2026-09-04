@@ -23,14 +23,14 @@ use picomint_encoding::{Decodable, Encodable};
 mod amount;
 /// Fibonacci backoff policies for retry loops.
 pub mod backoff;
-/// Federation configuration
+/// Mint configuration
 pub mod config;
 /// Fundamental types
 pub mod core;
-/// Guardian-announced federation expiry date.
+/// Guardian-announced mint expiry date.
 pub mod expiry;
 /// A cut charged on a client's transactions, and where to pay it out.
-/// Federation invite code
+/// Mint invite code
 pub mod invite;
 /// Lightning module wire types / helpers (shared between client and server).
 pub mod lightning;
@@ -48,7 +48,7 @@ pub mod secret;
 pub mod session;
 /// Wire-level Transaction and ConsensusItem types.
 pub mod tx;
-/// Consensus version of the federation and the vote that advances it.
+/// Consensus version of the mint and the vote that advances it.
 pub mod version;
 /// Onchain module wire types / helpers (shared between client and server).
 pub mod onchain;

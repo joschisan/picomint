@@ -68,7 +68,7 @@ pub trait Prefix<D: Table>: Encodable {}
 /// ```ignore
 /// table!(
 ///     NoteTable,
-///     (FederationId, Account, SpendableNote) => (),
+///     (MintId, Account, SpendableNote) => (),
 ///     "note",
 /// );
 /// ```
@@ -608,7 +608,7 @@ impl WriteTx {
     }
 
     /// Remove every entry whose key starts with `prefix`. Used to clear one
-    /// scope's slice of a shared table, e.g. a federation's rows on leave.
+    /// scope's slice of a shared table, e.g. a mint's rows on leave.
     pub fn remove_prefix<D: Table, P: Prefix<D>>(&self, def: &D, prefix: &P) {
         self.touch(def);
 

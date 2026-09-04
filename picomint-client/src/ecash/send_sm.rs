@@ -1,6 +1,6 @@
 use futures::StreamExt;
 use picomint_core::Amount;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{WriteTx, table};
@@ -13,8 +13,8 @@ use crate::context::ClientContext;
 
 table!(
     SendStateMachineTable,
-    (FederationId, SmId) => SendStateMachine,
-    "mint-send-sm",
+    (MintId, SmId) => SendStateMachine,
+    "ecash-send-sm",
 );
 
 /// Drives the slow-path tail of `mint().send()`. The reissuance tx and
@@ -68,7 +68,7 @@ impl StateMachine for SendStateMachine {
     ) -> Option<Self> {
         match outcome {
             SendOutcome::Success => {
-                match super::send_ecash_dbtx(dbtx, ctx.federation, self.account, self.amount) {
+                match super::send_ecash_dbtx(dbtx, ctx.mint, self.account, self.amount) {
                     Some(ecash) => ctx.log_event(
                         dbtx,
                         self.account,

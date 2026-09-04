@@ -17,7 +17,7 @@ use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, ScriptBuf};
 use db::{NextOutputIndexTable, ValidAddressIndexTable};
 use events::{ReceiveEvent, SendEvent};
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::onchain::{
     StandardScript, OnchainInput, OnchainOutput, is_potential_receive, tweaked_address,
@@ -40,8 +40,8 @@ use tracing::warn;
 /// Number of output info entries to scan per batch.
 const SLICE_SIZE: u64 = 1000;
 
-/// Resume this federation's persisted wallet state machines and start the
-/// address scanner. Called exactly once, at federation bring-up.
+/// Resume this mint's persisted wallet state machines and start the
+/// address scanner. Called exactly once, at mint bring-up.
 pub(crate) fn resume(ctx: &ClientContext) {
     crate::executor::resume::<SendStateMachine, _>(ctx, SendStateMachineTable);
 
@@ -52,7 +52,7 @@ pub(crate) fn resume(ctx: &ClientContext) {
 pub(crate) async fn send_fee(ctx: &ClientContext) -> Result<bitcoin::Amount, SendError> {
     api::send_fee(&ctx.api)
         .await
-        .map_err(|_| SendError::FederationError)?
+        .map_err(|_| SendError::MintError)?
         .ok_or(SendError::NoConsensusFeerateAvailable)
 }
 
@@ -135,7 +135,7 @@ fn submit_send(
 fn highest_valid_index(ctx: &ClientContext, account: Account) -> Option<u64> {
     ctx.db
         .begin_read()
-        .prefix_rev(&ValidAddressIndexTable, &(ctx.federation, account), |r| {
+        .prefix_rev(&ValidAddressIndexTable, &(ctx.mint, account), |r| {
             r.next().map(|entry| entry.0.2)
         })
 }
@@ -222,7 +222,7 @@ fn receive_output(
     (operation, txid)
 }
 
-/// Walks the federation-wide output stream once, matching every account's
+/// Walks the mint-wide output stream once, matching every account's
 /// addresses in the same pass. The stream and its cursor are shared, so a
 /// each extra account costs another entry in the address map rather than
 /// another sweep.
@@ -237,7 +237,7 @@ async fn output_scanner(ctx: ClientContext) {
         assert!(
             dbtx.insert(
                 &ValidAddressIndexTable,
-                &(ctx.federation, account, index),
+                &(ctx.mint, account, index),
                 &()
             )
             .is_none(),
@@ -270,13 +270,13 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
     let dbtx = ctx.db.begin_read();
 
     let start = dbtx
-        .get(&NextOutputIndexTable, &ctx.federation)
+        .get(&NextOutputIndexTable, &ctx.mint)
         .unwrap_or(0);
 
     // Every account's indices come out of one prefix scan, already tagged
     // with the account they belong to.
     let valid_indices: Vec<(Account, u64)> =
-        dbtx.prefix(&ValidAddressIndexTable, &ctx.federation, |r| {
+        dbtx.prefix(&ValidAddressIndexTable, &ctx.mint, |r| {
             r.map(|entry| (entry.0.1, entry.0.2)).collect()
         });
 
@@ -321,7 +321,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
 
                 dbtx.insert(
                     &ValidAddressIndexTable,
-                    &(ctx.federation, account, index),
+                    &(ctx.mint, account, index),
                     &(),
                 );
 
@@ -371,7 +371,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
 
         let dbtx = ctx.db.begin_write();
 
-        dbtx.insert(&NextOutputIndexTable, &ctx.federation, &(output.index + 1));
+        dbtx.insert(&NextOutputIndexTable, &ctx.mint, &(output.index + 1));
 
         dbtx.commit();
     }
@@ -379,22 +379,22 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
     Ok(!outputs.is_empty())
 }
 
-/// Remove every row this module owns under the caller's federation prefix.
+/// Remove every row this module owns under the caller's mint prefix.
 /// Called by [`crate::Client::remove`] for end-of-life cleanup.
-pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
-    dbtx.remove(&NextOutputIndexTable, &federation);
-    dbtx.remove_prefix(&ValidAddressIndexTable, &federation);
-    dbtx.remove_prefix(&SendStateMachineTable, &federation);
+pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
+    dbtx.remove(&NextOutputIndexTable, &mint);
+    dbtx.remove_prefix(&ValidAddressIndexTable, &mint);
+    dbtx.remove_prefix(&SendStateMachineTable, &mint);
 }
 
 /// Whether any of this module's state machines for `operation` is still
-/// active under `federation`.
+/// active under `mint`.
 pub(crate) fn operation_is_active(
     dbtx: &ReadTx,
-    federation: FederationId,
+    mint: MintId,
     operation: OperationId,
 ) -> bool {
-    dbtx.prefix(&SendStateMachineTable, &federation, |r| {
+    dbtx.prefix(&SendStateMachineTable, &mint, |r| {
         r.any(|entry| entry.1.operation == operation)
     })
 }
@@ -407,33 +407,33 @@ pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
 pub enum SendError {
-    #[error("Address is from a different network than the federation.")]
+    #[error("Address is from a different network than the mint.")]
     WrongNetwork,
     #[error("The value is too small")]
     DustValue,
     #[error("Could not determine the send fee")]
-    FederationError,
+    MintError,
     #[error("No consensus feerate is available at this time")]
     NoConsensusFeerateAvailable,
     #[error("The client does not have sufficient funds to send the payment")]
     InsufficientFunds,
     #[error("Unsupported address type")]
     UnsupportedAddress,
-    #[error("Federation is not added")]
+    #[error("Mint is not added")]
     NotAdded,
 }
 
-// ─── Flat federation-keyed surface ───────────────────────────────────────
+// ─── Flat mint-keyed surface ───────────────────────────────────────
 
 impl Client {
     /// `account`'s next unused onchain deposit address. Errors while the
     /// initial address derivation has not completed yet.
     pub fn onchain_receive(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
     ) -> anyhow::Result<Address> {
-        let ctx = self.ctx(federation)?;
+        let ctx = self.ctx(mint)?;
 
         highest_valid_index(&ctx, account)
             .map(|index| derive_address(&ctx, account, index))
@@ -441,16 +441,16 @@ impl Client {
     }
 
     /// Send an onchain payment funded from `account`. `fee` defaults to the
-    /// federation's current send fee.
+    /// mint's current send fee.
     pub async fn onchain_send(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
         address: Address<NetworkUnchecked>,
         amount: bitcoin::Amount,
         fee: Option<bitcoin::Amount>,
     ) -> Result<OperationId, SendError> {
-        let ctx = self.ctx(federation).map_err(|_| SendError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| SendError::NotAdded)?;
 
         let fee = match fee {
             Some(fee) => fee,
@@ -465,10 +465,10 @@ impl Client {
     /// the send itself re-prices at the moment it is submitted.
     pub async fn onchain_send_max_amount(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
     ) -> Result<bitcoin::Amount, SendError> {
-        let ctx = self.ctx(federation).map_err(|_| SendError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| SendError::NotAdded)?;
 
         Ok(max_amount_at(&ctx, account, send_fee(&ctx).await?))
     }
@@ -477,11 +477,11 @@ impl Client {
     /// holds; no change comes back.
     pub async fn onchain_send_max(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
         address: Address<NetworkUnchecked>,
     ) -> Result<OperationId, SendError> {
-        let ctx = self.ctx(federation).map_err(|_| SendError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| SendError::NotAdded)?;
 
         let fee = send_fee(&ctx).await?;
 
@@ -493,27 +493,27 @@ impl Client {
     /// The current fee required to send an onchain payment.
     pub async fn onchain_send_fee(
         &self,
-        federation: FederationId,
+        mint: MintId,
     ) -> Result<bitcoin::Amount, SendError> {
-        let ctx = self.ctx(federation).map_err(|_| SendError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| SendError::NotAdded)?;
 
         send_fee(&ctx).await
     }
 
-    /// The total value of bitcoin controlled by the federation.
+    /// The total value of bitcoin controlled by the mint.
     pub async fn onchain_total_value(
         &self,
-        federation: FederationId,
+        mint: MintId,
     ) -> anyhow::Result<bitcoin::Amount> {
-        let ctx = self.ctx(federation)?;
+        let ctx = self.ctx(mint)?;
 
-        api::federation_utxo(&ctx.api)
+        api::mint_utxo(&ctx.api)
             .await
             .map(|tx_out| tx_out.map_or(bitcoin::Amount::ZERO, |tx_out| tx_out.value))
     }
 
     /// The current consensus feerate.
-    pub async fn onchain_feerate(&self, federation: FederationId) -> anyhow::Result<Option<u32>> {
-        api::consensus_feerate(&self.ctx(federation)?.api).await
+    pub async fn onchain_feerate(&self, mint: MintId) -> anyhow::Result<Option<u32>> {
+        api::consensus_feerate(&self.ctx(mint)?.api).await
     }
 }

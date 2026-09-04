@@ -53,14 +53,14 @@ fn main() -> anyhow::Result<()> {
 
     runtime.block_on(client_send.client.shutdown());
 
-    info!("Removing the federation from the gateway...");
-    cli::gateway_federation_remove(&env.gateway_data_dir, &env.invite.federation.to_string())?;
+    info!("Removing the mint from the gateway...");
+    cli::gateway_mint_remove(&env.gateway_data_dir, &env.invite.mint.to_string())?;
 
     ensure!(
-        cli::gateway_federation_list(&env.gateway_data_dir)?
-            .federations
+        cli::gateway_mint_list(&env.gateway_data_dir)?
+            .mints
             .is_empty(),
-        "gateway still lists federations after remove"
+        "gateway still lists mints after remove"
     );
 
     info!("Running guardian backup/restore test...");
@@ -78,7 +78,7 @@ fn main() -> anyhow::Result<()> {
     std::process::exit(0);
 }
 
-/// Keep the federation running after the suite passes so it can be driven by
+/// Keep the mint running after the suite passes so it can be driven by
 /// hand — pair a phone with the printed invite, or hit the daemons with
 /// `picomint-{guardian,gateway}-cli --data-dir <dir>`. Blocks until Ctrl-C;
 /// the wrapper script tears the daemons down on exit.
@@ -88,7 +88,7 @@ fn keep_alive(runtime: &tokio::runtime::Runtime, env: &env::TestEnv) -> anyhow::
 
     // The lightning suite registers then deregisters the gateway as cleanup, so
     // re-register the real gateway with every guardian here — otherwise the
-    // kept-alive federation exposes no gateway and a paired phone can't do
+    // kept-alive mint exposes no gateway and a paired phone can't do
     // Lightning.
     info!("Registering gateway with all guardians");
     for peer in 0..env::NUM_GUARDIANS {
@@ -132,7 +132,7 @@ fn keep_alive(runtime: &tokio::runtime::Runtime, env: &env::TestEnv) -> anyhow::
     println!(" Ctrl-C to tear everything down.");
     println!("==========================================================================");
 
-    info!("Federation up; waiting for Ctrl-C…");
+    info!("Mint up; waiting for Ctrl-C…");
     runtime.block_on(async {
         let _ = tokio::signal::ctrl_c().await;
     });

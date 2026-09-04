@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::Notify;
 
-use crate::api::FederationApi;
+use crate::api::MintApi;
 use crate::client::Client;
 use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
@@ -23,7 +23,7 @@ use anyhow::ensure;
 use client_db::{CounterTable, NoteTable, ReceiveOperationTable};
 pub use events::*;
 use futures::StreamExt;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::ecash::config::{ECashConfigConsensus, client_denominations};
 use picomint_core::ecash::{Denomination, ECashInput, Note};
@@ -97,7 +97,7 @@ impl SpendableNote {
 /// is where it lands, in the dbtx [`crate::Client::add`] owns.
 #[derive(Debug, Clone)]
 pub(crate) struct Restore {
-    federation: FederationId,
+    mint: MintId,
     notes: Vec<SpendableNote>,
     counter: u64,
 }
@@ -105,13 +105,13 @@ pub(crate) struct Restore {
 /// Persist what a [`scan`] of `account` found, in a dbtx the caller owns.
 ///
 /// The counter mark must land before the account issues anything: an account
-/// resuming from zero would re-derive nonces the federation has already
+/// resuming from zero would re-derive nonces the mint has already
 /// signed, and every note behind them would be stranded. That is why this
-/// shares a dbtx with whatever marks the federation as added — a crash
+/// shares a dbtx with whatever marks the mint as added — a crash
 /// leaves either both or neither.
 ///
 /// The notes go straight into the wallet rather than through a reissuance
-/// first, so the balance is simply there when the client opens. The federation
+/// first, so the balance is simply there when the client opens. The mint
 /// was asked about each of these nonces by name during the scan and can
 /// recognise them when they are spent — a restored wallet is linkable to its
 /// scan until the notes churn out through the change of ordinary
@@ -121,14 +121,14 @@ pub(crate) struct Restore {
 pub(crate) fn commit_scan(dbtx: &WriteTx, account: Account, restore: &Restore) {
     dbtx.insert(
         &CounterTable,
-        &(restore.federation, account),
+        &(restore.mint, account),
         &restore.counter,
     );
 
     for note in &restore.notes {
         dbtx.insert(
             &NoteTable,
-            &(restore.federation, account, note.clone()),
+            &(restore.mint, account, note.clone()),
             &(),
         );
     }
@@ -138,21 +138,21 @@ pub(crate) fn commit_scan(dbtx: &WriteTx, account: Account, restore: &Restore) {
 ///
 /// Runs in two phases. A single counter space serves every denomination, so
 /// the walk is one sequential chain of batches, stopping as soon as one full
-/// batch turns up nothing at all — neither a nonce the federation has seen
+/// batch turns up nothing at all — neither a nonce the mint has seen
 /// spent nor a blinded message it ever signed. Only once the live set has
 /// settled are the signature shares fetched, in a single request.
 ///
 /// Splitting membership from retrieval is what keeps a note from going
 /// missing: both probes answer under threshold consensus, so peers must agree
 /// before a counter is written off, and the fetch then asks only for messages
-/// already known to resolve — a share the federation fails to produce is an
+/// already known to resolve — a share the mint fails to produce is an
 /// error rather than a candidate quietly dropped for want of a full column to
 /// interpolate over.
 pub(crate) async fn scan(
-    api: &FederationApi,
+    api: &MintApi,
     secret: &ECashSecret,
     cfg: &ECashConfigConsensus,
-    federation: FederationId,
+    mint: MintId,
     account: Account,
 ) -> anyhow::Result<Restore> {
     let (counter, requests) = scan_counters(api, secret, account).await;
@@ -185,17 +185,17 @@ pub(crate) async fn scan(
     }
 
     Ok(Restore {
-        federation,
+        mint,
         notes,
         counter,
     })
 }
 
 /// Walk the counter space. Returns the counter the scan reached and the
-/// candidates the federation both signed and has not seen spent — the notes
+/// candidates the mint both signed and has not seen spent — the notes
 /// still live, whose shares the caller fetches in bulk.
 ///
-/// A candidate's denomination comes back from [`FederationApi::issuance_state`]
+/// A candidate's denomination comes back from [`MintApi::issuance_state`]
 /// rather than from the seed, since nothing under a single counter depends on
 /// it. A peer that reports the wrong one cannot make the wallet credit itself
 /// anything: the share is aggregated and checked against that denomination's
@@ -208,7 +208,7 @@ pub(crate) async fn scan(
 /// counters below the next issuance would strand it behind exactly the gap the
 /// scan refuses to cross.
 async fn scan_counters(
-    api: &FederationApi,
+    api: &MintApi,
     secret: &ECashSecret,
     account: Account,
 ) -> (u64, Vec<NoteIssuanceRequest>) {
@@ -263,10 +263,10 @@ async fn scan_counters(
 /// blinded message is committed to.
 fn next_counter(ctx: &ClientContext, dbtx: &WriteTx, account: Account) -> u64 {
     let counter = dbtx
-        .get(&CounterTable, &(ctx.federation, account))
+        .get(&CounterTable, &(ctx.mint, account))
         .unwrap_or(0);
 
-    dbtx.insert(&CounterTable, &(ctx.federation, account), &(counter + 1));
+    dbtx.insert(&CounterTable, &(ctx.mint, account), &(counter + 1));
 
     counter
 }
@@ -333,7 +333,7 @@ pub(crate) fn finalize_and_submit_tx<E: crate::eventlog::Event + Send>(
 /// Mint-side transaction balancing. Pulls funding notes from `account`
 /// when the builder is underfunded, then absorbs any excess as change
 /// outputs issued back to the same account. Sub-denomination dust below
-/// `smallest_change_denom + output_fee` is left as implicit federation
+/// `smallest_change_denom + output_fee` is left as implicit mint
 /// revenue. Returns `None` iff the account holds insufficient funds to
 /// cover the builder's deficit, which is the only way balancing fails.
 fn fund(
@@ -350,7 +350,7 @@ fn fund(
     spendable_notes.sort_by_key(|note| note.denomination);
 
     for note in &spendable_notes {
-        remove_spendable_note(dbtx, ctx.federation, account, note);
+        remove_spendable_note(dbtx, ctx.mint, account, note);
         builder.add_input(Input {
             input: wire::Input::ECash(ECashInput { note: note.note() }),
             keypair: note.keypair,
@@ -436,7 +436,7 @@ fn submit<E: crate::eventlog::Event + Send>(
 /// spent in full — their face value minus one input fee per note. The
 /// budget a max-send amount is solved against.
 fn max_spendable(ctx: &ClientContext, account: Account) -> Amount {
-    account_notes(&ctx.db.begin_read(), ctx.federation, account)
+    account_notes(&ctx.db.begin_read(), ctx.mint, account)
         .iter()
         .map(|note| note_value(ctx, note))
         .sum()
@@ -445,11 +445,11 @@ fn max_spendable(ctx: &ClientContext, account: Account) -> Amount {
 /// Largest whole-sat amount `account`'s notes can deliver to a rail's
 /// outputs when spent in full: a max send for this amount pulls every
 /// note and mints no change (see [`change_denominations`]), donating the
-/// sub-sat remainder to the federation the way change dust already is.
+/// sub-sat remainder to the mint the way change dust already is.
 /// Zero when even the fees on a zero-amount payment do not fit.
 ///
 /// `rail_fees` prices everything the rail's outputs add on top of the
-/// amount itself — the rail's own fees and the federation's fee on the
+/// amount itself — the rail's own fees and the mint's fee on the
 /// outputs that carry them — and must be monotone.
 ///
 /// Whole sats because that is the granularity every rail's amount entry
@@ -492,7 +492,7 @@ fn select_funding_input(
     let mut selected = Vec::new();
     let mut target_notes = Vec::new();
 
-    let all_notes = account_notes(dbtx, ctx.federation, account);
+    let all_notes = account_notes(dbtx, ctx.mint, account);
 
     for amount in client_denominations().rev() {
         let notes_amount: Vec<SpendableNote> = all_notes
@@ -574,12 +574,12 @@ fn select_output_denominations(
 
 fn get_count_by_denomination_dbtx(
     dbtx: &impl DbRead,
-    federation: FederationId,
+    mint: MintId,
     account: Account,
 ) -> BTreeMap<Denomination, u64> {
     let mut acc = BTreeMap::new();
 
-    for note in account_notes(dbtx, federation, account) {
+    for note in account_notes(dbtx, mint, account) {
         acc.entry(note.denomination)
             .and_modify(|count| *count += 1)
             .or_insert(1);
@@ -590,22 +590,22 @@ fn get_count_by_denomination_dbtx(
 
 fn remove_spendable_note(
     dbtx: &WriteTx,
-    federation: FederationId,
+    mint: MintId,
     account: Account,
     spendable_note: &SpendableNote,
 ) {
-    dbtx.remove(&NoteTable, &(federation, account, spendable_note.clone()))
+    dbtx.remove(&NoteTable, &(mint, account, spendable_note.clone()))
         .expect("Must delete existing spendable note");
 }
 
 /// Every note `account` holds — an indexed prefix scan over the key's
-/// leading `(federation, account)` columns.
+/// leading `(mint, account)` columns.
 fn account_notes(
     dbtx: &impl DbRead,
-    federation: FederationId,
+    mint: MintId,
     account: Account,
 ) -> Vec<SpendableNote> {
-    dbtx.prefix(&NoteTable, &(federation, account), |r| {
+    dbtx.prefix(&NoteTable, &(mint, account), |r| {
         r.map(|entry| entry.0.2).collect()
     })
 }
@@ -616,11 +616,11 @@ fn account_notes(
 /// — callers do that.
 fn send_ecash_dbtx(
     dbtx: &WriteTx,
-    federation: FederationId,
+    mint: MintId,
     account: Account,
     mut remaining_amount: Amount,
 ) -> Option<ECash> {
-    let mut sorted = account_notes(dbtx, federation, account);
+    let mut sorted = account_notes(dbtx, mint, account);
 
     sorted.sort_by_key(|n| std::cmp::Reverse(n.denomination));
 
@@ -640,32 +640,32 @@ fn send_ecash_dbtx(
     }
 
     for spendable_note in &notes {
-        remove_spendable_note(dbtx, federation, account, spendable_note);
+        remove_spendable_note(dbtx, mint, account, spendable_note);
     }
 
-    Some(ECash::new(federation, notes))
+    Some(ECash::new(mint, notes))
 }
 
-/// Remove every row this module owns under the caller's federation prefix.
+/// Remove every row this module owns under the caller's mint prefix.
 /// Called by [`crate::Client::remove`] for end-of-life cleanup.
-pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
-    dbtx.remove_prefix(&NoteTable, &federation);
-    dbtx.remove_prefix(&ReceiveOperationTable, &federation);
-    dbtx.remove_prefix(&CounterTable, &federation);
-    dbtx.remove_prefix(&ECashStateMachineTable, &federation);
-    dbtx.remove_prefix(&SendStateMachineTable, &federation);
+pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
+    dbtx.remove_prefix(&NoteTable, &mint);
+    dbtx.remove_prefix(&ReceiveOperationTable, &mint);
+    dbtx.remove_prefix(&CounterTable, &mint);
+    dbtx.remove_prefix(&ECashStateMachineTable, &mint);
+    dbtx.remove_prefix(&SendStateMachineTable, &mint);
 }
 
 /// Whether any of this module's state machines for `operation` is still
-/// active under `federation`.
+/// active under `mint`.
 pub(crate) fn operation_is_active(
     dbtx: &ReadTx,
-    federation: FederationId,
+    mint: MintId,
     operation: OperationId,
 ) -> bool {
-    dbtx.prefix(&ECashStateMachineTable, &federation, |r| {
+    dbtx.prefix(&ECashStateMachineTable, &mint, |r| {
         r.any(|entry| entry.1.operation == operation)
-    }) || dbtx.prefix(&SendStateMachineTable, &federation, |r| {
+    }) || dbtx.prefix(&SendStateMachineTable, &mint, |r| {
         r.any(|entry| entry.1.operation == operation)
     })
 }
@@ -679,8 +679,8 @@ pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
     ]
 }
 
-/// Resume this federation's persisted mint state machines. Called exactly
-/// once, at federation bring-up.
+/// Resume this mint's persisted mint state machines. Called exactly
+/// once, at mint bring-up.
 pub(crate) fn resume(ctx: &ClientContext) {
     crate::executor::resume::<TxSubmissionStateMachine, _>(ctx, TxSubmissionStateMachineTable);
 
@@ -697,7 +697,7 @@ pub enum SendECashError {
     InsufficientBalance,
     #[error("A non-recoverable error has occurred")]
     Failure,
-    #[error("Federation is not added")]
+    #[error("Mint is not added")]
     NotAdded,
 }
 
@@ -707,15 +707,15 @@ pub enum ReceiveECashError {
     Empty,
     #[error("The ECash bundle contains more notes than one transaction can reissue")]
     TooManyNotes,
-    #[error("The ECash is from a different federation")]
-    WrongFederation,
+    #[error("The ECash is from a different mint")]
+    WrongMint,
     #[error("ECash contains an uneconomical denomination")]
     UneconomicalDenomination,
     #[error("Receiving ecash requires additional funds")]
     InsufficientFunds,
     #[error("This ecash bundle has already been received")]
     AlreadyAttempted,
-    #[error("Federation is not added")]
+    #[error("Mint is not added")]
     NotAdded,
 }
 
@@ -738,30 +738,30 @@ fn represent_amount(mut remaining_amount: Amount) -> Vec<Denomination> {
     denominations
 }
 
-// ─── Flat federation-keyed surface ───────────────────────────────────────
+// ─── Flat mint-keyed surface ───────────────────────────────────────
 
 /// `account`'s ecash balance: the face value of every note it holds.
-pub(crate) fn balance(dbtx: &impl DbRead, federation: FederationId, account: Account) -> Amount {
-    account_notes(dbtx, federation, account)
+pub(crate) fn balance(dbtx: &impl DbRead, mint: MintId, account: Account) -> Amount {
+    account_notes(dbtx, mint, account)
         .iter()
         .map(|note| note.amount())
         .sum()
 }
 
 impl Client {
-    /// `account`'s ecash balance. Pure read — a federation that is not
+    /// `account`'s ecash balance. Pure read — a mint that is not
     /// added simply holds nothing.
-    pub fn ecash_balance(&self, federation: FederationId, account: Account) -> Amount {
-        balance(&self.db.begin_read(), federation, account)
+    pub fn ecash_balance(&self, mint: MintId, account: Account) -> Amount {
+        balance(&self.db.begin_read(), mint, account)
     }
 
     /// Yields `account`'s balance whenever the note table is written. The
-    /// same value may be yielded repeatedly — every federation's accounts
-    /// share one table, so writes to another account or federation wake this
+    /// same value may be yielded repeatedly — every mint's accounts
+    /// share one table, so writes to another account or mint wake this
     /// stream too. Pure read.
     pub fn ecash_subscribe_balance(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
     ) -> futures::stream::BoxStream<'static, Amount> {
         let notify = self.db.notify_for_table(&NoteTable);
@@ -773,7 +773,7 @@ impl Client {
                 // still wakes the already-registered waiter.
                 let notified = notify.notified();
 
-                yield balance(&db.begin_read(), federation, account);
+                yield balance(&db.begin_read(), mint, account);
 
                 notified.await;
             }
@@ -781,13 +781,13 @@ impl Client {
     }
 
     /// Count `account`'s notes by denomination. Pure read — never brings
-    /// the federation up.
+    /// the mint up.
     pub fn ecash_count(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
     ) -> BTreeMap<Denomination, u64> {
-        get_count_by_denomination_dbtx(&self.db.begin_read(), federation, account)
+        get_count_by_denomination_dbtx(&self.db.begin_read(), mint, account)
     }
 
     /// Send [`ECash`] for the given amount from `account`. The amount is
@@ -798,11 +798,11 @@ impl Client {
     /// send, receive the ecash yourself.
     pub async fn ecash_send(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
         amount: Amount,
     ) -> Result<ECash, SendECashError> {
-        let ctx = self.ctx(federation).map_err(|_| SendECashError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| SendECashError::NotAdded)?;
 
         let amount = round_to_multiple(
             amount,
@@ -819,7 +819,7 @@ impl Client {
         // atomically in one dbtx — no tx, no SM.
         let dbtx = ctx.db.begin_write();
 
-        if let Some(ecash) = send_ecash_dbtx(&dbtx, ctx.federation, account, amount) {
+        if let Some(ecash) = send_ecash_dbtx(&dbtx, ctx.mint, account, amount) {
             ctx.log_event(&dbtx, account, operation, SendEvent { amount });
             ctx.log_event(
                 &dbtx,
@@ -915,25 +915,25 @@ impl Client {
     /// it holds nothing.
     pub fn ecash_send_max(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
     ) -> anyhow::Result<Option<ECash>> {
-        let ctx = self.ctx(federation)?;
+        let ctx = self.ctx(mint)?;
 
         let operation = OperationId::new_random();
         let dbtx = ctx.db.begin_write();
 
-        let notes = account_notes(&dbtx, ctx.federation, account);
+        let notes = account_notes(&dbtx, ctx.mint, account);
 
         if notes.is_empty() {
             return Ok(None);
         }
 
         for note in &notes {
-            remove_spendable_note(&dbtx, ctx.federation, account, note);
+            remove_spendable_note(&dbtx, ctx.mint, account, note);
         }
 
-        let ecash = ECash::new(ctx.federation, notes);
+        let ecash = ECash::new(ctx.mint, notes);
         let amount = ecash.amount();
 
         ctx.log_event(&dbtx, account, operation, SendEvent { amount });
@@ -952,15 +952,15 @@ impl Client {
     }
 
     /// Receive an [`ECash`] bundle into `account` by reissuing its notes.
-    /// A bundle can be received exactly once per federation.
+    /// A bundle can be received exactly once per mint.
     pub fn ecash_receive(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
         ecash: &ECash,
     ) -> Result<OperationId, ReceiveECashError> {
         let ctx = self
-            .ctx(federation)
+            .ctx(mint)
             .map_err(|_| ReceiveECashError::NotAdded)?;
 
         let operation = OperationId::from_encodable(ecash);
@@ -980,8 +980,8 @@ impl Client {
             return Err(ReceiveECashError::TooManyNotes);
         }
 
-        if ecash.mint != ctx.federation {
-            return Err(ReceiveECashError::WrongFederation);
+        if ecash.mint != ctx.mint {
+            return Err(ReceiveECashError::WrongMint);
         }
 
         if ecash
@@ -1005,7 +1005,7 @@ impl Client {
         let dbtx = ctx.db.begin_write();
 
         if dbtx
-            .insert(&ReceiveOperationTable, &(ctx.federation, operation), &())
+            .insert(&ReceiveOperationTable, &(ctx.mint, operation), &())
             .is_some()
         {
             return Err(ReceiveECashError::AlreadyAttempted);
@@ -1039,7 +1039,7 @@ impl Client {
     #[allow(clippy::too_many_arguments)]
     pub fn ecash_finalize_and_submit_tx<E: crate::eventlog::Event + Send>(
         &self,
-        federation: FederationId,
+        mint: MintId,
         dbtx: &WriteTx,
         account: Account,
         operation: OperationId,
@@ -1047,7 +1047,7 @@ impl Client {
         max: bool,
         event: impl FnOnce(TransactionId) -> E,
     ) -> anyhow::Result<Option<TransactionId>> {
-        let ctx = self.ctx(federation)?;
+        let ctx = self.ctx(mint)?;
 
         Ok(finalize_and_submit_tx(
             &ctx,

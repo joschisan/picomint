@@ -19,7 +19,7 @@ pub struct AcceptedItem {
 /// Items ordered in a single session that have been accepted by Picomint
 /// consensus.
 ///
-/// A running Federation produces a [`SessionOutcome`] every couple of minutes.
+/// A running Mint produces a [`SessionOutcome`] every couple of minutes.
 /// Therefore, just like in Bitcoin, a [`SessionOutcome`] might be empty if no
 /// items are ordered in that time or all ordered items are discarded by
 /// Picomint Consensus.
@@ -41,11 +41,11 @@ impl SessionOutcome {
     }
 }
 
-/// A [`SessionOutcome`], signed by the Federation.
+/// A [`SessionOutcome`], signed by the Mint.
 ///
 /// A signed block combines a block with the naive threshold secp schnorr
-/// signature for its header created by the federation. The signed blocks allow
-/// clients and recovering guardians to verify the federations consensus
+/// signature for its header created by the mint. The signed blocks allow
+/// clients and recovering guardians to verify the mints consensus
 /// history. After a signed block has been created it is stored in the database.
 #[derive(Clone, Debug, Encodable, Decodable, Eq, PartialEq)]
 pub struct SignedSessionOutcome {

@@ -1,4 +1,4 @@
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_redb::table;
 
@@ -11,16 +11,16 @@ use super::SpendableNote;
 // against already-spent notes.
 table!(
     ReceiveOperationTable,
-    (FederationId, OperationId) => (),
+    (MintId, OperationId) => (),
     "ecash-receive-operation",
 );
 
-// Every federation's accounts share one table, split by the key's leading
-// [`FederationId`] and [`Account`]. Nonces derive from per-account secrets,
+// Every mint's accounts share one table, split by the key's leading
+// [`MintId`] and [`Account`]. Nonces derive from per-account secrets,
 // so two accounts can never produce the same note.
 table!(
     NoteTable,
-    (FederationId, Account, SpendableNote) => (),
+    (MintId, Account, SpendableNote) => (),
     "ecash-note",
 );
 
@@ -32,9 +32,9 @@ table!(
 //
 // Restore rewrites an account's counter to the high-water mark it scanned to;
 // a restored wallet that resumed from zero would re-derive nonces the
-// federation has already signed.
+// mint has already signed.
 table!(
     CounterTable,
-    (FederationId, Account) => u64,
+    (MintId, Account) => u64,
     "ecash-counter",
 );

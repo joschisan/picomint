@@ -30,7 +30,7 @@ impl Event for SendSuccessEvent {
 }
 
 /// Emitted when the payment fails and funds are refunded via a new claim tx.
-/// `expired` is `true` when the contract expired without the federation
+/// `expired` is `true` when the contract expired without the mint
 /// observing a preimage, `false` when the gateway returned a signed cancel
 /// (payment definitively did not happen).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -46,7 +46,7 @@ impl Event for SendRefundEvent {
 
 /// Emitted when a send is in an unrecoverable indeterminate state: the
 /// refund tx was rejected (so the contract was claimed by the gateway),
-/// but the federation hasn't surfaced a preimage we can verify either.
+/// but the mint hasn't surfaced a preimage we can verify either.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendFailureEvent;
 

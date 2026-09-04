@@ -2,7 +2,7 @@ use picomint_redb::{WriteTx, table};
 use std::collections::BTreeMap;
 
 use anyhow::{Context, anyhow};
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::OperationId;
 use picomint_core::lightning::LightningInput;
 use picomint_core::lightning::contracts::IncomingOffer;
@@ -23,16 +23,16 @@ use picomint_rpc::query::FilterMapThreshold;
 
 table!(
     ReceiveStateMachineTable,
-    (FederationId, SmId) => ReceiveStateMachine,
+    (MintId, SmId) => ReceiveStateMachine,
     "gateway-receive-sm",
 );
 
-/// Single-state state machine covering the federation side of the receive
+/// Single-state state machine covering the mint side of the receive
 /// flow. `trigger` waits for tx acceptance and gathers TPE decryption shares;
 /// `transition` logs the terminal receive event and submits the refund tx
 /// if the preimage decode failed. All external (LN / cross-fed) side effects
-/// are handled out-of-band by the per-federation trailer task watching this
-/// federation's event log.
+/// are handled out-of-band by the per-mint trailer task watching this
+/// mint's event log.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveStateMachine {
     pub operation: OperationId,

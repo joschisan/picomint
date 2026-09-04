@@ -21,11 +21,11 @@ pub struct PeerSetupCode {
     /// Public key of the peer's single iroh endpoint (serves both p2p and
     /// client-API traffic, demuxed by node-id on accept).
     pub pk: iroh_base::PublicKey,
-    /// Federation name set by the leader
-    pub federation_name: Option<String>,
+    /// Mint name set by the leader
+    pub mint_name: Option<String>,
     /// Total number of guardians (including the one who sets this), set by the
     /// leader
-    pub federation_size: Option<u8>,
+    pub mint_size: Option<u8>,
 }
 
 /// The state of the server while config gen is running.
@@ -55,11 +55,11 @@ pub struct LocalParams {
     iroh_sk: iroh::SecretKey,
     /// Name of the peer
     name: String,
-    /// Federation name set by the leader
-    federation_name: Option<String>,
+    /// Mint name set by the leader
+    mint_name: Option<String>,
     /// Total number of guardians (including the one who sets this), set by the
     /// leader
-    federation_size: Option<u8>,
+    mint_size: Option<u8>,
 }
 
 impl LocalParams {
@@ -67,8 +67,8 @@ impl LocalParams {
         PeerSetupCode {
             name: self.name.clone(),
             pk: self.iroh_sk.public(),
-            federation_name: self.federation_name.clone(),
-            federation_size: self.federation_size,
+            mint_name: self.mint_name.clone(),
+            mint_size: self.mint_size,
         }
     }
 }
@@ -146,13 +146,13 @@ impl SetupApi {
     pub async fn set_local_parameters(
         &self,
         name: String,
-        federation_name: Option<String>,
-        federation_size: Option<u8>,
+        mint_name: Option<String>,
+        mint_size: Option<u8>,
     ) -> anyhow::Result<String> {
         if let Some(existing_local_parameters) = self.state.lock().await.local_params.clone()
             && existing_local_parameters.name == name
-            && existing_local_parameters.federation_name == federation_name
-            && existing_local_parameters.federation_size == federation_size
+            && existing_local_parameters.mint_name == mint_name
+            && existing_local_parameters.mint_size == mint_size
         {
             return Ok(picomint_base32::encode(
                 &existing_local_parameters.setup_code(),
@@ -161,19 +161,19 @@ impl SetupApi {
 
         ensure!(!name.is_empty(), "The guardian name is empty");
 
-        if let Some(federation_name) = federation_name.as_ref() {
-            ensure!(!federation_name.is_empty(), "The federation name is empty");
+        if let Some(mint_name) = mint_name.as_ref() {
+            ensure!(!mint_name.is_empty(), "The mint name is empty");
         }
 
-        if federation_name.is_some() {
+        if mint_name.is_some() {
             ensure!(
-                federation_size.is_some(),
-                "The leader must set the federation size"
+                mint_size.is_some(),
+                "The leader must set the mint size"
             );
         }
 
-        if let Some(size) = federation_size {
-            ensure!(size >= 4, "Federation size must be at least 4");
+        if let Some(size) = mint_size {
+            ensure!(size >= 4, "Mint size must be at least 4");
         }
 
         let mut state = self.state.lock().await;
@@ -188,8 +188,8 @@ impl SetupApi {
         let lp = LocalParams {
             iroh_sk,
             name,
-            federation_name,
-            federation_size,
+            mint_name,
+            mint_size,
         };
 
         let dbtx = self.db.begin_write();
@@ -222,27 +222,27 @@ impl SetupApi {
             "You cannot add your own setup code"
         );
 
-        if let Some(federation_name) = state
+        if let Some(mint_name) = state
             .setup_codes
             .iter()
             .chain(once(&local_params.setup_code()))
-            .find_map(|info| info.federation_name.clone())
+            .find_map(|info| info.mint_name.clone())
         {
             ensure!(
-                info.federation_name.is_none(),
-                "Federation name has already been set to {federation_name}"
+                info.mint_name.is_none(),
+                "Mint name has already been set to {mint_name}"
             );
         }
 
-        if let Some(federation_size) = state
+        if let Some(mint_size) = state
             .setup_codes
             .iter()
             .chain(once(&local_params.setup_code()))
-            .find_map(|info| info.federation_size)
+            .find_map(|info| info.mint_size)
         {
             ensure!(
-                info.federation_size.is_none(),
-                "Federation size has already been set to {federation_size}"
+                info.mint_size.is_none(),
+                "Mint size has already been set to {mint_size}"
             );
         }
 
@@ -265,26 +265,26 @@ impl SetupApi {
 
         ensure!(
             state.setup_codes.len() >= 4,
-            "Federation size must be at least 4"
+            "Mint size must be at least 4"
         );
 
-        if let Some(federation_size) = state
+        if let Some(mint_size) = state
             .setup_codes
             .iter()
-            .find_map(|info| info.federation_size)
+            .find_map(|info| info.mint_size)
         {
             ensure!(
-                state.setup_codes.len() == federation_size as usize,
-                "Expected {federation_size} guardians but got {}",
+                state.setup_codes.len() == mint_size as usize,
+                "Expected {mint_size} guardians but got {}",
                 state.setup_codes.len()
             );
         }
 
-        let federation_name = state
+        let mint_name = state
             .setup_codes
             .iter()
-            .find_map(|info| info.federation_name.clone())
-            .context("We need one guardian to configure the federations name")?;
+            .find_map(|info| info.mint_name.clone())
+            .context("We need one guardian to configure the mints name")?;
 
         let our_id = state
             .setup_codes
@@ -299,7 +299,7 @@ impl SetupApi {
                 .map(|i| PeerId::from(i as u8))
                 .zip(state.setup_codes.clone())
                 .collect(),
-            name: federation_name,
+            name: mint_name,
             network: self.settings.network,
         };
 
@@ -337,23 +337,23 @@ impl SetupApi {
         Ok(())
     }
 
-    pub async fn federation_size(&self) -> Option<u8> {
+    pub async fn mint_size(&self) -> Option<u8> {
         let state = self.state.lock().await;
         let local_setup_code = state.local_params.as_ref().map(LocalParams::setup_code);
         state
             .setup_codes
             .iter()
             .chain(local_setup_code.iter())
-            .find_map(|info| info.federation_size)
+            .find_map(|info| info.mint_size)
     }
 
-    pub async fn cfg_federation_name(&self) -> Option<String> {
+    pub async fn cfg_mint_name(&self) -> Option<String> {
         let state = self.state.lock().await;
         let local_setup_code = state.local_params.as_ref().map(LocalParams::setup_code);
         state
             .setup_codes
             .iter()
             .chain(local_setup_code.iter())
-            .find_map(|info| info.federation_name.clone())
+            .find_map(|info| info.mint_name.clone())
     }
 }

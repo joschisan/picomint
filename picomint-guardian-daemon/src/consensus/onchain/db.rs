@@ -5,7 +5,7 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::table;
 use serde::Serialize;
 
-use super::{FederationTx, FederationUtxo};
+use super::{MintTx, MintUtxo};
 
 #[derive(Clone, Debug, Encodable, Decodable, Serialize)]
 pub struct Output(pub bitcoin::OutPoint, pub TxOut);
@@ -18,39 +18,39 @@ pub struct NonceEntry(pub PeerId, pub Vec<tss::PublicNonce>);
 table!(
     OutputTable,
     u64 => Output,
-    "wallet-output",
+    "onchain-output",
 );
 
 table!(
     SpentOutputTable,
     u64 => (),
-    "wallet-spent-output",
+    "onchain-spent-output",
 );
 
 table!(
-    FederationWalletTable,
-    () => FederationUtxo,
-    "wallet-federation-wallet",
+    MintWalletTable,
+    () => MintUtxo,
+    "onchain-mint-utxo",
 );
 
 table!(
     TxInfoTable,
     u64 => TxInfo,
-    "wallet-tx-info",
+    "onchain-tx-info",
 );
 
 table!(
     TxInfoIndexTable,
     picomint_core::OutPoint => u64,
-    "wallet-tx-info-index",
+    "onchain-tx-info-index",
 );
 
-// The single unsigned transaction the federation is currently signing.
+// The single unsigned transaction the mint is currently signing.
 // Further pegins and pegouts are rejected until it completes.
 table!(
     UnsignedTxTable,
-    () => FederationTx,
-    "wallet-unsigned-tx",
+    () => MintTx,
+    "onchain-unsigned-tx",
 );
 
 // Append-only log of the accepted nonce entries for the unsigned
@@ -60,7 +60,7 @@ table!(
 table!(
     NonceLogTable,
     u64 => NonceEntry,
-    "wallet-nonce-log",
+    "onchain-nonce-log",
 );
 
 // The signature shares responding to a nonce entry — one share per tx
@@ -69,17 +69,17 @@ table!(
 table!(
     SignaturesTable,
     u64 => Vec<tss::SignatureShare>,
-    "wallet-signatures",
+    "onchain-signatures",
 );
 
 table!(
     UnconfirmedTxTable,
-    Txid => FederationTx,
-    "wallet-unconfirmed-tx",
+    Txid => MintTx,
+    "onchain-unconfirmed-tx",
 );
 
 table!(
     FeeRateVoteTable,
     PeerId => Option<u32>,
-    "wallet-fee-rate-vote",
+    "onchain-fee-rate-vote",
 );

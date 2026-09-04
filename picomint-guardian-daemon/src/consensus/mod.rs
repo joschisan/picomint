@@ -33,7 +33,7 @@ use crate::consensus::server::Server;
 use crate::p2p::{P2PStatusReceivers, ReconnectP2PConnections};
 
 /// Number of confirmations required for a transaction to be considered as
-/// final by the federation. The block that mines the transaction does
+/// final by the mint. The block that mines the transaction does
 /// not count towards the number of confirmations.
 pub const CONFIRMATION_FINALITY_DELAY: u32 = 9;
 
@@ -173,7 +173,7 @@ async fn submit_ci_proposals(server: Server, submission_tx: async_channel::Sende
         // Upgrading the binary is the whole of casting a vote: we
         // announce what we support until consensus has recorded it,
         // then stay quiet until the next upgrade raises it again. A
-        // federation created by this binary has nothing to announce.
+        // mint created by this binary has nothing to announce.
         if dbtx
             .get(&ConsensusVersionVoteTable, &server.cfg.private.identity)
             .unwrap_or(server.cfg.consensus.default_version)

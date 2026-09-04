@@ -23,17 +23,17 @@ use url::Url;
 #[derive(Parser)]
 #[command(version)]
 struct ServerOpts {
-    /// Path to folder containing federation config files
+    /// Path to folder containing mint config files
     #[arg(long = "data-dir", env = "DATA_DIR")]
     data_dir: PathBuf,
 
-    /// The bitcoin network of the federation
+    /// The bitcoin network of the mint
     #[arg(long, env = "BITCOIN_NETWORK", default_value = "bitcoin")]
     bitcoin_network: Network,
 
     /// Bitcoind RPC URL with embedded credentials, e.g.
     /// `http://user:pass@127.0.0.1:8332`. The node must be unpruned —
-    /// the guardian needs random access to any block from federation
+    /// the guardian needs random access to any block from mint
     /// start onward to make consensus progress.
     #[arg(long, env = "BITCOIND_URL")]
     bitcoind_url: Url,
@@ -93,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
     // Run consensus on the main task. Inner spawned tasks are fire-and-forget
     // — process death (SIGTERM/SIGKILL) is the shutdown protocol; db commits
     // are atomic and BFT sessions resume from disk on next boot. The only
-    // graceful return path is the federation-shutdown-via-API mechanism, which
+    // graceful return path is the mint-shutdown-via-API mechanism, which
     // unwinds the engine cleanly.
     run_server(settings, db, bitcoind).await
 }

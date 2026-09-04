@@ -1,4 +1,4 @@
-//! Federation guardian daemon.
+//! Mint guardian daemon.
 //!
 //! This crate hosts both the daemon library and the `picomint-guardian-daemon`
 //! binary (`src/main.rs`). It drives config generation, consensus, and the
@@ -122,7 +122,7 @@ async fn run_dkg_then_consensus(
     // p2p accept loop's demux, drained by the consensus-phase api task.
     // Small bound: pre-DKG there's no consumer, so incoming api attempts
     // overflow and are dropped (no valid client should be talking to a
-    // not-yet-bootstrapped federation).
+    // not-yet-bootstrapped mint).
     let (conn_tx, conn_rx) = async_channel::bounded(128);
 
     let cnt = P2PConnector::new(cgp.iroh_sk.clone(), cgp.iroh_pks(), settings.p2p_addr).await?;
@@ -169,7 +169,7 @@ async fn run_consensus(
     // p2p accept loop's demux, drained by the consensus-phase api task.
     // Small bound: pre-DKG there's no consumer, so incoming api attempts
     // overflow and are dropped (no valid client should be talking to a
-    // not-yet-bootstrapped federation).
+    // not-yet-bootstrapped mint).
     let (conn_tx, conn_rx) = async_channel::bounded(128);
 
     let cnt = P2PConnector::new(

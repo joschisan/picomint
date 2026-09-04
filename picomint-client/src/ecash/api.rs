@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::api::FederationApi;
+use crate::api::MintApi;
 use picomint_core::ecash::Denomination;
 use picomint_core::ecash::methods::{
     IssuanceStateRequest, IssuanceStateResponse, ECashMethod, SignaturesRequest, SignaturesResponse,
@@ -16,7 +16,7 @@ use super::NoteIssuanceRequest;
 use super::ecash_sm::verify_blind_shares;
 
 pub async fn signatures(
-    api: &FederationApi,
+    api: &MintApi,
     txid: TransactionId,
     issuance_requests: Vec<NoteIssuanceRequest>,
     tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
@@ -34,11 +34,11 @@ pub async fn signatures(
 }
 
 /// Fetch shares for notes a restore scan has already established the
-/// federation signed. Every message must resolve on every peer, so a
+/// mint signed. Every message must resolve on every peer, so a
 /// candidate can never be silently dropped for want of a full column of
 /// shares to interpolate over.
 pub async fn signatures_restore(
-    api: &FederationApi,
+    api: &MintApi,
     issuance_requests: Vec<NoteIssuanceRequest>,
     tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
 ) -> BTreeMap<PeerId, Vec<BlindedSignatureShare>> {
@@ -61,12 +61,12 @@ pub async fn signatures_restore(
     .await
 }
 
-/// Which of `nonces` the federation has already seen spent, and which of
+/// Which of `nonces` the mint has already seen spent, and which of
 /// `messages` it ever signed. Both go through threshold consensus rather
 /// than a single peer: either answer coming back wrong in the negative
 /// direction makes a restoring wallet abandon a live note, so a lone
 /// peer must not be able to decide it.
-pub async fn spend_state(api: &FederationApi, nonces: Vec<XOnlyPublicKey>) -> Vec<bool> {
+pub async fn spend_state(api: &MintApi, nonces: Vec<XOnlyPublicKey>) -> Vec<bool> {
     api.request_current_consensus_retry::<SpendStateResponse>(Method::ECash(ECashMethod::SpendState(
         SpendStateRequest { nonces },
     )))
@@ -74,12 +74,12 @@ pub async fn spend_state(api: &FederationApi, nonces: Vec<XOnlyPublicKey>) -> Ve
     .spent
 }
 
-/// For each message, the denomination the federation signed it under, or
+/// For each message, the denomination the mint signed it under, or
 /// `None` if it never did. The denomination is not derivable from the
-/// seed under a single counter space, so the scan takes the federation's
+/// seed under a single counter space, so the scan takes the mint's
 /// word for it — and then checks that word when it aggregates the share.
 pub async fn issuance_state(
-    api: &FederationApi,
+    api: &MintApi,
     messages: Vec<BlindedMessage>,
 ) -> Vec<Option<Denomination>> {
     api.request_current_consensus_retry::<IssuanceStateResponse>(Method::ECash(

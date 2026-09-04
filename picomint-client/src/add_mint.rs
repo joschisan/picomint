@@ -1,11 +1,11 @@
-//! Adding a federation.
+//! Adding a mint.
 //!
 //! One path, whether or not the seed has been here before. [`add`] downloads
 //! the config and scans every account the seed could hold notes under; a seed
 //! that never held anything scans to nothing, which costs a round trip and is
 //! otherwise indistinguishable from a first add. There is nothing for an
 //! integrator to choose between, and so nothing for it to get wrong: skipping
-//! the scan for a federation this seed has used strands every note behind the
+//! the scan for a mint this seed has used strands every note behind the
 //! counters it would re-derive from zero.
 
 use std::collections::BTreeMap;
@@ -20,23 +20,23 @@ use picomint_core::methods::{ConfigRequest, ConfigResponse, CoreMethod};
 use picomint_core::module::Method;
 use tracing::debug;
 
-use crate::api::FederationApi;
+use crate::api::MintApi;
 use crate::client::Client;
 use crate::ecash::Restore;
 use crate::secret::ClientSecret;
 
-/// Download a federation's config, check it against `network` if given, and
+/// Download a mint's config, check it against `network` if given, and
 /// rebuild whatever the seed already owns there.
 ///
 /// Reads nothing and writes nothing locally, so a failure leaves the wallet
 /// exactly as it was. The network check runs before the scans — a rejected
-/// federation costs one config download. All or nothing across the accounts:
+/// mint costs one config download. All or nothing across the accounts:
 /// one scan failing abandons the add rather than leaving some accounts
 /// restored and others silently starting from zero.
 ///
 /// The scans walk disjoint counter spaces and share nothing, so they run
 /// concurrently and the wait is the slowest of them rather than their sum.
-pub(crate) async fn add(
+pub(crate) async fn add_mint(
     client: &Client,
     invite: &InviteCode,
     network: Option<bitcoin::Network>,
@@ -47,15 +47,15 @@ pub(crate) async fn add(
         bail!("Unsupported network {}", config.network);
     }
 
-    let federation = config.calculate_federation_id();
+    let mint = config.calculate_mint_id();
 
-    let api = FederationApi::new(client.endpoint.clone(), config.iroh_pks());
+    let api = MintApi::new(client.endpoint.clone(), config.iroh_pks());
 
-    let secret = ClientSecret::new(&client.mnemonic, federation).ecash_secret();
+    let secret = ClientSecret::new(&client.mnemonic, mint).ecash_secret();
 
     let scans = try_join_all(
         Account::ALL
-            .map(|account| crate::ecash::scan(&api, &secret, &config.ecash, federation, account)),
+            .map(|account| crate::ecash::scan(&api, &secret, &config.ecash, mint, account)),
     )
     .await?;
 
@@ -67,7 +67,7 @@ pub(crate) async fn add(
 /// Downloads the [`ConsensusConfig`] from the issuing guardian named in the
 /// invite code. The guardian enforces the invite's expiration and user limit
 /// before serving; integrity is guaranteed because the config's computed
-/// federation id must match the one committed in the invite code.
+/// mint id must match the one committed in the invite code.
 async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<ConsensusConfig> {
     debug!(
         invite = %picomint_base32::encode(invite),
@@ -85,8 +85,8 @@ async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<Co
     .await
     .map_err(|_| anyhow::anyhow!("Failed to download client config from invite peer"))?;
 
-    if invite_resp.config.calculate_federation_id() != invite.federation {
-        bail!("FederationId in invite code does not match client config");
+    if invite_resp.config.calculate_mint_id() != invite.mint {
+        bail!("MintId in invite code does not match client config");
     }
 
     Ok(invite_resp.config)

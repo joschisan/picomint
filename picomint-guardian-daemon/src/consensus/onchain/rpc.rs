@@ -1,8 +1,8 @@
 //! Freestanding API handlers for the wallet module.
 
 use picomint_core::onchain::methods::{
-    ConsensusFeerateRequest, ConsensusFeerateResponse, FederationUtxoRequest,
-    FederationUtxoResponse, OutputInfoSliceRequest, OutputInfoSliceResponse,
+    ConsensusFeerateRequest, ConsensusFeerateResponse, MintUtxoRequest,
+    MintUtxoResponse, OutputInfoSliceRequest, OutputInfoSliceResponse,
     PendingTxChainRequest, PendingTxChainResponse, ReceiveFeeRequest, ReceiveFeeResponse,
     SendFeeRequest, SendFeeResponse, TxChainRequest, TxChainResponse, TxIdRequest, TxIdResponse,
 };
@@ -19,12 +19,12 @@ pub fn consensus_feerate(
     })
 }
 
-pub fn federation_utxo(
+pub fn mint_utxo(
     server: &Server,
-    _: FederationUtxoRequest,
-) -> Result<FederationUtxoResponse, String> {
-    Ok(FederationUtxoResponse {
-        utxo: super::federation_utxo(&server.db.begin_read()),
+    _: MintUtxoRequest,
+) -> Result<MintUtxoResponse, String> {
+    Ok(MintUtxoResponse {
+        utxo: super::mint_utxo(&server.db.begin_read()),
     })
 }
 

@@ -1,4 +1,4 @@
-//! Federation-internal p2p: message types, iroh connector, and reconnecting
+//! Mint-internal p2p: message types, iroh connector, and reconnecting
 //! connection manager used by consensus / DKG.
 
 use std::collections::BTreeMap;
@@ -227,7 +227,7 @@ impl P2PConnector {
 
     /// Accept the next incoming connection, fully completing the QUIC
     /// handshake. The remote node-id is compared against the pinned peer set:
-    /// a match produces [`Accepted::Peer`] for the federation-internal p2p
+    /// a match produces [`Accepted::Peer`] for the mint-internal p2p
     /// path; anything else is [`Accepted::Foreign`] for the public API path
     /// (one endpoint, two logical consumers demuxed here by node-id).
     pub async fn accept(&self) -> anyhow::Result<Accepted> {
@@ -251,7 +251,7 @@ impl P2PConnector {
     }
 }
 
-/// Result of [`P2PConnector::accept`]: either a federation peer (pinned
+/// Result of [`P2PConnector::accept`]: either a mint peer (pinned
 /// node-id) or a foreign connection (public-API client).
 pub enum Accepted {
     Peer(PeerId, P2PConnection),

@@ -12,7 +12,7 @@ use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_client::{Client, Mnemonic};
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_redb::Database;
@@ -24,11 +24,11 @@ use tracing::info;
 use crate::cli;
 
 /// One test wallet: the app-level [`Client`] plus the id of the single
-/// federation it joins — the two values every federation-keyed call takes.
+/// mint it joins — the two values every mint-keyed call takes.
 #[derive(Clone)]
 pub struct TestClient {
     pub client: Arc<Client>,
-    pub fed: FederationId,
+    pub fed: MintId,
     pub db: Database,
 }
 
@@ -38,7 +38,7 @@ pub const PORTS_PER_GUARDIAN: u16 = 5;
 pub const NUM_GUARDIANS: usize = 7;
 
 /// Guardians `NUM_ONLINE_GUARDIANS..` are taken offline right after DKG,
-/// so the entire suite runs against a federation at exactly quorum
+/// so the entire suite runs against a mint at exactly quorum
 /// (5 of 7). The restore test brings them back online.
 pub const NUM_ONLINE_GUARDIANS: usize = 5;
 pub const GW_PORT: u16 = 28175;
@@ -114,10 +114,10 @@ impl TestEnv {
                 cli::guardian_invite(&peer0_data_dir)
             }))?
             .invite;
-        info!("Federation ready");
+        info!("Mint ready");
 
         // Take the last two guardians offline so the rest of the suite
-        // runs against a federation at exactly quorum. Wait for each to
+        // runs against a mint at exactly quorum. Wait for each to
         // finalize a session first — that proves its DKG output and bft
         // state are persisted, so it can come back from its data dir.
         for peer in NUM_ONLINE_GUARDIANS..NUM_GUARDIANS {
@@ -169,8 +169,8 @@ impl TestEnv {
         let lnurl_daemon_url = format!("http://127.0.0.1:{LNURL_DAEMON_PORT}/");
         info!("LNURL daemon started on {LNURL_DAEMON_PORT}");
 
-        info!("Connecting gateway to federation...");
-        cli::gateway_federation_add(&gateway_data_dir, &invite)?;
+        info!("Connecting gateway to mint...");
+        cli::gateway_mint_add(&gateway_data_dir, &invite)?;
         info!("Gateway connected");
 
         info!("Building freestanding LDK node...");
@@ -222,7 +222,7 @@ impl TestEnv {
 
     /// Mine one regtest block per second for the lifetime of the test.
     /// Guardians only propose block-count votes when the height changes,
-    /// so without steadily arriving blocks an idle federation orders
+    /// so without steadily arriving blocks an idle mint orders
     /// nothing and session-advance waits would starve.
     fn spawn_miner_thread() -> anyhow::Result<()> {
         let url = format!("http://127.0.0.1:{BTC_RPC_PORT}/wallet/default");
@@ -259,7 +259,7 @@ impl TestEnv {
     }
 
     /// Bring up a client. Passing a `mnemonic` a previous client used against
-    /// this federation restores it — the scan is part of joining, so there is
+    /// this mint restores it — the scan is part of joining, so there is
     /// no second entry point for it.
     pub async fn new_client(&self, mnemonic: Option<Mnemonic>) -> anyhow::Result<TestClient> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
@@ -309,7 +309,7 @@ async fn build_client(
     let client = Arc::new(Client::new(endpoint, db.clone(), mnemonic));
 
     let fed = client
-        .add(&invite_code, Some(bitcoin::Network::Regtest))
+        .add_mint(&invite_code, Some(bitcoin::Network::Regtest))
         .await?;
 
     info!("Created client-{n}");
@@ -407,16 +407,16 @@ async fn run_dkg(peer_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
     let mut setup_codes = BTreeMap::new();
     for (peer, data_dir) in peer_data_dirs.iter().enumerate() {
         let name = format!("Guardian {peer}");
-        let (federation_name, federation_size) = if peer == 0 {
-            (Some("Test Federation"), Some(NUM_GUARDIANS as u8))
+        let (mint_name, mint_size) = if peer == 0 {
+            (Some("Test Mint"), Some(NUM_GUARDIANS as u8))
         } else {
             (None, None)
         };
         let resp = cli::guardian_setup_set_local_params(
             data_dir,
             &name,
-            federation_name,
-            federation_size,
+            mint_name,
+            mint_size,
         )?;
         let setup_code = resp
             .get("setup_code")

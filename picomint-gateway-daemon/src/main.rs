@@ -2,7 +2,7 @@
 //! This crate provides the Picomint gateway binary.
 //!
 //! The binary contains logic for sending/receiving Lightning payments on behalf
-//! of Picomint clients in one or more connected Federations.
+//! of Picomint clients in one or more connected Mints.
 //!
 //! It runs a webserver with a REST API that can be used by Picomint
 //! clients to request routing of payments through the Lightning Network.
@@ -66,7 +66,7 @@ pub struct GatewayOpts {
     pub bitcoind_url: Option<Url>,
 
     /// Public API listen address. The iroh endpoint binds here for the
-    /// gateway-API and outgoing federation client traffic.
+    /// gateway-API and outgoing mint client traffic.
     #[arg(long = "api-addr", env = "API_ADDR", default_value = "0.0.0.0:8080")]
     pub api_addr: SocketAddr,
 
@@ -148,7 +148,7 @@ fn main() -> anyhow::Result<()> {
 
     let gateway_db = picomint_redb::Database::open(opts.data_dir.join(DB_FILE))?;
 
-    // 3. Load or init the gateway identity: the mnemonic (federation-client
+    // 3. Load or init the gateway identity: the mnemonic (mint-client
     // seed + LDK entropy) and the independent iroh key the public API is
     // served under.
     let mnemonic = picomint_gateway_daemon::db::load_or_init_mnemonic(&gateway_db)?;
@@ -165,7 +165,7 @@ fn main() -> anyhow::Result<()> {
             .bind(),
     )?;
 
-    // `Client::new` brings every added federation up, which spawns their
+    // `Client::new` brings every added mint up, which spawns their
     // background tasks — so the runtime stays entered from here on.
     let _rt = runtime.enter();
 
@@ -365,10 +365,10 @@ fn handle_payment_claimable(
     // LDK only fires PaymentClaimable for hashes we registered via
     // `receive_for_hash` in `AppState::receive`, which commits the
     // offer row before returning the invoice — but removing the offer's
-    // federation wipes the row while LDK still holds the hash, so fail
+    // mint wipes the row while LDK still holds the hash, so fail
     // the HTLC and refund the LN sender.
     let Some(row) = dbtx.get(&IncomingOfferTable, &operation) else {
-        error!("Failing inbound HTLC for a removed federation");
+        error!("Failing inbound HTLC for a removed mint");
 
         state
             .node
@@ -388,7 +388,7 @@ fn handle_payment_claimable(
     } else {
         if state
             .client
-            .gateway_start_receive(row.federation, dbtx, operation, row.offer)
+            .gateway_start_receive(row.mint, dbtx, operation, row.offer)
             .is_err()
         {
             state
@@ -401,7 +401,7 @@ fn handle_payment_claimable(
 }
 
 /// Outbound LN payment succeeded. Look up the outgoing contract row and
-/// tell the source federation's client to finalize the send with the
+/// tell the source mint's client to finalize the send with the
 /// preimage carried on the `PaymentSuccessful` event.
 fn handle_payment_successful(
     state: &AppState,
@@ -423,19 +423,19 @@ fn handle_payment_successful(
         state
             .client
             .gateway_finalize_send(
-                row.federation,
+                row.mint,
                 dbtx,
                 operation,
                 row.contract,
                 row.outpoint,
                 Some((preimage, lightning_fee)),
             )
-            .expect("source federation for outgoing contract is added");
+            .expect("source mint for outgoing contract is added");
     }
 }
 
 /// Outbound LN payment failed. Look up the outgoing contract row and tell
-/// the source federation's client to forfeit the contract.
+/// the source mint's client to forfeit the contract.
 fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32]) {
     let operation = OperationId::from_encodable(&payment_hash);
 
@@ -450,13 +450,13 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32
         state
             .client
             .gateway_finalize_send(
-                row.federation,
+                row.mint,
                 dbtx,
                 operation,
                 row.contract,
                 row.outpoint,
                 None,
             )
-            .expect("source federation for outgoing contract is added");
+            .expect("source mint for outgoing contract is added");
     }
 }

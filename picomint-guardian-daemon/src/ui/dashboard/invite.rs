@@ -25,7 +25,7 @@ pub fn render(consensus_block_count: u32) -> Markup {
             @if consensus_block_count == 0 {
                 div class="modal-body" {
                     div class="alert alert-warning" {
-                        "Invite codes will be available once the federation has reached consensus on a block count."
+                        "Invite codes will be available once the mint has reached consensus on a block count."
                     }
                 }
             } @else {

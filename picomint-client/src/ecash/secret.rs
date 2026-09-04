@@ -4,7 +4,7 @@
 //! Each account owns a subtree, and within it both leaves hang off a single
 //! issuance counter, so a counter yields exactly one note and nothing here
 //! depends on the denomination. A restoring wallet therefore cannot know a
-//! candidate's denomination on its own and learns it from the federation,
+//! candidate's denomination on its own and learns it from the mint,
 //! which reports it alongside membership in `issuance_state`.
 //!
 //! [`ClientSecret::ecash_secret`]: crate::secret::ClientSecret::ecash_secret

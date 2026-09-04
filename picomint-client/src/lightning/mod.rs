@@ -20,7 +20,7 @@ use db::{GatewayPkTable, IncomingContractStreamIndexTable, SendOperationTable};
 pub(crate) use gateway::Gateways;
 use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::NumPeersExt;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::lightning::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
@@ -29,7 +29,7 @@ use picomint_core::lightning::secret::IncomingContractSecret;
 use picomint_core::lightning::{
     LightningInput, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT,
 };
-use picomint_core::methods::FederationInfoResponse;
+use picomint_core::methods::MintInfoResponse;
 use picomint_core::wire;
 
 pub use self::secret::LightningSecret;
@@ -53,18 +53,18 @@ const CONTRACT_CONFIRMATION_BUFFER: u32 = 12;
 /// Contracts pulled per round trip when walking the incoming-contract
 /// stream.
 ///
-/// The stream is federation-wide and a cold client walks all of it, so the
+/// The stream is mint-wide and a cold client walks all of it, so the
 /// batch sets how many round trips that costs — and each round trip fans out
 /// to every guardian. A thousand summaries is ~150 kB per peer, which is a
 /// reasonable unit of work against a set that only grows with the
-/// federation's unclaimed contracts.
+/// mint's unclaimed contracts.
 const BATCH: u64 = 1000;
 
 pub type SendResult = Result<OperationId, SendPaymentError>;
 
-/// Resume this federation's persisted send state machines and start the
+/// Resume this mint's persisted send state machines and start the
 /// incoming-contract scan plus the cold-start gateway warmup. Called
-/// exactly once, at federation bring-up.
+/// exactly once, at mint bring-up.
 ///
 /// The warmup runs concurrently: the info probe reads whatever pks the
 /// previous session persisted, so `select_gateway` becomes usable without
@@ -79,7 +79,7 @@ pub(crate) fn resume(ctx: &ClientContext) {
     ctx.tg.spawn(update_gateway_info(ctx.clone()));
 }
 
-/// Fetch the federation's announced gateway pk list via threshold
+/// Fetch the mint's announced gateway pk list via threshold
 /// consensus, persist it to [`GatewayPkTable`] (replacing the previous
 /// set), and reconcile the connection pool to match — a deregistered
 /// gateway is dropped here, its connection aborted. Info is filled in
@@ -91,10 +91,10 @@ async fn update_gateway_pks(ctx: ClientContext) -> Result<(), RefreshGatewaysErr
 
     let dbtx = ctx.db.begin_write();
 
-    dbtx.remove_prefix(&GatewayPkTable, &ctx.federation);
+    dbtx.remove_prefix(&GatewayPkTable, &ctx.mint);
 
     for gateway_pk in &list {
-        dbtx.insert(&GatewayPkTable, &(ctx.federation, *gateway_pk), &());
+        dbtx.insert(&GatewayPkTable, &(ctx.mint, *gateway_pk), &());
     }
 
     dbtx.commit();
@@ -112,18 +112,18 @@ async fn update_gateway_info(ctx: ClientContext) {
     let list: Vec<GatewayPk> = ctx
         .db
         .begin_read()
-        .prefix(&GatewayPkTable, &ctx.federation, |it| {
+        .prefix(&GatewayPkTable, &ctx.mint, |it| {
             it.map(|entry| entry.0.1).collect()
         });
 
     ctx.gateways.reconcile(&list, false);
 
-    ctx.gateways.probe(&list, ctx.federation).await;
+    ctx.gateways.probe(&list, ctx.mint).await;
 }
 
 /// The largest whole-sat invoice amount a max send from `account`
 /// through this gateway can pay: the account's notes spent in full cover
-/// the invoice, the gateway's fee and the federation's transaction fee,
+/// the invoice, the gateway's fee and the mint's transaction fee,
 /// with the sub-sat remainder donated.
 fn send_max_amount(ctx: &ClientContext, account: Account, gateway_info: &GatewayInfo) -> Amount {
     crate::ecash::largest_affordable_amount(ctx, account, |amount| {
@@ -197,7 +197,7 @@ async fn send_inner(
     if ctx.config.network != invoice.currency().into() {
         return Err(SendPaymentError::WrongCurrency {
             invoice_currency: invoice.currency(),
-            federation_currency: ctx.config.network.into(),
+            mint_currency: ctx.config.network.into(),
         });
     }
 
@@ -240,7 +240,7 @@ async fn send_inner(
     let dbtx = ctx.db.begin_write();
 
     if dbtx
-        .insert(&SendOperationTable, &(ctx.federation, operation), &())
+        .insert(&SendOperationTable, &(ctx.mint, operation), &())
         .is_some()
     {
         return Err(SendPaymentError::InvoiceAlreadyAttempted);
@@ -333,7 +333,7 @@ async fn create_offer_and_fetch_invoice(
 
     let invoice = ctx
         .gateways
-        .receive(gateway_pk, ctx.federation, offer)
+        .receive(gateway_pk, ctx.mint, offer)
         .await
         .map_err(|e| ReceiveError::FailedToConnectToGateway(e.to_string()))?;
 
@@ -354,7 +354,7 @@ async fn create_offer_and_fetch_invoice(
 /// atomically).
 ///
 /// A summary that recovers has been proven byte-identical to the contract
-/// the federation stores, so the input built here is one consensus will
+/// the mint stores, so the input built here is one consensus will
 /// accept — short of the contract having been spent in the meantime,
 /// which nothing local can rule out.
 fn receive_incoming_contract(
@@ -395,7 +395,7 @@ fn receive_incoming_contract(
     .expect("Cannot claim input, additional funding needed");
 }
 
-/// Walks the federation-wide contract stream once, trialling every
+/// Walks the mint-wide contract stream once, trialling every
 /// account's receive key against each entry. The stream and its cursor are
 /// shared, so each extra account costs one ECDH per contract rather than
 /// another sweep.
@@ -411,7 +411,7 @@ async fn receive_scan(ctx: ClientContext) {
         let start = ctx
             .db
             .begin_read()
-            .get(&IncomingContractStreamIndexTable, &ctx.federation)
+            .get(&IncomingContractStreamIndexTable, &ctx.mint)
             .unwrap_or(0);
 
         let (entries, next) = api::await_incoming_contracts(&ctx.api, start, BATCH).await;
@@ -424,7 +424,7 @@ async fn receive_scan(ctx: ClientContext) {
             }
         }
 
-        dbtx.insert(&IncomingContractStreamIndexTable, &ctx.federation, &next);
+        dbtx.insert(&IncomingContractStreamIndexTable, &ctx.mint, &next);
 
         dbtx.commit();
     }
@@ -434,7 +434,7 @@ async fn receive_scan(ctx: ClientContext) {
 pub enum SelectGatewayError {
     #[error("No gateways are available")]
     NoGatewaysAvailable,
-    #[error("Federation is not added")]
+    #[error("Mint is not added")]
     NotAdded,
 }
 
@@ -457,9 +457,9 @@ pub enum SendPaymentError {
     #[error("Invoice is for a different currency")]
     WrongCurrency {
         invoice_currency: Currency,
-        federation_currency: Currency,
+        mint_currency: Currency,
     },
-    #[error("Federation is not added")]
+    #[error("Mint is not added")]
     NotAdded,
 }
 
@@ -475,7 +475,7 @@ pub enum ReceiveError {
     InvalidInvoice,
     #[error("Gateway returned an invoice with incorrect amount")]
     IncorrectInvoiceAmount,
-    #[error("Federation is not added")]
+    #[error("Mint is not added")]
     NotAdded,
 }
 
@@ -485,23 +485,23 @@ pub enum RefreshGatewaysError {
     FailedToRequestGateways,
 }
 
-/// Remove every row this module owns under the caller's federation prefix.
+/// Remove every row this module owns under the caller's mint prefix.
 /// Called by [`crate::Client::remove`] for end-of-life cleanup.
-pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
-    dbtx.remove(&IncomingContractStreamIndexTable, &federation);
-    dbtx.remove_prefix(&SendOperationTable, &federation);
-    dbtx.remove_prefix(&GatewayPkTable, &federation);
-    dbtx.remove_prefix(&SendStateMachineTable, &federation);
+pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
+    dbtx.remove(&IncomingContractStreamIndexTable, &mint);
+    dbtx.remove_prefix(&SendOperationTable, &mint);
+    dbtx.remove_prefix(&GatewayPkTable, &mint);
+    dbtx.remove_prefix(&SendStateMachineTable, &mint);
 }
 
 /// Whether any of this module's state machines for `operation` is still
-/// active under `federation`.
+/// active under `mint`.
 pub(crate) fn operation_is_active(
     dbtx: &ReadTx,
-    federation: FederationId,
+    mint: MintId,
     operation: OperationId,
 ) -> bool {
-    dbtx.prefix(&SendStateMachineTable, &federation, |r| {
+    dbtx.prefix(&SendStateMachineTable, &mint, |r| {
         r.any(|entry| entry.1.common.operation == operation)
     })
 }
@@ -512,19 +512,19 @@ pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
     vec![db.notify_for_table(&SendStateMachineTable)]
 }
 
-// ─── Flat federation-keyed surface ───────────────────────────────────────
+// ─── Flat mint-keyed surface ───────────────────────────────────────
 
 impl Client {
-    /// Pick a gateway from the federation's pool, at random for load
+    /// Pick a gateway from the mint's pool, at random for load
     /// distribution. The returned info prices any payment identically, so
     /// callers preview it and pass both values back into the send/receive
     /// calls.
     pub fn lightning_select_gateway(
         &self,
-        federation: FederationId,
+        mint: MintId,
     ) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
         let ctx = self
-            .ctx(federation)
+            .ctx(mint)
             .map_err(|_| SelectGatewayError::NotAdded)?;
 
         select_gateway(&ctx)
@@ -534,14 +534,14 @@ impl Client {
     /// obtained via [`lightning_select_gateway`].
     pub async fn lightning_send(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
         gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
         invoice: Bolt11Invoice,
     ) -> Result<OperationId, SendPaymentError> {
         let ctx = self
-            .ctx(federation)
+            .ctx(mint)
             .map_err(|_| SendPaymentError::NotAdded)?;
 
         send_inner(&ctx, account, gateway_pk, gateway_info, invoice, false).await
@@ -551,11 +551,11 @@ impl Client {
     /// `account` through this gateway can pay.
     pub fn lightning_send_max_amount(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
         gateway_info: &GatewayInfo,
     ) -> anyhow::Result<Amount> {
-        let ctx = self.ctx(federation)?;
+        let ctx = self.ctx(mint)?;
 
         Ok(send_max_amount(&ctx, account, gateway_info))
     }
@@ -564,13 +564,13 @@ impl Client {
     /// it, size the max, pay.
     pub async fn lightning_send_max(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
         gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
         lnurl: &str,
     ) -> anyhow::Result<OperationId> {
-        let ctx = self.ctx(federation)?;
+        let ctx = self.ctx(mint)?;
 
         send_max(&ctx, account, gateway_pk, gateway_info, lnurl).await
     }
@@ -579,13 +579,13 @@ impl Client {
     /// obtained via [`lightning_select_gateway`].
     pub async fn lightning_receive(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
         gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
         amount: Amount,
     ) -> Result<Bolt11Invoice, ReceiveError> {
-        let ctx = self.ctx(federation).map_err(|_| ReceiveError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| ReceiveError::NotAdded)?;
 
         let receive_keypair = ctx.secret.lightning_secret().receive_keypair(account);
 
@@ -601,21 +601,21 @@ impl Client {
 
     /// A shareable lnurl for `account`, served by `lnurl_daemon`. Nothing
     /// perishable goes into the payload, so it stays valid for as long as
-    /// the federation exists.
+    /// the mint exists.
     pub fn lightning_generate_lnurl(
         &self,
-        federation: FederationId,
+        mint: MintId,
         account: Account,
         lnurl_daemon: String,
     ) -> anyhow::Result<String> {
-        let ctx = self.ctx(federation)?;
+        let ctx = self.ctx(mint)?;
 
         let config = &ctx.config;
 
         let recipient = ctx.secret.lightning_secret().receive_keypair(account).public_key();
 
         // `f + 1` guardians, sampled fresh per lnurl: enough that one is
-        // honest and reachable whenever the federation itself is, and random
+        // honest and reachable whenever the mint itself is, and random
         // so bootstrap load spreads instead of pinning the lowest peer ids.
         let guardians = config
             .peers
@@ -626,7 +626,7 @@ impl Client {
                 config.peers.to_num_peers().one_honest(),
             );
 
-        let info = FederationInfoResponse::new(config).consensus_hash_sha256();
+        let info = MintInfoResponse::new(config).consensus_hash_sha256();
 
         let request = LnurlRequest {
             recipient,
@@ -643,9 +643,9 @@ impl Client {
 
     /// Re-run the threshold-consensus gateway query and re-probe every
     /// announced gateway, so [`lightning_select_gateway`] reflects the
-    /// federation's current set.
-    pub async fn lightning_refresh_gateways(&self, federation: FederationId) -> anyhow::Result<()> {
-        let ctx = self.ctx(federation)?;
+    /// mint's current set.
+    pub async fn lightning_refresh_gateways(&self, mint: MintId) -> anyhow::Result<()> {
+        let ctx = self.ctx(mint)?;
 
         update_gateway_pks(ctx.clone()).await?;
 

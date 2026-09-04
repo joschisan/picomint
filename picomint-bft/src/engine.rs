@@ -351,7 +351,7 @@ where
             for p in ev.unit.parents.keys() {
                 ensure!(
                     self.n.peer_ids().any(|x| x == *p),
-                    "parent creator not in federation",
+                    "parent creator not in mint",
                 );
             }
         }

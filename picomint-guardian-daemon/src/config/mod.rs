@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use dkg::DkgHandle;
 use picomint_core::config::ConsensusConfig;
-pub use picomint_core::config::{FederationId, PeerEndpoint};
+pub use picomint_core::config::{MintId, PeerEndpoint};
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::config::LightningConfigPrivate;
 use picomint_core::ecash::config::{ECashConfig, ECashConfigPrivate};
@@ -35,7 +35,7 @@ pub mod setup;
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 /// Full picomint server config (persisted in the guardian database).
 pub struct ServerConfig {
-    /// Federation-wide config, identical across peers
+    /// Mint-wide config, identical across peers
     pub consensus: ConsensusConfig,
     /// Per-peer secrets (identity + DKG keys)
     pub private: ServerConfigPrivate,
@@ -64,7 +64,7 @@ pub struct ConfigGenSettings {
     pub p2p_addr: SocketAddr,
     /// Web UI bind address.
     pub ui_addr: SocketAddr,
-    /// Bitcoin network for the federation
+    /// Bitcoin network for the mint
     pub network: bitcoin::Network,
     /// Path to the folder holding the database and the admin CLI socket
     pub data_dir: PathBuf,
@@ -90,9 +90,9 @@ pub struct ConfigGenParams {
     pub iroh_sk: iroh::SecretKey,
     /// Endpoints of all servers
     pub peers: BTreeMap<PeerId, PeerSetupCode>,
-    /// Federation name, chosen by the lead guardian during setup.
+    /// Mint name, chosen by the lead guardian during setup.
     pub name: String,
-    /// Bitcoin network for this federation
+    /// Bitcoin network for this mint
     pub network: bitcoin::Network,
 }
 
@@ -149,7 +149,7 @@ impl ServerConfig {
     pub fn get_invite_code(&self, invite_id: [u8; 16]) -> InviteCode {
         InviteCode::new(
             self.private.iroh_sk.public(),
-            self.consensus.calculate_federation_id(),
+            self.consensus.calculate_mint_id(),
             invite_id,
         )
     }

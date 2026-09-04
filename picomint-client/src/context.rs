@@ -1,4 +1,4 @@
-use crate::api::FederationApi;
+use crate::api::MintApi;
 use crate::eventlog::{Event, EventLogEntry};
 use crate::lightning::Gateways;
 use crate::secret::ClientSecret;
@@ -7,27 +7,27 @@ use futures::StreamExt as _;
 use futures::stream::BoxStream;
 use picomint_core::TransactionId;
 use picomint_core::config::ConsensusConfig;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_redb::{Database, WriteTx};
 
 use crate::{TxAcceptEvent, TxRejectEvent};
 
-/// The one per-federation context: API and gateway pools, the shared client
-/// db, the federation config, the root secret, and the task group. Every
+/// The one per-mint context: API and gateway pools, the shared client
+/// db, the mint config, the root secret, and the task group. Every
 /// state machine runs against a clone of this, and every module operation
 /// is a function over it — module configs, public key sets and per-module
 /// secrets are projections (`config.ecash.tbs_pks`, `secret.ecash_secret()`),
 /// never copies.
 #[derive(Clone)]
 pub struct ClientContext {
-    pub(crate) api: FederationApi,
+    pub(crate) api: MintApi,
     pub(crate) db: Database,
     pub(crate) config: ConsensusConfig,
-    /// Memoized [`ConsensusConfig::calculate_federation_id`] — a consensus
+    /// Memoized [`ConsensusConfig::calculate_mint_id`] — a consensus
     /// hash over the whole config, too hot to recompute per table key. Can
     /// never go stale: the config it is derived from is immutable beside it.
-    pub(crate) federation: FederationId,
+    pub(crate) mint: MintId,
     pub(crate) secret: ClientSecret,
     pub(crate) gateways: Gateways,
     pub(crate) tg: TaskGroup,
@@ -35,7 +35,7 @@ pub struct ClientContext {
 
 impl ClientContext {
     pub(crate) fn new(
-        api: FederationApi,
+        api: MintApi,
         db: Database,
         config: ConsensusConfig,
         secret: ClientSecret,
@@ -45,7 +45,7 @@ impl ClientContext {
         Self {
             api,
             db,
-            federation: config.calculate_federation_id(),
+            mint: config.calculate_mint_id(),
             config,
             secret,
             gateways,
@@ -93,6 +93,6 @@ impl ClientContext {
     where
         E: Event + Send,
     {
-        crate::eventlog::log_event(dbtx, self.federation, account, operation, event);
+        crate::eventlog::log_event(dbtx, self.mint, account, operation, event);
     }
 }

@@ -7,8 +7,8 @@ use picomint_core::{NumPeers, PeerId};
 /// Picomint query strategy
 ///
 /// Due to federated security model each Picomint client API call to the
-/// Federation might require a different way to process one or more required
-/// responses from the Federation members. This trait abstracts away the details
+/// Mint might require a different way to process one or more required
+/// responses from the Mint members. This trait abstracts away the details
 /// of each specific strategy for the generic client Api code.
 pub trait QueryStrategy<IR, OR = IR> {
     fn process(&mut self, peer: PeerId, response: IR) -> QueryStep<OR>;

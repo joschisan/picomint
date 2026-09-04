@@ -15,7 +15,7 @@ use crate::lightning::secret::IncomingContractSecret;
 use crate::lightning::{ContractId, OfferId};
 
 /// What a recipient asks a gateway to fund: terms plus the preimage that
-/// settles them, encrypted to the federation.
+/// settles them, encrypted to the mint.
 ///
 /// Authored end to end by the recipient, who derives every field from one
 /// ECDH secret, and identified by [`Self::offer_id`]. The gateway cannot
@@ -28,7 +28,7 @@ pub struct IncomingOffer {
     pub ciphertext: CipherText,
 }
 
-/// A funded [`IncomingOffer`]: what the federation holds and what
+/// A funded [`IncomingOffer`]: what the mint holds and what
 /// [`crate::lightning::LightningInput::Incoming`] spends.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct IncomingContract {
@@ -53,7 +53,7 @@ pub struct Commitment {
     pub payment_hash: sha256::Hash,
     /// Invoice amount: what the LN payer paid the gateway.
     pub amount: Amount,
-    /// Gateway's combined cut (LN routing + tx fee). The federation will
+    /// Gateway's combined cut (LN routing + tx fee). The mint will
     /// credit the recipient `amount - fee` ecash on claim.
     pub fee: Amount,
     pub claim_pk: XOnlyPublicKey,
@@ -156,7 +156,7 @@ impl IncomingOffer {
 /// What a client needs from the incoming-contract stream, in place of the
 /// whole [`IncomingContract`].
 ///
-/// The stream is federation-wide — every client downloads every entry and
+/// The stream is mint-wide — every client downloads every entry and
 /// discards the ones that are not its own — so its size is paid by every
 /// client for every payment anyone receives. Most of a contract is
 /// redundant to the recipient: the ciphertext is a deterministic function
@@ -173,7 +173,7 @@ pub struct IncomingContractSummary {
     /// without ever reaching it.
     ///
     /// The *preimage* could not travel here — it is what settles the
-    /// inbound HTLC, and the federation withholding it until the contract
+    /// inbound HTLC, and the mint withholding it until the contract
     /// is claimed is what makes the swap atomic. Its hash is already public
     /// in the invoice.
     pub payment_hash: sha256::Hash,
@@ -181,7 +181,7 @@ pub struct IncomingContractSummary {
     pub fee: Amount,
     /// ECDH input — everything the recipient derives hangs off this.
     pub ephemeral_pk: PublicKey,
-    /// Id of the offer the federation actually holds funded. A recipient
+    /// Id of the offer the mint actually holds funded. A recipient
     /// rebuilds the offer from what it derived plus the fields above; a
     /// matching id proves the reconstruction is byte-identical to the stored
     /// one, and so that every check
@@ -217,7 +217,7 @@ impl IncomingContractSummary {
     ///
     /// The split also separates two signals: a payment-hash miss is someone
     /// else's contract, while a hit whose rebuild does not match the id
-    /// means the summary disagrees with what the federation stores.
+    /// means the summary disagrees with what the mint stores.
     pub fn recover(
         &self,
         agg_pk: &AggregatePublicKey,

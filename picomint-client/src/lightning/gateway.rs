@@ -1,20 +1,20 @@
 //! Client-side gateway pool: each announced gateway's kept-alive iroh
 //! connection and its latest probed info, managed together.
 //!
-//! Gateways are discovered dynamically via the federation's announced pk set,
+//! Gateways are discovered dynamically via the mint's announced pk set,
 //! so [`Gateways`] keys one entry per gateway holding both its pooled
 //! connection (a [`connection_task`] published on a `watch`) and its latest
 //! [`GatewayInfo`]. The two share one lifecycle: [`Gateways::reconcile`] spawns
 //! an entry when a gateway joins the announced set and drops it — aborting the
 //! connection task — when it leaves, so [`Gateways::select`] never returns a
-//! gateway the federation no longer recognises. Surviving gateways keep their
+//! gateway the mint no longer recognises. Surviving gateways keep their
 //! warm connection across refreshes; the QUIC handshake and hole-punched path
 //! are paid once, then reused by info probes, sends, and receives.
 //!
 //! The wire types ([`GatewayMethod`] + per-method `*Request`/`*Response`
 //! structs) live in [`picomint_core::lightning::methods`] because the gateway daemon
 //! must agree on them. The wire envelope is `Result<Vec<u8>, String>` — same
-//! shape as the federation API.
+//! shape as the mint API.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
@@ -24,7 +24,7 @@ use bitcoin::secp256k1::schnorr::Signature;
 use iroh::Endpoint;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::OutPoint;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::lightning::LightningInvoice;
 use picomint_core::lightning::contracts::{IncomingOffer, OutgoingContract};
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk};
@@ -102,7 +102,7 @@ impl Gateways {
     /// connection, writing each result back as it arrives. A failed probe
     /// clears that gateway's info (unselectable) without dropping its
     /// connection; a slow probe never blocks the others' updates.
-    pub async fn probe(&self, pks: &[GatewayPk], federation: FederationId) {
+    pub async fn probe(&self, pks: &[GatewayPk], mint: MintId) {
         let connections: Vec<_> = self
             .inner
             .read()
@@ -116,7 +116,7 @@ impl Gateways {
 
         for (pk, mut rx) in connections {
             probes.spawn(async move {
-                let method = GatewayMethod::Info(InfoRequest { federation });
+                let method = GatewayMethod::Info(InfoRequest { mint });
 
                 let info = request_on_state::<InfoResponse>(&mut rx, method)
                     .await
@@ -174,12 +174,12 @@ impl Gateways {
     pub async fn receive(
         &self,
         gateway_pk: GatewayPk,
-        federation: FederationId,
+        mint: MintId,
         offer: IncomingOffer,
     ) -> anyhow::Result<Bolt11Invoice> {
         self.request::<ReceiveResponse>(
             gateway_pk,
-            GatewayMethod::Receive(ReceiveRequest { federation, offer }),
+            GatewayMethod::Receive(ReceiveRequest { mint, offer }),
         )
         .await
         .map(|r| r.invoice)
@@ -189,7 +189,7 @@ impl Gateways {
     pub async fn send(
         &self,
         gateway_pk: GatewayPk,
-        federation: FederationId,
+        mint: MintId,
         outpoint: OutPoint,
         contract: OutgoingContract,
         invoice: LightningInvoice,
@@ -198,7 +198,7 @@ impl Gateways {
         self.request::<SendResponse>(
             gateway_pk,
             GatewayMethod::Send(SendRequest {
-                federation,
+                mint,
                 outpoint,
                 contract,
                 invoice,

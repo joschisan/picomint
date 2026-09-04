@@ -86,7 +86,7 @@ pub fn render_pending(server: &crate::consensus::server::Server, dbtx: &ReadTx) 
 }
 
 pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Markup {
-    let federation_utxo = onchain::federation_utxo(dbtx);
+    let mint_utxo = onchain::mint_utxo(dbtx);
     let consensus_fee_rate = onchain::consensus_feerate(server, dbtx).map(|f| f / 1000);
     let transaction_count = onchain::total_txs(dbtx);
 
@@ -98,7 +98,7 @@ pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Marku
 
             div class="kv" {
                 span class="kv-label" { "Transaction Tip" }
-                @if let Some(wallet) = federation_utxo {
+                @if let Some(wallet) = mint_utxo {
                     a href={ "https://mempool.space/tx/" (wallet.outpoint.txid) } target="_blank" {
                         "mempool.space"
                     }

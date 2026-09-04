@@ -24,7 +24,7 @@ impl Event for SendEvent {
 /// Emitted when the outgoing HTLC is claimed with a preimage.
 ///
 /// `lightning_fee` is the routing cost reported by LDK's `PaymentSuccessful` event
-/// — `0` for direct swaps between picomint federations (no LN hop) and for
+/// — `0` for direct swaps between picomint mints (no LN hop) and for
 /// LDK builds that omit fee tracking.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendSuccessEvent {
@@ -51,7 +51,7 @@ impl Event for SendCancelEvent {
 
 // --- Incoming payment ---
 
-/// Emitted when the gateway relays an incoming HTLC into the federation.
+/// Emitted when the gateway relays an incoming HTLC into the mint.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReceiveEvent {
     pub txid: TransactionId,

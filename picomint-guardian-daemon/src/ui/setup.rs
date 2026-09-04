@@ -14,7 +14,7 @@ use crate::ui::assets::WithStaticRoutesExt;
 use crate::ui::{ROOT_ROUTE, copiable_text, single_card_layout};
 
 // Setup route constants
-pub const FEDERATION_SETUP_ROUTE: &str = "/federation-setup";
+pub const MINT_SETUP_ROUTE: &str = "/mint-setup";
 pub const ADD_SETUP_CODE_ROUTE: &str = "/add-setup-code";
 pub const RESET_SETUP_CODES_ROUTE: &str = "/reset-setup-codes";
 pub const START_DKG_ROUTE: &str = "/start-dkg";
@@ -26,9 +26,9 @@ pub(crate) struct SetupInput {
     pub name: String,
     #[serde(default)]
     pub is_lead: bool,
-    pub federation_name: String,
+    pub mint_name: String,
     #[serde(default)]
-    pub federation_size: String,
+    pub mint_size: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,17 +38,17 @@ pub(crate) struct PeerInfoInput {
 
 fn peer_list_section(
     connected_peers: &[String],
-    federation_size: Option<u8>,
-    cfg_federation_name: &Option<String>,
+    mint_size: Option<u8>,
+    cfg_mint_name: &Option<String>,
     error: Option<&str>,
 ) -> Markup {
     let total_guardians = connected_peers.len() + 1;
     let can_start_dkg =
-        federation_size.is_some_and(|expected| total_guardians == expected as usize);
+        mint_size.is_some_and(|expected| total_guardians == expected as usize);
 
     html! {
         div id="peer-list-section" {
-            @if let Some(expected) = federation_size {
+            @if let Some(expected) = mint_size {
                 span { (format!("{total_guardians} of {expected} guardians connected.")) }
             } @else {
                 span { "Add setup code for every other guardian." }
@@ -72,7 +72,7 @@ fn peer_list_section(
             }
 
             @if can_start_dkg {
-                @let has_settings = cfg_federation_name.is_some() || federation_size.is_some();
+                @let has_settings = cfg_mint_name.is_some() || mint_size.is_some();
 
                 form id="start-dkg-form" class="form-stack" hx-post=(START_DKG_ROUTE) hx-target="#peer-list-section" hx-swap="outerHTML" {
                     @if let Some(error) = error {
@@ -83,10 +83,10 @@ fn peer_list_section(
 
                 @if has_settings {
                     span class="hint" {
-                        @if let Some(name) = cfg_federation_name {
-                            (name) " federation has been configured"
+                        @if let Some(name) = cfg_mint_name {
+                            (name) " mint has been configured"
                         } @else {
-                            "The federation has been configured"
+                            "The mint has been configured"
                         }
                         "."
                     }
@@ -150,7 +150,7 @@ fn setup_form_content(error: Option<&str>) -> Markup {
                 }
 
                 div class="toggle-content form-stack" {
-                    input type="text" id="federation_name" name="federation_name" placeholder="Federation Name";
+                    input type="text" id="mint_name" name="mint_name" placeholder="Mint Name";
 
                     div class="field" {
                         span class="field-label" {
@@ -165,10 +165,10 @@ fn setup_form_content(error: Option<&str>) -> Markup {
                                 // for non-leader guardians. The server
                                 // re-validates that a leader supplied a size.
                                 input type="radio"
-                                    id=(format!("federation_size_{size}"))
-                                    name="federation_size"
+                                    id=(format!("mint_size_{size}"))
+                                    name="mint_size"
                                     value=(size.to_string());
-                                label class="pill" for=(format!("federation_size_{size}")) {
+                                label class="pill" for=(format!("mint_size_{size}")) {
                                     (size.to_string())
                                 }
                             }
@@ -194,7 +194,7 @@ fn setup_form_content(error: Option<&str>) -> Markup {
 // GET handler for the /setup route (display the setup form)
 async fn setup_form(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
     if state.setup_code().await.is_some() {
-        return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
+        return Redirect::to(MINT_SETUP_ROUTE).into_response();
     }
 
     Html(single_card_layout("Guardian Setup", setup_form_content(None)).into_string())
@@ -205,7 +205,7 @@ async fn setup_form(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
 // previously-saved server config).
 async fn restore_page(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
     if state.setup_code().await.is_some() {
-        return Redirect::to(FEDERATION_SETUP_ROUTE).into_response();
+        return Redirect::to(MINT_SETUP_ROUTE).into_response();
     }
 
     Html(single_card_layout("Restore from Config", restore_form_content(None)).into_string())
@@ -218,21 +218,21 @@ async fn setup_submit(
     Form(input): Form<SetupInput>,
 ) -> impl IntoResponse {
     // Only use these settings if is_lead is true
-    let federation_name = if input.is_lead {
-        Some(input.federation_name)
+    let mint_name = if input.is_lead {
+        Some(input.mint_name)
     } else {
         None
     };
 
-    let federation_size = if input.is_lead {
-        let s = input.federation_size.trim();
+    let mint_size = if input.is_lead {
+        let s = input.mint_size.trim();
         if s.is_empty() {
             None
         } else {
             match s.parse::<u8>() {
                 Ok(size) => Some(size),
                 Err(_) => {
-                    return Html(setup_form_content(Some("Invalid federation size")).into_string())
+                    return Html(setup_form_content(Some("Invalid mint size")).into_string())
                         .into_response();
                 }
             }
@@ -242,11 +242,11 @@ async fn setup_submit(
     };
 
     match state
-        .set_local_parameters(input.name, federation_name, federation_size)
+        .set_local_parameters(input.name, mint_name, mint_size)
         .await
     {
         Ok(_) => (
-            [("HX-Redirect", FEDERATION_SETUP_ROUTE)],
+            [("HX-Redirect", MINT_SETUP_ROUTE)],
             Html(String::new()),
         )
             .into_response(),
@@ -254,8 +254,8 @@ async fn setup_submit(
     }
 }
 
-// GET handler for the /federation-setup route (main federation management page)
-async fn federation_setup(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
+// GET handler for the /mint-setup route (main mint management page)
+async fn mint_setup(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
     // If the user lands here too early (before local parameters have been
     // set), send them back to /setup to fill in their guardian params first.
     let Some(our_setup_code) = state.setup_code().await else {
@@ -265,18 +265,18 @@ async fn federation_setup(State(state): State<Arc<SetupApi>>) -> impl IntoRespon
     let our_connection_info = picomint_base32::encode(&our_setup_code);
 
     let connected_peers = state.connected_peers().await;
-    let federation_size = state.federation_size().await;
-    let cfg_federation_name = state.cfg_federation_name().await;
+    let mint_size = state.mint_size().await;
+    let cfg_mint_name = state.cfg_mint_name().await;
 
     let content = html! {
         span { "Share this with your fellow guardians." }
 
         (copiable_text(&our_connection_info))
 
-        (peer_list_section(&connected_peers, federation_size, &cfg_federation_name, None))
+        (peer_list_section(&connected_peers, mint_size, &cfg_mint_name, None))
     };
 
-    Html(single_card_layout("Federation Setup", content).into_string()).into_response()
+    Html(single_card_layout("Mint Setup", content).into_string()).into_response()
 }
 
 async fn post_add_setup_code(
@@ -286,14 +286,14 @@ async fn post_add_setup_code(
     let error = state.add_peer_setup_code(input.peer_info).await.err();
 
     let connected_peers = state.connected_peers().await;
-    let federation_size = state.federation_size().await;
-    let cfg_federation_name = state.cfg_federation_name().await;
+    let mint_size = state.mint_size().await;
+    let cfg_mint_name = state.cfg_mint_name().await;
 
     Html(
         peer_list_section(
             &connected_peers,
-            federation_size,
-            &cfg_federation_name,
+            mint_size,
+            &cfg_mint_name,
             error
                 .as_ref()
                 .map(std::string::ToString::to_string)
@@ -320,14 +320,14 @@ async fn post_start_dkg(State(state): State<Arc<SetupApi>>) -> impl IntoResponse
         }
         Err(e) => {
             let connected_peers = state.connected_peers().await;
-            let federation_size = state.federation_size().await;
-            let cfg_federation_name = state.cfg_federation_name().await;
+            let mint_size = state.mint_size().await;
+            let cfg_mint_name = state.cfg_mint_name().await;
 
             Html(
                 peer_list_section(
                     &connected_peers,
-                    federation_size,
-                    &cfg_federation_name,
+                    mint_size,
+                    &cfg_mint_name,
                     Some(&e.to_string()),
                 )
                 .into_string(),
@@ -377,7 +377,7 @@ async fn post_restore_config(
 
     let waiting = html! {
         div class="alert alert-info" {
-            "Config restored. The guardian is rejoining the federation — you'll be redirected once it's back online."
+            "Config restored. The guardian is rejoining the mint — you'll be redirected once it's back online."
         }
 
         div
@@ -405,13 +405,13 @@ async fn post_restore_config(
 async fn post_reset_setup_codes(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
     state.reset_setup_codes().await;
 
-    Redirect::to(FEDERATION_SETUP_ROUTE).into_response()
+    Redirect::to(MINT_SETUP_ROUTE).into_response()
 }
 
 pub fn router(api: Arc<SetupApi>) -> Router {
     Router::new()
         .route(ROOT_ROUTE, get(setup_form).post(setup_submit))
-        .route(FEDERATION_SETUP_ROUTE, get(federation_setup))
+        .route(MINT_SETUP_ROUTE, get(mint_setup))
         .route(ADD_SETUP_CODE_ROUTE, post(post_add_setup_code))
         .route(RESET_SETUP_CODES_ROUTE, post(post_reset_setup_codes))
         .route(START_DKG_ROUTE, post(post_start_dkg))

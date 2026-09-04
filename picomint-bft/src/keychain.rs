@@ -6,7 +6,7 @@ use picomint_core::PeerId;
 use picomint_core::secp256k1::{Keypair, SECP256K1, XOnlyPublicKey, schnorr};
 use picomint_encoding::Encodable;
 
-/// Schnorr signing identity plus the federation's public-key set, indexed by
+/// Schnorr signing identity plus the mint's public-key set, indexed by
 /// `PeerId`. Every peer in a session shares the same pubkey map; only the
 /// `keypair` differs.
 #[derive(Clone)]
@@ -16,7 +16,7 @@ pub struct Keychain {
 }
 
 impl Keychain {
-    /// Construct a keychain from this peer's own keypair and the federation's
+    /// Construct a keychain from this peer's own keypair and the mint's
     /// known public keys.
     pub fn new(keypair: Keypair, pubkeys: BTreeMap<PeerId, XOnlyPublicKey>) -> Self {
         Self { keypair, pubkeys }

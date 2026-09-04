@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use crate::executor::{SmId, StateMachine};
 use anyhow::ensure;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::ecash::{Denomination, verify_note};
 use picomint_core::{PeerId, TransactionId};
@@ -17,8 +17,8 @@ use crate::context::ClientContext;
 
 table!(
     ECashStateMachineTable,
-    (FederationId, SmId) => ECashStateMachine,
-    "mint-mint-sm",
+    (MintId, SmId) => ECashStateMachine,
+    "ecash-sm",
 );
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
@@ -37,7 +37,7 @@ pub struct ECashStateMachine {
     /// Tx the SM is tied to.
     pub txid: TransactionId,
     /// Blinded outputs this tx issues. Finalized into `SpendableNote`s and
-    /// inserted into `NoteTable` once the federation's blind-signature shares are
+    /// inserted into `NoteTable` once the mint's blind-signature shares are
     /// aggregated.
     ///
     /// Each carries the account it settles into, which is not always
@@ -73,7 +73,7 @@ impl StateMachine for ECashStateMachine {
             for note in &self.spendable_notes {
                 dbtx.insert(
                     &NoteTable,
-                    &(ctx.federation, self.account, note.clone()),
+                    &(ctx.mint, self.account, note.clone()),
                     &(),
                 );
             }
@@ -107,7 +107,7 @@ impl StateMachine for ECashStateMachine {
             assert!(
                 dbtx.insert(
                     &NoteTable,
-                    &(ctx.federation, request.account(), spendable_note),
+                    &(ctx.mint, request.account(), spendable_note),
                     &()
                 )
                 .is_none()

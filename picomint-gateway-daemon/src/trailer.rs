@@ -1,6 +1,6 @@
 //! Daemon-wide trailer task.
 //!
-//! The `ReceiveStateMachine` in `picomint-client::gateway` is purely federation-
+//! The `ReceiveStateMachine` in `picomint-client::gateway` is purely mint-
 //! local — it submits the incoming-contract tx, gathers TPE shares, writes
 //! the terminal `ReceiveSuccess` / `ReceiveRefund` / `ReceiveFailure` event,
 //! and submits the refund tx for refunds. The trailer watches the global
@@ -8,7 +8,7 @@
 //! terminal from the outside world's point of view:
 //!
 //! - Direct swap (daemon DB has an `OutgoingContract[operation]` row): call
-//!   `finalize_send` on the sending federation's client so the sender gets
+//!   `finalize_send` on the sending mint's client so the sender gets
 //!   the preimage (or refund signature).
 //! - External LN receive (no outgoing row): call `claim_for_hash` /
 //!   `fail_for_hash` on the LDK node so the upstream LN sender's HTLC
@@ -90,7 +90,7 @@ fn dispatch_direct_swap(
     state
         .client
         .gateway_finalize_send(
-            row.federation,
+            row.mint,
             tx_ref,
             operation,
             row.contract,
@@ -99,7 +99,7 @@ fn dispatch_direct_swap(
             // realized no routing cost.
             preimage.map(|preimage| (preimage, picomint_core::Amount::ZERO)),
         )
-        .expect("source federation for outgoing contract is added");
+        .expect("source mint for outgoing contract is added");
 }
 
 fn dispatch_lightning_receive(
@@ -108,18 +108,18 @@ fn dispatch_lightning_receive(
     operation: OperationId,
     preimage: Option<[u8; 32]>,
 ) {
-    // Refund path: the federation-side refund tx already reclaims the
+    // Refund path: the mint-side refund tx already reclaims the
     // contract amount for us. We intentionally do NOT fail the inbound LDK
     // HTLC — let it expire on LDK's own schedule.
     let Some(preimage) = preimage else {
         return;
     };
 
-    // Removing the offer's federation wipes the row; an event of its that
+    // Removing the offer's mint wipes the row; an event of its that
     // the cursor had not yet passed then has nothing left to claim, and the
     // inbound HTLC expires on LDK's own schedule.
     let Some(row) = tx_ref.get(&IncomingOfferTable, &operation) else {
-        error!("Cannot claim HTLC for a removed federation");
+        error!("Cannot claim HTLC for a removed mint");
 
         return;
     };

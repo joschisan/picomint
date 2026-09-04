@@ -72,7 +72,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
         .iter()
         .map(|(peer, endpoint)| (*peer, endpoint.name.clone()))
         .collect();
-    let federation_name = api.server.cfg.consensus.name.clone();
+    let mint_name = api.server.cfg.consensus.name.clone();
     let p2p_connection_status: BTreeMap<_, _> = api
         .p2p_status_receivers
         .iter()
@@ -90,7 +90,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
     let block_count = consensus_block_count(&api.server, &dbtx);
     let version = consensus_version(&api.server, &dbtx);
 
-    let value_in_custody = crate::consensus::onchain::federation_utxo(&dbtx)
+    let value_in_custody = crate::consensus::onchain::mint_utxo(&dbtx)
         .map(|wallet| wallet.value.to_btc())
         .unwrap_or(0.0);
 
@@ -106,7 +106,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
 
         div class="grid" {
             div class="grid-col" {
-                (general::render(&federation_name, &guardian_names, &p2p_connection_status))
+                (general::render(&mint_name, &guardian_names, &p2p_connection_status))
                 (onchain::render_pending(&api.server, &dbtx))
             }
 
@@ -121,7 +121,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
         (invite::render(block_count))
     };
 
-    Html(dashboard_layout(&federation_name, env!("CARGO_PKG_VERSION"), content).into_string())
+    Html(dashboard_layout(&mint_name, env!("CARGO_PKG_VERSION"), content).into_string())
         .into_response()
 }
 

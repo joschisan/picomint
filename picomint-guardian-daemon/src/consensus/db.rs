@@ -38,14 +38,14 @@ table!(
 );
 
 // Latest block count each peer has voted for. Votes only ever increase, so a
-// missing entry means the peer has not voted since the federation was created.
+// missing entry means the peer has not voted since the mint was created.
 table!(
     BlockCountVoteTable,
     PeerId => u32,
     "block-count-vote",
 );
 
-/// The consensus block count the federation currently runs at.
+/// The consensus block count the mint currently runs at.
 ///
 /// Sorted descending and indexed at `threshold() - 1`, so any threshold of
 /// correct peers can increase the consensus block count and any consensus
@@ -66,14 +66,14 @@ pub fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u32 {
 
 // Highest consensus version each peer has announced support for. A peer
 // votes once per upgrade and never downwards, so a missing entry means the
-// peer has not upgraded past the version the federation was created at.
+// peer has not upgraded past the version the mint was created at.
 table!(
     ConsensusVersionVoteTable,
     PeerId => ConsensusVersion,
     "consensus-version-vote",
 );
 
-/// The consensus version the federation currently runs at.
+/// The consensus version the mint currently runs at.
 ///
 /// Sorted ascending and indexed at `max_evil()`, so `2f + 1` peers voted for
 /// at least this version — a threshold can run it — and `f + 1` voted for at

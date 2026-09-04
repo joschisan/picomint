@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use self::db::{
-    FederationWalletTable, FeeRateVoteTable, NonceEntry, NonceLogTable, Output, OutputTable,
+    MintWalletTable, FeeRateVoteTable, NonceEntry, NonceLogTable, Output, OutputTable,
     SignaturesTable, SpentOutputTable, TxInfoIndexTable, TxInfoTable, UnconfirmedTxTable,
     UnsignedTxTable,
 };
@@ -37,7 +37,7 @@ use picomint_core::secret::Secret;
 use picomint_core::onchain::config::{OnchainConfig, OnchainConfigPrivate};
 use picomint_core::onchain::methods::OnchainMethod;
 use picomint_core::onchain::{
-    FederationUtxo, TxInfo, OnchainInputError, OnchainOutputError, is_potential_receive,
+    MintUtxo, TxInfo, OnchainInputError, OnchainOutputError, is_potential_receive,
     tweak_public_key, tweaked_script_pubkey,
 };
 use secp256k1::Scalar;
@@ -53,7 +53,7 @@ use tss::{
 /// below what Bitcoin Core will relay.
 const MIN_FEERATE_VOTE_SATS_PER_KVB: u32 = 1000;
 
-// A federation tx is a taproot key spend whose witness is always exactly one
+// A mint tx is a taproot key spend whose witness is always exactly one
 // 64-byte BIP340 signature, no matter how many guardians signed — so both tx
 // shapes have a constant size known upfront. In BIP-141 weight units
 // (non-witness bytes count 4, witness bytes 1): 42 overhead (nVersion 16,
@@ -62,9 +62,9 @@ const MIN_FEERATE_VOTE_SATS_PER_KVB: u32 = 1000;
 // 66), 172 per output with a 34-byte scriptPubKey (nValue 32, length 4,
 // script 136). Both figures are verified exactly by the integration suite:
 // the finalized taproot-destination pegout logs 154 vbytes and the second
-// pegin's sweep logs 169 via the "Finalized federation tx" line.
+// pegin's sweep logs 169 via the "Finalized mint tx" line.
 
-/// A send spends the federation UTXO into a destination output and a change
+/// A send spends the mint UTXO into a destination output and a change
 /// output: 42 + 230 + 172 + 172 = 616 wu. Sized for the largest destination
 /// script a [`StandardScript`] can carry (34 bytes, P2WSH/P2TR), so smaller
 /// destinations are overcharged by up to 3 vbytes.
@@ -72,12 +72,12 @@ const MIN_FEERATE_VOTE_SATS_PER_KVB: u32 = 1000;
 /// [`StandardScript`]: picomint_core::onchain::StandardScript
 const SEND_TX_VBYTES: u64 = 154;
 
-/// A receive sweeps the deposit and the federation UTXO into one change
+/// A receive sweeps the deposit and the mint UTXO into one change
 /// output: 42 + 230 + 230 + 172 = 674 wu.
 const RECEIVE_TX_VBYTES: u64 = 169;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Encodable, Decodable)]
-pub struct FederationTx {
+pub struct MintTx {
     pub tx: Transaction,
     pub spent_tx_outs: Vec<SpentTxOut>,
     pub vbytes: u64,
@@ -90,10 +90,10 @@ pub struct SpentTxOut {
     pub tweak: sha256::Hash,
 }
 
-fn pending_txs_unordered(dbtx: &impl DbRead) -> Vec<FederationTx> {
-    let unsigned: Option<FederationTx> = dbtx.get(&UnsignedTxTable, &());
+fn pending_txs_unordered(dbtx: &impl DbRead) -> Vec<MintTx> {
+    let unsigned: Option<MintTx> = dbtx.get(&UnsignedTxTable, &());
 
-    let unconfirmed: Vec<FederationTx> =
+    let unconfirmed: Vec<MintTx> =
         dbtx.iter(&UnconfirmedTxTable, |r| r.map(|(_, v)| v).collect());
 
     unsigned.into_iter().chain(unconfirmed).collect()
@@ -164,7 +164,7 @@ pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<OnchainConsensu
 fn signing_session_proposal(
     server: &Server,
     dbtx: &ReadTx,
-    unsigned_tx: &FederationTx,
+    unsigned_tx: &MintTx,
 ) -> Option<OnchainConsensusItem> {
     let txid = unsigned_tx.tx.compute_txid();
 
@@ -292,7 +292,7 @@ pub fn process_input(
         receive_fee(server, dbtx).ok_or(OnchainInputError::NoConsensusFeerateAvailable)?;
 
     // We allow for a higher fee such that a guardian could construct a CPFP
-    // transaction. This is the last line of defense should the federations
+    // transaction. This is the last line of defense should the mints
     // transactions ever get stuck due to a critical failure of the feerate
     // estimation.
     if input.fee < consensus_receive_fee {
@@ -304,8 +304,8 @@ pub fn process_input(
         .checked_sub(input.fee)
         .ok_or(OnchainInputError::ArithmeticOverflow)?;
 
-    if let Some(wallet) = dbtx.remove(&FederationWalletTable, &()) {
-        // Assuming the first receive into the federation is made through a
+    if let Some(wallet) = dbtx.remove(&MintWalletTable, &()) {
+        // Assuming the first receive into the mint is made through a
         // standard transaction, its output value is over the dust limit.
         // By induction so is this change value.
         let change_value = wallet
@@ -337,9 +337,9 @@ pub fn process_input(
         };
 
         dbtx.insert(
-            &FederationWalletTable,
+            &MintWalletTable,
             &(),
-            &FederationUtxo {
+            &MintUtxo {
                 value: change_value,
                 outpoint: bitcoin::OutPoint {
                     txid: tx.compute_txid(),
@@ -367,7 +367,7 @@ pub fn process_input(
             },
         );
 
-        let unsigned_tx = FederationTx {
+        let unsigned_tx = MintTx {
             tx: tx.clone(),
             spent_tx_outs: vec![
                 SpentTxOut {
@@ -388,9 +388,9 @@ pub fn process_input(
         }
     } else {
         dbtx.insert(
-            &FederationWalletTable,
+            &MintWalletTable,
             &(),
-            &FederationUtxo {
+            &MintUtxo {
                 value: tracked_output.value,
                 outpoint: tracked_outpoint,
                 tweak: input.tweak.consensus_hash(),
@@ -418,14 +418,14 @@ pub fn process_output(
     }
 
     let wallet = dbtx
-        .remove(&FederationWalletTable, &())
-        .ok_or(OnchainOutputError::NoFederationUTXO)?;
+        .remove(&MintWalletTable, &())
+        .ok_or(OnchainOutputError::NoMintUtxo)?;
 
     let consensus_send_fee =
         send_fee(server, dbtx).ok_or(OnchainOutputError::NoConsensusFeerateAvailable)?;
 
     // We allow for a higher fee such that a guardian could construct a CPFP
-    // transaction. This is the last line of defense should the federations
+    // transaction. This is the last line of defense should the mints
     // transactions ever get stuck due to a critical failure of the feerate
     // estimation.
     if output.fee < consensus_send_fee {
@@ -470,9 +470,9 @@ pub fn process_output(
     };
 
     dbtx.insert(
-        &FederationWalletTable,
+        &MintWalletTable,
         &(),
-        &FederationUtxo {
+        &MintUtxo {
             value: change_value,
             outpoint: bitcoin::OutPoint {
                 txid: tx.compute_txid(),
@@ -502,7 +502,7 @@ pub fn process_output(
 
     dbtx.insert(&TxInfoIndexTable, &outpoint, &tx_index);
 
-    let unsigned_tx = FederationTx {
+    let unsigned_tx = MintTx {
         tx: tx.clone(),
         spent_tx_outs: vec![SpentTxOut {
             value: wallet.value,
@@ -524,14 +524,14 @@ pub fn process_output(
 }
 
 pub fn audit(dbtx: &WriteTx) -> i64 {
-    dbtx.get(&FederationWalletTable, &())
+    dbtx.get(&MintWalletTable, &())
         .map_or(0, |wallet| 1000 * wallet.value.to_sat() as i64)
 }
 
 pub async fn handle_api(server: &Server, method: OnchainMethod) -> Result<Vec<u8>, String> {
     match method {
         OnchainMethod::ConsensusFeerate(req) => handler!(consensus_feerate, server, req).await,
-        OnchainMethod::FederationUtxo(req) => handler!(federation_utxo, server, req).await,
+        OnchainMethod::MintUtxo(req) => handler!(mint_utxo, server, req).await,
         OnchainMethod::SendFee(req) => handler!(send_fee, server, req).await,
         OnchainMethod::ReceiveFee(req) => handler!(receive_fee, server, req).await,
         OnchainMethod::TxId(req) => handler!(tx_id, server, req).await,
@@ -548,7 +548,7 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
 ) {
     tokio::spawn(async move {
         loop {
-            let unconfirmed_txs: Vec<FederationTx> = db
+            let unconfirmed_txs: Vec<MintTx> = db
                 .begin_read()
                 .iter(&UnconfirmedTxTable, |r| r.map(|(_, v)| v).collect());
 
@@ -566,7 +566,7 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
 }
 
 /// Scan the blocks the consensus block count advanced over for pegins and
-/// confirmations of the federation's own transactions. Called by the
+/// confirmations of the mint's own transactions. Called by the
 /// consensus engine whenever the consensus block count advances.
 pub async fn sync_blocks(
     server: &Server,
@@ -574,7 +574,7 @@ pub async fn sync_blocks(
     old_block_count: u32,
     new_block_count: u32,
 ) {
-    // We do not sync blocks that predate the federation itself.
+    // We do not sync blocks that predate the mint itself.
     if old_block_count == 0 {
         return;
     }
@@ -602,7 +602,7 @@ pub async fn sync_blocks(
             dbtx.remove(&UnconfirmedTxTable, &tx.compute_txid());
 
             // We maintain an append-only log of transaction outputs that pass
-            // the probabilistic receive filter created since the federation was
+            // the probabilistic receive filter created since the mint was
             // established. This is downloaded by clients to detect pegins and
             // claim them by index.
 
@@ -873,7 +873,7 @@ fn tweaked_agg_pk(server: &Server, tweak: &sha256::Hash) -> AggregatePublicKey {
 }
 
 /// The BIP341 keyspend sighash of every input of the transaction.
-fn sighashes(server: &Server, unsigned_tx: &FederationTx) -> Vec<[u8; 32]> {
+fn sighashes(server: &Server, unsigned_tx: &MintTx) -> Vec<[u8; 32]> {
     let prevouts: Vec<TxOut> = unsigned_tx
         .spent_tx_outs
         .iter()
@@ -901,7 +901,7 @@ fn sighashes(server: &Server, unsigned_tx: &FederationTx) -> Vec<[u8; 32]> {
 
 fn sign_tx(
     server: &Server,
-    unsigned_tx: &FederationTx,
+    unsigned_tx: &MintTx,
     sighashes: &[[u8; 32]],
     secret_nonces: Vec<SecretNonce>,
     chunk: &[NonceEntry],
@@ -927,17 +927,17 @@ fn sign_tx(
 
 fn finalize_tx(
     server: &Server,
-    federation_tx: &mut FederationTx,
+    mint_tx: &mut MintTx,
     sighashes: &[[u8; 32]],
     chunk: &[NonceEntry],
     responses: &[Vec<SignatureShare>],
 ) {
     assert_eq!(
-        federation_tx.spent_tx_outs.len(),
-        federation_tx.tx.input.len()
+        mint_tx.spent_tx_outs.len(),
+        mint_tx.tx.input.len()
     );
 
-    for (index, (utxo, msg)) in federation_tx
+    for (index, (utxo, msg)) in mint_tx
         .spent_tx_outs
         .iter()
         .zip(sighashes)
@@ -968,7 +968,7 @@ fn finalize_tx(
             "Aggregated signature failed verification"
         );
 
-        federation_tx.tx.input[index].witness =
+        mint_tx.tx.input[index].witness =
             Witness::p2tr_key_spend(&bitcoin::taproot::Signature {
                 signature,
                 sighash_type: TapSighashType::Default,
@@ -976,10 +976,10 @@ fn finalize_tx(
     }
 
     info!(
-        inputs = federation_tx.tx.input.len(),
-        outputs = federation_tx.tx.output.len(),
-        vbytes = federation_tx.tx.vsize(),
-        "Finalized federation tx"
+        inputs = mint_tx.tx.input.len(),
+        outputs = mint_tx.tx.output.len(),
+        vbytes = mint_tx.tx.vsize(),
+        "Finalized mint tx"
     );
 }
 
@@ -1025,21 +1025,21 @@ pub fn total_txs(dbtx: &impl DbRead) -> u64 {
     dbtx.iter_rev(&TxInfoTable, |r| r.next().map_or(0, |entry| entry.0 + 1))
 }
 
-/// The current federation wallet, if a first receive has established one.
-pub fn federation_utxo(dbtx: &impl DbRead) -> Option<FederationUtxo> {
-    dbtx.get(&FederationWalletTable, &())
+/// The current mint wallet, if a first receive has established one.
+pub fn mint_utxo(dbtx: &impl DbRead) -> Option<MintUtxo> {
+    dbtx.get(&MintWalletTable, &())
 }
 
-/// Export recovery material for federation shutdown: the tweaked
+/// Export recovery material for mint shutdown: the tweaked
 /// aggregate public key and this guardian's tweaked secret key share.
 /// Additive tweaks commute with Lagrange interpolation, so an offline
 /// tool can interpolate any threshold of tweaked key shares directly
-/// into the secret key of the current federation UTXO, verify it
+/// into the secret key of the current mint UTXO, verify it
 /// against the tweaked aggregate key and sweep the UTXO with a
-/// single-key taproot wallet. Returns None if the federation wallet has
+/// single-key taproot wallet. Returns None if the mint wallet has
 /// not been initialized yet.
 pub fn restore_keys(server: &Server, dbtx: &impl DbRead) -> Option<(String, String)> {
-    let wallet = federation_utxo(dbtx)?;
+    let wallet = mint_utxo(dbtx)?;
 
     Some((
         tweaked_agg_pk(server, &wallet.tweak).0.to_string(),

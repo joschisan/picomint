@@ -11,7 +11,7 @@ use super::secret::ECashSecret;
 ///
 /// The two paths that produce notes disagree only on where the denomination
 /// comes from: issuance picks it up front, a restore scan learns it from the
-/// federation after probing. Both meet here, and neither can derive a nonce
+/// mint after probing. Both meet here, and neither can derive a nonce
 /// that depends on the answer.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct NoteIssuance {
@@ -40,7 +40,7 @@ impl NoteIssuance {
 
     /// The expensive half of a candidate: two G1 scalar multiplications,
     /// roughly twenty times the cost of [`NoteIssuance::nonce`]. A restore
-    /// scan derives it only for counters the federation has already reported
+    /// scan derives it only for counters the mint has already reported
     /// as unspent.
     pub fn blinded_message(&self) -> BlindedMessage {
         blind_message(nonce_message(self.nonce()), self.blinding_key)

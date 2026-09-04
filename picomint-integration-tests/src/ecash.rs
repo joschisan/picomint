@@ -78,7 +78,7 @@ async fn wait_mint_event<S>(
 /// - `Ok` once both `TxAcceptEvent` AND `ECashSuccessEvent` have been
 ///   observed — at that point the spendable notes have been written
 ///   to the local NoteTable table and the balance reflects the receive.
-/// - `Err` on `TxRejectEvent` (federation rejected the tx).
+/// - `Err` on `TxRejectEvent` (mint rejected the tx).
 ///
 /// Callers must wait for `ECashSuccessEvent`, not just `TxAcceptEvent`,
 /// because the issuance state machine still has to fetch threshold
@@ -246,7 +246,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
         "remint left balance out of range: {swept} vs {expected}"
     );
 
-    // The remint pays the federation for its outputs and the integrator its
+    // The remint pays the mint for its outputs and the integrator its
     // cut of what moved, so the cut over the whole balance is the loosest
     // bound that still catches fees running away.
     let cut = Amount::from_msat(expected.msat * CLIENT_FEE_PPM / 1_000_000);

@@ -75,7 +75,7 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
         .expect("CLI admin server failed");
 }
 
-/// Build the Dashboard-phase CLI router that exposes read-only federation
+/// Build the Dashboard-phase CLI router that exposes read-only mint
 /// endpoints (audit, invite) plus the lightning/onchain module-admin routes.
 pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     use crate::p2p::{P2PConnectionStatus, Transport};
@@ -126,7 +126,7 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<AuditResponse>, CliError> {
         Ok(Json(AuditResponse {
-            audit: api.federation_audit(),
+            audit: api.mint_audit(),
         }))
     }
 
@@ -134,7 +134,7 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<OnchainTotalValueResponse>, CliError> {
         Ok(Json(OnchainTotalValueResponse {
-            total_value_sat: onchain::federation_utxo(&api.server.db.begin_read())
+            total_value_sat: onchain::mint_utxo(&api.server.db.begin_read())
                 .map(|w| w.value.to_sat()),
         }))
     }
@@ -330,8 +330,8 @@ async fn setup_set_local_params(
     let setup_code = setup_api
         .set_local_parameters(
             payload.name,
-            payload.federation_name,
-            payload.federation_size,
+            payload.mint_name,
+            payload.mint_size,
         )
         .await
         .map_err(CliError::internal)?;

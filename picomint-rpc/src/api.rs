@@ -18,11 +18,11 @@ use tracing::{debug, instrument};
 use crate::connection::{ConnState, ConnStatus, connection_task, request_on_state};
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 
-/// Federation API client: a pool of kept-alive connections to a federation's
+/// Mint API client: a pool of kept-alive connections to a mint's
 /// guardians, with the query strategies for fanning a request across them.
 ///
-/// Spans the whole federation — [`Self::request_with_strategy`] gives up once
-/// `f + 1` peers have errored, so the peer set must have a federation's shape.
+/// Spans the whole mint — [`Self::request_with_strategy`] gives up once
+/// `f + 1` peers have errored, so the peer set must have a mint's shape.
 /// A one-shot request to some subset of guardians wants [`crate::request`]
 /// instead, which pays for a connection it does not keep.
 ///
@@ -33,12 +33,12 @@ use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 /// QUIC handshake and hole-punched path are paid once and reused, not per
 /// request. Each task's status feeds [`Self::connection_status_stream`].
 #[derive(Clone, Debug)]
-pub struct FederationApi {
+pub struct MintApi {
     peers: BTreeMap<PeerId, PublicKey>,
     states: BTreeMap<PeerId, watch::Receiver<Option<ConnState>>>,
 }
 
-impl FederationApi {
+impl MintApi {
     pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, PublicKey>) -> Self {
         let mut states = BTreeMap::new();
 
@@ -56,8 +56,8 @@ impl FederationApi {
         self.peers.keys().copied().collect()
     }
 
-    /// Federation size, derived from the peer set. Panics unless the pool
-    /// spans a whole federation — a subset has no such shape.
+    /// Mint size, derived from the peer set. Panics unless the pool
+    /// spans a whole mint — a subset has no such shape.
     pub fn num_peers(&self) -> NumPeers {
         self.peers.to_num_peers()
     }
@@ -106,7 +106,7 @@ impl FederationApi {
         request_on_state(&mut rx, method).await
     }
 
-    /// Make an aggregate request to federation, using `strategy` to logically
+    /// Make an aggregate request to mint, using `strategy` to logically
     /// merge the responses.
     #[instrument(skip_all, fields(method = ?method))]
     pub async fn request_with_strategy<P: Decodable + Send + 'static, F: Debug>(
@@ -160,7 +160,7 @@ impl FederationApi {
 
             if peer_errors.len() == peer_error_threshold {
                 return Err(anyhow!(
-                    "Federation request {method:?} failed: {peer_errors:?}"
+                    "Mint request {method:?} failed: {peer_errors:?}"
                 ));
             }
         }
