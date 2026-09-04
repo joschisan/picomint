@@ -254,24 +254,24 @@ impl Client {
         crate::eventlog::read_operation_events(&self.db, operation)
     }
 
-    /// Whether any state machine is still driving `operation` under
-    /// `mint`. The synchronous companion to
+    /// Whether any state machine is still driving `operation`. Needs no
+    /// mint: operation ids are globally unique, like the event log the
+    /// operation's story lands in. The synchronous companion to
     /// [`Self::subscribe_completion`]: read the current state with this,
     /// subscribe to the transition with that — a subscription alone leaves
     /// the caller guessing until its first resolution arrives.
-    pub fn operation_is_active(&self, mint: MintId, operation: OperationId) -> bool {
+    pub fn operation_is_active(&self, operation: OperationId) -> bool {
         let dbtx = self.db.begin_read();
 
-        crate::tx::operation_is_active(&dbtx, mint, operation)
-            || crate::ecash::operation_is_active(&dbtx, mint, operation)
-            || crate::lightning::operation_is_active(&dbtx, mint, operation)
-            || crate::onchain::operation_is_active(&dbtx, mint, operation)
-            || crate::gateway::operation_is_active(&dbtx, mint, operation)
+        crate::tx::operation_is_active(&dbtx, operation)
+            || crate::ecash::operation_is_active(&dbtx, operation)
+            || crate::lightning::operation_is_active(&dbtx, operation)
+            || crate::onchain::operation_is_active(&dbtx, operation)
+            || crate::gateway::operation_is_active(&dbtx, operation)
     }
 
-    /// Resolve once no state machine is still driving `operation` under
-    /// `mint`. Resolves immediately for a settled or unknown
-    /// operation.
+    /// Resolve once no state machine is still driving `operation`.
+    /// Resolves immediately for a settled or unknown operation.
     ///
     /// This answers "is anything still running", not "did the payment
     /// succeed": the outcome is carried by the event log, and a receive
@@ -281,9 +281,9 @@ impl Client {
     /// state machines logged — including the terminal one, committed in
     /// the same tx that removed its state machine.
     ///
-    /// Purely db-backed: for a mint that is no longer added it simply
-    /// stays pending, since nothing is driving the operation forward.
-    pub async fn subscribe_completion(&self, mint: MintId, operation: OperationId) {
+    /// Purely db-backed: removing a mint deletes its state machine rows,
+    /// so its operations read as complete rather than pending forever.
+    pub async fn subscribe_completion(&self, operation: OperationId) {
         let notifies = [
             crate::tx::sm_notifies(&self.db),
             crate::ecash::sm_notifies(&self.db),
@@ -302,7 +302,7 @@ impl Client {
                 .map(|notify| Box::pin(notify.notified()))
                 .collect();
 
-            if !self.operation_is_active(mint, operation) {
+            if !self.operation_is_active(operation) {
                 return;
             }
 
