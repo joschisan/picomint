@@ -36,15 +36,14 @@ pub const ROUTE_LDK_PEER_DISCONNECT: &str = "/ldk/peer/disconnect";
 pub const ROUTE_LDK_PEER_LIST: &str = "/ldk/peer/list";
 
 // Analytics
-pub const ROUTE_ANALYTICS: &str = "/analytics";
+pub const ROUTE_QUERY: &str = "/query";
 
 // Federation management
 pub const ROUTE_FEDERATION_ADD: &str = "/federation/add";
 pub const ROUTE_FEDERATION_LIST: &str = "/federation/list";
 pub const ROUTE_FEDERATION_CONFIG: &str = "/federation/config";
 pub const ROUTE_FEDERATION_BALANCE: &str = "/federation/balance";
-pub const ROUTE_FEDERATION_DISABLE: &str = "/federation/disable";
-pub const ROUTE_FEDERATION_ENABLE: &str = "/federation/enable";
+pub const ROUTE_FEDERATION_REMOVE: &str = "/federation/remove";
 
 // Per-federation module commands
 pub const ROUTE_FEDERATION_MODULE_MINT_COUNT: &str = "/federation/module/mint/count";
@@ -297,15 +296,10 @@ pub struct FederationAddRequest {
     pub invite: InviteCode,
 }
 
-// --- /federation/disable + /federation/enable ---
+// --- /federation/remove ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationDisableRequest {
-    pub federation: FederationId,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationEnableRequest {
+pub struct FederationRemoveRequest {
     pub federation: FederationId,
 }
 
@@ -348,10 +342,10 @@ pub struct FederationConfigResponse {
     pub config: serde_json::Value,
 }
 
-// --- /analytics ---
+// --- /query ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct AnalyticsRequest {
+pub struct QueryRequest {
     /// Read-only SQL run against the analytics db, e.g.
     /// "SELECT * FROM outgoing_payments ORDER BY started_at DESC LIMIT 10"
     pub query: String,
@@ -359,7 +353,7 @@ pub struct AnalyticsRequest {
 
 /// One JSON object per row, keyed by result column name — the same shape
 /// `sqlite3 --json` prints.
-pub type AnalyticsResponse = Vec<serde_json::Map<String, serde_json::Value>>;
+pub type QueryResponse = Vec<serde_json::Map<String, serde_json::Value>>;
 
 // --- /federation/module/mint/count ---
 

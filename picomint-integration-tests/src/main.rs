@@ -8,6 +8,7 @@ mod wallet;
 
 use std::sync::Arc;
 
+use anyhow::ensure;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
@@ -51,6 +52,16 @@ fn main() -> anyhow::Result<()> {
     info!("Shutting down the primary test client!");
 
     runtime.block_on(client_send.client.shutdown());
+
+    info!("Removing the federation from the gateway...");
+    cli::gateway_federation_remove(&env.gw_data_dir, &env.invite.federation.to_string())?;
+
+    ensure!(
+        cli::gateway_federation_list(&env.gw_data_dir)?
+            .federations
+            .is_empty(),
+        "gateway still lists federations after remove"
+    );
 
     info!("Running guardian backup/restore test...");
     runtime.block_on(restore::run_test(&env))?;

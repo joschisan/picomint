@@ -12,7 +12,7 @@ use picomint_encoding::Encodable as _;
 
 use crate::AppState;
 
-pub async fn run_public(state: AppState, endpoint: Endpoint) {
+pub async fn run(state: AppState, endpoint: Endpoint) {
     picomint_rpc::run_accept_loop(endpoint, move |method| dispatch(state.clone(), method)).await;
 }
 

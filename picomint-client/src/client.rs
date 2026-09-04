@@ -16,13 +16,12 @@ use picomint_core::config::ConsensusConfig;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
-use picomint_core::secp256k1::XOnlyPublicKey;
-use picomint_redb::{Database, DbRead, table};
+use picomint_redb::{Database, DbRead, WriteTx, table};
 use picomint_rpc::connection::ConnStatus;
 use tracing::debug;
 
-// The config of every joined federation. The row is what makes a federation
-// joined: [`Client::add`] inserts it and [`Client::remove`] removes it,
+// The config of every added federation. The row is what makes a federation
+// added: [`Client::add`] inserts it and [`Client::begin_remove`] removes it,
 // atomically with the federation's other rows.
 table!(
     ClientConfigTable,
@@ -30,21 +29,21 @@ table!(
     "client-config",
 );
 
-/// Main client type: one instance per application, holding every joined
+/// Main client type: one instance per application, holding every added
 /// federation as data.
 ///
 /// Owns the shared resources — database handle, iroh endpoint, seed, event
-/// log — and a private map of per-federation runtimes. Federations are
-/// joined via [`Client::add`], brought up explicitly by [`Client::connect`]
-/// or implicitly by the first operation that needs them, and removed by
-/// [`Client::remove`]. Every operation takes the [`FederationId`] it acts
-/// on; there is no per-federation handle to hold or leak. Policy stays with
-/// the integrator: the client never decides when to bring a federation up
-/// or whether removing is allowed.
+/// log — and a private map of per-federation runtimes. An added federation
+/// is always up: [`Client::new`] brings every one up at construction,
+/// [`Client::add`] brings a new one up on add, and [`Client::begin_remove`]
+/// shuts one down as it removes it — there is no dormant state in between.
+/// Every operation takes the [`FederationId`] it acts on; there is no
+/// per-federation handle to hold or leak. Policy stays with the integrator:
+/// the client never decides whether removing is allowed.
 ///
-/// Teardown is explicit: call [`Self::shutdown`] (or [`Self::remove`] per
-/// federation) before letting go of the client. Dropping it without one
-/// leaks the connected federations' tasks until process exit.
+/// Teardown is explicit: call [`Self::shutdown`] before letting go of the
+/// client. Dropping it without one leaks the added federations' tasks until
+/// process exit.
 pub struct Client {
     pub(crate) endpoint: Endpoint,
     pub(crate) db: Database,
@@ -53,9 +52,9 @@ pub struct Client {
 }
 
 impl Client {
-    /// Build a client over the embedder's `endpoint`, `db` and seed. Inert:
-    /// no federation is brought up until [`Self::connect`] or the first
-    /// operation does so.
+    /// Build a client over the embedder's `endpoint`, `db` and seed, and
+    /// bring every added federation up. Must run inside a tokio runtime,
+    /// since bringing a federation up spawns its background tasks.
     ///
     /// Seed storage is the embedder's job — pass the same mnemonic on every
     /// start. The endpoint is the embedder's network identity choice: a
@@ -70,21 +69,27 @@ impl Client {
             "Building picomint client",
         );
 
+        let federations = db
+            .begin_read()
+            .iter(&ClientConfigTable, |r| r.collect::<Vec<_>>())
+            .into_iter()
+            .map(|entry| (entry.0, build_ctx(&endpoint, &db, &mnemonic, entry.1)))
+            .collect();
+
         Client {
             endpoint,
             db,
             mnemonic,
-            federations: RwLock::new(BTreeMap::new()),
+            federations: RwLock::new(federations),
         }
     }
 
-    /// Join the federation behind `invite`: download its config, verify it
+    /// Add the federation behind `invite`: download its config, verify it
     /// against `network` if given, scan every account the seed could hold
-    /// notes under, and land config, counter marks and restored notes in one
-    /// dbtx. Inert — no executor is started and no guardian connection kept;
-    /// call [`Self::connect`] (or any operation) to bring the federation up.
+    /// notes under, land config, counter marks and restored notes in one
+    /// dbtx, and bring the federation up.
     ///
-    /// The scan matters as much on a first join: a seed that has been here
+    /// The scan matters as much on a first add: a seed that has been here
     /// before holds notes behind counters a fresh client would re-derive
     /// from zero, stranding them. A seed that never held anything scans to
     /// nothing, which costs a round trip and is otherwise indistinguishable.
@@ -93,7 +98,7 @@ impl Client {
         invite: &InviteCode,
         network: Option<bitcoin::Network>,
     ) -> anyhow::Result<FederationId> {
-        let (config, restores) = crate::join::join(self, invite, network).await?;
+        let (config, restores) = crate::add::add(self, invite, network).await?;
 
         let federation = config.calculate_federation_id();
 
@@ -101,7 +106,7 @@ impl Client {
 
         ensure!(
             dbtx.get(&ClientConfigTable, &federation).is_none(),
-            "Federation is already joined"
+            "Federation is already added"
         );
 
         dbtx.insert(&ClientConfigTable, &federation, &config);
@@ -112,26 +117,29 @@ impl Client {
 
         dbtx.commit();
 
+        let ctx = build_ctx(&self.endpoint, &self.db, &self.mnemonic, config);
+
+        self.federations
+            .write()
+            .expect("federations lock poisoned")
+            .insert(federation, ctx);
+
         Ok(federation)
     }
 
-    /// Bring `federation` up: resume its state machines, spawn its refresh
-    /// loops, and build its connection pool. Idempotent — a federation that
-    /// is already up is left alone.
-    ///
-    /// An app that shows every balance at startup calls this for each joined
-    /// federation; a gateway serving federations on demand never calls it
-    /// and relies on operations connecting lazily, so a dormant federation
-    /// costs no connections.
-    pub fn connect(&self, federation: FederationId) -> anyhow::Result<()> {
-        self.ctx(federation).map(|_| ())
-    }
-
     /// Remove a federation: shut its runtime down, then remove its config
-    /// and every row it holds in one dbtx, so a crash mid-remove loses
-    /// nothing halfway. Re-joining later runs a fresh scan against clean
-    /// state.
-    pub async fn remove(&self, federation: FederationId) -> anyhow::Result<()> {
+    /// and every row it holds in the returned dbtx — the caller commits it,
+    /// so a crash mid-remove loses nothing halfway, and an embedder sharing
+    /// the database can delete its own federation-scoped rows in the same
+    /// transaction: an embedder row referencing a federation then always
+    /// implies the federation is added. Re-adding later runs a fresh scan
+    /// against clean state.
+    ///
+    /// The shutdown must complete before the dbtx opens — a task blocked in
+    /// `begin_write` cannot observe cancellation — which is why this method
+    /// owns the ordering and hands back the open tx rather than accepting
+    /// one.
+    pub async fn begin_remove(&self, federation: FederationId) -> anyhow::Result<WriteTx> {
         let ctx = self
             .federations
             .write()
@@ -148,7 +156,7 @@ impl Client {
 
         ensure!(
             dbtx.remove(&ClientConfigTable, &federation).is_some(),
-            "Federation is not joined"
+            "Federation is not added"
         );
 
         crate::mint::wipe_tables(&dbtx, federation);
@@ -158,92 +166,44 @@ impl Client {
         crate::tx::wipe_tables(&dbtx, federation);
         crate::expiry::wipe_tables(&dbtx, federation);
 
-        dbtx.commit();
-
-        Ok(())
+        Ok(dbtx)
     }
 
-    /// The joined federation's context, brought up from the persisted config
-    /// on first use. Errors for a federation that is not joined.
-    ///
-    /// Double-checked: the read-lock fast path serves the hot case, and a
-    /// cache miss re-checks under the write lock in case another caller
-    /// raced and inserted.
+    /// The added federation's context. Errors for a federation that is not
+    /// added.
     pub(crate) fn ctx(&self, federation: FederationId) -> anyhow::Result<ClientContext> {
-        if let Some(ctx) = self
-            .federations
+        self.federations
             .read()
             .expect("federations lock poisoned")
             .get(&federation)
-        {
-            return Ok(ctx.clone());
-        }
-
-        let mut federations = self.federations.write().expect("federations lock poisoned");
-
-        if let Some(ctx) = federations.get(&federation) {
-            return Ok(ctx.clone());
-        }
-
-        let config = self
-            .db
-            .begin_read()
-            .get(&ClientConfigTable, &federation)
-            .context("Federation is not joined")?;
-
-        let ctx = self.build_ctx(config);
-
-        federations.insert(federation, ctx.clone());
-
-        Ok(ctx)
+            .cloned()
+            .context("Federation is not added")
     }
 
-    /// Every joined federation, whether or not it is currently up.
+    /// Every added federation.
     pub fn federations(&self) -> Vec<FederationId> {
         self.db
             .begin_read()
             .iter(&ClientConfigTable, |r| r.map(|entry| entry.0).collect())
     }
 
-    /// Every joined federation's persisted config, without bringing any up.
+    /// Every added federation's persisted config.
     pub fn federation_configs(&self) -> BTreeMap<FederationId, ConsensusConfig> {
         self.db
             .begin_read()
             .iter(&ClientConfigTable, |r| r.collect())
     }
 
-    /// The joined federation's persisted config, without bringing it up.
+    /// The added federation's persisted config.
     pub fn config(&self, federation: FederationId) -> Option<ConsensusConfig> {
         self.db.begin_read().get(&ClientConfigTable, &federation)
-    }
-
-    /// The guardians' iroh node ids, read from the persisted config.
-    pub fn peers(
-        &self,
-        federation: FederationId,
-    ) -> Option<BTreeMap<PeerId, iroh_base::PublicKey>> {
-        self.config(federation).map(|config| config.iroh_pks())
-    }
-
-    /// The guardians' broadcast public keys, read from the persisted config.
-    pub fn guardian_public_keys(
-        &self,
-        federation: FederationId,
-    ) -> Option<BTreeMap<PeerId, XOnlyPublicKey>> {
-        self.config(federation).map(|config| {
-            config
-                .peers
-                .iter()
-                .map(|entry| (*entry.0, entry.1.broadcast_pk))
-                .collect()
-        })
     }
 
     /// Stream of per-peer guardian reachability, emitting a fresh
     /// `peer -> status` map on every change (current state first). Backed by
     /// the federation's pooled connections, so it reflects the same links
     /// requests travel over; the `Connected` status carries the RTT sampled
-    /// at connect. Brings the federation up.
+    /// at connect.
     pub fn connection_status_stream(
         &self,
         federation: FederationId,
@@ -251,7 +211,7 @@ impl Client {
         Ok(self.ctx(federation)?.api.connection_status_stream())
     }
 
-    /// The federation's API handle. Brings the federation up.
+    /// The federation's API handle.
     pub fn api(&self, federation: FederationId) -> anyhow::Result<FederationApi> {
         Ok(self.ctx(federation)?.api.clone())
     }
@@ -313,9 +273,8 @@ impl Client {
     /// state machines logged — including the terminal one, committed in
     /// the same tx that removed its state machine.
     ///
-    /// Purely db-backed: does not bring the federation up, and against a
-    /// federation that is down it simply stays pending, since nothing is
-    /// driving the operation forward.
+    /// Purely db-backed: for a federation that is no longer added it simply
+    /// stays pending, since nothing is driving the operation forward.
     pub async fn subscribe_completion(&self, federation: FederationId, operation: OperationId) {
         let notifies = [
             crate::tx::sm_notifies(&self.db),
@@ -354,36 +313,41 @@ impl Client {
             operation,
         ))
     }
+}
 
-    /// Bring up a federation against `config`.
-    ///
-    /// Not inert: resuming the persisted state machines and the background
-    /// refreshes commit writes of their own. So this goes last, after the
-    /// dbtx that persists `config` and the join's scan results — and the
-    /// resumes run before the context is published in the federation map,
-    /// so no concurrent operation can add a state machine mid-resume.
-    fn build_ctx(&self, config: ConsensusConfig) -> ClientContext {
-        let federation = config.calculate_federation_id();
+/// Bring up a federation against `config`.
+///
+/// Not inert: resuming the persisted state machines and the background
+/// refreshes commit writes of their own. So this goes last, after the
+/// dbtx that persists `config` and the add's scan results — and the
+/// resumes run before the context is published in the federation map,
+/// so no concurrent operation can add a state machine mid-resume.
+fn build_ctx(
+    endpoint: &Endpoint,
+    db: &Database,
+    mnemonic: &Mnemonic,
+    config: ConsensusConfig,
+) -> ClientContext {
+    let federation = config.calculate_federation_id();
 
-        let ctx = ClientContext::new(
-            FederationApi::new(self.endpoint.clone(), config.iroh_pks()),
-            self.db.clone(),
-            config,
-            ClientSecret::new(&self.mnemonic, federation),
-            Gateways::new(self.endpoint.clone()),
-            TaskGroup::new(),
-        );
+    let ctx = ClientContext::new(
+        FederationApi::new(endpoint.clone(), config.iroh_pks()),
+        db.clone(),
+        config,
+        ClientSecret::new(mnemonic, federation),
+        Gateways::new(endpoint.clone()),
+        TaskGroup::new(),
+    );
 
-        crate::mint::resume(&ctx);
+    crate::mint::resume(&ctx);
 
-        crate::wallet::resume(&ctx);
+    crate::wallet::resume(&ctx);
 
-        crate::ln::resume(&ctx);
+    crate::ln::resume(&ctx);
 
-        crate::gw::resume(&ctx);
+    crate::gw::resume(&ctx);
 
-        ctx.tg.spawn(crate::expiry::refresh(ctx.clone()));
+    ctx.tg.spawn(crate::expiry::refresh(ctx.clone()));
 
-        ctx
-    }
+    ctx
 }

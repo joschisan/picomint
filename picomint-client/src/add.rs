@@ -1,9 +1,9 @@
-//! Joining a federation.
+//! Adding a federation.
 //!
-//! One path, whether or not the seed has been here before. [`join`] downloads
+//! One path, whether or not the seed has been here before. [`add`] downloads
 //! the config and scans every account the seed could hold notes under; a seed
 //! that never held anything scans to nothing, which costs a round trip and is
-//! otherwise indistinguishable from a first join. There is nothing for an
+//! otherwise indistinguishable from a first add. There is nothing for an
 //! integrator to choose between, and so nothing for it to get wrong: skipping
 //! the scan for a federation this seed has used strands every note behind the
 //! counters it would re-derive from zero.
@@ -31,12 +31,12 @@ use crate::secret::ClientSecret;
 /// Reads nothing and writes nothing locally, so a failure leaves the wallet
 /// exactly as it was. The network check runs before the scans — a rejected
 /// federation costs one config download. All or nothing across the accounts:
-/// one scan failing abandons the join rather than leaving some accounts
+/// one scan failing abandons the add rather than leaving some accounts
 /// restored and others silently starting from zero.
 ///
 /// The scans walk disjoint counter spaces and share nothing, so they run
 /// concurrently and the wait is the slowest of them rather than their sum.
-pub(crate) async fn join(
+pub(crate) async fn add(
     client: &Client,
     invite: &InviteCode,
     network: Option<bitcoin::Network>,

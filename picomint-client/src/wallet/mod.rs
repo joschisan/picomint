@@ -419,8 +419,8 @@ pub enum SendError {
     InsufficientFunds,
     #[error("Unsupported address type")]
     UnsupportedAddress,
-    #[error("Federation is not joined")]
-    NotJoined,
+    #[error("Federation is not added")]
+    NotAdded,
 }
 
 // ─── Flat federation-keyed surface ───────────────────────────────────────
@@ -428,7 +428,7 @@ pub enum SendError {
 impl Client {
     /// `account`'s next unused onchain deposit address. Errors while the
     /// initial address derivation has not completed yet.
-    pub fn wallet_deposit_address(
+    pub fn wallet_receive(
         &self,
         federation: FederationId,
         account: Account,
@@ -450,7 +450,7 @@ impl Client {
         amount: bitcoin::Amount,
         fee: Option<bitcoin::Amount>,
     ) -> Result<OperationId, SendError> {
-        let ctx = self.ctx(federation).map_err(|_| SendError::NotJoined)?;
+        let ctx = self.ctx(federation).map_err(|_| SendError::NotAdded)?;
 
         let fee = match fee {
             Some(fee) => fee,
@@ -468,7 +468,7 @@ impl Client {
         federation: FederationId,
         account: Account,
     ) -> Result<bitcoin::Amount, SendError> {
-        let ctx = self.ctx(federation).map_err(|_| SendError::NotJoined)?;
+        let ctx = self.ctx(federation).map_err(|_| SendError::NotAdded)?;
 
         Ok(max_amount_at(&ctx, account, send_fee(&ctx).await?))
     }
@@ -481,7 +481,7 @@ impl Client {
         account: Account,
         address: Address<NetworkUnchecked>,
     ) -> Result<OperationId, SendError> {
-        let ctx = self.ctx(federation).map_err(|_| SendError::NotJoined)?;
+        let ctx = self.ctx(federation).map_err(|_| SendError::NotAdded)?;
 
         let fee = send_fee(&ctx).await?;
 
@@ -495,7 +495,7 @@ impl Client {
         &self,
         federation: FederationId,
     ) -> Result<bitcoin::Amount, SendError> {
-        let ctx = self.ctx(federation).map_err(|_| SendError::NotJoined)?;
+        let ctx = self.ctx(federation).map_err(|_| SendError::NotAdded)?;
 
         send_fee(&ctx).await
     }

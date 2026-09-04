@@ -3387,7 +3387,6 @@ dependencies = [
  "derive_more",
  "futures",
  "iroh",
- "iroh-base",
  "lightning-invoice",
  "picomint-base32",
  "picomint-core",

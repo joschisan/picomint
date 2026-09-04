@@ -31,10 +31,7 @@ use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::FederationInfo;
 use picomint_redb::{Database, DbRead};
 
-use crate::db::{
-    DisabledFederationTable, IncomingOfferRow, IncomingOfferTable, OutgoingContractRow,
-    OutgoingContractTable,
-};
+use crate::db::{IncomingOfferRow, IncomingOfferTable, OutgoingContractRow, OutgoingContractTable};
 
 /// Name of the gateway's database.
 pub const DB_FILE: &str = "database.redb";
@@ -60,8 +57,7 @@ pub struct AppState {
 
 impl AppState {
     /// List every federation the gateway has added, with its config-declared
-    /// name. Reads the persisted configs directly so dormant federations are
-    /// not forced to lazy-load.
+    /// name.
     pub fn federation_list(&self) -> Vec<FederationInfo> {
         self.client
             .federation_configs()
@@ -77,14 +73,6 @@ impl AppState {
 // Lightning Gateway implementation
 impl AppState {
     pub async fn gateway_info(&self, federation: &FederationId) -> anyhow::Result<GatewayInfo> {
-        ensure!(
-            self.gateway_db
-                .begin_read()
-                .get(&DisabledFederationTable, federation)
-                .is_none(),
-            "Federation is disabled",
-        );
-
         Ok(GatewayInfo {
             module_public_key: self.client.gw_pk(*federation)?,
             send_fee: self.send_fee,
@@ -274,7 +262,10 @@ impl AppState {
     pub async fn receive(&self, payload: ReceiveRequest) -> anyhow::Result<Bolt11Invoice> {
         ensure!(payload.offer.verify(), "The offer is invalid");
 
-        self.client.connect(payload.federation)?;
+        ensure!(
+            self.client.config(payload.federation).is_some(),
+            "Federation is not added"
+        );
 
         let receive_fee = self.receive_fee.fee(payload.offer.commitment.amount.msat);
 
@@ -323,17 +314,10 @@ impl AppState {
     ) -> anyhow::Result<VerifyResponse> {
         let operation = OperationId::from_encodable(&payment_hash);
 
-        let row = self
-            .gateway_db
+        self.gateway_db
             .begin_read()
             .get(&IncomingOfferTable, &operation)
             .ok_or_else(|| anyhow!("Unknown payment hash"))?;
-
-        // Bring the federation up so its state machines drive the contract
-        // to settlement; the event reads below go through the shared log.
-        self.client
-            .connect(row.federation)
-            .expect("source federation for incoming contract is joined");
 
         if !wait {
             if let Some(preimage) = self

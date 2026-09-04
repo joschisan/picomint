@@ -23,6 +23,7 @@ use picomint_client::eventlog::EventLogEntry;
 use picomint_client::gw::events::{ReceiveRefundEvent, ReceiveSuccessEvent};
 use picomint_core::core::OperationId;
 use picomint_redb::{DbRead, WriteTx};
+use tracing::error;
 
 use crate::AppState;
 use crate::db::{EventCursorTable, IncomingOfferTable, OutgoingContractTable};
@@ -98,7 +99,7 @@ fn dispatch_direct_swap(
             // realized no routing cost.
             preimage.map(|preimage| (preimage, picomint_core::Amount::ZERO)),
         )
-        .expect("source federation for outgoing contract is joined");
+        .expect("source federation for outgoing contract is added");
 }
 
 fn dispatch_ln_receive(
@@ -114,9 +115,14 @@ fn dispatch_ln_receive(
         return;
     };
 
-    let row = tx_ref
-        .get(&IncomingOfferTable, &operation)
-        .expect("incoming-offer row registered by AppState::receive");
+    // Removing the offer's federation wipes the row; an event of its that
+    // the cursor had not yet passed then has nothing left to claim, and the
+    // inbound HTLC expires on LDK's own schedule.
+    let Some(row) = tx_ref.get(&IncomingOfferTable, &operation) else {
+        error!("Cannot claim HTLC for a removed federation");
+
+        return;
+    };
 
     let ph = PaymentHash(*row.offer.commitment.payment_hash.as_byte_array());
 

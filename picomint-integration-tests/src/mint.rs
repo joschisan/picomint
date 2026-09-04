@@ -306,7 +306,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     ensure!(
         client
             .client
-            .mint_count_by_denomination(client.fed, Account::Primary)
+            .mint_count(client.fed, Account::Primary)
             .is_empty(),
         "send_max left notes behind"
     );

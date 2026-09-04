@@ -434,8 +434,8 @@ async fn receive_scan(ctx: ClientContext) {
 pub enum SelectGatewayError {
     #[error("No gateways are available")]
     NoGatewaysAvailable,
-    #[error("Federation is not joined")]
-    NotJoined,
+    #[error("Federation is not added")]
+    NotAdded,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
@@ -459,8 +459,8 @@ pub enum SendPaymentError {
         invoice_currency: Currency,
         federation_currency: Currency,
     },
-    #[error("Federation is not joined")]
-    NotJoined,
+    #[error("Federation is not added")]
+    NotAdded,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
@@ -475,8 +475,8 @@ pub enum ReceiveError {
     InvalidInvoice,
     #[error("Gateway returned an invoice with incorrect amount")]
     IncorrectInvoiceAmount,
-    #[error("Federation is not joined")]
-    NotJoined,
+    #[error("Federation is not added")]
+    NotAdded,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
@@ -525,7 +525,7 @@ impl Client {
     ) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
         let ctx = self
             .ctx(federation)
-            .map_err(|_| SelectGatewayError::NotJoined)?;
+            .map_err(|_| SelectGatewayError::NotAdded)?;
 
         select_gateway(&ctx)
     }
@@ -542,7 +542,7 @@ impl Client {
     ) -> Result<OperationId, SendPaymentError> {
         let ctx = self
             .ctx(federation)
-            .map_err(|_| SendPaymentError::NotJoined)?;
+            .map_err(|_| SendPaymentError::NotAdded)?;
 
         send_inner(&ctx, account, gateway_pk, gateway_info, invoice, false).await
     }
@@ -585,7 +585,7 @@ impl Client {
         gateway_info: GatewayInfo,
         amount: Amount,
     ) -> Result<Bolt11Invoice, ReceiveError> {
-        let ctx = self.ctx(federation).map_err(|_| ReceiveError::NotJoined)?;
+        let ctx = self.ctx(federation).map_err(|_| ReceiveError::NotAdded)?;
 
         let receive_keypair = ctx.secret.ln_secret().receive_keypair(account);
 

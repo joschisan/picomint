@@ -12,22 +12,22 @@ use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_gateway_cli_core::{
-    AnalyticsRequest, CLI_SOCKET_FILENAME, FederationAddRequest, FederationBalanceRequest,
-    FederationConfigRequest, FederationDisableRequest, FederationEnableRequest,
+    CLI_SOCKET_FILENAME, FederationAddRequest, FederationBalanceRequest, FederationConfigRequest,
     FederationMintCountRequest, FederationMintReceiveRequest, FederationMintSendRequest,
-    FederationWalletReceiveRequest, FederationWalletSendFeeRequest, FederationWalletSendRequest,
-    LdkChannelCloseRequest, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
-    LdkChannelSpliceOutRequest, LdkLnProbeRequest, LdkLnReceiveRequest, LdkLnSendRequest,
-    LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest, ROUTE_ANALYTICS,
-    ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
-    ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE, ROUTE_FEDERATION_LIST,
-    ROUTE_FEDERATION_MODULE_MINT_COUNT, ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
-    ROUTE_FEDERATION_MODULE_MINT_SEND, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO,
+    FederationRemoveRequest, FederationWalletReceiveRequest, FederationWalletSendFeeRequest,
+    FederationWalletSendRequest, LdkChannelCloseRequest, LdkChannelOpenRequest,
+    LdkChannelSpliceInRequest, LdkChannelSpliceOutRequest, LdkLnProbeRequest, LdkLnReceiveRequest,
+    LdkLnSendRequest, LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
+    QueryRequest, ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
+    ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
+    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_FEDERATION_REMOVE, ROUTE_INFO,
     ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LN_PROBE,
     ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
     ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
+    ROUTE_QUERY,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -54,7 +54,7 @@ enum Commands {
     /// Display mnemonic seed words
     Mnemonic,
     /// Query the analytics db with read-only SQL; rows print as JSON objects
-    Analytics(AnalyticsRequest),
+    Query(QueryRequest),
     /// LDK lightning node management
     #[command(subcommand)]
     Ldk(LdkCommands),
@@ -127,11 +127,10 @@ enum LdkPeerCommands {
 enum FederationCommands {
     /// Add a federation
     Add(FederationAddRequest),
-    /// Disable a federation's public client API (gateway_info,
-    /// receive). In-flight contracts continue to settle.
-    Disable(FederationDisableRequest),
-    /// Re-enable a previously disabled federation
-    Enable(FederationEnableRequest),
+    /// Remove a federation and delete all of its data. Destructive:
+    /// check for in-flight payments via `query` first — failing to
+    /// check might result in loss of funds.
+    Remove(FederationRemoveRequest),
     /// List connected federations
     List,
     /// Get a connected federation's JSON client config
@@ -248,7 +247,7 @@ async fn main() -> Result<()> {
     let result = match cli.command {
         Commands::Info => request(d, ROUTE_INFO, ()).await?,
         Commands::Mnemonic => request(d, ROUTE_MNEMONIC, ()).await?,
-        Commands::Analytics(req) => request(d, ROUTE_ANALYTICS, req).await?,
+        Commands::Query(req) => request(d, ROUTE_QUERY, req).await?,
 
         Commands::Ldk(cmd) => match cmd {
             LdkCommands::Balances => request(d, ROUTE_LDK_BALANCES, ()).await?,
@@ -283,8 +282,7 @@ async fn main() -> Result<()> {
 
         Commands::Federation(cmd) => match cmd {
             FederationCommands::Add(req) => request(d, ROUTE_FEDERATION_ADD, req).await?,
-            FederationCommands::Disable(req) => request(d, ROUTE_FEDERATION_DISABLE, req).await?,
-            FederationCommands::Enable(req) => request(d, ROUTE_FEDERATION_ENABLE, req).await?,
+            FederationCommands::Remove(req) => request(d, ROUTE_FEDERATION_REMOVE, req).await?,
             FederationCommands::List => request(d, ROUTE_FEDERATION_LIST, ()).await?,
             FederationCommands::Config(req) => request(d, ROUTE_FEDERATION_CONFIG, req).await?,
             FederationCommands::Balance(req) => request(d, ROUTE_FEDERATION_BALANCE, req).await?,
