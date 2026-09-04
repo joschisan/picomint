@@ -18,8 +18,8 @@ use picomint_node_cli_core::{
     ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
     ROUTE_MODULE_ONCHAIN_FEERATE, ROUTE_MODULE_ONCHAIN_PENDING_TXS,
     ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
-    ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_RESTORE, ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG,
-    ROUTE_SETUP_STATUS, SetupAddNodeRequest, SetupSetLocalParamsRequest,
+    ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESTORE, ROUTE_SETUP_START_DKG,
+    ROUTE_SETUP_STATUS, SetupAddNodeRequest, SetupInitRequest,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -80,8 +80,8 @@ enum ExpiryCommands {
 enum SetupCommands {
     /// Check setup status
     Status,
-    /// Set local node parameters
-    SetLocalParams(SetupSetLocalParamsRequest),
+    /// Initialize this node and print its setup code
+    Init(SetupInitRequest),
     /// Add a node's setup code
     AddNode(SetupAddNodeRequest),
     /// Start distributed key generation
@@ -221,9 +221,7 @@ async fn main() -> Result<()> {
 
         Commands::Setup(cmd) => match cmd {
             SetupCommands::Status => request(d, ROUTE_SETUP_STATUS, ()).await?,
-            SetupCommands::SetLocalParams(req) => {
-                request(d, ROUTE_SETUP_SET_LOCAL_PARAMS, req).await?
-            }
+            SetupCommands::Init(req) => request(d, ROUTE_SETUP_INIT, req).await?,
             SetupCommands::AddNode(req) => request(d, ROUTE_SETUP_ADD_NODE, req).await?,
             SetupCommands::StartDkg => request(d, ROUTE_SETUP_START_DKG, ()).await?,
             SetupCommands::Restore { path } => {

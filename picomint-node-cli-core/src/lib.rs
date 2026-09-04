@@ -9,19 +9,16 @@ use serde::{Deserialize, Serialize};
 /// The daemon binds and the CLI connects at `{DATA_DIR}/{CLI_SOCKET_FILENAME}`.
 pub const CLI_SOCKET_FILENAME: &str = "cli.sock";
 
-/// Status of the setup flow — CLI-consumed copy of the daemon's
-/// `config::setup::SetupStatus` (minus `ConsensusIsRunning`, which the
-/// setup socket can never report) so `picomint-node-cli` doesn't need to
-/// pull in the daemon crate.
+/// Status of the setup flow, as reported by `/setup/status`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SetupStatus {
-    AwaitingLocalParams,
-    SharingConnectionCodes,
+    AwaitingInit,
+    SharingSetupCodes,
 }
 
 // Setup routes
 pub const ROUTE_SETUP_STATUS: &str = "/setup/status";
-pub const ROUTE_SETUP_SET_LOCAL_PARAMS: &str = "/setup/set-local-params";
+pub const ROUTE_SETUP_INIT: &str = "/setup/init";
 pub const ROUTE_SETUP_ADD_NODE: &str = "/setup/add-node";
 pub const ROUTE_SETUP_START_DKG: &str = "/setup/start-dkg";
 pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
@@ -50,10 +47,10 @@ pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/lightning/gateway/list";
 // --- /setup/status ---
 // Response: SetupStatus (defined above)
 
-// --- /setup/set-local-params ---
+// --- /setup/init ---
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
-pub struct SetupSetLocalParamsRequest {
+pub struct SetupInitRequest {
     /// Node name
     pub name: String,
     /// Mint name (leader only)
@@ -65,7 +62,7 @@ pub struct SetupSetLocalParamsRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SetupSetLocalParamsResponse {
+pub struct SetupInitResponse {
     pub setup_code: String,
 }
 

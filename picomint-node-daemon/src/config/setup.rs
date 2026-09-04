@@ -10,10 +10,10 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
-use crate::config::db::{ConfigGenParamsTable, LocalParamsTable, store_server_config};
+use crate::config::db::{ConfigGenParamsTable, InitParamsTable, store_server_config};
 use crate::config::{ConfigGenParams, ConfigGenSettings, ServerConfig, SetupResult};
 
-/// Connection information sent between nodes in order to start config gen.
+/// Connection information shared between nodes during setup.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable, Serialize)]
 pub struct NodeSetupCode {
     /// Name of the node
@@ -28,29 +28,20 @@ pub struct NodeSetupCode {
     pub mint_size: Option<u8>,
 }
 
-/// The state of the server while config gen is running.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum SetupStatus {
-    /// Waiting for node to set the local parameters
-    AwaitingLocalParams,
-    /// Sharing the connection codes with our nodes
-    SharingConnectionCodes,
-    /// Consensus is running
-    ConsensusIsRunning,
-}
-
-/// State held by the setup API after receiving a set of local parameters.
+/// In-memory state of the setup phase.
 #[derive(Debug, Clone, Default)]
 pub struct SetupState {
-    /// Our local connection
-    local_params: Option<LocalParams>,
-    /// Connection info received from other nodes
+    /// This node's own parameters; `None` until `init` has run
+    init_params: Option<InitParams>,
+    /// Setup codes received from other nodes
     setup_codes: std::collections::BTreeSet<NodeSetupCode>,
 }
 
 #[derive(Clone, Debug, Encodable, Decodable)]
-/// Connection information sent between nodes in order to start config gen
-pub struct LocalParams {
+/// This node's own setup parameters, created by `init` and persisted so a
+/// daemon restart mid-setup keeps the iroh identity. Never leaves the node —
+/// only the derived [`NodeSetupCode`] is shared.
+pub struct InitParams {
     /// Secret key for our single iroh endpoint (p2p + api)
     iroh_sk: iroh::SecretKey,
     /// Name of the node
@@ -62,7 +53,7 @@ pub struct LocalParams {
     mint_size: Option<u8>,
 }
 
-impl LocalParams {
+impl InitParams {
     pub fn setup_code(&self) -> NodeSetupCode {
         NodeSetupCode {
             name: self.name.clone(),
@@ -73,10 +64,10 @@ impl LocalParams {
     }
 }
 
-/// Serves the config gen API endpoints
+/// Serves the setup API endpoints
 #[derive(Clone)]
 pub struct SetupApi {
-    /// Our config gen settings configured locally
+    /// The daemon's locally-configured settings
     settings: ConfigGenSettings,
     /// In-memory state machine, mirroring the on-disk setup tables.
     state: Arc<Mutex<SetupState>>,
@@ -91,7 +82,7 @@ pub struct SetupApi {
 impl SetupApi {
     pub fn new(settings: ConfigGenSettings, sender: Sender<SetupResult>, db: Database) -> Self {
         let state = SetupState {
-            local_params: db.begin_read().get(&LocalParamsTable, &()),
+            init_params: db.begin_read().get(&InitParamsTable, &()),
             setup_codes: std::collections::BTreeSet::new(),
         };
 
@@ -107,18 +98,18 @@ impl SetupApi {
         self.state
             .lock()
             .await
-            .local_params
+            .init_params
             .as_ref()
-            .map(LocalParams::setup_code)
+            .map(InitParams::setup_code)
     }
 
     pub async fn node_name(&self) -> Option<String> {
         self.state
             .lock()
             .await
-            .local_params
+            .init_params
             .as_ref()
-            .map(|lp| lp.name.clone())
+            .map(|params| params.name.clone())
     }
 
     pub async fn connected_nodes(&self) -> Vec<String> {
@@ -136,27 +127,18 @@ impl SetupApi {
         self.state.lock().await.setup_codes.clear();
     }
 
-    pub async fn setup_status(&self) -> SetupStatus {
-        match self.state.lock().await.local_params {
-            Some(..) => SetupStatus::SharingConnectionCodes,
-            None => SetupStatus::AwaitingLocalParams,
-        }
-    }
-
-    pub async fn set_local_parameters(
+    pub async fn init(
         &self,
         name: String,
         mint_name: Option<String>,
         mint_size: Option<u8>,
     ) -> anyhow::Result<String> {
-        if let Some(existing_local_parameters) = self.state.lock().await.local_params.clone()
-            && existing_local_parameters.name == name
-            && existing_local_parameters.mint_name == mint_name
-            && existing_local_parameters.mint_size == mint_size
+        if let Some(existing_init_params) = self.state.lock().await.init_params.clone()
+            && existing_init_params.name == name
+            && existing_init_params.mint_name == mint_name
+            && existing_init_params.mint_size == mint_size
         {
-            return Ok(picomint_base32::encode(
-                &existing_local_parameters.setup_code(),
-            ));
+            return Ok(picomint_base32::encode(&existing_init_params.setup_code()));
         }
 
         ensure!(!name.is_empty(), "The node name is empty");
@@ -176,13 +158,13 @@ impl SetupApi {
         let mut state = self.state.lock().await;
 
         ensure!(
-            state.local_params.is_none(),
-            "Local parameters have already been set"
+            state.init_params.is_none(),
+            "The node has already been initialized"
         );
 
         let iroh_sk = SecretKey::from_bytes(&rand::random());
 
-        let lp = LocalParams {
+        let params = InitParams {
             iroh_sk,
             name,
             mint_name,
@@ -191,13 +173,13 @@ impl SetupApi {
 
         let dbtx = self.db.begin_write();
 
-        dbtx.insert(&LocalParamsTable, &(), &lp);
+        dbtx.insert(&InitParamsTable, &(), &params);
 
         dbtx.commit();
 
-        state.local_params = Some(lp.clone());
+        state.init_params = Some(params.clone());
 
-        Ok(picomint_base32::encode(&lp.setup_code()))
+        Ok(picomint_base32::encode(&params.setup_code()))
     }
 
     pub async fn add_node_setup_code(&self, info: String) -> anyhow::Result<String> {
@@ -209,20 +191,20 @@ impl SetupApi {
             return Ok(info.name.clone());
         }
 
-        let local_params = state
-            .local_params
+        let init_params = state
+            .init_params
             .clone()
-            .context("Local parameters have not been set yet")?;
+            .context("The node has not been initialized yet")?;
 
         ensure!(
-            info != local_params.setup_code(),
+            info != init_params.setup_code(),
             "You cannot add your own setup code"
         );
 
         if let Some(mint_name) = state
             .setup_codes
             .iter()
-            .chain(once(&local_params.setup_code()))
+            .chain(once(&init_params.setup_code()))
             .find_map(|info| info.mint_name.clone())
         {
             ensure!(
@@ -234,7 +216,7 @@ impl SetupApi {
         if let Some(mint_size) = state
             .setup_codes
             .iter()
-            .chain(once(&local_params.setup_code()))
+            .chain(once(&init_params.setup_code()))
             .find_map(|info| info.mint_size)
         {
             ensure!(
@@ -251,12 +233,12 @@ impl SetupApi {
     pub async fn start_dkg(&self) -> anyhow::Result<()> {
         let mut state = self.state.lock().await.clone();
 
-        let local_params = state
-            .local_params
+        let init_params = state
+            .init_params
             .clone()
-            .context("Local parameters have not been set yet")?;
+            .context("The node has not been initialized yet")?;
 
-        let our_setup_code = local_params.setup_code();
+        let our_setup_code = init_params.setup_code();
 
         state.setup_codes.insert(our_setup_code.clone());
 
@@ -284,7 +266,7 @@ impl SetupApi {
 
         let params = ConfigGenParams {
             identity: NodeId::from(our_id as u8),
-            iroh_sk: local_params.iroh_sk,
+            iroh_sk: init_params.iroh_sk,
             nodes: (0..)
                 .map(|i| NodeId::from(i as u8))
                 .zip(state.setup_codes.clone())
@@ -294,12 +276,12 @@ impl SetupApi {
         };
 
         // Atomically transition out of the code-exchange phase: drop the
-        // `LocalParams` (its iroh secret key is now inside `params`) and
+        // `InitParams` (its iroh secret key is now inside `params`) and
         // persist `ConfigGenParams` so a daemon restart auto-resumes DKG
         // without operator interaction.
         let dbtx = self.db.begin_write();
 
-        dbtx.clear_table(&LocalParamsTable);
+        dbtx.clear_table(&InitParamsTable);
 
         dbtx.insert(&ConfigGenParamsTable, &(), &params);
 
@@ -329,21 +311,21 @@ impl SetupApi {
 
     pub async fn mint_size(&self) -> Option<u8> {
         let state = self.state.lock().await;
-        let local_setup_code = state.local_params.as_ref().map(LocalParams::setup_code);
+        let our_setup_code = state.init_params.as_ref().map(InitParams::setup_code);
         state
             .setup_codes
             .iter()
-            .chain(local_setup_code.iter())
+            .chain(our_setup_code.iter())
             .find_map(|info| info.mint_size)
     }
 
     pub async fn cfg_mint_name(&self) -> Option<String> {
         let state = self.state.lock().await;
-        let local_setup_code = state.local_params.as_ref().map(LocalParams::setup_code);
+        let our_setup_code = state.init_params.as_ref().map(InitParams::setup_code);
         state
             .setup_codes
             .iter()
-            .chain(local_setup_code.iter())
+            .chain(our_setup_code.iter())
             .find_map(|info| info.mint_name.clone())
     }
 }

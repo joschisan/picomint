@@ -159,14 +159,14 @@ pub fn node_setup_status(data_dir: &Path) -> Result<SetupStatus> {
         .run_cli::<SetupStatus>()
 }
 
-pub fn node_setup_set_local_params(
+pub fn node_setup_init(
     data_dir: &Path,
     name: &str,
     mint_name: Option<&str>,
     mint_size: Option<u8>,
 ) -> Result<Value> {
     let mut cmd = node_cmd(data_dir);
-    cmd.arg("setup").arg("set-local-params").arg(name);
+    cmd.arg("setup").arg("init").arg(name);
     if let Some(fed_name) = mint_name {
         cmd.arg("--mint-name").arg(fed_name);
     }

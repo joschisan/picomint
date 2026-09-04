@@ -1,7 +1,7 @@
 use picomint_redb::table;
 use picomint_redb::{Database, DbRead};
 
-use crate::config::setup::LocalParams;
+use crate::config::setup::InitParams;
 use crate::config::{ConfigGenParams, ServerConfig};
 
 table!(
@@ -11,9 +11,9 @@ table!(
 );
 
 table!(
-    LocalParamsTable,
-    () => LocalParams,
-    "setup-local-params",
+    InitParamsTable,
+    () => InitParams,
+    "setup-init-params",
 );
 
 table!(
@@ -28,7 +28,7 @@ pub async fn load_server_config(db: &Database) -> Option<ServerConfig> {
 
 /// Persist the finalized `ServerConfig` and drop any leftover setup-phase
 /// state in the same write tx — once consensus has a config, the
-/// `LocalParams` / `ConfigGenParams` entries are dead weight.
+/// `InitParams` / `ConfigGenParams` entries are dead weight.
 pub async fn store_server_config(db: &Database, cfg: &ServerConfig) {
     let dbtx = db.begin_write();
 
@@ -37,7 +37,7 @@ pub async fn store_server_config(db: &Database, cfg: &ServerConfig) {
         "Server config already present in database"
     );
 
-    dbtx.clear_table(&LocalParamsTable);
+    dbtx.clear_table(&InitParamsTable);
     dbtx.clear_table(&ConfigGenParamsTable);
 
     dbtx.commit();

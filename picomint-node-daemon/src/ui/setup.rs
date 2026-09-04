@@ -239,10 +239,7 @@ async fn setup_submit(
         None
     };
 
-    match state
-        .set_local_parameters(input.name, mint_name, mint_size)
-        .await
-    {
+    match state.init(input.name, mint_name, mint_size).await {
         Ok(_) => ([("HX-Redirect", MINT_SETUP_ROUTE)], Html(String::new())).into_response(),
         Err(e) => Html(setup_form_content(Some(&e.to_string())).into_string()).into_response(),
     }
@@ -250,8 +247,8 @@ async fn setup_submit(
 
 // GET handler for the /mint-setup route (main mint management page)
 async fn mint_setup(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
-    // If the user lands here too early (before local parameters have been
-    // set), send them back to /setup to fill in their node params first.
+    // If the user lands here too early (before the node has been
+    // initialized), send them back to the setup form first.
     let Some(our_setup_code) = state.setup_code().await else {
         return Redirect::to(ROOT_ROUTE).into_response();
     };
