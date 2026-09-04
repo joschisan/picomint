@@ -55,7 +55,7 @@ recovery at the 1 Hz anti-entropy cadence, not by decision depth.
 - **Round** — a row of the DAG. Round 0 is the root row; its units
   carry no parents.
 - **UnitHash** — the sha256 consensus-hash of an encoded unit; the
-  unit's identity everywhere: storage key of `the units table (`"bft-units"`)`, element of
+  unit's identity everywhere: storage key of the units table (`"bft-units"`), element of
   the in-memory sets, and how parents pin the exact parent unit. It
   covers the payload transitively through the unit's `data`
   commitment.
@@ -122,10 +122,11 @@ own_top:            Option<(Round, UnitHash)>,      // own column top: next-roun
 request_sent_at:    BTreeMap<UnitHash, Instant>,    // demand-pull throttle
 ```
 
-The `rounds` index is written at exactly one point in steady state (`insert_unit`), and rebuilt directly by `replay` on startup
-and provides every per-round scan: the extension cascade over stored
-units, and — filtered by `extended` membership — the extender's
-candidate and decider walks. The `extended` map carries each
+The `rounds` index is written at exactly one point in steady state
+(`insert_unit`), rebuilt directly by `replay` on startup, and provides
+every per-round scan: the extension cascade over stored units, and —
+filtered by `extended` membership — the extender's candidate and
+decider walks. The `extended` map carries each
 extended unit's position and parent map, which is the complete
 evidence the decision rule needs — virtual votes are computed from
 parent maps alone, so the extender never touches the db except to
@@ -155,8 +156,9 @@ The protocol is split into two gates with distinct semantics.
 `insert_unit(dbtx, envelope, hash)` installs a fresh envelope from a
 `Unit` message and indexes it in `rounds`. Admission checks:
 
-- Structural validity: round 0 has an empty parent map; round R>0 has
-  exactly `threshold` parent entries, all keyed by mint members.
+- Structural validity: the creator is a mint member; round 0 has an
+  empty parent map; round R>0 has exactly `threshold` parent entries,
+  all keyed by mint members.
 - The creator sig verifies against the unit under the session.
 - Whether parents are *locally present or extended* is **not**
   checked. An out-of-order arrival lands in `units_table` anyway, so

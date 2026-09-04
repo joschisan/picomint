@@ -34,7 +34,9 @@ impl Keychain {
     }
 
     /// Verify `signature` is `node`'s schnorr signature over the
-    /// consensus-hash of `(session, value)`.
+    /// consensus-hash of `(session, value)`. False for a node outside
+    /// the keychain — `node` may come straight off the wire, and an
+    /// unknown signer is just an invalid signature, never a panic.
     pub fn verify<E: Encodable>(
         &self,
         session: u32,
@@ -45,10 +47,9 @@ impl Keychain {
         let message =
             Message::from_digest((session, value).consensus_hash_sha256().to_byte_array());
 
-        let pk = self
-            .pubkeys
-            .get(&node)
-            .expect("verify is only ever called with nodes from our keychain");
+        let Some(pk) = self.pubkeys.get(&node) else {
+            return false;
+        };
 
         SECP256K1.verify_schnorr(signature, &message, pk).is_ok()
     }

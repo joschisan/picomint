@@ -11,7 +11,7 @@ use tracing::warn;
 
 use crate::data::DataProvider;
 use crate::keychain::Keychain;
-use crate::network::{DynNetwork, Message, Recipient};
+use crate::network::{INetwork, Message, Recipient};
 use crate::unit::{Round, Unit, UnitData, UnitEnvelope, UnitHash};
 
 /// Periodic own-unit push interval. Pull is demand-driven, not periodic.
@@ -33,18 +33,19 @@ const REQUEST_DEDUP_INTERVAL: Duration = Duration::from_secs(1);
 /// previously-committed item through `ordered_tx`. The caller-side
 /// idempotency check (e.g. the daemon's `resume_from` cursor over its
 /// accepted-items table) absorbs the redelivery.
-pub struct Engine<P, D, T>
+pub struct Engine<P, D, T, N>
 where
     D: UnitData,
     P: DataProvider<D>,
     T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
+    N: INetwork<D>,
 {
     pub(crate) id: NodeId,
     session: u32,
     pub(crate) n: NumNodes,
     db: Database,
     keychain: Keychain,
-    network: DynNetwork<D>,
+    network: N,
     data_provider: P,
     pub(crate) ordered_tx: Sender<(Round, NodeId, D)>,
 
@@ -92,11 +93,12 @@ where
     request_sent_at: BTreeMap<UnitHash, Instant>,
 }
 
-impl<P, D, T> Engine<P, D, T>
+impl<P, D, T, N> Engine<P, D, T, N>
 where
     D: UnitData,
     P: DataProvider<D>,
     T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
+    N: INetwork<D>,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -105,7 +107,7 @@ where
         n: NumNodes,
         db: Database,
         keychain: Keychain,
-        network: DynNetwork<D>,
+        network: N,
         data_provider: P,
         ordered_tx: Sender<(Round, NodeId, D)>,
         units_table: T,
@@ -337,6 +339,13 @@ where
     /// in `rounds` and advance `own_top` for our own units. A
     /// duplicate unit hits the same key and errors.
     fn insert_unit(&mut self, dbtx: &WriteTx, ev: &UnitEnvelope<D>, hash: UnitHash) -> Result<()> {
+        // Before the signature check, which looks the creator up in the
+        // keychain — an out-of-mint creator has no key there.
+        ensure!(
+            self.n.node_ids().any(|x| x == ev.unit.creator),
+            "unit creator not in mint",
+        );
+
         if ev.unit.round == 0 {
             ensure!(
                 ev.unit.parents.is_empty(),
@@ -456,17 +465,6 @@ where
         self.rounds.get(&round).cloned().unwrap_or_default()
     }
 
-    /// The extended units of `round`.
-    pub(crate) fn extended_at(&self, round: Round) -> BTreeSet<UnitHash> {
-        self.rounds
-            .get(&round)
-            .into_iter()
-            .flatten()
-            .filter(|hash| self.is_extended(**hash))
-            .copied()
-            .collect()
-    }
-
     /// Extend `hash` if eligible, then sweep ascending rounds while
     /// each sweep produces at least one new extension. Termination is
     /// by induction — a round can only gain extensions when the
@@ -522,7 +520,9 @@ where
             return None;
         }
 
-        Some(self.extended.entry(hash).or_insert(ev.unit).round)
+        self.extended.insert(hash, ev.unit.clone());
+
+        Some(ev.unit.round)
     }
 
     /// Our own unit at `round-1` plus the `threshold - 1` lowest-`NodeId`
@@ -545,7 +545,7 @@ where
         // don't verify which branch we picked.
         let mut extended_row: BTreeMap<NodeId, UnitHash> = BTreeMap::new();
 
-        for hash in self.extended_at(parent_round) {
+        for hash in extended_at(&self.rounds, &self.extended, parent_round) {
             let extended = self.extended.get(&hash).expect("filtered on extended");
 
             extended_row.entry(extended.creator).or_insert(hash);
@@ -562,4 +562,20 @@ where
 
         (parents.len() == t).then_some(parents)
     }
+}
+
+/// The extended units of `round`, in ascending hash order. Free over
+/// the two engine fields it reads so the extender can walk it while
+/// mutating the vote and decision caches.
+pub(crate) fn extended_at<'a>(
+    rounds: &'a BTreeMap<Round, BTreeSet<UnitHash>>,
+    extended: &'a BTreeMap<UnitHash, Unit>,
+    round: Round,
+) -> impl Iterator<Item = UnitHash> + 'a {
+    rounds
+        .get(&round)
+        .into_iter()
+        .flatten()
+        .copied()
+        .filter(move |hash| extended.contains_key(hash))
 }

@@ -17,7 +17,6 @@
 
 use std::collections::BTreeMap;
 use std::future::pending;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
@@ -107,7 +106,6 @@ fn delayed_send(sender: Sender<(NodeId, Message<u64>)>, from: NodeId, msg: Messa
     });
 }
 
-#[async_trait]
 impl INetwork<u64> for MockChannel {
     fn send(&self, recipient: Recipient, msg: Message<u64>) {
         match recipient {
@@ -144,29 +142,16 @@ impl INetwork<u64> for MockChannel {
     async fn receive(&self) -> Option<(NodeId, Message<u64>)> {
         self.rx.recv().await.ok()
     }
-
-    async fn receive_from_node(&self, _node: NodeId) -> Option<Message<u64>> {
-        unimplemented!(
-            "MockChannel multiplexes inbound traffic on a single receiver; \
-             per-node reads are only meaningful for round-robin DKG, which \
-             picomint-bft doesn't have"
-        )
-    }
 }
 
 /// Sink network for an engine replaying from disk in isolation: sends
 /// vanish and no message ever arrives.
 struct NullNetwork;
 
-#[async_trait]
 impl INetwork<u64> for NullNetwork {
     fn send(&self, _recipient: Recipient, _msg: Message<u64>) {}
 
     async fn receive(&self) -> Option<(NodeId, Message<u64>)> {
-        pending().await
-    }
-
-    async fn receive_from_node(&self, _node: NodeId) -> Option<Message<u64>> {
         pending().await
     }
 }
@@ -250,7 +235,7 @@ fn spawn_engines(
             n,
             db,
             keychains.get(&node).expect("built above").clone(),
-            Arc::new(channel),
+            channel,
             TimestampDataProvider,
             ordered_tx,
             BftUnits,
@@ -638,6 +623,48 @@ async fn engines_ignore_spoofed_parent_positions() {
     }
 }
 
+/// Node 0 sends a unit claiming a creator id outside the mint.
+/// Admission must reject it before the signature check — the keychain
+/// holds no key for the claimed creator, and before creator validation
+/// this panicked the engine's keychain lookup, killing ordering on
+/// every node the unit reached.
+#[tokio::test]
+async fn engines_reject_units_from_unknown_creator() {
+    let n = NumNodes::from(N_NODES);
+    let keychains = build_keychains(n);
+    let mut channels = MockChannel::mesh(n, DROP_RATE);
+
+    let forker = NodeId::from(0u8);
+    let forker_channel = channels.remove(&forker).expect("mesh built above");
+
+    let engines = spawn_engines(n, &keychains, channels);
+
+    let poison = build_envelope(
+        &keychains[&forker],
+        0,
+        NodeId::from(200u8),
+        BTreeMap::new(),
+        66,
+    );
+
+    for recipient in [1u8, 2u8, 3u8] {
+        forker_channel.deliver(NodeId::from(recipient), Message::Unit(poison.clone()));
+    }
+
+    let sequences = collect_sequences(engines.ordered_rxs).await;
+
+    for h in engines.handles {
+        h.abort();
+    }
+
+    let reference = assert_agreement(&sequences);
+
+    assert!(
+        !reference.contains(&(NodeId::from(200u8), 66)),
+        "a unit from an unknown creator must never be ordered",
+    );
+}
+
 /// Restarting an engine on its persisted unit table must reproduce the
 /// exact live emission sequence — including under forks. Runs the
 /// forking-node scenario, then replays node 1's engine on a clone of
@@ -680,7 +707,7 @@ async fn replay_reproduces_order_under_forks() {
         n,
         engines.dbs.remove(&replayer).expect("spawned above"),
         keychains[&replayer].clone(),
-        Arc::new(NullNetwork),
+        NullNetwork,
         TimestampDataProvider,
         ordered_tx,
         BftUnits,

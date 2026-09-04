@@ -67,7 +67,6 @@ fn into_p2p_recipient(r: BftRecipient) -> P2PRecipient {
     }
 }
 
-#[async_trait]
 impl INetwork<ConsensusItem> for Network {
     fn send(&self, recipient: BftRecipient, msg: BftMessage<ConsensusItem>) {
         self.connections
@@ -107,10 +106,6 @@ impl INetwork<ConsensusItem> for Network {
                 ),
             }
         }
-    }
-
-    async fn receive_from_node(&self, _node: NodeId) -> Option<BftMessage<ConsensusItem>> {
-        unimplemented!("bft consensus only uses fan-in receive")
     }
 }
 
