@@ -6,8 +6,8 @@ use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
-    FederationBalanceResponse, InfoResponse, LdkChannelListResponse, LdkLnReceiveResponse,
-    LdkOnchainReceiveResponse,
+    FederationBalanceResponse, FederationListResponse, InfoResponse, LdkChannelListResponse,
+    LdkLnReceiveResponse, LdkOnchainReceiveResponse,
 };
 use picomint_guardian_cli_core::{InviteResponse, SetupStatus};
 use serde::de::DeserializeOwned;
@@ -64,6 +64,21 @@ pub fn gateway_federation_add(gw_data_dir: &Path, invite: &InviteCode) -> Result
         .arg("add")
         .arg(picomint_base32::encode(invite))
         .run_cli::<Value>()
+}
+
+pub fn gateway_federation_remove(gw_data_dir: &Path, federation: &str) -> Result<Value> {
+    gateway_cmd(gw_data_dir)
+        .arg("federation")
+        .arg("remove")
+        .arg(federation)
+        .run_cli::<Value>()
+}
+
+pub fn gateway_federation_list(gw_data_dir: &Path) -> Result<FederationListResponse> {
+    gateway_cmd(gw_data_dir)
+        .arg("federation")
+        .arg("list")
+        .run_cli::<FederationListResponse>()
 }
 
 pub fn gateway_federation_balance(

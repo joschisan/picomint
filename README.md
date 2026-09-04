@@ -216,6 +216,14 @@ List added federations:
 picomint-gateway-cli federation list
 ```
 
+Remove a federation and delete all of its data:
+
+```bash
+picomint-gateway-cli federation remove <federation-id>
+```
+
+This is destructive: check for in-flight payments via `query` first, otherwise you might lose funds.
+
 For the gateway to actually route payments on behalf of a federation, its guardians also need to add the gateway's URL to their recommended list — see [Configure Gateways](#configure-gateways) above.
 
 ### Manage Federation Liquidity
@@ -291,21 +299,21 @@ query against the live db and returns one JSON object per row, the same
 shape `sqlite3 --json` prints. Ten most recent outgoing payments:
 
 ```bash
-picomint-gateway-cli analytics \
+picomint-gateway-cli query \
     "SELECT * FROM outgoing_payments ORDER BY started_at DESC LIMIT 10"
 ```
 
 Status breakdown for outgoing:
 
 ```bash
-picomint-gateway-cli analytics \
+picomint-gateway-cli query \
     "SELECT status, COUNT(*) AS n FROM outgoing_payments GROUP BY status"
 ```
 
 Total outgoing volume per federation, in sat:
 
 ```bash
-picomint-gateway-cli analytics \
+picomint-gateway-cli query \
     "SELECT federation, SUM(amount_msat)/1000 AS sat \
      FROM outgoing_payments WHERE status='success' GROUP BY federation"
 ```

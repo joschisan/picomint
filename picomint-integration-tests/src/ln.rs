@@ -668,7 +668,7 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
         fee: client
             .client
             .config(client.fed)
-            .expect("federation is joined")
+            .expect("federation is added")
             .ln
             .input_fee,
     });

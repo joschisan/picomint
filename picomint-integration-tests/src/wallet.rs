@@ -74,7 +74,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     let pegin_addr = retry("deposit address derived", || async {
         client_send
             .client
-            .wallet_deposit_address(client_send.fed, Account::Primary)
+            .wallet_receive(client_send.fed, Account::Primary)
     })
     .await?;
     info!(addr = %pegin_addr, "Pegin address ready");
@@ -243,7 +243,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     ensure!(
         client
             .client
-            .mint_count_by_denomination(client.fed, Account::Primary)
+            .mint_count(client.fed, Account::Primary)
             .is_empty(),
         "send_max left notes behind"
     );
@@ -257,7 +257,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     let pegin_addr = retry("second deposit address derived", || async {
         client_send
             .client
-            .wallet_deposit_address(client_send.fed, Account::Primary)
+            .wallet_receive(client_send.fed, Account::Primary)
     })
     .await?;
 

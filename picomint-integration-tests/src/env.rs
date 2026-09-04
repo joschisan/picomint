@@ -279,8 +279,6 @@ async fn build_client(
         .add(&invite_code, Some(bitcoin::Network::Regtest))
         .await?;
 
-    client.connect(fed)?;
-
     info!("Created client-{n}");
     Ok(TestClient { client, fed, db })
 }

@@ -6,7 +6,7 @@ use picomint_core::core::OperationId;
 use picomint_core::ln::LightningInvoice;
 use picomint_core::ln::contracts;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_redb::{Database, DbRead, table};
+use picomint_redb::{Database, DbRead, WriteTx, table};
 use rand::rngs::OsRng;
 
 // BIP39 entropy for the daemon's mnemonic, written once on first start.
@@ -27,16 +27,6 @@ table!(
     IrohSecretKeyTable,
     () => [u8; 32],
     "iroh-sk",
-);
-
-// Set of federation ids whose public-facing endpoints (`gateway_info`,
-// `receive`) are gated off. Disable stops *new* client-initiated
-// work; back doors (LDK event handlers, trailer, terminal settlement of
-// in-flight contracts) stay open so existing operations drain naturally.
-table!(
-    DisabledFederationTable,
-    FederationId => (),
-    "disabled-federation",
 );
 
 table!(
@@ -85,6 +75,32 @@ pub struct IncomingOfferRow {
     pub federation: FederationId,
     pub offer: contracts::IncomingOffer,
     pub invoice: LightningInvoice,
+}
+
+/// Delete the daemon's rows scoped to `federation` — its outgoing-contract
+/// and incoming-offer rows. Runs inside the dbtx that removes the federation
+/// from the client, so a surviving contract row always implies its
+/// federation is added.
+pub fn wipe_federation_rows(dbtx: &WriteTx, federation: FederationId) {
+    let outgoing = dbtx.iter(&OutgoingContractTable, |rows| {
+        rows.filter(|entry| entry.1.federation == federation)
+            .map(|entry| entry.0)
+            .collect::<Vec<_>>()
+    });
+
+    for operation in outgoing {
+        dbtx.remove(&OutgoingContractTable, &operation);
+    }
+
+    let incoming = dbtx.iter(&IncomingOfferTable, |rows| {
+        rows.filter(|entry| entry.1.federation == federation)
+            .map(|entry| entry.0)
+            .collect::<Vec<_>>()
+    });
+
+    for operation in incoming {
+        dbtx.remove(&IncomingOfferTable, &operation);
+    }
 }
 
 /// Load the persisted gateway mnemonic, or generate and persist a fresh one

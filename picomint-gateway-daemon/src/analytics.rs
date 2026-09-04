@@ -12,7 +12,7 @@
 //! source of truth; the trailer replays from position 0 on every boot.
 //!
 //! Operators and agents inspect the db with read-only SQL via
-//! `picomint-gateway-cli analytics <query>`, served by [`query`] — the only
+//! `picomint-gateway-cli query <sql>`, served by [`query`] — the only
 //! reader there is: the musl-static distroless image ships no `sqlite3`
 //! binary, so nothing outside the daemon ever opens the file.
 
@@ -27,7 +27,7 @@ use picomint_client::gw::events::{
     ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent, SendCancelEvent,
     SendEvent, SendSuccessEvent,
 };
-use picomint_gateway_cli_core::AnalyticsResponse;
+use picomint_gateway_cli_core::QueryResponse;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{Map, Value};
@@ -87,7 +87,7 @@ impl Analytics {
 /// row, keyed by result column name. Opens its own `SQLITE_OPEN_READ_ONLY`
 /// connection — WAL mode lets it read concurrently with the trailer's writer
 /// connection, and the flag rejects any write statement outright.
-pub fn query(data_dir: &Path, sql: &str) -> anyhow::Result<AnalyticsResponse> {
+pub fn query(data_dir: &Path, sql: &str) -> anyhow::Result<QueryResponse> {
     let path = data_dir.join(ANALYTICS_DIR).join(ANALYTICS_FILE);
 
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)

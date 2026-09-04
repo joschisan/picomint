@@ -1,12 +1,13 @@
 //! Picomint client library.
 //!
 //! [`Client`] is the entry point for applications: one instance per app,
-//! holding every joined federation as data. [`Client::new`] binds the iroh
-//! endpoint from the seed; [`Client::add`] joins a federation,
-//! [`Client::connect`] brings one up, [`Client::remove`] wipes one. Every
-//! operation takes the [`picomint_core::config::FederationId`] it acts on
+//! holding every added federation as data. [`Client::new`] brings every
+//! added federation up; [`Client::add`] adds one, [`Client::begin_remove`]
+//! wipes one. An added federation is always up — there is no dormant state
+//! in between. Every operation takes the
+//! [`picomint_core::config::FederationId`] it acts on
 //! and is named for the module that serves it — `mint_send`,
-//! `wallet_deposit_address`, `ln_receive`, `gw_finalize_send` — so there is
+//! `wallet_receive`, `ln_receive`, `gw_finalize_send` — so there is
 //! no per-federation handle to hold or leak.
 //!
 //! Every table is shared across federations with a
@@ -21,6 +22,8 @@
 //! balances against the wallet and submits via its own
 //! [`crate::tx::TxSubmissionStateMachine`].
 
+/// Downloading a federation's config and rebuilding what the seed owns there.
+mod add;
 /// Federation API transport
 /// Core [`Client`]
 pub mod api;
@@ -38,8 +41,6 @@ pub mod expiry;
 /// Federation fee announcement cache, and paying out a collected cut.
 /// Gateway lightning module (mounted by the gateway daemon).
 pub mod gw;
-/// Downloading a federation's config and rebuilding what the seed owns there.
-mod join;
 /// Lightning module client.
 pub mod ln;
 /// Mint module client.

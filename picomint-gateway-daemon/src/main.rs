@@ -26,7 +26,7 @@ use picomint_gateway_daemon::db::{
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
 use picomint_redb::{DbRead, WriteTx};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -165,6 +165,10 @@ fn main() -> anyhow::Result<()> {
             .bind(),
     )?;
 
+    // `Client::new` brings every added federation up, which spawns their
+    // background tasks — so the runtime stays entered from here on.
+    let _rt = runtime.enter();
+
     let client = Arc::new(picomint_client::Client::new(
         endpoint.clone(),
         gateway_db.clone(),
@@ -259,13 +263,12 @@ fn main() -> anyhow::Result<()> {
         analytics: picomint_gateway_daemon::analytics::Analytics::wipe_and_init(&opts.data_dir)?,
     };
 
-    // 6. Fire-and-forget every long-running task. Federation clients are
-    //    lazy-loaded on first use; all work is persisted incrementally and
-    //    idempotent on retry, so the runtime drop on process exit aborts
-    //    cleanly.
-    runtime.spawn(public::run_public(state.clone(), endpoint.clone()));
+    // 6. Fire-and-forget every long-running task. All work is persisted
+    //    incrementally and idempotent on retry, so the runtime drop on
+    //    process exit aborts cleanly.
+    runtime.spawn(public::run(state.clone(), endpoint.clone()));
 
-    runtime.spawn(cli::run_cli(state.clone()));
+    runtime.spawn(cli::run(state.clone()));
 
     runtime.spawn(process_ldk_events(state.clone()));
 
@@ -358,10 +361,20 @@ fn handle_payment_claimable(
 
     // LDK only fires PaymentClaimable for hashes we registered via
     // `receive_for_hash` in `AppState::receive`, which commits the
-    // offer row before returning the invoice.
-    let row = dbtx
-        .get(&IncomingOfferTable, &operation)
-        .expect("PaymentClaimable for an unregistered payment_hash");
+    // offer row before returning the invoice — but removing the offer's
+    // federation wipes the row while LDK still holds the hash, so fail
+    // the HTLC and refund the LN sender.
+    let Some(row) = dbtx.get(&IncomingOfferTable, &operation) else {
+        error!("Failing inbound HTLC for a removed federation");
+
+        state
+            .node
+            .bolt11_payment()
+            .fail_for_hash(PaymentHash(payment_hash))
+            .expect("LDK has this payment_hash (registered via receive_for_hash)");
+
+        return;
+    };
 
     if row.offer.commitment.amount.msat != amount_msat {
         state
@@ -414,7 +427,7 @@ fn handle_payment_successful(
                 row.outpoint,
                 Some((preimage, ln_fee)),
             )
-            .expect("source federation for outgoing contract is joined");
+            .expect("source federation for outgoing contract is added");
     }
 }
 
@@ -441,6 +454,6 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32
                 row.outpoint,
                 None,
             )
-            .expect("source federation for outgoing contract is joined");
+            .expect("source federation for outgoing contract is added");
     }
 }

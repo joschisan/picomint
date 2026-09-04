@@ -19,28 +19,28 @@ use picomint_client::{TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
 use picomint_core::ln::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
-    AnalyticsRequest, AnalyticsResponse, CLI_SOCKET_FILENAME, ChannelInfo, FederationAddRequest,
-    FederationBalanceRequest, FederationBalanceResponse, FederationConfigRequest,
-    FederationConfigResponse, FederationDisableRequest, FederationEnableRequest,
+    CLI_SOCKET_FILENAME, ChannelInfo, FederationAddRequest, FederationBalanceRequest,
+    FederationBalanceResponse, FederationConfigRequest, FederationConfigResponse,
     FederationListResponse, FederationMintCountRequest, FederationMintCountResponse,
     FederationMintReceiveRequest, FederationMintReceiveResponse, FederationMintSendRequest,
-    FederationMintSendResponse, FederationWalletReceiveRequest, FederationWalletReceiveResponse,
-    FederationWalletSendFeeRequest, FederationWalletSendFeeResponse, FederationWalletSendRequest,
-    FederationWalletSendResponse, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
-    LdkChannelListResponse, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
-    LdkChannelSpliceOutRequest, LdkLnProbeRequest, LdkLnReceiveRequest, LdkLnReceiveResponse,
-    LdkLnSendRequest, LdkLnSendResponse, LdkOnchainReceiveResponse, LdkOnchainSendRequest,
-    LdkOnchainSendResponse, LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse,
-    MnemonicResponse, PeerInfo, ROUTE_ANALYTICS, ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE,
-    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_DISABLE, ROUTE_FEDERATION_ENABLE,
-    ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
+    FederationMintSendResponse, FederationRemoveRequest, FederationWalletReceiveRequest,
+    FederationWalletReceiveResponse, FederationWalletSendFeeRequest,
+    FederationWalletSendFeeResponse, FederationWalletSendRequest, FederationWalletSendResponse,
+    InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelListResponse,
+    LdkChannelOpenRequest, LdkChannelSpliceInRequest, LdkChannelSpliceOutRequest,
+    LdkLnProbeRequest, LdkLnReceiveRequest, LdkLnReceiveResponse, LdkLnSendRequest,
+    LdkLnSendResponse, LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
+    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
+    PeerInfo, QueryRequest, QueryResponse, ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE,
+    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
     ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
     ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_INFO, ROUTE_LDK_BALANCES,
-    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_FEDERATION_REMOVE, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LN_PROBE,
     ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
     ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
+    ROUTE_QUERY,
 };
 use reqwest::StatusCode;
 use tokio::net::UnixListener;
@@ -92,7 +92,7 @@ impl From<anyhow::Error> for CliError {
     }
 }
 
-pub async fn run_cli(state: AppState) {
+pub async fn run(state: AppState) {
     let socket_path = state.data_dir.join(CLI_SOCKET_FILENAME);
     std::fs::remove_file(&socket_path).ok();
 
@@ -113,7 +113,7 @@ fn router() -> Router<AppState> {
         // Top-level
         .route(ROUTE_INFO, post(info))
         .route(ROUTE_MNEMONIC, post(mnemonic))
-        .route(ROUTE_ANALYTICS, post(analytics))
+        .route(ROUTE_QUERY, post(query))
         // LDK node management
         .route(ROUTE_LDK_BALANCES, post(ldk_balances))
         .route(ROUTE_LDK_CHANNEL_OPEN, post(ldk_channel_open))
@@ -131,8 +131,7 @@ fn router() -> Router<AppState> {
         .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
         // Federation management
         .route(ROUTE_FEDERATION_ADD, post(federation_add))
-        .route(ROUTE_FEDERATION_DISABLE, post(federation_disable))
-        .route(ROUTE_FEDERATION_ENABLE, post(federation_enable))
+        .route(ROUTE_FEDERATION_REMOVE, post(federation_remove))
         .route(ROUTE_FEDERATION_LIST, post(federation_list))
         .route(ROUTE_FEDERATION_CONFIG, post(federation_config))
         .route(ROUTE_FEDERATION_BALANCE, post(federation_balance))
@@ -198,10 +197,10 @@ async fn mnemonic(State(state): State<AppState>) -> Result<Json<MnemonicResponse
     Ok(Json(MnemonicResponse { mnemonic: words }))
 }
 
-async fn analytics(
+async fn query(
     State(state): State<AppState>,
-    Json(request): Json<AnalyticsRequest>,
-) -> Result<Json<AnalyticsResponse>, CliError> {
+    Json(request): Json<QueryRequest>,
+) -> Result<Json<QueryResponse>, CliError> {
     let rows = tokio::task::spawn_blocking(move || {
         crate::analytics::query(&state.data_dir, &request.query)
     })
@@ -639,35 +638,23 @@ async fn federation_add(
     Ok(Json(()))
 }
 
-/// Disable a federation's public client API. Blind insert into
-/// `DisabledFederationTable` — no validation of whether the fed is even
-/// added.
+/// Remove a federation: shut its client runtime down, then delete its
+/// client rows and the daemon's contract rows in one dbtx. Destructive —
+/// in-flight contracts are dropped with their rows, so the operator
+/// checks for in-flight payments via the query route before removing;
+/// failing to check might result in loss of funds.
 #[instrument(skip_all, err)]
-async fn federation_disable(
+async fn federation_remove(
     State(state): State<AppState>,
-    Json(payload): Json<FederationDisableRequest>,
+    Json(payload): Json<FederationRemoveRequest>,
 ) -> Result<Json<()>, CliError> {
-    let dbtx = state.gateway_db.begin_write();
-    dbtx.insert(
-        &crate::db::DisabledFederationTable,
-        &payload.federation,
-        &(),
-    );
+    let dbtx = state.client.begin_remove(payload.federation).await?;
+
+    crate::db::wipe_federation_rows(&dbtx, payload.federation);
+
     dbtx.commit();
 
-    Ok(Json(()))
-}
-
-/// Re-enable a previously disabled federation. Blind remove from
-/// `DisabledFederationTable` — no-op if the row isn't there.
-#[instrument(skip_all, err)]
-async fn federation_enable(
-    State(state): State<AppState>,
-    Json(payload): Json<FederationEnableRequest>,
-) -> Result<Json<()>, CliError> {
-    let dbtx = state.gateway_db.begin_write();
-    dbtx.remove(&crate::db::DisabledFederationTable, &payload.federation);
-    dbtx.commit();
+    info!(federation = %payload.federation, "Removed federation");
 
     Ok(Json(()))
 }
@@ -693,7 +680,7 @@ async fn federation_config(
     let config = state
         .client
         .config(federation)
-        .ok_or_else(|| CliError::bad_request("Federation not joined"))?;
+        .ok_or_else(|| CliError::bad_request("Federation not added"))?;
 
     Ok(Json(FederationConfigResponse {
         config: serde_json::to_value(config).expect("ConsensusConfig is serializable"),
@@ -719,8 +706,7 @@ async fn federation_balance(
 
 /// Resolve the target federation. When `id` is `None` and the gateway has
 /// exactly one federation added, that one is used; otherwise the caller must
-/// supply `--id`. Resolves against persisted configs, so an
-/// added-but-not-yet-connected federation works on first use.
+/// supply `--id`.
 fn resolve_federation(
     state: &AppState,
     id: Option<FederationId>,
@@ -744,9 +730,7 @@ async fn federation_module_mint_count(
     Json(payload): Json<FederationMintCountRequest>,
 ) -> Result<Json<FederationMintCountResponse>, CliError> {
     let federation = resolve_federation(&state, payload.federation)?;
-    let counts = state
-        .client
-        .mint_count_by_denomination(federation, GATEWAY_ACCOUNT);
+    let counts = state.client.mint_count(federation, GATEWAY_ACCOUNT);
     Ok(Json(FederationMintCountResponse { counts }))
 }
 
@@ -867,7 +851,7 @@ async fn federation_module_wallet_receive(
 
     let address = state
         .client
-        .wallet_deposit_address(federation, GATEWAY_ACCOUNT)
+        .wallet_receive(federation, GATEWAY_ACCOUNT)
         .map_err(CliError::internal)?;
 
     Ok(Json(FederationWalletReceiveResponse {

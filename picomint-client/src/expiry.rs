@@ -32,13 +32,13 @@ impl Client {
     /// Read the cached expiry status. Populated at bring-up (and by
     /// [`Self::refresh_expiry_status`]); returns `None` until that completes
     /// successfully or if the federation has not announced an expiry. Pure
-    /// read — never brings the federation up.
+    /// read.
     pub fn expiry_status(&self, federation: FederationId) -> Option<ExpiryStatus> {
         self.db.begin_read().get(&ExpiryStatusTable, &federation)
     }
 
     /// Re-fetch the announced expiry via threshold consensus and reconcile
-    /// the local cache. Brings the federation up.
+    /// the local cache.
     pub async fn refresh_expiry_status(
         &self,
         federation: FederationId,

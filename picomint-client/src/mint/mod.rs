@@ -107,7 +107,7 @@ pub(crate) struct Restore {
 /// The counter mark must land before the account issues anything: an account
 /// resuming from zero would re-derive nonces the federation has already
 /// signed, and every note behind them would be stranded. That is why this
-/// shares a dbtx with whatever marks the federation as joined — a crash
+/// shares a dbtx with whatever marks the federation as added — a crash
 /// leaves either both or neither.
 ///
 /// The notes go straight into the wallet rather than through a reissuance
@@ -697,8 +697,8 @@ pub enum SendECashError {
     InsufficientBalance,
     #[error("A non-recoverable error has occurred")]
     Failure,
-    #[error("Federation is not joined")]
-    NotJoined,
+    #[error("Federation is not added")]
+    NotAdded,
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
@@ -715,8 +715,8 @@ pub enum ReceiveECashError {
     InsufficientFunds,
     #[error("This ecash bundle has already been received")]
     AlreadyAttempted,
-    #[error("Federation is not joined")]
-    NotJoined,
+    #[error("Federation is not added")]
+    NotAdded,
 }
 
 fn round_to_multiple(amount: Amount, min_denomiation: Amount) -> Amount {
@@ -749,8 +749,8 @@ pub(crate) fn balance(dbtx: &impl DbRead, federation: FederationId, account: Acc
 }
 
 impl Client {
-    /// `account`'s ecash balance. Pure read — never brings the federation
-    /// up, and an unjoined federation simply holds nothing.
+    /// `account`'s ecash balance. Pure read — a federation that is not
+    /// added simply holds nothing.
     pub fn mint_balance(&self, federation: FederationId, account: Account) -> Amount {
         balance(&self.db.begin_read(), federation, account)
     }
@@ -758,7 +758,7 @@ impl Client {
     /// Yields `account`'s balance whenever the note table is written. The
     /// same value may be yielded repeatedly — every federation's accounts
     /// share one table, so writes to another account or federation wake this
-    /// stream too. Pure read — never brings the federation up.
+    /// stream too. Pure read.
     pub fn mint_subscribe_balance(
         &self,
         federation: FederationId,
@@ -782,7 +782,7 @@ impl Client {
 
     /// Count `account`'s notes by denomination. Pure read — never brings
     /// the federation up.
-    pub fn mint_count_by_denomination(
+    pub fn mint_count(
         &self,
         federation: FederationId,
         account: Account,
@@ -802,9 +802,7 @@ impl Client {
         account: Account,
         amount: Amount,
     ) -> Result<ECash, SendECashError> {
-        let ctx = self
-            .ctx(federation)
-            .map_err(|_| SendECashError::NotJoined)?;
+        let ctx = self.ctx(federation).map_err(|_| SendECashError::NotAdded)?;
 
         let amount = round_to_multiple(
             amount,
@@ -963,7 +961,7 @@ impl Client {
     ) -> Result<OperationId, ReceiveECashError> {
         let ctx = self
             .ctx(federation)
-            .map_err(|_| ReceiveECashError::NotJoined)?;
+            .map_err(|_| ReceiveECashError::NotAdded)?;
 
         let operation = OperationId::from_encodable(ecash);
 
