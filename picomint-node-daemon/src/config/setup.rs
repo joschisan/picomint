@@ -212,7 +212,7 @@ impl SetupApi {
         let local_params = state
             .local_params
             .clone()
-            .expect("Local parameters are set before setup codes are exchanged");
+            .context("Local parameters have not been set yet")?;
 
         ensure!(
             info != local_params.setup_code(),
@@ -254,7 +254,7 @@ impl SetupApi {
         let local_params = state
             .local_params
             .clone()
-            .expect("Local parameters are set before setup codes are exchanged");
+            .context("Local parameters have not been set yet")?;
 
         let our_setup_code = local_params.setup_code();
 
