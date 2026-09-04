@@ -16,7 +16,7 @@ use crate::client::Client;
 use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
-use db::{GatewayPkTable, IncomingContractStreamIndexTable, SendOperationIdTable};
+use db::{GatewayPkTable, IncomingContractStreamCursorTable, SendOperationIdTable};
 pub(crate) use gateway::Gateways;
 use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::NumNodesExt;
@@ -417,7 +417,7 @@ async fn receive_scan(ctx: ClientContext) {
         let start = ctx
             .db
             .begin_read()
-            .get(&IncomingContractStreamIndexTable, &ctx.mint)
+            .get(&IncomingContractStreamCursorTable, &ctx.mint)
             .unwrap_or(0);
 
         let (entries, next) = api::await_incoming_contracts(&ctx.api, start, BATCH).await;
@@ -430,7 +430,7 @@ async fn receive_scan(ctx: ClientContext) {
             }
         }
 
-        dbtx.insert(&IncomingContractStreamIndexTable, &ctx.mint, &next);
+        dbtx.insert(&IncomingContractStreamCursorTable, &ctx.mint, &next);
 
         dbtx.commit();
     }
@@ -494,7 +494,7 @@ pub enum RefreshGatewaysError {
 /// Remove every row this module owns under the caller's mint prefix.
 /// Called by [`crate::Client::begin_remove_mint`] for end-of-life cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
-    dbtx.remove(&IncomingContractStreamIndexTable, &mint);
+    dbtx.remove(&IncomingContractStreamCursorTable, &mint);
     dbtx.remove_prefix(&SendOperationIdTable, &mint);
     dbtx.remove_prefix(&GatewayPkTable, &mint);
     dbtx.remove_prefix(&SendStateMachineTable, &mint);

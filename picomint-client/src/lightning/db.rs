@@ -4,9 +4,9 @@ use picomint_core::lightning::gateway::GatewayPk;
 use picomint_redb::table;
 
 table!(
-    IncomingContractStreamIndexTable,
+    IncomingContractStreamCursorTable,
     MintId => u64,
-    "lightning-incoming-contract-stream-index",
+    "lightning-incoming-contract-stream-cursor",
 );
 
 // The mint's announced gateway pks, mirrored to disk by
