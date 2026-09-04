@@ -272,7 +272,10 @@ fn main() -> anyhow::Result<()> {
 
     runtime.spawn(process_ldk_events(state.clone()));
 
-    runtime.spawn(picomint_gateway_daemon::analytics::trailer(state.clone()));
+    runtime.spawn(picomint_gateway_daemon::analytics::trailer(
+        state.client.clone(),
+        state.analytics.clone(),
+    ));
 
     runtime.spawn(picomint_gateway_daemon::trailer::run(state));
 

@@ -21,7 +21,7 @@ use crate::consensus::db::{
     AcceptedItemTable, AcceptedTxTable, BftUnitsTable, BlockCountVoteTable,
     ConsensusVersionVoteTable, SignedSessionOutcomeTable, consensus_block_count, consensus_version,
 };
-use crate::consensus::server::Server;
+use crate::consensus::server::{Server, audit};
 use crate::consensus::wallet;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
@@ -491,9 +491,9 @@ async fn process_consensus_item(
 
             dbtx.insert(&AcceptedTxTable, &txid, &());
 
-            let audit = server.audit(dbtx);
+            let summary = audit(dbtx);
 
-            assert!(audit.total >= 0, "Failed audit: {audit:?}");
+            assert!(summary.total >= 0, "Failed audit: {summary:?}");
         }
         ConsensusItem::Module(ci) => {
             server.process_module_ci(dbtx, peer, ci).await?;

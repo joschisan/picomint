@@ -180,6 +180,15 @@ impl Client {
             .context("Federation is not added")
     }
 
+    /// Whether `federation` is added — the membership check without
+    /// [`Self::ctx`]'s context clone.
+    pub(crate) fn is_added(&self, federation: FederationId) -> bool {
+        self.federations
+            .read()
+            .expect("federations lock poisoned")
+            .contains_key(&federation)
+    }
+
     /// Every added federation.
     pub fn federations(&self) -> Vec<FederationId> {
         self.db

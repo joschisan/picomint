@@ -96,10 +96,6 @@ impl Server {
         }
     }
 
-    pub fn audit(&self, dbtx: &WriteTx) -> AuditSummary {
-        AuditSummary::new(mint::audit(dbtx), wallet::audit(dbtx), ln::audit(dbtx))
-    }
-
     /// Dispatch the inputs and outputs of a transaction to the relevant
     /// modules.
     pub fn process_tx(&self, dbtx: &WriteTx, tx: &Transaction) -> Result<(), TxError> {
@@ -162,4 +158,9 @@ impl Server {
 
         Ok(())
     }
+}
+
+/// Balance-sheet snapshot across all modules.
+pub fn audit(dbtx: &WriteTx) -> AuditSummary {
+    AuditSummary::new(mint::audit(dbtx), wallet::audit(dbtx), ln::audit(dbtx))
 }
