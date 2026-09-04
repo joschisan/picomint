@@ -52,7 +52,7 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 - Shared request/response types also live in the `*-cli-core` crates; daemon handlers live in `picomint-node-daemon/src/cli.rs` and `picomint-gateway-daemon/src/cli.rs`.
 
 ### Env vars
-Env var names are unprefixed (puncture-style): `DATA_DIR`, `BITCOIN_NETWORK`, `BITCOIND_URL`, etc. No `FM_*` prefix. `*_ADDR` is the convention for listen-address vars (`P2P_ADDR`, `UI_ADDR`, `API_ADDR`, `LDK_ADDR`). Defined inline via clap `#[arg(env = "...")]`.
+Env var names are unprefixed (puncture-style): `DATA_DIR`, `NETWORK`, `BITCOIND_URL`, etc. No `FM_*` prefix. `*_ADDR` is the convention for listen-address vars (`P2P_ADDR`, `UI_ADDR`, `API_ADDR`, `LDK_ADDR`). Defined inline via clap `#[arg(env = "...")]`.
 
 ## Conventions
 

@@ -77,12 +77,7 @@ impl BitcoindRpcMonitor {
     }
 
     async fn fetch_status(rpc: &BitcoindClient) -> Result<BitcoindRpcStatus> {
-        let network = match rpc.get_block_hash(1).await?.to_string().as_str() {
-            MAINNET => Network::Bitcoin,
-            TESTNET => Network::Testnet,
-            SIGNET_4 | MUTINYNET => Network::Signet,
-            _ => Network::Regtest,
-        };
+        let network = rpc.network().await?;
 
         let block_count = rpc.get_block_count().await?;
 
@@ -213,6 +208,17 @@ impl BitcoindClient {
 
     pub async fn get_block_hash(&self, height: u32) -> anyhow::Result<BlockHash> {
         self.call("getblockhash", json!([height])).await
+    }
+
+    /// Identify the backend's network by its block hash at height 1 rather
+    /// than trusting `getblockchaininfo`'s chain string.
+    pub async fn network(&self) -> anyhow::Result<Network> {
+        Ok(match self.get_block_hash(1).await?.to_string().as_str() {
+            MAINNET => Network::Bitcoin,
+            TESTNET => Network::Testnet,
+            SIGNET_4 | MUTINYNET => Network::Signet,
+            _ => Network::Regtest,
+        })
     }
 
     pub async fn get_block(&self, hash: &BlockHash) -> anyhow::Result<Block> {

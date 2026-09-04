@@ -60,8 +60,6 @@ pub struct DaemonSettings {
     pub p2p_addr: SocketAddr,
     /// Web UI bind address.
     pub ui_addr: SocketAddr,
-    /// Bitcoin network for the mint
-    pub network: Network,
     /// Path to the folder holding the database and the admin CLI socket
     pub data_dir: PathBuf,
 }

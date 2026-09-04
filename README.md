@@ -133,8 +133,7 @@ picomint-node-cli …`.
 | Env                          | Required | Default           | Description                                |
 |------------------------------|----------|-------------------|--------------------------------------------|
 | `DATA_DIR`                   | yes      |                   | Directory for the database file            |
-| `BITCOIN_NETWORK`            | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`  |
-| `BITCOIND_URL`               | yes      |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332`. Must point at an **unpruned** node — see [Bitcoin Backend](#bitcoin-backend) above. |
+| `BITCOIND_URL`               | yes      |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332`. Must point at an **unpruned** node — see [Bitcoin Backend](#bitcoin-backend) above. The mint's network is read off the backend at DKG time. |
 | `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
 | `UI_ADDR`                    | no       | `127.0.0.1:3000`  | Web UI listen address                      |
 
@@ -366,7 +365,7 @@ picomint-gateway-cli …`.
 | Env                        | Required | Default           | Description                                 |
 |----------------------------|----------|-------------------|---------------------------------------------|
 | `DATA_DIR`                 | yes      |                   | Directory for the database + LDK node data  |
-| `BITCOIN_NETWORK`          | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`   |
+| `NETWORK`                  | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`   |
 | `ESPLORA_URL`              | one of   |                   | Esplora HTTP URL                            |
 | `BITCOIND_URL`             | one of   |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |
 | `API_ADDR`                 | no       | `0.0.0.0:8080`    | Public API listen address                   |
