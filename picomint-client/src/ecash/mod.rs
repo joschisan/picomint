@@ -691,10 +691,10 @@ pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
 
 /// Whether any of this module's state machines for `operation` is still
 /// active under `mint`.
-pub(crate) fn operation_is_active(dbtx: &ReadTx, mint: MintId, operation: OperationId) -> bool {
-    dbtx.prefix(&EcashStateMachineTable, &mint, |r| {
+pub(crate) fn operation_is_active(dbtx: &ReadTx, operation: OperationId) -> bool {
+    dbtx.iter(&EcashStateMachineTable, |r| {
         r.any(|entry| entry.1.operation == operation)
-    }) || dbtx.prefix(&SendStateMachineTable, &mint, |r| {
+    }) || dbtx.iter(&SendStateMachineTable, |r| {
         r.any(|entry| entry.1.operation == operation)
     })
 }
