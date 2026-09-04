@@ -65,7 +65,7 @@ pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
                 .tpe_pks
                 .get(&cfg.private.identity)
                 .context("Public key set has no key for our identity")?,
-        "Preimge encryption secret key share does not match our public key share"
+        "Preimage encryption secret key share does not match our public key share"
     );
 
     Ok(())

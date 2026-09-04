@@ -163,7 +163,7 @@ impl IncomingOffer {
 /// of a seed only they can derive, and the payment hash and claim key fall
 /// out of the same ECDH. Only what cannot be derived travels here, plus a
 /// payment hash to reject foreign entries cheaply and an offer id to prove
-/// the rebuild — 153 bytes against the contract's 361.
+/// the rebuild — 147 bytes against the contract's 321.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct IncomingContractSummary {
     pub outpoint: OutPoint,

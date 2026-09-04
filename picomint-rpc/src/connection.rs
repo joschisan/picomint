@@ -1,8 +1,9 @@
 //! A single kept-alive, self-reconnecting iroh connection, published as a
 //! `watch<Option<ConnState>>`. Both the mint node pool ([`crate::api`])
 //! and the client's gateway connection pool are just this primitive
-//! mapped over a set of node ids — the mint over its fixed node set, the
-//! gateway pool over an append-only set of announced gateways.
+//! mapped over a set of iroh public keys — the mint client over its fixed
+//! node set, the gateway pool over an append-only set of announced
+//! gateways.
 
 use std::time::Duration;
 

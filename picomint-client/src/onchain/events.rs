@@ -14,7 +14,7 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const SOURCE: EventSource = EventSource::Wallet;
+    const SOURCE: EventSource = EventSource::Onchain;
     const KIND: EventKind = EventKind::from_static("send");
 }
 
@@ -25,7 +25,7 @@ pub struct SendSuccessEvent {
 }
 
 impl Event for SendSuccessEvent {
-    const SOURCE: EventSource = EventSource::Wallet;
+    const SOURCE: EventSource = EventSource::Onchain;
     const KIND: EventKind = EventKind::from_static("send-success");
 }
 
@@ -34,7 +34,7 @@ impl Event for SendSuccessEvent {
 pub struct SendFailureEvent;
 
 impl Event for SendFailureEvent {
-    const SOURCE: EventSource = EventSource::Wallet;
+    const SOURCE: EventSource = EventSource::Onchain;
     const KIND: EventKind = EventKind::from_static("send-failure");
 }
 
@@ -48,6 +48,6 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const SOURCE: EventSource = EventSource::Wallet;
+    const SOURCE: EventSource = EventSource::Onchain;
     const KIND: EventKind = EventKind::from_static("receive");
 }

@@ -85,7 +85,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     register_gateway(env, &env.gateway_pk)?;
     client_send
         .client
-        .lightning_refresh_gateways(client_send.fed)
+        .lightning_refresh_gateways(client_send.mint)
         .await?;
     test_payments(env, client_send).await?;
     test_lnurl_daemon_roundtrip(env).await?;
@@ -96,7 +96,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     register_gateway(env, &mock_gw_pk)?;
     client_send
         .client
-        .lightning_refresh_gateways(client_send.fed)
+        .lightning_refresh_gateways(client_send.mint)
         .await?;
     test_mock_send_exactly_once(client_send).await?;
     test_mock_send_refund_forfeit(client_send).await?;
@@ -128,16 +128,16 @@ fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<(
     Ok(())
 }
 
-/// Asserts exact row counts in the gateway's in-memory analytics tables
+/// Asserts exact row counts in the gateway's on-disk SQLite analytics tables
 /// after all real-gateway-driven scenarios in `run_tests` have completed.
 ///
-/// Expected events (module = Lightning, emitted by the gateway's gateway-module):
+/// Expected events (mirrored from the gateway's client events):
 ///  - `test_payments` self-pay no-liquidity → 1 send, 1 send_cancel
 ///  - `test_payments` no-route              → 1 send, 1 send_cancel
 ///  - `test_payments` outgoing success      → 1 send, 1 send_success
-///  - `test_payments` incoming success      → 1 receive, 1 receive_success, 1 complete
+///  - `test_payments` incoming success      → 1 receive, 1 receive_success
 ///  - `test_payments` outgoing cancel       → 1 send, 1 send_cancel
-///  - `test_lnurl_daemon_roundtrip` → 1 receive, 1 receive_success, 1 complete
+///  - `test_lnurl_daemon_roundtrip` → 1 receive, 1 receive_success
 ///
 /// The mock-gateway tests and `test_direct_lightning_payments` don't drive the real
 /// gateway's gateway module, so they produce no rows here.
@@ -256,11 +256,11 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
     // gateway must signal a cancel so the client gets a gateway-signed refund
     // (`expired = false`), not a wait-for-CLTV unilateral refund.
     {
-        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
+        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.mint)?;
         let invoice = client
             .client
             .lightning_receive(
-                client.fed,
+                client.mint,
                 Account::Primary,
                 gateway_pk,
                 gateway_info.clone(),
@@ -271,7 +271,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
         let send_op = client
             .client
             .lightning_send(
-                client.fed,
+                client.mint,
                 Account::Primary,
                 gateway_pk,
                 gateway_info,
@@ -305,11 +305,11 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
     {
         let invoice = mock_invoice([30; 32], [31; 32], Currency::Regtest);
 
-        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
+        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.mint)?;
         let send_op = client
             .client
             .lightning_send(
-                client.fed,
+                client.mint,
                 Account::Primary,
                 gateway_pk,
                 gateway_info,
@@ -343,11 +343,11 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             3600,
         )?;
 
-        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
+        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.mint)?;
         let send_op = client
             .client
             .lightning_send(
-                client.fed,
+                client.mint,
                 Account::Primary,
                 gateway_pk,
                 gateway_info,
@@ -382,11 +382,11 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
     info!("Testing payment from LDK node to client (half of first send)...");
 
     {
-        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
+        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.mint)?;
         let invoice = client
             .client
             .lightning_receive(
-                client.fed,
+                client.mint,
                 Account::Primary,
                 gateway_pk,
                 gateway_info,
@@ -401,7 +401,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
         };
 
         // Verify the freestanding LDK node observes the payment as successful,
-        // i.e. the gateway settled the HTLC back to it via the CompleteSM.
+        // i.e. the gateway's trailer settled the HTLC back to it via `claim_for_hash`.
         let payment_hash = lightning_types::payment::PaymentHash(*invoice.payment_hash().as_ref());
         loop {
             let event = env.ldk_node.next_event_async().await;
@@ -430,11 +430,11 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             payment_hash,
         )?;
 
-        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
+        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.mint)?;
         let send_op = client
             .client
             .lightning_send(
-                client.fed,
+                client.mint,
                 Account::Primary,
                 gateway_pk,
                 gateway_info,
@@ -527,11 +527,11 @@ async fn test_mock_send_exactly_once(client: &TestClient) -> anyhow::Result<()> 
 
     let mut events = pin!(lightning_event_stream(client));
 
-    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
+    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.mint)?;
     let send_op = client
         .client
         .lightning_send(
-            client.fed,
+            client.mint,
             Account::Primary,
             gateway_pk,
             gateway_info.clone(),
@@ -551,7 +551,7 @@ async fn test_mock_send_exactly_once(client: &TestClient) -> anyhow::Result<()> 
     match client
         .client
         .lightning_send(
-            client.fed,
+            client.mint,
             Account::Primary,
             gateway_pk,
             gateway_info,
@@ -574,11 +574,11 @@ async fn test_mock_send_refund_forfeit(client: &TestClient) -> anyhow::Result<()
     let mut events = pin!(lightning_event_stream(client));
 
     let invoice = unpayable_invoice();
-    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
+    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.mint)?;
     let send_op = client
         .client
         .lightning_send(
-            client.fed,
+            client.mint,
             Account::Primary,
             gateway_pk,
             gateway_info,
@@ -604,12 +604,12 @@ async fn test_mock_wrong_network(client: &TestClient) -> anyhow::Result<()> {
     info!("lightning: test_mock_wrong_network");
 
     let invoice = signet_invoice();
-    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
+    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.mint)?;
 
     match client
         .client
         .lightning_send(
-            client.fed,
+            client.mint,
             Account::Primary,
             gateway_pk,
             gateway_info,
@@ -634,17 +634,17 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
 
     let mut events = pin!(lightning_event_stream(client));
 
-    // Crash scenario: mock HTTP-500s on `Send`, so the client loops
+    // Crash scenario: the mock returns an RPC error on `Send`, so the client loops
     // retrying indefinitely — giving us room to claim the on-chain contract
     // manually before the client ever sees a gateway response.
     let preimage = [12u8; 32];
 
     let invoice = crash_invoice(preimage);
-    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
+    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.mint)?;
     let send_op = client
         .client
         .lightning_send(
-            client.fed,
+            client.mint,
             Account::Primary,
             gateway_pk,
             gateway_info,
@@ -681,7 +681,7 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
         amount: send_event.amount,
         fee: client
             .client
-            .config(client.fed)
+            .config(client.mint)
             .expect("mint is added")
             .lightning
             .input_fee,
@@ -692,7 +692,7 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
     client
         .client
         .ecash_finalize_and_submit_tx(
-            client.fed,
+            client.mint,
             &dbtx,
             Account::Primary,
             OperationId::new_random(),
@@ -723,11 +723,11 @@ async fn test_unilateral_refund(env: &TestEnv, client: &TestClient) -> anyhow::R
     // preimage reveal the contract must eventually expire so the client can
     // pull its funds back via `OutgoingWitness::Refund`.
     let invoice = crash_invoice([13; 32]);
-    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
+    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.mint)?;
     let send_op = client
         .client
         .lightning_send(
-            client.fed,
+            client.mint,
             Account::Primary,
             gateway_pk,
             gateway_info,
@@ -766,7 +766,7 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
     let lnurl =
         client
             .client
-            .lightning_generate_lnurl(client.fed, Account::Primary, lnurl_daemon)?;
+            .lightning_generate_lnurl(client.mint, Account::Primary, lnurl_daemon)?;
 
     let pay_url = parse_lnurl(&lnurl).ok_or_else(|| anyhow::anyhow!("parse_lnurl"))?;
 
@@ -883,7 +883,7 @@ fn unpayable_invoice() -> Bolt11Invoice {
     )
 }
 
-/// Invoice that triggers the mock's crash branch (HTTP 500, gateway never
+/// Invoice that triggers the mock's crash branch (RPC error, gateway never
 /// resolves). Each caller supplies its own preimage so its operation
 /// (derived from the payment hash) is distinct.
 fn crash_invoice(preimage: [u8; 32]) -> Bolt11Invoice {

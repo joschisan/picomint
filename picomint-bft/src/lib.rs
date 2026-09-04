@@ -4,7 +4,7 @@
 //! broadcast to all nodes. A unit is *extended* once it is locally stored
 //! and all of its parents are extended. Round R+1 unit creation is
 //! triggered when the local graph has at least `threshold` extended
-//! round-R units. Round 0 is the DAG's root row: each node creates its own
+//! round-R units, our own round-R unit among them. Round 0 is the DAG's root row: each node creates its own
 //! round-0 unit with an empty parent set and disseminates it like any
 //! other.
 //!

@@ -1,4 +1,4 @@
-//! Wallet-module derivation tree. Only constructible via
+//! Onchain-module derivation tree. Only constructible via
 //! [`ClientSecret::onchain_secret`]; the path enum is private.
 //!
 //! [`ClientSecret::onchain_secret`]: crate::secret::ClientSecret::onchain_secret

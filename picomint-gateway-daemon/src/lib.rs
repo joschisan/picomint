@@ -84,9 +84,9 @@ impl AppState {
 
     /// Orchestrates an outgoing payment. Verifies the request, registers the
     /// contract in the daemon-global outgoing_contract table, logs
-    /// `SendEvent` on F1, and kicks off either a direct-swap receive on the
+    /// `SendEvent` on the source mint, and kicks off either a direct-swap receive on the
     /// target mint or an LN send via LDK. Returns once a terminal event
-    /// (`SendSuccessEvent` / `SendCancelEvent`) is observed in F1's event log.
+    /// (`SendSuccessEvent` / `SendCancelEvent`) is observed in the source mint's event log.
     pub async fn send(
         &self,
         payload: SendRequest,
@@ -154,7 +154,7 @@ impl AppState {
             "Contract expiry does not leave enough room for routing"
         );
 
-        // --- Insert outgoing_contract row + log SendEvent on F1 (one tx) ---
+        // --- Insert outgoing_contract row + log SendEvent on the source mint (one tx) ---
 
         let operation = OperationId::from_encodable(payload.invoice.bolt11().payment_hash());
 
@@ -244,7 +244,7 @@ impl AppState {
 
         dbtx.commit();
 
-        // --- Await terminal event on F1 -------------------------------------
+        // --- Await terminal event on the source mint -------------------------------------
         self.client
             .gateway_subscribe_send(payload.mint, operation)
             .await
@@ -252,8 +252,9 @@ impl AppState {
 
     /// Creates a Bolt11 invoice for an incoming payment. Registers the
     /// `IncomingOffer` + the generated invoice in the daemon-global
-    /// `incoming-offer` table. Idempotent on operation: a retry with the same
-    /// offer returns the previously generated invoice.
+    /// `incoming-offer` table. A duplicate offer is rejected — both the offer
+    /// table insert and LDK's `receive_for_hash` refuse a repeated payment
+    /// hash.
     pub async fn receive(&self, payload: ReceiveRequest) -> anyhow::Result<Bolt11Invoice> {
         ensure!(payload.offer.verify(), "The offer is invalid");
 

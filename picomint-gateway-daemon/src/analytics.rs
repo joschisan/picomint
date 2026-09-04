@@ -42,10 +42,10 @@ pub const ANALYTICS_DIR: &str = "analytics";
 /// Filename of the analytics DB inside `ANALYTICS_DIR`.
 pub const ANALYTICS_FILE: &str = "analytics.sqlite";
 
-/// Shared handle to the analytics SQLite connection. All trailer tasks and
-/// any future readers go through this single mutex-guarded connection — fine
-/// because SQLite serializes writes internally anyway and our write volume
-/// is bounded by event-log throughput.
+/// Shared handle to the analytics SQLite writer connection, used by the
+/// analytics trailer; readers (the `query` CLI) open their own read-only
+/// connections. Mutex-guarded — fine because our write volume is bounded
+/// by event-log throughput.
 #[derive(Clone)]
 pub struct Analytics {
     conn: Arc<Mutex<Connection>>,

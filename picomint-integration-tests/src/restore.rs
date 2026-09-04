@@ -25,10 +25,9 @@ async fn retry_session_count_at_least(env: &TestEnv, node: usize, target: u64) -
 /// catch up on every session ordered while they were down. Then three
 /// further nodes are wiped and restored from config backups. With
 /// 3-of-7 wiped, the surviving 4 can't reach threshold on their own,
-/// so this exercises the bft column-state quorum gate: every wiped
-/// node must observe `threshold` node views of its column before
-/// authoring round-0, otherwise it'd fork its own column against
-/// pre-wipe predecessors.
+/// so this exercises full recovery of wiped nodes into a live mint:
+/// catching up on every finalized session and rejoining the broadcast
+/// without forking their own columns against pre-wipe predecessors.
 pub async fn run_test(env: &TestEnv) -> Result<()> {
     info!("bringing the offline nodes back online");
     for node in NUM_ONLINE_NODES..NUM_NODES {

@@ -127,7 +127,7 @@ pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
             .get(&cfg.private.identity)
             .context("Public key share set has no key for our identity")?
             == &derive_pk_share(&cfg.private.onchain.sks),
-        "Wallet secret key share does not match our public key share"
+        "Onchain secret key share does not match our public key share"
     );
 
     Ok(())

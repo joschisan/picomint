@@ -85,7 +85,7 @@ async fn wait_mint_event<S>(
 /// Callers must wait for `EcashSuccessEvent`, not just `TxAcceptEvent`,
 /// because the issuance state machine still has to fetch threshold
 /// signatures after the tx is accepted before the notes land. Reading
-/// `get_balance()` between TxAccept and EcashSuccessEvent returns a
+/// `ecash_balance` between TxAccept and EcashSuccessEvent returns a
 /// stale (lower) figure.
 pub(crate) async fn await_tx_outcome(
     client: &TestClient,
@@ -128,7 +128,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
         let ecash = client_send
             .client
-            .ecash_send(client_send.fed, Account::Primary, Amount::from_sat(1_000))
+            .ecash_send(client_send.mint, Account::Primary, Amount::from_sat(1_000))
             .await?;
 
         wait_mint_event(&mut send_events, |_, e| matches!(e, EcashEvent::Send(_))).await;
@@ -136,7 +136,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
         let operation =
             client_receive
                 .client
-                .ecash_receive(client_receive.fed, Account::Primary, &ecash)?;
+                .ecash_receive(client_receive.mint, Account::Primary, &ecash)?;
 
         let Some((op, EcashEvent::Receive(_))) = receive_events.next().await else {
             panic!("Expected Receive event");
@@ -157,7 +157,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     // transitions on Err. Capturing here avoids racing that reclaim.
     let expected = client_receive
         .client
-        .ecash_balance(client_receive.fed, Account::Primary);
+        .ecash_balance(client_receive.mint, Account::Primary);
 
     ensure!(
         expected != Amount::ZERO,
@@ -168,7 +168,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let ecash = client_send
         .client
-        .ecash_send(client_send.fed, Account::Primary, Amount::from_sat(1_000))
+        .ecash_send(client_send.mint, Account::Primary, Amount::from_sat(1_000))
         .await?;
 
     wait_mint_event(&mut send_events, |_, e| matches!(e, EcashEvent::Send(_))).await;
@@ -176,7 +176,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     // First receive succeeds (sender receives own ecash back)
     let operation = client_send
         .client
-        .ecash_receive(client_send.fed, Account::Primary, &ecash)?;
+        .ecash_receive(client_send.mint, Account::Primary, &ecash)?;
 
     wait_mint_event(&mut send_events, |op, e| {
         op == operation && matches!(e, EcashEvent::Receive(_))
@@ -191,7 +191,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     let operation =
         client_receive
             .client
-            .ecash_receive(client_receive.fed, Account::Primary, &ecash)?;
+            .ecash_receive(client_receive.mint, Account::Primary, &ecash)?;
 
     let Some((op, EcashEvent::Receive(_))) = receive_events.next().await else {
         panic!("Expected Receive event");
@@ -217,7 +217,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     // reissuance settles.
     let scanned = restored
         .client
-        .ecash_balance(restored.fed, Account::Primary);
+        .ecash_balance(restored.mint, Account::Primary);
 
     ensure!(
         scanned == expected,
@@ -232,12 +232,12 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     // which is the state the next scan has to cross to.
     let ecash = restored
         .client
-        .ecash_send(restored.fed, Account::Primary, Amount::from_sat(1_000))
+        .ecash_send(restored.mint, Account::Primary, Amount::from_sat(1_000))
         .await?;
 
     let operation = restored
         .client
-        .ecash_receive(restored.fed, Account::Primary, &ecash)?;
+        .ecash_receive(restored.mint, Account::Primary, &ecash)?;
 
     await_tx_outcome(&restored, operation)
         .await
@@ -245,7 +245,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let swept = restored
         .client
-        .ecash_balance(restored.fed, Account::Primary);
+        .ecash_balance(restored.mint, Account::Primary);
 
     ensure!(
         swept > Amount::ZERO && swept < expected,
@@ -276,7 +276,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let scanned = restored
         .client
-        .ecash_balance(restored.fed, Account::Primary);
+        .ecash_balance(restored.mint, Account::Primary);
 
     ensure!(
         scanned == swept,
@@ -295,12 +295,12 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let ecash = client_send
         .client
-        .ecash_send(client_send.fed, Account::Primary, Amount::from_sat(5_000))
+        .ecash_send(client_send.mint, Account::Primary, Amount::from_sat(5_000))
         .await?;
 
     let operation = client
         .client
-        .ecash_receive(client.fed, Account::Primary, &ecash)?;
+        .ecash_receive(client.mint, Account::Primary, &ecash)?;
 
     await_tx_outcome(&client, operation)
         .await
@@ -308,13 +308,13 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let ecash = client
         .client
-        .ecash_send_max(client.fed, Account::Primary)?
+        .ecash_send_max(client.mint, Account::Primary)?
         .expect("account holds notes");
 
     ensure!(
         client
             .client
-            .ecash_count(client.fed, Account::Primary)
+            .ecash_count(client.mint, Account::Primary)
             .is_empty(),
         "send_max left notes behind"
     );
@@ -322,7 +322,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     // The bundle is real value, so hand it back rather than burning it.
     let operation = client_send
         .client
-        .ecash_receive(client_send.fed, Account::Primary, &ecash)?;
+        .ecash_receive(client_send.mint, Account::Primary, &ecash)?;
 
     await_tx_outcome(client_send, operation)
         .await

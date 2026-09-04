@@ -30,7 +30,7 @@ enum Path {
     #[allow(dead_code)]
     Core,
     Mint,
-    Wallet,
+    Onchain,
     Lightning,
     Gateway,
 }
@@ -50,7 +50,7 @@ impl ClientSecret {
     }
 
     pub fn onchain_secret(&self) -> OnchainSecret {
-        OnchainSecret::new(self.0.child(&Path::Wallet))
+        OnchainSecret::new(self.0.child(&Path::Onchain))
     }
 
     pub fn lightning_secret(&self) -> LightningSecret {

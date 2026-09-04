@@ -1,7 +1,7 @@
 //! Picomint Core API (common) module interface
 //!
 //! This module defines common interoperability types
-//! and functionality that is used on both client and sever side.
+//! and functionality that is used on both client and server side.
 
 use bitcoin::hashes::sha256;
 use derive_more::Display;

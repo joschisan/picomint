@@ -1,4 +1,4 @@
-//! Freestanding API handlers for the wallet module.
+//! Freestanding API handlers for the onchain module.
 
 use picomint_core::onchain::methods::{
     ConsensusFeerateRequest, ConsensusFeerateResponse, MintUtxoRequest, MintUtxoResponse,

@@ -134,23 +134,23 @@ fn router() -> Router<AppState> {
         .route(ROUTE_MINT_CONFIG, post(mint_config))
         .route(ROUTE_MINT_BALANCE, post(mint_balance))
         // Per-mint module commands
-        .route(ROUTE_MINT_MODULE_ECASH_COUNT, post(mint_module_mint_count))
-        .route(ROUTE_MINT_MODULE_ECASH_SEND, post(mint_module_mint_send))
+        .route(ROUTE_MINT_MODULE_ECASH_COUNT, post(mint_module_ecash_count))
+        .route(ROUTE_MINT_MODULE_ECASH_SEND, post(mint_module_ecash_send))
         .route(
             ROUTE_MINT_MODULE_ECASH_RECEIVE,
-            post(mint_module_mint_receive),
+            post(mint_module_ecash_receive),
         )
         .route(
             ROUTE_MINT_MODULE_ONCHAIN_SEND_FEE,
-            post(mint_module_wallet_send_fee),
+            post(mint_module_onchain_send_fee),
         )
         .route(
             ROUTE_MINT_MODULE_ONCHAIN_SEND,
-            post(mint_module_wallet_send),
+            post(mint_module_onchain_send),
         )
         .route(
             ROUTE_MINT_MODULE_ONCHAIN_RECEIVE,
-            post(mint_module_wallet_receive),
+            post(mint_module_onchain_receive),
         )
 }
 
@@ -712,7 +712,7 @@ fn resolve_mint(state: &AppState, id: Option<MintId>) -> Result<MintId, CliError
 
 /// Count held ecash notes by denomination
 #[instrument(skip_all, err)]
-async fn mint_module_mint_count(
+async fn mint_module_ecash_count(
     State(state): State<AppState>,
     Json(payload): Json<MintEcashCountRequest>,
 ) -> Result<Json<MintEcashCountResponse>, CliError> {
@@ -723,7 +723,7 @@ async fn mint_module_mint_count(
 
 /// Spend ecash from a mint
 #[instrument(skip_all, err)]
-async fn mint_module_mint_send(
+async fn mint_module_ecash_send(
     State(state): State<AppState>,
     Json(payload): Json<MintEcashSendRequest>,
 ) -> Result<Json<MintEcashSendResponse>, CliError> {
@@ -746,7 +746,7 @@ async fn mint_module_mint_send(
 /// mint id, so no `--id` is needed. Blocks until issuance either
 /// completes or fails mint-side.
 #[instrument(skip_all, err)]
-async fn mint_module_mint_receive(
+async fn mint_module_ecash_receive(
     State(state): State<AppState>,
     Json(payload): Json<MintEcashReceiveRequest>,
 ) -> Result<Json<MintEcashReceiveResponse>, CliError> {
@@ -774,7 +774,7 @@ async fn mint_module_mint_receive(
 
 /// Fetch the current onchain send-fee for a mint
 #[instrument(skip_all, err)]
-async fn mint_module_wallet_send_fee(
+async fn mint_module_onchain_send_fee(
     State(state): State<AppState>,
     Json(payload): Json<MintOnchainSendFeeRequest>,
 ) -> Result<Json<MintOnchainSendFeeResponse>, CliError> {
@@ -791,7 +791,7 @@ async fn mint_module_wallet_send_fee(
 /// terminal state: confirmed broadcast, mint rejected the input tx, or
 /// the mint accepted but never produced a bitcoin txid.
 #[instrument(skip_all, err)]
-async fn mint_module_wallet_send(
+async fn mint_module_onchain_send(
     State(state): State<AppState>,
     Json(payload): Json<MintOnchainSendRequest>,
 ) -> Result<Json<MintOnchainSendResponse>, CliError> {
@@ -828,7 +828,7 @@ async fn mint_module_wallet_send(
 
 /// Generate deposit address for a mint
 #[instrument(skip_all, err)]
-async fn mint_module_wallet_receive(
+async fn mint_module_onchain_receive(
     State(state): State<AppState>,
     Json(payload): Json<MintOnchainReceiveRequest>,
 ) -> Result<Json<MintOnchainReceiveResponse>, CliError> {

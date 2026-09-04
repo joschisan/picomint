@@ -48,7 +48,7 @@ pub fn tweaked_address(
 }
 
 /// Returns true if the script pubkey potentially belongs to the mint.
-/// This uses a probabilistic filter - only ~1/65536 of P2WSH scripts pass.
+/// This uses a probabilistic filter - only ~1/65536 of scripts pass.
 pub fn is_potential_receive(pks_hash: &sha256::Hash, script_pubkey: &ScriptBuf) -> bool {
     (pks_hash, script_pubkey)
         .consensus_hash::<sha256::Hash>()

@@ -49,13 +49,13 @@ recovery at the 1 Hz anti-entropy cadence, not by decision depth.
 
 ## Glossary
 
-- **Session** — an instance of consensus, identified by a `u64`. All
+- **Session** — an instance of consensus, identified by a `u32`. All
   signatures bind to the session via the keychain API; a stale message
   from a previous session fails verification.
 - **Round** — a row of the DAG. Round 0 is the root row; its units
   carry no parents.
 - **UnitHash** — the sha256 consensus-hash of an encoded unit; the
-  unit's identity everywhere: storage key of `BFT_UNITS`, element of
+  unit's identity everywhere: storage key of `the units table (`"bft-units"`)`, element of
   the in-memory sets, and how parents pin the exact parent unit. It
   covers the payload transitively through the unit's `data`
   commitment.
@@ -90,7 +90,7 @@ enum Message<D> {
 
 | Message | Bytes | Emission rule |
 |---|---|---|
-| `Unit` | `~103 + 32·|parents| + |D|` | Creator's broadcast at unit-creation; creator's anti-entropy push of own highest unit; sole `Request` response. |
+| `Unit` | `~111 + 33·|parents| + |D|` | Creator's broadcast at unit-creation; creator's anti-entropy push of own highest unit; sole `Request` response. |
 | `Request` | `~33` | On-receive demand-pull of a missing ancestor, on receipt of a `Unit`. |
 
 Every broadcast (`Recipient::Everyone`) carries content authored by
@@ -104,10 +104,10 @@ All persisted state lives in one database table. It is *declared by the
 daemon* and passed into `Engine::new`; bft only reads and writes it:
 
 ```rust
-units_table: UnitHash => UnitEnvelope<D>   // BFT_UNITS
+units_table: UnitHash => UnitEnvelope<D>   // the units table (`"bft-units"`)
 ```
 
-Everything else is in-memory state on `Engine<P, D>`, rebuilt on
+Everything else is in-memory state on `Engine<P, D, T>`, rebuilt on
 startup and never persisted:
 
 ```rust
@@ -122,7 +122,7 @@ own_top:            Option<(Round, UnitHash)>,      // own column top: next-roun
 request_sent_at:    BTreeMap<UnitHash, Instant>,    // demand-pull throttle
 ```
 
-The `rounds` index is written at exactly one point (`insert_unit`)
+The `rounds` index is written at exactly one point in steady state (`insert_unit`), and rebuilt directly by `replay` on startup
 and provides every per-round scan: the extension cascade over stored
 units, and — filtered by `extended` membership — the extender's
 candidate and decider walks. The `extended` map carries each
@@ -318,7 +318,7 @@ every referenced branch is one we hold.
 
 Unit creation is work-gated: a node only builds a unit that carries
 items or keeps the DAG growing while an earlier unit of its own awaits
-ordering. A head at round `R` decides once rounds `R+1` and `R+2` (or
+ordering. A head at round `R` decides once rounds `R+1` through `R+3` (or
 a few more, on the common-vote path) exist, and those evidence rounds
 are built while at least `2f+1` nodes
 still await ordering of their own units — guaranteed for client work
@@ -362,7 +362,7 @@ orders of magnitude smaller. Catch-up under loss is O(n × R) Request
   `Keychain`, `Message`, `Unit`, `UnitEnvelope`, `DataProvider`, …).
 - [`unit.rs`] — `Unit`, `UnitEnvelope<D>`, `UnitHash`, `UnitData`,
   `Round` type alias.
-- [`engine.rs`] — `Engine<P, D>`: the `run` loop (anti-entropy push,
+- [`engine.rs`] — `Engine<P, D, T>`: the `run` loop (anti-entropy push,
   inbound message handling, unit creation), lax insert, the extension
   cascade, and all graph state over the units table.
 - [`extender.rs`] — the virtual-voting decision rule and BFS batch

@@ -10,9 +10,9 @@
 //!   page polls `/` and redirects once the consensus UI starts answering
 //!   with status 200.
 //! - Dashboard UI (once the mint is running). Served by
-//!   [`dashboard::router`] which takes an `Arc<ConsensusApi>` and reaches
-//!   straight into the three typed module instances (`ecash`, `wallet`, `lightning`)
-//!   hanging off it.
+//!   [`dashboard::router`] which takes an `Arc<ConsensusApi>` and
+//!   dispatches to the freestanding module functions (`ecash`, `onchain`,
+//!   `lightning`) over the shared `Server`.
 //!
 //! The UI is unauthenticated. Operators are expected to bind it to loopback
 //! (or expose it via SSH tunnel / VPN). See README.md for the deployment

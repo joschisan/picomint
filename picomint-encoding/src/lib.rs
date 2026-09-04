@@ -576,7 +576,7 @@ pub(crate) mod tests {
     fn derive_unknown_enum_variant_rejected() {
         // Variant index 99 doesn't exist.
         let mut bytes = Vec::new();
-        99u64.consensus_encode(&mut bytes).unwrap();
+        99u8.consensus_encode(&mut bytes).unwrap();
         assert!(TestEnum::consensus_decode(&bytes).is_err());
     }
 

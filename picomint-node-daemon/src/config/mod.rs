@@ -82,7 +82,7 @@ pub enum SetupResult {
 /// All the parameters necessary for generating the `ServerConfig` during setup
 ///
 /// * Nodes can create the parameters using a setup UI or CLI tool
-/// * Used for distributed or trusted config generation
+/// * Used for distributed config generation
 pub struct ConfigGenParams {
     /// Our own node id
     pub identity: NodeId,
@@ -244,9 +244,9 @@ impl ServerConfig {
 
         let broadcast_public_keys = handle.exchange_encodable(broadcast_pk).await?;
 
-        info!("Running config generation for module of kind mint...");
+        info!("Running config generation for module of kind ecash...");
 
-        let mint = crate::consensus::ecash::distributed_gen(&handle).await?;
+        let ecash = crate::consensus::ecash::distributed_gen(&handle).await?;
 
         info!("Running config generation for module of kind lightning...");
 
@@ -261,7 +261,7 @@ impl ServerConfig {
             params.identity,
             broadcast_public_keys,
             broadcast_sk,
-            mint,
+            ecash,
             lightning,
             onchain,
         );

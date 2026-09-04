@@ -167,9 +167,8 @@ async fn run_consensus(
 ) -> anyhow::Result<()> {
     // Single channel for foreign (non-node) iroh connections — fed by the
     // p2p accept loop's demux, drained by the consensus-phase api task.
-    // Small bound: pre-DKG there's no consumer, so incoming api attempts
-    // overflow and are dropped (no valid client should be talking to a
-    // not-yet-bootstrapped mint).
+    // Small bound: the api task starts draining right away, so a transient
+    // backlog overflowing is harmless.
     let (conn_tx, conn_rx) = async_channel::bounded(128);
 
     let cnt = P2PConnector::new(

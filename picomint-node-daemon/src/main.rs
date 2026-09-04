@@ -92,8 +92,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Run consensus on the main task. Inner spawned tasks are fire-and-forget
     // — process death (SIGTERM/SIGKILL) is the shutdown protocol; db commits
-    // are atomic and BFT sessions resume from disk on next boot. The only
-    // graceful return path is the mint-shutdown-via-API mechanism, which
-    // unwinds the engine cleanly.
+    // are atomic and BFT sessions resume from disk on next boot.
     run_server(settings, db, bitcoind).await
 }
