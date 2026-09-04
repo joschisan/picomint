@@ -10,9 +10,9 @@ use rand::rngs::OsRng;
 use rand_chacha::ChaChaRng;
 
 use crate::{
-    AggregatePublicKey, BlindedSignatureShare, BlindingKey, Message, PublicKeyShare,
-    SecretKeyShare, aggregate_signature_shares, blind_nonce, derive_pk_share, sign_nonce,
-    unblind_signature, verify, verify_signature_share,
+    AggregatePublicKey, BlindedSignatureShare, BlindingKey, Nonce, PublicKeyShare, SecretKeyShare,
+    aggregate_signature_shares, blind_nonce, derive_pk_share, sign_nonce, unblind_signature,
+    verify, verify_signature_share,
 };
 
 fn dealer_agg_pk() -> AggregatePublicKey {
@@ -49,10 +49,10 @@ fn test_roundtrip() {
     const NODES: u64 = 4;
     const THRESHOLD: u64 = 3;
 
-    let message = Message::from_public_key([7_u8; 32]);
+    let nonce = Nonce::from_public_key([7_u8; 32]);
     let blinding_key = BlindingKey(Scalar::random(OsRng));
 
-    let b_message = blind_nonce(message, blinding_key);
+    let b_message = blind_nonce(nonce, blinding_key);
 
     for node in 0..NODES {
         assert!(verify_signature_share(
@@ -70,5 +70,5 @@ fn test_roundtrip() {
 
     let signature = unblind_signature(blinding_key, signature);
 
-    assert!(verify(message, signature, dealer_agg_pk()));
+    assert!(verify(nonce, signature, dealer_agg_pk()));
 }
