@@ -24,7 +24,7 @@ table!(
 // Used to reject duplicate pay attempts for the same invoice (the operation id is
 // derived from the invoice payment hash).
 table!(
-    SendOperationTable,
+    SendOperationIdTable,
     (MintId, OperationId) => (),
-    "lightning-send-operation",
+    "lightning-send-operation-id",
 );

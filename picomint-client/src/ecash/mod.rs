@@ -21,7 +21,7 @@ use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use crate::tx::{TxSubmissionStateMachine, TxSubmissionStateMachineTable};
 use anyhow::ensure;
-use client_db::{CounterTable, NoteTable, ReceiveOperationTable};
+use client_db::{DerivationCounterTable, NoteTable, ReceiveOperationIdTable};
 pub use events::*;
 use futures::StreamExt;
 use picomint_core::config::MintId;
@@ -166,7 +166,11 @@ pub(crate) struct Restore {
 /// transaction bounded by [`Transaction::MAX_INPUTS`], which a wallet holding
 /// more notes than that could not be restored through at all.
 pub(crate) fn commit_scan(dbtx: &WriteTx, account: Account, restore: &Restore) {
-    dbtx.insert(&CounterTable, &(restore.mint, account), &restore.counter);
+    dbtx.insert(
+        &DerivationCounterTable,
+        &(restore.mint, account),
+        &restore.counter,
+    );
 
     for note in &restore.notes {
         dbtx.insert(&NoteTable, &(restore.mint, account, note.clone()), &());
@@ -301,9 +305,15 @@ async fn scan_counters(
 /// dbtx, so a counter is only spent once the transaction carrying its
 /// blinded message is committed to.
 fn next_counter(ctx: &ClientContext, dbtx: &WriteTx, account: Account) -> u64 {
-    let counter = dbtx.get(&CounterTable, &(ctx.mint, account)).unwrap_or(0);
+    let counter = dbtx
+        .get(&DerivationCounterTable, &(ctx.mint, account))
+        .unwrap_or(0);
 
-    dbtx.insert(&CounterTable, &(ctx.mint, account), &(counter + 1));
+    dbtx.insert(
+        &DerivationCounterTable,
+        &(ctx.mint, account),
+        &(counter + 1),
+    );
 
     counter
 }
@@ -683,8 +693,8 @@ fn send_ecash_dbtx(
 /// Called by [`crate::Client::begin_remove_mint`] for end-of-life cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
     dbtx.remove_prefix(&NoteTable, &mint);
-    dbtx.remove_prefix(&ReceiveOperationTable, &mint);
-    dbtx.remove_prefix(&CounterTable, &mint);
+    dbtx.remove_prefix(&ReceiveOperationIdTable, &mint);
+    dbtx.remove_prefix(&DerivationCounterTable, &mint);
     dbtx.remove_prefix(&EcashStateMachineTable, &mint);
     dbtx.remove_prefix(&SendStateMachineTable, &mint);
 }
@@ -1024,7 +1034,7 @@ impl Client {
         let dbtx = ctx.db.begin_write();
 
         if dbtx
-            .insert(&ReceiveOperationTable, &(ctx.mint, operation), &())
+            .insert(&ReceiveOperationIdTable, &(ctx.mint, operation), &())
             .is_some()
         {
             return Err(ReceiveEcashError::AlreadyAttempted);

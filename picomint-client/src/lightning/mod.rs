@@ -16,7 +16,7 @@ use crate::client::Client;
 use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
-use db::{GatewayPkTable, IncomingContractStreamIndexTable, SendOperationTable};
+use db::{GatewayPkTable, IncomingContractStreamIndexTable, SendOperationIdTable};
 pub(crate) use gateway::Gateways;
 use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::NumNodesExt;
@@ -242,7 +242,7 @@ async fn send_inner(
     let dbtx = ctx.db.begin_write();
 
     if dbtx
-        .insert(&SendOperationTable, &(ctx.mint, operation), &())
+        .insert(&SendOperationIdTable, &(ctx.mint, operation), &())
         .is_some()
     {
         return Err(SendPaymentError::InvoiceAlreadyAttempted);
@@ -495,7 +495,7 @@ pub enum RefreshGatewaysError {
 /// Called by [`crate::Client::begin_remove_mint`] for end-of-life cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
     dbtx.remove(&IncomingContractStreamIndexTable, &mint);
-    dbtx.remove_prefix(&SendOperationTable, &mint);
+    dbtx.remove_prefix(&SendOperationIdTable, &mint);
     dbtx.remove_prefix(&GatewayPkTable, &mint);
     dbtx.remove_prefix(&SendStateMachineTable, &mint);
 }

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use self::db::{
     FeeRateVoteTable, MintOnchainTable, NonceEntry, NonceLogTable, Output, OutputTable,
-    SignaturesTable, SpentOutputTable, TxInfoIndexTable, TxInfoTable, UnconfirmedTxTable,
+    SignaturesTable, SpentOutputIndexTable, TxInfoIndexTable, TxInfoTable, UnconfirmedTxTable,
     UnsignedTxTable,
 };
 use crate::bitcoind::BitcoindRpcMonitor;
@@ -275,7 +275,7 @@ pub fn process_input(
     input: &OnchainInput,
 ) -> Result<(picomint_core::Amount, XOnlyPublicKey), OnchainInputError> {
     if dbtx
-        .insert(&SpentOutputTable, &input.output_index, &())
+        .insert(&SpentOutputIndexTable, &input.output_index, &())
         .is_some()
     {
         return Err(OnchainInputError::OutputAlreadySpent);
@@ -984,7 +984,7 @@ fn tx_id(dbtx: &impl DbRead, outpoint: OutPoint) -> Option<Txid> {
 }
 
 fn get_outputs(dbtx: &impl DbRead, start_index: u64, end_index: u64) -> Vec<OutputInfo> {
-    let spent: BTreeSet<u64> = dbtx.range(&SpentOutputTable, start_index..end_index, |r| {
+    let spent: BTreeSet<u64> = dbtx.range(&SpentOutputIndexTable, start_index..end_index, |r| {
         r.map(|(idx, ())| idx).collect()
     });
 

@@ -10,9 +10,9 @@ use super::SpendableNote;
 // same bundle into a second account is rejected rather than left to fail
 // against already-spent notes.
 table!(
-    ReceiveOperationTable,
+    ReceiveOperationIdTable,
     (MintId, OperationId) => (),
-    "ecash-receive-operation",
+    "ecash-receive-operation-id",
 );
 
 // Every mint's accounts share one table, split by the key's leading
@@ -34,7 +34,7 @@ table!(
 // a restored wallet that resumed from zero would re-derive nonces the
 // mint has already signed.
 table!(
-    CounterTable,
+    DerivationCounterTable,
     (MintId, Account) => u64,
-    "ecash-counter",
+    "ecash-derivation-counter",
 );

@@ -22,9 +22,9 @@ table!(
 );
 
 table!(
-    SpentOutputTable,
+    SpentOutputIndexTable,
     u64 => (),
-    "onchain-spent-output",
+    "onchain-spent-output-index",
 );
 
 table!(

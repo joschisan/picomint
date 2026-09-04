@@ -14,7 +14,7 @@
 //!   LDK node so the upstream LN sender's HTLC settles; on refund the
 //!   inbound HTLC is left to expire on LDK's schedule.
 //!
-//! Cursor is persisted daemon-wide in `EventCursorTable` and advanced after
+//! Cursor is persisted daemon-wide in `EventLogCursorTable` and advanced after
 //! each dispatched event. Dispatches are idempotent, so on a crash the
 //! trailer just re-runs the last event on restart.
 use bitcoin::hashes::Hash as _;
@@ -26,7 +26,7 @@ use picomint_redb::{DbRead, WriteTx};
 use tracing::error;
 
 use crate::AppState;
-use crate::db::{EventCursorTable, IncomingOfferTable, OutgoingContractTable};
+use crate::db::{EventLogCursorTable, IncomingOfferTable, OutgoingContractTable};
 
 const CHUNK_SIZE: u64 = 1_000;
 
@@ -34,7 +34,7 @@ pub async fn run(state: AppState) {
     let mut cursor = state
         .gateway_db
         .begin_read()
-        .get(&EventCursorTable, &())
+        .get(&EventLogCursorTable, &())
         .unwrap_or_default();
 
     let notify = state.client.event_notify();
@@ -51,7 +51,7 @@ pub async fn run(state: AppState) {
 
             cursor = id.saturating_add(1);
 
-            dbtx.insert(&EventCursorTable, &(), &cursor);
+            dbtx.insert(&EventLogCursorTable, &(), &cursor);
 
             dbtx.commit();
         }

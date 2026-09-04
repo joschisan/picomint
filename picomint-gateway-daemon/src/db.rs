@@ -57,9 +57,9 @@ table!(
 // dispatches the external side effect — so a crashed trailer simply
 // re-dispatches idempotently on restart.
 table!(
-    EventCursorTable,
+    EventLogCursorTable,
     () => EventLogId,
-    "gateway-event-cursor",
+    "gateway-event-log-cursor",
 );
 
 #[derive(Debug, Clone, Encodable, Decodable)]

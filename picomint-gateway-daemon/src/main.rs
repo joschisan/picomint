@@ -23,7 +23,7 @@ use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::lightning::gateway::PaymentFee;
 use picomint_gateway_daemon::db::{
-    IncomingOfferTable, OutgoingContractTable, LdkEventPaymentHashTable,
+    IncomingOfferTable, LdkEventPaymentHashTable, OutgoingContractTable,
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
 use picomint_redb::{DbRead, WriteTx};

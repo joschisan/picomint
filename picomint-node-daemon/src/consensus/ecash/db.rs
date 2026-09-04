@@ -41,7 +41,7 @@ table!(
 );
 
 table!(
-    IssuanceCounterTable,
+    IssuanceDerivationCounterTable,
     Denomination => u64,
     "ecash-issuance-counter",
 );

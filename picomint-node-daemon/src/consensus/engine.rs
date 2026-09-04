@@ -18,7 +18,7 @@ use tracing::{info, instrument};
 use crate::config::NodeConfig;
 use crate::consensus::bft::{DataProvider, Network};
 use crate::consensus::db::{
-    AcceptedItemTable, AcceptedTxTable, BftUnitsTable, BlockCountVoteTable,
+    AcceptedItemTable, AcceptedTxIdTable, BftUnitsTable, BlockCountVoteTable,
     ConsensusVersionVoteTable, SignedSessionOutcomeTable, consensus_block_count, consensus_version,
 };
 use crate::consensus::onchain;
@@ -471,7 +471,7 @@ async fn process_consensus_item(
             let txid = tx.compute_txid();
 
             ensure!(
-                dbtx.get(&AcceptedTxTable, &txid).is_none(),
+                dbtx.get(&AcceptedTxIdTable, &txid).is_none(),
                 "Transaction is already accepted"
             );
 
@@ -489,7 +489,7 @@ async fn process_consensus_item(
                 return Err(anyhow!(error.to_string()));
             }
 
-            dbtx.insert(&AcceptedTxTable, &txid, &());
+            dbtx.insert(&AcceptedTxIdTable, &txid, &());
 
             let summary = audit(dbtx);
 

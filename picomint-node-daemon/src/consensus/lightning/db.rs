@@ -33,7 +33,7 @@ table!(
 table!(
     GatewayTable,
     GatewayPk => String,
-    "lightning-gateway-pk",
+    "lightning-gateway",
 );
 
 // Incoming contracts are indexed in three ways:
