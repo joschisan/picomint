@@ -201,7 +201,11 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let ecash = client_send
         .client
-        .ecash_send(client_send.mint, Account::Primary, Amount::from_sat(100_000))
+        .ecash_send(
+            client_send.mint,
+            Account::Primary,
+            Amount::from_sat(100_000),
+        )
         .await?;
 
     let operation = client
