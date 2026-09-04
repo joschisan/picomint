@@ -1,4 +1,4 @@
-//! Per-peer order extender running a deterministic QuickAleph-style
+//! Per-node order extender running a deterministic QuickAleph-style
 //! virtual-voting rule (arXiv:1908.05156, Appendix A/C.2) with the
 //! coin replaced by seeded pseudo-random bits — sound under the
 //! benign-network model, where common votes only need to be *common*,
@@ -31,7 +31,7 @@
 //! The round head is the first candidate in hash order decided 1,
 //! after every earlier candidate is decided 0; an undecided candidate
 //! blocks the round until later rounds decide it. The walk order only
-//! needs to be *common* across peers, not unpredictable — the paper's
+//! needs to be *common* across nodes, not unpredictable — the paper's
 //! secret permutation defends latency against an adaptive network
 //! adversary the benign model excludes, and a creator can grind its
 //! unit hash for early position under any public order. Head election
@@ -49,7 +49,7 @@
 //! extracted BFS-style and sent through the ordered-item channel in
 //! oldest-first order. An equivocator's sibling branches may both be
 //! swept as ancestry — the guarantee is one identical order on every
-//! peer, not single-branch emission; item processing downstream
+//! node, not single-branch emission; item processing downstream
 //! validates each item on its own terms.
 
 use std::collections::{BTreeMap, VecDeque};
@@ -65,7 +65,7 @@ use crate::unit::{Round, Unit, UnitData, UnitEnvelope, UnitHash};
 /// The common-vote bit for a candidate of round `candidate_round` as
 /// seen from round `round`: fixed 1 two rounds up (fast include),
 /// fixed 0 three rounds up (fast exclusion of invisible candidates),
-/// seeded pseudo-random above (tie-breaking). Identical at every peer
+/// seeded pseudo-random above (tie-breaking). Identical at every node
 /// by construction — commonness, not unpredictability, is what safety
 /// needs under a benign network. The round input is load-bearing: the
 /// same candidate is re-evaluated at successive rounds and needs a
@@ -170,7 +170,7 @@ where
     /// paper's trailing `output ⊥`, dead under its Lemma C.13 (some
     /// candidate is referenced by `f+1` honest next-round units, so
     /// every unit two rounds up votes 1 on it and it can never gather
-    /// a 0-certificate) whenever every honest peer eventually holds a
+    /// a 0-certificate) whenever every honest node eventually holds a
     /// unit in the next round, which submission fan-out and sequential
     /// own-round backfill provide.
     fn choose_head(&mut self, round: Round) -> Option<UnitHash> {
@@ -241,10 +241,10 @@ where
     /// BFS over the head's not-yet-emitted ancestors, marking each
     /// visited unit in `self.emitted` as we enqueue it. Returns the
     /// envelopes oldest-first (reversed BFS): rounds ascend since
-    /// parents sit exactly one round down, so every peer's own units
+    /// parents sit exactly one round down, so every node's own units
     /// emit in submission order. Within a round the order is BFS
     /// discovery — a deterministic function of the head and the
-    /// emitted set, hence identical on every peer, which is all the
+    /// emitted set, hence identical on every node, which is all the
     /// ordering needs; the paper's hash tie-break within rounds is
     /// not load-bearing.
     fn bfs_batch(&mut self, dbtx: &impl DbRead, head: UnitHash) -> Vec<UnitEnvelope<D>> {

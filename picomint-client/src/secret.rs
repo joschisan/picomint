@@ -1,64 +1,64 @@
 //! Mnemonic-driven client-tree derivation on top of [`Secret`].
 //!
-//! [`ClientSecret`] is the per-federation root. Its typed accessors descend
+//! [`ClientSecret`] is the per-mint root. Its typed accessors descend
 //! into the four per-module subtrees (each owned by its own `<module>/secret.rs`
 //! file); [`Path`] labels the module hop and is kept private so that tree can
 //! only be traversed via the typed entry points below.
 
 pub use bip39::{Language, Mnemonic};
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 pub use picomint_core::secret::Secret;
 use picomint_encoding::Encodable;
 use rand::{CryptoRng, RngCore};
 
-use crate::gw::GwSecret;
-use crate::ln::LnSecret;
-use crate::mint::MintSecret;
-use crate::wallet::WalletSecret;
+use crate::ecash::EcashSecret;
+use crate::gateway::GatewaySecret;
+use crate::lightning::LightningSecret;
+use crate::onchain::OnchainSecret;
 
 const WORD_COUNT: usize = 12;
 
-/// Per-module hop under the per-federation client root. The encoded
+/// Per-module hop under the per-mint client root. The encoded
 /// discriminant is hashed into the child secret, so variant order is
 /// load-bearing — reordering silently re-keys every client.
 ///
 /// `Core` is reserved for a future client-core secret; it has no consumer
-/// today. `Gw` is for the gateway-flavor Lightning module, which runs its own
-/// key space distinct from the regular `Ln` client.
+/// today. `Gateway` is for the gateway-flavor Lightning module, which runs its own
+/// key space distinct from the regular `Lightning` client.
 #[derive(Copy, Clone, Debug, Encodable)]
 enum Path {
     #[allow(dead_code)]
     Core,
     Mint,
     Wallet,
-    Ln,
-    Gw,
+    Lightning,
+    Gateway,
 }
 
-/// Per-federation client root secret, derived from `mnemonic → federation`.
+/// Per-mint client root secret, derived from `mnemonic → mint`.
 /// Exposes typed accessors for each module's sub-secret.
 #[derive(Copy, Clone, Debug)]
 pub struct ClientSecret(Secret);
 
 impl ClientSecret {
-    pub fn new(mnemonic: &Mnemonic, federation: FederationId) -> Self {
-        Self(Secret::new_root(&mnemonic.to_entropy()).child(&federation))
+    pub fn new(mnemonic: &Mnemonic, mint: MintId) -> Self {
+        Self(Secret::new_root(&mnemonic.to_entropy()).child(&mint))
     }
 
-    pub fn mint_secret(&self) -> MintSecret {
-        MintSecret::new(self.0.child(&Path::Mint))
+    pub fn ecash_secret(&self) -> EcashSecret {
+        EcashSecret::new(self.0.child(&Path::Mint))
     }
 
-    pub fn wallet_secret(&self) -> WalletSecret {
-        WalletSecret::new(self.0.child(&Path::Wallet))
+    pub fn onchain_secret(&self) -> OnchainSecret {
+        OnchainSecret::new(self.0.child(&Path::Wallet))
     }
 
-    pub fn ln_secret(&self) -> LnSecret {
-        LnSecret::new(self.0.child(&Path::Ln))
+    pub fn lightning_secret(&self) -> LightningSecret {
+        LightningSecret::new(self.0.child(&Path::Lightning))
     }
 
-    pub fn gw_secret(&self) -> GwSecret {
-        GwSecret::new(self.0.child(&Path::Gw))
+    pub fn gateway_secret(&self) -> GatewaySecret {
+        GatewaySecret::new(self.0.child(&Path::Gateway))
     }
 }
 

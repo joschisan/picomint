@@ -1,5 +1,5 @@
 [package]
-description = "Library for sending transactions to the Picomint federation."
+description = "Library for sending transactions to Picomint mints."
 edition = { workspace = true }
 homepage = { workspace = true }
 keywords = { workspace = true }
@@ -30,8 +30,8 @@ picomint-base32 = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-lnurl = { workspace = true }
-picomint-rpc = { workspace = true }
 picomint-redb = { workspace = true }
+picomint-rpc = { workspace = true }
 rand = { workspace = true }
 secp256k1 = { workspace = true }
 serde = { workspace = true }

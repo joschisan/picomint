@@ -1,0 +1,14 @@
+[package]
+authors = { workspace = true }
+description = "Shared types for picomint-node admin CLI"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-node-cli-core"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+clap = { workspace = true }
+picomint-core = { workspace = true }
+serde = { workspace = true }

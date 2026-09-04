@@ -13,34 +13,32 @@ use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
-use picomint_client::gw::GATEWAY_ACCOUNT;
-use picomint_client::wallet::events::{SendFailureEvent, SendSuccessEvent};
+use picomint_client::gateway::GATEWAY_ACCOUNT;
+use picomint_client::onchain::events::{SendFailureEvent, SendSuccessEvent};
 use picomint_client::{TxAcceptEvent, TxRejectEvent};
-use picomint_core::config::FederationId;
-use picomint_core::ln::gateway::GatewayPk;
+use picomint_core::config::MintId;
+use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
-    CLI_SOCKET_FILENAME, ChannelInfo, FederationAddRequest, FederationBalanceRequest,
-    FederationBalanceResponse, FederationConfigRequest, FederationConfigResponse,
-    FederationListResponse, FederationMintCountRequest, FederationMintCountResponse,
-    FederationMintReceiveRequest, FederationMintReceiveResponse, FederationMintSendRequest,
-    FederationMintSendResponse, FederationRemoveRequest, FederationWalletReceiveRequest,
-    FederationWalletReceiveResponse, FederationWalletSendFeeRequest,
-    FederationWalletSendFeeResponse, FederationWalletSendRequest, FederationWalletSendResponse,
-    InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelListResponse,
-    LdkChannelOpenRequest, LdkChannelSpliceInRequest, LdkChannelSpliceOutRequest,
-    LdkLnProbeRequest, LdkLnReceiveRequest, LdkLnReceiveResponse, LdkLnSendRequest,
-    LdkLnSendResponse, LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
-    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
-    PeerInfo, QueryRequest, QueryResponse, ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE,
-    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
-    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_FEDERATION_REMOVE, ROUTE_INFO,
-    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
-    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LN_PROBE,
-    ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
-    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
-    ROUTE_QUERY,
+    CLI_SOCKET_FILENAME, ChannelInfo, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
+    LdkChannelListResponse, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
+    LdkChannelSpliceOutRequest, LdkLightningProbeRequest, LdkLightningReceiveRequest,
+    LdkLightningReceiveResponse, LdkLightningSendRequest, LdkLightningSendResponse,
+    LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
+    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MintAddRequest,
+    MintBalanceRequest, MintBalanceResponse, MintConfigRequest, MintConfigResponse,
+    MintEcashCountRequest, MintEcashCountResponse, MintEcashReceiveRequest,
+    MintEcashReceiveResponse, MintEcashSendRequest, MintEcashSendResponse, MintListResponse,
+    MintOnchainReceiveRequest, MintOnchainReceiveResponse, MintOnchainSendFeeRequest,
+    MintOnchainSendFeeResponse, MintOnchainSendRequest, MintOnchainSendResponse, MintRemoveRequest,
+    MnemonicResponse, PeerInfo, QueryRequest, QueryResponse, ROUTE_INFO, ROUTE_LDK_BALANCES,
+    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE,
+    ROUTE_LDK_LIGHTNING_RECEIVE, ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE,
+    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    ROUTE_MINT_ADD, ROUTE_MINT_BALANCE, ROUTE_MINT_CONFIG, ROUTE_MINT_LIST,
+    ROUTE_MINT_MODULE_ECASH_COUNT, ROUTE_MINT_MODULE_ECASH_RECEIVE, ROUTE_MINT_MODULE_ECASH_SEND,
+    ROUTE_MINT_MODULE_ONCHAIN_RECEIVE, ROUTE_MINT_MODULE_ONCHAIN_SEND,
+    ROUTE_MINT_MODULE_ONCHAIN_SEND_FEE, ROUTE_MINT_REMOVE, ROUTE_MNEMONIC, ROUTE_QUERY,
 };
 use reqwest::StatusCode;
 use tokio::net::UnixListener;
@@ -123,42 +121,36 @@ fn router() -> Router<AppState> {
         .route(ROUTE_LDK_CHANNEL_SPLICE_OUT, post(ldk_channel_splice_out))
         .route(ROUTE_LDK_ONCHAIN_RECEIVE, post(ldk_onchain_receive))
         .route(ROUTE_LDK_ONCHAIN_SEND, post(ldk_onchain_send))
-        .route(ROUTE_LDK_LN_RECEIVE, post(ldk_ln_receive))
-        .route(ROUTE_LDK_LN_SEND, post(ldk_ln_send))
-        .route(ROUTE_LDK_LN_PROBE, post(ldk_ln_probe))
+        .route(ROUTE_LDK_LIGHTNING_RECEIVE, post(ldk_lightning_receive))
+        .route(ROUTE_LDK_LIGHTNING_SEND, post(ldk_lightning_send))
+        .route(ROUTE_LDK_LIGHTNING_PROBE, post(ldk_lightning_probe))
         .route(ROUTE_LDK_PEER_CONNECT, post(ldk_peer_connect))
         .route(ROUTE_LDK_PEER_DISCONNECT, post(ldk_peer_disconnect))
         .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
-        // Federation management
-        .route(ROUTE_FEDERATION_ADD, post(federation_add))
-        .route(ROUTE_FEDERATION_REMOVE, post(federation_remove))
-        .route(ROUTE_FEDERATION_LIST, post(federation_list))
-        .route(ROUTE_FEDERATION_CONFIG, post(federation_config))
-        .route(ROUTE_FEDERATION_BALANCE, post(federation_balance))
-        // Per-federation module commands
+        // Mint management
+        .route(ROUTE_MINT_ADD, post(mint_add))
+        .route(ROUTE_MINT_REMOVE, post(mint_remove))
+        .route(ROUTE_MINT_LIST, post(mint_list))
+        .route(ROUTE_MINT_CONFIG, post(mint_config))
+        .route(ROUTE_MINT_BALANCE, post(mint_balance))
+        // Per-mint module commands
+        .route(ROUTE_MINT_MODULE_ECASH_COUNT, post(mint_module_mint_count))
+        .route(ROUTE_MINT_MODULE_ECASH_SEND, post(mint_module_mint_send))
         .route(
-            ROUTE_FEDERATION_MODULE_MINT_COUNT,
-            post(federation_module_mint_count),
+            ROUTE_MINT_MODULE_ECASH_RECEIVE,
+            post(mint_module_mint_receive),
         )
         .route(
-            ROUTE_FEDERATION_MODULE_MINT_SEND,
-            post(federation_module_mint_send),
+            ROUTE_MINT_MODULE_ONCHAIN_SEND_FEE,
+            post(mint_module_wallet_send_fee),
         )
         .route(
-            ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
-            post(federation_module_mint_receive),
+            ROUTE_MINT_MODULE_ONCHAIN_SEND,
+            post(mint_module_wallet_send),
         )
         .route(
-            ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE,
-            post(federation_module_wallet_send_fee),
-        )
-        .route(
-            ROUTE_FEDERATION_MODULE_WALLET_SEND,
-            post(federation_module_wallet_send),
-        )
-        .route(
-            ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
-            post(federation_module_wallet_receive),
+            ROUTE_MINT_MODULE_ONCHAIN_RECEIVE,
+            post(mint_module_wallet_receive),
         )
 }
 
@@ -486,10 +478,10 @@ async fn ldk_onchain_send(
 
 /// Creates an invoice directly payable to the gateway's lightning node
 #[instrument(skip_all, err)]
-async fn ldk_ln_receive(
+async fn ldk_lightning_receive(
     State(state): State<AppState>,
-    Json(payload): Json<LdkLnReceiveRequest>,
-) -> Result<Json<LdkLnReceiveResponse>, CliError> {
+    Json(payload): Json<LdkLightningReceiveRequest>,
+) -> Result<Json<LdkLightningReceiveResponse>, CliError> {
     let expiry_secs = payload.expiry_secs.unwrap_or(3600);
     let description = match payload.description {
         Some(desc) => LdkBolt11InvoiceDescription::Direct(
@@ -505,17 +497,17 @@ async fn ldk_ln_receive(
         .receive(payload.amount_msat, &description, expiry_secs)
         .map_err(|e| CliError::internal(format!("Failed to get invoice: {e}")))?;
 
-    Ok(Json(LdkLnReceiveResponse {
+    Ok(Json(LdkLightningReceiveResponse {
         invoice: invoice.to_string(),
     }))
 }
 
 /// Pays an outgoing LN invoice using the gateway's own funds
 #[instrument(skip_all, err)]
-async fn ldk_ln_send(
+async fn ldk_lightning_send(
     State(state): State<AppState>,
-    Json(payload): Json<LdkLnSendRequest>,
-) -> Result<Json<LdkLnSendResponse>, CliError> {
+    Json(payload): Json<LdkLightningSendRequest>,
+) -> Result<Json<LdkLightningSendResponse>, CliError> {
     let payment_id = state
         .node
         .bolt11_payment()
@@ -543,7 +535,7 @@ async fn ldk_ln_send(
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
-    Ok(Json(LdkLnSendResponse {
+    Ok(Json(LdkLightningSendResponse {
         preimage: preimage.encode_hex::<String>(),
     }))
 }
@@ -553,9 +545,9 @@ async fn ldk_ln_send(
 /// outcomes surface only in the daemon's LDK logs, so nothing meaningful is
 /// returned here.
 #[instrument(skip_all, err)]
-async fn ldk_ln_probe(
+async fn ldk_lightning_probe(
     State(state): State<AppState>,
-    Json(payload): Json<LdkLnProbeRequest>,
+    Json(payload): Json<LdkLightningProbeRequest>,
 ) -> Result<Json<()>, CliError> {
     state
         .node
@@ -621,103 +613,98 @@ async fn ldk_peer_list(
 }
 
 // ---------------------------------------------------------------------------
-// Federation management handlers
+// Mint management handlers
 // ---------------------------------------------------------------------------
 
-/// Add a new federation
+/// Add a new mint
 #[instrument(skip_all, err)]
-async fn federation_add(
+async fn mint_add(
     State(state): State<AppState>,
-    Json(payload): Json<FederationAddRequest>,
+    Json(payload): Json<MintAddRequest>,
 ) -> Result<Json<()>, CliError> {
     state
         .client
-        .add(&payload.invite, Some(state.network))
+        .add_mint(&payload.invite, Some(state.network))
         .await?;
 
     Ok(Json(()))
 }
 
-/// Remove a federation: shut its client runtime down, then delete its
+/// Remove a mint: shut its client runtime down, then delete its
 /// client rows and the daemon's contract rows in one dbtx. Destructive —
 /// in-flight contracts are dropped with their rows, so the operator
 /// checks for in-flight payments via the query route before removing;
 /// failing to check might result in loss of funds.
 #[instrument(skip_all, err)]
-async fn federation_remove(
+async fn mint_remove(
     State(state): State<AppState>,
-    Json(payload): Json<FederationRemoveRequest>,
+    Json(payload): Json<MintRemoveRequest>,
 ) -> Result<Json<()>, CliError> {
-    let dbtx = state.client.begin_remove(payload.federation).await?;
+    let dbtx = state.client.begin_remove_mint(payload.mint).await?;
 
-    crate::db::wipe_federation_rows(&dbtx, payload.federation);
+    crate::db::wipe_mint_rows(&dbtx, payload.mint);
 
     dbtx.commit();
 
-    info!(federation = %payload.federation, "Removed federation");
+    info!(mint = %payload.mint, "Removed mint");
 
     Ok(Json(()))
 }
 
-/// List connected federations
+/// List connected mints
 #[instrument(skip_all, err)]
-async fn federation_list(
-    State(state): State<AppState>,
-) -> Result<Json<FederationListResponse>, CliError> {
-    Ok(Json(FederationListResponse {
-        federations: state.federation_list(),
+async fn mint_list(State(state): State<AppState>) -> Result<Json<MintListResponse>, CliError> {
+    Ok(Json(MintListResponse {
+        mints: state.mint_list(),
     }))
 }
 
-/// Display federation config
+/// Display mint config
 #[instrument(skip_all, err)]
-async fn federation_config(
+async fn mint_config(
     State(state): State<AppState>,
-    Json(payload): Json<FederationConfigRequest>,
-) -> Result<Json<FederationConfigResponse>, CliError> {
-    let federation = resolve_federation(&state, payload.federation)?;
+    Json(payload): Json<MintConfigRequest>,
+) -> Result<Json<MintConfigResponse>, CliError> {
+    let mint = resolve_mint(&state, payload.mint)?;
 
     let config = state
         .client
-        .config(federation)
-        .ok_or_else(|| CliError::bad_request("Federation not added"))?;
+        .config(mint)
+        .ok_or_else(|| CliError::bad_request("Mint not added"))?;
 
-    Ok(Json(FederationConfigResponse {
+    Ok(Json(MintConfigResponse {
         config: serde_json::to_value(config).expect("ConsensusConfig is serializable"),
     }))
 }
 
-/// Get a federation's ecash balance
+/// Get a mint's ecash balance
 #[instrument(skip_all, err)]
-async fn federation_balance(
+async fn mint_balance(
     State(state): State<AppState>,
-    Json(payload): Json<FederationBalanceRequest>,
-) -> Result<Json<FederationBalanceResponse>, CliError> {
-    let federation = resolve_federation(&state, payload.federation)?;
+    Json(payload): Json<MintBalanceRequest>,
+) -> Result<Json<MintBalanceResponse>, CliError> {
+    let mint = resolve_mint(&state, payload.mint)?;
 
-    let balance_msat = state.client.mint_balance(federation, GATEWAY_ACCOUNT);
+    let balance_msat = state.client.ecash_balance(mint, GATEWAY_ACCOUNT);
 
-    Ok(Json(FederationBalanceResponse { balance_msat }))
+    Ok(Json(MintBalanceResponse { balance_msat }))
 }
 
 // ---------------------------------------------------------------------------
-// Per-federation module handlers
+// Per-mint module handlers
 // ---------------------------------------------------------------------------
 
-/// Resolve the target federation. When `id` is `None` and the gateway has
-/// exactly one federation added, that one is used; otherwise the caller must
+/// Resolve the target mint. When `id` is `None` and the gateway has
+/// exactly one mint added, that one is used; otherwise the caller must
 /// supply `--id`.
-fn resolve_federation(
-    state: &AppState,
-    id: Option<FederationId>,
-) -> Result<FederationId, CliError> {
+fn resolve_mint(state: &AppState, id: Option<MintId>) -> Result<MintId, CliError> {
     match id {
         Some(id) => Ok(id),
-        None => match state.federation_list().as_slice() {
-            [] => Err(CliError::bad_request("No federations connected")),
-            [info] => Ok(info.federation),
+        None => match state.mint_list().as_slice() {
+            [] => Err(CliError::bad_request("No mints connected")),
+            [info] => Ok(info.mint),
             _ => Err(CliError::bad_request(
-                "Multiple federations connected — pass --id <FEDERATION_ID>",
+                "Multiple mints connected — pass --id <MINT_ID>",
             )),
         },
     }
@@ -725,55 +712,55 @@ fn resolve_federation(
 
 /// Count held ecash notes by denomination
 #[instrument(skip_all, err)]
-async fn federation_module_mint_count(
+async fn mint_module_mint_count(
     State(state): State<AppState>,
-    Json(payload): Json<FederationMintCountRequest>,
-) -> Result<Json<FederationMintCountResponse>, CliError> {
-    let federation = resolve_federation(&state, payload.federation)?;
-    let counts = state.client.mint_count(federation, GATEWAY_ACCOUNT);
-    Ok(Json(FederationMintCountResponse { counts }))
+    Json(payload): Json<MintEcashCountRequest>,
+) -> Result<Json<MintEcashCountResponse>, CliError> {
+    let mint = resolve_mint(&state, payload.mint)?;
+    let counts = state.client.ecash_count(mint, GATEWAY_ACCOUNT);
+    Ok(Json(MintEcashCountResponse { counts }))
 }
 
-/// Spend ecash from a federation
+/// Spend ecash from a mint
 #[instrument(skip_all, err)]
-async fn federation_module_mint_send(
+async fn mint_module_mint_send(
     State(state): State<AppState>,
-    Json(payload): Json<FederationMintSendRequest>,
-) -> Result<Json<FederationMintSendResponse>, CliError> {
-    let federation = resolve_federation(&state, payload.federation)?;
+    Json(payload): Json<MintEcashSendRequest>,
+) -> Result<Json<MintEcashSendResponse>, CliError> {
+    let mint = resolve_mint(&state, payload.mint)?;
 
     let ecash = state
         .client
-        .mint_send(
-            federation,
+        .ecash_send(
+            mint,
             GATEWAY_ACCOUNT,
             picomint_core::Amount::from_sat(payload.amount.to_sat()),
         )
         .await
         .map_err(CliError::internal)?;
 
-    Ok(Json(FederationMintSendResponse { ecash }))
+    Ok(Json(MintEcashSendResponse { ecash }))
 }
 
 /// Receive ecash into the gateway. The ecash bundle itself carries the target
-/// federation id, so no `--id` is needed. Blocks until issuance either
-/// completes or fails federation-side.
+/// mint id, so no `--id` is needed. Blocks until issuance either
+/// completes or fails mint-side.
 #[instrument(skip_all, err)]
-async fn federation_module_mint_receive(
+async fn mint_module_mint_receive(
     State(state): State<AppState>,
-    Json(payload): Json<FederationMintReceiveRequest>,
-) -> Result<Json<FederationMintReceiveResponse>, CliError> {
+    Json(payload): Json<MintEcashReceiveRequest>,
+) -> Result<Json<MintEcashReceiveResponse>, CliError> {
     let amount = payload.ecash.amount();
 
     let operation = state
         .client
-        .mint_receive(payload.ecash.mint, GATEWAY_ACCOUNT, &payload.ecash)
+        .ecash_receive(payload.ecash.mint, GATEWAY_ACCOUNT, &payload.ecash)
         .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
 
     let mut events = state.client.subscribe_operation_events(operation);
     while let Some(entry) = events.next().await {
         if entry.to_event::<TxAcceptEvent>().is_some() {
-            return Ok(Json(FederationMintReceiveResponse { amount }));
+            return Ok(Json(MintEcashReceiveResponse { amount }));
         }
         if let Some(e) = entry.to_event::<TxRejectEvent>() {
             return Err(CliError::bad_request(format!(
@@ -785,34 +772,34 @@ async fn federation_module_mint_receive(
     Err(CliError::internal("Event stream ended unexpectedly"))
 }
 
-/// Fetch the current onchain send-fee for a federation
+/// Fetch the current onchain send-fee for a mint
 #[instrument(skip_all, err)]
-async fn federation_module_wallet_send_fee(
+async fn mint_module_wallet_send_fee(
     State(state): State<AppState>,
-    Json(payload): Json<FederationWalletSendFeeRequest>,
-) -> Result<Json<FederationWalletSendFeeResponse>, CliError> {
-    let federation = resolve_federation(&state, payload.federation)?;
+    Json(payload): Json<MintOnchainSendFeeRequest>,
+) -> Result<Json<MintOnchainSendFeeResponse>, CliError> {
+    let mint = resolve_mint(&state, payload.mint)?;
     let fee = state
         .client
-        .wallet_send_fee(federation)
+        .onchain_send_fee(mint)
         .await
         .map_err(|e| CliError::internal(format!("Failed to fetch send fee: {e}")))?;
-    Ok(Json(FederationWalletSendFeeResponse { fee }))
+    Ok(Json(MintOnchainSendFeeResponse { fee }))
 }
 
-/// Withdraw onchain from a federation. Blocks until the send reaches a
-/// terminal state: confirmed broadcast, federation rejected the input tx, or
-/// the federation accepted but never produced a bitcoin txid.
+/// Withdraw onchain from a mint. Blocks until the send reaches a
+/// terminal state: confirmed broadcast, mint rejected the input tx, or
+/// the mint accepted but never produced a bitcoin txid.
 #[instrument(skip_all, err)]
-async fn federation_module_wallet_send(
+async fn mint_module_wallet_send(
     State(state): State<AppState>,
-    Json(payload): Json<FederationWalletSendRequest>,
-) -> Result<Json<FederationWalletSendResponse>, CliError> {
-    let federation = resolve_federation(&state, payload.federation)?;
+    Json(payload): Json<MintOnchainSendRequest>,
+) -> Result<Json<MintOnchainSendResponse>, CliError> {
+    let mint = resolve_mint(&state, payload.mint)?;
     let operation = state
         .client
-        .wallet_send(
-            federation,
+        .onchain_send(
+            mint,
             GATEWAY_ACCOUNT,
             payload.address,
             payload.amount,
@@ -824,7 +811,7 @@ async fn federation_module_wallet_send(
     let mut events = state.client.subscribe_operation_events(operation);
     while let Some(entry) = events.next().await {
         if let Some(e) = entry.to_event::<SendSuccessEvent>() {
-            return Ok(Json(FederationWalletSendResponse { txid: e.txid }));
+            return Ok(Json(MintOnchainSendResponse { txid: e.txid }));
         }
         if let Some(e) = entry.to_event::<TxRejectEvent>() {
             return Err(CliError::bad_request(format!(
@@ -833,28 +820,26 @@ async fn federation_module_wallet_send(
             )));
         }
         if entry.to_event::<SendFailureEvent>().is_some() {
-            return Err(CliError::internal(
-                "Failure to retrieve txid from federation",
-            ));
+            return Err(CliError::internal("Failure to retrieve txid from mint"));
         }
     }
     Err(CliError::internal("Event stream ended unexpectedly"))
 }
 
-/// Generate deposit address for a federation
+/// Generate deposit address for a mint
 #[instrument(skip_all, err)]
-async fn federation_module_wallet_receive(
+async fn mint_module_wallet_receive(
     State(state): State<AppState>,
-    Json(payload): Json<FederationWalletReceiveRequest>,
-) -> Result<Json<FederationWalletReceiveResponse>, CliError> {
-    let federation = resolve_federation(&state, payload.federation)?;
+    Json(payload): Json<MintOnchainReceiveRequest>,
+) -> Result<Json<MintOnchainReceiveResponse>, CliError> {
+    let mint = resolve_mint(&state, payload.mint)?;
 
     let address = state
         .client
-        .wallet_receive(federation, GATEWAY_ACCOUNT)
+        .onchain_receive(mint, GATEWAY_ACCOUNT)
         .map_err(CliError::internal)?;
 
-    Ok(Json(FederationWalletReceiveResponse {
+    Ok(Json(MintOnchainReceiveResponse {
         address: address.as_unchecked().clone(),
     }))
 }

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 
 use bitcoin::hashes::sha256;
-use picomint_core::PeerId;
+use picomint_core::NodeId;
 use picomint_core::secp256k1::schnorr;
 use picomint_encoding::{Decodable, Encodable};
 
@@ -46,7 +46,7 @@ pub struct UnitHash(pub sha256::Hash);
 /// commit rule elects at most one branch per candidate. The session
 /// is *not* carried in the unit — instead, signatures are produced
 /// over the tuple `(session, unit)`, so a stale unit from a previous
-/// session arriving at a peer in the current session fails signature
+/// session arriving at a node in the current session fails signature
 /// verification and is discarded. This saves 4 bytes per unit on the
 /// wire vs. embedding the session in the unit.
 ///
@@ -58,10 +58,10 @@ pub struct UnitHash(pub sha256::Hash);
 pub struct Unit {
     /// The round this unit belongs to.
     pub round: Round,
-    /// `PeerId` of this unit's creator.
-    pub creator: PeerId,
+    /// `NodeId` of this unit's creator.
+    pub creator: NodeId,
     /// Creator and unit hash of this unit's parents at `round - 1`.
-    pub parents: BTreeMap<PeerId, UnitHash>,
+    pub parents: BTreeMap<NodeId, UnitHash>,
     /// The sha256 consensus-hash of the payload carried in this
     /// unit's envelope; `None` iff the payload is empty.
     pub data: Option<sha256::Hash>,

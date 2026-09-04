@@ -8,7 +8,7 @@ use futures::stream::BoxStream;
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::module::Method;
-use picomint_core::{NumPeers, NumPeersExt, PeerId};
+use picomint_core::{NodeId, NumNodes, NumNodesExt};
 use picomint_encoding::Decodable;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -18,60 +18,60 @@ use tracing::{debug, instrument};
 use crate::connection::{ConnState, ConnStatus, connection_task, request_on_state};
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 
-/// Federation API client: a pool of kept-alive connections to a federation's
-/// guardians, with the query strategies for fanning a request across them.
+/// Mint API client: a pool of kept-alive connections to a mint's
+/// nodes, with the query strategies for fanning a request across them.
 ///
-/// Spans the whole federation — [`Self::request_with_strategy`] gives up once
-/// `f + 1` peers have errored, so the peer set must have a federation's shape.
-/// A one-shot request to some subset of guardians wants [`crate::request`]
+/// Spans the whole mint — [`Self::request_with_strategy`] gives up once
+/// `f + 1` nodes have errored, so the node set must have a mint's shape.
+/// A one-shot request to some subset of nodes wants [`crate::request`]
 /// instead, which pays for a connection it does not keep.
 ///
-/// Spawns one background [`connection_task`] per peer at construction that
+/// Spawns one background [`connection_task`] per node at construction that
 /// eagerly opens — and reconnects — a single kept-alive iroh connection,
-/// publishing its [`ConnState`] on a watch channel. Every per-peer request
+/// publishing its [`ConnState`] on a watch channel. Every per-node request
 /// is multiplexed as a fresh bi stream over that pooled connection, so the
 /// QUIC handshake and hole-punched path are paid once and reused, not per
 /// request. Each task's status feeds [`Self::connection_status_stream`].
 #[derive(Clone, Debug)]
-pub struct FederationApi {
-    peers: BTreeMap<PeerId, PublicKey>,
-    states: BTreeMap<PeerId, watch::Receiver<Option<ConnState>>>,
+pub struct MintApi {
+    nodes: BTreeMap<NodeId, PublicKey>,
+    states: BTreeMap<NodeId, watch::Receiver<Option<ConnState>>>,
 }
 
-impl FederationApi {
-    pub fn new(endpoint: Endpoint, peers: BTreeMap<PeerId, PublicKey>) -> Self {
+impl MintApi {
+    pub fn new(endpoint: Endpoint, nodes: BTreeMap<NodeId, PublicKey>) -> Self {
         let mut states = BTreeMap::new();
 
-        for (peer, node_id) in &peers {
+        for (node, iroh_pk) in &nodes {
             let (tx, rx) = watch::channel(None);
-            tokio::spawn(connection_task(*node_id, endpoint.clone(), tx));
-            states.insert(*peer, rx);
+            tokio::spawn(connection_task(*iroh_pk, endpoint.clone(), tx));
+            states.insert(*node, rx);
         }
 
-        Self { peers, states }
+        Self { nodes, states }
     }
 
-    /// Every peer in the pool.
-    pub fn all_peers(&self) -> BTreeSet<PeerId> {
-        self.peers.keys().copied().collect()
+    /// Every node in the pool.
+    pub fn all_nodes(&self) -> BTreeSet<NodeId> {
+        self.nodes.keys().copied().collect()
     }
 
-    /// Federation size, derived from the peer set. Panics unless the pool
-    /// spans a whole federation — a subset has no such shape.
-    pub fn num_peers(&self) -> NumPeers {
-        self.peers.to_num_peers()
+    /// Mint size, derived from the node set. Panics unless the pool
+    /// spans a whole mint — a subset has no such shape.
+    pub fn num_nodes(&self) -> NumNodes {
+        self.nodes.to_num_nodes()
     }
 
-    /// Stream of per-peer reachability. Emits a fresh `peer -> status` map
-    /// whenever any peer's connection comes up or goes down, starting with the
+    /// Stream of per-node reachability. Emits a fresh `node -> status` map
+    /// whenever any node's connection comes up or goes down, starting with the
     /// current state. Backed by the same kept-alive connections requests use,
     /// so it reflects real reachability, not a probe; the `Connected` status
     /// carries the RTT sampled at connect.
-    pub fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<PeerId, ConnStatus>> {
-        let streams = self.states.iter().map(|(&peer, rx)| {
+    pub fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<NodeId, ConnStatus>> {
+        let streams = self.states.iter().map(|(&node, rx)| {
             WatchStream::new(rx.clone()).map(move |s| {
                 (
-                    peer,
+                    node,
                     s.map_or(ConnStatus::Disconnected, |state| state.status()),
                 )
             })
@@ -79,34 +79,34 @@ impl FederationApi {
 
         let mut current = BTreeMap::new();
         futures::stream::select_all(streams)
-            .map(move |(peer, status)| {
-                current.insert(peer, status);
+            .map(move |(node, status)| {
+                current.insert(node, status);
                 current.clone()
             })
             .boxed()
     }
 
-    fn state(&self, peer: PeerId) -> watch::Receiver<Option<ConnState>> {
+    fn state(&self, node: NodeId) -> watch::Receiver<Option<ConnState>> {
         self.states
-            .get(&peer)
-            .expect("Strategies only retry peers from the pool")
+            .get(&node)
+            .expect("Strategies only retry nodes from the pool")
             .clone()
     }
 
     #[instrument(
         skip_all,
-        fields(peer = %peer, method = ?method),
+        fields(node = %node, method = ?method),
     )]
-    pub async fn request_single_peer<R>(&self, method: Method, peer: PeerId) -> anyhow::Result<R>
+    pub async fn request_single_node<R>(&self, method: Method, node: NodeId) -> anyhow::Result<R>
     where
         R: Decodable,
     {
-        let mut rx = self.states.get(&peer).context("Invalid peer id")?.clone();
+        let mut rx = self.states.get(&node).context("Invalid node id")?.clone();
 
         request_on_state(&mut rx, method).await
     }
 
-    /// Make an aggregate request to federation, using `strategy` to logically
+    /// Make an aggregate request to mint, using `strategy` to logically
     /// merge the responses.
     #[instrument(skip_all, fields(method = ?method))]
     pub async fn request_with_strategy<P: Decodable + Send + 'static, F: Debug>(
@@ -116,52 +116,50 @@ impl FederationApi {
     ) -> anyhow::Result<F> {
         let mut tasks = JoinSet::new();
 
-        for (peer, mut rx) in self.states.clone() {
+        for (node, mut rx) in self.states.clone() {
             let method = method.clone();
             tasks.spawn(async move {
                 let result = request_on_state(&mut rx, method).await;
-                (peer, result)
+                (node, result)
             });
         }
 
-        let mut peer_errors = BTreeMap::new();
-        let peer_error_threshold = self.num_peers().one_honest();
+        let mut node_errors = BTreeMap::new();
+        let node_error_threshold = self.num_nodes().one_honest();
 
         loop {
-            let (peer, result) = tasks
+            let (node, result) = tasks
                 .join_next()
                 .await
-                .expect("Query strategy ran out of peers to query without returning a result")
-                .expect("Per-peer request task panicked");
+                .expect("Query strategy ran out of nodes to query without returning a result")
+                .expect("Per-node request task panicked");
 
             match result {
-                Ok(response) => match strategy.process(peer, response) {
-                    QueryStep::Retry(peers) => {
-                        for peer in peers {
-                            let mut rx = self.state(peer);
+                Ok(response) => match strategy.process(node, response) {
+                    QueryStep::Retry(nodes) => {
+                        for node in nodes {
+                            let mut rx = self.state(node);
                             let method = method.clone();
                             tasks.spawn(async move {
                                 let result = request_on_state(&mut rx, method).await;
-                                (peer, result)
+                                (node, result)
                             });
                         }
                     }
                     QueryStep::Success(response) => return Ok(response),
                     QueryStep::Failure(e) => {
-                        peer_errors.insert(peer, e);
+                        node_errors.insert(node, e);
                     }
                     QueryStep::Continue => {}
                 },
                 Err(e) => {
-                    debug!(error = %e, "Peer request failed");
-                    peer_errors.insert(peer, e);
+                    debug!(error = %e, "Node request failed");
+                    node_errors.insert(node, e);
                 }
             }
 
-            if peer_errors.len() == peer_error_threshold {
-                return Err(anyhow!(
-                    "Federation request {method:?} failed: {peer_errors:?}"
-                ));
+            if node_errors.len() == node_error_threshold {
+                return Err(anyhow!("Mint request {method:?} failed: {node_errors:?}"));
             }
         }
     }
@@ -174,28 +172,28 @@ impl FederationApi {
     ) -> F {
         let mut tasks = JoinSet::new();
 
-        for (peer, rx) in self.states.clone() {
+        for (node, rx) in self.states.clone() {
             let method = method.clone();
             tasks.spawn(async move {
                 let response = request_on_state_retry(rx, method).await;
-                (peer, response)
+                (node, response)
             });
         }
 
         loop {
-            let (peer, response) = match tasks.join_next().await {
-                Some(joined) => joined.expect("Per-peer request task panicked"),
+            let (node, response) = match tasks.join_next().await {
+                Some(joined) => joined.expect("Per-node request task panicked"),
                 None => pending().await,
             };
 
-            match strategy.process(peer, response) {
-                QueryStep::Retry(peers) => {
-                    for peer in peers {
-                        let rx = self.state(peer);
+            match strategy.process(node, response) {
+                QueryStep::Retry(nodes) => {
+                    for node in nodes {
+                        let rx = self.state(node);
                         let method = method.clone();
                         tasks.spawn(async move {
                             let response = request_on_state_retry(rx, method).await;
-                            (peer, response)
+                            (node, response)
                         });
                     }
                 }
@@ -212,7 +210,7 @@ impl FederationApi {
     where
         R: Decodable + Eq + Debug + Clone + Send + 'static,
     {
-        self.request_with_strategy(ThresholdConsensus::new(self.num_peers()), method)
+        self.request_with_strategy(ThresholdConsensus::new(self.num_nodes()), method)
             .await
     }
 
@@ -220,14 +218,14 @@ impl FederationApi {
     where
         R: Decodable + Eq + Debug + Clone + Send + 'static,
     {
-        self.request_with_strategy_retry(ThresholdConsensus::new(self.num_peers()), method)
+        self.request_with_strategy_retry(ThresholdConsensus::new(self.num_nodes()), method)
             .await
     }
 }
 
 /// As [`request_on_state`] but retries forever on transport / decode errors
 /// using `networking_backoff`. Used by the strategy-retry fan-out where
-/// every peer call must eventually yield a response.
+/// every node call must eventually yield a response.
 async fn request_on_state_retry<R: Decodable>(
     rx: watch::Receiver<Option<ConnState>>,
     method: Method,
@@ -235,7 +233,7 @@ async fn request_on_state_retry<R: Decodable>(
     (|| async {
         request_on_state(&mut rx.clone(), method.clone())
             .await
-            .inspect_err(|e| debug!(error = %e, "Peer request failed"))
+            .inspect_err(|e| debug!(error = %e, "Node request failed"))
     })
     .retry(networking_backoff())
     .await

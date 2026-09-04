@@ -1,13 +1,13 @@
-//! Federation expiry status caching.
+//! Mint expiry status caching.
 //!
-//! The federation's announced expiry is fetched once at federation bring-up
+//! The mint's announced expiry is fetched once at mint bring-up
 //! via threshold consensus and mirrored into the local
 //! [`ExpiryStatusTable`]. [`Client::expiry_status`] is a fast, non-blocking
 //! read from that cache; [`Client::refresh_expiry_status`] re-runs the
-//! federation query on demand (used by tests and by apps that want to force
+//! mint query on demand (used by tests and by apps that want to force
 //! a re-sync).
 
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_redb::{DbRead, WriteTx, table};
 use thiserror::Error;
@@ -18,7 +18,7 @@ use crate::context::ClientContext;
 
 table!(
     ExpiryStatusTable,
-    FederationId => ExpiryStatus,
+    MintId => ExpiryStatus,
     "expiry-status",
 );
 
@@ -31,20 +31,20 @@ pub enum RefreshExpiryStatusError {
 impl Client {
     /// Read the cached expiry status. Populated at bring-up (and by
     /// [`Self::refresh_expiry_status`]); returns `None` until that completes
-    /// successfully or if the federation has not announced an expiry. Pure
+    /// successfully or if the mint has not announced an expiry. Pure
     /// read.
-    pub fn expiry_status(&self, federation: FederationId) -> Option<ExpiryStatus> {
-        self.db.begin_read().get(&ExpiryStatusTable, &federation)
+    pub fn expiry_status(&self, mint: MintId) -> Option<ExpiryStatus> {
+        self.db.begin_read().get(&ExpiryStatusTable, &mint)
     }
 
     /// Re-fetch the announced expiry via threshold consensus and reconcile
     /// the local cache.
     pub async fn refresh_expiry_status(
         &self,
-        federation: FederationId,
+        mint: MintId,
     ) -> Result<(), RefreshExpiryStatusError> {
         let ctx = self
-            .ctx(federation)
+            .ctx(mint)
             .map_err(|_| RefreshExpiryStatusError::FailedToRequestExpiryStatus)?;
 
         refresh_once(&ctx).await
@@ -56,7 +56,7 @@ impl Client {
 /// the next refresh.
 pub(crate) async fn refresh(ctx: ClientContext) {
     if refresh_once(&ctx).await.is_err() {
-        warn!(federation = %ctx.federation, "Failed to refresh the expiry status");
+        warn!(mint = %ctx.mint, "Failed to refresh the expiry status");
     }
 }
 
@@ -69,10 +69,10 @@ async fn refresh_once(ctx: &ClientContext) -> Result<(), RefreshExpiryStatusErro
 
     match status {
         Some(s) => {
-            dbtx.insert(&ExpiryStatusTable, &ctx.federation, &s);
+            dbtx.insert(&ExpiryStatusTable, &ctx.mint, &s);
         }
         None => {
-            dbtx.remove(&ExpiryStatusTable, &ctx.federation);
+            dbtx.remove(&ExpiryStatusTable, &ctx.mint);
         }
     }
 
@@ -81,7 +81,7 @@ async fn refresh_once(ctx: &ClientContext) -> Result<(), RefreshExpiryStatusErro
     Ok(())
 }
 
-/// Remove the federation's expiry cache row. Called on remove.
-pub(crate) fn wipe_tables(dbtx: &WriteTx, federation: FederationId) {
-    dbtx.remove(&ExpiryStatusTable, &federation);
+/// Remove the mint's expiry cache row. Called on remove.
+pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
+    dbtx.remove(&ExpiryStatusTable, &mint);
 }

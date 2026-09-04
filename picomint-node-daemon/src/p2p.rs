@@ -1,0 +1,597 @@
+//! Mint-internal p2p: message types, iroh connector, and reconnecting
+//! connection manager used by consensus / DKG.
+
+use std::collections::BTreeMap;
+use std::net::SocketAddr;
+use std::time::Duration;
+
+use anyhow::Context as _;
+use async_channel::{Receiver, Sender, bounded};
+use bitcoin::hashes::sha256;
+use bls12_381::{G1Projective, G2Projective, Scalar};
+use futures::FutureExt;
+use futures::future::select_all;
+use iroh::endpoint::presets::N0;
+use iroh::endpoint::{Connection, RecvStream};
+use iroh::{Endpoint, PublicKey, SecretKey};
+use iroh_mdns_address_lookup::MdnsAddressLookup;
+use picomint_bft::Message as BftMessage;
+use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
+use picomint_core::session::SignedSessionOutcome;
+use picomint_core::tx::ConsensusItem;
+use picomint_core::{NodeId, secp256k1};
+use picomint_encoding::{Decodable, Encodable};
+use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
+use tokio::time::sleep;
+use tracing::{Instrument, debug, info, info_span, warn};
+
+/// Transport of a connection's selected network path.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Transport {
+    /// Direct, hole-punched UDP path to the node.
+    Direct,
+    /// Relayed path through an iroh relay server.
+    Relay,
+}
+
+/// Details of a connection's selected network path.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathInfo {
+    /// Transport of the selected path: direct vs relayed.
+    pub transport: Transport,
+    /// Remote address of the selected path — a socket address (direct)
+    /// or a relay URL.
+    pub remote_addr: String,
+    /// Round-trip time of the selected path.
+    pub rtt: Duration,
+}
+
+/// P2P connection status for a node.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum P2PConnectionStatus {
+    /// No live connection to the node.
+    Disconnected,
+    /// A live connection, described by its selected network path.
+    Connected(PathInfo),
+}
+
+impl P2PConnectionStatus {
+    /// Whether the node is currently disconnected.
+    pub fn is_disconnected(&self) -> bool {
+        matches!(self, P2PConnectionStatus::Disconnected)
+    }
+}
+
+// ── P2P message types ───────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
+pub enum P2PMessage {
+    /// One bft message. Session isolation is enforced inside the
+    /// engine: every `Unit` carries its own `session` field (part of the
+    /// unit hash), and the `Graph` rejects any unit whose session doesn't
+    /// match. A stale `Propose`/`Confirmed` from session N landing in
+    /// session N+1 is therefore discarded at insertion; a stale `Ack`
+    /// fails sig verification against the local-session unit hash.
+    Bft(BftMessage<ConsensusItem>),
+    SessionSignature(secp256k1::schnorr::Signature),
+    SessionIndex(u32),
+    SignedSessionOutcome(SignedSessionOutcome),
+    Checksum(sha256::Hash),
+    DkgG1(DkgMessageG1),
+    DkgG2(DkgMessageG2),
+    DkgSecp(DkgMessageSecp),
+    Encodable(Vec<u8>),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]
+pub enum DkgMessageG1 {
+    Hash(sha256::Hash),
+    Commitment(Vec<G1Projective>),
+    Share(Scalar),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]
+pub enum DkgMessageG2 {
+    Hash(sha256::Hash),
+    Commitment(Vec<G2Projective>),
+    Share(Scalar),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]
+pub enum DkgMessageSecp {
+    Hash(sha256::Hash),
+    Commitment(Vec<secp256k1::PublicKey>),
+    Share(secp256k1::SecretKey),
+}
+
+// ── Connection primitives ───────────────────────────────────────────────────
+
+/// Maximum size of a p2p message in bytes. The largest message we expect to
+/// receive is a signed session outcome.
+const MAX_P2P_MESSAGE_SIZE: usize = 10_000_000;
+
+/// Thin wrapper over an iroh [`Connection`] that sends and receives
+/// consensus-encoded p2p messages.
+pub struct P2PConnection {
+    connection: Connection,
+}
+
+impl P2PConnection {
+    pub fn new(connection: Connection) -> Self {
+        Self { connection }
+    }
+
+    /// Send a single message over a fresh uni stream. Not cancel-safe.
+    pub async fn send(&self, message: P2PMessage) -> anyhow::Result<()> {
+        let mut sink = self.connection.open_uni().await?;
+
+        sink.write_all(&message.consensus_encode_to_vec()).await?;
+
+        sink.finish()?;
+
+        Ok(())
+    }
+
+    /// Await the next incoming uni stream. Cancel-safe — no bytes are
+    /// consumed here, so dropping this future before completion does not
+    /// lose any message data. The returned [`RecvStream`] must then be
+    /// read to completion with [`P2PConnection::read_frame`], outside of
+    /// any `select!`, to preserve message ordering.
+    pub async fn accept_stream(&self) -> anyhow::Result<RecvStream> {
+        Ok(self.connection.accept_uni().await?)
+    }
+
+    /// Drain a uni stream previously returned by [`Self::accept_stream`]
+    /// and decode it as `M`. Not cancel-safe — do not call inside
+    /// `select!`.
+    pub async fn read_frame(stream: &mut RecvStream) -> anyhow::Result<P2PMessage> {
+        let bytes = stream.read_to_end(MAX_P2P_MESSAGE_SIZE).await?;
+
+        Ok(P2PMessage::consensus_decode(&bytes)?)
+    }
+
+    /// Snapshot the connection's selected network path: its transport
+    /// (direct vs relay), remote address, and RTT. `None` when no path is
+    /// currently selected.
+    pub fn selected_path(&self) -> Option<PathInfo> {
+        self.connection
+            .paths()
+            .iter()
+            .find(|p| p.is_selected())
+            .map(|p| {
+                let transport = if p.is_relay() {
+                    Transport::Relay
+                } else {
+                    Transport::Direct
+                };
+
+                PathInfo {
+                    transport,
+                    remote_addr: p.remote_addr().to_string(),
+                    rtt: p.rtt(),
+                }
+            })
+    }
+}
+
+/// Iroh-backed connector that dials nodes by their pinned node id and accepts
+/// incoming connections authenticated against the same node-id set.
+#[derive(Clone)]
+pub struct P2PConnector {
+    iroh_pks: BTreeMap<NodeId, PublicKey>,
+    endpoint: Endpoint,
+}
+
+impl P2PConnector {
+    pub async fn new(
+        secret_key: SecretKey,
+        iroh_pks: BTreeMap<NodeId, PublicKey>,
+        p2p_addr: SocketAddr,
+    ) -> anyhow::Result<Self> {
+        let identity = *iroh_pks
+            .iter()
+            .find(|entry| entry.1 == &secret_key.public())
+            .expect("Our public key is not part of the keyset")
+            .0;
+
+        let endpoint = Endpoint::builder(N0)
+            .secret_key(secret_key)
+            .alpns(vec![picomint_rpc::ALPN.to_vec()])
+            .transport_config(picomint_rpc::transport_config())
+            .bind_addr(p2p_addr)?
+            .address_lookup(MdnsAddressLookup::builder())
+            .bind()
+            .await?;
+
+        Ok(Self {
+            iroh_pks: iroh_pks
+                .into_iter()
+                .filter(|entry| entry.0 != identity)
+                .collect(),
+            endpoint,
+        })
+    }
+
+    pub fn nodes(&self) -> Vec<NodeId> {
+        self.iroh_pks.keys().copied().collect()
+    }
+
+    pub async fn connect(&self, node: NodeId) -> anyhow::Result<P2PConnection> {
+        let iroh_pk = *self.iroh_pks.get(&node).expect("No iroh pk found for node");
+
+        let connection = self.endpoint.connect(iroh_pk, picomint_rpc::ALPN).await?;
+
+        Ok(P2PConnection::new(connection))
+    }
+
+    /// Accept the next incoming connection, fully completing the QUIC
+    /// handshake. The remote node-id is compared against the pinned node set:
+    /// a match produces [`Accepted::Node`] for the mint-internal p2p
+    /// path; anything else is [`Accepted::Foreign`] for the public API path
+    /// (one endpoint, two logical consumers demuxed here by node-id).
+    pub async fn accept(&self) -> anyhow::Result<Accepted> {
+        let connection = self
+            .endpoint
+            .accept()
+            .await
+            .context("Listener closed unexpectedly")?
+            .accept()?
+            .await?;
+
+        let iroh_pk = connection.remote_id();
+
+        for (node, pk) in &self.iroh_pks {
+            if *pk == iroh_pk {
+                return Ok(Accepted::Node(*node, P2PConnection::new(connection)));
+            }
+        }
+
+        Ok(Accepted::Foreign(connection))
+    }
+}
+
+/// Result of [`P2PConnector::accept`]: either a mint node (pinned
+/// node-id) or a foreign connection (public-API client).
+pub enum Accepted {
+    Node(NodeId, P2PConnection),
+    Foreign(Connection),
+}
+
+// ── Connection manager ──────────────────────────────────────────────────────
+
+pub type P2PStatusSenders = BTreeMap<NodeId, watch::Sender<P2PConnectionStatus>>;
+pub type P2PStatusReceivers = BTreeMap<NodeId, watch::Receiver<P2PConnectionStatus>>;
+
+/// This enum defines the intended recipient of a p2p message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Recipient {
+    Everyone,
+    Node(NodeId),
+}
+
+pub fn p2p_status_channels(nodes: Vec<NodeId>) -> (P2PStatusSenders, P2PStatusReceivers) {
+    let mut senders = BTreeMap::new();
+    let mut receivers = BTreeMap::new();
+
+    for node in nodes {
+        let (sender, receiver) = watch::channel(P2PConnectionStatus::Disconnected);
+
+        senders.insert(node, sender);
+        receivers.insert(node, receiver);
+    }
+
+    (senders, receivers)
+}
+
+/// Connection manager that tries to keep iroh connections open to all nodes
+/// and exchanges consensus-encoded [`P2PMessage`]s with them.
+#[derive(Clone)]
+pub struct ReconnectP2PConnections {
+    connections: BTreeMap<NodeId, NodeChannel>,
+}
+
+impl ReconnectP2PConnections {
+    pub fn new(
+        identity: NodeId,
+        connector: P2PConnector,
+        status_senders: P2PStatusSenders,
+        foreign_conn_tx: Sender<Connection>,
+    ) -> Self {
+        let mut connection_senders = BTreeMap::new();
+        let mut connections = BTreeMap::new();
+
+        for node in connector.nodes() {
+            assert_ne!(node, identity);
+
+            let (connection_tx, connection_rx) = bounded(4);
+
+            let connection = NodeChannel::new(
+                identity,
+                node,
+                connector.clone(),
+                connection_rx,
+                status_senders
+                    .get(&node)
+                    .expect("No p2p status sender for node")
+                    .clone(),
+            );
+
+            connection_senders.insert(node, connection_tx);
+            connections.insert(node, connection);
+        }
+
+        tokio::spawn(async move {
+            info!("Starting listening task for p2p connections");
+
+            loop {
+                match connector.accept().await {
+                    Ok(Accepted::Node(node, connection)) => {
+                        if connection_senders
+                            .get_mut(&node)
+                            .expect("Authenticating endpoint doesn't return unknown nodes")
+                            .send(connection)
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Ok(Accepted::Foreign(connection)) => {
+                        // Public API client. Drop on backpressure — the
+                        // api-layer consumer isn't running yet during DKG and
+                        // a pre-bootstrap client has no business connecting.
+                        if foreign_conn_tx.try_send(connection).is_err() {
+                            debug!("Dropping foreign connection: api channel full or closed");
+                        }
+                    }
+                    Err(err) => {
+                        warn!(our_id = %identity, err = %format_args!("{err:#}"), "Error while opening incoming connection");
+                    }
+                }
+            }
+
+            info!("Shutting down listening task for p2p connections");
+        });
+
+        ReconnectP2PConnections { connections }
+    }
+
+    /// Send `message` to `recipient`. Drops the message if the outgoing
+    /// channel is full (the consensus layer is expected to resend).
+    pub fn send(&self, recipient: Recipient, message: P2PMessage) {
+        match recipient {
+            Recipient::Everyone => {
+                for connection in self.connections.values() {
+                    connection.try_send(message.clone());
+                }
+            }
+            Recipient::Node(node) => match self.connections.get(&node) {
+                Some(connection) => {
+                    connection.try_send(message);
+                }
+                _ => {
+                    warn!("No connection for node {node}");
+                }
+            },
+        }
+    }
+
+    /// Await the next message from any node; `None` when shutting down.
+    pub async fn receive(&self) -> Option<(NodeId, P2PMessage)> {
+        select_all(self.connections.iter().map(|(&node, connection)| {
+            Box::pin(connection.receive().map(move |m| m.map(|m| (node, m))))
+        }))
+        .await
+        .0
+    }
+
+    /// Await the next message from `node`; `None` when shutting down.
+    pub async fn receive_from_node(&self, node: NodeId) -> Option<P2PMessage> {
+        self.connections
+            .get(&node)
+            .expect("No connection found for node")
+            .receive()
+            .await
+    }
+}
+
+/// Per-node outgoing queue and incoming queue, backed by a background state
+/// machine that (re)establishes the underlying iroh connection.
+#[derive(Clone)]
+struct NodeChannel {
+    outgoing_tx: Sender<P2PMessage>,
+    incoming_rx: Receiver<P2PMessage>,
+}
+
+impl NodeChannel {
+    fn new(
+        our_id: NodeId,
+        node: NodeId,
+        connector: P2PConnector,
+        incoming_connections: Receiver<P2PConnection>,
+        status_tx: watch::Sender<P2PConnectionStatus>,
+    ) -> Self {
+        // Per-node message queues. Sized for the BFT engine's anti-entropy
+        // bursts (push + reactive pull at unit-creation cadence) plus
+        // headroom — drops are silent and the consensus layer expects to
+        // resend, but a queue too small causes confirmation propagation
+        // to stall under brief network or drainer slowdowns.
+        let (outgoing_tx, outgoing_rx) = bounded(100);
+        let (incoming_tx, incoming_rx) = bounded(100);
+
+        tokio::spawn(
+            async move {
+                info!("Starting node connection state machine");
+
+                let mut state_machine = P2PConnectionStateMachine {
+                    common: P2PConnectionSMCommon {
+                        incoming_tx,
+                        outgoing_rx,
+                        our_id,
+                        node,
+                        connector,
+                        incoming_connections,
+                        status_tx,
+                    },
+                    state: P2PConnectionSMState::Disconnected(networking_backoff().build()),
+                };
+
+                while let Some(sm) = state_machine.state_transition().await {
+                    state_machine = sm;
+                }
+
+                info!("Shutting down node connection state machine");
+            }
+            .instrument(info_span!("io-state-machine", ?node)),
+        );
+
+        NodeChannel {
+            outgoing_tx,
+            incoming_rx,
+        }
+    }
+
+    fn try_send(&self, message: P2PMessage) {
+        if self.outgoing_tx.try_send(message).is_err() {
+            debug!("Outgoing message channel is full");
+        }
+    }
+
+    async fn receive(&self) -> Option<P2PMessage> {
+        self.incoming_rx.recv().await.ok()
+    }
+}
+
+struct P2PConnectionStateMachine {
+    state: P2PConnectionSMState,
+    common: P2PConnectionSMCommon,
+}
+
+struct P2PConnectionSMCommon {
+    incoming_tx: async_channel::Sender<P2PMessage>,
+    outgoing_rx: async_channel::Receiver<P2PMessage>,
+    our_id: NodeId,
+    node: NodeId,
+    connector: P2PConnector,
+    incoming_connections: Receiver<P2PConnection>,
+    status_tx: watch::Sender<P2PConnectionStatus>,
+}
+
+enum P2PConnectionSMState {
+    Disconnected(FibonacciBackoff),
+    Connected(P2PConnection),
+}
+
+impl P2PConnectionStateMachine {
+    async fn state_transition(mut self) -> Option<Self> {
+        match self.state {
+            P2PConnectionSMState::Disconnected(backoff) => {
+                self.common
+                    .status_tx
+                    .send_replace(P2PConnectionStatus::Disconnected);
+
+                self.common.transition_disconnected(backoff).await
+            }
+            P2PConnectionSMState::Connected(connection) => {
+                // A live connection essentially always has a selected path; if
+                // iroh hasn't surfaced one yet, report disconnected until the
+                // next transition picks it up.
+                let status = match connection.selected_path() {
+                    Some(path) => P2PConnectionStatus::Connected(path),
+                    None => P2PConnectionStatus::Disconnected,
+                };
+
+                self.common.status_tx.send_replace(status);
+
+                self.common.transition_connected(connection).await
+            }
+        }
+        .map(|state| P2PConnectionStateMachine {
+            common: self.common,
+            state,
+        })
+    }
+}
+
+impl P2PConnectionSMCommon {
+    async fn transition_connected(
+        &mut self,
+        connection: P2PConnection,
+    ) -> Option<P2PConnectionSMState> {
+        tokio::select! {
+            message = self.outgoing_rx.recv() => {
+                Some(self.send_message(connection, message.ok()?).await)
+            },
+            connection = self.incoming_connections.recv() => {
+                info!("Connected to node");
+
+                Some(P2PConnectionSMState::Connected(connection.ok()?))
+            },
+            stream = connection.accept_stream() => {
+                let mut stream = match stream {
+                    Ok(stream) => stream,
+                    Err(e) => return Some(self.disconnect(e)),
+                };
+
+                match P2PConnection::read_frame(&mut stream).await {
+                    Ok(message) => {
+                        if self.incoming_tx.try_send(message).is_err() {
+                            debug!("Incoming message channel is full");
+                        }
+
+                        Some(P2PConnectionSMState::Connected(connection))
+                    },
+                    Err(e) => Some(self.disconnect(e)),
+                }
+            },
+        }
+    }
+
+    fn disconnect(&self, error: anyhow::Error) -> P2PConnectionSMState {
+        info!("Disconnected from node: {}", error);
+
+        P2PConnectionSMState::Disconnected(networking_backoff().build())
+    }
+
+    async fn send_message(
+        &mut self,
+        connection: P2PConnection,
+        node_message: P2PMessage,
+    ) -> P2PConnectionSMState {
+        if let Err(e) = connection.send(node_message).await {
+            return self.disconnect(e);
+        }
+
+        P2PConnectionSMState::Connected(connection)
+    }
+
+    async fn transition_disconnected(
+        &mut self,
+        mut backoff: FibonacciBackoff,
+    ) -> Option<P2PConnectionSMState> {
+        tokio::select! {
+            connection = self.incoming_connections.recv() => {
+                info!("Connected to node");
+
+                Some(P2PConnectionSMState::Connected(connection.ok()?))
+            },
+            // To prevent reconnection ping-pongs, only the side with lower
+            // NodeId reconnects.
+            () = sleep(backoff.next().expect("Unlimited retries")), if self.our_id < self.node => {
+                info!("Attempting to reconnect to node");
+
+                match self.connector.connect(self.node).await {
+                    Ok(connection) => {
+                        info!("Connected to node");
+
+                        return Some(P2PConnectionSMState::Connected(connection));
+                    }
+                    Err(e) => warn!("Failed to connect to node: {e}"),
+                }
+
+                Some(P2PConnectionSMState::Disconnected(backoff))
+            },
+        }
+    }
+}

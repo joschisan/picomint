@@ -18,12 +18,12 @@ fn dealer_agg_pk() -> AggregatePublicKey {
     AggregatePublicKey(coefficient(0).public_key(SECP256K1))
 }
 
-fn dealer_pk(threshold: u64, peer: u64) -> PublicKeyShare {
-    derive_pk_share(&dealer_sk(threshold, peer))
+fn dealer_pk(threshold: u64, node: u64) -> PublicKeyShare {
+    derive_pk_share(&dealer_sk(threshold, node))
 }
 
-fn dealer_sk(threshold: u64, peer: u64) -> SecretKeyShare {
-    let x = scalar_from_u64(peer + 1);
+fn dealer_sk(threshold: u64, node: u64) -> SecretKeyShare {
+    let x = scalar_from_u64(node + 1);
 
     // We evaluate the secret polynomial of degree threshold - 1 at the point x
     // using the Horner schema.
@@ -58,34 +58,34 @@ fn test_roundtrip() {
     let mut secret_nonces = BTreeMap::new();
     let mut public_nonces = BTreeMap::new();
 
-    for peer in 0..THRESHOLD {
+    for node in 0..THRESHOLD {
         let (secret_nonce, public_nonce) = generate_nonce();
 
-        secret_nonces.insert(peer, secret_nonce);
-        public_nonces.insert(peer, public_nonce);
+        secret_nonces.insert(node, secret_nonce);
+        public_nonces.insert(node, public_nonce);
     }
 
     let shares = secret_nonces
         .into_iter()
-        .map(|(peer, nonce)| {
+        .map(|(node, nonce)| {
             let share = sign_share(
                 message,
-                &dealer_sk(THRESHOLD, peer),
+                &dealer_sk(THRESHOLD, node),
                 nonce,
                 &public_nonces,
-                peer,
+                node,
                 &dealer_agg_pk(),
             );
 
-            (peer, share)
+            (node, share)
         })
         .collect::<BTreeMap<u64, SignatureShare>>();
 
-    for (peer, share) in &shares {
+    for (node, share) in &shares {
         assert!(verify_signature_share(
             message,
-            *peer,
-            &dealer_pk(THRESHOLD, *peer),
+            *node,
+            &dealer_pk(THRESHOLD, *node),
             share,
             &public_nonces,
             &dealer_agg_pk()

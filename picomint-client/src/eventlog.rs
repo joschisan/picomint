@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use derive_more::Display;
 use futures::Stream;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, DbRead, WriteTx, table};
@@ -36,10 +36,10 @@ use tokio::sync::Notify;
 )]
 pub enum EventSource {
     Core,
-    Mint,
+    Ecash,
     Wallet,
-    Ln,
-    Gw,
+    Lightning,
+    Gateway,
 }
 
 pub trait Event: serde::Serialize + serde::de::DeserializeOwned {
@@ -105,14 +105,14 @@ pub struct EventLogEntry {
     /// Where the event came from. See [`EventSource`].
     pub source: EventSource,
 
-    /// Federation this event belongs to. Every event is federation-scoped
+    /// Mint this event belongs to. Every event is mint-scoped
     /// — there are no global events. For events that span two clients in
     /// the same daemon (e.g. a gateway-internal direct swap), each side
-    /// emits its own entry tagged with its own federation; the shared
+    /// emits its own entry tagged with its own mint; the shared
     /// `operation` lets a subscriber stitch them together.
-    pub federation: FederationId,
+    pub mint: MintId,
 
-    /// Account within that federation whose balance the event concerns.
+    /// Account within that mint whose balance the event concerns.
     /// Accounts share one log, so this is what lets a subscriber attribute
     /// an entry to the balance it moved.
     pub account: Account,
@@ -157,7 +157,7 @@ pub fn log_event_raw(
     dbtx: &WriteTx,
     kind: EventKind,
     source: EventSource,
-    federation: FederationId,
+    mint: MintId,
     account: Account,
     operation: OperationId,
     payload: Vec<u8>,
@@ -165,7 +165,7 @@ pub fn log_event_raw(
     tracing::info!(
         kind = %kind,
         source = ?source,
-        %federation,
+        %mint,
         %account,
         operation = %operation,
         payload = %String::from_utf8_lossy(&payload),
@@ -180,7 +180,7 @@ pub fn log_event_raw(
     let entry = EventLogEntry {
         kind,
         source,
-        federation,
+        mint,
         account,
         operation,
         timestamp,
@@ -202,7 +202,7 @@ pub fn log_event_raw(
 /// Typed convenience: encode an [`Event`] into the log.
 pub fn log_event<E: Event>(
     dbtx: &WriteTx,
-    federation: FederationId,
+    mint: MintId,
     account: Account,
     operation: OperationId,
     event: E,
@@ -211,7 +211,7 @@ pub fn log_event<E: Event>(
         dbtx,
         E::KIND,
         E::SOURCE,
-        federation,
+        mint,
         account,
         operation,
         serde_json::to_vec(&event).expect("Serialization can't fail"),

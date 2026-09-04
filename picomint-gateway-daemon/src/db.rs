@@ -1,16 +1,16 @@
 use picomint_client::eventlog::EventLogId;
 use picomint_client::{Mnemonic, random_mnemonic};
 use picomint_core::OutPoint;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::OperationId;
-use picomint_core::ln::LightningInvoice;
-use picomint_core::ln::contracts;
+use picomint_core::lightning::LightningInvoice;
+use picomint_core::lightning::contracts;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, DbRead, WriteTx, table};
 use rand::rngs::OsRng;
 
 // BIP39 entropy for the daemon's mnemonic, written once on first start.
-// Drives federation-client derivation and the LDK node seed; the iroh
+// Drives mint-client derivation and the LDK node seed; the iroh
 // identity lives in its own row below.
 table!(
     RootEntropyTable,
@@ -64,7 +64,7 @@ table!(
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct OutgoingContractRow {
-    pub federation: FederationId,
+    pub mint: MintId,
     pub contract: contracts::OutgoingContract,
     pub outpoint: OutPoint,
     pub invoice: LightningInvoice,
@@ -72,18 +72,18 @@ pub struct OutgoingContractRow {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct IncomingOfferRow {
-    pub federation: FederationId,
+    pub mint: MintId,
     pub offer: contracts::IncomingOffer,
     pub invoice: LightningInvoice,
 }
 
-/// Delete the daemon's rows scoped to `federation` — its outgoing-contract
-/// and incoming-offer rows. Runs inside the dbtx that removes the federation
+/// Delete the daemon's rows scoped to `mint` — its outgoing-contract
+/// and incoming-offer rows. Runs inside the dbtx that removes the mint
 /// from the client, so a surviving contract row always implies its
-/// federation is added.
-pub fn wipe_federation_rows(dbtx: &WriteTx, federation: FederationId) {
+/// mint is added.
+pub fn wipe_mint_rows(dbtx: &WriteTx, mint: MintId) {
     let outgoing = dbtx.iter(&OutgoingContractTable, |rows| {
-        rows.filter(|entry| entry.1.federation == federation)
+        rows.filter(|entry| entry.1.mint == mint)
             .map(|entry| entry.0)
             .collect::<Vec<_>>()
     });
@@ -93,7 +93,7 @@ pub fn wipe_federation_rows(dbtx: &WriteTx, federation: FederationId) {
     }
 
     let incoming = dbtx.iter(&IncomingOfferTable, |rows| {
-        rows.filter(|entry| entry.1.federation == federation)
+        rows.filter(|entry| entry.1.mint == mint)
             .map(|entry| entry.0)
             .collect::<Vec<_>>()
     });
@@ -104,7 +104,7 @@ pub fn wipe_federation_rows(dbtx: &WriteTx, federation: FederationId) {
 }
 
 /// Load the persisted gateway mnemonic, or generate and persist a fresh one
-/// on first start. The entropy drives federation-client derivation and the
+/// on first start. The entropy drives mint-client derivation and the
 /// LDK node seed.
 pub fn load_or_init_mnemonic(db: &Database) -> anyhow::Result<Mnemonic> {
     if let Some(entropy) = db.begin_read().get(&RootEntropyTable, &()) {

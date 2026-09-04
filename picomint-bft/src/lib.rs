@@ -1,10 +1,10 @@
 //! Minimal BFT atomic broadcast over a DAG of creator-signed units.
 //!
 //! Each unit at coordinate `(round, creator)` is signed by its creator and
-//! broadcast to all peers. A unit is *extended* once it is locally stored
+//! broadcast to all nodes. A unit is *extended* once it is locally stored
 //! and all of its parents are extended. Round R+1 unit creation is
 //! triggered when the local graph has at least `threshold` extended
-//! round-R units. Round 0 is the DAG's root row: each peer creates its own
+//! round-R units. Round 0 is the DAG's root row: each node creates its own
 //! round-0 unit with an empty parent set and disseminates it like any
 //! other.
 //!
@@ -13,11 +13,11 @@
 //! under its own [`UnitHash`]. Parents pin exact bodies by hash, and
 //! the extender's fork-tolerant commit rule (virtual votes and
 //! decision certificates — see `extender.rs`) guarantees an identical
-//! total order on every honest peer regardless of forks.
+//! total order on every honest node regardless of forks.
 //!
-//! Unit creation is work-gated: a peer only builds a unit that carries
+//! Unit creation is work-gated: a node only builds a unit that carries
 //! items, or that keeps the DAG growing while an earlier unit of its own
-//! still awaits ordering. A peer with no items inflight creates nothing
+//! still awaits ordering. A node with no items inflight creates nothing
 //! and idles until its `DataProvider` yields a fresh item.
 
 mod data;

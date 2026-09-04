@@ -1,7 +1,7 @@
 //! State machine for submitting transactions
 
 use crate::context::ClientContext;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::tx::Transaction;
 use picomint_encoding::{Decodable, Encodable};
@@ -12,7 +12,7 @@ use crate::{TxAcceptEvent, TxRejectEvent};
 
 table!(
     TxSubmissionStateMachineTable,
-    (FederationId, SmId) => TxSubmissionStateMachine,
+    (MintId, SmId) => TxSubmissionStateMachine,
     "tx-submission-sm",
 );
 
@@ -50,7 +50,7 @@ impl StateMachine for TxSubmissionStateMachine {
             Ok(()) => {
                 crate::eventlog::log_event(
                     dbtx,
-                    ctx.federation,
+                    ctx.mint,
                     self.account,
                     self.operation,
                     TxAcceptEvent { txid },
@@ -59,7 +59,7 @@ impl StateMachine for TxSubmissionStateMachine {
             Err(error) => {
                 crate::eventlog::log_event(
                     dbtx,
-                    ctx.federation,
+                    ctx.mint,
                     self.account,
                     self.operation,
                     TxRejectEvent { txid, error },

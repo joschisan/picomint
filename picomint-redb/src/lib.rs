@@ -68,7 +68,7 @@ pub trait Prefix<D: Table>: Encodable {}
 /// ```ignore
 /// table!(
 ///     NoteTable,
-///     (FederationId, Account, SpendableNote) => (),
+///     (MintId, Account, SpendableNote) => (),
 ///     "note",
 /// );
 /// ```
@@ -263,7 +263,7 @@ impl Database {
     /// become durable only when a later [`Self::begin_write`] commit flushes
     /// them, and a crash rolls back to that last durable commit. Use only
     /// for state a node can reconstruct after a crash (e.g. BFT units
-    /// re-fetched from peers) — never for money-bearing or safety-critical
+    /// re-fetched from nodes) — never for money-bearing or safety-critical
     /// writes.
     pub fn begin_write_relaxed(&self) -> WriteTx {
         let mut tx = self
@@ -608,7 +608,7 @@ impl WriteTx {
     }
 
     /// Remove every entry whose key starts with `prefix`. Used to clear one
-    /// scope's slice of a shared table, e.g. a federation's rows on leave.
+    /// scope's slice of a shared table, e.g. a mint's rows on leave.
     pub fn remove_prefix<D: Table, P: Prefix<D>>(&self, def: &D, prefix: &P) {
         self.touch(def);
 

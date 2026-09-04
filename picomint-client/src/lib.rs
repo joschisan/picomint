@@ -1,50 +1,52 @@
 //! Picomint client library.
 //!
 //! [`Client`] is the entry point for applications: one instance per app,
-//! holding every added federation as data. [`Client::new`] brings every
-//! added federation up; [`Client::add`] adds one, [`Client::begin_remove`]
-//! wipes one. An added federation is always up — there is no dormant state
+//! holding every added mint as data. [`Client::new`] brings every
+//! added mint up; [`Client::add`] adds one, [`Client::begin_remove`]
+//! wipes one. An added mint is always up — there is no dormant state
 //! in between. Every operation takes the
-//! [`picomint_core::config::FederationId`] it acts on
-//! and is named for the module that serves it — `mint_send`,
-//! `wallet_receive`, `ln_receive`, `gw_finalize_send` — so there is
-//! no per-federation handle to hold or leak.
+//! [`picomint_core::config::MintId`] it acts on
+//! and is named for the module that serves it — `ecash_send`,
+//! `onchain_receive`, `lightning_receive`, `gateway_finalize_send` — so there is
+//! no per-mint handle to hold or leak.
 //!
-//! Every table is shared across federations with a
-//! [`picomint_core::config::FederationId`]-prefixed key, so adds, removes,
+//! Every table is shared across mints with a
+//! [`picomint_core::config::MintId`]-prefixed key, so adds, removes,
 //! and all module writes commit through one database.
 //!
-//! Per-module logic lives in [`mod@mint`], [`mod@wallet`], [`mod@ln`], and
-//! [`mod@gw`]. Each module owns its own state machines and contributes its
+//! Per-module logic lives in [`mod@ecash`], [`mod@wallet`], [`mod@lightning`], and
+//! [`mod@gateway`]. Each module owns its own state machines and contributes its
 //! slice of the flat [`Client`] surface. Submission ownership lives
-//! entirely in the mint module — non-mint modules build a
+//! entirely in the ecash module — non-ecash modules build a
 //! [`crate::tx::TxBuilder`] and call its `finalize_and_submit_tx`, which
 //! balances against the wallet and submits via its own
 //! [`crate::tx::TxSubmissionStateMachine`].
 
-/// Downloading a federation's config and rebuilding what the seed owns there.
-mod add;
-/// Federation API transport
+/// Downloading a mint's config and rebuilding what the seed owns there.
+mod add_mint;
+/// Mint API transport
 /// Core [`Client`]
 pub mod api;
 
 mod client;
-/// The per-federation [`context::ClientContext`]
+/// The per-mint [`context::ClientContext`]
 mod context;
-/// Append-only event log shared by all federations on this host.
+/// Ecash module client.
+pub mod ecash;
+/// Append-only event log shared by all mints on this host.
 pub mod eventlog;
-/// Shared kept-alive iroh connection primitive (federation peers + gateways).
+/// Shared kept-alive iroh connection primitive (mint nodes + gateways).
 /// Per-module typed state machine executor
 mod executor;
-/// Federation expiry-status cache + refresh.
+/// Mint expiry-status cache + refresh.
 pub mod expiry;
-/// Federation fee announcement cache, and paying out a collected cut.
+/// Mint fee announcement cache, and paying out a collected cut.
 /// Gateway lightning module (mounted by the gateway daemon).
-pub mod gw;
+pub mod gateway;
 /// Lightning module client.
-pub mod ln;
-/// Mint module client.
-pub mod mint;
+pub mod lightning;
+/// Wallet module client.
+pub mod onchain;
 /// Client query-consensus strategies
 /// Secret handling & derivation
 pub mod secret;
@@ -52,8 +54,6 @@ pub mod secret;
 mod task;
 /// Structs and interfaces to construct Picomint transactions
 pub mod tx;
-/// Wallet module client.
-pub mod wallet;
 
 pub use iroh::Endpoint;
 
@@ -71,11 +71,11 @@ pub struct TxCreateEvent {
     pub txid: TransactionId,
     /// Amount the mint over-funded by when balancing the caller's
     /// builder: `sum(funding_notes) - deficit`. Reissued back to the
-    /// wallet (minus federation fees on the change outputs) as fresh
+    /// wallet (minus mint fees on the change outputs) as fresh
     /// notes once the tx is accepted.
     pub remint: Amount,
-    /// Federation fee paid by this transaction (sum of per-input and
-    /// per-output fees the federation deducts).
+    /// Mint fee paid by this transaction (sum of per-input and
+    /// per-output fees the mint deducts).
     pub fee: Amount,
 }
 

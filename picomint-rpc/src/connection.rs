@@ -1,7 +1,7 @@
 //! A single kept-alive, self-reconnecting iroh connection, published as a
-//! `watch<Option<ConnState>>`. Both the federation peer pool ([`crate::api`])
+//! `watch<Option<ConnState>>`. Both the mint node pool ([`crate::api`])
 //! and the client's gateway connection pool are just this primitive
-//! mapped over a set of node ids — the federation over its fixed peer set, the
+//! mapped over a set of node ids — the mint over its fixed node set, the
 //! gateway pool over an append-only set of announced gateways.
 
 use std::time::Duration;
@@ -48,7 +48,7 @@ impl ConnState {
     }
 }
 
-/// Keep one iroh connection to `node_id` alive, publishing each transition on
+/// Keep one iroh connection to `iroh_pk` alive, publishing each transition on
 /// `state`. Connect, announce `Connected`, block on `Connection::closed`,
 /// announce `Disconnected`, then reconnect. Connect failures back off via
 /// `networking_backoff`, reset on success.
@@ -57,7 +57,7 @@ impl ConnState {
 /// scope takes its tasks with it. Without that a short-lived pool would leak
 /// one reconnecting task per node for the life of the process.
 pub async fn connection_task(
-    node_id: PublicKey,
+    iroh_pk: PublicKey,
     endpoint: Endpoint,
     state: watch::Sender<Option<ConnState>>,
 ) {
@@ -65,7 +65,7 @@ pub async fn connection_task(
         let mut backoff = networking_backoff().build();
 
         loop {
-            match endpoint.connect(node_id, ALPN).await {
+            match endpoint.connect(iroh_pk, ALPN).await {
                 Ok(conn) => {
                     backoff = networking_backoff().build();
 

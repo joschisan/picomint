@@ -1,11 +1,11 @@
-//! On-disk SQLite mirror of the gateway's gw-module event log.
+//! On-disk SQLite mirror of the gateway's gateway-module event log.
 //!
 //! A single daemon-wide trailer task reads from the global event log and
 //! `INSERT`s rows into `{DATA_DIR}/analytics.sqlite`. One table per event
 //! kind plus `outgoing_payments` and `incoming_payments` views that each
-//! stitch the relevant event tables into a single row per op. Federation
+//! stitch the relevant event tables into a single row per op. Mint
 //! id is read directly off each event entry — every event is
-//! federation-scoped at log time.
+//! mint-scoped at log time.
 //!
 //! The file is **wiped on every gateway startup** — analytics state is
 //! derived, not authoritative. The event log in the gateway db is the
@@ -22,7 +22,7 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use hex::ToHex as _;
 use picomint_client::eventlog::{EventLogEntry, EventLogId};
-use picomint_client::gw::events::{
+use picomint_client::gateway::events::{
     ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent, SendCancelEvent,
     SendEvent, SendSuccessEvent,
 };
@@ -132,72 +132,72 @@ const SCHEMA_SQL: &str = r#"
 CREATE TABLE send (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,   -- msecs since unix epoch
-    federation TEXT NOT NULL,
+    mint TEXT NOT NULL,
     outpoint      TEXT NOT NULL,
     amount_msat   INTEGER NOT NULL,
     fee_msat      INTEGER NOT NULL,
-    PRIMARY KEY (federation, operation)
+    PRIMARY KEY (mint, operation)
 );
 
 CREATE TABLE send_success (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation TEXT NOT NULL,
+    mint TEXT NOT NULL,
     preimage      TEXT NOT NULL,
     txid          TEXT NOT NULL,
-    ln_fee_msat   INTEGER NOT NULL,
-    PRIMARY KEY (federation, operation)
+    lightning_fee_msat   INTEGER NOT NULL,
+    PRIMARY KEY (mint, operation)
 );
 
 CREATE TABLE send_cancel (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation TEXT NOT NULL,
+    mint TEXT NOT NULL,
     signature     TEXT NOT NULL,
-    PRIMARY KEY (federation, operation)
+    PRIMARY KEY (mint, operation)
 );
 
 CREATE TABLE receive (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation TEXT NOT NULL,
+    mint TEXT NOT NULL,
     txid          TEXT NOT NULL,
     amount_msat   INTEGER NOT NULL,
     fee_msat      INTEGER NOT NULL,
-    PRIMARY KEY (federation, operation)
+    PRIMARY KEY (mint, operation)
 );
 
 CREATE TABLE receive_success (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation TEXT NOT NULL,
+    mint TEXT NOT NULL,
     preimage      TEXT NOT NULL,
-    PRIMARY KEY (federation, operation)
+    PRIMARY KEY (mint, operation)
 );
 
 CREATE TABLE receive_failure (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation TEXT NOT NULL,
-    PRIMARY KEY (federation, operation)
+    mint TEXT NOT NULL,
+    PRIMARY KEY (mint, operation)
 );
 
 CREATE TABLE receive_refund (
     operation  TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation TEXT NOT NULL,
+    mint TEXT NOT NULL,
     txid          TEXT NOT NULL,
-    PRIMARY KEY (federation, operation)
+    PRIMARY KEY (mint, operation)
 );
 
 CREATE TABLE tx_create (
     operation     TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    federation    TEXT NOT NULL,
+    mint    TEXT NOT NULL,
     txid          TEXT NOT NULL,
     remint_msat   INTEGER NOT NULL,
     fee_msat      INTEGER NOT NULL,
-    PRIMARY KEY (federation, operation)
+    PRIMARY KEY (mint, operation)
 );
 
 CREATE INDEX idx_send_ts             ON send(ts);
@@ -208,7 +208,7 @@ CREATE INDEX idx_tx_create_ts        ON tx_create(ts);
 
 CREATE VIEW outgoing_payments AS
 SELECT
-    s.federation,
+    s.mint,
     s.operation,
     s.ts AS started_at,
     COALESCE(succ.ts, canc.ts) AS completed_at,
@@ -218,27 +218,27 @@ SELECT
         ELSE 'pending'
     END AS status,
     s.amount_msat,
-    s.fee_msat       AS gw_fee_msat,
+    s.fee_msat       AS gateway_fee_msat,
     CASE
-        WHEN succ.operation IS NOT NULL THEN s.fee_msat - succ.ln_fee_msat
+        WHEN succ.operation IS NOT NULL THEN s.fee_msat - succ.lightning_fee_msat
         WHEN canc.operation IS NOT NULL THEN 0
         ELSE NULL
-    END AS gw_fee_kept_msat,
+    END AS gateway_fee_kept_msat,
     succ.preimage,
     tx.txid          AS tx_txid,
     tx.remint_msat   AS tx_remint_msat,
     tx.fee_msat      AS tx_fee_msat
 FROM send s
 LEFT JOIN send_success succ
-       ON succ.federation = s.federation AND succ.operation = s.operation
+       ON succ.mint = s.mint AND succ.operation = s.operation
 LEFT JOIN send_cancel  canc
-       ON canc.federation = s.federation AND canc.operation = s.operation
+       ON canc.mint = s.mint AND canc.operation = s.operation
 LEFT JOIN tx_create    tx
-       ON tx.federation = s.federation AND tx.operation = s.operation;
+       ON tx.mint = s.mint AND tx.operation = s.operation;
 
 CREATE VIEW incoming_payments AS
 SELECT
-    r.federation,
+    r.mint,
     r.operation,
     r.ts AS started_at,
     COALESCE(succ.ts, fail.ts, refund.ts) AS completed_at,
@@ -249,23 +249,23 @@ SELECT
         ELSE 'pending'
     END AS status,
     r.amount_msat,
-    r.fee_msat       AS gw_fee_msat,
+    r.fee_msat       AS gateway_fee_msat,
     succ.preimage,
     tx.txid          AS tx_txid,
     tx.remint_msat   AS tx_remint_msat,
     tx.fee_msat      AS tx_fee_msat
 FROM receive r
 LEFT JOIN receive_success succ
-       ON succ.federation = r.federation AND succ.operation = r.operation
+       ON succ.mint = r.mint AND succ.operation = r.operation
 LEFT JOIN receive_failure fail
-       ON fail.federation = r.federation AND fail.operation = r.operation
+       ON fail.mint = r.mint AND fail.operation = r.operation
 LEFT JOIN receive_refund  refund
-       ON refund.federation = r.federation AND refund.operation = r.operation
+       ON refund.mint = r.mint AND refund.operation = r.operation
 LEFT JOIN tx_create       tx
-       ON tx.federation = r.federation AND tx.operation = r.operation;
+       ON tx.mint = r.mint AND tx.operation = r.operation;
 "#;
 
-/// Drain the global event log forward in chunks and mirror each gw event
+/// Drain the global event log forward in chunks and mirror each gateway event
 /// into the SQLite analytics DB. Blocks on the global `event_notify` only
 /// when caught up with the head. Spawned daemon-wide at startup.
 pub async fn trailer(client: Arc<Client>, analytics: Analytics) {
@@ -311,14 +311,14 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
     for entry in entries {
         let operation = entry.operation.to_string();
         let ts = entry.timestamp as i64;
-        let federation = entry.federation.to_string();
+        let mint = entry.mint.to_string();
         if let Some(e) = entry.to_event::<SendEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO send \
-                 (federation, operation, ts, outpoint, amount_msat, fee_msat) \
+                 (mint, operation, ts, outpoint, amount_msat, fee_msat) \
                  VALUES (?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
-                    federation,
+                    mint,
                     operation,
                     ts,
                     format!("{}:{}", e.outpoint.txid, e.outpoint.out_idx),
@@ -329,30 +329,30 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
         } else if let Some(e) = entry.to_event::<SendSuccessEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO send_success \
-                 (federation, operation, ts, preimage, txid, ln_fee_msat) \
+                 (mint, operation, ts, preimage, txid, lightning_fee_msat) \
                  VALUES (?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
-                    federation,
+                    mint,
                     operation,
                     ts,
                     hex::encode(e.preimage),
                     e.txid.to_string(),
-                    e.ln_fee.msat as i64,
+                    e.lightning_fee.msat as i64,
                 ],
             )?;
         } else if let Some(e) = entry.to_event::<SendCancelEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO send_cancel \
-                 (federation, operation, ts, signature) VALUES (?, ?, ?, ?)",
-                rusqlite::params![federation, operation, ts, e.signature.to_string()],
+                 (mint, operation, ts, signature) VALUES (?, ?, ?, ?)",
+                rusqlite::params![mint, operation, ts, e.signature.to_string()],
             )?;
         } else if let Some(e) = entry.to_event::<ReceiveEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO receive \
-                 (federation, operation, ts, txid, amount_msat, fee_msat) \
+                 (mint, operation, ts, txid, amount_msat, fee_msat) \
                  VALUES (?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
-                    federation,
+                    mint,
                     operation,
                     ts,
                     e.txid.to_string(),
@@ -363,28 +363,28 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
         } else if let Some(e) = entry.to_event::<ReceiveSuccessEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO receive_success \
-                 (federation, operation, ts, preimage) VALUES (?, ?, ?, ?)",
-                rusqlite::params![federation, operation, ts, hex::encode(e.preimage)],
+                 (mint, operation, ts, preimage) VALUES (?, ?, ?, ?)",
+                rusqlite::params![mint, operation, ts, hex::encode(e.preimage)],
             )?;
         } else if entry.to_event::<ReceiveFailureEvent>().is_some() {
             tx.execute(
                 "INSERT OR IGNORE INTO receive_failure \
-                 (federation, operation, ts) VALUES (?, ?, ?)",
-                rusqlite::params![federation, operation, ts],
+                 (mint, operation, ts) VALUES (?, ?, ?)",
+                rusqlite::params![mint, operation, ts],
             )?;
         } else if let Some(e) = entry.to_event::<ReceiveRefundEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO receive_refund \
-                 (federation, operation, ts, txid) VALUES (?, ?, ?, ?)",
-                rusqlite::params![federation, operation, ts, e.txid.to_string()],
+                 (mint, operation, ts, txid) VALUES (?, ?, ?, ?)",
+                rusqlite::params![mint, operation, ts, e.txid.to_string()],
             )?;
         } else if let Some(e) = entry.to_event::<TxCreateEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO tx_create \
-                 (federation, operation, ts, txid, remint_msat, fee_msat) \
+                 (mint, operation, ts, txid, remint_msat, fee_msat) \
                  VALUES (?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
-                    federation,
+                    mint,
                     operation,
                     ts,
                     e.txid.to_string(),

@@ -1,15 +1,15 @@
 //! iroh RPC primitives shared by picomint client and server.
 //!
 //! One request = one bidirectional stream. Connections are kept alive and
-//! reused: the federation client holds a pooled connection per peer (see
-//! `picomint-client`'s `FederationApi`) and multiplexes every request as a
+//! reused: the mint client holds a pooled connection per node (see
+//! `picomint-client`'s `MintApi`) and multiplexes every request as a
 //! fresh bi stream over it via [`request_on_connection`], paying the QUIC
 //! handshake and hole-punched path once rather than per request. [`request`]
 //! remains a one-shot convenience (connect → one request → close) for
 //! callers without a pool, e.g. fetching the config from an invite code.
 //!
 //! Server-side, [`handle_request`] serves a connection by accepting bi
-//! streams in a loop until the peer closes, handling each as one request
+//! streams in a loop until the node closes, handling each as one request
 //! (accept_bi → decode → handler → encode → finish) on its own task.
 //!
 //! The wire envelope is `Result<Vec<u8>, String>` — server-side `Ok` is the
@@ -31,7 +31,7 @@ use iroh::{Endpoint, PublicKey};
 use picomint_encoding::{Decodable, Encodable};
 use tracing::warn;
 
-/// ALPN identifier for picomint RPC. All picomint nodes — guardians and
+/// ALPN identifier for picomint RPC. All picomint nodes — nodes and
 /// gateways alike — speak the same ALPN; the demux happens at the
 /// method-enum layer.
 pub const ALPN: &[u8] = b"picomint";
@@ -54,17 +54,17 @@ pub fn transport_config() -> QuicTransportConfig {
         .build()
 }
 
-/// Open a fresh iroh connection to `node_id`, send `request`, read the
+/// Open a fresh iroh connection to `iroh_pk`, send `request`, read the
 /// response, close. The wire envelope (`Result<Vec<u8>, String>`) is
 /// unwrapped here — the caller gets back the consensus-decoded `Resp`
 /// directly, or an `anyhow::Error` carrying the server-side error string.
 pub async fn request<Req: Encodable, Resp: Decodable>(
     endpoint: &Endpoint,
-    node_id: PublicKey,
+    iroh_pk: PublicKey,
     request: Req,
 ) -> anyhow::Result<Resp> {
     let connection = endpoint
-        .connect(node_id, ALPN)
+        .connect(iroh_pk, ALPN)
         .await
         .context("Connection failed")?;
 
@@ -77,7 +77,7 @@ pub async fn request<Req: Encodable, Resp: Decodable>(
 
 /// Send one request over an existing, kept-alive [`Connection`] by opening a
 /// fresh bi stream on it. The connection is left open for reuse — the caller
-/// owns its lifecycle. The federation client multiplexes every per-peer
+/// owns its lifecycle. The mint client multiplexes every per-node
 /// request over a single pooled connection this way; the server's
 /// [`handle_request`] accept loop serves them as independent streams.
 pub async fn request_on_connection<Req: Encodable, Resp: Decodable>(
@@ -142,7 +142,7 @@ where
 }
 
 /// Serve a kept-alive iroh connection: accept bi streams in a loop, handling
-/// each as one independent request on its own task, until the peer closes
+/// each as one independent request on its own task, until the node closes
 /// the connection. Connections are pooled and reused by clients, so a single
 /// connection may carry many requests over its lifetime. The handler returns
 /// `Result<Vec<u8>, String>` — bytes are the consensus-encoded response,
@@ -154,7 +154,7 @@ where
     Fut: Future<Output = Result<Vec<u8>, String>> + Send + 'static,
 {
     loop {
-        // `accept_bi` errors once the peer closes (or the connection drops) —
+        // `accept_bi` errors once the node closes (or the connection drops) —
         // a normal end-of-life for a pooled connection, not a failure.
         let Ok((mut send_stream, mut recv_stream)) = connection.accept_bi().await else {
             return Ok(());

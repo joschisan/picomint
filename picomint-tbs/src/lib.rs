@@ -112,7 +112,7 @@ pub fn verify_signature_share(
 pub fn aggregate_signature_shares(
     shares: &BTreeMap<u64, BlindedSignatureShare>,
 ) -> BlindedSignature {
-    // this is a special case for one-of-one federations
+    // this is a special case for one-of-one mints
     if shares.len() == 1 {
         return BlindedSignature(
             shares
@@ -128,7 +128,7 @@ pub fn aggregate_signature_shares(
             shares
                 .keys()
                 .cloned()
-                .map(|peer| Scalar::from(peer + 1))
+                .map(|node| Scalar::from(node + 1))
                 .collect(),
         )
         .into_iter()

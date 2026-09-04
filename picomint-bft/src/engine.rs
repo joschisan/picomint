@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use async_channel::Sender;
-use picomint_core::{NumPeers, PeerId};
+use picomint_core::{NodeId, NumNodes};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, DbRead, Table, WriteTx};
 use tokio::time::{Instant, sleep_until};
@@ -23,7 +23,7 @@ const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
 /// requests every second.
 const REQUEST_DEDUP_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Drives a single peer's growth indefinitely. The caller constructs
+/// Drives a single node's growth indefinitely. The caller constructs
 /// the engine, then awaits `run()` (typically in a spawned task) and
 /// keeps the receiving end of `ordered_tx` for items as they commit.
 ///
@@ -39,14 +39,14 @@ where
     P: DataProvider<D>,
     T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
 {
-    pub(crate) id: PeerId,
+    pub(crate) id: NodeId,
     session: u32,
-    pub(crate) n: NumPeers,
+    pub(crate) n: NumNodes,
     db: Database,
     keychain: Keychain,
     network: DynNetwork<D>,
     data_provider: P,
-    pub(crate) ordered_tx: Sender<(Round, PeerId, D)>,
+    pub(crate) ordered_tx: Sender<(Round, NodeId, D)>,
 
     /// Daemon-declared units table (`UnitHash => UnitEnvelope<D>`).
     /// Bft only reads/writes it.
@@ -100,14 +100,14 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: PeerId,
+        id: NodeId,
         session: u32,
-        n: NumPeers,
+        n: NumNodes,
         db: Database,
         keychain: Keychain,
         network: DynNetwork<D>,
         data_provider: P,
-        ordered_tx: Sender<(Round, PeerId, D)>,
+        ordered_tx: Sender<(Round, NodeId, D)>,
         units_table: T,
     ) -> Self {
         Self {
@@ -224,11 +224,11 @@ where
     /// writes succeed via `?`.
     ///
     /// These commits use **relaxed** (non-fsync) durability: inbound units
-    /// are peer-originated and re-fetched via anti-entropy after a crash, so
+    /// are node-originated and re-fetched via anti-entropy after a crash, so
     /// they need not be individually durable. The fsync barrier is
     /// [`Self::try_create_unit`], whose durable commit before broadcast both
     /// prevents our own equivocation and flushes this relaxed backlog.
-    async fn handle_message(&mut self, sender: PeerId, msg: Message<D>) -> Result<()> {
+    async fn handle_message(&mut self, sender: NodeId, msg: Message<D>) -> Result<()> {
         match msg {
             Message::Unit(ev) => {
                 let dbtx = self.db.begin_write_relaxed();
@@ -269,13 +269,13 @@ where
         self.network.send(Recipient::Everyone, Message::Unit(ev));
     }
 
-    /// Send `Message::Request` for `hash` to `peer`, but only if we
+    /// Send `Message::Request` for `hash` to `node`, but only if we
     /// haven't asked for the same unit within the past
     /// [`REQUEST_DEDUP_INTERVAL`]. Anti-entropy retransmits the same
     /// top-of-chain unit every second, and every receipt would
     /// otherwise refire the entire ancestor walk — so we throttle the
     /// outgoing request rate per unit to one per cache window.
-    fn try_send_request(&mut self, peer: PeerId, hash: UnitHash) {
+    fn try_send_request(&mut self, node: NodeId, hash: UnitHash) {
         let now = Instant::now();
 
         if self
@@ -290,7 +290,7 @@ where
         self.request_sent_at.insert(hash, now);
 
         self.network
-            .send(Recipient::Peer(peer), Message::Request(hash));
+            .send(Recipient::Node(node), Message::Request(hash));
     }
 
     /// Walk ancestors of `top` locally and `Request` only the missing
@@ -299,7 +299,7 @@ where
     /// parent set; units whose bodies we lack are requested and
     /// terminate the walk, as do extended units and units we've
     /// already requested recently (via `try_send_request`).
-    fn cascade_parents(&mut self, dbtx: &impl DbRead, sender: PeerId, top: &Unit) {
+    fn cascade_parents(&mut self, dbtx: &impl DbRead, sender: NodeId, top: &Unit) {
         let mut visited: BTreeSet<UnitHash> = BTreeSet::new();
         let mut stack: Vec<UnitHash> = top.parents.values().copied().collect();
 
@@ -323,13 +323,13 @@ where
 
     /// Reply with the stored envelope; no reply if we don't hold the
     /// unit.
-    fn handle_request(&self, dbtx: &impl DbRead, requester: PeerId, hash: UnitHash) {
+    fn handle_request(&self, dbtx: &impl DbRead, requester: NodeId, hash: UnitHash) {
         let Some(ev) = dbtx.get(&self.units_table, &hash) else {
             return;
         };
 
         self.network
-            .send(Recipient::Peer(requester), Message::Unit(ev));
+            .send(Recipient::Node(requester), Message::Unit(ev));
     }
 
     /// Validate and install a fresh unit envelope in `BFT_UNITS` under
@@ -350,8 +350,8 @@ where
 
             for p in ev.unit.parents.keys() {
                 ensure!(
-                    self.n.peer_ids().any(|x| x == *p),
-                    "parent creator not in federation",
+                    self.n.node_ids().any(|x| x == *p),
+                    "parent creator not in mint",
                 );
             }
         }
@@ -410,7 +410,7 @@ where
 
         // Crash barrier: persist before broadcasting, otherwise a
         // restart would let us build a *different* unit at this round
-        // from a fresh data_provider draw — peers that saw the
+        // from a fresh data_provider draw — nodes that saw the
         // original would consider us a forker.
         self.insert_unit(&dbtx, &ev, hash)
             .expect("newly built unit must insert");
@@ -490,7 +490,7 @@ where
 
     /// Returns the unit's round iff this call transitioned it to
     /// extended. Every parent must be an extended unit created by the
-    /// peer it is keyed under at exactly `round - 1` — this pins each
+    /// node it is keyed under at exactly `round - 1` — this pins each
     /// unit's claimed position to its parents' (inductively, down to
     /// round 0), so extended rounds are gap-free and a forker cannot
     /// key its own branches under other creators to fake the
@@ -527,7 +527,7 @@ where
     /// verify it. It chains our column: every unit of ours is an
     /// ancestor of all our later units, so one downstream reference of
     /// our column emits our whole backlog.
-    fn parents_for(&self, round: Round) -> Option<BTreeMap<PeerId, UnitHash>> {
+    fn parents_for(&self, round: Round) -> Option<BTreeMap<NodeId, UnitHash>> {
         let Some(parent_round) = round.checked_sub(1) else {
             return Some(BTreeMap::new());
         };
@@ -535,7 +535,7 @@ where
         // A forker may have several extended branches; reference the
         // lowest-hash one. A creation-side choice only — receivers
         // don't verify which branch we picked.
-        let mut extended_row: BTreeMap<PeerId, UnitHash> = BTreeMap::new();
+        let mut extended_row: BTreeMap<NodeId, UnitHash> = BTreeMap::new();
 
         for hash in self.extended_at(parent_round) {
             let extended = self.extended.get(&hash).expect("filtered on extended");
@@ -547,7 +547,7 @@ where
 
         let t = self.n.threshold();
 
-        let parents: BTreeMap<PeerId, UnitHash> = std::iter::once((self.id, own))
+        let parents: BTreeMap<NodeId, UnitHash> = std::iter::once((self.id, own))
             .chain(extended_row.into_iter().filter(|(c, _)| *c != self.id))
             .take(t)
             .collect();

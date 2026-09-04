@@ -1,0 +1,169 @@
+//! Lightning module wire methods. Mint-side methods are framed by the
+//! [`LightningMethod`] enum; client↔gateway methods are framed by [`GatewayMethod`].
+//! Each method has a `Request` and a `Response` type; on the wire, every call
+//! returns `Result<Vec<u8>, String>` with the bytes being the response struct
+//! consensus-encoded.
+
+use bitcoin::hashes::sha256;
+use bitcoin::secp256k1::schnorr::Signature;
+use lightning_invoice::Bolt11Invoice;
+use picomint_encoding::{Decodable, Encodable};
+use tpe::{AggregatePublicKey, DecryptionKeyShare};
+
+use crate::OutPoint;
+use crate::config::MintId;
+use crate::lightning::ContractId;
+use crate::lightning::LightningInvoice;
+use crate::lightning::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
+use crate::lightning::gateway::{GatewayInfo, GatewayPk};
+
+// ── await-preimage ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct AwaitPreimageRequest {
+    pub outpoint: OutPoint,
+    pub expiry: u32,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct AwaitPreimageResponse {
+    pub preimage: Option<[u8; 32]>,
+}
+
+// ── decryption-key-share ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct DecryptionKeyShareRequest {
+    pub outpoint: OutPoint,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct DecryptionKeyShareResponse {
+    pub share: DecryptionKeyShare,
+}
+
+// ── outgoing-contract-expiry ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct OutgoingContractExpiryRequest {
+    pub outpoint: OutPoint,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct OutgoingContractExpiryResponse {
+    pub contract: Option<(ContractId, u32)>,
+}
+
+// ── await-incoming-contracts ────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct AwaitIncomingContractsRequest {
+    pub start: u64,
+    pub batch: u64,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct AwaitIncomingContractsResponse {
+    pub contracts: Vec<IncomingContractSummary>,
+    pub next_index: u64,
+}
+
+// ── gateways ────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct GatewaysRequest;
+
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct GatewaysResponse {
+    pub gateways: Vec<GatewayPk>,
+}
+
+// ── tpe-aggregate-pk ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct TpeAggregatePkRequest;
+
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct TpeAggregatePkResponse {
+    pub tpe_agg_pk: AggregatePublicKey,
+}
+
+// ── dispatch enum ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub enum LightningMethod {
+    AwaitPreimage(AwaitPreimageRequest),
+    DecryptionKeyShare(DecryptionKeyShareRequest),
+    OutgoingContractExpiry(OutgoingContractExpiryRequest),
+    AwaitIncomingContracts(AwaitIncomingContractsRequest),
+    Gateways(GatewaysRequest),
+    TpeAggregatePk(TpeAggregatePkRequest),
+}
+
+// ── info ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct InfoRequest {
+    pub mint: MintId,
+}
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct InfoResponse {
+    pub info: Option<GatewayInfo>,
+}
+
+// ── send ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct SendRequest {
+    pub mint: MintId,
+    pub outpoint: OutPoint,
+    pub contract: OutgoingContract,
+    pub invoice: LightningInvoice,
+    pub auth: Signature,
+}
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct SendResponse {
+    pub result: Result<[u8; 32], Signature>,
+}
+
+// ── receive ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct ReceiveRequest {
+    pub mint: MintId,
+    pub offer: IncomingOffer,
+}
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct ReceiveResponse {
+    pub invoice: Bolt11Invoice,
+}
+
+// ── verify ──────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct VerifyRequest {
+    pub hash: sha256::Hash,
+    pub wait: bool,
+}
+
+/// LUD-21 verify response — gateway-internal iroh wire shape. The LNURL
+/// daemon translates this to [`picomint_lnurl::VerifyResponse`] at the JSON
+/// boundary it serves to external LNURL wallets.
+#[derive(Debug, Clone, Encodable, Decodable, PartialEq, Eq)]
+pub struct VerifyResponse {
+    pub settled: bool,
+    pub preimage: Option<[u8; 32]>,
+}
+
+// ── gateway dispatch enum ───────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub enum GatewayMethod {
+    Info(InfoRequest),
+    Send(SendRequest),
+    Receive(ReceiveRequest),
+    Verify(VerifyRequest),
+}

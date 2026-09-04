@@ -11,12 +11,12 @@ members = [
     "picomint-gateway-cli",
     "picomint-gateway-cli-core",
     "picomint-gateway-daemon",
-    "picomint-guardian-cli",
-    "picomint-guardian-cli-core",
-    "picomint-guardian-daemon",
     "picomint-integration-tests",
     "picomint-lnurl",
     "picomint-lnurl-daemon",
+    "picomint-node-cli",
+    "picomint-node-cli-core",
+    "picomint-node-daemon",
     "picomint-redb",
     "picomint-rpc",
     "picomint-tbs",
@@ -88,10 +88,10 @@ picomint-encoding = { path = "./picomint-encoding", version = "=0.1.0" }
 picomint-fountain = { path = "./picomint-fountain", version = "=0.1.0" }
 picomint-gateway-cli-core = { path = "./picomint-gateway-cli-core", version = "=0.1.0" }
 picomint-gateway-daemon = { path = "./picomint-gateway-daemon", version = "=0.1.0" }
-picomint-guardian-cli = { path = "./picomint-guardian-cli", version = "=0.1.0" }
-picomint-guardian-cli-core = { path = "./picomint-guardian-cli-core", version = "=0.1.0" }
-picomint-guardian-daemon = { path = "./picomint-guardian-daemon", version = "=0.1.0" }
 picomint-lnurl = { path = "./picomint-lnurl", version = "=0.1.0" }
+picomint-node-cli = { path = "./picomint-node-cli", version = "=0.1.0" }
+picomint-node-cli-core = { path = "./picomint-node-cli-core", version = "=0.1.0" }
+picomint-node-daemon = { path = "./picomint-node-daemon", version = "=0.1.0" }
 picomint-redb = { path = "./picomint-redb", version = "=0.1.0" }
 picomint-rpc = { path = "./picomint-rpc", version = "=0.1.0" }
 proc-macro2 = "1.0"
@@ -130,7 +130,7 @@ tracing-subscriber = "0.3.23"
 tss = { package = "picomint-tss", path = "./picomint-tss", version = "=0.1.0" }
 url = "2.5.8"
 
-# Thin LTO is a measurable perf win for the federation guardian's
+# Thin LTO is a measurable perf win for the mint node's
 # crypto-heavy hot paths and worth the modest extra release-build time.
 [profile.release]
 lto = "thin"

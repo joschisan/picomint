@@ -6,9 +6,9 @@
 
 use picomint_encoding::{Decodable, Encodable};
 
-use crate::PeerId;
+use crate::NodeId;
 use crate::config::ConsensusConfig;
-use crate::config::{FederationId, PeerEndpoint};
+use crate::config::{MintId, NodeEndpoint};
 use crate::expiry::ExpiryStatus;
 use crate::tx::{Transaction, TxError};
 use std::collections::BTreeMap;
@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct ConfigRequest {
-    /// Invite id of the invite code this download is for. The issuing guardian
+    /// Invite id of the invite code this download is for. The issuing node
     /// checks the registered expiration date and user limit and counts the
     /// download towards the limit; there is no way to fetch the config without
     /// a recognized invite.
@@ -69,28 +69,28 @@ pub struct ExpiryStatusResponse {
     pub status: Option<ExpiryStatus>,
 }
 
-// ── federation-info ─────────────────────────────────────────────────────────
+// ── mint-info ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct FederationInfoRequest;
+pub struct MintInfoRequest;
 
-/// The federation's identity and peer set. Ungated, unlike [`ConfigRequest`]:
+/// The mint's identity and node set. Ungated, unlike [`ConfigRequest`]:
 /// any joined client already holds both, and a caller that received them out
 /// of band can pin them against a hash, so serving them grants nothing an
 /// invite would otherwise gate.
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct FederationInfoResponse {
-    pub federation: FederationId,
-    pub peers: BTreeMap<PeerId, PeerEndpoint>,
+pub struct MintInfoResponse {
+    pub mint: MintId,
+    pub nodes: BTreeMap<NodeId, NodeEndpoint>,
 }
 
-impl FederationInfoResponse {
-    /// Built on both sides — by a guardian to answer, and by a client to
+impl MintInfoResponse {
+    /// Built on both sides — by a node to answer, and by a client to
     /// commit to the answer it expects — so the two hash the same bytes.
     pub fn new(config: &ConsensusConfig) -> Self {
         Self {
-            federation: config.calculate_federation_id(),
-            peers: config.peers.clone(),
+            mint: config.calculate_mint_id(),
+            nodes: config.nodes.clone(),
         }
     }
 }
@@ -104,5 +104,5 @@ pub enum CoreMethod {
     BlockCount(BlockCountRequest),
     Liveness(LivenessRequest),
     ExpiryStatus(ExpiryStatusRequest),
-    FederationInfo(FederationInfoRequest),
+    MintInfo(MintInfoRequest),
 }

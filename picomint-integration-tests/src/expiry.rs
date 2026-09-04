@@ -1,5 +1,5 @@
-//! Integration test for the federation expiry announcement: each
-//! guardian sets the same `(date, successor)` pair via the admin CLI; a
+//! Integration test for the mint expiry announcement: each
+//! node sets the same `(date, successor)` pair via the admin CLI; a
 //! fresh client then fetches the announcement via threshold consensus
 //! and surfaces it through `Client::expiry_status`.
 
@@ -8,29 +8,29 @@ use picomint_core::expiry::ExpiryStatus;
 use tracing::info;
 
 use crate::cli;
-use crate::env::{NUM_ONLINE_GUARDIANS, TestEnv};
+use crate::env::{NUM_ONLINE_NODES, TestEnv};
 
 pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     info!("expiry: announce + client refresh");
 
-    // Use the federation's own invite code as the successor — this is just
-    // a value the guardians have to agree on byte-for-byte. A real
-    // deployment would point at a successor federation; here we want the
+    // Use the mint's own invite code as the successor — this is just
+    // a value the nodes have to agree on byte-for-byte. A real
+    // deployment would point at a successor mint; here we want the
     // successor field exercised end-to-end.
     let timestamp = 4_102_444_800; // 2100-01-01 UTC
 
-    info!("Setting expiry on all {NUM_ONLINE_GUARDIANS} online guardians");
+    info!("Setting expiry on all {NUM_ONLINE_NODES} online nodes");
     let expected = ExpiryStatus {
         timestamp,
         successor: Some(env.invite.clone()),
     };
-    for peer in 0..NUM_ONLINE_GUARDIANS {
-        let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        cli::guardian_expiry_set(&data_dir, timestamp, Some(&env.invite))?;
-        let stored = cli::guardian_expiry_status(&data_dir)?;
+    for node in 0..NUM_ONLINE_NODES {
+        let data_dir = cli::node_data_dir(&env.data_dir, node);
+        cli::node_expiry_set(&data_dir, timestamp, Some(&env.invite))?;
+        let stored = cli::node_expiry_status(&data_dir)?;
         ensure!(
             stored.as_ref() == Some(&expected),
-            "guardian {peer} stored expiry mismatch: got {stored:?}"
+            "node {node} stored expiry mismatch: got {stored:?}"
         );
     }
 
@@ -55,10 +55,10 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
         "client expiry mismatch: got {cached:?}, want {expected:?}"
     );
 
-    info!("Clearing expiry on all online guardians");
-    for peer in 0..NUM_ONLINE_GUARDIANS {
-        let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        cli::guardian_expiry_clear(&data_dir)?;
+    info!("Clearing expiry on all online nodes");
+    for node in 0..NUM_ONLINE_NODES {
+        let data_dir = cli::node_data_dir(&env.data_dir, node);
+        cli::node_expiry_clear(&data_dir)?;
     }
 
     client
@@ -69,7 +69,7 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
 
     ensure!(
         client.client.expiry_status(client.fed).is_none(),
-        "client cache should be empty after a federation-wide clear"
+        "client cache should be empty after a mint-wide clear"
     );
 
     info!("expiry: passed");

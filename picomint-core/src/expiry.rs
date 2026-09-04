@@ -1,5 +1,5 @@
-//! Federation-wide expiry announcement. Guardians can collectively
-//! declare a future shutdown date (and optionally a successor federation's
+//! Mint-wide expiry announcement. Nodes can collectively
+//! declare a future shutdown date (and optionally a successor mint's
 //! invite code) that clients fetch via threshold consensus and surface to
 //! their users.
 
@@ -8,12 +8,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::invite::InviteCode;
 
-/// Status indicating that a federation is expiring, with a target date and
-/// optional successor federation invite code for users to migrate to.
+/// Status indicating that a mint is expiring, with a target date and
+/// optional successor mint invite code for users to migrate to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ExpiryStatus {
     /// Expiry date as a unix timestamp in seconds (midnight UTC).
     pub timestamp: u64,
-    /// Optional invite code for the successor federation.
+    /// Optional invite code for the successor mint.
     pub successor: Option<InviteCode>,
 }

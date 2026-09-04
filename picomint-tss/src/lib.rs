@@ -32,11 +32,11 @@ const TAG_CHALLENGE: &[u8] = b"BIP0340/challenge";
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct SecretKeyShare(pub SecretKey);
 
-/// The public key corresponding to one peer's secret key share.
+/// The public key corresponding to one node's secret key share.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable, Serialize, Deserialize)]
 pub struct PublicKeyShare(pub PublicKey);
 
-/// The public key of the federation; its x-only form is the BIP340 public
+/// The public key of the mint; its x-only form is the BIP340 public
 /// key our signatures verify under.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable, Serialize, Deserialize)]
 pub struct AggregatePublicKey(pub PublicKey);
@@ -46,11 +46,11 @@ pub struct AggregatePublicKey(pub PublicKey);
 #[derive(Debug)]
 pub struct SecretNonce(SecretKey, SecretKey);
 
-/// The public nonce pair of one peer for one signing session.
+/// The public nonce pair of one node for one signing session.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable, Serialize, Deserialize)]
 pub struct PublicNonce(pub PublicKey, pub PublicKey);
 
-/// One peer's additive share of the final signature's response scalar.
+/// One node's additive share of the final signature's response scalar.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct SignatureShare(pub SecretKey);
 
@@ -141,23 +141,23 @@ pub fn sign_share(
     )
 }
 
-/// Verifies a peer's signature share against its public key share and the
+/// Verifies a node's signature share against its public key share and the
 /// nonces of the signing set.
 pub fn verify_signature_share(
     msg: [u8; 32],
-    peer: u64,
+    node: u64,
     pks: &PublicKeyShare,
     share: &SignatureShare,
     nonces: &BTreeMap<u64, PublicNonce>,
     pk: &AggregatePublicKey,
 ) -> bool {
-    let Some(nonce) = nonces.get(&peer) else {
+    let Some(nonce) = nonces.get(&node) else {
         return false;
     };
 
     let (binding, group_nonce, challenge) = session_values(&msg, nonces, pk);
 
-    let lambda = lagrange_multiplier(nonces, peer);
+    let lambda = lagrange_multiplier(nonces, node);
 
     let Ok(second) = nonce.1.mul_tweak(SECP256K1, &binding) else {
         return false;
@@ -378,19 +378,19 @@ fn scalar_mod_order(mut bytes: [u8; 32]) -> Scalar {
     Scalar::from_be_bytes(bytes).expect("The value is reduced below the curve order")
 }
 
-/// The Lagrange multiplier at zero for the peer's evaluation point in the
+/// The Lagrange multiplier at zero for the node's evaluation point in the
 /// signing set given by the keys of the nonces.
 fn lagrange_multiplier(nonces: &BTreeMap<u64, PublicNonce>, identity: u64) -> SecretKey {
     let mut numerator = key_from_u64(1);
     let mut denominator = key_from_u64(1);
 
-    for peer in nonces.keys().copied().filter(|peer| *peer != identity) {
+    for node in nonces.keys().copied().filter(|node| *node != identity) {
         numerator = numerator
-            .mul_tweak(&scalar_from_u64(peer + 1))
+            .mul_tweak(&scalar_from_u64(node + 1))
             .expect("A product of nonzero scalars is nonzero");
 
         denominator = denominator
-            .mul_tweak(&key_scalar(&difference(peer, identity)))
+            .mul_tweak(&key_scalar(&difference(node, identity)))
             .expect("A product of nonzero scalars is nonzero");
     }
 

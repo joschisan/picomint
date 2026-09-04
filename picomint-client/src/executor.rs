@@ -1,11 +1,11 @@
 //! Per-module state machine executor.
 //!
 //! Two functions over the shared [`ClientContext`]: [`resume`] restarts a
-//! table's persisted state machines at federation bring-up, and
+//! table's persisted state machines at mint bring-up, and
 //! [`add_state_machine_dbtx`] lands a new one atomically with the caller's
-//! writes. Tables are shared across federations, so both scope by the
-//! context federation's slice of the key space; active states are keyed by
-//! `(federation, SmId)` and driven in a typed reactor loop.
+//! writes. Tables are shared across mints, so both scope by the
+//! context mint's slice of the key space; active states are keyed by
+//! `(mint, SmId)` and driven in a typed reactor loop.
 //!
 //! Each driver iteration: wait for [`StateMachine::trigger`] to resolve,
 //! then apply [`StateMachine::transition`] atomically in a DB tx. A
@@ -16,7 +16,7 @@ use std::fmt::Debug;
 use std::future::Future;
 
 use crate::context::ClientContext;
-use picomint_core::config::FederationId;
+use picomint_core::config::MintId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{DbRead, Prefix, Table, WriteTx};
 
@@ -69,16 +69,16 @@ pub(crate) trait StateMachine:
     ) -> Option<Self>;
 }
 
-/// Resume every state machine the context's federation persisted in `table`
-/// from a previous run. Called exactly once per federation bring-up — a
+/// Resume every state machine the context's mint persisted in `table`
+/// from a previous run. Called exactly once per mint bring-up — a
 /// second call would double-drive every active state machine.
 pub(crate) fn resume<S, T>(ctx: &ClientContext, table: T)
 where
     S: StateMachine,
-    T: Table<Key = (FederationId, SmId), Value = S> + Copy + Send + Sync + 'static,
-    FederationId: Prefix<T>,
+    T: Table<Key = (MintId, SmId), Value = S> + Copy + Send + Sync + 'static,
+    MintId: Prefix<T>,
 {
-    let active: Vec<(SmId, S)> = ctx.db.begin_read().prefix(&table, &ctx.federation, |r| {
+    let active: Vec<(SmId, S)> = ctx.db.begin_read().prefix(&table, &ctx.mint, |r| {
         r.map(|entry| (entry.0.1, entry.1)).collect()
     });
 
@@ -93,11 +93,11 @@ where
 pub(crate) fn add_state_machine_dbtx<S, T>(ctx: &ClientContext, table: T, dbtx: &WriteTx, state: S)
 where
     S: StateMachine,
-    T: Table<Key = (FederationId, SmId), Value = S> + Copy + Send + Sync + 'static,
+    T: Table<Key = (MintId, SmId), Value = S> + Copy + Send + Sync + 'static,
 {
     let id = SmId::random();
     assert!(
-        dbtx.insert(&table, &(ctx.federation, id), &state).is_none(),
+        dbtx.insert(&table, &(ctx.mint, id), &state).is_none(),
         "SmId collision"
     );
 
@@ -111,7 +111,7 @@ where
 fn spawn_drive<S, T>(ctx: ClientContext, table: T, id: SmId, state: S)
 where
     S: StateMachine,
-    T: Table<Key = (FederationId, SmId), Value = S> + Copy + Send + Sync + 'static,
+    T: Table<Key = (MintId, SmId), Value = S> + Copy + Send + Sync + 'static,
 {
     let tg = ctx.tg.clone();
 
@@ -124,7 +124,7 @@ where
 async fn drive<S, T>(ctx: ClientContext, table: T, id: SmId, mut state: S)
 where
     S: StateMachine,
-    T: Table<Key = (FederationId, SmId), Value = S> + Copy + Send + Sync + 'static,
+    T: Table<Key = (MintId, SmId), Value = S> + Copy + Send + Sync + 'static,
 {
     loop {
         let outcome = state.trigger(&ctx).await;
@@ -133,12 +133,12 @@ where
 
         match state.transition(&ctx, &dbtx, outcome) {
             Some(new_state) => {
-                dbtx.insert(&table, &(ctx.federation, id), &new_state);
+                dbtx.insert(&table, &(ctx.mint, id), &new_state);
                 dbtx.commit();
                 state = new_state;
             }
             None => {
-                dbtx.remove(&table, &(ctx.federation, id));
+                dbtx.remove(&table, &(ctx.mint, id));
                 dbtx.commit();
                 return;
             }

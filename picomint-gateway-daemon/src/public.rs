@@ -7,7 +7,9 @@
 //! response, finish the stream.
 
 use iroh::Endpoint;
-use picomint_core::ln::methods::{GatewayMethod, InfoResponse, ReceiveResponse, SendResponse};
+use picomint_core::lightning::methods::{
+    GatewayMethod, InfoResponse, ReceiveResponse, SendResponse,
+};
 use picomint_encoding::Encodable as _;
 
 use crate::AppState;
@@ -19,7 +21,7 @@ pub async fn run(state: AppState, endpoint: Endpoint) {
 async fn dispatch(state: AppState, method: GatewayMethod) -> Result<Vec<u8>, String> {
     match method {
         GatewayMethod::Info(req) => Ok(InfoResponse {
-            info: state.gateway_info(&req.federation).await.ok(),
+            info: state.gateway_info(&req.mint).await.ok(),
         }
         .consensus_encode_to_vec()),
         GatewayMethod::Send(req) => state

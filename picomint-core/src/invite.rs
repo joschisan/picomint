@@ -1,26 +1,26 @@
 use iroh_base::PublicKey;
 use serde::{Deserialize, Serialize};
 
-use crate::config::FederationId;
+use crate::config::MintId;
 use picomint_encoding::{Decodable, Encodable};
 
-/// Everything a client needs to download the federation config and bootstrap.
-/// Carries the federation id (cross-checked against the downloaded config),
-/// the iroh public key of the issuing guardian, and the opaque invite id the
+/// Everything a client needs to download the mint config and bootstrap.
+/// Carries the mint id (cross-checked against the downloaded config),
+/// the iroh public key of the issuing node, and the opaque invite id the
 /// issuer registered in its database. The issuer enforces the invite code's
 /// expiration date and user limit against that id when serving the config.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct InviteCode {
-    pub federation: FederationId,
-    pub node_id: PublicKey,
+    pub mint: MintId,
+    pub iroh_pk: PublicKey,
     pub invite_id: [u8; 16],
 }
 
 impl InviteCode {
-    pub fn new(node_id: PublicKey, federation: FederationId, invite_id: [u8; 16]) -> Self {
+    pub fn new(iroh_pk: PublicKey, mint: MintId, invite_id: [u8; 16]) -> Self {
         Self {
-            federation,
-            node_id,
+            mint,
+            iroh_pk,
             invite_id,
         }
     }

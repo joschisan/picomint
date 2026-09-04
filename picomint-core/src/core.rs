@@ -37,9 +37,9 @@ impl OperationId {
     }
 }
 
-/// One of a client's balances within a single federation.
+/// One of a client's balances within a single mint.
 ///
-/// The federation cannot tell accounts apart — an account is purely a
+/// The mint cannot tell accounts apart — an account is purely a
 /// client-side split of the derivation tree and of the few tables that hold
 /// per-account state. It lives here rather than in the client because the
 /// event log is tagged with it, and the log is written by a crate that cannot
