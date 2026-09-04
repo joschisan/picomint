@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use crate::api::MintApi;
 use picomint_core::ecash::Denomination;
 use picomint_core::ecash::methods::{
-    EcashMethod, IssuanceStateRequest, IssuanceStateResponse, SignaturesRequest,
-    SignaturesResponse, SignaturesRestoreRequest, SignaturesRestoreResponse, SpendStateRequest,
-    SpendStateResponse,
+    EcashMethod, IssuanceStateRequest, IssuanceStateResponse, SignatureSharesRequest,
+    SignatureSharesResponse, SignatureSharesRestoreRequest, SignatureSharesRestoreResponse,
+    SpendStateRequest, SpendStateResponse,
 };
 use picomint_core::module::Method;
 use picomint_core::secp256k1::XOnlyPublicKey;
@@ -16,7 +16,7 @@ use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 use super::NoteIssuanceRequest;
 use super::ecash_sm::verify_blind_shares;
 
-pub async fn signatures(
+pub async fn signature_shares(
     api: &MintApi,
     txid: TransactionId,
     issuance_requests: Vec<NoteIssuanceRequest>,
@@ -24,12 +24,14 @@ pub async fn signatures(
 ) -> BTreeMap<NodeId, Vec<BlindedSignatureShare>> {
     api.request_with_strategy_retry(
         FilterMapThreshold::new(
-            move |node, resp: SignaturesResponse| {
+            move |node, resp: SignatureSharesResponse| {
                 verify_blind_shares(node, resp.shares, &issuance_requests, &tbs_pks)
             },
             api.num_nodes(),
         ),
-        Method::Ecash(EcashMethod::Signatures(SignaturesRequest { txid })),
+        Method::Ecash(EcashMethod::SignatureShares(SignatureSharesRequest {
+            txid,
+        })),
     )
     .await
 }
@@ -38,7 +40,7 @@ pub async fn signatures(
 /// mint signed. Every message must resolve on every node, so a
 /// candidate can never be silently dropped for want of a full column of
 /// shares to interpolate over.
-pub async fn signatures_restore(
+pub async fn signature_shares_restore(
     api: &MintApi,
     issuance_requests: Vec<NoteIssuanceRequest>,
     tbs_pks: BTreeMap<Denomination, BTreeMap<NodeId, PublicKeyShare>>,
@@ -50,14 +52,14 @@ pub async fn signatures_restore(
 
     api.request_with_strategy_retry(
         FilterMapThreshold::new(
-            move |node, resp: SignaturesRestoreResponse| {
+            move |node, resp: SignatureSharesRestoreResponse| {
                 verify_blind_shares(node, resp.shares, &issuance_requests, &tbs_pks)
             },
             api.num_nodes(),
         ),
-        Method::Ecash(EcashMethod::SignaturesRestore(SignaturesRestoreRequest {
-            messages,
-        })),
+        Method::Ecash(EcashMethod::SignatureSharesRestore(
+            SignatureSharesRestoreRequest { messages },
+        )),
     )
     .await
 }

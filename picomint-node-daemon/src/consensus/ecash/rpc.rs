@@ -3,8 +3,9 @@
 use picomint_core::OutPoint;
 use picomint_core::TransactionId;
 use picomint_core::ecash::methods::{
-    IssuanceStateRequest, IssuanceStateResponse, SignaturesRequest, SignaturesResponse,
-    SignaturesRestoreRequest, SignaturesRestoreResponse, SpendStateRequest, SpendStateResponse,
+    IssuanceStateRequest, IssuanceStateResponse, SignatureSharesRequest, SignatureSharesResponse,
+    SignatureSharesRestoreRequest, SignatureSharesRestoreResponse, SpendStateRequest,
+    SpendStateResponse,
 };
 use picomint_redb::{DbRead, ReadTx};
 use tbs::BlindedSignatureShare;
@@ -16,29 +17,29 @@ use super::db::{
     NoteNonceTable,
 };
 
-pub async fn signatures(
+pub async fn signature_shares(
     server: &Server,
-    req: SignaturesRequest,
-) -> Result<SignaturesResponse, String> {
+    req: SignatureSharesRequest,
+) -> Result<SignatureSharesResponse, String> {
     // Wait until any BlindedSignatureShareTable for this txid exists. All mint
     // outputs of a given tx are signed atomically in the same consensus
     // commit, so observing one implies all are present.
     let (shares, _dbtx) = server
         .db
         .wait_table_check(&BlindedSignatureShareTable, |dbtx| {
-            Some(collect_signatures(dbtx, req.txid)).filter(|s| !s.is_empty())
+            Some(collect_signature_shares(dbtx, req.txid)).filter(|s| !s.is_empty())
         })
         .await;
 
-    Ok(SignaturesResponse { shares })
+    Ok(SignatureSharesResponse { shares })
 }
 
 /// Callers establish membership through [`issuance_state`] first, so every
 /// message here is expected to resolve and a miss is an error.
-pub fn signatures_restore(
+pub fn signature_shares_restore(
     server: &Server,
-    req: SignaturesRestoreRequest,
-) -> Result<SignaturesRestoreResponse, String> {
+    req: SignatureSharesRestoreRequest,
+) -> Result<SignatureSharesRestoreResponse, String> {
     let mut shares = Vec::new();
 
     let dbtx = server.db.begin_read();
@@ -51,7 +52,7 @@ pub fn signatures_restore(
         shares.push(share);
     }
 
-    Ok(SignaturesRestoreResponse { shares })
+    Ok(SignatureSharesRestoreResponse { shares })
 }
 
 pub fn issuance_state(
@@ -81,7 +82,7 @@ pub fn spend_state(server: &Server, req: SpendStateRequest) -> Result<SpendState
     Ok(SpendStateResponse { spent })
 }
 
-fn collect_signatures(dbtx: &ReadTx, txid: TransactionId) -> Vec<BlindedSignatureShare> {
+fn collect_signature_shares(dbtx: &ReadTx, txid: TransactionId) -> Vec<BlindedSignatureShare> {
     let bounds = OutPoint { txid, out_idx: 0 }..=OutPoint {
         txid,
         out_idx: u16::MAX,

@@ -67,9 +67,9 @@ table!(
 // input — stored under the same index as the entry in the nonce log.
 // Session s is complete once every index of its chunk has a response.
 table!(
-    SignaturesTable,
+    SignatureShareTable,
     u64 => Vec<tss::SignatureShare>,
-    "onchain-signatures",
+    "onchain-signature-share",
 );
 
 table!(

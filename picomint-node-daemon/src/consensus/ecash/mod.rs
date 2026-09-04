@@ -175,8 +175,10 @@ pub fn audit(dbtx: &WriteTx) -> i64 {
 
 pub async fn handle_api(server: &Server, method: EcashMethod) -> Result<Vec<u8>, String> {
     match method {
-        EcashMethod::Signatures(req) => handler_async!(signatures, server, req).await,
-        EcashMethod::SignaturesRestore(req) => handler!(signatures_restore, server, req).await,
+        EcashMethod::SignatureShares(req) => handler_async!(signature_shares, server, req).await,
+        EcashMethod::SignatureSharesRestore(req) => {
+            handler!(signature_shares_restore, server, req).await
+        }
         EcashMethod::SpendState(req) => handler!(spend_state, server, req).await,
         EcashMethod::IssuanceState(req) => handler!(issuance_state, server, req).await,
     }

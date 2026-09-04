@@ -190,7 +190,11 @@ pub fn process_output(
 
             dbtx.insert(&IncomingContractIndexTable, &outpoint, &stream_index);
 
-            dbtx.insert(&IncomingContractStreamNextIndexTable, &(), &(stream_index + 1));
+            dbtx.insert(
+                &IncomingContractStreamNextIndexTable,
+                &(),
+                &(stream_index + 1),
+            );
 
             let dk_share = contract
                 .offer

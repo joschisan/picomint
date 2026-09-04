@@ -13,19 +13,19 @@ use crate::secp256k1::XOnlyPublicKey;
 // ── signature-shares ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SignaturesRequest {
+pub struct SignatureSharesRequest {
     pub txid: TransactionId,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct SignaturesResponse {
+pub struct SignatureSharesResponse {
     pub shares: Vec<BlindedSignatureShare>,
 }
 
 // ── restore-signature-shares ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SignaturesRestoreRequest {
+pub struct SignatureSharesRestoreRequest {
     pub messages: Vec<BlindedMessage>,
 }
 
@@ -33,7 +33,7 @@ pub struct SignaturesRestoreRequest {
 /// once [`IssuanceStateResponse`] has already confirmed every message, so a
 /// miss here is a genuine fault rather than the expected outcome of probing.
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct SignaturesRestoreResponse {
+pub struct SignatureSharesRestoreResponse {
     pub shares: Vec<BlindedSignatureShare>,
 }
 
@@ -78,8 +78,8 @@ pub struct SpendStateResponse {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum EcashMethod {
-    Signatures(SignaturesRequest),
-    SignaturesRestore(SignaturesRestoreRequest),
+    SignatureShares(SignatureSharesRequest),
+    SignatureSharesRestore(SignatureSharesRestoreRequest),
     SpendState(SpendStateRequest),
     IssuanceState(IssuanceStateRequest),
 }

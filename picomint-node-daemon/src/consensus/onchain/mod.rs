@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use self::db::{
     FeeRateVoteTable, MintOnchainTable, NonceEntry, NonceLogTable, Output, OutputTable,
-    SignaturesTable, SpentOutputIndexTable, TxInfoIndexTable, TxInfoTable, UnconfirmedTxTable,
+    SignatureShareTable, SpentOutputIndexTable, TxInfoIndexTable, TxInfoTable, UnconfirmedTxTable,
     UnsignedTxTable,
 };
 use crate::bitcoind::BitcoindRpcMonitor;
@@ -215,7 +215,7 @@ fn signing_session_proposal(
 
     let public_nonces = fresh_nonces.iter().map(derive_public_nonce).collect();
 
-    Some(OnchainConsensusItem::Signatures(
+    Some(OnchainConsensusItem::SignatureShares(
         txid,
         shares,
         public_nonces,
@@ -263,8 +263,8 @@ pub async fn process_consensus_item(
             Ok(())
         }
         OnchainConsensusItem::Nonces(txid, nonces) => process_nonces(dbtx, node, txid, nonces),
-        OnchainConsensusItem::Signatures(txid, shares, nonces) => {
-            process_signatures(server, dbtx, node, txid, shares, nonces).await
+        OnchainConsensusItem::SignatureShares(txid, shares, nonces) => {
+            process_signature_shares(server, dbtx, node, txid, shares, nonces).await
         }
     }
 }
@@ -659,7 +659,7 @@ fn process_nonces(
     Ok(())
 }
 
-async fn process_signatures(
+async fn process_signature_shares(
     server: &Server,
     dbtx: &WriteTx,
     node: NodeId,
@@ -733,7 +733,7 @@ async fn process_signatures(
     }
 
     ensure!(
-        dbtx.insert(&SignaturesTable, &(latest as u64), &shares)
+        dbtx.insert(&SignatureShareTable, &(latest as u64), &shares)
             .is_none(),
         "Already received signature shares for this entry"
     );
@@ -742,7 +742,7 @@ async fn process_signatures(
 
     dbtx.insert(&NonceLogTable, &next_index, &NonceEntry(node, fresh_nonces));
 
-    let responses: Vec<Vec<SignatureShare>> = dbtx.range(&SignaturesTable, chunk_range, |r| {
+    let responses: Vec<Vec<SignatureShare>> = dbtx.range(&SignatureShareTable, chunk_range, |r| {
         r.map(|(_, shares)| shares).collect()
     });
 
@@ -753,7 +753,7 @@ async fn process_signatures(
 
         dbtx.clear_table(&NonceLogTable);
 
-        dbtx.clear_table(&SignaturesTable);
+        dbtx.clear_table(&SignatureShareTable);
 
         dbtx.insert(&UnconfirmedTxTable, &txid, &unsigned);
 

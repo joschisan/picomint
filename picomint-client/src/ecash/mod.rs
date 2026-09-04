@@ -203,7 +203,8 @@ pub(crate) async fn scan(
     let mut notes = Vec::with_capacity(requests.len());
 
     if !requests.is_empty() {
-        let shares = api::signatures_restore(api, requests.clone(), cfg.tbs_pks.clone()).await;
+        let shares =
+            api::signature_shares_restore(api, requests.clone(), cfg.tbs_pks.clone()).await;
 
         for (i, request) in requests.iter().enumerate() {
             let shares = shares
