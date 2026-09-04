@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tpe::AggregateDecryptionKey;
 
-use crate::ln::contracts::{IncomingContract, OutgoingContract};
+use crate::lightning::contracts::{IncomingContract, OutgoingContract};
 use crate::{Amount, OutPoint};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Decodable, Encodable)]

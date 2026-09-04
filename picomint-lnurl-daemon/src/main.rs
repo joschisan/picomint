@@ -16,16 +16,16 @@ use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
-use picomint_core::ln::MINIMUM_INCOMING_CONTRACT_AMOUNT;
-use picomint_core::ln::contracts::IncomingOffer;
-use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
-use picomint_core::ln::lnurl::{LnurlRequest, MAX_GUARDIANS_PER_LNURL};
-use picomint_core::ln::methods::{
-    GatewayMethod, GatewaysRequest, GatewaysResponse, InfoRequest, InfoResponse, LnMethod,
+use picomint_core::lightning::MINIMUM_INCOMING_CONTRACT_AMOUNT;
+use picomint_core::lightning::contracts::IncomingOffer;
+use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
+use picomint_core::lightning::lnurl::{LnurlRequest, MAX_GUARDIANS_PER_LNURL};
+use picomint_core::lightning::methods::{
+    GatewayMethod, GatewaysRequest, GatewaysResponse, InfoRequest, InfoResponse, LightningMethod,
     ReceiveRequest, ReceiveResponse, TpeAggregatePkRequest, TpeAggregatePkResponse, VerifyRequest,
     VerifyResponse as WireVerifyResponse,
 };
-use picomint_core::ln::secret::IncomingContractSecret;
+use picomint_core::lightning::secret::IncomingContractSecret;
 use picomint_core::methods::{CoreMethod, FederationInfoRequest, FederationInfoResponse};
 use picomint_core::module::Method;
 use picomint_encoding::{Decodable, Encodable};
@@ -318,7 +318,7 @@ async fn fetch_federation_info(
 /// a value is the same assumption the rest of the federation already rests on.
 async fn fetch_aggregate_pk(api: &FederationApi) -> anyhow::Result<AggregatePublicKey> {
     let response: TpeAggregatePkResponse = api
-        .request_current_consensus(Method::Ln(LnMethod::TpeAggregatePk(TpeAggregatePkRequest)))
+        .request_current_consensus(Method::Lightning(LightningMethod::TpeAggregatePk(TpeAggregatePkRequest)))
         .await?;
 
     Ok(response.tpe_agg_pk)
@@ -328,7 +328,7 @@ async fn fetch_aggregate_pk(api: &FederationApi) -> anyhow::Result<AggregatePubl
 /// returning byte-identical lists.
 async fn fetch_gateways(api: &FederationApi) -> anyhow::Result<Vec<GatewayPk>> {
     let response: GatewaysResponse = api
-        .request_current_consensus(Method::Ln(LnMethod::Gateways(GatewaysRequest)))
+        .request_current_consensus(Method::Lightning(LightningMethod::Gateways(GatewaysRequest)))
         .await?;
 
     Ok(response.gateways)

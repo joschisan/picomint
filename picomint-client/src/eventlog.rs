@@ -38,8 +38,8 @@ pub enum EventSource {
     Core,
     ECash,
     Wallet,
-    Ln,
-    Gw,
+    Lightning,
+    Gateway,
 }
 
 pub trait Event: serde::Serialize + serde::de::DeserializeOwned {

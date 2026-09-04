@@ -13,11 +13,11 @@ use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
-use picomint_client::gw::GATEWAY_ACCOUNT;
+use picomint_client::gateway::GATEWAY_ACCOUNT;
 use picomint_client::onchain::events::{SendFailureEvent, SendSuccessEvent};
 use picomint_client::{TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
-use picomint_core::ln::gateway::GatewayPk;
+use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, ChannelInfo, FederationAddRequest, FederationBalanceRequest,
     FederationBalanceResponse, FederationConfigRequest, FederationConfigResponse,
@@ -37,8 +37,8 @@ use picomint_gateway_cli_core::{
     ROUTE_FEDERATION_MODULE_ONCHAIN_RECEIVE, ROUTE_FEDERATION_MODULE_ONCHAIN_SEND,
     ROUTE_FEDERATION_MODULE_ONCHAIN_SEND_FEE, ROUTE_FEDERATION_REMOVE, ROUTE_INFO,
     ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
-    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LN_PROBE,
-    ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
+    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE,
+    ROUTE_LDK_LIGHTNING_RECEIVE, ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
     ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
     ROUTE_QUERY,
 };
@@ -123,9 +123,9 @@ fn router() -> Router<AppState> {
         .route(ROUTE_LDK_CHANNEL_SPLICE_OUT, post(ldk_channel_splice_out))
         .route(ROUTE_LDK_ONCHAIN_RECEIVE, post(ldk_onchain_receive))
         .route(ROUTE_LDK_ONCHAIN_SEND, post(ldk_onchain_send))
-        .route(ROUTE_LDK_LN_RECEIVE, post(ldk_ln_receive))
-        .route(ROUTE_LDK_LN_SEND, post(ldk_ln_send))
-        .route(ROUTE_LDK_LN_PROBE, post(ldk_ln_probe))
+        .route(ROUTE_LDK_LIGHTNING_RECEIVE, post(ldk_lightning_receive))
+        .route(ROUTE_LDK_LIGHTNING_SEND, post(ldk_lightning_send))
+        .route(ROUTE_LDK_LIGHTNING_PROBE, post(ldk_lightning_probe))
         .route(ROUTE_LDK_PEER_CONNECT, post(ldk_peer_connect))
         .route(ROUTE_LDK_PEER_DISCONNECT, post(ldk_peer_disconnect))
         .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
@@ -486,7 +486,7 @@ async fn ldk_onchain_send(
 
 /// Creates an invoice directly payable to the gateway's lightning node
 #[instrument(skip_all, err)]
-async fn ldk_ln_receive(
+async fn ldk_lightning_receive(
     State(state): State<AppState>,
     Json(payload): Json<LdkLnReceiveRequest>,
 ) -> Result<Json<LdkLnReceiveResponse>, CliError> {
@@ -512,7 +512,7 @@ async fn ldk_ln_receive(
 
 /// Pays an outgoing LN invoice using the gateway's own funds
 #[instrument(skip_all, err)]
-async fn ldk_ln_send(
+async fn ldk_lightning_send(
     State(state): State<AppState>,
     Json(payload): Json<LdkLnSendRequest>,
 ) -> Result<Json<LdkLnSendResponse>, CliError> {
@@ -553,7 +553,7 @@ async fn ldk_ln_send(
 /// outcomes surface only in the daemon's LDK logs, so nothing meaningful is
 /// returned here.
 #[instrument(skip_all, err)]
-async fn ldk_ln_probe(
+async fn ldk_lightning_probe(
     State(state): State<AppState>,
     Json(payload): Json<LdkLnProbeRequest>,
 ) -> Result<Json<()>, CliError> {

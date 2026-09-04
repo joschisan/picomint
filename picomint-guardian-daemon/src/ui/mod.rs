@@ -11,7 +11,7 @@
 //!   with status 200.
 //! - Dashboard UI (once the federation is running). Served by
 //!   [`dashboard::router`] which takes an `Arc<ConsensusApi>` and reaches
-//!   straight into the three typed module instances (`ecash`, `wallet`, `ln`)
+//!   straight into the three typed module instances (`ecash`, `wallet`, `lightning`)
 //!   hanging off it.
 //!
 //! The UI is unauthenticated. Operators are expected to bind it to loopback

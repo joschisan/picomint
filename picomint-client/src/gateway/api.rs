@@ -1,8 +1,8 @@
 use crate::api::FederationApi;
 use picomint_core::OutPoint;
-use picomint_core::ln::ContractId;
-use picomint_core::ln::methods::{
-    LnMethod, OutgoingContractExpiryRequest, OutgoingContractExpiryResponse,
+use picomint_core::lightning::ContractId;
+use picomint_core::lightning::methods::{
+    LightningMethod, OutgoingContractExpiryRequest, OutgoingContractExpiryResponse,
 };
 use picomint_core::module::Method;
 
@@ -13,8 +13,8 @@ pub async fn outgoing_contract_expiry(
     api: &FederationApi,
     outpoint: OutPoint,
 ) -> anyhow::Result<Option<(ContractId, u32)>> {
-    api.request_current_consensus::<OutgoingContractExpiryResponse>(Method::Ln(
-        LnMethod::OutgoingContractExpiry(OutgoingContractExpiryRequest { outpoint }),
+    api.request_current_consensus::<OutgoingContractExpiryResponse>(Method::Lightning(
+        LightningMethod::OutgoingContractExpiry(OutgoingContractExpiryRequest { outpoint }),
     ))
     .await
     .map(|resp| resp.contract)

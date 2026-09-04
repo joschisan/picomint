@@ -7,15 +7,15 @@
 //! in between. Every operation takes the
 //! [`picomint_core::config::FederationId`] it acts on
 //! and is named for the module that serves it — `ecash_send`,
-//! `onchain_receive`, `ln_receive`, `gw_finalize_send` — so there is
+//! `onchain_receive`, `lightning_receive`, `gateway_finalize_send` — so there is
 //! no per-federation handle to hold or leak.
 //!
 //! Every table is shared across federations with a
 //! [`picomint_core::config::FederationId`]-prefixed key, so adds, removes,
 //! and all module writes commit through one database.
 //!
-//! Per-module logic lives in [`mod@ecash`], [`mod@wallet`], [`mod@ln`], and
-//! [`mod@gw`]. Each module owns its own state machines and contributes its
+//! Per-module logic lives in [`mod@ecash`], [`mod@wallet`], [`mod@lightning`], and
+//! [`mod@gateway`]. Each module owns its own state machines and contributes its
 //! slice of the flat [`Client`] surface. Submission ownership lives
 //! entirely in the ecash module — non-ecash modules build a
 //! [`crate::tx::TxBuilder`] and call its `finalize_and_submit_tx`, which
@@ -40,9 +40,9 @@ mod executor;
 pub mod expiry;
 /// Federation fee announcement cache, and paying out a collected cut.
 /// Gateway lightning module (mounted by the gateway daemon).
-pub mod gw;
+pub mod gateway;
 /// Lightning module client.
-pub mod ln;
+pub mod lightning;
 /// ECash module client.
 pub mod ecash;
 /// Client query-consensus strategies

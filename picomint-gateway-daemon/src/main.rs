@@ -20,7 +20,7 @@ use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning::types::payment::PaymentHash;
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
-use picomint_core::ln::gateway::PaymentFee;
+use picomint_core::lightning::gateway::PaymentFee;
 use picomint_gateway_daemon::db::{
     IncomingOfferTable, OutgoingContractTable, ProcessedLdkEventTable,
 };
@@ -388,7 +388,7 @@ fn handle_payment_claimable(
     } else {
         if state
             .client
-            .gw_start_receive(row.federation, dbtx, operation, row.offer)
+            .gateway_start_receive(row.federation, dbtx, operation, row.offer)
             .is_err()
         {
             state
@@ -408,7 +408,7 @@ fn handle_payment_successful(
     dbtx: &WriteTx,
     payment_hash: [u8; 32],
     preimage: [u8; 32],
-    ln_fee: Amount,
+    lightning_fee: Amount,
 ) {
     let operation = OperationId::from_encodable(&payment_hash);
 
@@ -422,13 +422,13 @@ fn handle_payment_successful(
     if let Some(row) = dbtx.get(&OutgoingContractTable, &operation) {
         state
             .client
-            .gw_finalize_send(
+            .gateway_finalize_send(
                 row.federation,
                 dbtx,
                 operation,
                 row.contract,
                 row.outpoint,
-                Some((preimage, ln_fee)),
+                Some((preimage, lightning_fee)),
             )
             .expect("source federation for outgoing contract is added");
     }
@@ -449,7 +449,7 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32
     if let Some(row) = dbtx.get(&OutgoingContractTable, &operation) {
         state
             .client
-            .gw_finalize_send(
+            .gateway_finalize_send(
                 row.federation,
                 dbtx,
                 operation,

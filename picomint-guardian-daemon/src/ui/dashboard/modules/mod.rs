@@ -1,2 +1,2 @@
-pub mod ln;
+pub mod lightning;
 pub mod onchain;

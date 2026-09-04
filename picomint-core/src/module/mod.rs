@@ -3,7 +3,7 @@ pub mod audit;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ln::methods::LnMethod;
+use crate::lightning::methods::LightningMethod;
 use crate::methods::CoreMethod;
 use crate::ecash::methods::ECashMethod;
 use crate::onchain::methods::OnchainMethod;
@@ -17,7 +17,7 @@ pub enum Method {
     Core(CoreMethod),
     ECash(ECashMethod),
     Onchain(OnchainMethod),
-    Ln(LnMethod),
+    Lightning(LightningMethod),
 }
 
 /// Authentication secret used to verify guardian admin API requests.

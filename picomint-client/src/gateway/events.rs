@@ -17,24 +17,24 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const SOURCE: EventSource = EventSource::Gw;
+    const SOURCE: EventSource = EventSource::Gateway;
     const KIND: EventKind = EventKind::from_static("send");
 }
 
 /// Emitted when the outgoing HTLC is claimed with a preimage.
 ///
-/// `ln_fee` is the routing cost reported by LDK's `PaymentSuccessful` event
+/// `lightning_fee` is the routing cost reported by LDK's `PaymentSuccessful` event
 /// — `0` for direct swaps between picomint federations (no LN hop) and for
 /// LDK builds that omit fee tracking.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendSuccessEvent {
     pub preimage: [u8; 32],
     pub txid: TransactionId,
-    pub ln_fee: Amount,
+    pub lightning_fee: Amount,
 }
 
 impl Event for SendSuccessEvent {
-    const SOURCE: EventSource = EventSource::Gw;
+    const SOURCE: EventSource = EventSource::Gateway;
     const KIND: EventKind = EventKind::from_static("send-success");
 }
 
@@ -45,7 +45,7 @@ pub struct SendCancelEvent {
 }
 
 impl Event for SendCancelEvent {
-    const SOURCE: EventSource = EventSource::Gw;
+    const SOURCE: EventSource = EventSource::Gateway;
     const KIND: EventKind = EventKind::from_static("send-cancel");
 }
 
@@ -60,7 +60,7 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const SOURCE: EventSource = EventSource::Gw;
+    const SOURCE: EventSource = EventSource::Gateway;
     const KIND: EventKind = EventKind::from_static("receive");
 }
 
@@ -71,7 +71,7 @@ pub struct ReceiveSuccessEvent {
 }
 
 impl Event for ReceiveSuccessEvent {
-    const SOURCE: EventSource = EventSource::Gw;
+    const SOURCE: EventSource = EventSource::Gateway;
     const KIND: EventKind = EventKind::from_static("receive-success");
 }
 
@@ -80,7 +80,7 @@ impl Event for ReceiveSuccessEvent {
 pub struct ReceiveFailureEvent;
 
 impl Event for ReceiveFailureEvent {
-    const SOURCE: EventSource = EventSource::Gw;
+    const SOURCE: EventSource = EventSource::Gateway;
     const KIND: EventKind = EventKind::from_static("receive-failure");
 }
 
@@ -92,6 +92,6 @@ pub struct ReceiveRefundEvent {
 }
 
 impl Event for ReceiveRefundEvent {
-    const SOURCE: EventSource = EventSource::Gw;
+    const SOURCE: EventSource = EventSource::Gateway;
     const KIND: EventKind = EventKind::from_static("receive-refund");
 }

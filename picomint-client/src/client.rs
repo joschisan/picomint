@@ -5,7 +5,7 @@ use crate::Endpoint;
 use crate::api::FederationApi;
 use crate::context::ClientContext;
 use crate::eventlog::{EventLogEntry, EventLogId};
-use crate::ln::Gateways;
+use crate::lightning::Gateways;
 use crate::secret::{ClientSecret, Mnemonic};
 use crate::task::TaskGroup;
 use anyhow::{Context as _, ensure};
@@ -161,8 +161,8 @@ impl Client {
 
         crate::ecash::wipe_tables(&dbtx, federation);
         crate::onchain::wipe_tables(&dbtx, federation);
-        crate::ln::wipe_tables(&dbtx, federation);
-        crate::gw::wipe_tables(&dbtx, federation);
+        crate::lightning::wipe_tables(&dbtx, federation);
+        crate::gateway::wipe_tables(&dbtx, federation);
         crate::tx::wipe_tables(&dbtx, federation);
         crate::expiry::wipe_tables(&dbtx, federation);
 
@@ -265,9 +265,9 @@ impl Client {
 
         crate::tx::operation_is_active(&dbtx, federation, operation)
             || crate::ecash::operation_is_active(&dbtx, federation, operation)
-            || crate::ln::operation_is_active(&dbtx, federation, operation)
+            || crate::lightning::operation_is_active(&dbtx, federation, operation)
             || crate::onchain::operation_is_active(&dbtx, federation, operation)
-            || crate::gw::operation_is_active(&dbtx, federation, operation)
+            || crate::gateway::operation_is_active(&dbtx, federation, operation)
     }
 
     /// Resolve once no state machine is still driving `operation` under
@@ -288,9 +288,9 @@ impl Client {
         let notifies = [
             crate::tx::sm_notifies(&self.db),
             crate::ecash::sm_notifies(&self.db),
-            crate::ln::sm_notifies(&self.db),
+            crate::lightning::sm_notifies(&self.db),
             crate::onchain::sm_notifies(&self.db),
-            crate::gw::sm_notifies(&self.db),
+            crate::gateway::sm_notifies(&self.db),
         ]
         .concat();
 
@@ -352,9 +352,9 @@ fn build_ctx(
 
     crate::onchain::resume(&ctx);
 
-    crate::ln::resume(&ctx);
+    crate::lightning::resume(&ctx);
 
-    crate::gw::resume(&ctx);
+    crate::gateway::resume(&ctx);
 
     ctx.tg.spawn(crate::expiry::refresh(ctx.clone()));
 

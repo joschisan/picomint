@@ -42,9 +42,9 @@ pub const ROUTE_MODULE_ONCHAIN_TOTAL_VALUE: &str = "/module/onchain/total-value"
 pub const ROUTE_MODULE_ONCHAIN_FEERATE: &str = "/module/onchain/feerate";
 pub const ROUTE_MODULE_ONCHAIN_PENDING_TXS: &str = "/module/onchain/pending-txs";
 pub const ROUTE_MODULE_ONCHAIN_TXS: &str = "/module/onchain/txs";
-pub const ROUTE_MODULE_LN_GATEWAY_ADD: &str = "/module/ln/gateway/add";
-pub const ROUTE_MODULE_LN_GATEWAY_REMOVE: &str = "/module/ln/gateway/remove";
-pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/ln/gateway/list";
+pub const ROUTE_MODULE_LN_GATEWAY_ADD: &str = "/module/lightning/gateway/add";
+pub const ROUTE_MODULE_LN_GATEWAY_REMOVE: &str = "/module/lightning/gateway/remove";
+pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/lightning/gateway/list";
 
 // --- /setup/status ---
 // Response: SetupStatus (defined above)
@@ -181,31 +181,31 @@ pub struct TxsResponse {
     pub txs: Vec<TxInfo>,
 }
 
-// --- /module/ln/gateway/* ---
+// --- /module/lightning/gateway/* ---
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
-pub struct LnGatewayAddRequest {
+pub struct LightningGatewayAddRequest {
     /// Gateway iroh public key (base32-encoded).
-    pub pk: picomint_core::ln::gateway::GatewayPk,
+    pub pk: picomint_core::lightning::gateway::GatewayPk,
     /// Display name to identify the gateway by.
     pub name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
-pub struct LnGatewayRemoveRequest {
+pub struct LightningGatewayRemoveRequest {
     /// Gateway iroh public key (base32-encoded).
-    pub pk: picomint_core::ln::gateway::GatewayPk,
+    pub pk: picomint_core::lightning::gateway::GatewayPk,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct LnGatewayListResponse {
-    pub gateways: Vec<LnGatewayInfo>,
+pub struct LightningGatewayListResponse {
+    pub gateways: Vec<LightningGatewayInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct LnGatewayInfo {
+pub struct LightningGatewayInfo {
     /// Gateway iroh public key (base32-encoded).
-    pub pk: picomint_core::ln::gateway::GatewayPk,
+    pub pk: picomint_core::lightning::gateway::GatewayPk,
     /// Display name to identify the gateway by.
     pub name: String,
 }

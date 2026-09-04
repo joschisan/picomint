@@ -24,8 +24,8 @@ use picomint_gateway_cli_core::{
     ROUTE_FEDERATION_MODULE_ONCHAIN_RECEIVE, ROUTE_FEDERATION_MODULE_ONCHAIN_SEND,
     ROUTE_FEDERATION_MODULE_ONCHAIN_SEND_FEE, ROUTE_FEDERATION_REMOVE, ROUTE_INFO,
     ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
-    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LN_PROBE,
-    ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
+    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE,
+    ROUTE_LDK_LIGHTNING_RECEIVE, ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
     ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
     ROUTE_QUERY,
 };
@@ -75,7 +75,7 @@ enum LdkCommands {
     Channel(LdkChannelCommands),
     /// Lightning operations
     #[command(subcommand)]
-    Ln(LdkLnCommands),
+    Lightning(LdkLnCommands),
     /// Peer management
     #[command(subcommand)]
     Peer(LdkPeerCommands),
@@ -266,10 +266,10 @@ async fn main() -> Result<()> {
                     request(d, ROUTE_LDK_CHANNEL_SPLICE_OUT, req).await?
                 }
             },
-            LdkCommands::Ln(cmd) => match cmd {
-                LdkLnCommands::Receive(req) => request(d, ROUTE_LDK_LN_RECEIVE, req).await?,
-                LdkLnCommands::Send(req) => request(d, ROUTE_LDK_LN_SEND, req).await?,
-                LdkLnCommands::Probe(req) => request(d, ROUTE_LDK_LN_PROBE, req).await?,
+            LdkCommands::Lightning(cmd) => match cmd {
+                LdkLnCommands::Receive(req) => request(d, ROUTE_LDK_LIGHTNING_RECEIVE, req).await?,
+                LdkLnCommands::Send(req) => request(d, ROUTE_LDK_LIGHTNING_SEND, req).await?,
+                LdkLnCommands::Probe(req) => request(d, ROUTE_LDK_LIGHTNING_PROBE, req).await?,
             },
             LdkCommands::Peer(cmd) => match cmd {
                 LdkPeerCommands::Connect(req) => request(d, ROUTE_LDK_PEER_CONNECT, req).await?,

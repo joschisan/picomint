@@ -14,7 +14,7 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const SOURCE: EventSource = EventSource::Ln;
+    const SOURCE: EventSource = EventSource::Lightning;
     const KIND: EventKind = EventKind::from_static("send");
 }
 
@@ -25,7 +25,7 @@ pub struct SendSuccessEvent {
 }
 
 impl Event for SendSuccessEvent {
-    const SOURCE: EventSource = EventSource::Ln;
+    const SOURCE: EventSource = EventSource::Lightning;
     const KIND: EventKind = EventKind::from_static("send-success");
 }
 
@@ -40,7 +40,7 @@ pub struct SendRefundEvent {
 }
 
 impl Event for SendRefundEvent {
-    const SOURCE: EventSource = EventSource::Ln;
+    const SOURCE: EventSource = EventSource::Lightning;
     const KIND: EventKind = EventKind::from_static("send-refund");
 }
 
@@ -51,7 +51,7 @@ impl Event for SendRefundEvent {
 pub struct SendFailureEvent;
 
 impl Event for SendFailureEvent {
-    const SOURCE: EventSource = EventSource::Ln;
+    const SOURCE: EventSource = EventSource::Lightning;
     const KIND: EventKind = EventKind::from_static("send-failure");
 }
 
@@ -66,6 +66,6 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const SOURCE: EventSource = EventSource::Ln;
+    const SOURCE: EventSource = EventSource::Lightning;
     const KIND: EventKind = EventKind::from_static("receive");
 }

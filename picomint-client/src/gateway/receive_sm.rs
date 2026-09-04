@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 use anyhow::{Context, anyhow};
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::ln::LightningInput;
-use picomint_core::ln::contracts::IncomingOffer;
-use picomint_core::ln::methods::{DecryptionKeyShareRequest, DecryptionKeyShareResponse, LnMethod};
+use picomint_core::lightning::LightningInput;
+use picomint_core::lightning::contracts::IncomingOffer;
+use picomint_core::lightning::methods::{DecryptionKeyShareRequest, DecryptionKeyShareResponse, LightningMethod};
 use picomint_core::module::Method;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::wire;
@@ -24,7 +24,7 @@ use picomint_rpc::query::FilterMapThreshold;
 table!(
     ReceiveStateMachineTable,
     (FederationId, SmId) => ReceiveStateMachine,
-    "gw-receive-sm",
+    "gateway-receive-sm",
 );
 
 /// Single-state state machine covering the federation side of the receive
@@ -49,7 +49,7 @@ impl StateMachine for ReceiveStateMachine {
             .await
             .map_err(|e| e.to_string())?;
 
-        let tpe_pks = ctx.config.ln.tpe_pks.clone();
+        let tpe_pks = ctx.config.lightning.tpe_pks.clone();
         let offer = self.offer.clone();
         let shares = ctx
             .api
@@ -67,7 +67,7 @@ impl StateMachine for ReceiveStateMachine {
                     },
                     ctx.api.num_peers(),
                 ),
-                Method::Ln(LnMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
+                Method::Lightning(LightningMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
                     outpoint: self.outpoint,
                 })),
             )
@@ -103,7 +103,7 @@ impl StateMachine for ReceiveStateMachine {
 
         if !self
             .offer
-            .verify_agg_decryption_key(&ctx.config.ln.tpe_agg_pk, &agg_decryption_key)
+            .verify_agg_decryption_key(&ctx.config.lightning.tpe_agg_pk, &agg_decryption_key)
         {
             warn!("Aggregate decryption key invalid — TPE config inconsistent");
             ctx.log_event(
@@ -126,10 +126,10 @@ impl StateMachine for ReceiveStateMachine {
         }
 
         let tx_builder = TxBuilder::from_input(Input {
-            input: wire::Input::Ln(LightningInput::Incoming(self.outpoint, agg_decryption_key)),
+            input: wire::Input::Lightning(LightningInput::Incoming(self.outpoint, agg_decryption_key)),
             keypair: self.refund_keypair,
             amount: self.offer.commitment.amount - self.offer.commitment.fee,
-            fee: ctx.config.ln.input_fee,
+            fee: ctx.config.lightning.input_fee,
         });
 
         crate::ecash::finalize_and_submit_tx(

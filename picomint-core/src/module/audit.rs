@@ -9,20 +9,20 @@ use serde::{Deserialize, Serialize};
 pub struct AuditSummary {
     pub ecash: i64,
     pub onchain: i64,
-    pub ln: i64,
+    pub lightning: i64,
     pub total: i64,
 }
 
 impl AuditSummary {
-    pub fn new(ecash: i64, onchain: i64, ln: i64) -> Self {
+    pub fn new(ecash: i64, onchain: i64, lightning: i64) -> Self {
         let total = ecash
             .checked_add(onchain)
-            .and_then(|s| s.checked_add(ln))
+            .and_then(|s| s.checked_add(lightning))
             .expect("Overflow while summing the federation's balance sheet");
         Self {
             ecash,
             onchain,
-            ln,
+            lightning,
             total,
         }
     }

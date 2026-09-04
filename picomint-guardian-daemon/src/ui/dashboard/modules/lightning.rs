@@ -3,15 +3,15 @@ use std::sync::Arc;
 use axum::extract::{Form, State};
 use axum::response::{Html, IntoResponse};
 use maud::{Markup, PreEscaped, html};
-use picomint_core::ln::gateway::GatewayPk;
+use picomint_core::lightning::gateway::GatewayPk;
 use picomint_redb::ReadTx;
 
 use crate::consensus::api::ConsensusApi;
-use crate::consensus::ln;
+use crate::consensus::lightning;
 use crate::ui::modal_header;
 
-pub const LN_ADD_ROUTE: &str = "/ln/add";
-pub const LN_REMOVE_ROUTE: &str = "/ln/remove";
+pub const LN_ADD_ROUTE: &str = "/lightning/add";
+pub const LN_REMOVE_ROUTE: &str = "/lightning/remove";
 
 // Form for adding a gateway. `pk` is kept as a raw string so a
 // malformed value renders an inline error instead of the extractor
@@ -35,7 +35,7 @@ pub struct RemoveGatewayForm {
 // so the card disappears with the last gateway while the dialog stays
 // reachable.
 pub fn render(dbtx: &ReadTx) -> Markup {
-    let gateways = ln::gateways(dbtx);
+    let gateways = lightning::gateways(dbtx);
 
     html! {
         div id="gateway-section" {
@@ -105,7 +105,7 @@ pub async fn post_add(
     State(state): State<Arc<ConsensusApi>>,
     Form(form): Form<AddGatewayForm>,
 ) -> impl IntoResponse {
-    let gateways = ln::gateways(&state.server.db.begin_read());
+    let gateways = lightning::gateways(&state.server.db.begin_read());
 
     let Ok(pk) = form.pk.trim().parse::<GatewayPk>() else {
         return Html(gateway_section(&gateways, Some("Invalid gateway code")).into_string());
@@ -117,9 +117,9 @@ pub async fn post_add(
         return Html(gateway_section(&gateways, Some("Name must not be empty")).into_string());
     }
 
-    ln::add_gateway(&state.server, pk, name);
+    lightning::add_gateway(&state.server, pk, name);
 
-    let gateways = ln::gateways(&state.server.db.begin_read());
+    let gateways = lightning::gateways(&state.server.db.begin_read());
 
     Html(gateway_section(&gateways, None).into_string())
 }
@@ -131,10 +131,10 @@ pub async fn post_remove(
     Form(form): Form<RemoveGatewayForm>,
 ) -> impl IntoResponse {
     if let Ok(pk) = form.pk.trim().parse::<GatewayPk>() {
-        ln::remove_gateway(&state.server, pk);
+        lightning::remove_gateway(&state.server, pk);
     }
 
-    let gateways = ln::gateways(&state.server.db.begin_read());
+    let gateways = lightning::gateways(&state.server.db.begin_read());
 
     Html(gateway_section(&gateways, None).into_string())
 }

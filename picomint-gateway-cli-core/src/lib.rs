@@ -28,9 +28,9 @@ pub const ROUTE_LDK_CHANNEL_SPLICE_IN: &str = "/ldk/channel/splice-in";
 pub const ROUTE_LDK_CHANNEL_SPLICE_OUT: &str = "/ldk/channel/splice-out";
 pub const ROUTE_LDK_ONCHAIN_RECEIVE: &str = "/ldk/onchain/receive";
 pub const ROUTE_LDK_ONCHAIN_SEND: &str = "/ldk/onchain/send";
-pub const ROUTE_LDK_LN_RECEIVE: &str = "/ldk/ln/receive";
-pub const ROUTE_LDK_LN_SEND: &str = "/ldk/ln/send";
-pub const ROUTE_LDK_LN_PROBE: &str = "/ldk/ln/probe";
+pub const ROUTE_LDK_LIGHTNING_RECEIVE: &str = "/ldk/lightning/receive";
+pub const ROUTE_LDK_LIGHTNING_SEND: &str = "/ldk/lightning/send";
+pub const ROUTE_LDK_LIGHTNING_PROBE: &str = "/ldk/lightning/probe";
 pub const ROUTE_LDK_PEER_CONNECT: &str = "/ldk/peer/connect";
 pub const ROUTE_LDK_PEER_DISCONNECT: &str = "/ldk/peer/disconnect";
 pub const ROUTE_LDK_PEER_LIST: &str = "/ldk/peer/list";
@@ -60,8 +60,8 @@ pub struct InfoResponse {
     /// Lightning node public key (LDK node id).
     pub lightning_pk: secp256k1::PublicKey,
     /// Iroh public key the gateway accepts on for the picomint API.
-    /// Federation guardians register this via `module ln gateway add`.
-    pub gateway_pk: picomint_core::ln::gateway::GatewayPk,
+    /// Federation guardians register this via `module lightning gateway add`.
+    pub gateway_pk: picomint_core::lightning::gateway::GatewayPk,
     pub alias: String,
     pub network: String,
     pub block_height: u64,
@@ -200,7 +200,7 @@ pub struct LdkChannelSpliceOutRequest {
     pub amount_sat: u64,
 }
 
-// --- /ldk/ln/probe ---
+// --- /ldk/lightning/probe ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkLnProbeRequest {
@@ -232,7 +232,7 @@ pub struct LdkOnchainSendResponse {
     pub txid: bitcoin::Txid,
 }
 
-// --- /ldk/ln/receive ---
+// --- /ldk/lightning/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkLnReceiveRequest {
@@ -248,7 +248,7 @@ pub struct LdkLnReceiveResponse {
     pub invoice: String,
 }
 
-// --- /ldk/ln/send ---
+// --- /ldk/lightning/send ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkLnSendRequest {

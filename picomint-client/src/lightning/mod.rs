@@ -1,4 +1,4 @@
-pub use picomint_core::ln as common;
+pub use picomint_core::lightning as common;
 
 mod api;
 mod db;
@@ -22,17 +22,17 @@ use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::NumPeersExt;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
-use picomint_core::ln::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
-use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
-use picomint_core::ln::lnurl::LnurlRequest;
-use picomint_core::ln::secret::IncomingContractSecret;
-use picomint_core::ln::{
+use picomint_core::lightning::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
+use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
+use picomint_core::lightning::lnurl::LnurlRequest;
+use picomint_core::lightning::secret::IncomingContractSecret;
+use picomint_core::lightning::{
     LightningInput, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT,
 };
 use picomint_core::methods::FederationInfoResponse;
 use picomint_core::wire;
 
-pub use self::secret::LnSecret;
+pub use self::secret::LightningSecret;
 use picomint_core::{Amount, OutPoint};
 use picomint_encoding::Encodable;
 use rand::seq::IteratorRandom;
@@ -127,7 +127,7 @@ async fn update_gateway_info(ctx: ClientContext) {
 /// with the sub-sat remainder donated.
 fn send_max_amount(ctx: &ClientContext, account: Account, gateway_info: &GatewayInfo) -> Amount {
     crate::ecash::largest_affordable_amount(ctx, account, |amount| {
-        gateway_info.send_fee.fee(amount.msat) + ctx.config.ln.output_fee
+        gateway_info.send_fee.fee(amount.msat) + ctx.config.lightning.output_fee
     })
 }
 
@@ -232,9 +232,9 @@ async fn send_inner(
     };
 
     let tx_builder = TxBuilder::from_output(Output {
-        output: wire::Output::Ln(Box::new(LightningOutput::Outgoing(contract.clone()))),
+        output: wire::Output::Lightning(Box::new(LightningOutput::Outgoing(contract.clone()))),
         amount: amount + fee,
-        fee: ctx.config.ln.output_fee,
+        fee: ctx.config.lightning.output_fee,
     });
 
     let dbtx = ctx.db.begin_write();
@@ -321,7 +321,7 @@ async fn create_offer_and_fetch_invoice(
         .0;
 
     let offer = IncomingOffer::new(
-        ctx.config.ln.tpe_agg_pk,
+        ctx.config.lightning.tpe_agg_pk,
         encryption_seed,
         preimage,
         preimage.consensus_hash(),
@@ -364,17 +364,17 @@ fn receive_incoming_contract(
     sk: SecretKey,
     summary: &IncomingContractSummary,
 ) {
-    let Some((claim_keypair, agg_dk)) = summary.recover(&ctx.config.ln.tpe_agg_pk, &sk) else {
+    let Some((claim_keypair, agg_dk)) = summary.recover(&ctx.config.lightning.tpe_agg_pk, &sk) else {
         return;
     };
 
     let tx_builder = TxBuilder::from_input(Input {
-        input: wire::Input::Ln(LightningInput::Incoming(summary.outpoint, agg_dk)),
+        input: wire::Input::Lightning(LightningInput::Incoming(summary.outpoint, agg_dk)),
         keypair: claim_keypair,
         amount: summary
             .claim_amount()
             .expect("Recovered summary has fee <= amount"),
-        fee: ctx.config.ln.input_fee,
+        fee: ctx.config.lightning.input_fee,
     });
 
     let operation = OperationId::from_encodable(&summary.outpoint);
@@ -403,7 +403,7 @@ async fn receive_scan(ctx: ClientContext) {
     let keys = Account::ALL.map(|account| {
         (
             account,
-            ctx.secret.ln_secret().receive_keypair(account).secret_key(),
+            ctx.secret.lightning_secret().receive_keypair(account).secret_key(),
         )
     });
 
@@ -519,7 +519,7 @@ impl Client {
     /// distribution. The returned info prices any payment identically, so
     /// callers preview it and pass both values back into the send/receive
     /// calls.
-    pub fn ln_select_gateway(
+    pub fn lightning_select_gateway(
         &self,
         federation: FederationId,
     ) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
@@ -531,8 +531,8 @@ impl Client {
     }
 
     /// Pay an invoice from `account` through a caller-selected gateway
-    /// obtained via [`ln_select_gateway`].
-    pub async fn ln_send(
+    /// obtained via [`lightning_select_gateway`].
+    pub async fn lightning_send(
         &self,
         federation: FederationId,
         account: Account,
@@ -547,9 +547,9 @@ impl Client {
         send_inner(&ctx, account, gateway_pk, gateway_info, invoice, false).await
     }
 
-    /// The largest whole-sat invoice amount a [`ln_send_max`] from
+    /// The largest whole-sat invoice amount a [`lightning_send_max`] from
     /// `account` through this gateway can pay.
-    pub fn ln_send_max_amount(
+    pub fn lightning_send_max_amount(
         &self,
         federation: FederationId,
         account: Account,
@@ -562,7 +562,7 @@ impl Client {
 
     /// Empty `account` to `lnurl` through a caller-selected gateway: resolve
     /// it, size the max, pay.
-    pub async fn ln_send_max(
+    pub async fn lightning_send_max(
         &self,
         federation: FederationId,
         account: Account,
@@ -576,8 +576,8 @@ impl Client {
     }
 
     /// Request an invoice into `account` from a caller-selected gateway
-    /// obtained via [`ln_select_gateway`].
-    pub async fn ln_receive(
+    /// obtained via [`lightning_select_gateway`].
+    pub async fn lightning_receive(
         &self,
         federation: FederationId,
         account: Account,
@@ -587,7 +587,7 @@ impl Client {
     ) -> Result<Bolt11Invoice, ReceiveError> {
         let ctx = self.ctx(federation).map_err(|_| ReceiveError::NotAdded)?;
 
-        let receive_keypair = ctx.secret.ln_secret().receive_keypair(account);
+        let receive_keypair = ctx.secret.lightning_secret().receive_keypair(account);
 
         create_offer_and_fetch_invoice(
             &ctx,
@@ -602,7 +602,7 @@ impl Client {
     /// A shareable lnurl for `account`, served by `lnurl_daemon`. Nothing
     /// perishable goes into the payload, so it stays valid for as long as
     /// the federation exists.
-    pub fn ln_generate_lnurl(
+    pub fn lightning_generate_lnurl(
         &self,
         federation: FederationId,
         account: Account,
@@ -612,7 +612,7 @@ impl Client {
 
         let config = &ctx.config;
 
-        let recipient = ctx.secret.ln_secret().receive_keypair(account).public_key();
+        let recipient = ctx.secret.lightning_secret().receive_keypair(account).public_key();
 
         // `f + 1` guardians, sampled fresh per lnurl: enough that one is
         // honest and reachable whenever the federation itself is, and random
@@ -642,9 +642,9 @@ impl Client {
     }
 
     /// Re-run the threshold-consensus gateway query and re-probe every
-    /// announced gateway, so [`ln_select_gateway`] reflects the
+    /// announced gateway, so [`lightning_select_gateway`] reflects the
     /// federation's current set.
-    pub async fn ln_refresh_gateways(&self, federation: FederationId) -> anyhow::Result<()> {
+    pub async fn lightning_refresh_gateways(&self, federation: FederationId) -> anyhow::Result<()> {
         let ctx = self.ctx(federation)?;
 
         update_gateway_pks(ctx.clone()).await?;

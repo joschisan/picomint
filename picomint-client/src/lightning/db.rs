@@ -1,12 +1,12 @@
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::ln::gateway::GatewayPk;
+use picomint_core::lightning::gateway::GatewayPk;
 use picomint_redb::table;
 
 table!(
     IncomingContractStreamIndexTable,
     FederationId => u64,
-    "ln-incoming-contract-stream-index",
+    "lightning-incoming-contract-stream-index",
 );
 
 // The federation's announced gateway pks, mirrored to disk by
@@ -17,7 +17,7 @@ table!(
 table!(
     GatewayPkTable,
     (FederationId, GatewayPk) => (),
-    "ln-gateway-pk",
+    "lightning-gateway-pk",
 );
 
 // Tracks that a send operation has been started for this [`OperationId`].
@@ -26,5 +26,5 @@ table!(
 table!(
     SendOperationTable,
     (FederationId, OperationId) => (),
-    "ln-send-operation",
+    "lightning-send-operation",
 );

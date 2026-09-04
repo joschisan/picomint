@@ -1,7 +1,7 @@
 mod cli;
 mod env;
 mod expiry;
-mod ln;
+mod lightning;
 mod ecash;
 mod restore;
 mod onchain;
@@ -33,15 +33,15 @@ fn main() -> anyhow::Result<()> {
 
     info!("Test environment ready!");
     info!("Invite code: {}", picomint_base32::encode(&env.invite));
-    info!("Gateway: {}", env.gw_data_dir.display());
+    info!("Gateway: {}", env.gateway_data_dir.display());
 
     info!("Running onchain tests...");
     runtime.block_on(onchain::run_tests(&env, &client_send))?;
 
-    info!("Running ln + ecash tests in parallel...");
+    info!("Running lightning + ecash tests in parallel...");
     runtime.block_on(async {
         tokio::try_join!(
-            ln::run_tests(&env, &client_send),
+            lightning::run_tests(&env, &client_send),
             ecash::run_tests(&env, &client_send),
         )
     })?;
@@ -54,10 +54,10 @@ fn main() -> anyhow::Result<()> {
     runtime.block_on(client_send.client.shutdown());
 
     info!("Removing the federation from the gateway...");
-    cli::gateway_federation_remove(&env.gw_data_dir, &env.invite.federation.to_string())?;
+    cli::gateway_federation_remove(&env.gateway_data_dir, &env.invite.federation.to_string())?;
 
     ensure!(
-        cli::gateway_federation_list(&env.gw_data_dir)?
+        cli::gateway_federation_list(&env.gateway_data_dir)?
             .federations
             .is_empty(),
         "gateway still lists federations after remove"
@@ -86,13 +86,13 @@ fn keep_alive(runtime: &tokio::runtime::Runtime, env: &env::TestEnv) -> anyhow::
     let base = &env.data_dir;
     let g0 = base.join("guardian-0");
 
-    // The ln suite registers then deregisters the gateway as cleanup, so
+    // The lightning suite registers then deregisters the gateway as cleanup, so
     // re-register the real gateway with every guardian here — otherwise the
     // kept-alive federation exposes no gateway and a paired phone can't do
     // Lightning.
     info!("Registering gateway with all guardians");
     for peer in 0..env::NUM_GUARDIANS {
-        cli::guardian_ln_gateway_add(&cli::guardian_data_dir(base, peer), &env.gw_pk)?;
+        cli::guardian_lightning_gateway_add(&cli::guardian_data_dir(base, peer), &env.gateway_pk)?;
     }
 
     println!();
@@ -113,7 +113,7 @@ fn keep_alive(runtime: &tokio::runtime::Runtime, env: &env::TestEnv) -> anyhow::
     }
     println!();
     println!(" Gateway (picomint-gateway-cli --data-dir <dir> <cmd>):");
-    println!("   {}", env.gw_data_dir.display());
+    println!("   {}", env.gateway_data_dir.display());
     println!();
     println!(" Examples:");
     println!(
@@ -126,7 +126,7 @@ fn keep_alive(runtime: &tokio::runtime::Runtime, env: &env::TestEnv) -> anyhow::
     );
     println!(
         "   target/release/picomint-gateway-cli  --data-dir {} info",
-        env.gw_data_dir.display(),
+        env.gateway_data_dir.display(),
     );
     println!();
     println!(" Ctrl-C to tear everything down.");

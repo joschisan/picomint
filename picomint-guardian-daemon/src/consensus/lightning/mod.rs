@@ -1,17 +1,17 @@
-pub use picomint_core::ln as common;
+pub use picomint_core::lightning as common;
 
 mod db;
 mod rpc;
 
 use anyhow::{Context, ensure};
 use group::Curve;
-use picomint_core::ln::config::{
+use picomint_core::lightning::config::{
     LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
 };
-use picomint_core::ln::contracts::IncomingContractSummary;
-use picomint_core::ln::gateway::GatewayPk;
-use picomint_core::ln::methods::LnMethod;
-use picomint_core::ln::{
+use picomint_core::lightning::contracts::IncomingContractSummary;
+use picomint_core::lightning::gateway::GatewayPk;
+use picomint_core::lightning::methods::LightningMethod;
+use picomint_core::lightning::{
     LightningInput, LightningInputError, LightningOutput, LightningOutputError, OutgoingWitness,
 };
 use picomint_core::secp256k1::XOnlyPublicKey;
@@ -58,10 +58,10 @@ pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<LightningC
 /// config.
 pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
     ensure!(
-        tpe::derive_pk_share(&cfg.private.ln.sk)
+        tpe::derive_pk_share(&cfg.private.lightning.sk)
             == *cfg
                 .consensus
-                .ln
+                .lightning
                 .tpe_pks
                 .get(&cfg.private.identity)
                 .context("Public key set has no key for our identity")?,
@@ -132,7 +132,7 @@ pub fn process_input(
 
             if !contract
                 .offer
-                .verify_agg_decryption_key(&server.cfg.consensus.ln.tpe_agg_pk, agg_decryption_key)
+                .verify_agg_decryption_key(&server.cfg.consensus.lightning.tpe_agg_pk, agg_decryption_key)
             {
                 return Err(LightningInputError::InvalidDecryptionKey);
             }
@@ -194,7 +194,7 @@ pub fn process_output(
 
             let dk_share = contract
                 .offer
-                .create_decryption_key_share(&server.cfg.private.ln.sk);
+                .create_decryption_key_share(&server.cfg.private.lightning.sk);
 
             dbtx.insert(&DecryptionKeyShareTable, &outpoint, &dk_share);
 
@@ -232,18 +232,18 @@ pub fn audit(dbtx: &WriteTx) -> i64 {
     outgoing + incoming
 }
 
-pub async fn handle_api(server: &Server, method: LnMethod) -> Result<Vec<u8>, String> {
+pub async fn handle_api(server: &Server, method: LightningMethod) -> Result<Vec<u8>, String> {
     match method {
-        LnMethod::AwaitPreimage(req) => handler_async!(await_preimage, server, req).await,
-        LnMethod::DecryptionKeyShare(req) => handler!(decryption_key_share, server, req).await,
-        LnMethod::OutgoingContractExpiry(req) => {
+        LightningMethod::AwaitPreimage(req) => handler_async!(await_preimage, server, req).await,
+        LightningMethod::DecryptionKeyShare(req) => handler!(decryption_key_share, server, req).await,
+        LightningMethod::OutgoingContractExpiry(req) => {
             handler!(outgoing_contract_expiry, server, req).await
         }
-        LnMethod::AwaitIncomingContracts(req) => {
+        LightningMethod::AwaitIncomingContracts(req) => {
             handler_async!(await_incoming_contracts, server, req).await
         }
-        LnMethod::Gateways(req) => handler!(gateways, server, req).await,
-        LnMethod::TpeAggregatePk(req) => handler!(tpe_aggregate_pk, server, req).await,
+        LightningMethod::Gateways(req) => handler!(gateways, server, req).await,
+        LightningMethod::TpeAggregatePk(req) => handler!(tpe_aggregate_pk, server, req).await,
     }
 }
 

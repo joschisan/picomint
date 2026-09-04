@@ -19,7 +19,7 @@ use tracing::info;
 
 use crate::config::ServerConfig;
 use crate::consensus::tx::FundingVerifier;
-use crate::consensus::{ecash, ln, onchain};
+use crate::consensus::{ecash, lightning, onchain};
 
 #[derive(Clone)]
 pub struct Server {
@@ -57,7 +57,7 @@ impl Server {
             wire::Input::Onchain(i) => {
                 onchain::process_input(self, dbtx, i).map_err(wire::InputError::Onchain)
             }
-            wire::Input::Ln(i) => ln::process_input(self, dbtx, i).map_err(wire::InputError::Ln),
+            wire::Input::Lightning(i) => lightning::process_input(self, dbtx, i).map_err(wire::InputError::Lightning),
         }
     }
 
@@ -74,8 +74,8 @@ impl Server {
             wire::Output::Onchain(o) => {
                 onchain::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::Onchain)
             }
-            wire::Output::Ln(o) => {
-                ln::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::Ln)
+            wire::Output::Lightning(o) => {
+                lightning::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::Lightning)
             }
         }
     }
@@ -84,7 +84,7 @@ impl Server {
         match input {
             wire::Input::ECash(..) => self.cfg.consensus.ecash.input_fee,
             wire::Input::Onchain(..) => self.cfg.consensus.onchain.input_fee,
-            wire::Input::Ln(..) => self.cfg.consensus.ln.input_fee,
+            wire::Input::Lightning(..) => self.cfg.consensus.lightning.input_fee,
         }
     }
 
@@ -92,7 +92,7 @@ impl Server {
         match output {
             wire::Output::ECash(..) => self.cfg.consensus.ecash.output_fee,
             wire::Output::Onchain(..) => self.cfg.consensus.onchain.output_fee,
-            wire::Output::Ln(..) => self.cfg.consensus.ln.output_fee,
+            wire::Output::Lightning(..) => self.cfg.consensus.lightning.output_fee,
         }
     }
 
@@ -162,5 +162,5 @@ impl Server {
 
 /// Balance-sheet snapshot across all modules.
 pub fn audit(dbtx: &WriteTx) -> AuditSummary {
-    AuditSummary::new(ecash::audit(dbtx), onchain::audit(dbtx), ln::audit(dbtx))
+    AuditSummary::new(ecash::audit(dbtx), onchain::audit(dbtx), lightning::audit(dbtx))
 }

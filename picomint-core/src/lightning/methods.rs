@@ -1,5 +1,5 @@
 //! Lightning module wire methods. Federation-side methods are framed by the
-//! [`LnMethod`] enum; client↔gateway methods are framed by [`GatewayMethod`].
+//! [`LightningMethod`] enum; client↔gateway methods are framed by [`GatewayMethod`].
 //! Each method has a `Request` and a `Response` type; on the wire, every call
 //! returns `Result<Vec<u8>, String>` with the bytes being the response struct
 //! consensus-encoded.
@@ -12,10 +12,10 @@ use tpe::{AggregatePublicKey, DecryptionKeyShare};
 
 use crate::OutPoint;
 use crate::config::FederationId;
-use crate::ln::ContractId;
-use crate::ln::LightningInvoice;
-use crate::ln::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
-use crate::ln::gateway::{GatewayInfo, GatewayPk};
+use crate::lightning::ContractId;
+use crate::lightning::LightningInvoice;
+use crate::lightning::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
+use crate::lightning::gateway::{GatewayInfo, GatewayPk};
 
 // ── await-preimage ──────────────────────────────────────────────────────────
 
@@ -91,7 +91,7 @@ pub struct TpeAggregatePkResponse {
 // ── dispatch enum ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub enum LnMethod {
+pub enum LightningMethod {
     AwaitPreimage(AwaitPreimageRequest),
     DecryptionKeyShare(DecryptionKeyShareRequest),
     OutgoingContractExpiry(OutgoingContractExpiryRequest),

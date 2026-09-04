@@ -11,8 +11,8 @@ use tpe::{
     verify_agg_dk, verify_ciphertext, verify_dk_share,
 };
 
-use crate::ln::secret::IncomingContractSecret;
-use crate::ln::{ContractId, OfferId};
+use crate::lightning::secret::IncomingContractSecret;
+use crate::lightning::{ContractId, OfferId};
 
 /// What a recipient asks a gateway to fund: terms plus the preimage that
 /// settles them, encrypted to the federation.
@@ -29,7 +29,7 @@ pub struct IncomingOffer {
 }
 
 /// A funded [`IncomingOffer`]: what the federation holds and what
-/// [`crate::ln::LightningInput::Incoming`] spends.
+/// [`crate::lightning::LightningInput::Incoming`] spends.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct IncomingContract {
     pub offer: IncomingOffer,
@@ -185,7 +185,7 @@ pub struct IncomingContractSummary {
     /// rebuilds the offer from what it derived plus the fields above; a
     /// matching id proves the reconstruction is byte-identical to the stored
     /// one, and so that every check
-    /// [`crate::ln::LightningInput::Incoming`] runs at claim time will pass.
+    /// [`crate::lightning::LightningInput::Incoming`] runs at claim time will pass.
     pub offer_id: OfferId,
 }
 

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use picomint_core::ln::methods::{
+use picomint_core::lightning::methods::{
     AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitPreimageRequest,
     AwaitPreimageResponse, DecryptionKeyShareRequest, DecryptionKeyShareResponse, GatewaysRequest,
     GatewaysResponse, OutgoingContractExpiryRequest, OutgoingContractExpiryResponse,
@@ -130,6 +130,6 @@ pub fn tpe_aggregate_pk(
     _: TpeAggregatePkRequest,
 ) -> Result<TpeAggregatePkResponse, String> {
     Ok(TpeAggregatePkResponse {
-        tpe_agg_pk: server.cfg.consensus.ln.tpe_agg_pk,
+        tpe_agg_pk: server.cfg.consensus.lightning.tpe_agg_pk,
     })
 }

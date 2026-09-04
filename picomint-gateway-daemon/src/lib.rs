@@ -17,15 +17,15 @@ use lightning::types::payment::PaymentHash;
 use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
-use picomint_client::gw::api;
-use picomint_client::gw::events::ReceiveSuccessEvent;
+use picomint_client::gateway::api;
+use picomint_client::gateway::events::ReceiveSuccessEvent;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::Amount;
 use picomint_core::config::FederationId;
 use picomint_core::core::OperationId;
-use picomint_core::ln::LightningInvoice;
-use picomint_core::ln::gateway::{GatewayInfo, PaymentFee};
-use picomint_core::ln::methods::{ReceiveRequest, SendRequest, VerifyResponse};
+use picomint_core::lightning::LightningInvoice;
+use picomint_core::lightning::gateway::{GatewayInfo, PaymentFee};
+use picomint_core::lightning::methods::{ReceiveRequest, SendRequest, VerifyResponse};
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::FederationInfo;
@@ -74,7 +74,7 @@ impl AppState {
 impl AppState {
     pub async fn gateway_info(&self, federation: &FederationId) -> anyhow::Result<GatewayInfo> {
         Ok(GatewayInfo {
-            module_public_key: self.client.gw_pk(*federation)?,
+            module_public_key: self.client.gateway_pk(*federation)?,
             send_fee: self.send_fee,
             receive_fee: self.receive_fee,
             expiry_delta: u16::try_from(self.cltv_expiry_delta + 144)
@@ -94,7 +94,7 @@ impl AppState {
         // --- Verify the request ---------------------------------------------
 
         ensure!(
-            payload.contract.claim_pk == self.client.gw_pk(payload.federation)?,
+            payload.contract.claim_pk == self.client.gateway_pk(payload.federation)?,
             "The outgoing contract is keyed to another gateway"
         );
 
@@ -175,11 +175,11 @@ impl AppState {
         {
             return self
                 .client
-                .gw_subscribe_send(payload.federation, operation)
+                .gateway_subscribe_send(payload.federation, operation)
                 .await;
         }
 
-        self.client.gw_log_send_started(
+        self.client.gateway_log_send_started(
             payload.federation,
             &dbtx,
             operation,
@@ -207,7 +207,7 @@ impl AppState {
             // the LDK send); the LDK events drive its terminal, so treat it as
             // a successful kick-off instead of cancelling an in-flight send.
             if !matches!(result, Ok(_) | Err(ldk_node::NodeError::DuplicatePayment)) {
-                self.client.gw_finalize_send(
+                self.client.gateway_finalize_send(
                     payload.federation,
                     &dbtx,
                     operation,
@@ -228,7 +228,7 @@ impl AppState {
 
             if self
                 .client
-                .gw_start_receive(
+                .gateway_start_receive(
                     incoming_row.federation,
                     &dbtx,
                     operation,
@@ -236,7 +236,7 @@ impl AppState {
                 )
                 .is_err()
             {
-                self.client.gw_finalize_send(
+                self.client.gateway_finalize_send(
                     payload.federation,
                     &dbtx,
                     operation,
@@ -251,7 +251,7 @@ impl AppState {
 
         // --- Await terminal event on F1 -------------------------------------
         self.client
-            .gw_subscribe_send(payload.federation, operation)
+            .gateway_subscribe_send(payload.federation, operation)
             .await
     }
 

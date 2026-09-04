@@ -9,9 +9,9 @@ use picomint_core::TransactionId;
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
-use picomint_core::ln::contracts::OutgoingContract;
-use picomint_core::ln::gateway::GatewayPk;
-use picomint_core::ln::{LightningInput, OutgoingWitness};
+use picomint_core::lightning::contracts::OutgoingContract;
+use picomint_core::lightning::gateway::GatewayPk;
+use picomint_core::lightning::{LightningInput, OutgoingWitness};
 use picomint_core::wire;
 use picomint_core::{OutPoint, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
@@ -27,7 +27,7 @@ use crate::context::ClientContext;
 table!(
     SendStateMachineTable,
     (FederationId, SmId) => SendStateMachine,
-    "ln-send-sm",
+    "lightning-send-sm",
 );
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
@@ -207,10 +207,10 @@ fn submit_refund(
     expired: bool,
 ) -> TransactionId {
     let tx_builder = TxBuilder::from_input(Input {
-        input: wire::Input::Ln(LightningInput::Outgoing(old_state.common.outpoint, witness)),
+        input: wire::Input::Lightning(LightningInput::Outgoing(old_state.common.outpoint, witness)),
         keypair: old_state.common.refund_keypair,
         amount: old_state.common.contract.amount + old_state.common.contract.fee,
-        fee: ctx.config.ln.input_fee,
+        fee: ctx.config.lightning.input_fee,
     });
 
     let operation = old_state.common.operation;

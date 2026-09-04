@@ -14,7 +14,7 @@ use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::config::FederationId;
 use picomint_core::invite::InviteCode;
-use picomint_core::ln::gateway::GatewayPk;
+use picomint_core::lightning::gateway::GatewayPk;
 use picomint_redb::Database;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
@@ -50,7 +50,7 @@ pub const LNURL_DAEMON_PORT: u16 = 28176;
 ///
 /// Non-zero so the whole suite runs against a client that pays a cut on
 /// every transaction it builds — the fee outputs, their counters and their
-/// issuance ride along with each of ecash, onchain and ln rather than needing
+/// issuance ride along with each of ecash, onchain and lightning rather than needing
 /// a scenario of their own. One percent, high enough that a cut on the
 /// smallest amount the suite moves still buys a note.
 pub const CLIENT_FEE_PPM: u64 = 10_000;
@@ -71,8 +71,8 @@ pub struct TestEnv {
     pub data_dir: std::path::PathBuf,
     pub bitcoind: bitcoincore_rpc::Client,
     pub invite: InviteCode,
-    pub gw_data_dir: std::path::PathBuf,
-    pub gw_pk: GatewayPk,
+    pub gateway_data_dir: std::path::PathBuf,
+    pub gateway_pk: GatewayPk,
     pub lnurl_daemon_url: String,
     pub client_counter: AtomicU64,
     /// One per guardian, indexed by peer id. `None` once we've killed it.
@@ -152,17 +152,17 @@ impl TestEnv {
             None,
         ))?;
 
-        runtime.block_on(start_gateway(base, "gw", GW_PORT, GW_LN_PORT))?;
+        runtime.block_on(start_gateway(base, "gateway", GW_PORT, GW_LN_PORT))?;
 
-        let gw_data_dir = base.join("gw");
+        let gateway_data_dir = base.join("gateway");
 
         info!("Waiting for gateway...");
-        let gw_pk = runtime.block_on(retry("gw ready", || async {
-            Ok(cli::gateway_info(&gw_data_dir)?.gateway_pk)
+        let gateway_pk = runtime.block_on(retry("gateway ready", || async {
+            Ok(cli::gateway_info(&gateway_data_dir)?.gateway_pk)
         }))?;
         info!(
             "Gateway ready, gateway_pk={}",
-            picomint_base32::encode(&gw_pk)
+            picomint_base32::encode(&gateway_pk)
         );
 
         runtime.block_on(start_lnurl_daemon(base, LNURL_DAEMON_PORT))?;
@@ -170,7 +170,7 @@ impl TestEnv {
         info!("LNURL daemon started on {LNURL_DAEMON_PORT}");
 
         info!("Connecting gateway to federation...");
-        cli::gateway_federation_add(&gw_data_dir, &invite)?;
+        cli::gateway_federation_add(&gateway_data_dir, &invite)?;
         info!("Gateway connected");
 
         info!("Building freestanding LDK node...");
@@ -178,7 +178,7 @@ impl TestEnv {
         info!("LDK node built: {}", ldk_node.node_id());
 
         info!("Funding gateway and opening channel to LDK node...");
-        runtime.block_on(open_channel(&bitcoind, &gw_data_dir, &ldk_node))?;
+        runtime.block_on(open_channel(&bitcoind, &gateway_data_dir, &ldk_node))?;
         info!("Channel opened");
 
         Ok((
@@ -187,8 +187,8 @@ impl TestEnv {
                 data_dir,
                 bitcoind,
                 invite,
-                gw_data_dir,
-                gw_pk,
+                gateway_data_dir,
+                gateway_pk,
                 lnurl_daemon_url,
                 client_counter,
                 guardian_processes: Mutex::new(guardian_processes),
@@ -360,7 +360,7 @@ async fn start_lnurl_daemon(base: &Path, port: u16) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn start_gateway(base: &Path, name: &str, gw_port: u16, ln_port: u16) -> anyhow::Result<()> {
+async fn start_gateway(base: &Path, name: &str, gateway_port: u16, lightning_port: u16) -> anyhow::Result<()> {
     let data_dir = base.join(name);
 
     tokio::fs::create_dir_all(&data_dir).await?;
@@ -369,8 +369,8 @@ async fn start_gateway(base: &Path, name: &str, gw_port: u16, ln_port: u16) -> a
 
     Command::new("target/release/picomint-gateway-daemon")
         .env("DATA_DIR", data_dir.to_str().unwrap())
-        .env("API_ADDR", format!("0.0.0.0:{gw_port}"))
-        .env("LDK_ADDR", format!("0.0.0.0:{ln_port}"))
+        .env("API_ADDR", format!("0.0.0.0:{gateway_port}"))
+        .env("LDK_ADDR", format!("0.0.0.0:{lightning_port}"))
         .env("BITCOIN_NETWORK", "regtest")
         .env(
             "BITCOIND_URL",
@@ -381,7 +381,7 @@ async fn start_gateway(base: &Path, name: &str, gw_port: u16, ln_port: u16) -> a
         .spawn()
         .context(format!("Failed to start {name}"))?;
 
-    info!("Started {name} on port {gw_port}");
+    info!("Started {name} on port {gateway_port}");
     Ok(())
 }
 
@@ -480,10 +480,10 @@ fn build_ldk_node(
 
 async fn open_channel(
     bitcoind: &bitcoincore_rpc::Client,
-    gw_data_dir: &std::path::Path,
+    gateway_data_dir: &std::path::Path,
     ldk_node: &ldk_node::Node,
 ) -> anyhow::Result<()> {
-    let addr = cli::gateway_ldk_onchain_receive(gw_data_dir)?
+    let addr = cli::gateway_ldk_onchain_receive(gateway_data_dir)?
         .address
         .assume_checked();
 
@@ -492,7 +492,7 @@ async fn open_channel(
 
     let target_height = block_in_place(|| bitcoind.get_block_count())? - 1;
     retry("gateway sync", || async {
-        let info = cli::gateway_info(gw_data_dir)?;
+        let info = cli::gateway_info(gateway_data_dir)?;
         ensure!(
             info.block_height >= target_height,
             "not synced: {} < {target_height}",
@@ -503,19 +503,19 @@ async fn open_channel(
     .await?;
 
     let ldk_pubkey = ldk_node.node_id().to_string();
-    let ldk_ln_addr = format!("127.0.0.1:{TEST_LDK_PORT}");
+    let ldk_lightning_addr = format!("127.0.0.1:{TEST_LDK_PORT}");
 
     cli::gateway_ldk_channel_open(
-        gw_data_dir,
+        gateway_data_dir,
         &ldk_pubkey,
-        &ldk_ln_addr,
+        &ldk_lightning_addr,
         10_000_000,
         5_000_000,
     )?;
 
     // Wait for the funding tx to be negotiated
     let funding_txid = retry("funding tx", || async {
-        cli::gateway_ldk_channel_list(gw_data_dir)?
+        cli::gateway_ldk_channel_list(gateway_data_dir)?
             .channels
             .into_iter()
             .find_map(|c| c.funding_txid)
@@ -551,7 +551,7 @@ async fn open_channel(
 
     // Wait for channel to be active on the gateway side
     retry("channel active", || async {
-        let channels = cli::gateway_ldk_channel_list(gw_data_dir)?.channels;
+        let channels = cli::gateway_ldk_channel_list(gateway_data_dir)?.channels;
         ensure!(
             channels.iter().any(|c| c.is_usable),
             "no active channels yet"

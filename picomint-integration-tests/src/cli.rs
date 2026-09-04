@@ -4,7 +4,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
-use picomint_core::ln::gateway::GatewayPk;
+use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
     FederationBalanceResponse, FederationListResponse, InfoResponse, LdkChannelListResponse,
     LdkLnReceiveResponse, LdkOnchainReceiveResponse,
@@ -32,9 +32,9 @@ impl RunCli for Command {
     }
 }
 
-fn gateway_cmd(gw_data_dir: &Path) -> Command {
+fn gateway_cmd(gateway_data_dir: &Path) -> Command {
     let mut cmd = Command::new("target/release/picomint-gateway-cli");
-    cmd.arg("--data-dir").arg(gw_data_dir);
+    cmd.arg("--data-dir").arg(gateway_data_dir);
     cmd
 }
 
@@ -52,40 +52,40 @@ pub fn guardian_data_dir(base: &Path, peer: usize) -> PathBuf {
 
 // ── Gateway CLI wrappers ────────────────────────────────────────────────────
 
-pub fn gateway_info(gw_data_dir: &Path) -> Result<InfoResponse> {
-    gateway_cmd(gw_data_dir)
+pub fn gateway_info(gateway_data_dir: &Path) -> Result<InfoResponse> {
+    gateway_cmd(gateway_data_dir)
         .arg("info")
         .run_cli::<InfoResponse>()
 }
 
-pub fn gateway_federation_add(gw_data_dir: &Path, invite: &InviteCode) -> Result<Value> {
-    gateway_cmd(gw_data_dir)
+pub fn gateway_federation_add(gateway_data_dir: &Path, invite: &InviteCode) -> Result<Value> {
+    gateway_cmd(gateway_data_dir)
         .arg("federation")
         .arg("add")
         .arg(picomint_base32::encode(invite))
         .run_cli::<Value>()
 }
 
-pub fn gateway_federation_remove(gw_data_dir: &Path, federation: &str) -> Result<Value> {
-    gateway_cmd(gw_data_dir)
+pub fn gateway_federation_remove(gateway_data_dir: &Path, federation: &str) -> Result<Value> {
+    gateway_cmd(gateway_data_dir)
         .arg("federation")
         .arg("remove")
         .arg(federation)
         .run_cli::<Value>()
 }
 
-pub fn gateway_federation_list(gw_data_dir: &Path) -> Result<FederationListResponse> {
-    gateway_cmd(gw_data_dir)
+pub fn gateway_federation_list(gateway_data_dir: &Path) -> Result<FederationListResponse> {
+    gateway_cmd(gateway_data_dir)
         .arg("federation")
         .arg("list")
         .run_cli::<FederationListResponse>()
 }
 
 pub fn gateway_federation_balance(
-    gw_data_dir: &Path,
+    gateway_data_dir: &Path,
     federation: &str,
 ) -> Result<FederationBalanceResponse> {
-    gateway_cmd(gw_data_dir)
+    gateway_cmd(gateway_data_dir)
         .arg("federation")
         .arg("balance")
         .arg("--id")
@@ -93,8 +93,8 @@ pub fn gateway_federation_balance(
         .run_cli::<FederationBalanceResponse>()
 }
 
-pub fn gateway_ldk_onchain_receive(gw_data_dir: &Path) -> Result<LdkOnchainReceiveResponse> {
-    gateway_cmd(gw_data_dir)
+pub fn gateway_ldk_onchain_receive(gateway_data_dir: &Path) -> Result<LdkOnchainReceiveResponse> {
+    gateway_cmd(gateway_data_dir)
         .arg("ldk")
         .arg("onchain")
         .arg("receive")
@@ -102,48 +102,48 @@ pub fn gateway_ldk_onchain_receive(gw_data_dir: &Path) -> Result<LdkOnchainRecei
 }
 
 pub fn gateway_ldk_channel_open(
-    gw_data_dir: &Path,
+    gateway_data_dir: &Path,
     node_id: &str,
-    ln_addr: &str,
+    lightning_addr: &str,
     channel_sat: u64,
     push_sat: u64,
 ) -> Result<Value> {
-    gateway_cmd(gw_data_dir)
+    gateway_cmd(gateway_data_dir)
         .arg("ldk")
         .arg("channel")
         .arg("open")
         .arg(node_id)
-        .arg(ln_addr)
+        .arg(lightning_addr)
         .arg(channel_sat.to_string())
         .arg("--push-amount-sat")
         .arg(push_sat.to_string())
         .run_cli::<Value>()
 }
 
-pub fn gateway_ldk_channel_list(gw_data_dir: &Path) -> Result<LdkChannelListResponse> {
-    gateway_cmd(gw_data_dir)
+pub fn gateway_ldk_channel_list(gateway_data_dir: &Path) -> Result<LdkChannelListResponse> {
+    gateway_cmd(gateway_data_dir)
         .arg("ldk")
         .arg("channel")
         .arg("list")
         .run_cli::<LdkChannelListResponse>()
 }
 
-pub fn gateway_ldk_ln_receive(
-    gw_data_dir: &Path,
+pub fn gateway_ldk_lightning_receive(
+    gateway_data_dir: &Path,
     amount_msat: u64,
 ) -> Result<LdkLnReceiveResponse> {
-    gateway_cmd(gw_data_dir)
+    gateway_cmd(gateway_data_dir)
         .arg("ldk")
-        .arg("ln")
+        .arg("lightning")
         .arg("receive")
         .arg(amount_msat.to_string())
         .run_cli::<LdkLnReceiveResponse>()
 }
 
-pub fn gateway_ldk_ln_send(gw_data_dir: &Path, invoice: &str) -> Result<Value> {
-    gateway_cmd(gw_data_dir)
+pub fn gateway_ldk_lightning_send(gateway_data_dir: &Path, invoice: &str) -> Result<Value> {
+    gateway_cmd(gateway_data_dir)
         .arg("ldk")
-        .arg("ln")
+        .arg("lightning")
         .arg("send")
         .arg(invoice)
         .run_cli::<Value>()
@@ -212,10 +212,10 @@ pub fn guardian_session_count(data_dir: &Path) -> Result<u64> {
     guardian_cmd(data_dir).arg("session-count").run_cli::<u64>()
 }
 
-pub fn guardian_ln_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
+pub fn guardian_lightning_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
     guardian_cmd(data_dir)
         .arg("module")
-        .arg("ln")
+        .arg("lightning")
         .arg("gateway")
         .arg("add")
         .arg(picomint_base32::encode(pk))
@@ -223,10 +223,10 @@ pub fn guardian_ln_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<bool> 
         .run_cli::<bool>()
 }
 
-pub fn guardian_ln_gateway_remove(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
+pub fn guardian_lightning_gateway_remove(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
     guardian_cmd(data_dir)
         .arg("module")
-        .arg("ln")
+        .arg("lightning")
         .arg("gateway")
         .arg("remove")
         .arg(picomint_base32::encode(pk))

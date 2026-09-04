@@ -1,6 +1,6 @@
 use crate::api::FederationApi;
 use crate::eventlog::{Event, EventLogEntry};
-use crate::ln::Gateways;
+use crate::lightning::Gateways;
 use crate::secret::ClientSecret;
 use crate::task::TaskGroup;
 use futures::StreamExt as _;

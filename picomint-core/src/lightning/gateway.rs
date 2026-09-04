@@ -1,5 +1,5 @@
 //! Gateway identity and pricing types — shared between clients and the
-//! gateway daemon. Wire methods live in [`crate::ln::methods`].
+//! gateway daemon. Wire methods live in [`crate::lightning::methods`].
 
 use std::str::FromStr;
 

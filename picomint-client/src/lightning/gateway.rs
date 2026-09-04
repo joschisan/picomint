@@ -12,7 +12,7 @@
 //! are paid once, then reused by info probes, sends, and receives.
 //!
 //! The wire types ([`GatewayMethod`] + per-method `*Request`/`*Response`
-//! structs) live in [`picomint_core::ln::methods`] because the gateway daemon
+//! structs) live in [`picomint_core::lightning::methods`] because the gateway daemon
 //! must agree on them. The wire envelope is `Result<Vec<u8>, String>` — same
 //! shape as the federation API.
 
@@ -25,10 +25,10 @@ use iroh::Endpoint;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::OutPoint;
 use picomint_core::config::FederationId;
-use picomint_core::ln::LightningInvoice;
-use picomint_core::ln::contracts::{IncomingOffer, OutgoingContract};
-use picomint_core::ln::gateway::{GatewayInfo, GatewayPk};
-use picomint_core::ln::methods::{
+use picomint_core::lightning::LightningInvoice;
+use picomint_core::lightning::contracts::{IncomingOffer, OutgoingContract};
+use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk};
+use picomint_core::lightning::methods::{
     GatewayMethod, InfoRequest, InfoResponse, ReceiveRequest, ReceiveResponse, SendRequest,
     SendResponse,
 };

@@ -11,13 +11,13 @@ use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning_invoice::{Bolt11Invoice, Currency, InvoiceBuilder, PaymentSecret};
 use picomint_client::eventlog::{EventLogEntry, EventLogId};
-use picomint_client::ln::SendPaymentError;
-use picomint_client::ln::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
+use picomint_client::lightning::SendPaymentError;
+use picomint_client::lightning::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
 use picomint_client::tx::{Input, TxBuilder};
 use picomint_client::{Account, OperationId};
-use picomint_core::ln::gateway::{GatewayInfo, GatewayPk, PaymentFee};
-use picomint_core::ln::methods::{GatewayMethod, InfoResponse, SendResponse};
-use picomint_core::ln::{LightningInput, OutgoingWitness};
+use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
+use picomint_core::lightning::methods::{GatewayMethod, InfoResponse, SendResponse};
+use picomint_core::lightning::{LightningInput, OutgoingWitness};
 use picomint_core::{Amount, OutPoint, wire};
 use picomint_encoding::Encodable as _;
 use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_invoice};
@@ -28,16 +28,16 @@ use crate::env::{NUM_ONLINE_GUARDIANS, TestClient, TestEnv, retry};
 
 #[derive(Debug)]
 #[allow(dead_code)]
-enum LnEvent {
+enum LightningEvent {
     Send(SendEvent),
     SendSuccess(SendSuccessEvent),
     SendRefund(SendRefundEvent),
     Receive(ReceiveEvent),
 }
 
-fn ln_event_stream(
+fn lightning_event_stream(
     client: &TestClient,
-) -> impl futures::Stream<Item = (picomint_core::core::OperationId, LnEvent)> {
+) -> impl futures::Stream<Item = (picomint_core::core::OperationId, LightningEvent)> {
     let client = client.clone();
     let notify = client.client.event_notify();
     let mut next_id = EventLogId::LOG_START;
@@ -50,7 +50,7 @@ fn ln_event_stream(
             for (id, entry) in events {
                 next_id = id.saturating_add(1);
 
-                if let Some((op, event)) = try_parse_ln_event(&entry) {
+                if let Some((op, event)) = try_parse_lightning_event(&entry) {
                     yield (op, event);
                 }
             }
@@ -60,41 +60,41 @@ fn ln_event_stream(
     }
 }
 
-fn try_parse_ln_event(
+fn try_parse_lightning_event(
     entry: &EventLogEntry,
-) -> Option<(picomint_core::core::OperationId, LnEvent)> {
+) -> Option<(picomint_core::core::OperationId, LightningEvent)> {
     let op = entry.operation;
     if let Some(e) = entry.to_event() {
-        return Some((op, LnEvent::Send(e)));
+        return Some((op, LightningEvent::Send(e)));
     }
     if let Some(e) = entry.to_event() {
-        return Some((op, LnEvent::SendSuccess(e)));
+        return Some((op, LightningEvent::SendSuccess(e)));
     }
     if let Some(e) = entry.to_event() {
-        return Some((op, LnEvent::SendRefund(e)));
+        return Some((op, LightningEvent::SendRefund(e)));
     }
     if let Some(e) = entry.to_event() {
-        return Some((op, LnEvent::Receive(e)));
+        return Some((op, LightningEvent::Receive(e)));
     }
     None
 }
 
 pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Result<()> {
-    register_gateway(env, &env.gw_pk)?;
+    register_gateway(env, &env.gateway_pk)?;
     client_send
         .client
-        .ln_refresh_gateways(client_send.fed)
+        .lightning_refresh_gateways(client_send.fed)
         .await?;
     test_payments(env, client_send).await?;
     test_lnurl_daemon_roundtrip(env).await?;
-    deregister_gateway(env, &env.gw_pk)?;
+    deregister_gateway(env, &env.gateway_pk)?;
 
     let mock_gw_pk = spawn_mock_gateway().await?;
 
     register_gateway(env, &mock_gw_pk)?;
     client_send
         .client
-        .ln_refresh_gateways(client_send.fed)
+        .lightning_refresh_gateways(client_send.fed)
         .await?;
     test_mock_send_exactly_once(client_send).await?;
     test_mock_send_refund_forfeit(client_send).await?;
@@ -103,7 +103,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     test_unilateral_refund(env, client_send).await?;
     deregister_gateway(env, &mock_gw_pk)?;
 
-    test_direct_ln_payments(env).await?;
+    test_direct_lightning_payments(env).await?;
 
     test_analytics_query(env).await?;
 
@@ -113,7 +113,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 fn register_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()> {
     for peer in 0..NUM_ONLINE_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        assert!(cli::guardian_ln_gateway_add(&data_dir, gateway_pk)?);
+        assert!(cli::guardian_lightning_gateway_add(&data_dir, gateway_pk)?);
     }
     Ok(())
 }
@@ -121,7 +121,7 @@ fn register_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()>
 fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()> {
     for peer in 0..NUM_ONLINE_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
-        assert!(cli::guardian_ln_gateway_remove(&data_dir, gateway_pk)?);
+        assert!(cli::guardian_lightning_gateway_remove(&data_dir, gateway_pk)?);
     }
     Ok(())
 }
@@ -129,7 +129,7 @@ fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<(
 /// Asserts exact row counts in the gateway's in-memory analytics tables
 /// after all real-gateway-driven scenarios in `run_tests` have completed.
 ///
-/// Expected events (module = Ln, emitted by the gateway's gw-module):
+/// Expected events (module = Lightning, emitted by the gateway's gateway-module):
 ///  - `test_payments` self-pay no-liquidity → 1 send, 1 send_cancel
 ///  - `test_payments` no-route              → 1 send, 1 send_cancel
 ///  - `test_payments` outgoing success      → 1 send, 1 send_success
@@ -137,12 +137,12 @@ fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<(
 ///  - `test_payments` outgoing cancel       → 1 send, 1 send_cancel
 ///  - `test_lnurl_daemon_roundtrip` → 1 receive, 1 receive_success, 1 complete
 ///
-/// The mock-gateway tests and `test_direct_ln_payments` don't drive the real
-/// gateway's gw module, so they produce no rows here.
+/// The mock-gateway tests and `test_direct_lightning_payments` don't drive the real
+/// gateway's gateway module, so they produce no rows here.
 async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
-    info!("ln: test_analytics_query");
+    info!("lightning: test_analytics_query");
 
-    let db_path = env.gw_data_dir.join("analytics").join("analytics.sqlite");
+    let db_path = env.gateway_data_dir.join("analytics").join("analytics.sqlite");
     let conn = rusqlite::Connection::open(&db_path)?;
 
     let count = |sql: &str| -> anyhow::Result<u64> {
@@ -193,13 +193,13 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     )?;
     assert_eq!(sum as u64, 1_000_000);
 
-    info!("ln: test_analytics_query passed");
+    info!("lightning: test_analytics_query passed");
 
     Ok(())
 }
 
-async fn test_direct_ln_payments(env: &TestEnv) -> anyhow::Result<()> {
-    info!("ln: test_direct_ln_payments");
+async fn test_direct_lightning_payments(env: &TestEnv) -> anyhow::Result<()> {
+    info!("lightning: test_direct_lightning_payments");
 
     info!("Gateway pays LDK node invoice...");
     {
@@ -211,12 +211,12 @@ async fn test_direct_ln_payments(env: &TestEnv) -> anyhow::Result<()> {
             3600,
         )?;
 
-        cli::gateway_ldk_ln_send(&env.gw_data_dir, &invoice.to_string())?;
+        cli::gateway_ldk_lightning_send(&env.gateway_data_dir, &invoice.to_string())?;
     }
 
     info!("LDK node pays gateway invoice...");
     {
-        let invoice_str = cli::gateway_ldk_ln_receive(&env.gw_data_dir, 1_000_000)?.invoice;
+        let invoice_str = cli::gateway_ldk_lightning_receive(&env.gateway_data_dir, 1_000_000)?.invoice;
         let invoice: lightning_invoice::Bolt11Invoice = invoice_str.parse()?;
 
         // The freestanding node may need a moment to consider the channel ready
@@ -231,15 +231,15 @@ async fn test_direct_ln_payments(env: &TestEnv) -> anyhow::Result<()> {
         .await?;
     }
 
-    info!("ln: test_direct_ln_payments passed");
+    info!("lightning: test_direct_lightning_payments passed");
 
     Ok(())
 }
 
 async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()> {
-    info!("ln: test_payments");
+    info!("lightning: test_payments");
 
-    let mut events = pin!(ln_event_stream(client));
+    let mut events = pin!(lightning_event_stream(client));
 
     info!("Testing self-pay refund when the gateway has no federation liquidity yet...");
 
@@ -250,10 +250,10 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
     // gateway must signal a cancel so the client gets a gateway-signed refund
     // (`expired = false`), not a wait-for-CLTV unilateral refund.
     {
-        let (gateway_pk, gateway_info) = client.client.ln_select_gateway(client.fed)?;
+        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
         let invoice = client
             .client
-            .ln_receive(
+            .lightning_receive(
                 client.fed,
                 Account::Primary,
                 gateway_pk,
@@ -264,7 +264,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
 
         let send_op = client
             .client
-            .ln_send(
+            .lightning_send(
                 client.fed,
                 Account::Primary,
                 gateway_pk,
@@ -273,12 +273,12 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             )
             .await?;
 
-        let Some((op, LnEvent::Send(_))) = events.next().await else {
+        let Some((op, LightningEvent::Send(_))) = events.next().await else {
             panic!("Expected Send event");
         };
         assert_eq!(op, send_op);
 
-        let Some((op, LnEvent::SendRefund(refund))) = events.next().await else {
+        let Some((op, LightningEvent::SendRefund(refund))) = events.next().await else {
             panic!("Expected SendRefund event");
         };
         assert_eq!(op, send_op);
@@ -299,10 +299,10 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
     {
         let invoice = mock_invoice([30; 32], [31; 32], Currency::Regtest);
 
-        let (gateway_pk, gateway_info) = client.client.ln_select_gateway(client.fed)?;
+        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
         let send_op = client
             .client
-            .ln_send(
+            .lightning_send(
                 client.fed,
                 Account::Primary,
                 gateway_pk,
@@ -311,12 +311,12 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             )
             .await?;
 
-        let Some((op, LnEvent::Send(_))) = events.next().await else {
+        let Some((op, LightningEvent::Send(_))) = events.next().await else {
             panic!("Expected Send event");
         };
         assert_eq!(op, send_op);
 
-        let Some((op, LnEvent::SendRefund(refund))) = events.next().await else {
+        let Some((op, LightningEvent::SendRefund(refund))) = events.next().await else {
             panic!("Expected SendRefund event");
         };
         assert_eq!(op, send_op);
@@ -337,10 +337,10 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             3600,
         )?;
 
-        let (gateway_pk, gateway_info) = client.client.ln_select_gateway(client.fed)?;
+        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
         let send_op = client
             .client
-            .ln_send(
+            .lightning_send(
                 client.fed,
                 Account::Primary,
                 gateway_pk,
@@ -349,12 +349,12 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             )
             .await?;
 
-        let Some((op, LnEvent::Send(_))) = events.next().await else {
+        let Some((op, LightningEvent::Send(_))) = events.next().await else {
             panic!("Expected Send event");
         };
         assert_eq!(op, send_op);
 
-        let Some((op, LnEvent::SendSuccess(_))) = events.next().await else {
+        let Some((op, LightningEvent::SendSuccess(_))) = events.next().await else {
             panic!("Expected SendSuccess event");
         };
         assert_eq!(op, send_op);
@@ -367,7 +367,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
         let federation = federation.clone();
         async move {
             let balance =
-                cli::gateway_federation_balance(&env.gw_data_dir, &federation)?.balance_msat;
+                cli::gateway_federation_balance(&env.gateway_data_dir, &federation)?.balance_msat;
             ensure!(balance.msat > 0, "gateway federation balance is zero");
             Ok(())
         }
@@ -377,10 +377,10 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
     info!("Testing payment from LDK node to client (half of first send)...");
 
     {
-        let (gateway_pk, gateway_info) = client.client.ln_select_gateway(client.fed)?;
+        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
         let invoice = client
             .client
-            .ln_receive(
+            .lightning_receive(
                 client.fed,
                 Account::Primary,
                 gateway_pk,
@@ -391,7 +391,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
 
         env.ldk_node.bolt11_payment().send(&invoice, None)?;
 
-        let Some((_op, LnEvent::Receive(_))) = events.next().await else {
+        let Some((_op, LightningEvent::Receive(_))) = events.next().await else {
             panic!("Expected Receive event");
         };
 
@@ -425,10 +425,10 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             payment_hash,
         )?;
 
-        let (gateway_pk, gateway_info) = client.client.ln_select_gateway(client.fed)?;
+        let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
         let send_op = client
             .client
-            .ln_send(
+            .lightning_send(
                 client.fed,
                 Account::Primary,
                 gateway_pk,
@@ -437,7 +437,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
             )
             .await?;
 
-        let Some((op, LnEvent::Send(_))) = events.next().await else {
+        let Some((op, LightningEvent::Send(_))) = events.next().await else {
             panic!("Expected Send event");
         };
         assert_eq!(op, send_op);
@@ -458,13 +458,13 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
         }
         env.ldk_node.bolt11_payment().fail_for_hash(payment_hash)?;
 
-        let Some((op, LnEvent::SendRefund(_))) = events.next().await else {
+        let Some((op, LightningEvent::SendRefund(_))) = events.next().await else {
             panic!("Expected SendRefund event");
         };
         assert_eq!(op, send_op);
     }
 
-    info!("ln: test_payments passed");
+    info!("lightning: test_payments passed");
 
     Ok(())
 }
@@ -472,13 +472,13 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
 /// Consume the stream until an entry for `op` matches `predicate`, and
 /// return that entry. Skips events from other operations (the shared
 /// `client_send` accumulates history across tests).
-async fn wait_ln_event<S>(
+async fn wait_lightning_event<S>(
     events: &mut std::pin::Pin<&mut S>,
     op: OperationId,
-    predicate: impl Fn(&LnEvent) -> bool,
-) -> LnEvent
+    predicate: impl Fn(&LightningEvent) -> bool,
+) -> LightningEvent
 where
-    S: futures::Stream<Item = (OperationId, LnEvent)>,
+    S: futures::Stream<Item = (OperationId, LightningEvent)>,
 {
     loop {
         let Some((event_op, event)) = events.next().await else {
@@ -516,16 +516,16 @@ async fn wait_tx_accepted(
 }
 
 async fn test_mock_send_exactly_once(client: &TestClient) -> anyhow::Result<()> {
-    info!("ln: test_mock_send_exactly_once");
+    info!("lightning: test_mock_send_exactly_once");
 
     let invoice = payable_invoice();
 
-    let mut events = pin!(ln_event_stream(client));
+    let mut events = pin!(lightning_event_stream(client));
 
-    let (gateway_pk, gateway_info) = client.client.ln_select_gateway(client.fed)?;
+    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
     let send_op = client
         .client
-        .ln_send(
+        .lightning_send(
             client.fed,
             Account::Primary,
             gateway_pk,
@@ -534,15 +534,15 @@ async fn test_mock_send_exactly_once(client: &TestClient) -> anyhow::Result<()> 
         )
         .await?;
 
-    wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
-    wait_ln_event(&mut events, send_op, |e| {
-        matches!(e, LnEvent::SendSuccess(_))
+    wait_lightning_event(&mut events, send_op, |e| matches!(e, LightningEvent::Send(_))).await;
+    wait_lightning_event(&mut events, send_op, |e| {
+        matches!(e, LightningEvent::SendSuccess(_))
     })
     .await;
 
     match client
         .client
-        .ln_send(
+        .lightning_send(
             client.fed,
             Account::Primary,
             gateway_pk,
@@ -555,21 +555,21 @@ async fn test_mock_send_exactly_once(client: &TestClient) -> anyhow::Result<()> 
         other => panic!("Expected InvoiceAlreadyAttempted, got {other:?}"),
     }
 
-    info!("ln: test_mock_send_exactly_once passed");
+    info!("lightning: test_mock_send_exactly_once passed");
 
     Ok(())
 }
 
 async fn test_mock_send_refund_forfeit(client: &TestClient) -> anyhow::Result<()> {
-    info!("ln: test_mock_send_refund_forfeit");
+    info!("lightning: test_mock_send_refund_forfeit");
 
-    let mut events = pin!(ln_event_stream(client));
+    let mut events = pin!(lightning_event_stream(client));
 
     let invoice = unpayable_invoice();
-    let (gateway_pk, gateway_info) = client.client.ln_select_gateway(client.fed)?;
+    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
     let send_op = client
         .client
-        .ln_send(
+        .lightning_send(
             client.fed,
             Account::Primary,
             gateway_pk,
@@ -578,26 +578,26 @@ async fn test_mock_send_refund_forfeit(client: &TestClient) -> anyhow::Result<()
         )
         .await?;
 
-    wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
-    wait_ln_event(&mut events, send_op, |e| {
-        matches!(e, LnEvent::SendRefund(_))
+    wait_lightning_event(&mut events, send_op, |e| matches!(e, LightningEvent::Send(_))).await;
+    wait_lightning_event(&mut events, send_op, |e| {
+        matches!(e, LightningEvent::SendRefund(_))
     })
     .await;
 
-    info!("ln: test_mock_send_refund_forfeit passed");
+    info!("lightning: test_mock_send_refund_forfeit passed");
 
     Ok(())
 }
 
 async fn test_mock_wrong_network(client: &TestClient) -> anyhow::Result<()> {
-    info!("ln: test_mock_wrong_network");
+    info!("lightning: test_mock_wrong_network");
 
     let invoice = signet_invoice();
-    let (gateway_pk, gateway_info) = client.client.ln_select_gateway(client.fed)?;
+    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
 
     match client
         .client
-        .ln_send(
+        .lightning_send(
             client.fed,
             Account::Primary,
             gateway_pk,
@@ -613,15 +613,15 @@ async fn test_mock_wrong_network(client: &TestClient) -> anyhow::Result<()> {
         other => panic!("Expected WrongCurrency, got {other:?}"),
     }
 
-    info!("ln: test_mock_wrong_network passed");
+    info!("lightning: test_mock_wrong_network passed");
 
     Ok(())
 }
 
 async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()> {
-    info!("ln: test_claim_outgoing_contract");
+    info!("lightning: test_claim_outgoing_contract");
 
-    let mut events = pin!(ln_event_stream(client));
+    let mut events = pin!(lightning_event_stream(client));
 
     // Crash scenario: mock HTTP-500s on `Send`, so the client loops
     // retrying indefinitely — giving us room to claim the on-chain contract
@@ -629,10 +629,10 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
     let preimage = [12u8; 32];
 
     let invoice = crash_invoice(preimage);
-    let (gateway_pk, gateway_info) = client.client.ln_select_gateway(client.fed)?;
+    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
     let send_op = client
         .client
-        .ln_send(
+        .lightning_send(
             client.fed,
             Account::Primary,
             gateway_pk,
@@ -642,8 +642,8 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
         .await?;
 
     let send_event =
-        match wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await {
-            LnEvent::Send(e) => e,
+        match wait_lightning_event(&mut events, send_op, |e| matches!(e, LightningEvent::Send(_))).await {
+            LightningEvent::Send(e) => e,
             _ => unreachable!(),
         };
 
@@ -659,7 +659,7 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
     // `SendEvent.amount` is already `send_fee.add_to(invoice_amount)` —
     // i.e. the on-chain contract amount. No further fee addition here.
     let tx_builder = TxBuilder::from_input(Input {
-        input: wire::Input::Ln(LightningInput::Outgoing(
+        input: wire::Input::Lightning(LightningInput::Outgoing(
             outpoint,
             OutgoingWitness::Claim(preimage),
         )),
@@ -669,7 +669,7 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
             .client
             .config(client.fed)
             .expect("federation is added")
-            .ln
+            .lightning
             .input_fee,
     });
 
@@ -690,29 +690,29 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
 
     dbtx.commit();
 
-    wait_ln_event(&mut events, send_op, |e| {
-        matches!(e, LnEvent::SendSuccess(_))
+    wait_lightning_event(&mut events, send_op, |e| {
+        matches!(e, LightningEvent::SendSuccess(_))
     })
     .await;
 
-    info!("ln: test_claim_outgoing_contract passed");
+    info!("lightning: test_claim_outgoing_contract passed");
 
     Ok(())
 }
 
 async fn test_unilateral_refund(env: &TestEnv, client: &TestClient) -> anyhow::Result<()> {
-    info!("ln: test_unilateral_refund");
+    info!("lightning: test_unilateral_refund");
 
-    let mut events = pin!(ln_event_stream(client));
+    let mut events = pin!(lightning_event_stream(client));
 
     // Same crash scenario — the mock never settles, and without any on-chain
     // preimage reveal the contract must eventually expire so the client can
     // pull its funds back via `OutgoingWitness::Refund`.
     let invoice = crash_invoice([13; 32]);
-    let (gateway_pk, gateway_info) = client.client.ln_select_gateway(client.fed)?;
+    let (gateway_pk, gateway_info) = client.client.lightning_select_gateway(client.fed)?;
     let send_op = client
         .client
-        .ln_send(
+        .lightning_send(
             client.fed,
             Account::Primary,
             gateway_pk,
@@ -721,25 +721,25 @@ async fn test_unilateral_refund(env: &TestEnv, client: &TestClient) -> anyhow::R
         )
         .await?;
 
-    wait_ln_event(&mut events, send_op, |e| matches!(e, LnEvent::Send(_))).await;
+    wait_lightning_event(&mut events, send_op, |e| matches!(e, LightningEvent::Send(_))).await;
 
     // Contract expiry = consensus_block_count + expiry_delta +
     // CONTRACT_CONFIRMATION_BUFFER = +62 blocks with the mock's settings.
     // Mine 100 so the consensus block count comfortably crosses it.
     env.mine_blocks(100);
 
-    wait_ln_event(&mut events, send_op, |e| {
-        matches!(e, LnEvent::SendRefund(_))
+    wait_lightning_event(&mut events, send_op, |e| {
+        matches!(e, LightningEvent::SendRefund(_))
     })
     .await;
 
-    info!("ln: test_unilateral_refund passed");
+    info!("lightning: test_unilateral_refund passed");
 
     Ok(())
 }
 
 async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
-    info!("ln: test_lnurl_daemon_roundtrip");
+    info!("lightning: test_lnurl_daemon_roundtrip");
 
     // Fresh client so the receive-event stream starts empty.
     let client = env.new_client(None).await?;
@@ -748,7 +748,7 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
 
     let lnurl = client
         .client
-        .ln_generate_lnurl(client.fed, Account::Primary, lnurl_daemon)?;
+        .lightning_generate_lnurl(client.fed, Account::Primary, lnurl_daemon)?;
 
     let pay_url = parse_lnurl(&lnurl).ok_or_else(|| anyhow::anyhow!("parse_lnurl"))?;
 
@@ -781,7 +781,7 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
         tokio::spawn(async move { verify_invoice(&url).await })
     };
 
-    let mut events = pin!(ln_event_stream(&client));
+    let mut events = pin!(lightning_event_stream(&client));
 
     env.ldk_node
         .bolt11_payment()
@@ -795,7 +795,7 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
             panic!("event stream ended");
         };
 
-        if matches!(ev, LnEvent::Receive(_)) {
+        if matches!(ev, LightningEvent::Receive(_)) {
             break;
         }
     }
@@ -828,7 +828,7 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
 
     client.client.shutdown().await;
 
-    info!("ln: test_lnurl_daemon_roundtrip passed");
+    info!("lightning: test_lnurl_daemon_roundtrip passed");
 
     Ok(())
 }

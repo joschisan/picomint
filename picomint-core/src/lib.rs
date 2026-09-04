@@ -33,7 +33,7 @@ pub mod expiry;
 /// Federation invite code
 pub mod invite;
 /// Lightning module wire types / helpers (shared between client and server).
-pub mod ln;
+pub mod lightning;
 /// Guardian wire method names dispatched over Iroh.
 pub mod methods;
 /// ECash module wire types / helpers (shared between client and server).

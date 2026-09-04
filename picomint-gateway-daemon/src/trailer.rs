@@ -1,6 +1,6 @@
 //! Daemon-wide trailer task.
 //!
-//! The `ReceiveStateMachine` in `picomint-client::gw` is purely federation-
+//! The `ReceiveStateMachine` in `picomint-client::gateway` is purely federation-
 //! local — it submits the incoming-contract tx, gathers TPE shares, writes
 //! the terminal `ReceiveSuccess` / `ReceiveRefund` / `ReceiveFailure` event,
 //! and submits the refund tx for refunds. The trailer watches the global
@@ -20,7 +20,7 @@
 use bitcoin::hashes::Hash as _;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use picomint_client::eventlog::EventLogEntry;
-use picomint_client::gw::events::{ReceiveRefundEvent, ReceiveSuccessEvent};
+use picomint_client::gateway::events::{ReceiveRefundEvent, ReceiveSuccessEvent};
 use picomint_core::core::OperationId;
 use picomint_redb::{DbRead, WriteTx};
 use tracing::error;
@@ -76,7 +76,7 @@ fn dispatch(state: &AppState, tx_ref: &WriteTx, entry: &EventLogEntry) {
     if let Some(row) = tx_ref.get(&OutgoingContractTable, &operation) {
         dispatch_direct_swap(state, tx_ref, operation, row, preimage);
     } else {
-        dispatch_ln_receive(state, tx_ref, operation, preimage);
+        dispatch_lightning_receive(state, tx_ref, operation, preimage);
     }
 }
 
@@ -89,7 +89,7 @@ fn dispatch_direct_swap(
 ) {
     state
         .client
-        .gw_finalize_send(
+        .gateway_finalize_send(
             row.federation,
             tx_ref,
             operation,
@@ -102,7 +102,7 @@ fn dispatch_direct_swap(
         .expect("source federation for outgoing contract is added");
 }
 
-fn dispatch_ln_receive(
+fn dispatch_lightning_receive(
     state: &AppState,
     tx_ref: &WriteTx,
     operation: OperationId,

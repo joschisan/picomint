@@ -1,7 +1,7 @@
 //! Gateway-module derivation tree. Only constructible via
-//! [`ClientSecret::gw_secret`]; the path enum is private.
+//! [`ClientSecret::gateway_secret`]; the path enum is private.
 //!
-//! [`ClientSecret::gw_secret`]: crate::secret::ClientSecret::gw_secret
+//! [`ClientSecret::gateway_secret`]: crate::secret::ClientSecret::gateway_secret
 
 use picomint_core::secp256k1::Keypair;
 use picomint_core::secret::Secret;
@@ -13,9 +13,9 @@ enum Path {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct GwSecret(Secret);
+pub struct GatewaySecret(Secret);
 
-impl GwSecret {
+impl GatewaySecret {
     pub(crate) fn new(module_root: Secret) -> Self {
         Self(module_root)
     }

@@ -1,7 +1,7 @@
 //! Lightning-module derivation tree. Only constructible via
-//! [`ClientSecret::ln_secret`]; the path enum is private.
+//! [`ClientSecret::lightning_secret`]; the path enum is private.
 //!
-//! [`ClientSecret::ln_secret`]: crate::secret::ClientSecret::ln_secret
+//! [`ClientSecret::lightning_secret`]: crate::secret::ClientSecret::lightning_secret
 
 use picomint_core::core::Account;
 use picomint_core::secp256k1::Keypair;
@@ -14,9 +14,9 @@ enum Path {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct LnSecret(Secret);
+pub struct LightningSecret(Secret);
 
-impl LnSecret {
+impl LightningSecret {
     pub(crate) fn new(module_root: Secret) -> Self {
         Self(module_root)
     }

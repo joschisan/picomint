@@ -54,7 +54,7 @@ fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, ECashEven
 }
 
 /// Consume `events` until one matches `predicate`, discarding the rest.
-/// The ln and onchain suites fund their send_max clients with ecash from the
+/// The lightning and onchain suites fund their send_max clients with ecash from the
 /// shared `client_send`, so its stream carries Send events that are not this
 /// suite's — a strict next-event assertion would trip over them.
 async fn wait_mint_event<S>(
@@ -281,7 +281,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     info!("ecash: send_max leaves no notes");
 
-    // A fresh client, so emptying the account cannot race the ln suite
+    // A fresh client, so emptying the account cannot race the lightning suite
     // running in parallel on `client_send`.
     let client = env.new_client(None).await?;
 

@@ -11,8 +11,8 @@ pub use picomint_core::secret::Secret;
 use picomint_encoding::Encodable;
 use rand::{CryptoRng, RngCore};
 
-use crate::gw::GwSecret;
-use crate::ln::LnSecret;
+use crate::gateway::GatewaySecret;
+use crate::lightning::LightningSecret;
 use crate::ecash::ECashSecret;
 use crate::onchain::OnchainSecret;
 
@@ -23,16 +23,16 @@ const WORD_COUNT: usize = 12;
 /// load-bearing — reordering silently re-keys every client.
 ///
 /// `Core` is reserved for a future client-core secret; it has no consumer
-/// today. `Gw` is for the gateway-flavor Lightning module, which runs its own
-/// key space distinct from the regular `Ln` client.
+/// today. `Gateway` is for the gateway-flavor Lightning module, which runs its own
+/// key space distinct from the regular `Lightning` client.
 #[derive(Copy, Clone, Debug, Encodable)]
 enum Path {
     #[allow(dead_code)]
     Core,
     Mint,
     Wallet,
-    Ln,
-    Gw,
+    Lightning,
+    Gateway,
 }
 
 /// Per-federation client root secret, derived from `mnemonic → federation`.
@@ -53,12 +53,12 @@ impl ClientSecret {
         OnchainSecret::new(self.0.child(&Path::Wallet))
     }
 
-    pub fn ln_secret(&self) -> LnSecret {
-        LnSecret::new(self.0.child(&Path::Ln))
+    pub fn lightning_secret(&self) -> LightningSecret {
+        LightningSecret::new(self.0.child(&Path::Lightning))
     }
 
-    pub fn gw_secret(&self) -> GwSecret {
-        GwSecret::new(self.0.child(&Path::Gw))
+    pub fn gateway_secret(&self) -> GatewaySecret {
+        GatewaySecret::new(self.0.child(&Path::Gateway))
     }
 }
 

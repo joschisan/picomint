@@ -15,7 +15,7 @@ use tokio::net::UnixListener;
 
 use crate::config::ServerConfig;
 use crate::config::setup::SetupApi;
-use crate::consensus::{ln, onchain};
+use crate::consensus::{lightning, onchain};
 
 #[derive(Debug)]
 pub struct CliError {
@@ -76,7 +76,7 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
 }
 
 /// Build the Dashboard-phase CLI router that exposes read-only federation
-/// endpoints (audit, invite) plus the LN/onchain module-admin routes.
+/// endpoints (audit, invite) plus the lightning/onchain module-admin routes.
 pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     use crate::p2p::{P2PConnectionStatus, Transport};
     use axum::Json;
@@ -84,8 +84,8 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     use picomint_core::expiry::ExpiryStatus;
     use picomint_guardian_cli_core::{
         AuditResponse, BitcoinConnectionResponse, BlockCountResponse, ExpirySetRequest,
-        INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse, LnGatewayAddRequest,
-        LnGatewayInfo, LnGatewayListResponse, LnGatewayRemoveRequest, P2pResponse, PeerInfo,
+        INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse, LightningGatewayAddRequest,
+        LightningGatewayInfo, LightningGatewayListResponse, LightningGatewayRemoveRequest, P2pResponse, PeerInfo,
         PendingTxsResponse, ROUTE_AUDIT, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG,
         ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
         ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
@@ -225,27 +225,27 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         }))
     }
 
-    async fn ln_gateway_add(
+    async fn lightning_gateway_add(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-        Json(payload): Json<LnGatewayAddRequest>,
+        Json(payload): Json<LightningGatewayAddRequest>,
     ) -> Result<Json<bool>, CliError> {
-        Ok(Json(ln::add_gateway(&api.server, payload.pk, payload.name)))
+        Ok(Json(lightning::add_gateway(&api.server, payload.pk, payload.name)))
     }
 
-    async fn ln_gateway_remove(
+    async fn lightning_gateway_remove(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-        Json(payload): Json<LnGatewayRemoveRequest>,
+        Json(payload): Json<LightningGatewayRemoveRequest>,
     ) -> Result<Json<bool>, CliError> {
-        Ok(Json(ln::remove_gateway(&api.server, payload.pk)))
+        Ok(Json(lightning::remove_gateway(&api.server, payload.pk)))
     }
 
-    async fn ln_gateway_list(
+    async fn lightning_gateway_list(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<LnGatewayListResponse>, CliError> {
-        Ok(Json(LnGatewayListResponse {
-            gateways: ln::gateways(&api.server.db.begin_read())
+    ) -> Result<Json<LightningGatewayListResponse>, CliError> {
+        Ok(Json(LightningGatewayListResponse {
+            gateways: lightning::gateways(&api.server.db.begin_read())
                 .into_iter()
-                .map(|(pk, name)| LnGatewayInfo { pk, name })
+                .map(|(pk, name)| LightningGatewayInfo { pk, name })
                 .collect(),
         }))
     }
@@ -286,9 +286,9 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         .route(ROUTE_MODULE_ONCHAIN_FEERATE, post(onchain_feerate))
         .route(ROUTE_MODULE_ONCHAIN_PENDING_TXS, post(onchain_pending_txs))
         .route(ROUTE_MODULE_ONCHAIN_TXS, post(onchain_txs))
-        .route(ROUTE_MODULE_LN_GATEWAY_ADD, post(ln_gateway_add))
-        .route(ROUTE_MODULE_LN_GATEWAY_REMOVE, post(ln_gateway_remove))
-        .route(ROUTE_MODULE_LN_GATEWAY_LIST, post(ln_gateway_list))
+        .route(ROUTE_MODULE_LN_GATEWAY_ADD, post(lightning_gateway_add))
+        .route(ROUTE_MODULE_LN_GATEWAY_REMOVE, post(lightning_gateway_remove))
+        .route(ROUTE_MODULE_LN_GATEWAY_LIST, post(lightning_gateway_list))
         .route(ROUTE_EXPIRY_SET, post(expiry_set))
         .route(ROUTE_EXPIRY_CLEAR, post(expiry_clear))
         .route(ROUTE_EXPIRY_STATUS, post(expiry_status))

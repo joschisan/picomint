@@ -1,6 +1,6 @@
-//! Static wire enums for the fixed module set: ecash + onchain + ln.
+//! Static wire enums for the fixed module set: ecash + onchain + lightning.
 
-use crate::ln::{LightningInput, LightningInputError, LightningOutput, LightningOutputError};
+use crate::lightning::{LightningInput, LightningInputError, LightningOutput, LightningOutputError};
 use crate::ecash::{ECashInput, ECashInputError, ECashOutput, ECashOutputError};
 use crate::onchain::{
     OnchainConsensusItem, OnchainInput, OnchainInputError, OnchainOutput, OnchainOutputError,
@@ -12,7 +12,7 @@ use thiserror::Error;
 pub enum Input {
     ECash(ECashInput),
     Onchain(OnchainInput),
-    Ln(LightningInput),
+    Lightning(LightningInput),
 }
 
 impl From<ECashInput> for Input {
@@ -23,7 +23,7 @@ impl From<ECashInput> for Input {
 
 impl From<LightningInput> for Input {
     fn from(v: LightningInput) -> Self {
-        Self::Ln(v)
+        Self::Lightning(v)
     }
 }
 
@@ -37,7 +37,7 @@ impl From<OnchainInput> for Input {
 pub enum Output {
     ECash(ECashOutput),
     Onchain(OnchainOutput),
-    Ln(Box<LightningOutput>),
+    Lightning(Box<LightningOutput>),
 }
 
 impl From<ECashOutput> for Output {
@@ -48,7 +48,7 @@ impl From<ECashOutput> for Output {
 
 impl From<LightningOutput> for Output {
     fn from(v: LightningOutput) -> Self {
-        Self::Ln(Box::new(v))
+        Self::Lightning(Box::new(v))
     }
 }
 
@@ -76,7 +76,7 @@ pub enum InputError {
     #[error("Onchain input error: {0}")]
     Onchain(OnchainInputError),
     #[error("Lightning input error: {0}")]
-    Ln(LightningInputError),
+    Lightning(LightningInputError),
 }
 
 impl From<ECashInputError> for InputError {
@@ -87,7 +87,7 @@ impl From<ECashInputError> for InputError {
 
 impl From<LightningInputError> for InputError {
     fn from(v: LightningInputError) -> Self {
-        Self::Ln(v)
+        Self::Lightning(v)
     }
 }
 
@@ -104,7 +104,7 @@ pub enum OutputError {
     #[error("Onchain output error: {0}")]
     Onchain(OnchainOutputError),
     #[error("Lightning output error: {0}")]
-    Ln(LightningOutputError),
+    Lightning(LightningOutputError),
 }
 
 impl From<ECashOutputError> for OutputError {
@@ -115,7 +115,7 @@ impl From<ECashOutputError> for OutputError {
 
 impl From<LightningOutputError> for OutputError {
     fn from(v: LightningOutputError) -> Self {
-        Self::Ln(v)
+        Self::Lightning(v)
     }
 }
 

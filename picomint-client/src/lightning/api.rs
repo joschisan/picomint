@@ -1,10 +1,10 @@
 use crate::api::FederationApi;
 use picomint_core::OutPoint;
-use picomint_core::ln::contracts::IncomingContractSummary;
-use picomint_core::ln::gateway::GatewayPk;
-use picomint_core::ln::methods::{
+use picomint_core::lightning::contracts::IncomingContractSummary;
+use picomint_core::lightning::gateway::GatewayPk;
+use picomint_core::lightning::methods::{
     AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitPreimageRequest,
-    AwaitPreimageResponse, GatewaysRequest, GatewaysResponse, LnMethod,
+    AwaitPreimageResponse, GatewaysRequest, GatewaysResponse, LightningMethod,
 };
 use picomint_core::module::Method;
 
@@ -13,8 +13,8 @@ pub async fn await_preimage(
     outpoint: OutPoint,
     expiry: u32,
 ) -> Option<[u8; 32]> {
-    api.request_current_consensus_retry::<AwaitPreimageResponse>(Method::Ln(
-        LnMethod::AwaitPreimage(AwaitPreimageRequest { outpoint, expiry }),
+    api.request_current_consensus_retry::<AwaitPreimageResponse>(Method::Lightning(
+        LightningMethod::AwaitPreimage(AwaitPreimageRequest { outpoint, expiry }),
     ))
     .await
     .preimage
@@ -26,8 +26,8 @@ pub async fn await_incoming_contracts(
     batch: u64,
 ) -> (Vec<IncomingContractSummary>, u64) {
     let resp = api
-        .request_current_consensus_retry::<AwaitIncomingContractsResponse>(Method::Ln(
-            LnMethod::AwaitIncomingContracts(AwaitIncomingContractsRequest { start, batch }),
+        .request_current_consensus_retry::<AwaitIncomingContractsResponse>(Method::Lightning(
+            LightningMethod::AwaitIncomingContracts(AwaitIncomingContractsRequest { start, batch }),
         ))
         .await;
 
@@ -39,7 +39,7 @@ pub async fn await_incoming_contracts(
 /// via the admin CLI; the response is byte-canonical (sorted via db
 /// iteration) so threshold equality is deterministic.
 pub async fn gateways(api: &FederationApi) -> anyhow::Result<Vec<GatewayPk>> {
-    api.request_current_consensus::<GatewaysResponse>(Method::Ln(LnMethod::Gateways(
+    api.request_current_consensus::<GatewaysResponse>(Method::Lightning(LightningMethod::Gateways(
         GatewaysRequest,
     )))
     .await

@@ -14,20 +14,20 @@ use crate::tx::{Input, Output, TxBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
-use picomint_core::ln::contracts::{IncomingContract, IncomingOffer, OutgoingContract};
-use picomint_core::ln::{LightningInput, LightningOutput, OutgoingWitness};
+use picomint_core::lightning::contracts::{IncomingContract, IncomingOffer, OutgoingContract};
+use picomint_core::lightning::{LightningInput, LightningOutput, OutgoingWitness};
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, secp256k1};
 use secp256k1::schnorr::Signature;
 use tracing::warn;
 
-pub use self::secret::GwSecret;
+pub use self::secret::GatewaySecret;
 use receive_sm::{ReceiveStateMachine, ReceiveStateMachineTable};
 
 /// A gateway client holds a single balance, so every account-scoped call this
 /// module makes names this one. Accounts are a wallet-facing split; the
-/// gateway has no use for a second balance and [`GwSecret`] grows no account
+/// gateway has no use for a second balance and [`GatewaySecret`] grows no account
 /// hop to derive one.
 pub const GATEWAY_ACCOUNT: Account = Account::Primary;
 
@@ -65,12 +65,12 @@ pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
 
 impl Client {
     /// The public key this gateway's contracts are keyed to on `federation`.
-    pub fn gw_pk(&self, federation: FederationId) -> anyhow::Result<XOnlyPublicKey> {
+    pub fn gateway_pk(&self, federation: FederationId) -> anyhow::Result<XOnlyPublicKey> {
         let ctx = self.ctx(federation)?;
 
         Ok(ctx
             .secret
-            .gw_secret()
+            .gateway_secret()
             .contract_keypair()
             .x_only_public_key()
             .0)
@@ -79,7 +79,7 @@ impl Client {
     /// Log a `SendEvent` on the federation's event log. Called by the
     /// daemon's public `Send` handler after it has inserted the outgoing
     /// contract row in the daemon DB; at most once per operation id.
-    pub fn gw_log_send_started(
+    pub fn gateway_log_send_started(
         &self,
         federation: FederationId,
         dbtx: &WriteTx,
@@ -108,7 +108,7 @@ impl Client {
     /// Fund an incoming offer: attach a fresh refund key, submit the
     /// resulting contract, log `ReceiveEvent`, and spawn the state machine
     /// that drives it to settlement. Idempotent on `operation`.
-    pub fn gw_start_receive(
+    pub fn gateway_start_receive(
         &self,
         federation: FederationId,
         dbtx: &WriteTx,
@@ -125,9 +125,9 @@ impl Client {
         };
 
         let tx_builder = TxBuilder::from_output(Output {
-            output: wire::Output::Ln(Box::new(LightningOutput::Incoming(contract))),
+            output: wire::Output::Lightning(Box::new(LightningOutput::Incoming(contract))),
             amount: offer.commitment.amount - offer.commitment.fee,
-            fee: ctx.config.ln.output_fee,
+            fee: ctx.config.lightning.output_fee,
         });
 
         let amount = offer.commitment.amount;
@@ -165,7 +165,7 @@ impl Client {
     /// Settle an outgoing contract: claim it with the preimage on success,
     /// or log the forfeit signature on failure. Idempotent via the caller's
     /// upstream markers, committed in the same dbtx.
-    pub fn gw_finalize_send(
+    pub fn gateway_finalize_send(
         &self,
         federation: FederationId,
         dbtx: &WriteTx,
@@ -177,15 +177,15 @@ impl Client {
         let ctx = self.ctx(federation)?;
 
         match success {
-            Some((preimage, ln_fee)) => {
+            Some((preimage, lightning_fee)) => {
                 let tx_builder = TxBuilder::from_input(Input {
-                    input: wire::Input::Ln(LightningInput::Outgoing(
+                    input: wire::Input::Lightning(LightningInput::Outgoing(
                         outpoint,
                         OutgoingWitness::Claim(preimage),
                     )),
-                    keypair: ctx.secret.gw_secret().contract_keypair(),
+                    keypair: ctx.secret.gateway_secret().contract_keypair(),
                     amount: contract.amount + contract.fee,
-                    fee: ctx.config.ln.input_fee,
+                    fee: ctx.config.lightning.input_fee,
                 });
 
                 crate::ecash::finalize_and_submit_tx(
@@ -199,7 +199,7 @@ impl Client {
                     |txid| SendSuccessEvent {
                         preimage,
                         txid,
-                        ln_fee,
+                        lightning_fee,
                     },
                 )
                 .expect("Cannot claim outgoing contract — additional funding needed");
@@ -207,7 +207,7 @@ impl Client {
             None => {
                 let signature = ctx
                     .secret
-                    .gw_secret()
+                    .gateway_secret()
                     .contract_keypair()
                     .sign_schnorr(contract.forfeit_message());
                 ctx.log_event(
@@ -225,7 +225,7 @@ impl Client {
     /// Await either `SendSuccessEvent` (the preimage) or `SendCancelEvent`
     /// (the forfeit signature) for `operation`. Replays history, so a
     /// completed operation returns immediately.
-    pub async fn gw_subscribe_send(
+    pub async fn gateway_subscribe_send(
         &self,
         federation: FederationId,
         operation: OperationId,

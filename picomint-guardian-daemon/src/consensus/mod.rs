@@ -2,7 +2,7 @@ pub mod api;
 pub mod bft;
 pub mod db;
 pub mod engine;
-pub mod ln;
+pub mod lightning;
 pub mod ecash;
 pub mod rpc;
 pub mod server;
@@ -220,6 +220,6 @@ async fn dispatch(consensus_api: Arc<ConsensusApi>, method: Method) -> Result<Ve
         Method::Core(m) => rpc::handle_api(&consensus_api, m).await,
         Method::ECash(m) => ecash::handle_api(&consensus_api.server, m).await,
         Method::Onchain(m) => onchain::handle_api(&consensus_api.server, m).await,
-        Method::Ln(m) => ln::handle_api(&consensus_api.server, m).await,
+        Method::Lightning(m) => lightning::handle_api(&consensus_api.server, m).await,
     }
 }

@@ -12,8 +12,8 @@ use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_guardian_cli_core::{
-    CLI_SOCKET_FILENAME, ExpirySetRequest, InviteRequest, LnGatewayAddRequest,
-    LnGatewayRemoveRequest, ROUTE_AUDIT, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG,
+    CLI_SOCKET_FILENAME, ExpirySetRequest, InviteRequest, LightningGatewayAddRequest,
+    LightningGatewayRemoveRequest, ROUTE_AUDIT, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG,
     ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
     ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
     ROUTE_MODULE_ONCHAIN_FEERATE, ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE,
@@ -98,9 +98,9 @@ enum ModuleCommands {
     /// Onchain module commands
     #[command(subcommand)]
     Onchain(OnchainCommands),
-    /// LN module commands
+    /// Lightning module commands
     #[command(subcommand)]
-    Ln(LnCommands),
+    Lightning(LightningCommands),
 }
 
 #[derive(Subcommand)]
@@ -116,18 +116,18 @@ enum OnchainCommands {
 }
 
 #[derive(Subcommand)]
-enum LnCommands {
+enum LightningCommands {
     /// Gateway management
     #[command(subcommand)]
-    Gateway(LnGatewayCommands),
+    Gateway(LightningGatewayCommands),
 }
 
 #[derive(Subcommand)]
-enum LnGatewayCommands {
+enum LightningGatewayCommands {
     /// Add a vetted gateway
-    Add(LnGatewayAddRequest),
+    Add(LightningGatewayAddRequest),
     /// Remove a vetted gateway
-    Remove(LnGatewayRemoveRequest),
+    Remove(LightningGatewayRemoveRequest),
     /// List vetted gateways
     List,
 }
@@ -244,15 +244,15 @@ async fn main() -> Result<()> {
                 }
                 OnchainCommands::Txs => request(d, ROUTE_MODULE_ONCHAIN_TXS, ()).await?,
             },
-            ModuleCommands::Ln(cmd) => match cmd {
-                LnCommands::Gateway(cmd) => match cmd {
-                    LnGatewayCommands::Add(req) => {
+            ModuleCommands::Lightning(cmd) => match cmd {
+                LightningCommands::Gateway(cmd) => match cmd {
+                    LightningGatewayCommands::Add(req) => {
                         request(d, ROUTE_MODULE_LN_GATEWAY_ADD, req).await?
                     }
-                    LnGatewayCommands::Remove(req) => {
+                    LightningGatewayCommands::Remove(req) => {
                         request(d, ROUTE_MODULE_LN_GATEWAY_REMOVE, req).await?
                     }
-                    LnGatewayCommands::List => request(d, ROUTE_MODULE_LN_GATEWAY_LIST, ()).await?,
+                    LightningGatewayCommands::List => request(d, ROUTE_MODULE_LN_GATEWAY_LIST, ()).await?,
                 },
             },
         },

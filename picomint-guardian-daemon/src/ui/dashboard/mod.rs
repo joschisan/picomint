@@ -20,7 +20,7 @@ use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::{ExpiryStatusTable, consensus_block_count, consensus_version};
 use crate::consensus::engine::get_finished_session_count;
 use crate::ui::assets::WithStaticRoutesExt;
-use crate::ui::dashboard::modules::{ln, onchain};
+use crate::ui::dashboard::modules::{lightning, onchain};
 use crate::ui::{ROOT_ROUTE, dashboard_layout};
 
 pub const BACKUP_CONFIG_ROUTE: &str = "/backup-config";
@@ -113,7 +113,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
             div class="grid-col" {
                 (bitcoin::render(&bitcoin_rpc_status))
                 (onchain::render(&api.server, &dbtx))
-                (ln::render(&dbtx))
+                (lightning::render(&dbtx))
             }
         }
 
@@ -135,8 +135,8 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
             invite::INVITE_CREATE_ROUTE,
             post(invite::post_create_invite),
         )
-        .route(ln::LN_ADD_ROUTE, post(ln::post_add))
-        .route(ln::LN_REMOVE_ROUTE, post(ln::post_remove))
+        .route(lightning::LN_ADD_ROUTE, post(lightning::post_add))
+        .route(lightning::LN_REMOVE_ROUTE, post(lightning::post_remove))
         .with_static_routes()
         .with_state(api)
 }

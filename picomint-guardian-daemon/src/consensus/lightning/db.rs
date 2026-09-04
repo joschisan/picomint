@@ -1,31 +1,31 @@
 use picomint_core::OutPoint;
-use picomint_core::ln::contracts;
-use picomint_core::ln::gateway::GatewayPk;
+use picomint_core::lightning::contracts;
+use picomint_core::lightning::gateway::GatewayPk;
 use picomint_redb::table;
 use tpe;
 
 table!(
     IncomingContractTable,
     OutPoint => contracts::IncomingContract,
-    "ln-incoming-contract",
+    "lightning-incoming-contract",
 );
 
 table!(
     OutgoingContractTable,
     OutPoint => contracts::OutgoingContract,
-    "ln-outgoing-contract",
+    "lightning-outgoing-contract",
 );
 
 table!(
     DecryptionKeyShareTable,
     OutPoint => tpe::DecryptionKeyShare,
-    "ln-decryption-key-share",
+    "lightning-decryption-key-share",
 );
 
 table!(
     PreimageTable,
     OutPoint => [u8; 32],
-    "ln-preimage",
+    "lightning-preimage",
 );
 
 // The value is an operator-chosen display name; it is guardian-local and
@@ -33,7 +33,7 @@ table!(
 table!(
     GatewayTable,
     GatewayPk => String,
-    "ln-gateway-pk",
+    "lightning-gateway-pk",
 );
 
 // Incoming contracts are indexed in three ways:
@@ -52,17 +52,17 @@ table!(
 table!(
     IncomingContractStreamIndexTable,
     () => u64,
-    "ln-incoming-contract-stream-index",
+    "lightning-incoming-contract-stream-index",
 );
 
 table!(
     IncomingContractStreamTable,
     u64 => contracts::IncomingContractSummary,
-    "ln-incoming-contract-stream",
+    "lightning-incoming-contract-stream",
 );
 
 table!(
     IncomingContractIndexTable,
     OutPoint => u64,
-    "ln-incoming-contract-index",
+    "lightning-incoming-contract-index",
 );

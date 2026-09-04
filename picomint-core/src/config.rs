@@ -8,7 +8,7 @@ use derive_more::{Display, FromStr};
 use serde::{Deserialize, Serialize};
 
 use crate::PeerId;
-use crate::ln::config::LightningConfigConsensus;
+use crate::lightning::config::LightningConfigConsensus;
 use crate::ecash::config::ECashConfigConsensus;
 use crate::version::ConsensusVersion;
 use crate::onchain::config::OnchainConfigConsensus;
@@ -83,7 +83,7 @@ pub struct ConsensusConfig {
     /// Onchain module config
     pub onchain: OnchainConfigConsensus,
     /// Lightning module config
-    pub ln: LightningConfigConsensus,
+    pub lightning: LightningConfigConsensus,
 }
 
 impl ConsensusConfig {

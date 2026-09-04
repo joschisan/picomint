@@ -1,4 +1,4 @@
-//! On-disk SQLite mirror of the gateway's gw-module event log.
+//! On-disk SQLite mirror of the gateway's gateway-module event log.
 //!
 //! A single daemon-wide trailer task reads from the global event log and
 //! `INSERT`s rows into `{DATA_DIR}/analytics.sqlite`. One table per event
@@ -22,7 +22,7 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use hex::ToHex as _;
 use picomint_client::eventlog::{EventLogEntry, EventLogId};
-use picomint_client::gw::events::{
+use picomint_client::gateway::events::{
     ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent, SendCancelEvent,
     SendEvent, SendSuccessEvent,
 };
@@ -145,7 +145,7 @@ CREATE TABLE send_success (
     federation TEXT NOT NULL,
     preimage      TEXT NOT NULL,
     txid          TEXT NOT NULL,
-    ln_fee_msat   INTEGER NOT NULL,
+    lightning_fee_msat   INTEGER NOT NULL,
     PRIMARY KEY (federation, operation)
 );
 
@@ -218,12 +218,12 @@ SELECT
         ELSE 'pending'
     END AS status,
     s.amount_msat,
-    s.fee_msat       AS gw_fee_msat,
+    s.fee_msat       AS gateway_fee_msat,
     CASE
-        WHEN succ.operation IS NOT NULL THEN s.fee_msat - succ.ln_fee_msat
+        WHEN succ.operation IS NOT NULL THEN s.fee_msat - succ.lightning_fee_msat
         WHEN canc.operation IS NOT NULL THEN 0
         ELSE NULL
-    END AS gw_fee_kept_msat,
+    END AS gateway_fee_kept_msat,
     succ.preimage,
     tx.txid          AS tx_txid,
     tx.remint_msat   AS tx_remint_msat,
@@ -249,7 +249,7 @@ SELECT
         ELSE 'pending'
     END AS status,
     r.amount_msat,
-    r.fee_msat       AS gw_fee_msat,
+    r.fee_msat       AS gateway_fee_msat,
     succ.preimage,
     tx.txid          AS tx_txid,
     tx.remint_msat   AS tx_remint_msat,
@@ -265,7 +265,7 @@ LEFT JOIN tx_create       tx
        ON tx.federation = r.federation AND tx.operation = r.operation;
 "#;
 
-/// Drain the global event log forward in chunks and mirror each gw event
+/// Drain the global event log forward in chunks and mirror each gateway event
 /// into the SQLite analytics DB. Blocks on the global `event_notify` only
 /// when caught up with the head. Spawned daemon-wide at startup.
 pub async fn trailer(client: Arc<Client>, analytics: Analytics) {
@@ -329,7 +329,7 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
         } else if let Some(e) = entry.to_event::<SendSuccessEvent>() {
             tx.execute(
                 "INSERT OR IGNORE INTO send_success \
-                 (federation, operation, ts, preimage, txid, ln_fee_msat) \
+                 (federation, operation, ts, preimage, txid, lightning_fee_msat) \
                  VALUES (?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
                     federation,
@@ -337,7 +337,7 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
                     ts,
                     hex::encode(e.preimage),
                     e.txid.to_string(),
-                    e.ln_fee.msat as i64,
+                    e.lightning_fee.msat as i64,
                 ],
             )?;
         } else if let Some(e) = entry.to_event::<SendCancelEvent>() {
