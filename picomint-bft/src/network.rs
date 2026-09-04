@@ -1,6 +1,5 @@
-use std::sync::Arc;
+use std::future::Future;
 
-use async_trait::async_trait;
 use picomint_core::NodeId;
 use picomint_encoding::{Decodable, Encodable};
 
@@ -28,28 +27,12 @@ pub enum Recipient {
     Node(NodeId),
 }
 
-pub type DynNetwork<D> = Arc<dyn INetwork<D>>;
-
-/// Engine's network surface. Shape mirrors fedimint's
-/// `IP2PConnections<M>` so it can be reused by a future DKG that wants
-/// per-node round-robin reads.
-#[async_trait]
+/// Engine's network surface.
 pub trait INetwork<D: UnitData>: Send + Sync + 'static {
     /// Fire-and-forget. Drops are silently swallowed; the consensus
     /// layer retransmits.
     fn send(&self, recipient: Recipient, msg: Message<D>);
 
     /// `None` once every sender has been dropped.
-    async fn receive(&self) -> Option<(NodeId, Message<D>)>;
-
-    /// Per-node read for round-robin DKG. Mocks may leave this as
-    /// `unimplemented!()`.
-    async fn receive_from_node(&self, node: NodeId) -> Option<Message<D>>;
-
-    fn into_dyn(self) -> DynNetwork<D>
-    where
-        Self: Sized,
-    {
-        Arc::new(self)
-    }
+    fn receive(&self) -> impl Future<Output = Option<(NodeId, Message<D>)>> + Send;
 }

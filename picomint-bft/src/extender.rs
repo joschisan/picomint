@@ -59,7 +59,8 @@ use picomint_encoding::Encodable;
 use picomint_redb::{DbRead, Table};
 
 use crate::data::DataProvider;
-use crate::engine::Engine;
+use crate::engine::{Engine, extended_at};
+use crate::network::INetwork;
 use crate::unit::{Round, Unit, UnitData, UnitEnvelope, UnitHash};
 
 /// The common-vote bit for a candidate of round `candidate_round` as
@@ -71,6 +72,12 @@ use crate::unit::{Round, Unit, UnitData, UnitEnvelope, UnitHash};
 /// same candidate is re-evaluated at successive rounds and needs a
 /// fresh bit each time, or a middle-band candidate could never
 /// resolve.
+///
+/// Callers guarantee `round >= candidate_round + 2` — the subtraction
+/// would underflow below that, but direct voters at `candidate_round +
+/// 1` are answered by parent membership in [`vote`] before the common
+/// vote is ever consulted, and [`Engine::decide`] starts its scan at
+/// `candidate_round + 2`.
 fn common_vote(candidate: UnitHash, candidate_round: Round, round: Round) -> bool {
     match round - candidate_round {
         2 => true,
@@ -85,6 +92,13 @@ fn common_vote(candidate: UnitHash, candidate_round: Round, round: Round) -> boo
 ///
 /// Free over the two engine fields it touches so `decide` can walk
 /// borrowed parent maps of `extended` while the tally mutates `votes`.
+///
+/// Recursion descends exactly one round per level, so the depth is
+/// `unit.round - candidate.round` — how long the candidate has gone
+/// undecided, since `decide` only probes rounds until its first
+/// certificate. Expected O(1) with a geometric tail under the
+/// common-vote schedule; the theoretical bound is the session's round
+/// cap.
 fn vote(
     extended: &BTreeMap<UnitHash, Unit>,
     votes: &mut BTreeMap<(UnitHash, UnitHash), bool>,
@@ -124,11 +138,12 @@ fn vote(
     bit
 }
 
-impl<P, D, T> Engine<P, D, T>
+impl<P, D, T, N> Engine<P, D, T, N>
 where
     D: UnitData,
     P: DataProvider<D>,
     T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
+    N: INetwork<D>,
 {
     /// Drain round heads from `self.next_decide_round` upward while
     /// each round resolves. For every head, BFS-extract the
@@ -174,11 +189,12 @@ where
     /// unit in the next round, which submission fan-out and sequential
     /// own-round backfill provide.
     fn choose_head(&mut self, round: Round) -> Option<UnitHash> {
-        if self.extended_at(round + 3).is_empty() {
-            return None;
-        }
+        extended_at(&self.rounds, &self.extended, round + 3).next()?;
 
-        for candidate in self.extended_at(round) {
+        // Collected because `decide` needs `&mut self` for its caches.
+        let candidates: Vec<UnitHash> = extended_at(&self.rounds, &self.extended, round).collect();
+
+        for candidate in candidates {
             match self.decide(candidate) {
                 Some(true) => return Some(candidate),
                 Some(false) => continue,
@@ -207,13 +223,11 @@ where
             .round;
 
         for round in (candidate_round + 2).. {
-            if self.extended_at(round).is_empty() {
-                return None;
-            }
+            extended_at(&self.rounds, &self.extended, round).next()?;
 
             let v = common_vote(candidate, candidate_round, round);
 
-            for unit in self.extended_at(round) {
+            for unit in extended_at(&self.rounds, &self.extended, round) {
                 let parents = &self
                     .extended
                     .get(&unit)

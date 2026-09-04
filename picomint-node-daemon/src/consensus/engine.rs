@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::{anyhow, ensure};
 use async_channel::Receiver;
 use futures::{StreamExt, stream};
-use picomint_bft::{Engine as BftEngine, INetwork, Keychain as BftKeychain, Round as BftRound};
+use picomint_bft::{Engine as BftEngine, Keychain as BftKeychain, Round as BftRound};
 use picomint_core::secp256k1::{SECP256K1, schnorr};
 use picomint_core::session::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use picomint_core::tx::ConsensusItem;
@@ -112,8 +112,7 @@ async fn run_session(
         outcomes_tx,
         signatures_tx,
         server.db.clone(),
-    )
-    .into_dyn();
+    );
 
     let bft_engine = BftEngine::new(
         server.cfg.private.identity,
