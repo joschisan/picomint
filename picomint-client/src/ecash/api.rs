@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use crate::api::MintApi;
 use picomint_core::ecash::Denomination;
 use picomint_core::ecash::methods::{
-    IssuanceStateRequest, IssuanceStateResponse, ECashMethod, SignaturesRequest, SignaturesResponse,
-    SignaturesRestoreRequest, SignaturesRestoreResponse, SpendStateRequest, SpendStateResponse,
+    EcashMethod, IssuanceStateRequest, IssuanceStateResponse, SignaturesRequest,
+    SignaturesResponse, SignaturesRestoreRequest, SignaturesRestoreResponse, SpendStateRequest,
+    SpendStateResponse,
 };
 use picomint_core::module::Method;
 use picomint_core::secp256k1::XOnlyPublicKey;
@@ -26,9 +27,9 @@ pub async fn signatures(
             move |node, resp: SignaturesResponse| {
                 verify_blind_shares(node, resp.shares, &issuance_requests, &tbs_pks)
             },
-            api.num_peers(),
+            api.num_nodes(),
         ),
-        Method::ECash(ECashMethod::Signatures(SignaturesRequest { txid })),
+        Method::Ecash(EcashMethod::Signatures(SignaturesRequest { txid })),
     )
     .await
 }
@@ -52,9 +53,9 @@ pub async fn signatures_restore(
             move |node, resp: SignaturesRestoreResponse| {
                 verify_blind_shares(node, resp.shares, &issuance_requests, &tbs_pks)
             },
-            api.num_peers(),
+            api.num_nodes(),
         ),
-        Method::ECash(ECashMethod::SignaturesRestore(SignaturesRestoreRequest {
+        Method::Ecash(EcashMethod::SignaturesRestore(SignaturesRestoreRequest {
             messages,
         })),
     )
@@ -67,9 +68,9 @@ pub async fn signatures_restore(
 /// direction makes a restoring wallet abandon a live note, so a lone
 /// node must not be able to decide it.
 pub async fn spend_state(api: &MintApi, nonces: Vec<XOnlyPublicKey>) -> Vec<bool> {
-    api.request_current_consensus_retry::<SpendStateResponse>(Method::ECash(ECashMethod::SpendState(
-        SpendStateRequest { nonces },
-    )))
+    api.request_current_consensus_retry::<SpendStateResponse>(Method::Ecash(
+        EcashMethod::SpendState(SpendStateRequest { nonces }),
+    ))
     .await
     .spent
 }
@@ -82,8 +83,8 @@ pub async fn issuance_state(
     api: &MintApi,
     messages: Vec<BlindedMessage>,
 ) -> Vec<Option<Denomination>> {
-    api.request_current_consensus_retry::<IssuanceStateResponse>(Method::ECash(
-        ECashMethod::IssuanceState(IssuanceStateRequest { messages }),
+    api.request_current_consensus_retry::<IssuanceStateResponse>(Method::Ecash(
+        EcashMethod::IssuanceState(IssuanceStateRequest { messages }),
     ))
     .await
     .issued

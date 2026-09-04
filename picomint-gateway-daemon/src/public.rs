@@ -7,7 +7,9 @@
 //! response, finish the stream.
 
 use iroh::Endpoint;
-use picomint_core::lightning::methods::{GatewayMethod, InfoResponse, ReceiveResponse, SendResponse};
+use picomint_core::lightning::methods::{
+    GatewayMethod, InfoResponse, ReceiveResponse, SendResponse,
+};
 use picomint_encoding::Encodable as _;
 
 use crate::AppState;

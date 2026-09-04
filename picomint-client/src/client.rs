@@ -208,7 +208,7 @@ impl Client {
         self.db.begin_read().get(&ClientConfigTable, &mint)
     }
 
-    /// Stream of per-node guardian reachability, emitting a fresh
+    /// Stream of per-node node reachability, emitting a fresh
     /// `node -> status` map on every change (current state first). Backed by
     /// the mint's pooled connections, so it reflects the same links
     /// requests travel over; the `Connected` status carries the RTT sampled
@@ -232,8 +232,7 @@ impl Client {
 
     /// Cancel every mint's tasks and wait for them to finish.
     pub async fn shutdown(&self) {
-        let mints =
-            std::mem::take(&mut *self.mints.write().expect("mints lock poisoned"));
+        let mints = std::mem::take(&mut *self.mints.write().expect("mints lock poisoned"));
 
         for ctx in mints.into_values() {
             ctx.tg.shutdown().await;

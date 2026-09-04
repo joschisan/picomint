@@ -1,9 +1,9 @@
 //! Picomint Core library
 //!
 //! `picomint-core` contains commonly used types, utilities and primitives,
-//! shared between both client and guardian code.
+//! shared between both client and node code.
 //!
-//! Things that are guardian-side only typically live in `picomint-guardian-daemon`,
+//! Things that are node-side only typically live in `picomint-node-daemon`,
 //! and client-side only in `picomint-client`.
 
 extern crate self as picomint_core;
@@ -27,17 +27,17 @@ pub mod backoff;
 pub mod config;
 /// Fundamental types
 pub mod core;
-/// Guardian-announced mint expiry date.
+/// Ecash module wire types / helpers (shared between client and server).
+pub mod ecash;
+/// Node-announced mint expiry date.
 pub mod expiry;
 /// A cut charged on a client's transactions, and where to pay it out.
 /// Mint invite code
 pub mod invite;
 /// Lightning module wire types / helpers (shared between client and server).
 pub mod lightning;
-/// Guardian wire method names dispatched over Iroh.
+/// Node wire method names dispatched over Iroh.
 pub mod methods;
-/// ECash module wire types / helpers (shared between client and server).
-pub mod ecash;
 /// Extendable module sysystem
 pub mod module;
 /// `NodeId` type
@@ -45,13 +45,13 @@ mod node;
 /// Consensus session outcome types (AcceptedItem, SessionOutcome, …).
 pub mod secret;
 
+/// Onchain module wire types / helpers (shared between client and server).
+pub mod onchain;
 pub mod session;
 /// Wire-level Transaction and ConsensusItem types.
 pub mod tx;
 /// Consensus version of the mint and the vote that advances it.
 pub mod version;
-/// Onchain module wire types / helpers (shared between client and server).
-pub mod onchain;
 /// Static wire enums over the fixed module set.
 pub mod wire;
 

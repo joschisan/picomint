@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::mem;
 
-use picomint_core::{NumPeers, NodeId};
+use picomint_core::{NodeId, NumNodes};
 
 /// Picomint query strategy
 ///
@@ -42,12 +42,12 @@ pub struct FilterMapThreshold<R, T> {
 impl<R, T> FilterMapThreshold<R, T> {
     pub fn new(
         verifier: impl Fn(NodeId, R) -> anyhow::Result<T> + Send + Sync + 'static,
-        num_peers: NumPeers,
+        num_nodes: NumNodes,
     ) -> Self {
         Self {
             filter_map: Box::new(verifier),
             filtered_responses: BTreeMap::new(),
-            threshold: num_peers.threshold(),
+            threshold: num_nodes.threshold(),
         }
     }
 }
@@ -80,11 +80,11 @@ pub struct ThresholdConsensus<R> {
 }
 
 impl<R> ThresholdConsensus<R> {
-    pub fn new(num_peers: NumPeers) -> Self {
+    pub fn new(num_nodes: NumNodes) -> Self {
         Self {
             responses: BTreeMap::new(),
             retry: BTreeSet::new(),
-            threshold: num_peers.threshold(),
+            threshold: num_nodes.threshold(),
         }
     }
 }
@@ -109,7 +109,7 @@ impl<R: Eq + Clone> QueryStrategy<R> for ThresholdConsensus<R> {
 
 #[test]
 fn test_threshold_consensus() {
-    let mut consensus = ThresholdConsensus::<u64>::new(NumPeers::from(4));
+    let mut consensus = ThresholdConsensus::<u64>::new(NumNodes::from(4));
 
     assert!(matches!(
         consensus.process(NodeId::from(0), 1),

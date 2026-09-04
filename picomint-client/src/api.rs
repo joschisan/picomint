@@ -36,7 +36,7 @@ pub async fn block_count(api: &MintApi) -> anyhow::Result<u32> {
     .map(|resp| resp.count)
 }
 
-/// Lightweight liveness check — succeeds if a threshold of guardians is
+/// Lightweight liveness check — succeeds if a threshold of nodes is
 /// reachable.
 pub async fn liveness(api: &MintApi) -> anyhow::Result<LivenessResponse> {
     api.request_current_consensus(Method::Core(CoreMethod::Liveness(LivenessRequest)))
@@ -46,14 +46,14 @@ pub async fn liveness(api: &MintApi) -> anyhow::Result<LivenessResponse> {
 /// Single-node liveness check — succeeds if `node` answers. Useful for
 /// surfacing per-node connection status (e.g. dashboards) where the
 /// threshold-consensus variant would mask which node is offline.
-pub async fn liveness_peer(api: &MintApi, node: NodeId) -> anyhow::Result<LivenessResponse> {
-    api.request_single_peer(Method::Core(CoreMethod::Liveness(LivenessRequest)), node)
+pub async fn liveness_node(api: &MintApi, node: NodeId) -> anyhow::Result<LivenessResponse> {
+    api.request_single_node(Method::Core(CoreMethod::Liveness(LivenessRequest)), node)
         .await
 }
 
 /// Fetch the mint's announced expiry status, threshold-
 /// consensus verified. Returns `Some(_)` only if a threshold of
-/// guardians return the byte-equal value, `None` if all guardians
+/// nodes return the byte-equal value, `None` if all nodes
 /// agree no expiry has been announced.
 pub async fn expiry_status(api: &MintApi) -> anyhow::Result<Option<ExpiryStatus>> {
     api.request_current_consensus::<ExpiryStatusResponse>(Method::Core(CoreMethod::ExpiryStatus(

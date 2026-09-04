@@ -449,14 +449,7 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32
     if let Some(row) = dbtx.get(&OutgoingContractTable, &operation) {
         state
             .client
-            .gateway_finalize_send(
-                row.mint,
-                dbtx,
-                operation,
-                row.contract,
-                row.outpoint,
-                None,
-            )
+            .gateway_finalize_send(row.mint, dbtx, operation, row.contract, row.outpoint, None)
             .expect("source mint for outgoing contract is added");
     }
 }

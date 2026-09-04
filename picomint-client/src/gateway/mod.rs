@@ -45,11 +45,7 @@ pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
 
 /// Whether any of this module's state machines for `operation` is still
 /// active under `mint`.
-pub(crate) fn operation_is_active(
-    dbtx: &ReadTx,
-    mint: MintId,
-    operation: OperationId,
-) -> bool {
+pub(crate) fn operation_is_active(dbtx: &ReadTx, mint: MintId, operation: OperationId) -> bool {
     dbtx.prefix(&ReceiveStateMachineTable, &mint, |r| {
         r.any(|entry| entry.1.operation == operation)
     })

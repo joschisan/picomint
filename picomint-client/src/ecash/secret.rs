@@ -1,4 +1,4 @@
-//! ECash-module derivation tree. Only constructible via
+//! Ecash-module derivation tree. Only constructible via
 //! [`ClientSecret::ecash_secret`]; the path enum is private.
 //!
 //! Each account owns a subtree, and within it both leaves hang off a single
@@ -22,9 +22,9 @@ enum Path {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct ECashSecret(Secret);
+pub struct EcashSecret(Secret);
 
-impl ECashSecret {
+impl EcashSecret {
     pub(crate) fn new(module_root: Secret) -> Self {
         Self(module_root)
     }

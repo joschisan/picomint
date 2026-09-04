@@ -3,24 +3,24 @@ pub mod audit;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ecash::methods::EcashMethod;
 use crate::lightning::methods::LightningMethod;
 use crate::methods::CoreMethod;
-use crate::ecash::methods::ECashMethod;
 use crate::onchain::methods::OnchainMethod;
 use picomint_encoding::{Decodable, Encodable};
 
-/// The wire method dispatched to a guardian over iroh. Each variant carries
+/// The wire method dispatched to a node over iroh. Each variant carries
 /// the concrete request for its module; the response type is determined by
 /// the variant the client sent.
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum Method {
     Core(CoreMethod),
-    ECash(ECashMethod),
+    Ecash(EcashMethod),
     Onchain(OnchainMethod),
     Lightning(LightningMethod),
 }
 
-/// Authentication secret used to verify guardian admin API requests.
+/// Authentication secret used to verify node admin API requests.
 ///
 /// The inner value is private to prevent timing leaks via direct comparison.
 /// Use [`Self::verify`] for authentication checks. No `Debug` impl — the

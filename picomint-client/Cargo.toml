@@ -1,5 +1,5 @@
 [package]
-description = "Library for sending transactions to the Picomint federation."
+description = "Library for sending transactions to Picomint mints."
 edition = { workspace = true }
 homepage = { workspace = true }
 keywords = { workspace = true }

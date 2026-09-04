@@ -27,7 +27,7 @@ use picomint_bft::{
     UnitHash,
 };
 use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
-use picomint_core::{NumPeers, NodeId};
+use picomint_core::{NodeId, NumNodes};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, table};
 use rand::Rng;
@@ -61,7 +61,7 @@ struct MockChannel {
 impl MockChannel {
     /// Build a fully-connected mesh of channels, one per node in `n`,
     /// each dropping sends with probability `drop_rate` per leg.
-    fn mesh(n: NumPeers, drop_rate: f64) -> BTreeMap<NodeId, MockChannel> {
+    fn mesh(n: NumNodes, drop_rate: f64) -> BTreeMap<NodeId, MockChannel> {
         let mut receivers = BTreeMap::new();
         let mut senders = BTreeMap::new();
 
@@ -145,7 +145,7 @@ impl INetwork<u64> for MockChannel {
         self.rx.recv().await.ok()
     }
 
-    async fn receive_from_peer(&self, _peer: NodeId) -> Option<Message<u64>> {
+    async fn receive_from_node(&self, _node: NodeId) -> Option<Message<u64>> {
         unimplemented!(
             "MockChannel multiplexes inbound traffic on a single receiver; \
              per-node reads are only meaningful for round-robin DKG, which \
@@ -166,7 +166,7 @@ impl INetwork<u64> for NullNetwork {
         pending().await
     }
 
-    async fn receive_from_peer(&self, _peer: NodeId) -> Option<Message<u64>> {
+    async fn receive_from_node(&self, _node: NodeId) -> Option<Message<u64>> {
         pending().await
     }
 }
@@ -193,11 +193,11 @@ impl DataProvider<u64> for TimestampDataProvider {
     }
 }
 
-const N_PEERS: usize = 4;
+const N_NODES: usize = 4;
 const ROUND_LIMIT: Round = 100;
 const SESSION: u32 = 0;
 
-fn build_keychains(n: NumPeers) -> BTreeMap<NodeId, Keychain> {
+fn build_keychains(n: NumNodes) -> BTreeMap<NodeId, Keychain> {
     let keypairs: BTreeMap<NodeId, Keypair> = n
         .node_ids()
         .map(|id| (id, Keypair::new(SECP256K1, &mut rand::thread_rng())))
@@ -226,7 +226,7 @@ struct Engines {
 /// in-memory database. Byzantine tests remove the forker's channel
 /// from the mesh beforehand.
 fn spawn_engines(
-    n: NumPeers,
+    n: NumNodes,
     keychains: &BTreeMap<NodeId, Keychain>,
     channels: BTreeMap<NodeId, MockChannel>,
 ) -> Engines {
@@ -336,7 +336,7 @@ fn build_envelope(
 
 #[tokio::test]
 async fn engines_agree_on_ordered_data() {
-    let n = NumPeers::from(N_PEERS);
+    let n = NumNodes::from(N_NODES);
     let keychains = build_keychains(n);
     let channels = MockChannel::mesh(n, DROP_RATE);
 
@@ -386,8 +386,8 @@ async fn engines_agree_on_ordered_data() {
 /// 1-certificate and both decide 0, while the branches themselves may
 /// still be swept as ancestry of honest heads.
 #[tokio::test]
-async fn engines_agree_under_forking_peer() {
-    let n = NumPeers::from(N_PEERS);
+async fn engines_agree_under_forking_node() {
+    let n = NumNodes::from(N_NODES);
     let keychains = build_keychains(n);
     let mut channels = MockChannel::mesh(n, DROP_RATE);
 
@@ -418,12 +418,12 @@ async fn engines_agree_under_forking_peer() {
 /// honest nodes extend both branches and deterministically reference —
 /// and thus vote for — the lowest-hash one, so that branch gathers
 /// certificates and the forked slot *commits*: the complementary
-/// outcome to `engines_agree_under_forking_peer`, where split votes
+/// outcome to `engines_agree_under_forking_node`, where split votes
 /// force a skip. The unreferenced branch is never swept as ancestry,
 /// so exactly one of the two forked payloads appears in the order.
 #[tokio::test]
 async fn engines_agree_when_fork_branch_commits() {
-    let n = NumPeers::from(N_PEERS);
+    let n = NumNodes::from(N_NODES);
     let keychains = build_keychains(n);
     let mut channels = MockChannel::mesh(n, DROP_RATE);
 
@@ -467,7 +467,7 @@ async fn engines_agree_when_fork_branch_commits() {
 /// order.
 #[tokio::test]
 async fn engines_agree_under_forking_voter() {
-    let n = NumPeers::from(N_PEERS);
+    let n = NumNodes::from(N_NODES);
     let keychains = build_keychains(n);
     let mut channels = MockChannel::mesh(n, DROP_RATE);
 
@@ -547,7 +547,7 @@ async fn engines_agree_under_forking_voter() {
 /// honest units nor swept into the order.
 #[tokio::test]
 async fn engines_ignore_spoofed_parent_positions() {
-    let n = NumPeers::from(N_PEERS);
+    let n = NumNodes::from(N_NODES);
     let keychains = build_keychains(n);
     let mut channels = MockChannel::mesh(n, DROP_RATE);
 
@@ -645,7 +645,7 @@ async fn engines_ignore_spoofed_parent_positions() {
 /// the same `ROUND_LIMIT` cut.
 #[tokio::test]
 async fn replay_reproduces_order_under_forks() {
-    let n = NumPeers::from(N_PEERS);
+    let n = NumNodes::from(N_NODES);
     let keychains = build_keychains(n);
     let mut channels = MockChannel::mesh(n, DROP_RATE);
 

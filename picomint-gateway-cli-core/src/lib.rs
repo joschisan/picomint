@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 use bitcoin::address::NetworkUnchecked;
 use clap::Args;
 use lightning_invoice::Bolt11Invoice;
-use picomint_client::ecash::ECash;
+use picomint_client::ecash::Ecash;
 use picomint_core::config::MintId;
-use picomint_core::invite::InviteCode;
 use picomint_core::ecash::Denomination;
+use picomint_core::invite::InviteCode;
 use picomint_core::{Amount, secp256k1};
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
@@ -60,7 +60,7 @@ pub struct InfoResponse {
     /// Lightning node public key (LDK node id).
     pub lightning_pk: secp256k1::PublicKey,
     /// Iroh public key the gateway accepts on for the picomint API.
-    /// Mint guardians register this via `module lightning gateway add`.
+    /// Mint nodes register this via `module lightning gateway add`.
     pub gateway_pk: picomint_core::lightning::gateway::GatewayPk,
     pub alias: String,
     pub network: String,
@@ -203,7 +203,7 @@ pub struct LdkChannelSpliceOutRequest {
 // --- /ldk/lightning/probe ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct LdkLnProbeRequest {
+pub struct LdkLightningProbeRequest {
     /// The node to probe a route towards.
     pub node_id: secp256k1::PublicKey,
     /// The amount to find paths for, in millisatoshis.
@@ -235,7 +235,7 @@ pub struct LdkOnchainSendResponse {
 // --- /ldk/lightning/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct LdkLnReceiveRequest {
+pub struct LdkLightningReceiveRequest {
     pub amount_msat: u64,
     #[arg(long)]
     pub expiry_secs: Option<u32>,
@@ -244,19 +244,19 @@ pub struct LdkLnReceiveRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LdkLnReceiveResponse {
+pub struct LdkLightningReceiveResponse {
     pub invoice: String,
 }
 
 // --- /ldk/lightning/send ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct LdkLnSendRequest {
+pub struct LdkLightningSendRequest {
     pub invoice: Bolt11Invoice,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LdkLnSendResponse {
+pub struct LdkLightningSendResponse {
     pub preimage: String,
 }
 
@@ -358,13 +358,13 @@ pub type QueryResponse = Vec<serde_json::Map<String, serde_json::Value>>;
 // --- /mint/module/ecash/count ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintMintCountRequest {
+pub struct MintEcashCountRequest {
     #[arg(long = "id")]
     pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintMintCountResponse {
+pub struct MintEcashCountResponse {
     /// Count of held ecash notes keyed by denomination.
     pub counts: BTreeMap<Denomination, u64>,
 }
@@ -372,26 +372,26 @@ pub struct MintMintCountResponse {
 // --- /mint/module/ecash/send ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintMintSendRequest {
+pub struct MintEcashSendRequest {
     pub amount: bitcoin::Amount,
     #[arg(long = "id")]
     pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintMintSendResponse {
-    pub ecash: ECash,
+pub struct MintEcashSendResponse {
+    pub ecash: Ecash,
 }
 
 // --- /mint/module/ecash/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintMintReceiveRequest {
-    pub ecash: ECash,
+pub struct MintEcashReceiveRequest {
+    pub ecash: Ecash,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintMintReceiveResponse {
+pub struct MintEcashReceiveResponse {
     pub amount: Amount,
 }
 
@@ -428,12 +428,12 @@ pub struct MintOnchainSendResponse {
 // --- /mint/module/onchain/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintWalletReceiveRequest {
+pub struct MintOnchainReceiveRequest {
     #[arg(long = "id")]
     pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintWalletReceiveResponse {
+pub struct MintOnchainReceiveResponse {
     pub address: bitcoin::Address<bitcoin::address::NetworkUnchecked>,
 }

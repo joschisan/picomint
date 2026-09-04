@@ -8,10 +8,10 @@ use derive_more::{Display, FromStr};
 use serde::{Deserialize, Serialize};
 
 use crate::NodeId;
+use crate::ecash::config::EcashConfigConsensus;
 use crate::lightning::config::LightningConfigConsensus;
-use crate::ecash::config::ECashConfigConsensus;
-use crate::version::ConsensusVersion;
 use crate::onchain::config::OnchainConfigConsensus;
+use crate::version::ConsensusVersion;
 use picomint_encoding::{Decodable, Encodable};
 
 // TODO: make configurable
@@ -69,17 +69,17 @@ pub struct ConsensusConfig {
     pub nodes: BTreeMap<NodeId, NodeEndpoint>,
     /// Bitcoin network this mint operates on.
     pub network: Network,
-    /// Mint name, chosen by the lead guardian during setup.
+    /// Mint name, chosen by the lead node during setup.
     pub name: String,
     /// Consensus version this mint was created at, and so the version
-    /// a guardian that has never voted counts as supporting. Set to the
+    /// a node that has never voted counts as supporting. Set to the
     /// creating binary's [`CONSENSUS_VERSION`], which is what lets a fresh
     /// mint run the newest rules without a single vote being cast.
     ///
     /// [`CONSENSUS_VERSION`]: crate::version::CONSENSUS_VERSION
     pub default_version: ConsensusVersion,
-    /// ECash module config
-    pub ecash: ECashConfigConsensus,
+    /// Ecash module config
+    pub ecash: EcashConfigConsensus,
     /// Onchain module config
     pub onchain: OnchainConfigConsensus,
     /// Lightning module config

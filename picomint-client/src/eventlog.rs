@@ -36,7 +36,7 @@ use tokio::sync::Notify;
 )]
 pub enum EventSource {
     Core,
-    ECash,
+    Ecash,
     Wallet,
     Lightning,
     Gateway,

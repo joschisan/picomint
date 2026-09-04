@@ -55,15 +55,15 @@ pub const ALLOWED_MINT_SIZES: &[usize] = &[4, 7, 10, 13, 16, 19, 22];
 /// size `3f + 1`, so storing `f` lets every derived quantity drop out
 /// of one multiplication or addition with no rounding involved.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NumPeers(usize);
+pub struct NumNodes(usize);
 
-impl NumPeers {
+impl NumNodes {
     /// Returns an iterator over all node IDs in the mint.
     pub fn node_ids(self) -> impl Iterator<Item = NodeId> {
         (0u8..(self.total() as u8)).map(NodeId)
     }
 
-    /// Total number of guardians: `3f + 1`.
+    /// Total number of nodes: `3f + 1`.
     pub fn total(self) -> usize {
         3 * self.0 + 1
     }
@@ -84,7 +84,7 @@ impl NumPeers {
     }
 }
 
-impl From<usize> for NumPeers {
+impl From<usize> for NumNodes {
     fn from(total: usize) -> Self {
         assert!(
             ALLOWED_MINT_SIZES.contains(&total),
@@ -95,19 +95,19 @@ impl From<usize> for NumPeers {
     }
 }
 
-/// Types that can be easily converted to [`NumPeers`]
-pub trait NumPeersExt {
-    fn to_num_peers(&self) -> NumPeers;
+/// Types that can be easily converted to [`NumNodes`]
+pub trait NumNodesExt {
+    fn to_num_nodes(&self) -> NumNodes;
 }
 
-impl<T> NumPeersExt for BTreeMap<NodeId, T> {
-    fn to_num_peers(&self) -> NumPeers {
-        NumPeers::from(self.len())
+impl<T> NumNodesExt for BTreeMap<NodeId, T> {
+    fn to_num_nodes(&self) -> NumNodes {
+        NumNodes::from(self.len())
     }
 }
 
-impl NumPeersExt for BTreeSet<NodeId> {
-    fn to_num_peers(&self) -> NumPeers {
-        NumPeers::from(self.len())
+impl NumNodesExt for BTreeSet<NodeId> {
+    fn to_num_nodes(&self) -> NumNodes {
+        NumNodes::from(self.len())
     }
 }

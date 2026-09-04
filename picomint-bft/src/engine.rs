@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use async_channel::Sender;
-use picomint_core::{NumPeers, NodeId};
+use picomint_core::{NodeId, NumNodes};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, DbRead, Table, WriteTx};
 use tokio::time::{Instant, sleep_until};
@@ -41,7 +41,7 @@ where
 {
     pub(crate) id: NodeId,
     session: u32,
-    pub(crate) n: NumPeers,
+    pub(crate) n: NumNodes,
     db: Database,
     keychain: Keychain,
     network: DynNetwork<D>,
@@ -102,7 +102,7 @@ where
     pub fn new(
         id: NodeId,
         session: u32,
-        n: NumPeers,
+        n: NumNodes,
         db: Database,
         keychain: Keychain,
         network: DynNetwork<D>,

@@ -228,12 +228,7 @@ impl AppState {
 
             if self
                 .client
-                .gateway_start_receive(
-                    incoming_row.mint,
-                    &dbtx,
-                    operation,
-                    incoming_row.offer,
-                )
+                .gateway_start_receive(incoming_row.mint, &dbtx, operation, incoming_row.offer)
                 .is_err()
             {
                 self.client.gateway_finalize_send(

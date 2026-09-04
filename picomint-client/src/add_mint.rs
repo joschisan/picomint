@@ -54,8 +54,7 @@ pub(crate) async fn add_mint(
     let secret = ClientSecret::new(&client.mnemonic, mint).ecash_secret();
 
     let scans = try_join_all(
-        Account::ALL
-            .map(|account| crate::ecash::scan(&api, &secret, &config.ecash, mint, account)),
+        Account::ALL.map(|account| crate::ecash::scan(&api, &secret, &config.ecash, mint, account)),
     )
     .await?;
 
@@ -64,8 +63,8 @@ pub(crate) async fn add_mint(
     Ok((config, restores))
 }
 
-/// Downloads the [`ConsensusConfig`] from the issuing guardian named in the
-/// invite code. The guardian enforces the invite's expiration and user limit
+/// Downloads the [`ConsensusConfig`] from the issuing node named in the
+/// invite code. The node enforces the invite's expiration and user limit
 /// before serving; integrity is guaranteed because the config's computed
 /// mint id must match the one committed in the invite code.
 async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<ConsensusConfig> {

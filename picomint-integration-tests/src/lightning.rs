@@ -12,7 +12,9 @@ use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning_invoice::{Bolt11Invoice, Currency, InvoiceBuilder, PaymentSecret};
 use picomint_client::eventlog::{EventLogEntry, EventLogId};
 use picomint_client::lightning::SendPaymentError;
-use picomint_client::lightning::events::{ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent};
+use picomint_client::lightning::events::{
+    ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent,
+};
 use picomint_client::tx::{Input, TxBuilder};
 use picomint_client::{Account, OperationId};
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
@@ -24,7 +26,7 @@ use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_
 use tracing::info;
 
 use crate::cli;
-use crate::env::{NUM_ONLINE_GUARDIANS, TestClient, TestEnv, retry};
+use crate::env::{NUM_ONLINE_NODES, TestClient, TestEnv, retry};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -111,17 +113,17 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 }
 
 fn register_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()> {
-    for node in 0..NUM_ONLINE_GUARDIANS {
-        let data_dir = cli::guardian_data_dir(&env.data_dir, node);
-        assert!(cli::guardian_lightning_gateway_add(&data_dir, gateway_pk)?);
+    for node in 0..NUM_ONLINE_NODES {
+        let data_dir = cli::node_data_dir(&env.data_dir, node);
+        assert!(cli::node_lightning_gateway_add(&data_dir, gateway_pk)?);
     }
     Ok(())
 }
 
 fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()> {
-    for node in 0..NUM_ONLINE_GUARDIANS {
-        let data_dir = cli::guardian_data_dir(&env.data_dir, node);
-        assert!(cli::guardian_lightning_gateway_remove(&data_dir, gateway_pk)?);
+    for node in 0..NUM_ONLINE_NODES {
+        let data_dir = cli::node_data_dir(&env.data_dir, node);
+        assert!(cli::node_lightning_gateway_remove(&data_dir, gateway_pk)?);
     }
     Ok(())
 }
@@ -142,7 +144,10 @@ fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<(
 async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     info!("lightning: test_analytics_query");
 
-    let db_path = env.gateway_data_dir.join("analytics").join("analytics.sqlite");
+    let db_path = env
+        .gateway_data_dir
+        .join("analytics")
+        .join("analytics.sqlite");
     let conn = rusqlite::Connection::open(&db_path)?;
 
     let count = |sql: &str| -> anyhow::Result<u64> {
@@ -216,7 +221,8 @@ async fn test_direct_lightning_payments(env: &TestEnv) -> anyhow::Result<()> {
 
     info!("LDK node pays gateway invoice...");
     {
-        let invoice_str = cli::gateway_ldk_lightning_receive(&env.gateway_data_dir, 1_000_000)?.invoice;
+        let invoice_str =
+            cli::gateway_ldk_lightning_receive(&env.gateway_data_dir, 1_000_000)?.invoice;
         let invoice: lightning_invoice::Bolt11Invoice = invoice_str.parse()?;
 
         // The freestanding node may need a moment to consider the channel ready
@@ -366,8 +372,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
     retry("gateway mint balance", || {
         let mint = mint.clone();
         async move {
-            let balance =
-                cli::gateway_mint_balance(&env.gateway_data_dir, &mint)?.balance_msat;
+            let balance = cli::gateway_mint_balance(&env.gateway_data_dir, &mint)?.balance_msat;
             ensure!(balance.msat > 0, "gateway mint balance is zero");
             Ok(())
         }
@@ -534,7 +539,10 @@ async fn test_mock_send_exactly_once(client: &TestClient) -> anyhow::Result<()> 
         )
         .await?;
 
-    wait_lightning_event(&mut events, send_op, |e| matches!(e, LightningEvent::Send(_))).await;
+    wait_lightning_event(&mut events, send_op, |e| {
+        matches!(e, LightningEvent::Send(_))
+    })
+    .await;
     wait_lightning_event(&mut events, send_op, |e| {
         matches!(e, LightningEvent::SendSuccess(_))
     })
@@ -578,7 +586,10 @@ async fn test_mock_send_refund_forfeit(client: &TestClient) -> anyhow::Result<()
         )
         .await?;
 
-    wait_lightning_event(&mut events, send_op, |e| matches!(e, LightningEvent::Send(_))).await;
+    wait_lightning_event(&mut events, send_op, |e| {
+        matches!(e, LightningEvent::Send(_))
+    })
+    .await;
     wait_lightning_event(&mut events, send_op, |e| {
         matches!(e, LightningEvent::SendRefund(_))
     })
@@ -641,11 +652,14 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
         )
         .await?;
 
-    let send_event =
-        match wait_lightning_event(&mut events, send_op, |e| matches!(e, LightningEvent::Send(_))).await {
-            LightningEvent::Send(e) => e,
-            _ => unreachable!(),
-        };
+    let send_event = match wait_lightning_event(&mut events, send_op, |e| {
+        matches!(e, LightningEvent::Send(_))
+    })
+    .await
+    {
+        LightningEvent::Send(e) => e,
+        _ => unreachable!(),
+    };
 
     let outpoint = OutPoint {
         txid: send_event.txid,
@@ -721,7 +735,10 @@ async fn test_unilateral_refund(env: &TestEnv, client: &TestClient) -> anyhow::R
         )
         .await?;
 
-    wait_lightning_event(&mut events, send_op, |e| matches!(e, LightningEvent::Send(_))).await;
+    wait_lightning_event(&mut events, send_op, |e| {
+        matches!(e, LightningEvent::Send(_))
+    })
+    .await;
 
     // Contract expiry = consensus_block_count + expiry_delta +
     // CONTRACT_CONFIRMATION_BUFFER = +62 blocks with the mock's settings.
@@ -746,9 +763,10 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
 
     let lnurl_daemon: String = env.lnurl_daemon_url.parse()?;
 
-    let lnurl = client
-        .client
-        .lightning_generate_lnurl(client.fed, Account::Primary, lnurl_daemon)?;
+    let lnurl =
+        client
+            .client
+            .lightning_generate_lnurl(client.fed, Account::Primary, lnurl_daemon)?;
 
     let pay_url = parse_lnurl(&lnurl).ok_or_else(|| anyhow::anyhow!("parse_lnurl"))?;
 
@@ -803,7 +821,7 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
     // The ?wait long-poll guarantees the gateway has logged ReceiveSuccessEvent
     // before we do the non-wait check below. Without this ordering the non-wait
     // GET races against the gateway's threshold decryption (which requires a
-    // network round trip to all guardians) and can return settled=false even
+    // network round trip to all nodes) and can return settled=false even
     // though the client scanner already fired ReceiveEvent locally.
     let waited = wait_task.await?.map_err(anyhow::Error::msg)?;
 
@@ -902,7 +920,7 @@ fn mock_invoice_msat(
 
 /// Spawns a mock gateway via [`picomint_rpc::run_accept_loop`] — same
 /// dispatch lifecycle the real gateway daemon uses. Returns the mock's iroh
-/// public key for guardian registration.
+/// public key for node registration.
 async fn spawn_mock_gateway() -> anyhow::Result<GatewayPk> {
     let endpoint = Endpoint::builder(N0)
         .alpns(vec![picomint_rpc::ALPN.to_vec()])

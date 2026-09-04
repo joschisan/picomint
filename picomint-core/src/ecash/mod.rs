@@ -37,7 +37,7 @@ impl Denomination {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct ECashOutputBlindSignature(pub tbs::BlindedSignature);
+pub struct EcashOutputBlindSignature(pub tbs::BlindedSignature);
 
 /// A verifiable one time use IOU from the mint.
 ///
@@ -62,17 +62,17 @@ impl Note {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct ECashInput {
+pub struct EcashInput {
     pub note: Note,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct ECashOutput {
+pub struct EcashOutput {
     pub denomination: Denomination,
     pub nonce: BlindedMessage,
 }
 
-impl ECashOutput {
+impl EcashOutput {
     pub fn amount(&self) -> Amount {
         self.denomination.amount()
     }
@@ -87,7 +87,7 @@ pub fn nonce_message(nonce: XOnlyPublicKey) -> Message {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
-pub enum ECashInputError {
+pub enum EcashInputError {
     #[error("The note is already spent")]
     SpentCoin,
     #[error("The note has an invalid amount not issued by the mint")]
@@ -97,7 +97,7 @@ pub enum ECashInputError {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
-pub enum ECashOutputError {
+pub enum EcashOutputError {
     #[error("The blinded nonce has already been signed")]
     ReusedNonce,
     #[error("The note has an invalid amount not issued by the mint")]

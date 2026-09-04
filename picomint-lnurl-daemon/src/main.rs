@@ -19,7 +19,7 @@ use picomint_core::config::MintId;
 use picomint_core::lightning::MINIMUM_INCOMING_CONTRACT_AMOUNT;
 use picomint_core::lightning::contracts::IncomingOffer;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
-use picomint_core::lightning::lnurl::{LnurlRequest, MAX_GUARDIANS_PER_LNURL};
+use picomint_core::lightning::lnurl::{LnurlRequest, MAX_NODES_PER_LNURL};
 use picomint_core::lightning::methods::{
     GatewayMethod, GatewaysRequest, GatewaysResponse, InfoRequest, InfoResponse, LightningMethod,
     ReceiveRequest, ReceiveResponse, TpeAggregatePkRequest, TpeAggregatePkResponse, VerifyRequest,
@@ -142,9 +142,9 @@ async fn invoice(
         return Json(LnurlResponse::error("Failed to decode payload"));
     };
 
-    if request.guardians.len() > MAX_GUARDIANS_PER_LNURL {
+    if request.nodes.len() > MAX_NODES_PER_LNURL {
         return Json(LnurlResponse::error(format!(
-            "Too many guardians in request (max {MAX_GUARDIANS_PER_LNURL})"
+            "Too many nodes in request (max {MAX_NODES_PER_LNURL})"
         )));
     }
 
@@ -181,7 +181,7 @@ async fn invoice(
     }))
 }
 
-/// Resolve the mint from the payload's guardians, then buy an invoice
+/// Resolve the mint from the payload's nodes, then buy an invoice
 /// from one of its currently announced gateways. Nothing perishable comes out
 /// of the lnurl itself, which is what keeps an outstanding one valid across
 /// gateway churn.
@@ -190,7 +190,7 @@ async fn resolve_and_fetch_invoice(
     request: &LnurlRequest,
     amount: u64,
 ) -> anyhow::Result<(GatewayPk, Bolt11Invoice)> {
-    let info = fetch_mint_info(endpoint, &request.guardians, request.info).await?;
+    let info = fetch_mint_info(endpoint, &request.nodes, request.info).await?;
 
     let nodes = info
         .nodes
@@ -272,26 +272,26 @@ async fn resolve_and_fetch_invoice(
     Ok((gateway_pk, invoice))
 }
 
-/// Take the first guardian response that hashes to the payload's commitment.
-/// That commitment is what makes a single guardian enough: one can stall or
+/// Take the first node response that hashes to the payload's commitment.
+/// That commitment is what makes a single node enough: one can stall or
 /// refuse, but a forged node set will not hash. The payload carries `f + 1` of
 /// them, so one is honest and reachable whenever the mint itself is.
 ///
-/// One request per guardian and no reuse, so this dials directly rather than
-/// standing up a [`MintApi`] — and the guardians are a subset, which a
+/// One request per node and no reuse, so this dials directly rather than
+/// standing up a [`MintApi`] — and the nodes are a subset, which a
 /// mint-shaped node set has no room for.
 async fn fetch_mint_info(
     endpoint: &Endpoint,
-    guardians: &[iroh::PublicKey],
+    nodes: &[iroh::PublicKey],
     info: sha256::Hash,
 ) -> anyhow::Result<MintInfoResponse> {
-    ensure!(!guardians.is_empty(), "Lnurl names no guardians");
+    ensure!(!nodes.is_empty(), "Lnurl names no nodes");
 
-    let attempts = guardians.iter().copied().map(|guardian| {
+    let attempts = nodes.iter().copied().map(|node| {
         Box::pin(async move {
             let response: MintInfoResponse = picomint_rpc::request(
                 endpoint,
-                guardian,
+                node,
                 Method::Core(CoreMethod::MintInfo(MintInfoRequest)),
             )
             .await?;
@@ -307,28 +307,32 @@ async fn fetch_mint_info(
 
     let response = select_ok(attempts)
         .await
-        .context("No guardian served an info matching the lnurl's commitment")?
+        .context("No node served an info matching the lnurl's commitment")?
         .0;
 
     Ok(response)
 }
 
 /// Threshold-read the mint's tpe aggregate key. Not committed to by the
-/// lnurl: the node set it is read from is, and `2f + 1` guardians agreeing on
+/// lnurl: the node set it is read from is, and `2f + 1` nodes agreeing on
 /// a value is the same assumption the rest of the mint already rests on.
 async fn fetch_aggregate_pk(api: &MintApi) -> anyhow::Result<AggregatePublicKey> {
     let response: TpeAggregatePkResponse = api
-        .request_current_consensus(Method::Lightning(LightningMethod::TpeAggregatePk(TpeAggregatePkRequest)))
+        .request_current_consensus(Method::Lightning(LightningMethod::TpeAggregatePk(
+            TpeAggregatePkRequest,
+        )))
         .await?;
 
     Ok(response.tpe_agg_pk)
 }
 
-/// Threshold-read the mint's announced gateway set — `2f + 1` guardians
+/// Threshold-read the mint's announced gateway set — `2f + 1` nodes
 /// returning byte-identical lists.
 async fn fetch_gateways(api: &MintApi) -> anyhow::Result<Vec<GatewayPk>> {
     let response: GatewaysResponse = api
-        .request_current_consensus(Method::Lightning(LightningMethod::Gateways(GatewaysRequest)))
+        .request_current_consensus(Method::Lightning(LightningMethod::Gateways(
+            GatewaysRequest,
+        )))
         .await?;
 
     Ok(response.gateways)

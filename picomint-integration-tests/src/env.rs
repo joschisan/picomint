@@ -33,14 +33,14 @@ pub struct TestClient {
 }
 
 pub const BTC_RPC_PORT: u16 = 18443;
-pub const GUARDIAN_BASE_PORT: u16 = 17000;
-pub const PORTS_PER_GUARDIAN: u16 = 5;
-pub const NUM_GUARDIANS: usize = 7;
+pub const NODE_BASE_PORT: u16 = 17000;
+pub const PORTS_PER_NODE: u16 = 5;
+pub const NUM_NODES: usize = 7;
 
-/// Guardians `NUM_ONLINE_GUARDIANS..` are taken offline right after DKG,
+/// Nodes `NUM_ONLINE_NODES..` are taken offline right after DKG,
 /// so the entire suite runs against a mint at exactly quorum
 /// (5 of 7). The restore test brings them back online.
-pub const NUM_ONLINE_GUARDIANS: usize = 5;
+pub const NUM_ONLINE_NODES: usize = 5;
 pub const GW_PORT: u16 = 28175;
 pub const GW_LN_PORT: u16 = 9735;
 pub const TEST_LDK_PORT: u16 = 9736;
@@ -75,8 +75,8 @@ pub struct TestEnv {
     pub gateway_pk: GatewayPk,
     pub lnurl_daemon_url: String,
     pub client_counter: AtomicU64,
-    /// One per guardian, indexed by node id. `None` once we've killed it.
-    pub guardian_processes: Mutex<Vec<Option<Child>>>,
+    /// One per node, indexed by node id. `None` once we've killed it.
+    pub node_processes: Mutex<Vec<Option<Child>>>,
 }
 
 impl TestEnv {
@@ -96,52 +96,50 @@ impl TestEnv {
 
         Self::spawn_miner_thread()?;
 
-        let mut guardian_processes = Vec::with_capacity(NUM_GUARDIANS);
-        for i in 0..NUM_GUARDIANS {
-            let child = runtime.block_on(start_guardian(base, i))?;
-            guardian_processes.push(Some(child));
+        let mut node_processes = Vec::with_capacity(NUM_NODES);
+        for i in 0..NUM_NODES {
+            let child = runtime.block_on(start_node(base, i))?;
+            node_processes.push(Some(child));
         }
 
         info!("Running DKG...");
-        let node_data_dirs: Vec<_> = (0..NUM_GUARDIANS)
-            .map(|i| base.join(format!("guardian-{i}")))
+        let node_data_dirs: Vec<_> = (0..NUM_NODES)
+            .map(|i| base.join(format!("node-{i}")))
             .collect();
         runtime.block_on(run_dkg(&node_data_dirs))?;
 
         let node0_data_dir = node_data_dirs[0].clone();
         let invite = runtime
             .block_on(retry("fetch invite code", || async {
-                cli::guardian_invite(&node0_data_dir)
+                cli::node_invite(&node0_data_dir)
             }))?
             .invite;
         info!("Mint ready");
 
-        // Take the last two guardians offline so the rest of the suite
+        // Take the last two nodes offline so the rest of the suite
         // runs against a mint at exactly quorum. Wait for each to
         // finalize a session first — that proves its DKG output and bft
         // state are persisted, so it can come back from its data dir.
-        for node in NUM_ONLINE_GUARDIANS..NUM_GUARDIANS {
+        for node in NUM_ONLINE_NODES..NUM_NODES {
             let data_dir = &node_data_dirs[node];
             runtime.block_on(retry(
-                &format!("guardian-{node} finalized a session"),
+                &format!("node-{node} finalized a session"),
                 || async {
                     ensure!(
-                        cli::guardian_session_count(data_dir)? >= 1,
+                        cli::node_session_count(data_dir)? >= 1,
                         "no finalized session yet"
                     );
                     Ok(())
                 },
             ))?;
 
-            let mut child = guardian_processes[node]
-                .take()
-                .expect("guardian was started");
+            let mut child = node_processes[node].take().expect("node was started");
             runtime.block_on(async {
                 child.kill().await?;
                 child.wait().await?;
                 anyhow::Ok(())
             })?;
-            info!("Stopped guardian-{node}");
+            info!("Stopped node-{node}");
         }
 
         let client_counter = AtomicU64::new(0);
@@ -191,37 +189,37 @@ impl TestEnv {
                 gateway_pk,
                 lnurl_daemon_url,
                 client_counter,
-                guardian_processes: Mutex::new(guardian_processes),
+                node_processes: Mutex::new(node_processes),
             },
             client_send,
         ))
     }
 
-    /// SIGKILL a single guardian process and delete its data directory,
-    /// simulating a total disk loss. Use `restart_guardian` to bring it
+    /// SIGKILL a single node process and delete its data directory,
+    /// simulating a total disk loss. Use `restart_node` to bring it
     /// back up against an empty data dir.
-    pub async fn wipe_guardian(&self, node: usize) -> anyhow::Result<()> {
-        let mut procs = self.guardian_processes.lock().await;
+    pub async fn wipe_node(&self, node: usize) -> anyhow::Result<()> {
+        let mut procs = self.node_processes.lock().await;
         if let Some(mut child) = procs[node].take() {
             child.kill().await?;
             child.wait().await?;
         }
         drop(procs);
 
-        let data_dir = self.data_dir.join(format!("guardian-{node}"));
+        let data_dir = self.data_dir.join(format!("node-{node}"));
         tokio::fs::remove_dir_all(&data_dir).await?;
         Ok(())
     }
 
     /// Spawn a fresh daemon for `node` against its existing data dir.
-    pub async fn restart_guardian(&self, node: usize) -> anyhow::Result<()> {
-        let child = start_guardian(&self.data_dir, node).await?;
-        self.guardian_processes.lock().await[node] = Some(child);
+    pub async fn restart_node(&self, node: usize) -> anyhow::Result<()> {
+        let child = start_node(&self.data_dir, node).await?;
+        self.node_processes.lock().await[node] = Some(child);
         Ok(())
     }
 
     /// Mine one regtest block per second for the lifetime of the test.
-    /// Guardians only propose block-count votes when the height changes,
+    /// Nodes only propose block-count votes when the height changes,
     /// so without steadily arriving blocks an idle mint orders
     /// nothing and session-advance waits would starve.
     fn spawn_miner_thread() -> anyhow::Result<()> {
@@ -316,19 +314,19 @@ async fn build_client(
     Ok(TestClient { client, fed, db })
 }
 
-async fn start_guardian(base: &Path, node: usize) -> anyhow::Result<Child> {
-    let p2p_port = GUARDIAN_BASE_PORT + (node as u16 * PORTS_PER_GUARDIAN);
+async fn start_node(base: &Path, node: usize) -> anyhow::Result<Child> {
+    let p2p_port = NODE_BASE_PORT + (node as u16 * PORTS_PER_NODE);
     let ui_port = p2p_port + 1;
 
-    let data_dir = base.join(format!("guardian-{node}"));
+    let data_dir = base.join(format!("node-{node}"));
     tokio::fs::create_dir_all(&data_dir).await?;
 
     let log_file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(base.join(format!("guardian-{node}.log")))?;
+        .open(base.join(format!("node-{node}.log")))?;
 
-    let child = Command::new("target/release/picomint-guardian-daemon")
+    let child = Command::new("target/release/picomint-node-daemon")
         .env("DATA_DIR", data_dir.to_str().unwrap())
         .env("BITCOIN_NETWORK", "regtest")
         .env(
@@ -341,9 +339,9 @@ async fn start_guardian(base: &Path, node: usize) -> anyhow::Result<Child> {
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
         .spawn()
-        .context(format!("Failed to start guardian-{node}"))?;
+        .context(format!("Failed to start node-{node}"))?;
 
-    info!("Started guardian-{node} on port {p2p_port} (UI: http://127.0.0.1:{ui_port})");
+    info!("Started node-{node} on port {p2p_port} (UI: http://127.0.0.1:{ui_port})");
     Ok(child)
 }
 
@@ -360,7 +358,12 @@ async fn start_lnurl_daemon(base: &Path, port: u16) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn start_gateway(base: &Path, name: &str, gateway_port: u16, lightning_port: u16) -> anyhow::Result<()> {
+async fn start_gateway(
+    base: &Path,
+    name: &str,
+    gateway_port: u16,
+    lightning_port: u16,
+) -> anyhow::Result<()> {
     let data_dir = base.join(name);
 
     tokio::fs::create_dir_all(&data_dir).await?;
@@ -386,13 +389,13 @@ async fn start_gateway(base: &Path, name: &str, gateway_port: u16, lightning_por
 }
 
 async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
-    use picomint_guardian_cli_core::SetupStatus;
+    use picomint_node_cli_core::SetupStatus;
 
-    // Wait for all guardians to be ready (the CLI `setup status` call
+    // Wait for all nodes to be ready (the CLI `setup status` call
     // returns once the daemon has bound its CLI socket).
     for (node, data_dir) in node_data_dirs.iter().enumerate() {
-        retry(&format!("guardian-{node} setup status"), || async {
-            let status = cli::guardian_setup_status(data_dir)?;
+        retry(&format!("node-{node} setup status"), || async {
+            let status = cli::node_setup_status(data_dir)?;
             ensure!(
                 status == SetupStatus::AwaitingLocalParams,
                 "Unexpected status: {status:?}"
@@ -401,23 +404,18 @@ async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
         })
         .await?;
     }
-    info!("All guardians awaiting local params");
+    info!("All nodes awaiting local params");
 
     // Set local params: node 0 is leader, rest are followers
     let mut setup_codes = BTreeMap::new();
     for (node, data_dir) in node_data_dirs.iter().enumerate() {
-        let name = format!("Guardian {node}");
+        let name = format!("Node {node}");
         let (mint_name, mint_size) = if node == 0 {
-            (Some("Test Mint"), Some(NUM_GUARDIANS as u8))
+            (Some("Test Mint"), Some(NUM_NODES as u8))
         } else {
             (None, None)
         };
-        let resp = cli::guardian_setup_set_local_params(
-            data_dir,
-            &name,
-            mint_name,
-            mint_size,
-        )?;
+        let resp = cli::node_setup_set_local_params(data_dir, &name, mint_name, mint_size)?;
         let setup_code = resp
             .get("setup_code")
             .and_then(|v| v.as_str())
@@ -425,22 +423,22 @@ async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
             .to_string();
         setup_codes.insert(node, setup_code);
     }
-    info!("Local params set for all guardians");
+    info!("Local params set for all nodes");
 
     // Exchange node connection info
     for (node, code) in &setup_codes {
-        for (other_peer, data_dir) in node_data_dirs.iter().enumerate() {
-            if other_peer == *node {
+        for (other_node, data_dir) in node_data_dirs.iter().enumerate() {
+            if other_node == *node {
                 continue;
             }
-            cli::guardian_setup_add_peer(data_dir, code)?;
+            cli::node_setup_add_node(data_dir, code)?;
         }
     }
     info!("Node info exchanged");
 
     // Start DKG on all nodes
     for data_dir in node_data_dirs {
-        cli::guardian_setup_start_dkg(data_dir)?;
+        cli::node_setup_start_dkg(data_dir)?;
     }
 
     info!("DKG started");

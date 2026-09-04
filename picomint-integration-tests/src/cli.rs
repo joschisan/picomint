@@ -6,10 +6,10 @@ use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
-    MintBalanceResponse, MintListResponse, InfoResponse, LdkChannelListResponse,
-    LdkLnReceiveResponse, LdkOnchainReceiveResponse,
+    InfoResponse, LdkChannelListResponse, LdkLightningReceiveResponse, LdkOnchainReceiveResponse,
+    MintBalanceResponse, MintListResponse,
 };
-use picomint_guardian_cli_core::{InviteResponse, SetupStatus};
+use picomint_node_cli_core::{InviteResponse, SetupStatus};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -38,16 +38,16 @@ fn gateway_cmd(gateway_data_dir: &Path) -> Command {
     cmd
 }
 
-fn guardian_cmd(data_dir: &Path) -> Command {
-    let mut cmd = Command::new("target/release/picomint-guardian-cli");
+fn node_cmd(data_dir: &Path) -> Command {
+    let mut cmd = Command::new("target/release/picomint-node-cli");
     cmd.arg("--data-dir").arg(data_dir);
     cmd
 }
 
-/// Helper to compute a guardian's data directory from the shared test
-/// temp root, mirroring `env::start_guardian`'s layout.
-pub fn guardian_data_dir(base: &Path, node: usize) -> PathBuf {
-    base.join(format!("guardian-{node}"))
+/// Helper to compute a node's data directory from the shared test
+/// temp root, mirroring `env::start_node`'s layout.
+pub fn node_data_dir(base: &Path, node: usize) -> PathBuf {
+    base.join(format!("node-{node}"))
 }
 
 // ── Gateway CLI wrappers ────────────────────────────────────────────────────
@@ -81,10 +81,7 @@ pub fn gateway_mint_list(gateway_data_dir: &Path) -> Result<MintListResponse> {
         .run_cli::<MintListResponse>()
 }
 
-pub fn gateway_mint_balance(
-    gateway_data_dir: &Path,
-    mint: &str,
-) -> Result<MintBalanceResponse> {
+pub fn gateway_mint_balance(gateway_data_dir: &Path, mint: &str) -> Result<MintBalanceResponse> {
     gateway_cmd(gateway_data_dir)
         .arg("mint")
         .arg("balance")
@@ -131,13 +128,13 @@ pub fn gateway_ldk_channel_list(gateway_data_dir: &Path) -> Result<LdkChannelLis
 pub fn gateway_ldk_lightning_receive(
     gateway_data_dir: &Path,
     amount_msat: u64,
-) -> Result<LdkLnReceiveResponse> {
+) -> Result<LdkLightningReceiveResponse> {
     gateway_cmd(gateway_data_dir)
         .arg("ldk")
         .arg("lightning")
         .arg("receive")
         .arg(amount_msat.to_string())
-        .run_cli::<LdkLnReceiveResponse>()
+        .run_cli::<LdkLightningReceiveResponse>()
 }
 
 pub fn gateway_ldk_lightning_send(gateway_data_dir: &Path, invoice: &str) -> Result<Value> {
@@ -149,28 +146,26 @@ pub fn gateway_ldk_lightning_send(gateway_data_dir: &Path, invoice: &str) -> Res
         .run_cli::<Value>()
 }
 
-// ── Guardian CLI wrappers ───────────────────────────────────────────────────
+// ── Node CLI wrappers ───────────────────────────────────────────────────
 
-pub fn guardian_invite(data_dir: &Path) -> Result<InviteResponse> {
-    guardian_cmd(data_dir)
-        .arg("invite")
-        .run_cli::<InviteResponse>()
+pub fn node_invite(data_dir: &Path) -> Result<InviteResponse> {
+    node_cmd(data_dir).arg("invite").run_cli::<InviteResponse>()
 }
 
-pub fn guardian_setup_status(data_dir: &Path) -> Result<SetupStatus> {
-    guardian_cmd(data_dir)
+pub fn node_setup_status(data_dir: &Path) -> Result<SetupStatus> {
+    node_cmd(data_dir)
         .arg("setup")
         .arg("status")
         .run_cli::<SetupStatus>()
 }
 
-pub fn guardian_setup_set_local_params(
+pub fn node_setup_set_local_params(
     data_dir: &Path,
     name: &str,
     mint_name: Option<&str>,
     mint_size: Option<u8>,
 ) -> Result<Value> {
-    let mut cmd = guardian_cmd(data_dir);
+    let mut cmd = node_cmd(data_dir);
     cmd.arg("setup").arg("set-local-params").arg(name);
     if let Some(fed_name) = mint_name {
         cmd.arg("--mint-name").arg(fed_name);
@@ -181,39 +176,39 @@ pub fn guardian_setup_set_local_params(
     cmd.run_cli::<Value>()
 }
 
-pub fn guardian_setup_add_peer(data_dir: &Path, setup_code: &str) -> Result<Value> {
-    guardian_cmd(data_dir)
+pub fn node_setup_add_node(data_dir: &Path, setup_code: &str) -> Result<Value> {
+    node_cmd(data_dir)
         .arg("setup")
         .arg("add-node")
         .arg(setup_code)
         .run_cli::<Value>()
 }
 
-pub fn guardian_setup_start_dkg(data_dir: &Path) -> Result<Value> {
-    guardian_cmd(data_dir)
+pub fn node_setup_start_dkg(data_dir: &Path) -> Result<Value> {
+    node_cmd(data_dir)
         .arg("setup")
         .arg("start-dkg")
         .run_cli::<Value>()
 }
 
-pub fn guardian_setup_restore(data_dir: &Path, config_path: &Path) -> Result<Value> {
-    guardian_cmd(data_dir)
+pub fn node_setup_restore(data_dir: &Path, config_path: &Path) -> Result<Value> {
+    node_cmd(data_dir)
         .arg("setup")
         .arg("restore")
         .arg(config_path)
         .run_cli::<Value>()
 }
 
-pub fn guardian_config(data_dir: &Path) -> Result<Value> {
-    guardian_cmd(data_dir).arg("config").run_cli::<Value>()
+pub fn node_config(data_dir: &Path) -> Result<Value> {
+    node_cmd(data_dir).arg("config").run_cli::<Value>()
 }
 
-pub fn guardian_session_count(data_dir: &Path) -> Result<u64> {
-    guardian_cmd(data_dir).arg("session-count").run_cli::<u64>()
+pub fn node_session_count(data_dir: &Path) -> Result<u64> {
+    node_cmd(data_dir).arg("session-count").run_cli::<u64>()
 }
 
-pub fn guardian_lightning_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
-    guardian_cmd(data_dir)
+pub fn node_lightning_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
+    node_cmd(data_dir)
         .arg("module")
         .arg("lightning")
         .arg("gateway")
@@ -223,8 +218,8 @@ pub fn guardian_lightning_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result
         .run_cli::<bool>()
 }
 
-pub fn guardian_lightning_gateway_remove(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
-    guardian_cmd(data_dir)
+pub fn node_lightning_gateway_remove(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
+    node_cmd(data_dir)
         .arg("module")
         .arg("lightning")
         .arg("gateway")
@@ -233,12 +228,12 @@ pub fn guardian_lightning_gateway_remove(data_dir: &Path, pk: &GatewayPk) -> Res
         .run_cli::<bool>()
 }
 
-pub fn guardian_expiry_set(
+pub fn node_expiry_set(
     data_dir: &Path,
     timestamp: u64,
     successor: Option<&InviteCode>,
 ) -> Result<Value> {
-    let mut cmd = guardian_cmd(data_dir);
+    let mut cmd = node_cmd(data_dir);
     cmd.arg("expiry")
         .arg("set")
         .arg("--timestamp")
@@ -249,15 +244,15 @@ pub fn guardian_expiry_set(
     cmd.run_cli::<Value>()
 }
 
-pub fn guardian_expiry_clear(data_dir: &Path) -> Result<Value> {
-    guardian_cmd(data_dir)
+pub fn node_expiry_clear(data_dir: &Path) -> Result<Value> {
+    node_cmd(data_dir)
         .arg("expiry")
         .arg("clear")
         .run_cli::<Value>()
 }
 
-pub fn guardian_expiry_status(data_dir: &Path) -> Result<Option<ExpiryStatus>> {
-    guardian_cmd(data_dir)
+pub fn node_expiry_status(data_dir: &Path) -> Result<Option<ExpiryStatus>> {
+    node_cmd(data_dir)
         .arg("expiry")
         .arg("status")
         .run_cli::<Option<ExpiryStatus>>()

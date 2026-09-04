@@ -13,8 +13,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - image: picomint-guardian-daemon
-            dockerfile: docker-guardian/Dockerfile
+          - image: picomint-node-daemon
+            dockerfile: docker-node/Dockerfile
           - image: picomint-gateway-daemon
             dockerfile: docker-gateway/Dockerfile
           - image: picomint-lnurl-daemon

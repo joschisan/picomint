@@ -19,10 +19,12 @@ use bitcoin::secp256k1;
 use db::{GatewayPkTable, IncomingContractStreamIndexTable, SendOperationTable};
 pub(crate) use gateway::Gateways;
 use lightning_invoice::{Bolt11Invoice, Currency};
-use picomint_core::NumPeersExt;
+use picomint_core::NumNodesExt;
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
-use picomint_core::lightning::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
+use picomint_core::lightning::contracts::{
+    IncomingContractSummary, IncomingOffer, OutgoingContract,
+};
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::lnurl::LnurlRequest;
 use picomint_core::lightning::secret::IncomingContractSecret;
@@ -55,7 +57,7 @@ const CONTRACT_CONFIRMATION_BUFFER: u32 = 12;
 ///
 /// The stream is mint-wide and a cold client walks all of it, so the
 /// batch sets how many round trips that costs — and each round trip fans out
-/// to every guardian. A thousand summaries is ~150 kB per node, which is a
+/// to every node. A thousand summaries is ~150 kB per node, which is a
 /// reasonable unit of work against a set that only grows with the
 /// mint's unclaimed contracts.
 const BATCH: u64 = 1000;
@@ -364,7 +366,8 @@ fn receive_incoming_contract(
     sk: SecretKey,
     summary: &IncomingContractSummary,
 ) {
-    let Some((claim_keypair, agg_dk)) = summary.recover(&ctx.config.lightning.tpe_agg_pk, &sk) else {
+    let Some((claim_keypair, agg_dk)) = summary.recover(&ctx.config.lightning.tpe_agg_pk, &sk)
+    else {
         return;
     };
 
@@ -403,7 +406,10 @@ async fn receive_scan(ctx: ClientContext) {
     let keys = Account::ALL.map(|account| {
         (
             account,
-            ctx.secret.lightning_secret().receive_keypair(account).secret_key(),
+            ctx.secret
+                .lightning_secret()
+                .receive_keypair(account)
+                .secret_key(),
         )
     });
 
@@ -496,11 +502,7 @@ pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
 
 /// Whether any of this module's state machines for `operation` is still
 /// active under `mint`.
-pub(crate) fn operation_is_active(
-    dbtx: &ReadTx,
-    mint: MintId,
-    operation: OperationId,
-) -> bool {
+pub(crate) fn operation_is_active(dbtx: &ReadTx, mint: MintId, operation: OperationId) -> bool {
     dbtx.prefix(&SendStateMachineTable, &mint, |r| {
         r.any(|entry| entry.1.common.operation == operation)
     })
@@ -523,9 +525,7 @@ impl Client {
         &self,
         mint: MintId,
     ) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
-        let ctx = self
-            .ctx(mint)
-            .map_err(|_| SelectGatewayError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| SelectGatewayError::NotAdded)?;
 
         select_gateway(&ctx)
     }
@@ -540,9 +540,7 @@ impl Client {
         gateway_info: GatewayInfo,
         invoice: Bolt11Invoice,
     ) -> Result<OperationId, SendPaymentError> {
-        let ctx = self
-            .ctx(mint)
-            .map_err(|_| SendPaymentError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| SendPaymentError::NotAdded)?;
 
         send_inner(&ctx, account, gateway_pk, gateway_info, invoice, false).await
     }
@@ -612,25 +610,29 @@ impl Client {
 
         let config = &ctx.config;
 
-        let recipient = ctx.secret.lightning_secret().receive_keypair(account).public_key();
+        let recipient = ctx
+            .secret
+            .lightning_secret()
+            .receive_keypair(account)
+            .public_key();
 
-        // `f + 1` guardians, sampled fresh per lnurl: enough that one is
+        // `f + 1` nodes, sampled fresh per lnurl: enough that one is
         // honest and reachable whenever the mint itself is, and random
         // so bootstrap load spreads instead of pinning the lowest node ids.
-        let guardians = config
+        let nodes = config
             .nodes
             .values()
             .map(|endpoint| endpoint.iroh_pk)
             .choose_multiple(
                 &mut rand::thread_rng(),
-                config.nodes.to_num_peers().one_honest(),
+                config.nodes.to_num_nodes().one_honest(),
             );
 
         let info = MintInfoResponse::new(config).consensus_hash_sha256();
 
         let request = LnurlRequest {
             recipient,
-            guardians,
+            nodes,
             info,
         };
 

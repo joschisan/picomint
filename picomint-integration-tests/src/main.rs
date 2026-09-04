@@ -1,10 +1,10 @@
 mod cli;
+mod ecash;
 mod env;
 mod expiry;
 mod lightning;
-mod ecash;
-mod restore;
 mod onchain;
+mod restore;
 
 use std::sync::Arc;
 
@@ -63,7 +63,7 @@ fn main() -> anyhow::Result<()> {
         "gateway still lists mints after remove"
     );
 
-    info!("Running guardian backup/restore test...");
+    info!("Running node backup/restore test...");
     runtime.block_on(restore::run_test(&env))?;
 
     info!(
@@ -80,19 +80,19 @@ fn main() -> anyhow::Result<()> {
 
 /// Keep the mint running after the suite passes so it can be driven by
 /// hand — pair a phone with the printed invite, or hit the daemons with
-/// `picomint-{guardian,gateway}-cli --data-dir <dir>`. Blocks until Ctrl-C;
+/// `picomint-{node,gateway}-cli --data-dir <dir>`. Blocks until Ctrl-C;
 /// the wrapper script tears the daemons down on exit.
 fn keep_alive(runtime: &tokio::runtime::Runtime, env: &env::TestEnv) -> anyhow::Result<()> {
     let base = &env.data_dir;
-    let g0 = base.join("guardian-0");
+    let g0 = base.join("node-0");
 
     // The lightning suite registers then deregisters the gateway as cleanup, so
-    // re-register the real gateway with every guardian here — otherwise the
+    // re-register the real gateway with every node here — otherwise the
     // kept-alive mint exposes no gateway and a paired phone can't do
     // Lightning.
-    info!("Registering gateway with all guardians");
-    for node in 0..env::NUM_GUARDIANS {
-        cli::guardian_lightning_gateway_add(&cli::guardian_data_dir(base, node), &env.gateway_pk)?;
+    info!("Registering gateway with all nodes");
+    for node in 0..env::NUM_NODES {
+        cli::node_lightning_gateway_add(&cli::node_data_dir(base, node), &env.gateway_pk)?;
     }
 
     println!();
@@ -103,12 +103,12 @@ fn keep_alive(runtime: &tokio::runtime::Runtime, env: &env::TestEnv) -> anyhow::
     println!(" Invite (pair your phone):");
     println!("   {}", picomint_base32::encode(&env.invite));
     println!();
-    println!(" Guardians (picomint-guardian-cli --data-dir <dir> <cmd>):");
-    for i in 0..env::NUM_GUARDIANS as u16 {
-        let ui_port = env::GUARDIAN_BASE_PORT + i * env::PORTS_PER_GUARDIAN + 1;
+    println!(" Nodes (picomint-node-cli --data-dir <dir> <cmd>):");
+    for i in 0..env::NUM_NODES as u16 {
+        let ui_port = env::NODE_BASE_PORT + i * env::PORTS_PER_NODE + 1;
         println!(
-            "   guardian-{i}: {}   (UI http://127.0.0.1:{ui_port}, password: test)",
-            base.join(format!("guardian-{i}")).display(),
+            "   node-{i}: {}   (UI http://127.0.0.1:{ui_port}, password: test)",
+            base.join(format!("node-{i}")).display(),
         );
     }
     println!();
@@ -117,11 +117,11 @@ fn keep_alive(runtime: &tokio::runtime::Runtime, env: &env::TestEnv) -> anyhow::
     println!();
     println!(" Examples:");
     println!(
-        "   target/release/picomint-guardian-cli --data-dir {} invite",
+        "   target/release/picomint-node-cli --data-dir {} invite",
         g0.display(),
     );
     println!(
-        "   target/release/picomint-guardian-cli --data-dir {} session-count",
+        "   target/release/picomint-node-cli --data-dir {} session-count",
         g0.display(),
     );
     println!(

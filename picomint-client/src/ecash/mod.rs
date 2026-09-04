@@ -2,15 +2,16 @@ pub use picomint_core::ecash as common;
 
 mod api;
 mod client_db;
-mod ecash;
+mod ecash_sm;
 mod events;
 mod issuance;
-mod ecash_sm;
 mod secret;
 mod send_sm;
 
 use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 use std::collections::BTreeMap;
+use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Notify;
 
@@ -25,19 +26,20 @@ pub use events::*;
 use futures::StreamExt;
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
-use picomint_core::ecash::config::{ECashConfigConsensus, client_denominations};
-use picomint_core::ecash::{Denomination, ECashInput, Note};
+use picomint_core::ecash::config::{EcashConfigConsensus, client_denominations};
+use picomint_core::ecash::{Denomination, EcashInput, Note};
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_core::tx::Transaction;
 use picomint_core::{Amount, TransactionId, wire};
 use picomint_encoding::{Decodable, Encodable};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tbs::aggregate_signature_shares;
 use thiserror::Error;
 
-pub use self::ecash::ECash;
+use self::ecash_sm::{EcashStateMachine, EcashStateMachineTable};
 use self::issuance::{NoteIssuance, NoteIssuanceRequest};
-use self::ecash_sm::{ECashStateMachine, ECashStateMachineTable};
-pub use self::secret::ECashSecret;
+pub use self::secret::EcashSecret;
 use self::send_sm::{SendStateMachine, SendStateMachineTable};
 
 const TARGET_PER_DENOMINATION: usize = 3;
@@ -90,11 +92,56 @@ impl SpendableNote {
     }
 }
 
+/// Out-of-band Chaumian ecash bundle. The serde representation is the
+/// `picomint`-prefixed base32 string that callers hand off — so events
+/// carrying an `Ecash` log it the same way it travels on the wire.
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub struct Ecash {
+    pub mint: MintId,
+    pub notes: Vec<SpendableNote>,
+}
+
+impl Ecash {
+    pub fn new(mint: MintId, notes: Vec<SpendableNote>) -> Self {
+        Self { mint, notes }
+    }
+
+    pub fn amount(&self) -> Amount {
+        self.notes.iter().map(SpendableNote::amount).sum()
+    }
+}
+
+impl fmt::Display for Ecash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&picomint_base32::encode(self))
+    }
+}
+
+impl FromStr for Ecash {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        picomint_base32::decode(s)
+    }
+}
+
+impl Serialize for Ecash {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        picomint_base32::encode(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Ecash {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        picomint_base32::decode(&String::deserialize(deserializer)?).map_err(D::Error::custom)
+    }
+}
+
 /// Everything a seed-only scan of one account turned up: the notes it still
 /// owns, and how far its counter space was walked.
 ///
 /// Produced by [`scan`], which touches no database at all — [`commit_scan`]
-/// is where it lands, in the dbtx [`crate::Client::add`] owns.
+/// is where it lands, in the dbtx [`crate::Client::add_mint`] owns.
 #[derive(Debug, Clone)]
 pub(crate) struct Restore {
     mint: MintId,
@@ -119,18 +166,10 @@ pub(crate) struct Restore {
 /// transaction bounded by [`Transaction::MAX_INPUTS`], which a wallet holding
 /// more notes than that could not be restored through at all.
 pub(crate) fn commit_scan(dbtx: &WriteTx, account: Account, restore: &Restore) {
-    dbtx.insert(
-        &CounterTable,
-        &(restore.mint, account),
-        &restore.counter,
-    );
+    dbtx.insert(&CounterTable, &(restore.mint, account), &restore.counter);
 
     for note in &restore.notes {
-        dbtx.insert(
-            &NoteTable,
-            &(restore.mint, account, note.clone()),
-            &(),
-        );
+        dbtx.insert(&NoteTable, &(restore.mint, account, note.clone()), &());
     }
 }
 
@@ -150,8 +189,8 @@ pub(crate) fn commit_scan(dbtx: &WriteTx, account: Account, restore: &Restore) {
 /// interpolate over.
 pub(crate) async fn scan(
     api: &MintApi,
-    secret: &ECashSecret,
-    cfg: &ECashConfigConsensus,
+    secret: &EcashSecret,
+    cfg: &EcashConfigConsensus,
     mint: MintId,
     account: Account,
 ) -> anyhow::Result<Restore> {
@@ -209,7 +248,7 @@ pub(crate) async fn scan(
 /// scan refuses to cross.
 async fn scan_counters(
     api: &MintApi,
-    secret: &ECashSecret,
+    secret: &EcashSecret,
     account: Account,
 ) -> (u64, Vec<NoteIssuanceRequest>) {
     let mut found = Vec::new();
@@ -262,9 +301,7 @@ async fn scan_counters(
 /// dbtx, so a counter is only spent once the transaction carrying its
 /// blinded message is committed to.
 fn next_counter(ctx: &ClientContext, dbtx: &WriteTx, account: Account) -> u64 {
-    let counter = dbtx
-        .get(&CounterTable, &(ctx.mint, account))
-        .unwrap_or(0);
+    let counter = dbtx.get(&CounterTable, &(ctx.mint, account)).unwrap_or(0);
 
     dbtx.insert(&CounterTable, &(ctx.mint, account), &(counter + 1));
 
@@ -274,7 +311,7 @@ fn next_counter(ctx: &ClientContext, dbtx: &WriteTx, account: Account) -> u64 {
 /// Balance the builder against mint's wallet (pulling funding notes when
 /// underfunded, generating change outputs when overfunded), sign and
 /// submit the resulting transaction, and spawn the
-/// `ECashStateMachine` that tracks the balance-side notes/requests
+/// `EcashStateMachine` that tracks the balance-side notes/requests
 /// (if any).
 ///
 /// `max` raises the change floor (see [`change_denominations`]): an
@@ -317,14 +354,14 @@ pub(crate) fn finalize_and_submit_tx<E: crate::eventlog::Event + Send>(
     let txid = submit(ctx, dbtx, account, operation, builder, remint, event);
 
     if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
-        let sm = ECashStateMachine {
+        let sm = EcashStateMachine {
             account,
             operation,
             spendable_notes,
             txid,
             issuance_requests,
         };
-        crate::executor::add_state_machine_dbtx(ctx, ECashStateMachineTable, dbtx, sm);
+        crate::executor::add_state_machine_dbtx(ctx, EcashStateMachineTable, dbtx, sm);
     }
 
     Some(txid)
@@ -352,7 +389,7 @@ fn fund(
     for note in &spendable_notes {
         remove_spendable_note(dbtx, ctx.mint, account, note);
         builder.add_input(Input {
-            input: wire::Input::ECash(ECashInput { note: note.note() }),
+            input: wire::Input::Ecash(EcashInput { note: note.note() }),
             keypair: note.keypair,
             amount: note.amount(),
             fee: ctx.config.ecash.input_fee,
@@ -385,7 +422,7 @@ fn fund(
 
     for request in &issuance_requests {
         builder.add_output(Output {
-            output: wire::Output::ECash(request.output()),
+            output: wire::Output::Ecash(request.output()),
             amount: request.denomination.amount(),
             fee: ctx.config.ecash.output_fee,
         });
@@ -600,18 +637,14 @@ fn remove_spendable_note(
 
 /// Every note `account` holds — an indexed prefix scan over the key's
 /// leading `(mint, account)` columns.
-fn account_notes(
-    dbtx: &impl DbRead,
-    mint: MintId,
-    account: Account,
-) -> Vec<SpendableNote> {
+fn account_notes(dbtx: &impl DbRead, mint: MintId, account: Account) -> Vec<SpendableNote> {
     dbtx.prefix(&NoteTable, &(mint, account), |r| {
         r.map(|entry| entry.0.2).collect()
     })
 }
 
 /// Pull a set of `account`'s `SpendableNote`s whose denominations sum exactly
-/// to `remaining_amount`, remove them, and return the resulting `ECash`.
+/// to `remaining_amount`, remove them, and return the resulting `Ecash`.
 /// Returns `None` if no exact-match combination exists. No events are logged
 /// — callers do that.
 fn send_ecash_dbtx(
@@ -619,7 +652,7 @@ fn send_ecash_dbtx(
     mint: MintId,
     account: Account,
     mut remaining_amount: Amount,
-) -> Option<ECash> {
+) -> Option<Ecash> {
     let mut sorted = account_notes(dbtx, mint, account);
 
     sorted.sort_by_key(|n| std::cmp::Reverse(n.denomination));
@@ -643,7 +676,7 @@ fn send_ecash_dbtx(
         remove_spendable_note(dbtx, mint, account, spendable_note);
     }
 
-    Some(ECash::new(mint, notes))
+    Some(Ecash::new(mint, notes))
 }
 
 /// Remove every row this module owns under the caller's mint prefix.
@@ -652,18 +685,14 @@ pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
     dbtx.remove_prefix(&NoteTable, &mint);
     dbtx.remove_prefix(&ReceiveOperationTable, &mint);
     dbtx.remove_prefix(&CounterTable, &mint);
-    dbtx.remove_prefix(&ECashStateMachineTable, &mint);
+    dbtx.remove_prefix(&EcashStateMachineTable, &mint);
     dbtx.remove_prefix(&SendStateMachineTable, &mint);
 }
 
 /// Whether any of this module's state machines for `operation` is still
 /// active under `mint`.
-pub(crate) fn operation_is_active(
-    dbtx: &ReadTx,
-    mint: MintId,
-    operation: OperationId,
-) -> bool {
-    dbtx.prefix(&ECashStateMachineTable, &mint, |r| {
+pub(crate) fn operation_is_active(dbtx: &ReadTx, mint: MintId, operation: OperationId) -> bool {
+    dbtx.prefix(&EcashStateMachineTable, &mint, |r| {
         r.any(|entry| entry.1.operation == operation)
     }) || dbtx.prefix(&SendStateMachineTable, &mint, |r| {
         r.any(|entry| entry.1.operation == operation)
@@ -674,7 +703,7 @@ pub(crate) fn operation_is_active(
 /// commit that writes them.
 pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
     vec![
-        db.notify_for_table(&ECashStateMachineTable),
+        db.notify_for_table(&EcashStateMachineTable),
         db.notify_for_table(&SendStateMachineTable),
     ]
 }
@@ -684,13 +713,13 @@ pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
 pub(crate) fn resume(ctx: &ClientContext) {
     crate::executor::resume::<TxSubmissionStateMachine, _>(ctx, TxSubmissionStateMachineTable);
 
-    crate::executor::resume::<ECashStateMachine, _>(ctx, ECashStateMachineTable);
+    crate::executor::resume::<EcashStateMachine, _>(ctx, EcashStateMachineTable);
 
     crate::executor::resume::<SendStateMachine, _>(ctx, SendStateMachineTable);
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
-pub enum SendECashError {
+pub enum SendEcashError {
     #[error("We need to reissue notes but the client is offline")]
     Offline,
     #[error("The clients balance is insufficient")]
@@ -702,14 +731,14 @@ pub enum SendECashError {
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
-pub enum ReceiveECashError {
-    #[error("The ECash bundle contains no notes")]
+pub enum ReceiveEcashError {
+    #[error("The Ecash bundle contains no notes")]
     Empty,
-    #[error("The ECash bundle contains more notes than one transaction can reissue")]
+    #[error("The Ecash bundle contains more notes than one transaction can reissue")]
     TooManyNotes,
-    #[error("The ECash is from a different mint")]
+    #[error("The Ecash is from a different mint")]
     WrongMint,
-    #[error("ECash contains an uneconomical denomination")]
+    #[error("Ecash contains an uneconomical denomination")]
     UneconomicalDenomination,
     #[error("Receiving ecash requires additional funds")]
     InsufficientFunds,
@@ -782,15 +811,11 @@ impl Client {
 
     /// Count `account`'s notes by denomination. Pure read — never brings
     /// the mint up.
-    pub fn ecash_count(
-        &self,
-        mint: MintId,
-        account: Account,
-    ) -> BTreeMap<Denomination, u64> {
+    pub fn ecash_count(&self, mint: MintId, account: Account) -> BTreeMap<Denomination, u64> {
         get_count_by_denomination_dbtx(&self.db.begin_read(), mint, account)
     }
 
-    /// Send [`ECash`] for the given amount from `account`. The amount is
+    /// Send [`Ecash`] for the given amount from `account`. The amount is
     /// rounded up to a multiple of the smallest client denomination; when the
     /// balance's denominations cannot cover it exactly, a reissue transaction
     /// mints them first. Safe to cancel before the reissue completes — the
@@ -801,8 +826,8 @@ impl Client {
         mint: MintId,
         account: Account,
         amount: Amount,
-    ) -> Result<ECash, SendECashError> {
-        let ctx = self.ctx(mint).map_err(|_| SendECashError::NotAdded)?;
+    ) -> Result<Ecash, SendEcashError> {
+        let ctx = self.ctx(mint).map_err(|_| SendEcashError::NotAdded)?;
 
         let amount = round_to_multiple(
             amount,
@@ -839,7 +864,7 @@ impl Client {
 
         crate::api::liveness(&ctx.api)
             .await
-            .map_err(|_| SendECashError::Offline)?;
+            .map_err(|_| SendEcashError::Offline)?;
 
         let dbtx = ctx.db.begin_write();
 
@@ -859,7 +884,7 @@ impl Client {
 
         for request in &targets {
             builder.add_output(Output {
-                output: wire::Output::ECash(request.output()),
+                output: wire::Output::Ecash(request.output()),
                 amount: request.denomination.amount(),
                 fee: ctx.config.ecash.output_fee,
             });
@@ -867,7 +892,7 @@ impl Client {
 
         // Everything below lands in the same dbtx that submits the
         // reissuance: SendEvent → RemintEvent → TxCreateEvent →
-        // ECashSM + SendSM. A crash before the commit leaves no half-state
+        // EcashSM + SendSM. A crash before the commit leaves no half-state
         // behind; on restart the operation simply doesn't exist.
         ctx.log_event(&dbtx, account, operation, SendEvent { amount });
 
@@ -881,7 +906,7 @@ impl Client {
             false,
             |txid| RemintEvent { txid },
         )
-        .ok_or(SendECashError::InsufficientBalance)?;
+        .ok_or(SendEcashError::InsufficientBalance)?;
 
         let send_sm = SendStateMachine {
             account,
@@ -905,19 +930,15 @@ impl Client {
                     .expect("logged ecash is its own to_string, which from_str reverses");
             }
             if entry.to_event::<SendFailureEvent>().is_some() {
-                return Err(SendECashError::Failure);
+                return Err(SendEcashError::Failure);
             }
         }
         unreachable!("subscribe_operation_events only ends at client shutdown")
     }
 
-    /// Send everything `account` holds as one [`ECash`] bundle. `None` when
+    /// Send everything `account` holds as one [`Ecash`] bundle. `None` when
     /// it holds nothing.
-    pub fn ecash_send_max(
-        &self,
-        mint: MintId,
-        account: Account,
-    ) -> anyhow::Result<Option<ECash>> {
+    pub fn ecash_send_max(&self, mint: MintId, account: Account) -> anyhow::Result<Option<Ecash>> {
         let ctx = self.ctx(mint)?;
 
         let operation = OperationId::new_random();
@@ -933,7 +954,7 @@ impl Client {
             remove_spendable_note(&dbtx, ctx.mint, account, note);
         }
 
-        let ecash = ECash::new(ctx.mint, notes);
+        let ecash = Ecash::new(ctx.mint, notes);
         let amount = ecash.amount();
 
         ctx.log_event(&dbtx, account, operation, SendEvent { amount });
@@ -951,17 +972,15 @@ impl Client {
         Ok(Some(ecash))
     }
 
-    /// Receive an [`ECash`] bundle into `account` by reissuing its notes.
+    /// Receive an [`Ecash`] bundle into `account` by reissuing its notes.
     /// A bundle can be received exactly once per mint.
     pub fn ecash_receive(
         &self,
         mint: MintId,
         account: Account,
-        ecash: &ECash,
-    ) -> Result<OperationId, ReceiveECashError> {
-        let ctx = self
-            .ctx(mint)
-            .map_err(|_| ReceiveECashError::NotAdded)?;
+        ecash: &Ecash,
+    ) -> Result<OperationId, ReceiveEcashError> {
+        let ctx = self.ctx(mint).map_err(|_| ReceiveEcashError::NotAdded)?;
 
         let operation = OperationId::from_encodable(ecash);
 
@@ -970,18 +989,18 @@ impl Client {
         // Without the guard it would balance to a transaction with no inputs
         // and no outputs and submit it.
         if ecash.notes.is_empty() {
-            return Err(ReceiveECashError::Empty);
+            return Err(ReceiveEcashError::Empty);
         }
 
         // Every note in the bundle is an input, and they are the only inputs
         // the account did not choose, so this is the one place a transaction
         // can be handed more of them than it may carry.
         if ecash.notes.len() > Transaction::MAX_INPUTS {
-            return Err(ReceiveECashError::TooManyNotes);
+            return Err(ReceiveEcashError::TooManyNotes);
         }
 
         if ecash.mint != ctx.mint {
-            return Err(ReceiveECashError::WrongMint);
+            return Err(ReceiveEcashError::WrongMint);
         }
 
         if ecash
@@ -989,13 +1008,13 @@ impl Client {
             .iter()
             .any(|note| note.amount() <= ctx.config.ecash.input_fee)
         {
-            return Err(ReceiveECashError::UneconomicalDenomination);
+            return Err(ReceiveEcashError::UneconomicalDenomination);
         }
 
         let mut tx_builder = TxBuilder::new();
         for note in &ecash.notes {
             tx_builder.add_input(Input {
-                input: wire::Input::ECash(ECashInput { note: note.note() }),
+                input: wire::Input::Ecash(EcashInput { note: note.note() }),
                 keypair: note.keypair,
                 amount: note.amount(),
                 fee: ctx.config.ecash.input_fee,
@@ -1008,7 +1027,7 @@ impl Client {
             .insert(&ReceiveOperationTable, &(ctx.mint, operation), &())
             .is_some()
         {
-            return Err(ReceiveECashError::AlreadyAttempted);
+            return Err(ReceiveEcashError::AlreadyAttempted);
         }
 
         let amount = ecash.amount();
@@ -1023,7 +1042,7 @@ impl Client {
             false,
             |txid| ReceiveEvent { txid, amount },
         )
-        .ok_or(ReceiveECashError::InsufficientFunds)?;
+        .ok_or(ReceiveEcashError::InsufficientFunds)?;
 
         dbtx.commit();
 

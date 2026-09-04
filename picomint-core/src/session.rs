@@ -45,7 +45,7 @@ impl SessionOutcome {
 ///
 /// A signed block combines a block with the naive threshold secp schnorr
 /// signature for its header created by the mint. The signed blocks allow
-/// clients and recovering guardians to verify the mints consensus
+/// clients and recovering nodes to verify the mints consensus
 /// history. After a signed block has been created it is stored in the database.
 #[derive(Clone, Debug, Encodable, Decodable, Eq, PartialEq)]
 pub struct SignedSessionOutcome {

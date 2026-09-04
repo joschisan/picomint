@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct ConfigRequest {
-    /// Invite id of the invite code this download is for. The issuing guardian
+    /// Invite id of the invite code this download is for. The issuing node
     /// checks the registered expiration date and user limit and counts the
     /// download towards the limit; there is no way to fetch the config without
     /// a recognized invite.
@@ -85,7 +85,7 @@ pub struct MintInfoResponse {
 }
 
 impl MintInfoResponse {
-    /// Built on both sides — by a guardian to answer, and by a client to
+    /// Built on both sides — by a node to answer, and by a client to
     /// commit to the answer it expects — so the two hash the same bytes.
     pub fn new(config: &ConsensusConfig) -> Self {
         Self {

@@ -3533,74 +3533,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-guardian-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "http-body-util",
- "hyper",
- "hyper-util",
- "picomint-guardian-cli-core",
- "serde",
- "serde_json",
- "tokio",
- "tower-service",
-]
-
-[[package]]
-name = "picomint-guardian-cli-core"
-version = "0.1.0"
-dependencies = [
- "clap",
- "picomint-core",
- "serde",
-]
-
-[[package]]
-name = "picomint-guardian-daemon"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-channel",
- "async-trait",
- "axum",
- "axum-extra",
- "bitcoin",
- "bls12_381",
- "chrono",
- "clap",
- "futures",
- "group",
- "iroh",
- "iroh-base",
- "iroh-mdns-address-lookup",
- "maud",
- "picomint-base32",
- "picomint-bft",
- "picomint-core",
- "picomint-encoding",
- "picomint-guardian-cli-core",
- "picomint-redb",
- "picomint-rpc",
- "picomint-tbs",
- "picomint-tpe",
- "picomint-tss",
- "qrcode",
- "rand 0.8.6",
- "reqwest 0.13.3",
- "secp256k1",
- "serde",
- "serde_json",
- "test-log",
- "tokio",
- "tokio-rustls",
- "tracing",
- "tracing-subscriber",
- "url",
-]
-
-[[package]]
 name = "picomint-integration-tests"
 version = "0.1.0"
 dependencies = [
@@ -3619,8 +3551,8 @@ dependencies = [
  "picomint-core",
  "picomint-encoding",
  "picomint-gateway-cli-core",
- "picomint-guardian-cli-core",
  "picomint-lnurl",
+ "picomint-node-cli-core",
  "picomint-redb",
  "picomint-rpc",
  "rusqlite",
@@ -3668,6 +3600,74 @@ dependencies = [
  "tower-http 0.7.1",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "picomint-node-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "picomint-node-cli-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-service",
+]
+
+[[package]]
+name = "picomint-node-cli-core"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "picomint-core",
+ "serde",
+]
+
+[[package]]
+name = "picomint-node-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "async-trait",
+ "axum",
+ "axum-extra",
+ "bitcoin",
+ "bls12_381",
+ "chrono",
+ "clap",
+ "futures",
+ "group",
+ "iroh",
+ "iroh-base",
+ "iroh-mdns-address-lookup",
+ "maud",
+ "picomint-base32",
+ "picomint-bft",
+ "picomint-core",
+ "picomint-encoding",
+ "picomint-node-cli-core",
+ "picomint-redb",
+ "picomint-rpc",
+ "picomint-tbs",
+ "picomint-tpe",
+ "picomint-tss",
+ "qrcode",
+ "rand 0.8.6",
+ "reqwest 0.13.3",
+ "secp256k1",
+ "serde",
+ "serde_json",
+ "test-log",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "tracing-subscriber",
+ "url",
 ]
 
 [[package]]

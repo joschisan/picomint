@@ -2,119 +2,119 @@
 
 A minimal implementation of a federated Chaumian ecash mint on Bitcoin.
 
-## Deploy Guardian
+## Deploy Node
 
-Guardians run on a fresh **Ubuntu 26.04 LTS desktop** (amd64) with a screen and keyboard:
+Nodes run on a fresh **Ubuntu 26.04 LTS desktop** (amd64) with a screen and keyboard:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap.sh | bash
 ```
 
-The installer is fully self-contained — the compose file, updater and log viewer are embedded in the script and written to `~/picomint`. It installs Docker (if missing), brings up the guardian + a bundled bitcoind, pins Dashboard / Logs / Update shortcuts to the dock, and installs Signal Desktop for exchanging setup codes with co-guardians. It is safe to re-run at any time; guardian state lives in Docker volumes a re-run never touches. CI runs the bootstrap end-to-end on GitHub Actions' `ubuntu-26.04` runner.
+The installer is fully self-contained — the compose file, updater and log viewer are embedded in the script and written to `~/picomint`. It installs Docker (if missing), brings up the node + a bundled bitcoind, pins Dashboard / Logs / Update shortcuts to the dock, and installs Signal Desktop for exchanging setup codes with co-operators. It is safe to re-run at any time; node state lives in Docker volumes a re-run never touches. CI runs the bootstrap end-to-end on GitHub Actions' `ubuntu-26.04` runner.
 
 ### Bitcoin Backend
 
-The guardian runs as a lightweight daemon on top of a local **unpruned** Bitcoin Core node. The bundled compose starts one for you alongside the guardian. Any machine that can comfortably run Bitcoin Core can run the picomint guardian on top — picomint's own resource footprint is negligible compared to Core's.
+The node runs as a lightweight daemon on top of a local **unpruned** Bitcoin Core node. The bundled compose starts one for you alongside the node. Any machine that can comfortably run Bitcoin Core can run the picomint node on top — picomint's own resource footprint is negligible compared to Core's.
 
-Pruning is not supported: a halted federation must be able to resume from blocks that may pre-date a rolling prune window.
+Pruning is not supported: a halted mint must be able to resume from blocks that may pre-date a rolling prune window.
 
-Initial block download pulls the full chain over the network, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth and disk. The guardian will sit idle until bitcoind catches up.
+Initial block download pulls the full chain over the network, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth and disk. The node will sit idle until bitcoind catches up.
 
 ### Accessing the CLI
 
-The `picomint-guardian-cli` binary is included in the container and on the `PATH`. Run CLI commands from the host like:
+The `picomint-node-cli` binary is included in the container and on the `PATH`. Run CLI commands from the host like:
 
 ```bash
-sudo docker exec picomint-guardian-daemon picomint-guardian-cli --help
+sudo docker exec picomint-node-daemon picomint-node-cli --help
 ```
 
-The walkthroughs below use the bare `picomint-guardian-cli …` form — prefix with `sudo docker exec picomint-guardian-daemon` to run them.
+The walkthroughs below use the bare `picomint-node-cli …` form — prefix with `sudo docker exec picomint-node-daemon` to run them.
 
 ### Setup Ceremony
 
-Before the federation can start processing transactions, guardians run a one-time setup ceremony. The Web UI walks you through it in a setup wizard; the CLI does the same thing.
+Before the mint can start processing transactions, nodes run a one-time setup ceremony. The Web UI walks you through it in a setup wizard; the CLI does the same thing.
 
-Exactly one guardian sets the global federation config and passes `--federation-name` and `--federation-size`; the others pass only their own `<name>`:
+Exactly one node sets the global mint config and passes `--mint-name` and `--mint-size`; the others pass only their own `<name>`:
 
 ```bash
-picomint-guardian-cli setup set-local-params <name> [--federation-name X] [--federation-size N]
+picomint-node-cli setup set-local-params <name> [--mint-name X] [--mint-size N]
 ```
 
-`set-local-params` returns a setup code. Every guardian then calls `add-peer` once per peer with that peer's setup code:
+`set-local-params` returns a setup code. Every node then calls `add-node` once per node with that node's setup code:
 
 ```bash
-picomint-guardian-cli setup add-peer <setup-code>
+picomint-node-cli setup add-node <setup-code>
 ```
 
-Once every guardian has added every peer, everyone runs:
+Once every node has added every node, everyone runs:
 
 ```bash
-picomint-guardian-cli setup start-dkg
+picomint-node-cli setup start-dkg
 ```
 
 Check your progress with:
 
 ```bash
-picomint-guardian-cli setup status
+picomint-node-cli setup status
 ```
 
 ### Invite Users
 
-Users add the federation with an invite code and any guardian can create one:
+Users add the mint with an invite code and any node can create one:
 
 ```bash
-picomint-guardian-cli invite
+picomint-node-cli invite
 ```
 
-The client can use this invite to download and verify the federation config from the guardian that generated it.
+The client can use this invite to download and verify the mint config from the node that generated it.
 
 ### Configure Gateways
 
-The federation maintains an explicit list of recommended Lightning gateways. Any guardian can add a gateway and clients will priorititze gateways by the number of guardians recommending them.
+The mint maintains an explicit list of recommended Lightning gateways. Any node can add a gateway and clients will priorititze gateways by the number of nodes recommending them.
 
 Add a gateway:
 
 ```bash
-picomint-guardian-cli module ln gateway add <url>
+picomint-node-cli module lightning gateway add <url>
 ```
 
 Remove one:
 
 ```bash
-picomint-guardian-cli module ln gateway remove <url>
+picomint-node-cli module lightning gateway remove <url>
 ```
 
 List the current recommendations:
 
 ```bash
-picomint-guardian-cli module ln gateway list
+picomint-node-cli module lightning gateway list
 ```
 
 ### Backup
 
-Once the setup ceremony completes, save your guardian's config to a file on
+Once the setup ceremony completes, save your node's config to a file on
 your local machine and stash it somewhere safe (encrypted backup, password
 manager, paper printout):
 
 ```bash
-picomint-guardian-cli config > config.json
+picomint-node-cli config > config.json
 ```
 
 This single file is the only state you need to keep. It contains your
-guardian's secret keys plus the federation's consensus config. The live
+node's secret keys plus the mint's consensus config. The live
 `database.redb` is operational state (BFT sessions, block sync) which is
-reconstructed from peers when a restored guardian rejoins.
+reconstructed from nodes when a restored node rejoins.
 
 If your deployment is ever lost, copy the backup back into a fresh container:
 
 ```bash
-sudo docker cp config.json picomint-guardian-daemon:/tmp/config.json
+sudo docker cp config.json picomint-node-daemon:/tmp/config.json
 ```
 
 And run `setup restore`:
 
 ```bash
-picomint-guardian-cli setup restore /tmp/config.json
+picomint-node-cli setup restore /tmp/config.json
 ```
 
 ### Interfaces
@@ -125,8 +125,8 @@ picomint-guardian-cli setup restore /tmp/config.json
 | 3000 | Web UI (setup + dashboard)   | Localhost only  |
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `sudo docker exec picomint-guardian-daemon
-picomint-guardian-cli …`.
+network exposure. Reach it with `sudo docker exec picomint-node-daemon
+picomint-node-cli …`.
 
 ### Configuration
 
@@ -172,10 +172,10 @@ Your info will look like
 
 ### Open Channels
 
-To route payments on behalf of federations the gateway needs Lightning channels — specifically inbound liquidity, since a fresh node cannot receive payments. The usual approach is to buy an inbound channel from a Lightning Service Provider (LSP) such as [LN Big](https://lnbig.com). LSPs will ask for the node's `public_key` from `info` above and may require you to connect to them before they open the channel:
+To route payments on behalf of mints the gateway needs Lightning channels — specifically inbound liquidity, since a fresh node cannot receive payments. The usual approach is to buy an inbound channel from a Lightning Service Provider (LSP) such as [LN Big](https://lnbig.com). LSPs will ask for the node's `public_key` from `info` above and may require you to connect to them before they open the channel:
 
 ```bash
-picomint-gateway-cli ldk peer connect <lsp-pubkey> <lsp-host>
+picomint-gateway-cli ldk node connect <lsp-pubkey> <lsp-host>
 ```
 
 You can also open outbound channels yourself but first the gateway's embedded LDK node needs onchain bitcoin to open channels. Generate a receive address:
@@ -202,72 +202,72 @@ Running a second outbound channel alongside the LSP's inbound one is worthwhile:
 picomint-gateway-cli ldk channel list
 ```
 
-### Add Federations
+### Add Mints
 
-The gateway can serve mutliple Federations simultanously. Add one with an invite code (see [Invite Users](#invite-users) above for how guardians produce these):
+The gateway can serve multiple mints simultaneously. Add one with an invite code (see [Invite Users](#invite-users) above for how nodes produce these):
 
 ```bash
-picomint-gateway-cli federation add <invite>
+picomint-gateway-cli mint add <invite>
 ```
 
-List added federations:
+List added mints:
 
 ```bash
-picomint-gateway-cli federation list
+picomint-gateway-cli mint list
 ```
 
-Remove a federation and delete all of its data:
+Remove a mint and delete all of its data:
 
 ```bash
-picomint-gateway-cli federation remove <federation-id>
+picomint-gateway-cli mint remove <mint-id>
 ```
 
 This is destructive: check for in-flight payments via `query` first, otherwise you might lose funds.
 
-For the gateway to actually route payments on behalf of a federation, its guardians also need to add the gateway's URL to their recommended list — see [Configure Gateways](#configure-gateways) above.
+For the gateway to actually route payments on behalf of a mint, its nodes also need to add the gateway's URL to their recommended list — see [Configure Gateways](#configure-gateways) above.
 
-### Manage Federation Liquidity
+### Manage Mint Liquidity
 
-Every command below accepts `--id <federation-id>` to target a specific federation. When exactly one federation is added (the common case) the flag can be omitted and that federation is used.
+Every command below accepts `--id <mint-id>` to target a specific mint. When exactly one mint is added (the common case) the flag can be omitted and that mint is used.
 
-The gateway holds its own ecash balance in every federation it has added. Check it with:
+The gateway holds its own ecash balance in every mint it has added. Check it with:
 
 ```bash
-picomint-gateway-cli federation balance
+picomint-gateway-cli mint balance
 ```
 
 You can move funds in and out either onchain or as an ecash string.
 
-**Receive Onchain:** generate a federation deposit address and send bitcoin to it. When the transaction confirms the federation mints ecash to the gateway.
+**Receive Onchain:** generate a mint deposit address and send bitcoin to it. When the transaction confirms the mint issues ecash to the gateway.
 
 ```bash
-picomint-gateway-cli federation module wallet receive
+picomint-gateway-cli mint module onchain receive
 ```
 
-**Send Onchain:** burn ecash in exchange for an onchain transfer to the given address. The federation picks a feerate; check what it will charge first:
+**Send Onchain:** burn ecash in exchange for an onchain transfer to the given address. The mint picks a feerate; check what it will charge first:
 
 ```bash
-picomint-gateway-cli federation module wallet send-fee
+picomint-gateway-cli mint module onchain send-fee
 ```
 
 Then send:
 
 ```bash
-picomint-gateway-cli federation module wallet send <address> <amount>
+picomint-gateway-cli mint module onchain send <address> <amount>
 ```
 
 Passing `--fee <amount>` overrides the feerate with an exact value; otherwise whatever `send-fee` currently reports is used.
 
-**Send Ecash:** spend part of the federation balance as a base32-encoded ecash string you can hand to another client:
+**Send Ecash:** spend part of the mint balance as a base32-encoded ecash string you can hand to another client:
 
 ```bash
-picomint-gateway-cli federation module mint send <amount>
+picomint-gateway-cli mint module ecash send <amount>
 ```
 
 **Receive Ecash:** reissue an ecash string produced by `mint send` (on this gateway or any other client) into your balance:
 
 ```bash
-picomint-gateway-cli federation module mint receive <ecash>
+picomint-gateway-cli mint module ecash receive <ecash>
 ```
 
 ### Restore
@@ -278,11 +278,11 @@ If your gateway deployment is ever corrupted you can restore your onchain funds 
 picomint-gateway-cli mnemonic
 ```
 
-The mnemonic can be used with any Bip 39 compatible wallet to restore the onchain funds and with any Picomint wallet to restore the funds in the federations.  **The balance in your open lightning channels is lost.**
+The mnemonic can be used with any Bip 39 compatible wallet to restore the onchain funds and with any Picomint wallet to restore the funds in the mints.  **The balance in your open lightning channels is lost.**
 
 ### Analytics
 
-The gateway mirrors every gw-module event into a SQLite database at
+The gateway mirrors every gateway-module event into a SQLite database at
 `{DATA_DIR}/analytics/analytics.sqlite`. The directory is **wiped on every
 startup** and rebuilt by replaying the event log — analytics are derived,
 not authoritative, so it's safe to delete and let it rebuild.
@@ -310,35 +310,35 @@ picomint-gateway-cli query \
     "SELECT status, COUNT(*) AS n FROM outgoing_payments GROUP BY status"
 ```
 
-Total outgoing volume per federation, in sat:
+Total outgoing volume per mint, in sat:
 
 ```bash
 picomint-gateway-cli query \
-    "SELECT federation, SUM(amount_msat)/1000 AS sat \
-     FROM outgoing_payments WHERE status='success' GROUP BY federation"
+    "SELECT mint, SUM(amount_msat)/1000 AS sat \
+     FROM outgoing_payments WHERE status='success' GROUP BY mint"
 ```
 
 **Columns common to both views:**
 
 | Column           | Type    | Notes                                                                  |
 |------------------|---------|------------------------------------------------------------------------|
-| `federation`     | TEXT    | Hex-encoded federation id                                              |
+| `mint`     | TEXT    | Hex-encoded mint id                                              |
 | `operation`      | TEXT    | Hex-encoded operation id; unique within the view                       |
 | `status`         | TEXT    | See below                                                              |
 | `started_at`     | INTEGER | When the operation was initiated (ms since epoch)                      |
 | `completed_at`   | INTEGER | NULL while `status = 'pending'`                                        |
 | `amount_msat`    | INTEGER | Payment amount, msat                                                   |
-| `gw_fee_msat`    | INTEGER | The gateway's fee cut                                                  |
-| `tx_fee_msat`    | INTEGER | Federation consensus tx fee (NULL until the tx lands)                  |
-| `tx_remint_msat` | INTEGER | Federation tx remint amount                                            |
-| `tx_txid`        | TEXT    | Federation tx id (NULL until the tx lands)                             |
+| `gateway_fee_msat`    | INTEGER | The gateway's fee cut                                                  |
+| `tx_fee_msat`    | INTEGER | Mint consensus tx fee (NULL until the tx lands)                  |
+| `tx_remint_msat` | INTEGER | Mint tx remint amount                                            |
+| `tx_txid`        | TEXT    | Mint tx id (NULL until the tx lands)                             |
 | `preimage`       | TEXT    | Hex-encoded; NULL unless `status = 'success'`                          |
 
 **Additional columns on `outgoing_payments`:**
 
 | Column             | Type    | Notes                                                                  |
 |--------------------|---------|------------------------------------------------------------------------|
-| `gw_fee_kept_msat` | INTEGER | `gw_fee_msat` less the realized LN routing cost (NULL while pending; 0 if cancelled) |
+| `gateway_fee_kept_msat` | INTEGER | `gateway_fee_msat` less the realized LN routing cost (NULL while pending; 0 if cancelled) |
 
 **Status values:**
 

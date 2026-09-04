@@ -27,7 +27,7 @@ picomint-client = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-gateway-cli-core = { workspace = true }
-picomint-guardian-cli-core = { workspace = true }
+picomint-node-cli-core = { workspace = true }
 picomint-lnurl = { workspace = true }
 picomint-rpc = { workspace = true }
 picomint-redb = { workspace = true }

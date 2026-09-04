@@ -1,7 +1,9 @@
 //! Static wire enums for the fixed module set: ecash + onchain + lightning.
 
-use crate::lightning::{LightningInput, LightningInputError, LightningOutput, LightningOutputError};
-use crate::ecash::{ECashInput, ECashInputError, ECashOutput, ECashOutputError};
+use crate::ecash::{EcashInput, EcashInputError, EcashOutput, EcashOutputError};
+use crate::lightning::{
+    LightningInput, LightningInputError, LightningOutput, LightningOutputError,
+};
 use crate::onchain::{
     OnchainConsensusItem, OnchainInput, OnchainInputError, OnchainOutput, OnchainOutputError,
 };
@@ -10,14 +12,14 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum Input {
-    ECash(ECashInput),
+    Ecash(EcashInput),
     Onchain(OnchainInput),
     Lightning(LightningInput),
 }
 
-impl From<ECashInput> for Input {
-    fn from(v: ECashInput) -> Self {
-        Self::ECash(v)
+impl From<EcashInput> for Input {
+    fn from(v: EcashInput) -> Self {
+        Self::Ecash(v)
     }
 }
 
@@ -35,14 +37,14 @@ impl From<OnchainInput> for Input {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum Output {
-    ECash(ECashOutput),
+    Ecash(EcashOutput),
     Onchain(OnchainOutput),
     Lightning(Box<LightningOutput>),
 }
 
-impl From<ECashOutput> for Output {
-    fn from(v: ECashOutput) -> Self {
-        Self::ECash(v)
+impl From<EcashOutput> for Output {
+    fn from(v: EcashOutput) -> Self {
+        Self::Ecash(v)
     }
 }
 
@@ -71,17 +73,17 @@ impl From<OnchainConsensusItem> for ModuleConsensusItem {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable, Error)]
 pub enum InputError {
-    #[error("ECash input error: {0}")]
-    ECash(ECashInputError),
+    #[error("Ecash input error: {0}")]
+    Ecash(EcashInputError),
     #[error("Onchain input error: {0}")]
     Onchain(OnchainInputError),
     #[error("Lightning input error: {0}")]
     Lightning(LightningInputError),
 }
 
-impl From<ECashInputError> for InputError {
-    fn from(v: ECashInputError) -> Self {
-        Self::ECash(v)
+impl From<EcashInputError> for InputError {
+    fn from(v: EcashInputError) -> Self {
+        Self::Ecash(v)
     }
 }
 
@@ -99,17 +101,17 @@ impl From<OnchainInputError> for InputError {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable, Error)]
 pub enum OutputError {
-    #[error("ECash output error: {0}")]
-    ECash(ECashOutputError),
+    #[error("Ecash output error: {0}")]
+    Ecash(EcashOutputError),
     #[error("Onchain output error: {0}")]
     Onchain(OnchainOutputError),
     #[error("Lightning output error: {0}")]
     Lightning(LightningOutputError),
 }
 
-impl From<ECashOutputError> for OutputError {
-    fn from(v: ECashOutputError) -> Self {
-        Self::ECash(v)
+impl From<EcashOutputError> for OutputError {
+    fn from(v: EcashOutputError) -> Self {
+        Self::Ecash(v)
     }
 }
 

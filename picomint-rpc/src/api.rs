@@ -8,7 +8,7 @@ use futures::stream::BoxStream;
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::module::Method;
-use picomint_core::{NumPeers, NumPeersExt, NodeId};
+use picomint_core::{NodeId, NumNodes, NumNodesExt};
 use picomint_encoding::Decodable;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -19,11 +19,11 @@ use crate::connection::{ConnState, ConnStatus, connection_task, request_on_state
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 
 /// Mint API client: a pool of kept-alive connections to a mint's
-/// guardians, with the query strategies for fanning a request across them.
+/// nodes, with the query strategies for fanning a request across them.
 ///
 /// Spans the whole mint — [`Self::request_with_strategy`] gives up once
 /// `f + 1` nodes have errored, so the node set must have a mint's shape.
-/// A one-shot request to some subset of guardians wants [`crate::request`]
+/// A one-shot request to some subset of nodes wants [`crate::request`]
 /// instead, which pays for a connection it does not keep.
 ///
 /// Spawns one background [`connection_task`] per node at construction that
@@ -52,14 +52,14 @@ impl MintApi {
     }
 
     /// Every node in the pool.
-    pub fn all_peers(&self) -> BTreeSet<NodeId> {
+    pub fn all_nodes(&self) -> BTreeSet<NodeId> {
         self.nodes.keys().copied().collect()
     }
 
     /// Mint size, derived from the node set. Panics unless the pool
     /// spans a whole mint — a subset has no such shape.
-    pub fn num_peers(&self) -> NumPeers {
-        self.nodes.to_num_peers()
+    pub fn num_nodes(&self) -> NumNodes {
+        self.nodes.to_num_nodes()
     }
 
     /// Stream of per-node reachability. Emits a fresh `node -> status` map
@@ -97,7 +97,7 @@ impl MintApi {
         skip_all,
         fields(node = %node, method = ?method),
     )]
-    pub async fn request_single_peer<R>(&self, method: Method, node: NodeId) -> anyhow::Result<R>
+    pub async fn request_single_node<R>(&self, method: Method, node: NodeId) -> anyhow::Result<R>
     where
         R: Decodable,
     {
@@ -125,7 +125,7 @@ impl MintApi {
         }
 
         let mut node_errors = BTreeMap::new();
-        let node_error_threshold = self.num_peers().one_honest();
+        let node_error_threshold = self.num_nodes().one_honest();
 
         loop {
             let (node, result) = tasks
@@ -159,9 +159,7 @@ impl MintApi {
             }
 
             if node_errors.len() == node_error_threshold {
-                return Err(anyhow!(
-                    "Mint request {method:?} failed: {node_errors:?}"
-                ));
+                return Err(anyhow!("Mint request {method:?} failed: {node_errors:?}"));
             }
         }
     }
@@ -212,7 +210,7 @@ impl MintApi {
     where
         R: Decodable + Eq + Debug + Clone + Send + 'static,
     {
-        self.request_with_strategy(ThresholdConsensus::new(self.num_peers()), method)
+        self.request_with_strategy(ThresholdConsensus::new(self.num_nodes()), method)
             .await
     }
 
@@ -220,7 +218,7 @@ impl MintApi {
     where
         R: Decodable + Eq + Debug + Clone + Send + 'static,
     {
-        self.request_with_strategy_retry(ThresholdConsensus::new(self.num_peers()), method)
+        self.request_with_strategy_retry(ThresholdConsensus::new(self.num_nodes()), method)
             .await
     }
 }

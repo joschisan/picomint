@@ -1,6 +1,6 @@
 # picomint-bft
 
-Byzantine-tolerant atomic broadcast over a DAG. Each peer publishes
+Byzantine-tolerant atomic broadcast over a DAG. Each node publishes
 one creator-signed *unit* per round, parents pin exact bodies by
 hash, and a deterministic QuickAleph-style virtual-voting rule
 (arXiv:1908.05156) extracts a total order over the extended units'
@@ -12,15 +12,15 @@ coin.
 
 picomint-bft is engineered for one specific operating point:
 
-- **Adversary**: `f` Byzantine peers out of `n = 3f+1` total. Honest
-  peers follow the protocol; Byzantine peers may fork, refuse to
+- **Adversary**: `f` Byzantine nodes out of `n = 3f+1` total. Honest
+  nodes follow the protocol; Byzantine nodes may fork, refuse to
   participate, equivocate, or send arbitrary garbage.
 - **Network**: assumed honest and roughly random. Messages may drop
   independently and arrive with variable latency, but no adversary
   controls the network — there is no protection against coordinated
   message reordering by a network-level attacker.
 - **Goal**: deliver low ordering latency under varying network
-  conditions while remaining safe against the Byzantine peers.
+  conditions while remaining safe against the Byzantine nodes.
 
 The most concrete consequence: **picomint-bft has no timeouts
 anywhere**. Lax insert and demand-pull replace what other DAG
@@ -35,15 +35,15 @@ cosign wave), and a well-referenced candidate decides at round
 misses resolve through the common-vote schedule within an expected
 one to two extra rounds under random network behavior, with
 geometrically decaying tails and no absorbing undecided state at any
-federation size. Dropping the cosign wave cuts messages per round
-from Θ(n³) to Θ(n²) and per-peer signature verifications per round
+mint size. Dropping the cosign wave cuts messages per round
+from Θ(n³) to Θ(n²) and per-node signature verifications per round
 from Θ(n²) to Θ(n).
 
 Measured in the mock at n = 22 (f = 7) without drops: agreement over
 a 24k-item order, head decisions at mean depth 4.1 rounds under iid
 latency jitter (median item delay 6.4 round-periods including the
 ancestry sweep), and mean depth 2.25 with 92% three-delay decisions
-under a stable per-peer latency ladder. In the lossy 4-peer mock
+under a stable per-node latency ladder. In the lossy 4-node mock
 (25 ms ± 15 ms, 10% drop), item delay averages ~1 s — set by loss
 recovery at the 1 Hz anti-entropy cadence, not by decision depth.
 
@@ -78,7 +78,7 @@ recovery at the 1 Hz anti-entropy cadence, not by decision depth.
 
 ## Wire protocol
 
-Two message types. The sender's `PeerId` is attached by the network
+Two message types. The sender's `NodeId` is attached by the network
 layer; never carried in the payload.
 
 ```rust
@@ -95,7 +95,7 @@ enum Message<D> {
 
 Every broadcast (`Recipient::Everyone`) carries content authored by
 the sender: their own newly-created unit or their own anti-entropy
-push of their column. Other peers' envelopes flow only on explicit
+push of their column. Other nodes' envelopes flow only on explicit
 `Request`, answered by whoever holds them.
 
 ## Storage
@@ -132,7 +132,7 @@ parent maps alone, so the extender never touches the db except to
 read payloads at emission time.
 
 Persistence is just the per-message db commit. Inbound `Unit`
-commits are **relaxed** (non-fsync): they are peer-originated and
+commits are **relaxed** (non-fsync): they are node-originated and
 re-fetched via anti-entropy after a crash. The fsync barrier is
 own-unit creation, whose durable commit before broadcast both
 prevents our own equivocation and flushes the relaxed backlog.
@@ -156,7 +156,7 @@ The protocol is split into two gates with distinct semantics.
 `Unit` message and indexes it in `rounds`. Admission checks:
 
 - Structural validity: round 0 has an empty parent map; round R>0 has
-  exactly `threshold` parent entries, all keyed by federation members.
+  exactly `threshold` parent entries, all keyed by mint members.
 - The creator sig verifies against the unit under the session.
 - Whether parents are *locally present or extended* is **not**
   checked. An out-of-order arrival lands in `units_table` anyway, so
@@ -173,7 +173,7 @@ extending units that satisfy:
 
 1. Not already in `extended`.
 2. Envelope stored in `units_table`.
-3. Every parent is already in `extended`, was created by the peer it
+3. Every parent is already in `extended`, was created by the node it
    is keyed under, and sits at exactly `round − 1` (round-0 parent
    maps are empty, so vacuously true).
 
@@ -197,9 +197,9 @@ itself extendable on receivers that hold those parents extended.
 
 Two propagation mechanisms, each with a narrow role:
 
-**Anti-entropy push (1 Hz)**: each peer sends its *own* highest unit
-to everyone. Each peer is canonical for its own column of the DAG;
-pushing only the own unit gives laggards a reentry point. Other peers'
+**Anti-entropy push (1 Hz)**: each node sends its *own* highest unit
+to everyone. Each node is canonical for its own column of the DAG;
+pushing only the own unit gives laggards a reentry point. Other nodes'
 columns flow only on demand-pull.
 
 **Demand-pull (event-driven)**: on every receive of a `Unit`, the
@@ -210,7 +210,7 @@ are descended through (we already hold their parent maps); missing
 bodies are requested and terminate the walk.
 
 Re-issuing on every receive (fresh or duplicate) makes the mechanism
-self-healing against dropped requests: the next time the pushing peer
+self-healing against dropped requests: the next time the pushing node
 ships the same child, we re-ask for the still-not-extended parents. A
 per-unit `REQUEST_DEDUP_INTERVAL` throttle keeps those re-asks from
 re-firing the whole ancestor walk every second.
@@ -220,7 +220,7 @@ re-firing the whole ancestor walk every second.
 Extended units enter the extender, which runs a deterministic
 QuickAleph-style virtual-voting rule per round. Every extended
 round-`R` branch is a *candidate*, walked in ascending hash order —
-the walk order only needs to be *common* across peers, and a creator
+the walk order only needs to be *common* across nodes, and a creator
 can grind its body hash for early position under any public order,
 so re-hashing with the round would buy nothing. Each candidate
 resolves to a binary include/exclude decision:
@@ -231,7 +231,7 @@ resolves to a binary include/exclude decision:
   **unanimous**, otherwise it votes the round's **common vote** —
   fixed 1 at `R+2`, fixed 0 at `R+3`, seeded pseudo-random bits
   above. The bits are plain hashes of `(round, candidate)`: every
-  peer computes the same value, and commonness — not
+  node computes the same value, and commonness — not
   unpredictability — is all safety needs under a benign network.
 - A unit at round `R+2` or above **decides** the common-vote value
   `v` of its round iff at least `2f+1` of its parents vote `v`. One
@@ -250,7 +250,7 @@ resolves to a binary include/exclude decision:
 
 The fixed 1 at `R+2` gives well-referenced candidates a
 three-message-delay include; the fixed 0 at `R+3` excludes invisible
-candidates fast, keeping the walk moving past crashed peers; the
+candidates fast, keeping the walk moving past crashed nodes; the
 seeded bits break middle-band ties within an expected extra round.
 Decisions are stable once reached, so they are cached in `decided`
 for the engine's lifetime, and startup replay reproduces the exact
@@ -258,12 +258,12 @@ live emission sequence.
 
 On commit, the head's not-yet-emitted causal ancestors are extracted
 BFS-style and emitted as the round's batch (oldest-first): rounds
-ascend, so every peer's own units emit in submission order; within a
+ascend, so every node's own units emit in submission order; within a
 round the BFS discovery order is a deterministic function of the head
-and the emitted set, hence identical on every peer — the paper's hash
+and the emitted set, hence identical on every node — the paper's hash
 tie-break within rounds is not load-bearing. An
 equivocator's sibling branches may both be swept as ancestry — the
-guarantee is one identical order on every peer, not single-branch
+guarantee is one identical order on every node, not single-branch
 emission; item processing downstream validates each item on its own
 terms.
 
@@ -304,7 +304,7 @@ causal containment of the branch, so an `R+3` unit voting 1 shares a
 common above-the-branch unit with every other `R+3` unit — including
 one we hold. Contrapositive: a branch outside our held `R+3`
 ancestry is never voted 1 at `R+3` anywhere, every higher round
-inherits 0, and no peer can ever decide it 1. A branch we have never
+inherits 0, and no node can ever decide it 1. A branch we have never
 even heard of is outside that ancestry (extended ancestry is
 complete), so once an `R+3` unit is extended, no unknown candidate
 can outrank a head chosen from the local candidate set — which is
@@ -316,17 +316,17 @@ every referenced branch is one we hold.
 
 ## Liveness under quiescence
 
-Unit creation is work-gated: a peer only builds a unit that carries
+Unit creation is work-gated: a node only builds a unit that carries
 items or keeps the DAG growing while an earlier unit of its own awaits
 ordering. A head at round `R` decides once rounds `R+1` and `R+2` (or
 a few more, on the common-vote path) exist, and those evidence rounds
-are built while at least `2f+1` peers
+are built while at least `2f+1` nodes
 still await ordering of their own units — guaranteed for client work
-because submissions fan out to every guardian, so all peers propose
+because submissions fan out to every node, so all nodes propose
 (and keep building until they order) their own copy. A tail unit that
-no committed head happened to sweep before the federation went
+no committed head happened to sweep before the mint went
 quiescent waits for the next burst of work: its items were also
-proposed and ordered through the other guardians' units, and the
+proposed and ordered through the other nodes' units, and the
 self-parent chain sweeps the whole backlog on the next commit.
 
 Session binding via the sig prefix `(session, &unit)` ensures stale
@@ -336,11 +336,11 @@ explicit session check on the body.
 
 ## Network complexity
 
-Per-peer bandwidth at sustained max throughput (50 KB unit bodies,
-20 rounds/sec, no drops). Figures are aggregates at a single peer
+Per-node bandwidth at sustained max throughput (50 KB unit bodies,
+20 rounds/sec, no drops). Figures are aggregates at a single node
 summed across its `n−1` links; egress and ingress are equal by
-symmetry — each peer broadcasts its own unit to `n−1` peers and
-receives `n−1` peers' units in return:
+symmetry — each node broadcasts its own unit to `n−1` nodes and
+receives `n−1` nodes' units in return:
 
 | n | t | egress | ingress |
 |---|---|---|---|
@@ -354,7 +354,7 @@ connections.
 
 Unit envelope fan-out is the only sustained traffic; anti-entropy is two
 orders of magnitude smaller. Catch-up under loss is O(n × R) Request
-/ Unit pairs for a peer R rounds behind — paid one-shot.
+/ Unit pairs for a node R rounds behind — paid one-shot.
 
 ## Layout
 
@@ -369,7 +369,7 @@ orders of magnitude smaller. Catch-up under loss is O(n × R) Request
   extraction (an `impl Engine` block).
 - [`network.rs`] — `Message<D>`, `Recipient`, `INetwork` trait.
 - [`keychain.rs`] — schnorr `sign(session, value)` / `verify(session,
-  value, sig, peer)` with session-binding hash prefix.
+  value, sig, node)` with session-binding hash prefix.
 - [`data.rs`] — `DataProvider<D>` trait for unit payload sourcing.
 
 [`lib.rs`]: src/lib.rs

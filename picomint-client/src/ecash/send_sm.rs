@@ -8,7 +8,7 @@ use picomint_redb::{WriteTx, table};
 use crate::TxRejectEvent;
 use crate::executor::{SmId, StateMachine};
 
-use super::events::{ECashFailureEvent, ECashSuccessEvent, SendFailureEvent, SendSuccessEvent};
+use super::events::{EcashFailureEvent, EcashSuccessEvent, SendFailureEvent, SendSuccessEvent};
 use crate::context::ClientContext;
 
 table!(
@@ -18,7 +18,7 @@ table!(
 );
 
 /// Drives the slow-path tail of `mint().send()`. The reissuance tx and
-/// `ECashStateMachine` are wired up in the same dbtx that submits the
+/// `EcashStateMachine` are wired up in the same dbtx that submits the
 /// remint; this SM observes the operation's terminal events and either
 /// assembles the requested ecash from the freshly minted notes or logs
 /// `SendFailureEvent`.
@@ -33,10 +33,10 @@ pub struct SendStateMachine {
 
 #[derive(Debug)]
 pub enum SendOutcome {
-    /// `ECashSuccessEvent` landed — the freshly reissued notes are in
+    /// `EcashSuccessEvent` landed — the freshly reissued notes are in
     /// `NoteTable`, attempt assembly.
     Success,
-    /// `TxRejectEvent` or `ECashFailureEvent` landed — reissuance is
+    /// `TxRejectEvent` or `EcashFailureEvent` landed — reissuance is
     /// dead, the send can't complete.
     Failure,
 }
@@ -47,10 +47,10 @@ impl StateMachine for SendStateMachine {
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         let mut stream = ctx.subscribe_operation_events(self.operation);
         while let Some(entry) = stream.next().await {
-            if entry.to_event::<ECashSuccessEvent>().is_some() {
+            if entry.to_event::<EcashSuccessEvent>().is_some() {
                 return SendOutcome::Success;
             }
-            if entry.to_event::<ECashFailureEvent>().is_some() {
+            if entry.to_event::<EcashFailureEvent>().is_some() {
                 return SendOutcome::Failure;
             }
             if entry.to_event::<TxRejectEvent>().is_some() {

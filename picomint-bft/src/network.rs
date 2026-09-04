@@ -44,7 +44,7 @@ pub trait INetwork<D: UnitData>: Send + Sync + 'static {
 
     /// Per-node read for round-robin DKG. Mocks may leave this as
     /// `unimplemented!()`.
-    async fn receive_from_peer(&self, node: NodeId) -> Option<Message<D>>;
+    async fn receive_from_node(&self, node: NodeId) -> Option<Message<D>>;
 
     fn into_dyn(self) -> DynNetwork<D>
     where

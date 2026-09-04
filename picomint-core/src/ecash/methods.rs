@@ -1,6 +1,6 @@
-//! ECash module wire methods.
+//! Ecash module wire methods.
 //!
-//! Each method has a `Request` and a `Response` type. The [`ECashMethod`] enum
+//! Each method has a `Request` and a `Response` type. The [`EcashMethod`] enum
 //! ties them together.
 
 use picomint_encoding::{Decodable, Encodable};
@@ -77,7 +77,7 @@ pub struct SpendStateResponse {
 // ── dispatch enum ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub enum ECashMethod {
+pub enum EcashMethod {
     Signatures(SignaturesRequest),
     SignaturesRestore(SignaturesRestoreRequest),
     SpendState(SpendStateRequest),

@@ -11,9 +11,9 @@ pub use picomint_core::secret::Secret;
 use picomint_encoding::Encodable;
 use rand::{CryptoRng, RngCore};
 
+use crate::ecash::EcashSecret;
 use crate::gateway::GatewaySecret;
 use crate::lightning::LightningSecret;
-use crate::ecash::ECashSecret;
 use crate::onchain::OnchainSecret;
 
 const WORD_COUNT: usize = 12;
@@ -45,8 +45,8 @@ impl ClientSecret {
         Self(Secret::new_root(&mnemonic.to_entropy()).child(&mint))
     }
 
-    pub fn ecash_secret(&self) -> ECashSecret {
-        ECashSecret::new(self.0.child(&Path::Mint))
+    pub fn ecash_secret(&self) -> EcashSecret {
+        EcashSecret::new(self.0.child(&Path::Mint))
     }
 
     pub fn onchain_secret(&self) -> OnchainSecret {

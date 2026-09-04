@@ -31,7 +31,7 @@ use iroh::{Endpoint, PublicKey};
 use picomint_encoding::{Decodable, Encodable};
 use tracing::warn;
 
-/// ALPN identifier for picomint RPC. All picomint nodes — guardians and
+/// ALPN identifier for picomint RPC. All picomint nodes — nodes and
 /// gateways alike — speak the same ALPN; the demux happens at the
 /// method-enum layer.
 pub const ALPN: &[u8] = b"picomint";

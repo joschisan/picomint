@@ -8,9 +8,9 @@ use crate::ecash::Denomination;
 use crate::{Amount, NodeId};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ECashConfig {
-    pub private: ECashConfigPrivate,
-    pub consensus: ECashConfigConsensus,
+pub struct EcashConfig {
+    pub private: EcashConfigPrivate,
+    pub consensus: EcashConfigConsensus,
 }
 
 pub fn consensus_denominations() -> impl DoubleEndedIterator<Item = Denomination> {
@@ -22,7 +22,7 @@ pub fn client_denominations() -> impl DoubleEndedIterator<Item = Denomination> +
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub struct ECashConfigConsensus {
+pub struct EcashConfigConsensus {
     pub tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,
     pub tbs_pks: BTreeMap<Denomination, BTreeMap<NodeId, PublicKeyShare>>,
     pub input_fee: Amount,
@@ -30,6 +30,6 @@ pub struct ECashConfigConsensus {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Encodable, Decodable)]
-pub struct ECashConfigPrivate {
+pub struct EcashConfigPrivate {
     pub tbs_sks: BTreeMap<Denomination, tbs::SecretKeyShare>,
 }

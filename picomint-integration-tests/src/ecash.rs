@@ -3,8 +3,8 @@ use std::pin::pin;
 use anyhow::ensure;
 use async_stream::stream;
 use futures::StreamExt;
+use picomint_client::ecash::{EcashSuccessEvent, ReceiveEvent, SendEvent};
 use picomint_client::eventlog::{EventLogEntry, EventLogId};
-use picomint_client::ecash::{ECashSuccessEvent, ReceiveEvent, SendEvent};
 use picomint_client::{Account, Mnemonic, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
@@ -14,12 +14,14 @@ use crate::env::{CLIENT_FEE_PPM, TestClient, TestEnv};
 
 #[derive(Debug)]
 #[allow(dead_code)]
-enum ECashEvent {
+enum EcashEvent {
     Send(SendEvent),
     Receive(ReceiveEvent),
 }
 
-fn ecash_event_stream(client: &TestClient) -> impl futures::Stream<Item = (OperationId, ECashEvent)> {
+fn ecash_event_stream(
+    client: &TestClient,
+) -> impl futures::Stream<Item = (OperationId, EcashEvent)> {
     let client = client.clone();
     let notify = client.client.event_notify();
     let mut next_id = EventLogId::LOG_START;
@@ -42,13 +44,13 @@ fn ecash_event_stream(client: &TestClient) -> impl futures::Stream<Item = (Opera
     }
 }
 
-fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, ECashEvent)> {
+fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, EcashEvent)> {
     let op = entry.operation;
     if let Some(e) = entry.to_event() {
-        return Some((op, ECashEvent::Send(e)));
+        return Some((op, EcashEvent::Send(e)));
     }
     if let Some(e) = entry.to_event() {
-        return Some((op, ECashEvent::Receive(e)));
+        return Some((op, EcashEvent::Receive(e)));
     }
     None
 }
@@ -59,9 +61,9 @@ fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, ECashEven
 /// suite's — a strict next-event assertion would trip over them.
 async fn wait_mint_event<S>(
     events: &mut std::pin::Pin<&mut S>,
-    predicate: impl Fn(OperationId, &ECashEvent) -> bool,
+    predicate: impl Fn(OperationId, &EcashEvent) -> bool,
 ) where
-    S: futures::Stream<Item = (OperationId, ECashEvent)>,
+    S: futures::Stream<Item = (OperationId, EcashEvent)>,
 {
     loop {
         let Some((op, event)) = events.next().await else {
@@ -75,15 +77,15 @@ async fn wait_mint_event<S>(
 }
 
 /// Wait until a receive operation is fully settled. Returns:
-/// - `Ok` once both `TxAcceptEvent` AND `ECashSuccessEvent` have been
+/// - `Ok` once both `TxAcceptEvent` AND `EcashSuccessEvent` have been
 ///   observed — at that point the spendable notes have been written
 ///   to the local NoteTable table and the balance reflects the receive.
 /// - `Err` on `TxRejectEvent` (mint rejected the tx).
 ///
-/// Callers must wait for `ECashSuccessEvent`, not just `TxAcceptEvent`,
+/// Callers must wait for `EcashSuccessEvent`, not just `TxAcceptEvent`,
 /// because the issuance state machine still has to fetch threshold
 /// signatures after the tx is accepted before the notes land. Reading
-/// `get_balance()` between TxAccept and ECashSuccessEvent returns a
+/// `get_balance()` between TxAccept and EcashSuccessEvent returns a
 /// stale (lower) figure.
 pub(crate) async fn await_tx_outcome(
     client: &TestClient,
@@ -102,7 +104,7 @@ pub(crate) async fn await_tx_outcome(
             return Err(ev.error);
         }
 
-        if tx_accepted && entry.to_event::<ECashSuccessEvent>().is_some() {
+        if tx_accepted && entry.to_event::<EcashSuccessEvent>().is_some() {
             return Ok(());
         }
     }
@@ -129,14 +131,14 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
             .ecash_send(client_send.fed, Account::Primary, Amount::from_sat(1_000))
             .await?;
 
-        wait_mint_event(&mut send_events, |_, e| matches!(e, ECashEvent::Send(_))).await;
+        wait_mint_event(&mut send_events, |_, e| matches!(e, EcashEvent::Send(_))).await;
 
         let operation =
             client_receive
                 .client
                 .ecash_receive(client_receive.fed, Account::Primary, &ecash)?;
 
-        let Some((op, ECashEvent::Receive(_))) = receive_events.next().await else {
+        let Some((op, EcashEvent::Receive(_))) = receive_events.next().await else {
             panic!("Expected Receive event");
         };
         assert_eq!(op, operation);
@@ -169,7 +171,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
         .ecash_send(client_send.fed, Account::Primary, Amount::from_sat(1_000))
         .await?;
 
-    wait_mint_event(&mut send_events, |_, e| matches!(e, ECashEvent::Send(_))).await;
+    wait_mint_event(&mut send_events, |_, e| matches!(e, EcashEvent::Send(_))).await;
 
     // First receive succeeds (sender receives own ecash back)
     let operation = client_send
@@ -177,7 +179,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
         .ecash_receive(client_send.fed, Account::Primary, &ecash)?;
 
     wait_mint_event(&mut send_events, |op, e| {
-        op == operation && matches!(e, ECashEvent::Receive(_))
+        op == operation && matches!(e, EcashEvent::Receive(_))
     })
     .await;
 
@@ -191,7 +193,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
             .client
             .ecash_receive(client_receive.fed, Account::Primary, &ecash)?;
 
-    let Some((op, ECashEvent::Receive(_))) = receive_events.next().await else {
+    let Some((op, EcashEvent::Receive(_))) = receive_events.next().await else {
         panic!("Expected Receive event");
     };
     assert_eq!(op, operation);
@@ -213,7 +215,9 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     // inside the join and wrote its notes with the counter marks, so the
     // wallet is whole the moment the client opens rather than once a
     // reissuance settles.
-    let scanned = restored.client.ecash_balance(restored.fed, Account::Primary);
+    let scanned = restored
+        .client
+        .ecash_balance(restored.fed, Account::Primary);
 
     ensure!(
         scanned == expected,
@@ -239,7 +243,9 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
         .await
         .expect("self-remint should be accepted");
 
-    let swept = restored.client.ecash_balance(restored.fed, Account::Primary);
+    let swept = restored
+        .client
+        .ecash_balance(restored.fed, Account::Primary);
 
     ensure!(
         swept > Amount::ZERO && swept < expected,
@@ -268,7 +274,9 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let restored = env.new_client(Some(receive_mnemonic)).await?;
 
-    let scanned = restored.client.ecash_balance(restored.fed, Account::Primary);
+    let scanned = restored
+        .client
+        .ecash_balance(restored.fed, Account::Primary);
 
     ensure!(
         scanned == swept,

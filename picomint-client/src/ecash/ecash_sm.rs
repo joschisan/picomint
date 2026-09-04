@@ -11,18 +11,18 @@ use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use super::client_db::NoteTable;
-use super::events::{ECashFailureEvent, ECashSuccessEvent};
+use super::events::{EcashFailureEvent, EcashSuccessEvent};
 use super::{NoteIssuanceRequest, SpendableNote};
 use crate::context::ClientContext;
 
 table!(
-    ECashStateMachineTable,
-    (MintId, SmId) => ECashStateMachine,
+    EcashStateMachineTable,
+    (MintId, SmId) => EcashStateMachine,
     "ecash-sm",
 );
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct ECashStateMachine {
+pub struct EcashStateMachine {
     /// Account whose balance this issuance settles into. Carried in the state
     /// rather than in the table name, so one executor drives every account's
     /// state machines.
@@ -46,7 +46,7 @@ pub struct ECashStateMachine {
     pub issuance_requests: Vec<NoteIssuanceRequest>,
 }
 
-impl StateMachine for ECashStateMachine {
+impl StateMachine for EcashStateMachine {
     type Outcome = Result<BTreeMap<NodeId, Vec<BlindedSignatureShare>>, String>;
 
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
@@ -71,11 +71,7 @@ impl StateMachine for ECashStateMachine {
     ) -> Option<Self> {
         let Ok(signatures) = outcome else {
             for note in &self.spendable_notes {
-                dbtx.insert(
-                    &NoteTable,
-                    &(ctx.mint, self.account, note.clone()),
-                    &(),
-                );
+                dbtx.insert(&NoteTable, &(ctx.mint, self.account, note.clone()), &());
             }
 
             return None;
@@ -99,7 +95,7 @@ impl StateMachine for ECashStateMachine {
                 .expect("No aggregated pk found for denomination");
 
             if !verify_note(spendable_note.note(), pk) {
-                ctx.log_event(dbtx, self.account, self.operation, ECashFailureEvent);
+                ctx.log_event(dbtx, self.account, self.operation, EcashFailureEvent);
 
                 return None;
             }
@@ -117,7 +113,7 @@ impl StateMachine for ECashStateMachine {
         // The log entry is filed under this state machine's account, so it
         // reports what that account received — not what a fee output filed
         // elsewhere in the same transaction did.
-        let event = ECashSuccessEvent {
+        let event = EcashSuccessEvent {
             txid: self.txid,
             amount: self
                 .issuance_requests

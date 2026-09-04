@@ -20,7 +20,7 @@ pub struct OnchainConfigPrivate {
 pub struct OnchainConfigConsensus {
     /// The aggregate public key of the mint's taproot wallet
     pub agg_pk: AggregatePublicKey,
-    /// The public key shares of the guardians
+    /// The public key shares of the nodes
     pub pks: BTreeMap<NodeId, PublicKeyShare>,
     /// The minimum feerate doubles for each pending transaction in the stack,
     /// protecting against catastrophic feerate estimation errors

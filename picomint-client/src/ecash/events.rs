@@ -16,16 +16,16 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const SOURCE: EventSource = EventSource::ECash;
+    const SOURCE: EventSource = EventSource::Ecash;
     const KIND: EventKind = EventKind::from_static("send");
 }
 
 /// Terminal success event for [`crate::ecash::Mint::send`].
 /// `ecash` is the assembled bundle as its `picomint`-prefixed base32
-/// string — the exact form callers hand off and `ECash::from_str`
+/// string — the exact form callers hand off and `Ecash::from_str`
 /// reverses. Kept encoded so a client replaying history does not decode
 /// every bundle it scrolls past. The logged bytes are unchanged from
-/// when this field was typed: `ECash`'s serde impl serialises as this
+/// when this field was typed: `Ecash`'s serde impl serialises as this
 /// same string.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SendSuccessEvent {
@@ -33,19 +33,19 @@ pub struct SendSuccessEvent {
 }
 
 impl Event for SendSuccessEvent {
-    const SOURCE: EventSource = EventSource::ECash;
+    const SOURCE: EventSource = EventSource::Ecash;
     const KIND: EventKind = EventKind::from_static("send-success");
 }
 
 /// Terminal failure event for [`crate::ecash::Mint::send`].
-/// Fires when reissuance failed (`TxRejectEvent`/`ECashFailureEvent`)
+/// Fires when reissuance failed (`TxRejectEvent`/`EcashFailureEvent`)
 /// or — defensively — when the post-reissuance NoteTable table no longer
 /// has the exact denominations the send needs.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendFailureEvent;
 
 impl Event for SendFailureEvent {
-    const SOURCE: EventSource = EventSource::ECash;
+    const SOURCE: EventSource = EventSource::Ecash;
     const KIND: EventKind = EventKind::from_static("send-failure");
 }
 
@@ -57,7 +57,7 @@ pub struct RemintEvent {
 }
 
 impl Event for RemintEvent {
-    const SOURCE: EventSource = EventSource::ECash;
+    const SOURCE: EventSource = EventSource::Ecash;
     const KIND: EventKind = EventKind::from_static("remint");
 }
 
@@ -73,29 +73,29 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const SOURCE: EventSource = EventSource::ECash;
+    const SOURCE: EventSource = EventSource::Ecash;
     const KIND: EventKind = EventKind::from_static("receive");
 }
 
 /// Emitted when a mint state machine successfully finalises new notes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ECashSuccessEvent {
+pub struct EcashSuccessEvent {
     pub txid: TransactionId,
     /// Total amount of notes finalized into the local note table by this
     /// state machine (sum of all issuance-request denominations).
     pub amount: Amount,
 }
 
-impl Event for ECashSuccessEvent {
-    const SOURCE: EventSource = EventSource::ECash;
+impl Event for EcashSuccessEvent {
+    const SOURCE: EventSource = EventSource::Ecash;
     const KIND: EventKind = EventKind::from_static("success");
 }
 
 /// Emitted when a mint state machine fails to finalise notes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct ECashFailureEvent;
+pub struct EcashFailureEvent;
 
-impl Event for ECashFailureEvent {
-    const SOURCE: EventSource = EventSource::ECash;
+impl Event for EcashFailureEvent {
+    const SOURCE: EventSource = EventSource::Ecash;
     const KIND: EventKind = EventKind::from_static("failure");
 }

@@ -20,7 +20,7 @@ use events::{ReceiveEvent, SendEvent};
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::onchain::{
-    StandardScript, OnchainInput, OnchainOutput, is_potential_receive, tweaked_address,
+    OnchainInput, OnchainOutput, StandardScript, is_potential_receive, tweaked_address,
 };
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, TransactionId};
@@ -235,12 +235,8 @@ async fn output_scanner(ctx: ClientContext) {
         let index = next_valid_index(&ctx, account, 0);
         let dbtx = ctx.db.begin_write();
         assert!(
-            dbtx.insert(
-                &ValidAddressIndexTable,
-                &(ctx.mint, account, index),
-                &()
-            )
-            .is_none(),
+            dbtx.insert(&ValidAddressIndexTable, &(ctx.mint, account, index), &())
+                .is_none(),
             "seed address index already present"
         );
         dbtx.commit();
@@ -269,16 +265,13 @@ async fn output_scanner(ctx: ClientContext) {
 async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
     let dbtx = ctx.db.begin_read();
 
-    let start = dbtx
-        .get(&NextOutputIndexTable, &ctx.mint)
-        .unwrap_or(0);
+    let start = dbtx.get(&NextOutputIndexTable, &ctx.mint).unwrap_or(0);
 
     // Every account's indices come out of one prefix scan, already tagged
     // with the account they belong to.
-    let valid_indices: Vec<(Account, u64)> =
-        dbtx.prefix(&ValidAddressIndexTable, &ctx.mint, |r| {
-            r.map(|entry| (entry.0.1, entry.0.2)).collect()
-        });
+    let valid_indices: Vec<(Account, u64)> = dbtx.prefix(&ValidAddressIndexTable, &ctx.mint, |r| {
+        r.map(|entry| (entry.0.1, entry.0.2)).collect()
+    });
 
     drop(dbtx);
 
@@ -319,11 +312,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
 
                 let dbtx = ctx.db.begin_write();
 
-                dbtx.insert(
-                    &ValidAddressIndexTable,
-                    &(ctx.mint, account, index),
-                    &(),
-                );
+                dbtx.insert(&ValidAddressIndexTable, &(ctx.mint, account, index), &());
 
                 dbtx.commit();
 
@@ -389,11 +378,7 @@ pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
 
 /// Whether any of this module's state machines for `operation` is still
 /// active under `mint`.
-pub(crate) fn operation_is_active(
-    dbtx: &ReadTx,
-    mint: MintId,
-    operation: OperationId,
-) -> bool {
+pub(crate) fn operation_is_active(dbtx: &ReadTx, mint: MintId, operation: OperationId) -> bool {
     dbtx.prefix(&SendStateMachineTable, &mint, |r| {
         r.any(|entry| entry.1.operation == operation)
     })
@@ -428,11 +413,7 @@ pub enum SendError {
 impl Client {
     /// `account`'s next unused onchain deposit address. Errors while the
     /// initial address derivation has not completed yet.
-    pub fn onchain_receive(
-        &self,
-        mint: MintId,
-        account: Account,
-    ) -> anyhow::Result<Address> {
+    pub fn onchain_receive(&self, mint: MintId, account: Account) -> anyhow::Result<Address> {
         let ctx = self.ctx(mint)?;
 
         highest_valid_index(&ctx, account)
@@ -491,20 +472,14 @@ impl Client {
     }
 
     /// The current fee required to send an onchain payment.
-    pub async fn onchain_send_fee(
-        &self,
-        mint: MintId,
-    ) -> Result<bitcoin::Amount, SendError> {
+    pub async fn onchain_send_fee(&self, mint: MintId) -> Result<bitcoin::Amount, SendError> {
         let ctx = self.ctx(mint).map_err(|_| SendError::NotAdded)?;
 
         send_fee(&ctx).await
     }
 
     /// The total value of bitcoin controlled by the mint.
-    pub async fn onchain_total_value(
-        &self,
-        mint: MintId,
-    ) -> anyhow::Result<bitcoin::Amount> {
+    pub async fn onchain_total_value(&self, mint: MintId) -> anyhow::Result<bitcoin::Amount> {
         let ctx = self.ctx(mint)?;
 
         api::mint_utxo(&ctx.api)

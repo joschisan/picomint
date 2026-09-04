@@ -8,12 +8,12 @@ The operator of the service is trusted to provide the correct invoice to the req
 
 ## How it works
 
-1. Client generates an LNURL locally containing encoded payment details (federation ID, recipient public key, gateways, etc.)
+1. Client generates an LNURL locally containing encoded payment details (mint ID, recipient public key, gateways, etc.)
 2. When a payer scans the LNURL, `GET /pay/{payload}` returns the LNURL-pay response
 3. Payer requests invoice via `GET /invoice/{payload}?amount=X`
 4. Server decodes payload, creates an incoming contract with a gateway, and returns a BOLT11 invoice
 5. Payer pays the invoice directly to the gateway
-6. Recipient claims funds from the federation when they come online
+6. Recipient claims funds from the mint when they come online
 
 Note that once the invoice is generated, the daemon cannot claim the funds for itself.
 

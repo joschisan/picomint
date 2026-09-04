@@ -8,11 +8,7 @@ use picomint_core::lightning::methods::{
 };
 use picomint_core::module::Method;
 
-pub async fn await_preimage(
-    api: &MintApi,
-    outpoint: OutPoint,
-    expiry: u32,
-) -> Option<[u8; 32]> {
+pub async fn await_preimage(api: &MintApi, outpoint: OutPoint, expiry: u32) -> Option<[u8; 32]> {
     api.request_current_consensus_retry::<AwaitPreimageResponse>(Method::Lightning(
         LightningMethod::AwaitPreimage(AwaitPreimageRequest { outpoint, expiry }),
     ))
@@ -35,7 +31,7 @@ pub async fn await_incoming_contracts(
 }
 
 /// The mint's announced gateway list, agreed by a threshold of
-/// guardians. Each guardian maintains their own vetted-gateway list
+/// nodes. Each node maintains their own vetted-gateway list
 /// via the admin CLI; the response is byte-canonical (sorted via db
 /// iteration) so threshold equality is deterministic.
 pub async fn gateways(api: &MintApi) -> anyhow::Result<Vec<GatewayPk>> {

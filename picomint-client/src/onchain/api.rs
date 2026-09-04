@@ -2,10 +2,10 @@ use crate::api::MintApi;
 use picomint_core::OutPoint;
 use picomint_core::module::Method;
 use picomint_core::onchain::methods::{
-    ConsensusFeerateRequest, ConsensusFeerateResponse, MintUtxoRequest,
-    MintUtxoResponse, OutputInfoSliceRequest, OutputInfoSliceResponse,
-    PendingTxChainRequest, PendingTxChainResponse, ReceiveFeeRequest, ReceiveFeeResponse,
-    SendFeeRequest, SendFeeResponse, TxIdRequest, TxIdResponse, OnchainMethod,
+    ConsensusFeerateRequest, ConsensusFeerateResponse, MintUtxoRequest, MintUtxoResponse,
+    OnchainMethod, OutputInfoSliceRequest, OutputInfoSliceResponse, PendingTxChainRequest,
+    PendingTxChainResponse, ReceiveFeeRequest, ReceiveFeeResponse, SendFeeRequest, SendFeeResponse,
+    TxIdRequest, TxIdResponse,
 };
 use picomint_core::onchain::{MintUtxo, OutputInfo, TxInfo};
 
@@ -18,9 +18,9 @@ pub async fn consensus_feerate(api: &MintApi) -> anyhow::Result<Option<u32>> {
 }
 
 pub async fn mint_utxo(api: &MintApi) -> anyhow::Result<Option<MintUtxo>> {
-    api.request_current_consensus::<MintUtxoResponse>(Method::Onchain(
-        OnchainMethod::MintUtxo(MintUtxoRequest),
-    ))
+    api.request_current_consensus::<MintUtxoResponse>(Method::Onchain(OnchainMethod::MintUtxo(
+        MintUtxoRequest,
+    )))
     .await
     .map(|resp| resp.utxo)
 }

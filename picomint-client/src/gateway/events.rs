@@ -75,7 +75,7 @@ impl Event for ReceiveSuccessEvent {
     const KIND: EventKind = EventKind::from_static("receive-success");
 }
 
-/// Emitted when guardian decryption shares are inconsistent or invalid.
+/// Emitted when node decryption shares are inconsistent or invalid.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReceiveFailureEvent;
 

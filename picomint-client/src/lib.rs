@@ -31,6 +31,8 @@ pub mod api;
 mod client;
 /// The per-mint [`context::ClientContext`]
 mod context;
+/// Ecash module client.
+pub mod ecash;
 /// Append-only event log shared by all mints on this host.
 pub mod eventlog;
 /// Shared kept-alive iroh connection primitive (mint nodes + gateways).
@@ -43,8 +45,8 @@ pub mod expiry;
 pub mod gateway;
 /// Lightning module client.
 pub mod lightning;
-/// ECash module client.
-pub mod ecash;
+/// Wallet module client.
+pub mod onchain;
 /// Client query-consensus strategies
 /// Secret handling & derivation
 pub mod secret;
@@ -52,8 +54,6 @@ pub mod secret;
 mod task;
 /// Structs and interfaces to construct Picomint transactions
 pub mod tx;
-/// Wallet module client.
-pub mod onchain;
 
 pub use iroh::Endpoint;
 

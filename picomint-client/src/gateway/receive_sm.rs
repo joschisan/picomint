@@ -6,11 +6,13 @@ use picomint_core::config::MintId;
 use picomint_core::core::OperationId;
 use picomint_core::lightning::LightningInput;
 use picomint_core::lightning::contracts::IncomingOffer;
-use picomint_core::lightning::methods::{DecryptionKeyShareRequest, DecryptionKeyShareResponse, LightningMethod};
+use picomint_core::lightning::methods::{
+    DecryptionKeyShareRequest, DecryptionKeyShareResponse, LightningMethod,
+};
 use picomint_core::module::Method;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::wire;
-use picomint_core::{OutPoint, NodeId};
+use picomint_core::{NodeId, OutPoint};
 use picomint_encoding::{Decodable, Encodable};
 use tpe::{DecryptionKeyShare, aggregate_dk_shares};
 use tracing::warn;
@@ -65,11 +67,13 @@ impl StateMachine for ReceiveStateMachine {
                         }
                         Ok(share)
                     },
-                    ctx.api.num_peers(),
+                    ctx.api.num_nodes(),
                 ),
-                Method::Lightning(LightningMethod::DecryptionKeyShare(DecryptionKeyShareRequest {
-                    outpoint: self.outpoint,
-                })),
+                Method::Lightning(LightningMethod::DecryptionKeyShare(
+                    DecryptionKeyShareRequest {
+                        outpoint: self.outpoint,
+                    },
+                )),
             )
             .await;
 
@@ -126,7 +130,10 @@ impl StateMachine for ReceiveStateMachine {
         }
 
         let tx_builder = TxBuilder::from_input(Input {
-            input: wire::Input::Lightning(LightningInput::Incoming(self.outpoint, agg_decryption_key)),
+            input: wire::Input::Lightning(LightningInput::Incoming(
+                self.outpoint,
+                agg_decryption_key,
+            )),
             keypair: self.refund_keypair,
             amount: self.offer.commitment.amount - self.offer.commitment.fee,
             fee: ctx.config.lightning.input_fee,

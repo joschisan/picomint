@@ -10,11 +10,11 @@ use serde::{Deserialize, Serialize};
 /// module set, so there is nothing for a per-module version to say that this
 /// one does not.
 ///
-/// The major/minor split is about clients, not guardians. For guardians
+/// The major/minor split is about clients, not nodes. For nodes
 /// every bump is breaking — an unknown discriminant is a hard decode error,
-/// never a skip, so there is no such thing as a change an older guardian can
+/// never a skip, so there is no such thing as a change an older node can
 /// run through. Clients are different: a rule change confined to the
-/// guardian side is a minor bump they can ignore, while a change to what
+/// node side is a minor bump they can ignore, while a change to what
 /// clients see is a major bump they must support. Votes compare
 /// lexicographically via the field order below.
 #[derive(
@@ -42,9 +42,9 @@ pub struct ConsensusVersion {
 
 /// Highest consensus version this binary can run.
 ///
-/// Each guardian votes for this and nothing else, so upgrading the binary is
+/// Each node votes for this and nothing else, so upgrading the binary is
 /// the whole of casting a vote. Once a threshold has voted the mint
-/// switches over and guardians still on an older binary halt, since they
+/// switches over and nodes still on an older binary halt, since they
 /// cannot apply rules they do not have.
 ///
 /// Also what a mint created by this binary starts at, recorded as

@@ -1,4 +1,4 @@
-//! Mint-wide expiry announcement. Guardians can collectively
+//! Mint-wide expiry announcement. Nodes can collectively
 //! declare a future shutdown date (and optionally a successor mint's
 //! invite code) that clients fetch via threshold consensus and surface to
 //! their users.
