@@ -397,16 +397,16 @@ async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
         retry(&format!("node-{node} setup status"), || async {
             let status = cli::node_setup_status(data_dir)?;
             ensure!(
-                status == SetupStatus::AwaitingLocalParams,
+                status == SetupStatus::AwaitingInit,
                 "Unexpected status: {status:?}"
             );
             Ok(())
         })
         .await?;
     }
-    info!("All nodes awaiting local params");
+    info!("All nodes awaiting init");
 
-    // Set local params: node 0 is leader, rest are followers
+    // Initialize the nodes: node 0 is leader, rest are followers
     let mut setup_codes = BTreeMap::new();
     for (node, data_dir) in node_data_dirs.iter().enumerate() {
         let name = format!("Node {node}");
@@ -415,17 +415,17 @@ async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
         } else {
             (None, None)
         };
-        let resp = cli::node_setup_set_local_params(data_dir, &name, mint_name, mint_size)?;
+        let resp = cli::node_setup_init(data_dir, &name, mint_name, mint_size)?;
         let setup_code = resp
             .get("setup_code")
             .and_then(|v| v.as_str())
-            .context("missing setup_code in set-local-params response")?
+            .context("missing setup_code in init response")?
             .to_string();
         setup_codes.insert(node, setup_code);
     }
-    info!("Local params set for all nodes");
+    info!("All nodes initialized");
 
-    // Exchange node connection info
+    // Exchange setup codes between all nodes
     for (node, code) in &setup_codes {
         for (other_node, data_dir) in node_data_dirs.iter().enumerate() {
             if other_node == *node {

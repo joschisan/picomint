@@ -5,7 +5,7 @@
 //! page the operator saw the moment they clicked "Start DKG". The 503
 //! status is load-bearing: the polling JS embedded in the page redirects
 //! to `/` on status `200`, so any other status keeps the waiting page up. Once
-//! `ServerConfig` is committed and the consensus UI binds the same port,
+//! `NodeConfig` is committed and the consensus UI binds the same port,
 //! `/` starts returning 200 and the redirect fires.
 
 use axum::Router;
@@ -15,7 +15,7 @@ use axum::response::{Html, IntoResponse, Response};
 use maud::{Markup, html};
 use picomint_redb::{Database, DbRead};
 
-use crate::config::db::ConfigGenParamsTable;
+use crate::config::db::DkgParamsTable;
 use crate::config::setup::NodeSetupCode;
 use crate::ui::assets::WithStaticRoutesExt;
 use crate::ui::{ROOT_ROUTE, copiable_text, single_card_layout};
@@ -49,10 +49,10 @@ pub fn loading_card(setup_code: &NodeSetupCode) -> Markup {
 }
 
 async fn loading_page(State(db): State<Database>) -> Response {
-    // `store_server_config` clears the table moments before this router is
+    // `store_node_config` clears the table moments before this router is
     // aborted, so a request can land after DKG has completed. A bare 503
     // keeps the polling page up until the consensus UI takes over the port.
-    let Some(params) = db.begin_read().get(&ConfigGenParamsTable, &()) else {
+    let Some(params) = db.begin_read().get(&DkgParamsTable, &()) else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
 

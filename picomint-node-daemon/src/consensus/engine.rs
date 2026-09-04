@@ -15,7 +15,7 @@ use picomint_redb::{DbRead, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
 use tracing::{info, instrument};
 
-use crate::config::ServerConfig;
+use crate::config::NodeConfig;
 use crate::consensus::bft::{DataProvider, Network};
 use crate::consensus::db::{
     AcceptedItemTable, AcceptedTxTable, BftUnitsTable, BlockCountVoteTable,
@@ -31,7 +31,7 @@ use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 /// on a mint is on the same network by construction, so the two can
 /// never disagree, and a mint that wants shorter sessions is a
 /// mint running a different binary.
-fn rounds_per_session(cfg: &ServerConfig) -> u32 {
+fn rounds_per_session(cfg: &NodeConfig) -> u32 {
     if cfg.consensus.network == bitcoin::Network::Regtest {
         100
     } else {
@@ -350,7 +350,7 @@ async fn collect_threshold_signatures(
 }
 
 /// Returns a random node ID excluding ourselves
-fn random_node(cfg: &ServerConfig) -> NodeId {
+fn random_node(cfg: &NodeConfig) -> NodeId {
     cfg.consensus
         .nodes
         .to_num_nodes()
@@ -362,7 +362,7 @@ fn random_node(cfg: &ServerConfig) -> NodeId {
 
 /// Validate a SignedSessionOutcome received via P2P
 fn validate_signed_session_outcome(
-    cfg: &ServerConfig,
+    cfg: &NodeConfig,
     session_index: u32,
     outcome: &SignedSessionOutcome,
 ) -> bool {
@@ -549,7 +549,7 @@ pub fn get_finished_session_count(dbtx: &ReadTx) -> u32 {
     })
 }
 
-fn build_keychain(cfg: &ServerConfig) -> BftKeychain {
+fn build_keychain(cfg: &NodeConfig) -> BftKeychain {
     let keypair = cfg.private.broadcast_secret_key.keypair(SECP256K1);
 
     let pubkeys = cfg

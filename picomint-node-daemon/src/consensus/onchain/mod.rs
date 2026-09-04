@@ -26,7 +26,7 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 use tokio::time::sleep;
 
-use crate::config::ServerConfig;
+use crate::config::NodeConfig;
 use crate::config::dkg::DkgHandle;
 use crate::config::dkg_secp::eval_poly;
 use crate::consensus::CONFIRMATION_FINALITY_DELAY;
@@ -100,7 +100,7 @@ fn pending_txs_unordered(dbtx: &impl DbRead) -> Vec<MintTx> {
 
 /// Run DKG for the onchain module, producing a fresh `OnchainConfig` for this
 /// node.
-pub async fn distributed_gen(nodes: &DkgHandle<'_>) -> anyhow::Result<OnchainConfig> {
+pub async fn dkg(nodes: &DkgHandle<'_>) -> anyhow::Result<OnchainConfig> {
     let (polynomial, sks) = nodes.run_dkg_secp().await?;
 
     let pks = nodes
@@ -119,7 +119,7 @@ pub async fn distributed_gen(nodes: &DkgHandle<'_>) -> anyhow::Result<OnchainCon
 
 /// Verify our onchain secret key share matches the corresponding public key
 /// share in the consensus config.
-pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
+pub fn validate_config(cfg: &NodeConfig) -> anyhow::Result<()> {
     ensure!(
         cfg.consensus
             .onchain

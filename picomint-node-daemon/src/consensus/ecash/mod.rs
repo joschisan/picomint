@@ -17,7 +17,7 @@ use picomint_core::{Amount, OutPoint};
 use picomint_redb::{DbRead, WriteTx};
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
 
-use crate::config::ServerConfig;
+use crate::config::NodeConfig;
 use crate::config::dkg::DkgHandle;
 use crate::config::poly::eval_poly_g2;
 use crate::consensus::server::Server;
@@ -29,7 +29,7 @@ use self::db::{
 };
 
 /// Run DKG for the ecash module, producing a fresh `EcashConfig` for this node.
-pub async fn distributed_gen(nodes: &DkgHandle<'_>) -> anyhow::Result<EcashConfig> {
+pub async fn dkg(nodes: &DkgHandle<'_>) -> anyhow::Result<EcashConfig> {
     let mut tbs_sks = BTreeMap::new();
     let mut tbs_agg_pks = BTreeMap::new();
     let mut tbs_pks = BTreeMap::new();
@@ -63,7 +63,7 @@ pub async fn distributed_gen(nodes: &DkgHandle<'_>) -> anyhow::Result<EcashConfi
 
 /// Verify our private tbs shares match the public shares in the consensus
 /// config.
-pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
+pub fn validate_config(cfg: &NodeConfig) -> anyhow::Result<()> {
     for denomination in consensus_denominations() {
         let pk = derive_pk_share(&cfg.private.ecash.tbs_sks[&denomination]);
 

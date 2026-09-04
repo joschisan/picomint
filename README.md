@@ -37,10 +37,10 @@ Before the mint can start processing transactions, nodes run a one-time setup ce
 Exactly one node sets the global mint config and passes `--mint-name` and `--mint-size`; the others pass only their own `<name>`:
 
 ```bash
-picomint-node-cli setup set-local-params <name> [--mint-name X] [--mint-size N]
+picomint-node-cli setup init <name> [--mint-name X] [--mint-size N]
 ```
 
-`set-local-params` returns a setup code. Every node then calls `add-node` once per node with that node's setup code:
+`init` returns a setup code. Every node then calls `add-node` once per node with that node's setup code:
 
 ```bash
 picomint-node-cli setup add-node <setup-code>

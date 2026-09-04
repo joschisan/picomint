@@ -1,7 +1,7 @@
 //! Mint node daemon.
 //!
 //! This crate hosts both the daemon library and the `picomint-node-daemon`
-//! binary (`src/main.rs`). It drives config generation, consensus, and the
+//! binary (`src/main.rs`). It drives setup, DKG, consensus, and the
 //! admin UI/CLI for the fixed module set (ecash + lightning + onchain).
 
 extern crate picomint_core;
@@ -19,7 +19,7 @@ use std::sync::Arc;
 pub const DB_FILE: &str = "database.redb";
 
 use crate::bitcoind::BitcoindClient;
-use config::ServerConfig;
+use config::NodeConfig;
 use picomint_redb::{Database, DbRead};
 use tracing::info;
 
@@ -55,22 +55,22 @@ macro_rules! handler_async {
     };
 }
 
-use crate::config::db::{ConfigGenParamsTable, load_server_config, store_server_config};
+use crate::config::db::{DkgParamsTable, load_node_config, store_node_config};
 use crate::config::setup::SetupApi;
-use crate::config::{ConfigGenParams, ConfigGenSettings, SetupResult};
+use crate::config::{DaemonSettings, DkgParams, SetupResult, dkg};
 use crate::p2p::{P2PConnector, ReconnectP2PConnections, p2p_status_channels};
 
 pub async fn run_server(
-    settings: ConfigGenSettings,
+    settings: DaemonSettings,
     db: Database,
     bitcoin: Arc<BitcoindClient>,
 ) -> anyhow::Result<()> {
-    if let Some(cfg) = load_server_config(&db).await {
+    if let Some(cfg) = load_node_config(&db).await {
         return run_consensus(cfg, settings, db, bitcoin).await;
     }
 
-    if let Some(cgp) = db.begin_read().get(&ConfigGenParamsTable, &()) {
-        return run_dkg_then_consensus(cgp, settings, db, bitcoin).await;
+    if let Some(params) = db.begin_read().get(&DkgParamsTable, &()) {
+        return run_dkg_then_consensus(params, settings, db, bitcoin).await;
     }
 
     info!("Starting setup UI...");
@@ -105,14 +105,14 @@ pub async fn run_server(
     setup_cli_handle.await.ok();
 
     match setup_result {
-        SetupResult::Dkg(cgp) => run_dkg_then_consensus(*cgp, settings, db, bitcoin).await,
+        SetupResult::Dkg(params) => run_dkg_then_consensus(*params, settings, db, bitcoin).await,
         SetupResult::Restored(cfg) => run_consensus(*cfg, settings, db, bitcoin).await,
     }
 }
 
 async fn run_dkg_then_consensus(
-    cgp: ConfigGenParams,
-    settings: ConfigGenSettings,
+    params: DkgParams,
+    settings: DaemonSettings,
     db: Database,
     bitcoin_rpc: Arc<BitcoindClient>,
 ) -> anyhow::Result<()> {
@@ -125,11 +125,12 @@ async fn run_dkg_then_consensus(
     // not-yet-bootstrapped mint).
     let (conn_tx, conn_rx) = async_channel::bounded(128);
 
-    let cnt = P2PConnector::new(cgp.iroh_sk.clone(), cgp.iroh_pks(), settings.p2p_addr).await?;
+    let cnt =
+        P2PConnector::new(params.iroh_sk.clone(), params.iroh_pks(), settings.p2p_addr).await?;
 
     let (status_txs, status_rxs) = p2p_status_channels(cnt.nodes());
 
-    let connections = ReconnectP2PConnections::new(cgp.identity, cnt, status_txs, conn_tx);
+    let connections = ReconnectP2PConnections::new(params.identity, cnt, status_txs, conn_tx);
 
     // Serve a stateless loading page on UI_ADDR while DKG runs.
     // Operators reloading the page during DKG — or opening it
@@ -137,9 +138,9 @@ async fn run_dkg_then_consensus(
     // coherent waiting screen instead of a connection error.
     let dkg_ui_handle = tokio::spawn(ui::run(settings.ui_addr, ui::dkg::router(db.clone())));
 
-    let cfg = ServerConfig::generate(&cgp, connections.clone(), status_rxs.clone()).await?;
+    let cfg = dkg::run(&params, connections.clone(), status_rxs.clone()).await?;
 
-    store_server_config(&db, &cfg).await;
+    store_node_config(&db, &cfg).await;
 
     dkg_ui_handle.abort();
 
@@ -160,8 +161,8 @@ async fn run_dkg_then_consensus(
 }
 
 async fn run_consensus(
-    cfg: ServerConfig,
-    settings: ConfigGenSettings,
+    cfg: NodeConfig,
+    settings: DaemonSettings,
     db: Database,
     bitcoin_rpc: Arc<BitcoindClient>,
 ) -> anyhow::Result<()> {

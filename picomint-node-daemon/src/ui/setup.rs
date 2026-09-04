@@ -8,7 +8,7 @@ use axum_extra::extract::Form;
 use maud::{Markup, html};
 use serde::Deserialize;
 
-use crate::config::ServerConfig;
+use crate::config::NodeConfig;
 use crate::config::setup::SetupApi;
 use crate::ui::assets::WithStaticRoutesExt;
 use crate::ui::{ROOT_ROUTE, copiable_text, single_card_layout};
@@ -25,15 +25,15 @@ pub const RESTORE_PAGE_ROUTE: &str = "/restore";
 pub(crate) struct SetupInput {
     pub name: String,
     #[serde(default)]
-    pub is_lead: bool,
+    pub is_leader: bool,
     pub mint_name: String,
     #[serde(default)]
     pub mint_size: String,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct NodeInfoInput {
-    pub node_info: String,
+pub(crate) struct SetupCodeInput {
+    pub setup_code: String,
 }
 
 fn node_list_section(
@@ -92,7 +92,7 @@ fn node_list_section(
                 }
             } @else {
                 form id="add-setup-code-form" class="form-stack" hx-post=(ADD_SETUP_CODE_ROUTE) hx-target="#node-list-section" hx-swap="outerHTML" {
-                    input type="text" id="node_info" name="node_info"
+                    input type="text" id="setup_code" name="setup_code"
                         placeholder="Paste Setup Code" required;
 
                     @if let Some(error) = error {
@@ -115,7 +115,7 @@ fn restore_form_content(error: Option<&str>) -> Markup {
             hx-swap="outerHTML"
         {
             div class="alert alert-info" {
-                "Upload your saved server config to restore."
+                "Upload your saved node config to restore."
             }
 
             input type="file" id="config_file" name="config_file"
@@ -141,9 +141,9 @@ fn setup_form_content(error: Option<&str>) -> Markup {
 
             div class="inset-panel" {
                 div class="check-row" {
-                    input type="checkbox" class="toggle-control" id="is_lead" name="is_lead" value="true";
+                    input type="checkbox" class="toggle-control" id="is_leader" name="is_leader" value="true";
 
-                    label for="is_lead" {
+                    label for="is_leader" {
                         "Set the global config"
                     }
                 }
@@ -158,7 +158,7 @@ fn setup_form_content(error: Option<&str>) -> Markup {
                         div class="pill-group" {
                             @for size in [4u32, 7, 10, 13, 16, 19] {
                                 // `required` is intentionally omitted: the
-                                // radios are hidden when `is_lead` is off, and
+                                // radios are hidden when `is_leader` is off, and
                                 // browsers refuse to focus a hidden required
                                 // control — they silently block submit even
                                 // for non-leader nodes. The server
@@ -200,7 +200,7 @@ async fn setup_form(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
 }
 
 // GET handler for the /restore route (dedicated page for restoring from a
-// previously-saved server config).
+// previously-saved node config).
 async fn restore_page(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
     if state.setup_code().await.is_some() {
         return Redirect::to(MINT_SETUP_ROUTE).into_response();
@@ -215,14 +215,14 @@ async fn setup_submit(
     State(state): State<Arc<SetupApi>>,
     Form(input): Form<SetupInput>,
 ) -> impl IntoResponse {
-    // Only use these settings if is_lead is true
-    let mint_name = if input.is_lead {
+    // Only use these settings if is_leader is true
+    let mint_name = if input.is_leader {
         Some(input.mint_name)
     } else {
         None
     };
 
-    let mint_size = if input.is_lead {
+    let mint_size = if input.is_leader {
         let s = input.mint_size.trim();
         if s.is_empty() {
             None
@@ -239,10 +239,7 @@ async fn setup_submit(
         None
     };
 
-    match state
-        .set_local_parameters(input.name, mint_name, mint_size)
-        .await
-    {
+    match state.init(input.name, mint_name, mint_size).await {
         Ok(_) => ([("HX-Redirect", MINT_SETUP_ROUTE)], Html(String::new())).into_response(),
         Err(e) => Html(setup_form_content(Some(&e.to_string())).into_string()).into_response(),
     }
@@ -250,13 +247,11 @@ async fn setup_submit(
 
 // GET handler for the /mint-setup route (main mint management page)
 async fn mint_setup(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
-    // If the user lands here too early (before local parameters have been
-    // set), send them back to /setup to fill in their node params first.
+    // If the user lands here too early (before the node has been
+    // initialized), send them back to the setup form first.
     let Some(our_setup_code) = state.setup_code().await else {
         return Redirect::to(ROOT_ROUTE).into_response();
     };
-
-    let our_connection_info = picomint_base32::encode(&our_setup_code);
 
     let connected_nodes = state.connected_nodes().await;
     let mint_size = state.mint_size().await;
@@ -265,7 +260,7 @@ async fn mint_setup(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
     let content = html! {
         span { "Share this with your fellow nodes." }
 
-        (copiable_text(&our_connection_info))
+        (copiable_text(&picomint_base32::encode(&our_setup_code)))
 
         (node_list_section(&connected_nodes, mint_size, &cfg_mint_name, None))
     };
@@ -275,9 +270,9 @@ async fn mint_setup(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
 
 async fn post_add_setup_code(
     State(state): State<Arc<SetupApi>>,
-    Form(input): Form<NodeInfoInput>,
+    Form(input): Form<SetupCodeInput>,
 ) -> impl IntoResponse {
-    let error = state.add_node_setup_code(input.node_info).await.err();
+    let error = state.add_node_setup_code(input.setup_code).await.err();
 
     let connected_nodes = state.connected_nodes().await;
     let mint_size = state.mint_size().await;
@@ -355,7 +350,7 @@ async fn post_restore_config(
         }
     };
 
-    let cfg: ServerConfig = match serde_json::from_slice(&bytes) {
+    let cfg: NodeConfig = match serde_json::from_slice(&bytes) {
         Ok(c) => c,
         Err(e) => {
             return Html(

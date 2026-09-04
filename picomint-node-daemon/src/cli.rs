@@ -7,13 +7,13 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::post;
 use picomint_node_cli_core::{
-    CLI_SOCKET_FILENAME, ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_RESTORE, ROUTE_SETUP_SET_LOCAL_PARAMS,
+    CLI_SOCKET_FILENAME, ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESTORE,
     ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddNodeRequest, SetupAddNodeResponse,
-    SetupSetLocalParamsRequest, SetupSetLocalParamsResponse, SetupStatus,
+    SetupInitRequest, SetupInitResponse, SetupStatus,
 };
 use tokio::net::UnixListener;
 
-use crate::config::ServerConfig;
+use crate::config::NodeConfig;
 use crate::config::setup::SetupApi;
 use crate::consensus::{lightning, onchain};
 
@@ -63,7 +63,7 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
 
     let router = Router::new()
         .route(ROUTE_SETUP_STATUS, post(setup_status))
-        .route(ROUTE_SETUP_SET_LOCAL_PARAMS, post(setup_set_local_params))
+        .route(ROUTE_SETUP_INIT, post(setup_init))
         .route(ROUTE_SETUP_ADD_NODE, post(setup_add_node))
         .route(ROUTE_SETUP_START_DKG, post(setup_start_dkg))
         .route(ROUTE_SETUP_RESTORE, post(setup_restore))
@@ -98,7 +98,7 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
 
     async fn config(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<ServerConfig>, CliError> {
+    ) -> Result<Json<NodeConfig>, CliError> {
         Ok(Json(api.server.cfg.clone()))
     }
 
@@ -325,23 +325,23 @@ async fn setup_status(
     State(setup_api): State<Arc<SetupApi>>,
 ) -> Result<Json<SetupStatus>, CliError> {
     let status = if setup_api.setup_code().await.is_some() {
-        SetupStatus::SharingConnectionCodes
+        SetupStatus::SharingSetupCodes
     } else {
-        SetupStatus::AwaitingLocalParams
+        SetupStatus::AwaitingInit
     };
     Ok(Json(status))
 }
 
-async fn setup_set_local_params(
+async fn setup_init(
     State(setup_api): State<Arc<SetupApi>>,
-    Json(payload): Json<SetupSetLocalParamsRequest>,
-) -> Result<Json<SetupSetLocalParamsResponse>, CliError> {
+    Json(payload): Json<SetupInitRequest>,
+) -> Result<Json<SetupInitResponse>, CliError> {
     let setup_code = setup_api
-        .set_local_parameters(payload.name, payload.mint_name, payload.mint_size)
+        .init(payload.name, payload.mint_name, payload.mint_size)
         .await
         .map_err(CliError::internal)?;
 
-    Ok(Json(SetupSetLocalParamsResponse { setup_code }))
+    Ok(Json(SetupInitResponse { setup_code }))
 }
 
 async fn setup_add_node(
@@ -364,7 +364,7 @@ async fn setup_start_dkg(State(setup_api): State<Arc<SetupApi>>) -> Result<Json<
 
 async fn setup_restore(
     State(setup_api): State<Arc<SetupApi>>,
-    Json(cfg): Json<ServerConfig>,
+    Json(cfg): Json<NodeConfig>,
 ) -> Result<Json<()>, CliError> {
     setup_api
         .restore_config(cfg)

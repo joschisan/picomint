@@ -69,7 +69,7 @@ pub struct ConsensusConfig {
     pub nodes: BTreeMap<NodeId, NodeEndpoint>,
     /// Bitcoin network this mint operates on.
     pub network: Network,
-    /// Mint name, chosen by the lead node during setup.
+    /// Mint name, chosen by the leader during setup.
     pub name: String,
     /// Consensus version this mint was created at, and so the version
     /// a node that has never voted counts as supporting. Set to the

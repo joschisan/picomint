@@ -26,7 +26,7 @@ use tokio::sync::watch;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-use crate::config::{ConfigGenSettings, ServerConfig};
+use crate::config::{DaemonSettings, NodeConfig};
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::{BlockCountVoteTable, ConsensusVersionVoteTable};
 use crate::consensus::server::Server;
@@ -45,8 +45,8 @@ pub const CONFIRMATION_FINALITY_DELAY: u32 = 9;
 const TX_BUFFER: usize = 100;
 
 pub async fn run(
-    cfg: ServerConfig,
-    settings: ConfigGenSettings,
+    cfg: NodeConfig,
+    settings: DaemonSettings,
     db: Database,
     btc_rpc: Arc<BitcoindClient>,
     connections: ReconnectP2PConnections,
