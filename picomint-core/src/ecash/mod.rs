@@ -2,7 +2,7 @@ use std::hash::Hash;
 
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
-use tbs::{BlindedMessage, Message};
+use tbs::{BlindedNonce, Nonce};
 use thiserror::Error;
 
 use crate::Amount;
@@ -69,7 +69,7 @@ pub struct EcashInput {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct EcashOutput {
     pub denomination: Denomination,
-    pub nonce: BlindedMessage,
+    pub nonce: BlindedNonce,
 }
 
 impl EcashOutput {
@@ -79,11 +79,11 @@ impl EcashOutput {
 }
 
 pub fn verify_note(note: Note, pk: tbs::AggregatePublicKey) -> bool {
-    tbs::verify(nonce_message(note.nonce), note.signature, pk)
-}
-
-pub fn nonce_message(nonce: XOnlyPublicKey) -> Message {
-    tbs::Message::from_public_key(nonce.serialize())
+    tbs::verify(
+        Nonce::from_public_key(note.nonce.serialize()),
+        note.signature,
+        pk,
+    )
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]

@@ -106,11 +106,7 @@ pub fn process_input(
         .checked_sub(1)
         .expect("Failed to decrement issuance counter");
 
-    dbtx.insert(
-        &IssuanceCounterTable,
-        &input.note.denomination,
-        &new_count,
-    );
+    dbtx.insert(&IssuanceCounterTable, &input.note.denomination, &new_count);
 
     Ok((input.note.amount(), input.note.nonce))
 }
@@ -140,7 +136,7 @@ pub fn process_output(
         .ecash
         .tbs_sks
         .get(&output.denomination)
-        .map(|key| tbs::sign_message(output.nonce, *key))
+        .map(|key| tbs::sign_nonce(output.nonce, *key))
         .ok_or(EcashOutputError::InvalidDenomination)?;
 
     dbtx.insert(&BlindedSignatureShareTable, &outpoint, &signature);
@@ -157,11 +153,7 @@ pub fn process_output(
         .checked_add(1)
         .expect("Failed to increment issuance counter");
 
-    dbtx.insert(
-        &IssuanceCounterTable,
-        &output.denomination,
-        &new_count,
-    );
+    dbtx.insert(&IssuanceCounterTable, &output.denomination, &new_count);
 
     Ok(output.amount())
 }

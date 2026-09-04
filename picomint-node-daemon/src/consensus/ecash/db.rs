@@ -2,7 +2,7 @@ use picomint_core::OutPoint;
 use picomint_core::ecash::Denomination;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_redb::table;
-use tbs::{BlindedMessage, BlindedSignatureShare};
+use tbs::{BlindedNonce, BlindedSignatureShare};
 
 table!(
     NoteNonceTable,
@@ -24,7 +24,7 @@ table!(
     /// The share itself stays in [`BlindedSignatureShareRestoreTable`], which
     /// a membership probe still has no reason to read.
     BlindedNonceTable,
-    BlindedMessage => Denomination,
+    BlindedNonce => Denomination,
     "ecash-blinded-nonce",
 );
 
@@ -36,7 +36,7 @@ table!(
 
 table!(
     BlindedSignatureShareRestoreTable,
-    BlindedMessage => BlindedSignatureShare,
+    BlindedNonce => BlindedSignatureShare,
     "ecash-blinded-signature-share-restore",
 );
 

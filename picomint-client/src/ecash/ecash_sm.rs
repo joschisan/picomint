@@ -147,7 +147,7 @@ pub fn verify_blind_shares(
             .expect("No pk share found for node");
 
         ensure!(
-            tbs::verify_signature_share(request.blinded_message(), *share, *amount_key),
+            tbs::verify_signature_share(request.blinded_nonce(), *share, *amount_key),
             "Invalid blind signature"
         );
     }

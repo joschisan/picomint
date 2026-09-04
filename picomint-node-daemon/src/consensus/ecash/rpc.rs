@@ -35,7 +35,7 @@ pub async fn signature_shares(
 }
 
 /// Callers establish membership through [`issuance_state`] first, so every
-/// message here is expected to resolve and a miss is an error.
+/// nonce here is expected to resolve and a miss is an error.
 pub fn signature_shares_restore(
     server: &Server,
     req: SignatureSharesRestoreRequest,
@@ -44,9 +44,9 @@ pub fn signature_shares_restore(
 
     let dbtx = server.db.begin_read();
 
-    for message in req.messages {
+    for nonce in req.nonces {
         let share = dbtx
-            .get(&BlindedSignatureShareRestoreTable, &message)
+            .get(&BlindedSignatureShareRestoreTable, &nonce)
             .ok_or_else(|| "No blinded signature share found".to_string())?;
 
         shares.push(share);
@@ -62,9 +62,9 @@ pub fn issuance_state(
     let dbtx = server.db.begin_read();
 
     let issued = req
-        .messages
+        .nonces
         .iter()
-        .map(|message| dbtx.get(&BlindedNonceTable, message))
+        .map(|nonce| dbtx.get(&BlindedNonceTable, nonce))
         .collect();
 
     Ok(IssuanceStateResponse { issued })

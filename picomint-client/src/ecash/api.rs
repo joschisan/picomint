@@ -11,7 +11,7 @@ use picomint_core::module::Method;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{NodeId, TransactionId};
 use picomint_rpc::query::FilterMapThreshold;
-use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
+use tbs::{BlindedNonce, BlindedSignatureShare, PublicKeyShare};
 
 use super::NoteIssuanceRequest;
 use super::ecash_sm::verify_blind_shares;
@@ -37,7 +37,7 @@ pub async fn signature_shares(
 }
 
 /// Fetch shares for notes a restore scan has already established the
-/// mint signed. Every message must resolve on every node, so a
+/// mint signed. Every nonce must resolve on every node, so a
 /// candidate can never be silently dropped for want of a full column of
 /// shares to interpolate over.
 pub async fn signature_shares_restore(
@@ -45,9 +45,9 @@ pub async fn signature_shares_restore(
     issuance_requests: Vec<NoteIssuanceRequest>,
     tbs_pks: BTreeMap<Denomination, BTreeMap<NodeId, PublicKeyShare>>,
 ) -> BTreeMap<NodeId, Vec<BlindedSignatureShare>> {
-    let messages = issuance_requests
+    let nonces = issuance_requests
         .iter()
-        .map(NoteIssuanceRequest::blinded_message)
+        .map(NoteIssuanceRequest::blinded_nonce)
         .collect();
 
     api.request_with_strategy_retry(
@@ -58,14 +58,14 @@ pub async fn signature_shares_restore(
             api.num_nodes(),
         ),
         Method::Ecash(EcashMethod::SignatureSharesRestore(
-            SignatureSharesRestoreRequest { messages },
+            SignatureSharesRestoreRequest { nonces },
         )),
     )
     .await
 }
 
 /// Which of `nonces` the mint has already seen spent, and which of
-/// `messages` it ever signed. Both go through threshold consensus rather
+/// `nonces` it ever signed. Both go through threshold consensus rather
 /// than a single node: either answer coming back wrong in the negative
 /// direction makes a restoring wallet abandon a live note, so a lone
 /// node must not be able to decide it.
@@ -77,16 +77,13 @@ pub async fn spend_state(api: &MintApi, nonces: Vec<XOnlyPublicKey>) -> Vec<bool
     .spent
 }
 
-/// For each message, the denomination the mint signed it under, or
+/// For each nonce, the denomination the mint signed it under, or
 /// `None` if it never did. The denomination is not derivable from the
 /// seed under a single counter space, so the scan takes the mint's
 /// word for it — and then checks that word when it aggregates the share.
-pub async fn issuance_state(
-    api: &MintApi,
-    messages: Vec<BlindedMessage>,
-) -> Vec<Option<Denomination>> {
+pub async fn issuance_state(api: &MintApi, nonces: Vec<BlindedNonce>) -> Vec<Option<Denomination>> {
     api.request_current_consensus_retry::<IssuanceStateResponse>(Method::Ecash(
-        EcashMethod::IssuanceState(IssuanceStateRequest { messages }),
+        EcashMethod::IssuanceState(IssuanceStateRequest { nonces }),
     ))
     .await
     .issued
