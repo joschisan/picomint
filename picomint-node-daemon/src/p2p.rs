@@ -67,12 +67,11 @@ impl P2PConnectionStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
 pub enum P2PMessage {
-    /// One bft message. Session isolation is enforced inside the
-    /// engine: every `Unit` carries its own `session` field (part of the
-    /// unit hash), and the `Graph` rejects any unit whose session doesn't
-    /// match. A stale `Propose`/`Confirmed` from session N landing in
-    /// session N+1 is therefore discarded at insertion; a stale `Ack`
-    /// fails sig verification against the local-session unit hash.
+    /// One bft message. Session isolation is enforced by the creator
+    /// signature: units deliberately do not carry the session — signatures
+    /// are produced over `(session, unit)`, so a stale `Unit` from another
+    /// session fails verification and is discarded. A stale `Request` at
+    /// worst backfills a unit the recipient does not hold.
     Bft(BftMessage<ConsensusItem>),
     SessionSignature(secp256k1::schnorr::Signature),
     SessionIndex(u32),

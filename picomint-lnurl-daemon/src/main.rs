@@ -369,7 +369,7 @@ async fn select_gateway(
 }
 
 /// Proxy LUD-21 verify: external LNURL wallet hits us at
-/// `/verify/{gateway_pk}/{payment_hash}` (URL embedded in the LNURL pay
+/// `/verify/{gateway_pk}/{payment_hash}` (URL embedded in the invoice
 /// response), we forward via iroh to the originating gateway. The
 /// optional `?wait` query param turns this into a long-poll on the
 /// gateway side.

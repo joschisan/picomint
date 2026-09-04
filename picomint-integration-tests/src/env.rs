@@ -28,7 +28,7 @@ use crate::cli;
 #[derive(Clone)]
 pub struct TestClient {
     pub client: Arc<Client>,
-    pub fed: MintId,
+    pub mint: MintId,
     pub db: Database,
 }
 
@@ -306,12 +306,12 @@ async fn build_client(
 
     let client = Arc::new(Client::new(endpoint, db.clone(), mnemonic));
 
-    let fed = client
+    let mint = client
         .add_mint(&invite_code, Some(bitcoin::Network::Regtest))
         .await?;
 
     info!("Created client-{n}");
-    Ok(TestClient { client, fed, db })
+    Ok(TestClient { client, mint, db })
 }
 
 async fn start_node(base: &Path, node: usize) -> anyhow::Result<Child> {

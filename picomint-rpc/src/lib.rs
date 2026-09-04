@@ -2,14 +2,14 @@
 //!
 //! One request = one bidirectional stream. Connections are kept alive and
 //! reused: the mint client holds a pooled connection per node (see
-//! `picomint-client`'s `MintApi`) and multiplexes every request as a
+//! [`crate::api::MintApi`]) and multiplexes every request as a
 //! fresh bi stream over it via [`request_on_connection`], paying the QUIC
 //! handshake and hole-punched path once rather than per request. [`request`]
 //! remains a one-shot convenience (connect → one request → close) for
 //! callers without a pool, e.g. fetching the config from an invite code.
 //!
 //! Server-side, [`handle_request`] serves a connection by accepting bi
-//! streams in a loop until the node closes, handling each as one request
+//! streams in a loop until the remote closes, handling each as one request
 //! (accept_bi → decode → handler → encode → finish) on its own task.
 //!
 //! The wire envelope is `Result<Vec<u8>, String>` — server-side `Ok` is the
@@ -31,8 +31,8 @@ use iroh::{Endpoint, PublicKey};
 use picomint_encoding::{Decodable, Encodable};
 use tracing::warn;
 
-/// ALPN identifier for picomint RPC. All picomint nodes — nodes and
-/// gateways alike — speak the same ALPN; the demux happens at the
+/// ALPN identifier for picomint RPC. Every picomint process — mint nodes
+/// and gateways alike — speaks the same ALPN; the demux happens at the
 /// method-enum layer.
 pub const ALPN: &[u8] = b"picomint";
 
@@ -142,7 +142,7 @@ where
 }
 
 /// Serve a kept-alive iroh connection: accept bi streams in a loop, handling
-/// each as one independent request on its own task, until the node closes
+/// each as one independent request on its own task, until the remote closes
 /// the connection. Connections are pooled and reused by clients, so a single
 /// connection may carry many requests over its lifetime. The handler returns
 /// `Result<Vec<u8>, String>` — bytes are the consensus-encoded response,
@@ -154,7 +154,7 @@ where
     Fut: Future<Output = Result<Vec<u8>, String>> + Send + 'static,
 {
     loop {
-        // `accept_bi` errors once the node closes (or the connection drops) —
+        // `accept_bi` errors once the remote closes (or the connection drops) —
         // a normal end-of-life for a pooled connection, not a failure.
         let Ok((mut send_stream, mut recv_stream)) = connection.accept_bi().await else {
             return Ok(());

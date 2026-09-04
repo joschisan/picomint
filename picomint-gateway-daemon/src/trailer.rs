@@ -8,11 +8,11 @@
 //! terminal from the outside world's point of view:
 //!
 //! - Direct swap (daemon DB has an `OutgoingContract[operation]` row): call
-//!   `finalize_send` on the sending mint's client so the sender gets
-//!   the preimage (or refund signature).
-//! - External LN receive (no outgoing row): call `claim_for_hash` /
-//!   `fail_for_hash` on the LDK node so the upstream LN sender's HTLC
-//!   settles or times out.
+//!   `gateway_finalize_send` on the sending mint's client so the sender
+//!   gets the preimage (or refund signature).
+//! - External LN receive (no outgoing row): call `claim_for_hash` on the
+//!   LDK node so the upstream LN sender's HTLC settles; on refund the
+//!   inbound HTLC is left to expire on LDK's schedule.
 //!
 //! Cursor is persisted daemon-wide in `EventCursorTable` and advanced after
 //! each dispatched event. Dispatches are idempotent, so on a crash the

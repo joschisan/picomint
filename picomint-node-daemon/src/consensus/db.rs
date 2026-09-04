@@ -17,7 +17,7 @@ table!(
 
 // bft table — owned by the daemon, lent to `picomint_bft::Engine`
 // via `Engine::new`. Cleaned up at session boundary by
-// `complete_session` alongside `AcceptedItemTable`.
+// `finalize_session` alongside `AcceptedItemTable`.
 
 table!(
     BftUnitsTable,

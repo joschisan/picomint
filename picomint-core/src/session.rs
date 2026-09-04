@@ -19,10 +19,9 @@ pub struct AcceptedItem {
 /// Items ordered in a single session that have been accepted by Picomint
 /// consensus.
 ///
-/// A running Mint produces a [`SessionOutcome`] every couple of minutes.
-/// Therefore, just like in Bitcoin, a [`SessionOutcome`] might be empty if no
-/// items are ordered in that time or all ordered items are discarded by
-/// Picomint Consensus.
+/// A running mint cuts a session once a byte target or round cap is
+/// reached. A [`SessionOutcome`] might be empty if no items are ordered
+/// in that window or all ordered items are discarded by consensus.
 ///
 /// When session is closed it is signed over by the nodes and produces a
 /// [`SignedSessionOutcome`].

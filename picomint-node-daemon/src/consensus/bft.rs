@@ -33,9 +33,10 @@ use crate::p2p::{P2PMessage, Recipient as P2PRecipient, ReconnectP2PConnections}
 /// are dispatched to their respective channels here so the engine sees
 /// only `bft::Message` on `receive`.
 ///
-/// Session isolation is handled inside the engine — every unit carries
-/// its own `session` field, and the graph rejects mismatches — so the
-/// adapter forwards bft traffic uninterpreted regardless of session.
+/// Session isolation is handled inside the engine — signatures are
+/// produced over `(session, unit)`, so stale units fail verification —
+/// and the adapter forwards bft traffic uninterpreted regardless of
+/// session.
 pub struct Network {
     connections: ReconnectP2PConnections,
     signed_outcomes_tx: Sender<(NodeId, SignedSessionOutcome)>,

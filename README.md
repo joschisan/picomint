@@ -70,18 +70,18 @@ The client can use this invite to download and verify the mint config from the n
 
 ### Configure Gateways
 
-The mint maintains an explicit list of recommended Lightning gateways. Any node can add a gateway and clients will priorititze gateways by the number of nodes recommending them.
+The mint maintains an explicit list of recommended Lightning gateways. Any node can add a gateway; clients accept a gateway once a threshold of nodes recommends it.
 
 Add a gateway:
 
 ```bash
-picomint-node-cli module lightning gateway add <url>
+picomint-node-cli module lightning gateway add <pk> <name>
 ```
 
 Remove one:
 
 ```bash
-picomint-node-cli module lightning gateway remove <url>
+picomint-node-cli module lightning gateway remove <pk>
 ```
 
 List the current recommendations:
@@ -140,7 +140,7 @@ picomint-node-cli …`.
 
 ## Deploy Gateway
 
-The gateway is a single container image: `ghcr.io/joschisan/picomint-gateway-daemon:main`. Set it up with Docker however you prefer — persist `/data` in a volume, publish the public API port `8080` and the LDK Lightning P2P port `9735`, and configure it through the environment variables documented in [Configuration](#configuration-1) below.
+The gateway is a single container image: `ghcr.io/joschisan/picomint-gateway-daemon:main`. Set it up with Docker however you prefer — persist `/data` in a volume, publish the public API port `8080` (iroh — QUIC over UDP) and the LDK Lightning P2P port `9735`, and configure it through the environment variables documented in [Configuration](#configuration-1) below.
 
 ### Accessing the CLI
 
@@ -162,7 +162,8 @@ Your info will look like
 
 ```json
 {
-  "public_key": "02abfe4a99f1ed8f67c1f07e5d47f3ab3d2e9c5b8a1c8e7f2a6d4b7e9c1f5a3e8d",
+  "lightning_pk": "02abfe4a99f1ed8f67c1f07e5d47f3ab3d2e9c5b8a1c8e7f2a6d4b7e9c1f5a3e8d",
+  "gateway_pk": "d2g4h6j8k0m1n3p5q7r9s0t2v4w6x8y1z3a5b7c9d1e3f5g7h9j1",
   "alias": "picomint-gateway-daemon",
   "network": "bitcoin",
   "block_height": 842195,
@@ -172,10 +173,10 @@ Your info will look like
 
 ### Open Channels
 
-To route payments on behalf of mints the gateway needs Lightning channels — specifically inbound liquidity, since a fresh node cannot receive payments. The usual approach is to buy an inbound channel from a Lightning Service Provider (LSP) such as [LN Big](https://lnbig.com). LSPs will ask for the node's `public_key` from `info` above and may require you to connect to them before they open the channel:
+To route payments on behalf of mints the gateway needs Lightning channels — specifically inbound liquidity, since a fresh node cannot receive payments. The usual approach is to buy an inbound channel from a Lightning Service Provider (LSP) such as [LN Big](https://lnbig.com). LSPs will ask for the node's `lightning_pk` from `info` above and may require you to connect to them before they open the channel:
 
 ```bash
-picomint-gateway-cli ldk node connect <lsp-pubkey> <lsp-host>
+picomint-gateway-cli ldk peer connect <lsp-pubkey> <lsp-host>
 ```
 
 You can also open outbound channels yourself but first the gateway's embedded LDK node needs onchain bitcoin to open channels. Generate a receive address:
@@ -224,11 +225,11 @@ picomint-gateway-cli mint remove <mint-id>
 
 This is destructive: check for in-flight payments via `query` first, otherwise you might lose funds.
 
-For the gateway to actually route payments on behalf of a mint, its nodes also need to add the gateway's URL to their recommended list — see [Configure Gateways](#configure-gateways) above.
+For the gateway to actually route payments on behalf of a mint, its nodes also need to add the gateway's `gateway_pk` (shown by `picomint-gateway-cli info`) to their recommended list — see [Configure Gateways](#configure-gateways) above.
 
 ### Manage Mint Liquidity
 
-Every command below accepts `--id <mint-id>` to target a specific mint. When exactly one mint is added (the common case) the flag can be omitted and that mint is used.
+Every command below except `ecash receive` accepts `--id <mint-id>` to target a specific mint (`ecash receive` reads the target mint from the ecash string itself). When exactly one mint is added (the common case) the flag can be omitted and that mint is used.
 
 The gateway holds its own ecash balance in every mint it has added. Check it with:
 
@@ -264,7 +265,7 @@ Passing `--fee <amount>` overrides the feerate with an exact value; otherwise wh
 picomint-gateway-cli mint module ecash send <amount>
 ```
 
-**Receive Ecash:** reissue an ecash string produced by `mint send` (on this gateway or any other client) into your balance:
+**Receive Ecash:** reissue an ecash string produced by `mint module ecash send` (on this gateway or any other client) into your balance:
 
 ```bash
 picomint-gateway-cli mint module ecash receive <ecash>
@@ -323,7 +324,7 @@ picomint-gateway-cli query \
 | Column           | Type    | Notes                                                                  |
 |------------------|---------|------------------------------------------------------------------------|
 | `mint`     | TEXT    | Hex-encoded mint id                                              |
-| `operation`      | TEXT    | Hex-encoded operation id; unique within the view                       |
+| `operation`      | TEXT    | Hex-encoded operation id; unique per mint within the view                       |
 | `status`         | TEXT    | See below                                                              |
 | `started_at`     | INTEGER | When the operation was initiated (ms since epoch)                      |
 | `completed_at`   | INTEGER | NULL while `status = 'pending'`                                        |
@@ -353,7 +354,7 @@ also queryable if you need a finer view.
 
 | Port | Purpose                      | Safe to expose? |
 |------|------------------------------|-----------------|
-| 8080 | Public API (HTTP)            | Yes             |
+| 8080 | Public API (iroh / QUIC over UDP) | Yes |
 | 9735 | LDK Lightning P2P (BOLT)     | Yes             |
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no

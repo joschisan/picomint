@@ -31,22 +31,22 @@ pub mod core;
 pub mod ecash;
 /// Node-announced mint expiry date.
 pub mod expiry;
-/// A cut charged on a client's transactions, and where to pay it out.
 /// Mint invite code
 pub mod invite;
 /// Lightning module wire types / helpers (shared between client and server).
 pub mod lightning;
 /// Node wire method names dispatched over Iroh.
 pub mod methods;
-/// Extendable module sysystem
+/// Static module system types
 pub mod module;
 /// `NodeId` type
 mod node;
-/// Consensus session outcome types (AcceptedItem, SessionOutcome, …).
+/// Deterministic key derivation from the root secret.
 pub mod secret;
 
 /// Onchain module wire types / helpers (shared between client and server).
 pub mod onchain;
+/// Consensus session outcome types (AcceptedItem, SessionOutcome, …).
 pub mod session;
 /// Wire-level Transaction and ConsensusItem types.
 pub mod tx;

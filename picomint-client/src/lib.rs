@@ -2,7 +2,7 @@
 //!
 //! [`Client`] is the entry point for applications: one instance per app,
 //! holding every added mint as data. [`Client::new`] brings every
-//! added mint up; [`Client::add`] adds one, [`Client::begin_remove`]
+//! added mint up; [`Client::add_mint`] adds one, [`Client::begin_remove_mint`]
 //! wipes one. An added mint is always up — there is no dormant state
 //! in between. Every operation takes the
 //! [`picomint_core::config::MintId`] it acts on
@@ -14,7 +14,7 @@
 //! [`picomint_core::config::MintId`]-prefixed key, so adds, removes,
 //! and all module writes commit through one database.
 //!
-//! Per-module logic lives in [`mod@ecash`], [`mod@wallet`], [`mod@lightning`], and
+//! Per-module logic lives in [`mod@ecash`], [`mod@onchain`], [`mod@lightning`], and
 //! [`mod@gateway`]. Each module owns its own state machines and contributes its
 //! slice of the flat [`Client`] surface. Submission ownership lives
 //! entirely in the ecash module — non-ecash modules build a
@@ -25,9 +25,9 @@
 /// Downloading a mint's config and rebuilding what the seed owns there.
 mod add_mint;
 /// Mint API transport
-/// Core [`Client`]
 pub mod api;
 
+/// Core [`Client`]
 mod client;
 /// The per-mint [`context::ClientContext`]
 mod context;
@@ -35,19 +35,16 @@ mod context;
 pub mod ecash;
 /// Append-only event log shared by all mints on this host.
 pub mod eventlog;
-/// Shared kept-alive iroh connection primitive (mint nodes + gateways).
 /// Per-module typed state machine executor
 mod executor;
 /// Mint expiry-status cache + refresh.
 pub mod expiry;
-/// Mint fee announcement cache, and paying out a collected cut.
 /// Gateway lightning module (mounted by the gateway daemon).
 pub mod gateway;
 /// Lightning module client.
 pub mod lightning;
 /// Onchain module client.
 pub mod onchain;
-/// Client query-consensus strategies
 /// Secret handling & derivation
 pub mod secret;
 /// Local `(TaskTracker, CancellationToken)` wrapper for client background tasks.

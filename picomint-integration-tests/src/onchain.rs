@@ -37,7 +37,7 @@ fn onchain_event_stream(
             for (id, entry) in events {
                 next_id = id.saturating_add(1);
 
-                if let Some((op, event)) = try_parse_wallet_event(&entry) {
+                if let Some((op, event)) = try_parse_onchain_event(&entry) {
                     yield (op, event);
                 }
             }
@@ -47,7 +47,7 @@ fn onchain_event_stream(
     }
 }
 
-fn try_parse_wallet_event(
+fn try_parse_onchain_event(
     entry: &EventLogEntry,
 ) -> Option<(picomint_core::core::OperationId, OnchainEvent)> {
     let op = entry.operation;
@@ -74,7 +74,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     let pegin_addr = retry("deposit address derived", || async {
         client_send
             .client
-            .onchain_receive(client_send.fed, Account::Primary)
+            .onchain_receive(client_send.mint, Account::Primary)
     })
     .await?;
     info!(addr = %pegin_addr, "Pegin address ready");
@@ -90,7 +90,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     env.mine_blocks(10);
 
-    // Drain the wallet events emitted by the pegin itself.
+    // Drain the onchain events emitted by the pegin itself.
     let Some((_, OnchainEvent::Receive(_))) = send_events.next().await else {
         panic!("Expected pegin Receive event");
     };
@@ -100,7 +100,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     retry("pegin balance", || async {
         let balance = client_send
             .client
-            .ecash_balance(client_send.fed, Account::Primary);
+            .ecash_balance(client_send.mint, Account::Primary);
         ensure!(balance > Amount::ZERO, "Balance is zero");
         Ok(())
     })
@@ -122,7 +122,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     let operation = client_send
         .client
         .onchain_send(
-            client_send.fed,
+            client_send.mint,
             Account::Primary,
             external_address.as_unchecked().clone(),
             bitcoin::Amount::from_sat(100_000),
@@ -173,7 +173,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     let abort_op = client_send
         .client
         .onchain_send(
-            client_send.fed,
+            client_send.mint,
             Account::Primary,
             external_address.as_unchecked().clone(),
             bitcoin::Amount::from_sat(100_000),
@@ -201,12 +201,12 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let ecash = client_send
         .client
-        .ecash_send(client_send.fed, Account::Primary, Amount::from_sat(100_000))
+        .ecash_send(client_send.mint, Account::Primary, Amount::from_sat(100_000))
         .await?;
 
     let operation = client
         .client
-        .ecash_receive(client.fed, Account::Primary, &ecash)?;
+        .ecash_receive(client.mint, Account::Primary, &ecash)?;
 
     crate::ecash::await_tx_outcome(&client, operation)
         .await
@@ -214,7 +214,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let amount = client
         .client
-        .onchain_send_max_amount(client.fed, Account::Primary)
+        .onchain_send_max_amount(client.mint, Account::Primary)
         .await?;
 
     ensure!(amount > bitcoin::Amount::ZERO, "max send amount is zero");
@@ -224,7 +224,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     let operation = client
         .client
         .onchain_send_max(
-            client.fed,
+            client.mint,
             Account::Primary,
             external_address.as_unchecked().clone(),
         )
@@ -243,7 +243,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     ensure!(
         client
             .client
-            .ecash_count(client.fed, Account::Primary)
+            .ecash_count(client.mint, Account::Primary)
             .is_empty(),
         "send_max left notes behind"
     );
@@ -257,7 +257,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     let pegin_addr = retry("second deposit address derived", || async {
         client_send
             .client
-            .onchain_receive(client_send.fed, Account::Primary)
+            .onchain_receive(client_send.mint, Account::Primary)
     })
     .await?;
 

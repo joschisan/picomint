@@ -30,9 +30,8 @@ pub struct EcashStateMachine {
     pub operation: OperationId,
     /// Notes consumed on the input side that came out of our own
     /// `NoteTable`, and are re-inserted there on tx rejection. A restore's
-    /// notes do not travel here — they arrive as an ordinary bundle through
-    /// `receive`, and a rejected reissuance simply leaves them unspent for
-    /// the next scan to find.
+    /// notes do not travel here — they are credited to `NoteTable` directly
+    /// by `commit_scan`.
     pub spendable_notes: Vec<SpendableNote>,
     /// Tx the SM is tied to.
     pub txid: TransactionId,

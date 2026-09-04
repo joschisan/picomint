@@ -4,9 +4,10 @@
 //! The binary contains logic for sending/receiving Lightning payments on behalf
 //! of Picomint clients in one or more connected Mints.
 //!
-//! It runs a webserver with a REST API that can be used by Picomint
-//! clients to request routing of payments through the Lightning Network.
-//! The API also has endpoints for managing the gateway.
+//! It serves Picomint clients over a public iroh endpoint (consensus-encoded
+//! `GatewayMethod` requests) to route payments through the Lightning
+//! Network, and is managed through a separate HTTP-over-Unix-socket admin
+//! CLI.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

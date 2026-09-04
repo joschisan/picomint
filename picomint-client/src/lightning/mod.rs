@@ -492,7 +492,7 @@ pub enum RefreshGatewaysError {
 }
 
 /// Remove every row this module owns under the caller's mint prefix.
-/// Called by [`crate::Client::remove`] for end-of-life cleanup.
+/// Called by [`crate::Client::begin_remove_mint`] for end-of-life cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
     dbtx.remove(&IncomingContractStreamIndexTable, &mint);
     dbtx.remove_prefix(&SendOperationTable, &mint);

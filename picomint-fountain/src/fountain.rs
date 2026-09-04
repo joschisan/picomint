@@ -59,7 +59,7 @@ impl Encoder {
     /// Returns the next fragment to be emitted by the fountain encoder.
     /// After all fragments of the original message have been emitted once,
     /// the fountain encoder will emit the result of xoring together the
-    /// fragments selected by the Xoshiro RNG (which could be a single
+    /// fragments selected by the ChaCha20 RNG (which could be a single
     /// fragment).
     pub fn next_fragment(&mut self) -> Fragment {
         let index = self.index;

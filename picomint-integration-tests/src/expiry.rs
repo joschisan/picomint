@@ -41,13 +41,13 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     // cache is settled before we assert.
     client
         .client
-        .refresh_expiry_status(client.fed)
+        .refresh_expiry_status(client.mint)
         .await
         .map_err(|e| anyhow::anyhow!("refresh_expiry_status: {e}"))?;
 
     let cached = client
         .client
-        .expiry_status(client.fed)
+        .expiry_status(client.mint)
         .ok_or_else(|| anyhow::anyhow!("expected client cache to hold the announcement"))?;
 
     ensure!(
@@ -63,12 +63,12 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
 
     client
         .client
-        .refresh_expiry_status(client.fed)
+        .refresh_expiry_status(client.mint)
         .await
         .map_err(|e| anyhow::anyhow!("refresh_expiry_status (clear): {e}"))?;
 
     ensure!(
-        client.client.expiry_status(client.fed).is_none(),
+        client.client.expiry_status(client.mint).is_none(),
         "client cache should be empty after a mint-wide clear"
     );
 

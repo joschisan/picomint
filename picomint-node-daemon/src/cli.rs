@@ -52,7 +52,7 @@ impl From<anyhow::Error> for CliError {
     }
 }
 
-/// Setup CLI server — runs during DKG phase. Binds a Unix socket at
+/// Setup CLI server — runs during the setup phase and is torn down when DKG starts. Binds a Unix socket at
 /// `{data_dir}/{CLI_SOCKET_FILENAME}`; a stale socket from a previous
 /// (crashed) run is unlinked before we bind.
 pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
@@ -75,8 +75,9 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
         .expect("CLI admin server failed");
 }
 
-/// Build the Dashboard-phase CLI router that exposes read-only mint
-/// endpoints (audit, invite) plus the lightning/onchain module-admin routes.
+/// Build the Dashboard-phase CLI router that exposes the mint endpoints
+/// (audit, invite, config, expiry, status probes) plus the
+/// lightning/onchain module-admin routes.
 pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     use crate::p2p::{P2PConnectionStatus, Transport};
     use axum::Json;

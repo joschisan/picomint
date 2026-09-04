@@ -60,7 +60,7 @@ impl<'a> DkgHandle<'a> {
         run_dkg_secp(self.num_nodes, self.identity, self.connections).await
     }
 
-    /// Exchange a `DkgNodeMsg::Module(Vec<u8>)` with all nodes. All nodes must
+    /// Exchange a `P2PMessage::Encodable(Vec<u8>)` with all nodes. All nodes must
     /// be online and submit a response. The caller's message is included in
     /// the returned map under its own `NodeId`.
     pub async fn exchange_bytes(

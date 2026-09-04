@@ -135,7 +135,7 @@ async fn run_session(
     // equivalent to crashing there: the dropped WriteTx rolls back, and
     // [`finalize_session`] re-applies the item from the adopted outcome.
     // That holds because module processing keeps no state outside the
-    // WriteTx and its only external effect, the wallet's tx broadcast,
+    // WriteTx and its only external effect, the onchain module's tx broadcast,
     // tolerates replay — new module code has to preserve both properties.
     let signed_session_outcome = tokio::select! {
         outcome = adopt_session(server, connections, session_index, outcomes_rx) => outcome?,
@@ -357,7 +357,7 @@ fn random_node(cfg: &ServerConfig) -> NodeId {
         .node_ids()
         .filter(|p| *p != cfg.private.identity)
         .choose(&mut rand::thread_rng())
-        .expect("We have at least three nodes")
+        .expect("We have at least four nodes")
 }
 
 /// Validate a SignedSessionOutcome received via P2P

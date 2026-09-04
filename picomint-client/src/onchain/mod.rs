@@ -40,7 +40,7 @@ use tracing::warn;
 /// Number of output info entries to scan per batch.
 const SLICE_SIZE: u64 = 1000;
 
-/// Resume this mint's persisted wallet state machines and start the
+/// Resume this mint's persisted onchain state machines and start the
 /// address scanner. Called exactly once, at mint bring-up.
 pub(crate) fn resume(ctx: &ClientContext) {
     crate::executor::resume::<SendStateMachine, _>(ctx, SendStateMachineTable);
@@ -297,7 +297,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
 
     let outputs = api::output_info_slice(&ctx.api, start, start + SLICE_SIZE)
         .await
-        .map_err(|_| anyhow!("Failed to fetch wallet output info slice"))?;
+        .map_err(|_| anyhow!("Failed to fetch onchain output info slice"))?;
 
     for output in &outputs {
         if let Some(&(account, address_index)) = address_map.get(&output.script) {
@@ -329,7 +329,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
                 // the congestion will clear up within a few blocks.
                 if api::pending_tx_chain(&ctx.api)
                     .await
-                    .map_err(|_| anyhow!("Failed to request wallet pending tx chain"))?
+                    .map_err(|_| anyhow!("Failed to request onchain pending tx chain"))?
                     .len()
                     >= 3
                 {
@@ -338,7 +338,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
 
                 let receive_fee = api::receive_fee(&ctx.api)
                     .await
-                    .map_err(|_| anyhow!("Failed to request wallet receive fee"))?
+                    .map_err(|_| anyhow!("Failed to request onchain receive fee"))?
                     .context("No consensus feerate is available")?;
 
                 if output.value > receive_fee {
@@ -369,7 +369,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
 }
 
 /// Remove every row this module owns under the caller's mint prefix.
-/// Called by [`crate::Client::remove`] for end-of-life cleanup.
+/// Called by [`crate::Client::begin_remove_mint`] for end-of-life cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
     dbtx.remove(&NextOutputIndexTable, &mint);
     dbtx.remove_prefix(&ValidAddressIndexTable, &mint);

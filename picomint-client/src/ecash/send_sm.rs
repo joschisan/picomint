@@ -17,7 +17,7 @@ table!(
     "ecash-send-sm",
 );
 
-/// Drives the slow-path tail of `mint().send()`. The reissuance tx and
+/// Drives the slow-path tail of [`crate::Client::ecash_send`]. The reissuance tx and
 /// `EcashStateMachine` are wired up in the same dbtx that submits the
 /// remint; this SM observes the operation's terminal events and either
 /// assembles the requested ecash from the freshly minted notes or logs

@@ -9,9 +9,10 @@ use serde::{Deserialize, Serialize};
 /// The daemon binds and the CLI connects at `{DATA_DIR}/{CLI_SOCKET_FILENAME}`.
 pub const CLI_SOCKET_FILENAME: &str = "cli.sock";
 
-/// Status of the setup flow — mirrors the node UI's `SetupStatus`
-/// as a CLI-consumed copy so `picomint-node-cli` doesn't need to pull in
-/// the daemon crate.
+/// Status of the setup flow — CLI-consumed copy of the daemon's
+/// `config::setup::SetupStatus` (minus `ConsensusIsRunning`, which the
+/// setup socket can never report) so `picomint-node-cli` doesn't need to
+/// pull in the daemon crate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SetupStatus {
     AwaitingLocalParams,

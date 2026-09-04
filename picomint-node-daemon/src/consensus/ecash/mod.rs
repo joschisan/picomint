@@ -69,7 +69,7 @@ pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
 
         ensure!(
             pk == cfg.consensus.ecash.tbs_pks[&denomination][&cfg.private.identity],
-            "Mint private key doesn't match pubkey share"
+            "Ecash tbs secret key share doesn't match pubkey share"
         );
     }
 

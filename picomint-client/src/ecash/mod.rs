@@ -680,7 +680,7 @@ fn send_ecash_dbtx(
 }
 
 /// Remove every row this module owns under the caller's mint prefix.
-/// Called by [`crate::Client::remove`] for end-of-life cleanup.
+/// Called by [`crate::Client::begin_remove_mint`] for end-of-life cleanup.
 pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
     dbtx.remove_prefix(&NoteTable, &mint);
     dbtx.remove_prefix(&ReceiveOperationTable, &mint);

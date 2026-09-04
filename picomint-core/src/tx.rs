@@ -15,9 +15,7 @@ use crate::wire;
 /// An atomic value transfer operation within the Picomint system and consensus.
 ///
 /// The mint enforces that the total value of the outputs equals the total value
-/// of the inputs, to prevent creating funds out of thin air. In some cases, the
-/// value of the inputs and outputs can both be 0 e.g. when creating an offer to
-/// a Lightning Gateway.
+/// of the inputs plus the fees, to prevent creating funds out of thin air.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct Transaction {
     pub inputs: Vec<wire::Input>,
@@ -96,10 +94,10 @@ pub enum TxError {
     Output(wire::OutputError),
 }
 
-/// All the items that may be produced during a consensus epoch.
+/// All the items that may be produced during a consensus session.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum ConsensusItem {
-    /// Threshold sign the epoch history for verification via the API
+    /// A client-submitted transaction
     Tx(Transaction),
     /// Any data that modules require consensus on
     Module(wire::ModuleConsensusItem),

@@ -32,7 +32,7 @@ table!(
 /// Single-state state machine covering the mint side of the receive
 /// flow. `trigger` waits for tx acceptance and gathers TPE decryption shares;
 /// `transition` logs the terminal receive event and submits the refund tx
-/// if the preimage decode failed. All external (LN / cross-fed) side effects
+/// if the preimage decode failed. All external (LN / cross-mint) side effects
 /// are handled out-of-band by the per-mint trailer task watching this
 /// mint's event log.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]

@@ -34,14 +34,14 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 - `picomint-rpc` — iroh RPC primitives shared by client and server (pooled connections, one request per bi stream)
 - `picomint-tbs` — threshold blind signatures (BLS12-381) for ecash issuance
 - `picomint-tss` — FROST threshold Schnorr (BIP 445, BIP340 output) for the mint's taproot wallet
-- `picomint-tpe` — threshold pairing encryption (BLS12-381) for lightning contract preimages
+- `picomint-tpe` — threshold point encryption (BLS12-381) for lightning contract preimages
 - `picomint-fountain` — fountain-code encoder/decoder (currently unused by any other crate)
 - `picomint-lnurl-daemon` — standalone LNURL proxy daemon for receiving Lightning payments
 - `picomint-lnurl` / `picomint-base32` — small shared utility crates
 - `picomint-integration-tests` — end-to-end integration tests (used by `test-integration.sh`)
 
 ### Wire + storage
-- Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-core::encoding`
+- Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-encoding`
 - Storage: redb only. No migrations (tables are declared via the `table!` macro in `picomint-redb`; keys/values use consensus encoding). The one exception is the gateway's analytics database — a separate SQLite file (rusqlite) queried via the `query` CLI command
 - Transport: Iroh-only (QUIC + hole-punching). No TLS/websocket/DNS announcements
 - Each node binds exactly one iroh `Endpoint` (one secret key, one node id) for both mint p2p and the public client API; the accept loop demuxes by remote node-id (node set → P2P path, otherwise → public API path).

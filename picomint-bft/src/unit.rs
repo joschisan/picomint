@@ -26,7 +26,7 @@ impl<T> UnitData for T where
 
 /// Hash identifying a unit: the sha256 consensus-hash of the encoded
 /// [`Unit`]. The unit's identity everywhere — storage key of
-/// `BFT_UNITS`, element of the in-memory `extended` / `emitted` sets,
+/// ``"bft-units"``, element of the in-memory `extended` / `emitted` sets,
 /// and how parents pin the exact parent unit, so a forked position's
 /// branches are distinguishable — the prerequisite for the
 /// fork-tolerant commit rule. Covers the payload transitively through
@@ -69,7 +69,7 @@ pub struct Unit {
 
 impl Unit {
     /// The hash identifying this unit; what parents reference and
-    /// what keys the unit's row in `BFT_UNITS`.
+    /// what keys the unit's row in ``"bft-units"``.
     pub fn hash(&self) -> UnitHash {
         UnitHash(self.consensus_hash_sha256())
     }

@@ -15,7 +15,7 @@
 //! hashes, so byte order matches the elements' logical order and — because
 //! every key element's encoding is prefix-free — concatenation preserves
 //! tuple order. Iteration, prefix and range order therefore equal
-//! element-wise tuple order. A variable-length, non-prefix-free key element
+//! element-wise tuple order. A variable-length, non-order-preserving key element
 //! (e.g. a length-prefixed `String`) would break this contract.
 //!
 //! Concurrency is redb's native model: a single write transaction at a time
