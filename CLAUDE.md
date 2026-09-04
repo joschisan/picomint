@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitcoin — two binaries (mint node + Lightning gateway), Iroh networking, SQLite storage, static module set (ecash, onchain, lightning). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. See README.md for deployment.
+Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitcoin — two binaries (mint node + Lightning gateway), Iroh networking, redb storage, static module set (ecash, onchain, lightning). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. See README.md for deployment.
+
+### Naming
+
+One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by **nodes** (consensus members, `NodeId`), bridged to Lightning by **gateways**, with **ecash** / **onchain** / **lightning** modules. Never reintroduce federation/guardian/peer/ln/gw/wallet-module. Exceptions: LDK's Lightning *peers* keep their name (channel counterparties), "LN" may refer to the Lightning Network in prose, and iroh transport identities are `PublicKey`/`iroh_pk` — "node id" always means the consensus index. "Wallet" means an actual wallet (the client's, bitcoind's, LDK's).
 
 ## Build and development
 
@@ -20,21 +24,25 @@ Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitco
 ### Crates
 - `picomint-core` — shared types, encoding, wire protocol, `ConsensusConfig`, and the per-module common types for `ecash`/`onchain`/`lightning`
 - `picomint-encoding` / `picomint-derive` — `Encodable`/`Decodable` traits and derive macros
-- `picomint-node-daemon` — mint node binary (consensus via picomint-bft); owns the concrete ecash/onchain/lightning server-side module code under `src/consensus/{ecash,onchain,lightning}/`
+- `picomint-bft` — BFT atomic broadcast (DAG-based, own design — not Aleph-derived)
+- `picomint-node-daemon` — mint node binary (consensus via picomint-bft); owns the concrete ecash/onchain/lightning server-side module code under `src/consensus/{ecash,onchain,lightning}/`, the bitcoind JSON-RPC client (`src/bitcoind.rs`), and the setup/dashboard web UI
 - `picomint-node-cli` / `picomint-node-cli-core` — admin CLI for the node daemon (HTTP-over-Unix-socket) + shared route/request types
 - `picomint-gateway-daemon` — Lightning gateway binary with embedded LDK node
 - `picomint-gateway-cli` / `picomint-gateway-cli-core` — admin CLI for the gateway daemon + shared route/request types
-- `picomint-client` — client library; owns the concrete per-module client state machines
-- `picomint-sqlite` — SQLite-based typed database layer
-- `picomint-eventlog` — append-only client event log
-- `picomint-bitcoin-rpc` — bitcoind RPC client used by the onchain module
+- `picomint-client` — multi-mint client library; owns the concrete per-module client state machines and the append-only event log (`src/eventlog.rs`)
+- `picomint-redb` — redb-backed typed database layer (`table!` macro; consensus-encoded keys/values)
+- `picomint-rpc` — iroh RPC primitives shared by client and server (pooled connections, one request per bi stream)
+- `picomint-tbs` — threshold blind signatures (BLS12-381) for ecash issuance
+- `picomint-tss` — FROST threshold Schnorr (BIP 445, BIP340 output) for the mint's taproot wallet
+- `picomint-tpe` — threshold pairing encryption (BLS12-381) for lightning contract preimages
+- `picomint-fountain` — fountain-code encoder/decoder (currently unused by any other crate)
 - `picomint-lnurl-daemon` — standalone LNURL proxy daemon for receiving Lightning payments
-- `picomint-lnurl` / `picomint-base32` / `picomint-logging` — small shared utility crates
+- `picomint-lnurl` / `picomint-base32` — small shared utility crates
 - `picomint-integration-tests` — end-to-end integration tests (used by `test-integration.sh`)
 
 ### Wire + storage
 - Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-core::encoding`
-- Storage: SQLite only. No RocksDB. No migrations (tables are declared via the `table!` macro in `picomint-sqlite`; keys/values use consensus encoding)
+- Storage: redb only. No migrations (tables are declared via the `table!` macro in `picomint-redb`; keys/values use consensus encoding). The one exception is the gateway's analytics database — a separate SQLite file (rusqlite) queried via the `query` CLI command
 - Transport: Iroh-only (QUIC + hole-punching). No TLS/websocket/DNS announcements
 - Each node binds exactly one iroh `Endpoint` (one secret key, one node id) for both mint p2p and the public client API; the accept loop demuxes by remote node-id (node set → P2P path, otherwise → public API path).
 

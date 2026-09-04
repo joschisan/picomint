@@ -37,7 +37,7 @@ use tokio::sync::Notify;
 pub enum EventSource {
     Core,
     Ecash,
-    Wallet,
+    Onchain,
     Lightning,
     Gateway,
 }

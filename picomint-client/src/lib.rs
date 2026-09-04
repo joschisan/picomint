@@ -45,7 +45,7 @@ pub mod expiry;
 pub mod gateway;
 /// Lightning module client.
 pub mod lightning;
-/// Wallet module client.
+/// Onchain module client.
 pub mod onchain;
 /// Client query-consensus strategies
 /// Secret handling & derivation
