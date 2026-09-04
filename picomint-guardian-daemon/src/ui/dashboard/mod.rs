@@ -19,9 +19,8 @@ use picomint_redb::DbRead;
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::{ExpiryStatusTable, consensus_block_count, consensus_version};
 use crate::consensus::engine::get_finished_session_count;
-use crate::consensus::wallet;
 use crate::ui::assets::WithStaticRoutesExt;
-use crate::ui::dashboard::modules::ln;
+use crate::ui::dashboard::modules::{ln, wallet};
 use crate::ui::{ROOT_ROUTE, dashboard_layout};
 
 pub const BACKUP_CONFIG_ROUTE: &str = "/backup-config";
@@ -91,7 +90,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
     let block_count = consensus_block_count(&api.server, &dbtx);
     let version = consensus_version(&api.server, &dbtx);
 
-    let value_in_custody = wallet::federation_wallet(&dbtx)
+    let value_in_custody = crate::consensus::wallet::federation_wallet(&dbtx)
         .map(|wallet| wallet.value.to_btc())
         .unwrap_or(0.0);
 
@@ -100,20 +99,20 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
             (tile("Value in Custody", html! {
                 (format!("{value_in_custody:.8}")) " " span class="tile-unit" { "BTC" }
             }))
-            (tile("Session Count", html! { (session_count) }))
             (tile("Block Count", html! { (block_count) }))
+            (tile("Session Count", html! { (session_count) }))
             (tile("Consensus Version", html! { (version) }))
         }
 
         div class="grid" {
             div class="grid-col" {
                 (general::render(&federation_name, &guardian_names, &p2p_connection_status))
-                (modules::wallet::render_pending(&api.server, &dbtx))
-                (modules::wallet::render(&api.server, &dbtx))
+                (wallet::render_pending(&api.server, &dbtx))
             }
 
             div class="grid-col" {
                 (bitcoin::render(&bitcoin_rpc_status))
+                (wallet::render(&api.server, &dbtx))
                 (ln::render(&dbtx))
             }
         }

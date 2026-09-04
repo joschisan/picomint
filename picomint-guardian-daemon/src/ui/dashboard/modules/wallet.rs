@@ -93,7 +93,7 @@ pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Marku
     html! {
         div class="card" {
             div class="card-header" {
-                span class="card-title" { "Wallet" }
+                span class="card-title" { "Onchain Wallet" }
             }
 
             div class="kv" {
