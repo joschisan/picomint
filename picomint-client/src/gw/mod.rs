@@ -3,7 +3,7 @@ pub mod events;
 mod receive_sm;
 mod secret;
 
-use anyhow::Context as _;
+use anyhow::{Context as _, ensure};
 use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -88,10 +88,11 @@ impl Client {
         amount: Amount,
         fee: Amount,
     ) -> anyhow::Result<()> {
-        let ctx = self.ctx(federation)?;
+        ensure!(self.is_added(federation), "Federation is not added");
 
-        ctx.log_event(
+        crate::eventlog::log_event(
             dbtx,
+            federation,
             GATEWAY_ACCOUNT,
             operation,
             SendEvent {

@@ -103,13 +103,26 @@ impl Gateways {
     /// clears that gateway's info (unselectable) without dropping its
     /// connection; a slow probe never blocks the others' updates.
     pub async fn probe(&self, pks: &[GatewayPk], federation: FederationId) {
+        let connections: Vec<_> = self
+            .inner
+            .read()
+            .expect("gateways RwLock poisoned")
+            .iter()
+            .filter(|entry| pks.contains(entry.0))
+            .map(|entry| (*entry.0, entry.1.conn.clone()))
+            .collect();
+
         let mut probes: JoinSet<(GatewayPk, Option<GatewayInfo>)> = JoinSet::new();
 
-        for pk in pks {
-            let this = self.clone();
-            let pk = *pk;
+        for (pk, mut rx) in connections {
             probes.spawn(async move {
-                let info = this.gateway_info(pk, federation).await.ok().flatten();
+                let method = GatewayMethod::Info(InfoRequest { federation });
+
+                let info = request_on_state::<InfoResponse>(&mut rx, method)
+                    .await
+                    .ok()
+                    .and_then(|r| r.info);
+
                 (pk, info)
             });
         }
@@ -156,16 +169,6 @@ impl Gateways {
             .context("Gateway is not a current member")?;
 
         request_on_state(&mut rx, method).await
-    }
-
-    pub async fn gateway_info(
-        &self,
-        gateway_pk: GatewayPk,
-        federation: FederationId,
-    ) -> anyhow::Result<Option<GatewayInfo>> {
-        self.request::<InfoResponse>(gateway_pk, GatewayMethod::Info(InfoRequest { federation }))
-            .await
-            .map(|r| r.info)
     }
 
     pub async fn receive(

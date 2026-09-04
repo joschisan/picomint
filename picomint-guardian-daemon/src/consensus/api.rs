@@ -10,7 +10,7 @@ use picomint_redb::DbRead;
 
 use crate::consensus::db::{ExpiryStatusTable, InviteMeta, InviteMetaTable, consensus_block_count};
 use crate::consensus::engine::get_finished_session_count;
-use crate::consensus::server::Server;
+use crate::consensus::server::{Server, audit};
 use crate::p2p::P2PStatusReceivers;
 
 #[derive(Clone)]
@@ -67,7 +67,7 @@ impl ConsensusApi {
     pub fn federation_audit(&self) -> AuditSummary {
         // Modules read their own tables during `audit`; we open a write tx and
         // drop it without commit after building the audit view.
-        self.server.audit(&self.server.db.begin_write())
+        audit(&self.server.db.begin_write())
     }
 
     /// Read this guardian's announced expiry status from the local

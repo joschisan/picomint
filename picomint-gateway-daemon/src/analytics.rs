@@ -21,19 +21,17 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use hex::ToHex as _;
-use picomint_client::TxCreateEvent;
 use picomint_client::eventlog::{EventLogEntry, EventLogId};
 use picomint_client::gw::events::{
     ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent, SendCancelEvent,
     SendEvent, SendSuccessEvent,
 };
+use picomint_client::{Client, TxCreateEvent};
 use picomint_gateway_cli_core::QueryResponse;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{Map, Value};
 use tokio::sync::Mutex;
-
-use crate::AppState;
 
 const CHUNK_SIZE: u64 = 10_000;
 
@@ -270,21 +268,21 @@ LEFT JOIN tx_create       tx
 /// Drain the global event log forward in chunks and mirror each gw event
 /// into the SQLite analytics DB. Blocks on the global `event_notify` only
 /// when caught up with the head. Spawned daemon-wide at startup.
-pub async fn trailer(state: AppState) {
+pub async fn trailer(client: Arc<Client>, analytics: Analytics) {
     let mut cursor = EventLogId::default();
-    let notify = state.client.event_notify();
+    let notify = client.event_notify();
 
     loop {
         // Register interest in the next commit BEFORE reading, so we don't
         // miss a commit that lands between the read and `.await`.
         let notified = notify.notified();
 
-        let chunk = state.client.get_event_log(cursor, CHUNK_SIZE);
+        let chunk = client.get_event_log(cursor, CHUNK_SIZE);
 
         if let Some((last_id, _)) = chunk.last() {
             cursor = last_id.saturating_add(1);
             let entries: Vec<EventLogEntry> = chunk.iter().map(|(_, e)| e.clone()).collect();
-            let analytics = state.analytics.clone();
+            let analytics = analytics.clone();
             // rusqlite is sync — hop off the tokio runtime's thread pool for
             // the insert batch so we don't block other async work.
             if let Err(e) = tokio::task::spawn_blocking(move || insert_batch(&analytics, &entries))

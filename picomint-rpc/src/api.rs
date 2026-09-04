@@ -36,7 +36,6 @@ use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 pub struct FederationApi {
     peers: BTreeMap<PeerId, PublicKey>,
     states: BTreeMap<PeerId, watch::Receiver<Option<ConnState>>>,
-    endpoint: Endpoint,
 }
 
 impl FederationApi {
@@ -49,11 +48,7 @@ impl FederationApi {
             states.insert(*peer, rx);
         }
 
-        Self {
-            peers,
-            states,
-            endpoint,
-        }
+        Self { peers, states }
     }
 
     /// Every peer in the pool.
@@ -65,12 +60,6 @@ impl FederationApi {
     /// spans a whole federation — a subset has no such shape.
     pub fn num_peers(&self) -> NumPeers {
         self.peers.to_num_peers()
-    }
-
-    /// Iroh endpoint this pool dials over. Re-used by callers that need to
-    /// talk to other iroh nodes (e.g. the Lightning module dialing gateways).
-    pub fn endpoint(&self) -> &Endpoint {
-        &self.endpoint
     }
 
     /// Stream of per-peer reachability. Emits a fresh `peer -> status` map
@@ -97,6 +86,13 @@ impl FederationApi {
             .boxed()
     }
 
+    fn state(&self, peer: PeerId) -> watch::Receiver<Option<ConnState>> {
+        self.states
+            .get(&peer)
+            .expect("Strategies only retry peers from the pool")
+            .clone()
+    }
+
     #[instrument(
         skip_all,
         fields(peer = %peer, method = ?method),
@@ -110,20 +106,6 @@ impl FederationApi {
         request_on_state(&mut rx, method).await
     }
 
-    /// As [`Self::request_single_peer`] but retries forever on transport /
-    /// decode errors using `networking_backoff`. Used by the strategy-retry
-    /// fan-out where every peer call must eventually yield a response.
-    async fn request_single_peer_retry<R: Decodable>(&self, method: Method, peer: PeerId) -> R {
-        (|| async {
-            self.request_single_peer(method.clone(), peer)
-                .await
-                .inspect_err(|e| debug!(error = %e, "Peer request failed"))
-        })
-        .retry(networking_backoff())
-        .await
-        .expect("networking_backoff retries forever")
-    }
-
     /// Make an aggregate request to federation, using `strategy` to logically
     /// merge the responses.
     #[instrument(skip_all, fields(method = ?method))]
@@ -134,11 +116,10 @@ impl FederationApi {
     ) -> anyhow::Result<F> {
         let mut tasks = JoinSet::new();
 
-        for peer in self.all_peers() {
-            let api = self.clone();
+        for (peer, mut rx) in self.states.clone() {
             let method = method.clone();
             tasks.spawn(async move {
-                let result = api.request_single_peer(method, peer).await;
+                let result = request_on_state(&mut rx, method).await;
                 (peer, result)
             });
         }
@@ -157,10 +138,10 @@ impl FederationApi {
                 Ok(response) => match strategy.process(peer, response) {
                     QueryStep::Retry(peers) => {
                         for peer in peers {
-                            let api = self.clone();
+                            let mut rx = self.state(peer);
                             let method = method.clone();
                             tasks.spawn(async move {
-                                let result = api.request_single_peer(method, peer).await;
+                                let result = request_on_state(&mut rx, method).await;
                                 (peer, result)
                             });
                         }
@@ -193,11 +174,10 @@ impl FederationApi {
     ) -> F {
         let mut tasks = JoinSet::new();
 
-        for peer in self.all_peers() {
-            let api = self.clone();
+        for (peer, rx) in self.states.clone() {
             let method = method.clone();
             tasks.spawn(async move {
-                let response = api.request_single_peer_retry(method, peer).await;
+                let response = request_on_state_retry(rx, method).await;
                 (peer, response)
             });
         }
@@ -211,10 +191,10 @@ impl FederationApi {
             match strategy.process(peer, response) {
                 QueryStep::Retry(peers) => {
                     for peer in peers {
-                        let api = self.clone();
+                        let rx = self.state(peer);
                         let method = method.clone();
                         tasks.spawn(async move {
-                            let response = api.request_single_peer_retry(method, peer).await;
+                            let response = request_on_state_retry(rx, method).await;
                             (peer, response)
                         });
                     }
@@ -243,4 +223,21 @@ impl FederationApi {
         self.request_with_strategy_retry(ThresholdConsensus::new(self.num_peers()), method)
             .await
     }
+}
+
+/// As [`request_on_state`] but retries forever on transport / decode errors
+/// using `networking_backoff`. Used by the strategy-retry fan-out where
+/// every peer call must eventually yield a response.
+async fn request_on_state_retry<R: Decodable>(
+    rx: watch::Receiver<Option<ConnState>>,
+    method: Method,
+) -> R {
+    (|| async {
+        request_on_state(&mut rx.clone(), method.clone())
+            .await
+            .inspect_err(|e| debug!(error = %e, "Peer request failed"))
+    })
+    .retry(networking_backoff())
+    .await
+    .expect("networking_backoff retries forever")
 }

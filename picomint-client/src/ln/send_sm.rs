@@ -1,4 +1,5 @@
 use super::gateway::Gateways;
+use crate::api::FederationApi;
 use crate::executor::{SmId, StateMachine};
 use crate::tx::{Input, TxBuilder};
 use anyhow::ensure;
@@ -104,7 +105,7 @@ impl StateMachine for SendStateMachine {
                     preimage = await_preimage_sm(
                         self.common.outpoint,
                         self.common.contract.clone(),
-                        ctx.clone(),
+                        ctx.api.clone(),
                     ) => match preimage {
                         Some(p) => SendOutcome::PreimageTable(p),
                         None => SendOutcome::Expired,
@@ -263,13 +264,13 @@ async fn gateway_send_sm(
     .expect("networking_backoff retries forever")
 }
 
-#[instrument(skip(ctx))]
+#[instrument(skip(api))]
 async fn await_preimage_sm(
     outpoint: OutPoint,
     contract: OutgoingContract,
-    ctx: ClientContext,
+    api: FederationApi,
 ) -> Option<[u8; 32]> {
-    let preimage = super::api::await_preimage(&ctx.api, outpoint, contract.expiry).await?;
+    let preimage = super::api::await_preimage(&api, outpoint, contract.expiry).await?;
 
     if contract.verify_preimage(&preimage) {
         return Some(preimage);

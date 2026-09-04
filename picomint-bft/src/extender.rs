@@ -52,7 +52,7 @@
 //! peer, not single-branch emission; item processing downstream
 //! validates each item on its own terms.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use bitcoin::hashes::Hash as _;
 use picomint_encoding::Encodable;
@@ -60,7 +60,7 @@ use picomint_redb::{DbRead, Table};
 
 use crate::data::DataProvider;
 use crate::engine::Engine;
-use crate::unit::{Round, UnitData, UnitEnvelope, UnitHash};
+use crate::unit::{Round, Unit, UnitData, UnitEnvelope, UnitHash};
 
 /// The common-vote bit for a candidate of round `candidate_round` as
 /// seen from round `round`: fixed 1 two rounds up (fast include),
@@ -77,6 +77,51 @@ fn common_vote(candidate: UnitHash, candidate_round: Round, round: Round) -> boo
         3 => false,
         _ => (round, candidate).consensus_hash_sha256().to_byte_array()[0] & 1 == 1,
     }
+}
+
+/// The vote of extended unit `unit` on `candidate`: direct parent
+/// membership one round up, unanimity-else-common-vote above, memoized
+/// in `votes` (votes are pure functions of the unit's fixed ancestry).
+///
+/// Free over the two engine fields it touches so `decide` can walk
+/// borrowed parent maps of `extended` while the tally mutates `votes`.
+fn vote(
+    extended: &BTreeMap<UnitHash, Unit>,
+    votes: &mut BTreeMap<(UnitHash, UnitHash), bool>,
+    candidate: UnitHash,
+    unit: UnitHash,
+) -> bool {
+    let cand = extended.get(&candidate).expect("candidate is extended");
+
+    let voter = extended.get(&unit).expect("voter is extended");
+
+    if voter.round == cand.round + 1 {
+        return voter.parents.get(&cand.creator) == Some(&candidate);
+    }
+
+    if let Some(bit) = votes.get(&(candidate, unit)) {
+        return *bit;
+    }
+
+    let default = common_vote(candidate, cand.round, voter.round);
+
+    let parent_votes: Vec<bool> = voter
+        .parents
+        .values()
+        .map(|parent| vote(extended, votes, candidate, *parent))
+        .collect();
+
+    let bit = if parent_votes.iter().all(|vote| *vote) {
+        true
+    } else if parent_votes.iter().all(|vote| !*vote) {
+        false
+    } else {
+        default
+    };
+
+    votes.insert((candidate, unit), bit);
+
+    bit
 }
 
 impl<P, D, T> Engine<P, D, T>
@@ -169,16 +214,17 @@ where
             let v = common_vote(candidate, candidate_round, round);
 
             for unit in self.extended_at(round) {
-                let parents = self
+                let parents = &self
                     .extended
                     .get(&unit)
                     .expect("iterated over extended units")
-                    .parents
-                    .clone();
+                    .parents;
 
                 let matching = parents
                     .values()
-                    .filter(|parent| self.vote(candidate, **parent) == v)
+                    .filter(|parent| {
+                        vote(&self.extended, &mut self.votes, candidate, **parent) == v
+                    })
                     .count();
 
                 if matching >= self.n.threshold() {
@@ -190,50 +236,6 @@ where
         }
 
         None
-    }
-
-    /// The vote of extended unit `unit` on `candidate`: direct parent
-    /// membership one round up, unanimity-else-common-vote above,
-    /// memoized in `self.votes` (votes are pure functions of the
-    /// unit's fixed ancestry).
-    fn vote(&mut self, candidate: UnitHash, unit: UnitHash) -> bool {
-        let cand = self
-            .extended
-            .get(&candidate)
-            .expect("candidate is extended");
-
-        let voter = self.extended.get(&unit).expect("voter is extended");
-
-        if voter.round == cand.round + 1 {
-            return voter.parents.get(&cand.creator) == Some(&candidate);
-        }
-
-        if let Some(bit) = self.votes.get(&(candidate, unit)) {
-            return *bit;
-        }
-
-        let default = common_vote(candidate, cand.round, voter.round);
-
-        let parent_votes: Vec<bool> = voter
-            .parents
-            .values()
-            .copied()
-            .collect::<Vec<UnitHash>>()
-            .into_iter()
-            .map(|parent| self.vote(candidate, parent))
-            .collect();
-
-        let bit = if parent_votes.iter().all(|vote| *vote) {
-            true
-        } else if parent_votes.iter().all(|vote| !*vote) {
-            false
-        } else {
-            default
-        };
-
-        self.votes.insert((candidate, unit), bit);
-
-        bit
     }
 
     /// BFS over the head's not-yet-emitted ancestors, marking each
