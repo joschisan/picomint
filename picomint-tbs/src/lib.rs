@@ -14,7 +14,7 @@ mod bls_serde;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 
-const TAG: [u8; 30] = *b"PICOMINT_TBS_BLS12_381_MESSAGE";
+const TAG: [u8; 28] = *b"PICOMINT_TBS_BLS12_381_NONCE";
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct SecretKeyShare(#[serde(with = "bls_serde::scalar")] pub Scalar);
@@ -73,7 +73,7 @@ impl std::hash::Hash for BlindingKey {
 
 impl Nonce {
     /// Creates a [`Nonce`] by hashing a 32-byte x-only public key with
-    /// SHA-256 under the domain separator `PICOMINT_TBS_BLS12_381_MESSAGE`,
+    /// SHA-256 under the domain separator `PICOMINT_TBS_BLS12_381_NONCE`,
     /// then mapping the hash to a BLS12-381 G1 curve point via a seeded
     /// [`ChaChaRng`].
     pub fn from_public_key(bytes: [u8; 32]) -> Nonce {
