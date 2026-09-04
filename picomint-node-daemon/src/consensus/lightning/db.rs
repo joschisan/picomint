@@ -43,16 +43,16 @@ table!(
 //    the stream is only ever read by clients hunting for their own)
 //    for efficient streaming reads via range queries on
 //    `IncomingContractStreamTable`.
-// 2) A monotonically-increasing index (`IncomingContractStreamIndexTable` -> u64)
+// 2) A monotonically-increasing index (`IncomingContractStreamNextIndexTable` -> u64)
 //    that stores the next stream index to assign, used to wait for new incoming
 //    contracts.
 // 3) A reverse lookup `OutPoint` -> `stream_index` via
 //    `IncomingContractIndexTable`, used to remove a contract from the stream once
 //    it has been spent.
 table!(
-    IncomingContractStreamIndexTable,
+    IncomingContractStreamNextIndexTable,
     () => u64,
-    "lightning-incoming-contract-stream-index",
+    "lightning-incoming-contract-stream-next-index",
 );
 
 table!(
