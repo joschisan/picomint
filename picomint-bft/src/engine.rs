@@ -27,12 +27,12 @@ const REQUEST_DEDUP_INTERVAL: Duration = Duration::from_secs(1);
 /// the engine, then awaits `run()` (typically in a spawned task) and
 /// keeps the receiving end of `ordered_tx` for items as they commit.
 ///
-/// On startup `run()` replays `BFT_UNITS` through `try_extend` +
+/// On startup `run()` replays ``"bft-units"`` through `try_extend` +
 /// `run_extender` to rebuild the in-memory `rounds` / `extended` /
 /// `emitted` / `next_decide_round` and re-emit every
 /// previously-committed item through `ordered_tx`. The caller-side
-/// idempotency check (e.g. the daemon's `item_index` probe against
-/// `ACCEPTED_ITEM`) absorbs the redelivery.
+/// idempotency check (e.g. the daemon's `resume_from` cursor over its
+/// accepted-items table) absorbs the redelivery.
 pub struct Engine<P, D, T>
 where
     D: UnitData,
@@ -67,7 +67,7 @@ where
     /// Units whose payload has been sent through `ordered_tx`.
     /// Prevents re-emission across batches and within one BFS.
     pub(crate) emitted: BTreeSet<UnitHash>,
-    /// Extender cursor: the next leader round to attempt deciding.
+    /// Extender cursor: the next round whose head to attempt deciding.
     pub(crate) next_decide_round: Round,
     /// Include/exclude decisions already reached per candidate, kept
     /// for the engine's lifetime. Sound because decisions propagate:
@@ -177,7 +177,7 @@ where
     }
 
     /// Rebuild the in-memory `rounds` / `extended` / `emitted` /
-    /// `next_decide_round` / `own_top` from persisted `BFT_UNITS`, and
+    /// `next_decide_round` / `own_top` from persisted ``"bft-units"``, and
     /// re-emit every committed item through `ordered_tx`.
     ///
     /// Correctness rests on determinism: `try_extend` is a fixpoint over
@@ -220,7 +220,7 @@ where
     /// their own writes via `WriteTx`'s read-your-own-writes.
     /// In-memory mutations (`rounds`, `extended`, `emitted`, channel
     /// sends) are not rolled back on Err — only the persistent
-    /// `BFT_UNITS` writes are. The mutators only run after the dbtx
+    /// ``"bft-units"`` writes are. The mutators only run after the dbtx
     /// writes succeed via `?`.
     ///
     /// These commits use **relaxed** (non-fsync) durability: inbound units
@@ -332,7 +332,7 @@ where
             .send(Recipient::Node(requester), Message::Unit(ev));
     }
 
-    /// Validate and install a fresh unit envelope in `BFT_UNITS` under
+    /// Validate and install a fresh unit envelope in ``"bft-units"`` under
     /// `hash` (its unit hash, computed by the caller), then index it
     /// in `rounds` and advance `own_top` for our own units. A
     /// duplicate unit hits the same key and errors.
@@ -360,6 +360,14 @@ where
             self.keychain
                 .verify(self.session, &ev.unit, &ev.sig, ev.unit.creator),
             "invalid creator signature",
+        );
+
+        // The signature covers only the unit, which pins the payload by
+        // hash — so the envelope's payload must be checked against that
+        // commitment or a third party relaying the unit could swap it.
+        ensure!(
+            ev.unit.data == (!ev.data.is_empty()).then(|| ev.data.consensus_hash_sha256()),
+            "payload does not match the unit's data commitment",
         );
 
         ensure!(
@@ -517,10 +525,10 @@ where
         Some(self.extended.entry(hash).or_insert(ev.unit).round)
     }
 
-    /// Our own unit at `round-1` plus the lowest-`UnitHash`-keyed
-    /// `threshold - 1` other extended units, or `None` if our own unit
-    /// isn't extended yet or fewer than `threshold` are. Empty map for
-    /// round 0. Filtering by `extended` (not mere presence) guarantees
+    /// Our own unit at `round-1` plus the `threshold - 1` lowest-`NodeId`
+    /// other creators' extended units (lowest-hash branch per forked
+    /// creator), or `None` if our own unit isn't extended yet or fewer
+    /// than `threshold` are. Empty map for round 0. Filtering by `extended` (not mere presence) guarantees
     /// any unit we author is itself extendable on receivers.
     ///
     /// The self-parent is a creation-side rule only — receivers don't
