@@ -7,7 +7,7 @@ use bitcoin::hashes::{Hash as BitcoinHash, sha256};
 use derive_more::{Display, FromStr};
 use serde::{Deserialize, Serialize};
 
-use crate::PeerId;
+use crate::NodeId;
 use crate::lightning::config::LightningConfigConsensus;
 use crate::ecash::config::ECashConfigConsensus;
 use crate::version::ConsensusVersion;
@@ -21,13 +21,13 @@ use picomint_encoding::{Decodable, Encodable};
 pub const BFT_UNIT_BYTE_TARGET: usize = 50_000;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub struct PeerEndpoint {
-    /// The peer's iroh API public key (QUIC transport identity).
+pub struct NodeEndpoint {
+    /// The node's iroh API public key (QUIC transport identity).
     pub iroh_pk: iroh_base::PublicKey,
-    /// The peer's x-only secp256k1 public key used to authenticate
+    /// The node's x-only secp256k1 public key used to authenticate
     /// atomic-broadcast messages.
     pub broadcast_pk: secp256k1::XOnlyPublicKey,
-    /// The peer's name.
+    /// The node's name.
     pub name: String,
 }
 
@@ -60,13 +60,13 @@ impl MintId {
 ///
 /// Produced by DKG on the server side, served to clients via the core
 /// [`CoreMethod::Config`] wire method, and stored in both the server and
-/// client databases. Byte-for-byte identical on every peer.
+/// client databases. Byte-for-byte identical on every node.
 ///
 /// [`CoreMethod::Config`]: crate::methods::CoreMethod::Config
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ConsensusConfig {
-    /// Per-peer endpoint info (iroh pk, broadcast pk, name).
-    pub peers: BTreeMap<PeerId, PeerEndpoint>,
+    /// Per-node endpoint info (iroh pk, broadcast pk, name).
+    pub nodes: BTreeMap<NodeId, NodeEndpoint>,
     /// Bitcoin network this mint operates on.
     pub network: Network,
     /// Mint name, chosen by the lead guardian during setup.
@@ -91,9 +91,9 @@ impl ConsensusConfig {
         MintId(self.consensus_hash())
     }
 
-    /// The peers' iroh public keys — the node ids a client dials.
-    pub fn iroh_pks(&self) -> BTreeMap<PeerId, iroh_base::PublicKey> {
-        self.peers
+    /// The nodes' iroh public keys — the node ids a client dials.
+    pub fn iroh_pks(&self) -> BTreeMap<NodeId, iroh_base::PublicKey> {
+        self.nodes
             .iter()
             .map(|entry| (*entry.0, entry.1.iroh_pk))
             .collect()

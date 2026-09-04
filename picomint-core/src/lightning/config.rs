@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{Amount, PeerId};
+use crate::{Amount, NodeId};
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use tpe::{AggregatePublicKey, PublicKeyShare, SecretKeyShare};
@@ -14,7 +14,7 @@ pub struct LightningConfig {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct LightningConfigConsensus {
     pub tpe_agg_pk: AggregatePublicKey,
-    pub tpe_pks: BTreeMap<PeerId, PublicKeyShare>,
+    pub tpe_pks: BTreeMap<NodeId, PublicKeyShare>,
     pub input_fee: Amount,
     pub output_fee: Amount,
 }

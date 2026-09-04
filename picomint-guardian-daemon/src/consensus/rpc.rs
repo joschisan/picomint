@@ -47,7 +47,7 @@ pub async fn submit_tx(
 async fn await_tx_outcome(api: &ConsensusApi, tx: Transaction) -> Result<(), TxError> {
     // Consensus checks these too, but that is after the transaction has
     // been proposed, and a transaction we propose travels in a bft unit
-    // our peers have to be able to receive. The counts are what hold a
+    // our nodes have to be able to receive. The counts are what hold a
     // submission to a size that fits one; the rest is refusing to carry a
     // transaction consensus is certain to throw out.
     if tx.inputs.is_empty() {
@@ -191,7 +191,7 @@ pub fn expiry_status(
     })
 }
 
-/// Ungated, unlike [`config`]: the mint id and peer set are already held
+/// Ungated, unlike [`config`]: the mint id and node set are already held
 /// by any joined client, and a caller that got them out of band can pin them
 /// against a hash. Serving them grants nothing an invite would otherwise gate.
 pub fn mint_info(

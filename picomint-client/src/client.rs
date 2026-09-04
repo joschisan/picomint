@@ -11,7 +11,7 @@ use crate::task::TaskGroup;
 use anyhow::{Context as _, ensure};
 use futures::future::select_all;
 use futures::stream::BoxStream;
-use picomint_core::PeerId;
+use picomint_core::NodeId;
 use picomint_core::config::ConsensusConfig;
 use picomint_core::config::MintId;
 use picomint_core::core::OperationId;
@@ -208,15 +208,15 @@ impl Client {
         self.db.begin_read().get(&ClientConfigTable, &mint)
     }
 
-    /// Stream of per-peer guardian reachability, emitting a fresh
-    /// `peer -> status` map on every change (current state first). Backed by
+    /// Stream of per-node guardian reachability, emitting a fresh
+    /// `node -> status` map on every change (current state first). Backed by
     /// the mint's pooled connections, so it reflects the same links
     /// requests travel over; the `Connected` status carries the RTT sampled
     /// at connect.
     pub fn connection_status_stream(
         &self,
         mint: MintId,
-    ) -> anyhow::Result<BoxStream<'static, BTreeMap<PeerId, ConnStatus>>> {
+    ) -> anyhow::Result<BoxStream<'static, BTreeMap<NodeId, ConnStatus>>> {
         Ok(self.ctx(mint)?.api.connection_status_stream())
     }
 

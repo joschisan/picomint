@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, ensure};
 use iroh::SecretKey;
-use picomint_core::PeerId;
+use picomint_core::NodeId;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, DbRead};
 use serde::Serialize;
@@ -13,12 +13,12 @@ use tokio::sync::mpsc::Sender;
 use crate::config::db::{ConfigGenParamsTable, LocalParamsTable, store_server_config};
 use crate::config::{ConfigGenParams, ConfigGenSettings, ServerConfig, SetupResult};
 
-/// Connection information sent between peers in order to start config gen.
+/// Connection information sent between nodes in order to start config gen.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable, Serialize)]
-pub struct PeerSetupCode {
-    /// Name of the peer
+pub struct NodeSetupCode {
+    /// Name of the node
     pub name: String,
-    /// Public key of the peer's single iroh endpoint (serves both p2p and
+    /// Public key of the node's single iroh endpoint (serves both p2p and
     /// client-API traffic, demuxed by node-id on accept).
     pub pk: iroh_base::PublicKey,
     /// Mint name set by the leader
@@ -33,7 +33,7 @@ pub struct PeerSetupCode {
 pub enum SetupStatus {
     /// Waiting for guardian to set the local parameters
     AwaitingLocalParams,
-    /// Sharing the connection codes with our peers
+    /// Sharing the connection codes with our nodes
     SharingConnectionCodes,
     /// Consensus is running
     ConsensusIsRunning,
@@ -45,15 +45,15 @@ pub struct SetupState {
     /// Our local connection
     local_params: Option<LocalParams>,
     /// Connection info received from other guardians
-    setup_codes: std::collections::BTreeSet<PeerSetupCode>,
+    setup_codes: std::collections::BTreeSet<NodeSetupCode>,
 }
 
 #[derive(Clone, Debug, Encodable, Decodable)]
-/// Connection information sent between peers in order to start config gen
+/// Connection information sent between nodes in order to start config gen
 pub struct LocalParams {
     /// Secret key for our single iroh endpoint (p2p + api)
     iroh_sk: iroh::SecretKey,
-    /// Name of the peer
+    /// Name of the node
     name: String,
     /// Mint name set by the leader
     mint_name: Option<String>,
@@ -63,8 +63,8 @@ pub struct LocalParams {
 }
 
 impl LocalParams {
-    pub fn setup_code(&self) -> PeerSetupCode {
-        PeerSetupCode {
+    pub fn setup_code(&self) -> NodeSetupCode {
+        NodeSetupCode {
             name: self.name.clone(),
             pk: self.iroh_sk.public(),
             mint_name: self.mint_name.clone(),
@@ -83,7 +83,7 @@ pub struct SetupApi {
     /// Signals the setup loop with either DKG params or a restored config
     sender: Sender<SetupResult>,
     /// Backing store; setup mutations write through here so a daemon restart
-    /// mid-setup keeps the iroh identity and the already-collected peer
+    /// mid-setup keeps the iroh identity and the already-collected node
     /// codes.
     db: Database,
 }
@@ -103,7 +103,7 @@ impl SetupApi {
         }
     }
 
-    pub async fn setup_code(&self) -> Option<PeerSetupCode> {
+    pub async fn setup_code(&self) -> Option<NodeSetupCode> {
         self.state
             .lock()
             .await
@@ -293,10 +293,10 @@ impl SetupApi {
             .expect("We inserted the key above.");
 
         let params = ConfigGenParams {
-            identity: PeerId::from(our_id as u8),
+            identity: NodeId::from(our_id as u8),
             iroh_sk: local_params.iroh_sk,
-            peers: (0..)
-                .map(|i| PeerId::from(i as u8))
+            nodes: (0..)
+                .map(|i| NodeId::from(i as u8))
                 .zip(state.setup_codes.clone())
                 .collect(),
             name: mint_name,

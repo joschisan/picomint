@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use picomint_bft::{
     DataProvider as BftDataProvider, INetwork, Message as BftMessage, Recipient as BftRecipient,
 };
-use picomint_core::PeerId;
+use picomint_core::NodeId;
 use picomint_core::config::BFT_UNIT_BYTE_TARGET;
 use picomint_core::secp256k1::schnorr;
 use picomint_core::session::SignedSessionOutcome;
@@ -38,16 +38,16 @@ use crate::p2p::{P2PMessage, Recipient as P2PRecipient, ReconnectP2PConnections}
 /// adapter forwards bft traffic uninterpreted regardless of session.
 pub struct Network {
     connections: ReconnectP2PConnections,
-    signed_outcomes_tx: Sender<(PeerId, SignedSessionOutcome)>,
-    signatures_tx: Sender<(PeerId, schnorr::Signature)>,
+    signed_outcomes_tx: Sender<(NodeId, SignedSessionOutcome)>,
+    signatures_tx: Sender<(NodeId, schnorr::Signature)>,
     db: Database,
 }
 
 impl Network {
     pub fn new(
         connections: ReconnectP2PConnections,
-        signed_outcomes_tx: Sender<(PeerId, SignedSessionOutcome)>,
-        signatures_tx: Sender<(PeerId, schnorr::Signature)>,
+        signed_outcomes_tx: Sender<(NodeId, SignedSessionOutcome)>,
+        signatures_tx: Sender<(NodeId, schnorr::Signature)>,
         db: Database,
     ) -> Self {
         Self {
@@ -62,7 +62,7 @@ impl Network {
 fn into_p2p_recipient(r: BftRecipient) -> P2PRecipient {
     match r {
         BftRecipient::Everyone => P2PRecipient::Everyone,
-        BftRecipient::Peer(p) => P2PRecipient::Peer(p),
+        BftRecipient::Node(p) => P2PRecipient::Node(p),
     }
 }
 
@@ -73,16 +73,16 @@ impl INetwork<ConsensusItem> for Network {
             .send(into_p2p_recipient(recipient), P2PMessage::Bft(msg));
     }
 
-    async fn receive(&self) -> Option<(PeerId, BftMessage<ConsensusItem>)> {
+    async fn receive(&self) -> Option<(NodeId, BftMessage<ConsensusItem>)> {
         loop {
-            let (peer, message) = self.connections.receive().await?;
+            let (node, message) = self.connections.receive().await?;
 
             match message {
                 P2PMessage::Bft(msg) => {
-                    return Some((peer, msg));
+                    return Some((node, msg));
                 }
                 P2PMessage::SessionSignature(signature) => {
-                    self.signatures_tx.try_send((peer, signature)).ok();
+                    self.signatures_tx.try_send((node, signature)).ok();
                 }
                 P2PMessage::SessionIndex(their_session) => {
                     if let Some(outcome) = self
@@ -91,16 +91,16 @@ impl INetwork<ConsensusItem> for Network {
                         .get(&SignedSessionOutcomeTable, &their_session)
                     {
                         self.connections.send(
-                            P2PRecipient::Peer(peer),
+                            P2PRecipient::Node(node),
                             P2PMessage::SignedSessionOutcome(outcome),
                         );
                     }
                 }
                 P2PMessage::SignedSessionOutcome(outcome) => {
-                    self.signed_outcomes_tx.try_send((peer, outcome)).ok();
+                    self.signed_outcomes_tx.try_send((node, outcome)).ok();
                 }
                 message => error!(
-                    %peer,
+                    %node,
                     ?message,
                     "Received unexpected p2p message variant"
                 ),
@@ -108,7 +108,7 @@ impl INetwork<ConsensusItem> for Network {
         }
     }
 
-    async fn receive_from_peer(&self, _peer: PeerId) -> Option<BftMessage<ConsensusItem>> {
+    async fn receive_from_peer(&self, _peer: NodeId) -> Option<BftMessage<ConsensusItem>> {
         unimplemented!("bft consensus only uses fan-in receive")
     }
 }

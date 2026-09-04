@@ -32,11 +32,11 @@ pub(crate) struct SetupInput {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct PeerInfoInput {
-    pub peer_info: String,
+pub(crate) struct NodeInfoInput {
+    pub node_info: String,
 }
 
-fn peer_list_section(
+fn node_list_section(
     connected_peers: &[String],
     mint_size: Option<u8>,
     cfg_mint_name: &Option<String>,
@@ -47,7 +47,7 @@ fn peer_list_section(
         mint_size.is_some_and(|expected| total_guardians == expected as usize);
 
     html! {
-        div id="peer-list-section" {
+        div id="node-list-section" {
             @if let Some(expected) = mint_size {
                 span { (format!("{total_guardians} of {expected} guardians connected.")) }
             } @else {
@@ -56,9 +56,9 @@ fn peer_list_section(
 
             @if !connected_peers.is_empty() {
                 div class="list list-bordered" {
-                    @for peer in connected_peers {
+                    @for node in connected_peers {
                         div class="list-row" {
-                            span class="list-row-name" { (peer) }
+                            span class="list-row-name" { (node) }
                         }
                     }
                 }
@@ -74,7 +74,7 @@ fn peer_list_section(
             @if can_start_dkg {
                 @let has_settings = cfg_mint_name.is_some() || mint_size.is_some();
 
-                form id="start-dkg-form" class="form-stack" hx-post=(START_DKG_ROUTE) hx-target="#peer-list-section" hx-swap="outerHTML" {
+                form id="start-dkg-form" class="form-stack" hx-post=(START_DKG_ROUTE) hx-target="#node-list-section" hx-swap="outerHTML" {
                     @if let Some(error) = error {
                         div class="alert alert-danger" { (error) }
                     }
@@ -92,8 +92,8 @@ fn peer_list_section(
                     }
                 }
             } @else {
-                form id="add-setup-code-form" class="form-stack" hx-post=(ADD_SETUP_CODE_ROUTE) hx-target="#peer-list-section" hx-swap="outerHTML" {
-                    input type="text" id="peer_info" name="peer_info"
+                form id="add-setup-code-form" class="form-stack" hx-post=(ADD_SETUP_CODE_ROUTE) hx-target="#node-list-section" hx-swap="outerHTML" {
+                    input type="text" id="node_info" name="node_info"
                         placeholder="Paste Setup Code" required;
 
                     @if let Some(error) = error {
@@ -273,7 +273,7 @@ async fn mint_setup(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
 
         (copiable_text(&our_connection_info))
 
-        (peer_list_section(&connected_peers, mint_size, &cfg_mint_name, None))
+        (node_list_section(&connected_peers, mint_size, &cfg_mint_name, None))
     };
 
     Html(single_card_layout("Mint Setup", content).into_string()).into_response()
@@ -281,16 +281,16 @@ async fn mint_setup(State(state): State<Arc<SetupApi>>) -> impl IntoResponse {
 
 async fn post_add_setup_code(
     State(state): State<Arc<SetupApi>>,
-    Form(input): Form<PeerInfoInput>,
+    Form(input): Form<NodeInfoInput>,
 ) -> impl IntoResponse {
-    let error = state.add_peer_setup_code(input.peer_info).await.err();
+    let error = state.add_peer_setup_code(input.node_info).await.err();
 
     let connected_peers = state.connected_peers().await;
     let mint_size = state.mint_size().await;
     let cfg_mint_name = state.cfg_mint_name().await;
 
     Html(
-        peer_list_section(
+        node_list_section(
             &connected_peers,
             mint_size,
             &cfg_mint_name,
@@ -324,7 +324,7 @@ async fn post_start_dkg(State(state): State<Arc<SetupApi>>) -> impl IntoResponse
             let cfg_mint_name = state.cfg_mint_name().await;
 
             Html(
-                peer_list_section(
+                node_list_section(
                     &connected_peers,
                     mint_size,
                     &cfg_mint_name,

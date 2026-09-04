@@ -9,7 +9,7 @@ use picomint_core::secp256k1::{SECP256K1, schnorr};
 use picomint_core::session::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::CONSENSUS_VERSION;
-use picomint_core::{NumPeersExt, PeerId};
+use picomint_core::{NumPeersExt, NodeId};
 use picomint_encoding::Encodable;
 use picomint_redb::{DbRead, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
@@ -43,14 +43,14 @@ fn rounds_per_session(cfg: &ServerConfig) -> u32 {
 ///
 /// A session outcome reaches a lagging guardian as a single p2p message, so
 /// it has to stay inside `MAX_P2P_MESSAGE_SIZE`; a session that outgrew that
-/// would be one no peer could ever recover. Nothing else bounds what a busy
+/// would be one no node could ever recover. Nothing else bounds what a busy
 /// session collects, since the round cap only bounds an idle one.
 ///
 /// Unlike the unit fill target this one is consensus: every guardian has to
 /// cut the session at the same item, which is why it counts accepted items in
-/// delivery order — the same items in the same order on every peer — and
+/// delivery order — the same items in the same order on every node — and
 /// resumes the count from the database after a restart. Each item counts at
-/// its full [`AcceptedItem`] encoding, peer id included, so the tally is the
+/// its full [`AcceptedItem`] encoding, node id included, so the tally is the
 /// wire size of the outcome's item list. The cut overshoots by the item that
 /// crossed it, itself bounded by the transaction caps.
 const SESSION_OUTCOME_BYTE_TARGET: usize = 1_000_000;
@@ -62,8 +62,8 @@ pub async fn run(
     connections: ReconnectP2PConnections,
     submission_rx: Receiver<ConsensusItem>,
 ) -> anyhow::Result<()> {
-    // We need four peers to run the atomic broadcast
-    assert!(server.cfg.consensus.peers.to_num_peers().total() >= 4);
+    // We need four nodes to run the atomic broadcast
+    assert!(server.cfg.consensus.nodes.to_num_peers().total() >= 4);
 
     loop {
         let session_index = get_finished_session_count(&server.db.begin_read());
@@ -95,12 +95,12 @@ async fn run_session(
     // clock.
 
     // Both of these are filled straight from the p2p reader, so leaving
-    // them unbounded would let a peer turn its bandwidth into our memory —
+    // them unbounded would let a node turn its bandwidth into our memory —
     // the more so for signatures, which nothing reads until the session
-    // cuts. Dropping when full costs nothing: a peer rebroadcasts its
-    // signature every second, and a peer that holds the signed outcome
+    // cuts. Dropping when full costs nothing: a node rebroadcasts its
+    // signature every second, and a node that holds the signed outcome
     // sends it again the next time we ask for the session.
-    let num_peers = server.cfg.consensus.peers.to_num_peers();
+    let num_peers = server.cfg.consensus.nodes.to_num_peers();
 
     let (outcomes_tx, outcomes_rx) = async_channel::bounded(num_peers.total());
     let (signatures_tx, signatures_rx) = async_channel::bounded(num_peers.total());
@@ -129,7 +129,7 @@ async fn run_session(
 
     let bft_handle = tokio::spawn(bft_engine.run());
 
-    // A validated threshold-signed outcome from a peer supersedes local
+    // A validated threshold-signed outcome from a node supersedes local
     // participation in any phase, so the two race for the whole session.
     // Cancelling participation at an await inside item processing has to be
     // equivalent to crashing there: the dropped WriteTx rolls back, and
@@ -157,7 +157,7 @@ async fn run_session(
 
     // The engine has no internal stopping condition, and it has to be dead
     // before [`finalize_session`] clears BFT_UNITS underneath it; abort it
-    // now that we hold the signed outcome — peers that still need it will
+    // now that we hold the signed outcome — nodes that still need it will
     // fetch via SessionIndex/SignedSessionOutcome.
     bft_handle.abort();
     bft_handle.await.ok();
@@ -168,14 +168,14 @@ async fn run_session(
 }
 
 /// Obtains the signed session outcome without ordering a single item, by
-/// asking a random peer for it at a fixed interval (3s prod / 300ms regtest)
+/// asking a random node for it at a fixed interval (3s prod / 300ms regtest)
 /// until a validated one arrives. This is how a guardian that fell behind —
 /// by crashing mid-session or by missing entire sessions — catches back up.
 async fn adopt_session(
     server: &Server,
     connections: &ReconnectP2PConnections,
     session_index: u32,
-    outcomes_rx: Receiver<(PeerId, SignedSessionOutcome)>,
+    outcomes_rx: Receiver<(NodeId, SignedSessionOutcome)>,
 ) -> Option<SignedSessionOutcome> {
     let request_interval = if server.cfg.consensus.network == bitcoin::Network::Regtest {
         Duration::from_millis(300)
@@ -188,17 +188,17 @@ async fn adopt_session(
     loop {
         tokio::select! {
             result = outcomes_rx.recv() => {
-                let (peer, outcome) = result.ok()?;
+                let (node, outcome) = result.ok()?;
 
                 if validate_signed_session_outcome(&server.cfg, session_index, &outcome) {
-                    info!(session_index, %peer, "Adopted signed session outcome from peer");
+                    info!(session_index, %node, "Adopted signed session outcome from node");
 
                     return Some(outcome);
                 }
             }
             _ = request_interval.tick() => {
                 connections.send(
-                    Recipient::Peer(random_peer(&server.cfg)),
+                    Recipient::Node(random_peer(&server.cfg)),
                     P2PMessage::SessionIndex(session_index),
                 );
             }
@@ -208,13 +208,13 @@ async fn adopt_session(
 
 /// Obtains the signed session outcome by taking part in the session: order
 /// items until the session cut, then sign the resulting outcome and collect
-/// a threshold of peer signatures over it.
+/// a threshold of node signatures over it.
 async fn participate_in_session(
     server: &Server,
     connections: &ReconnectP2PConnections,
     session_index: u32,
-    ordered_rx: Receiver<(BftRound, PeerId, ConsensusItem)>,
-    signatures_rx: Receiver<(PeerId, schnorr::Signature)>,
+    ordered_rx: Receiver<(BftRound, NodeId, ConsensusItem)>,
+    signatures_rx: Receiver<(NodeId, schnorr::Signature)>,
 ) -> Option<SignedSessionOutcome> {
     order_items_until_cut(server, ordered_rx).await?;
 
@@ -239,7 +239,7 @@ async fn participate_in_session(
 /// being skipped.
 async fn order_items_until_cut(
     server: &Server,
-    ordered_rx: Receiver<(BftRound, PeerId, ConsensusItem)>,
+    ordered_rx: Receiver<(BftRound, NodeId, ConsensusItem)>,
 ) -> Option<()> {
     // We enumerate every bft delivery for this session; ACCEPTED_ITEM is
     // sparse (rejected positions are absent). On crash replay bft re-emits
@@ -253,7 +253,7 @@ async fn order_items_until_cut(
         .map_or(0, |k| k + 1);
 
     // The byte budget resumes where the prior run left it for the same
-    // reason: a session that cut at a different item than its peers is one
+    // reason: a session that cut at a different item than its nodes is one
     // they never sign together.
     let mut n_bytes: usize = server.db.begin_read().iter(&AcceptedItemTable, |r| {
         r.map(|entry| entry.1.consensus_encode_to_vec().len()).sum()
@@ -265,12 +265,12 @@ async fn order_items_until_cut(
         // Ahead of the next delivery rather than after the last one: a run
         // that crashed between crossing the target and closing the session
         // comes back with the count already past it, and has to cut where
-        // its peers did rather than one item further on.
+        // its nodes did rather than one item further on.
         if n_bytes >= SESSION_OUTCOME_BYTE_TARGET {
             return Some(());
         }
 
-        let (index, (round, peer, item)) = deliveries.next().await?;
+        let (index, (round, node, item)) = deliveries.next().await?;
 
         if index < resume_from {
             continue;
@@ -282,11 +282,11 @@ async fn order_items_until_cut(
 
         let dbtx = server.db.begin_write();
 
-        if process_consensus_item(server, &dbtx, peer, item.clone())
+        if process_consensus_item(server, &dbtx, node, item.clone())
             .await
             .is_ok()
         {
-            let accepted_item = AcceptedItem { peer, item };
+            let accepted_item = AcceptedItem { node, item };
 
             dbtx.insert(&AcceptedItemTable, &index, &accepted_item);
 
@@ -298,13 +298,13 @@ async fn order_items_until_cut(
 }
 
 /// Signs the session header and rebroadcasts our signature every second
-/// until a threshold of validated peer signatures over it has arrived.
+/// until a threshold of validated node signatures over it has arrived.
 async fn collect_threshold_signatures(
     server: &Server,
     connections: &ReconnectP2PConnections,
     session_index: u32,
     session_outcome: SessionOutcome,
-    signatures_rx: Receiver<(PeerId, schnorr::Signature)>,
+    signatures_rx: Receiver<(NodeId, schnorr::Signature)>,
 ) -> Option<SignedSessionOutcome> {
     let header = session_outcome.header(session_index);
 
@@ -318,15 +318,15 @@ async fn collect_threshold_signatures(
 
     let mut broadcast_interval = tokio::time::interval(Duration::from_secs(1));
 
-    while signatures.len() < server.cfg.consensus.peers.to_num_peers().threshold() {
+    while signatures.len() < server.cfg.consensus.nodes.to_num_peers().threshold() {
         tokio::select! {
             result = signatures_rx.recv() => {
-                let (peer, signature) = result.ok()?;
+                let (node, signature) = result.ok()?;
 
-                if keychain.verify(session_index, &header, &signature, peer) {
-                    signatures.insert(peer, signature);
+                if keychain.verify(session_index, &header, &signature, node) {
+                    signatures.insert(node, signature);
 
-                    info!(session_index, %peer, "Collected signature from peer via P2P");
+                    info!(session_index, %node, "Collected signature from node via P2P");
                 }
             }
             _ = broadcast_interval.tick() => {
@@ -349,15 +349,15 @@ async fn collect_threshold_signatures(
     })
 }
 
-/// Returns a random peer ID excluding ourselves
-fn random_peer(cfg: &ServerConfig) -> PeerId {
+/// Returns a random node ID excluding ourselves
+fn random_peer(cfg: &ServerConfig) -> NodeId {
     cfg.consensus
-        .peers
+        .nodes
         .to_num_peers()
-        .peer_ids()
+        .node_ids()
         .filter(|p| *p != cfg.private.identity)
         .choose(&mut rand::thread_rng())
-        .expect("We have at least three peers")
+        .expect("We have at least three nodes")
 }
 
 /// Validate a SignedSessionOutcome received via P2P
@@ -366,7 +366,7 @@ fn validate_signed_session_outcome(
     session_index: u32,
     outcome: &SignedSessionOutcome,
 ) -> bool {
-    if outcome.signatures.len() != cfg.consensus.peers.to_num_peers().threshold() {
+    if outcome.signatures.len() != cfg.consensus.nodes.to_num_peers().threshold() {
         return false;
     }
 
@@ -430,7 +430,7 @@ async fn finalize_session(
         process_consensus_item(
             server,
             &dbtx,
-            accepted_item.peer,
+            accepted_item.node,
             accepted_item.item.clone(),
         )
         .await
@@ -463,7 +463,7 @@ async fn finalize_session(
 async fn process_consensus_item(
     server: &Server,
     dbtx: &WriteTx,
-    peer: PeerId,
+    node: NodeId,
     item: ConsensusItem,
 ) -> anyhow::Result<()> {
     match &item {
@@ -480,7 +480,7 @@ async fn process_consensus_item(
                 // it, and copies of an already accepted transaction bail at
                 // the check above - so every rejection we record is final
                 // and has a caller to fail.
-                if peer == server.cfg.private.identity {
+                if node == server.cfg.private.identity {
                     server.rejected.send_modify(|rejected| {
                         rejected.insert(txid, error.clone());
                     });
@@ -496,12 +496,12 @@ async fn process_consensus_item(
             assert!(summary.total >= 0, "Failed audit: {summary:?}");
         }
         ConsensusItem::Module(ci) => {
-            server.process_module_ci(dbtx, peer, ci).await?;
+            server.process_module_ci(dbtx, node, ci).await?;
         }
         ConsensusItem::BlockCount(vote) => {
             let old_block_count = consensus_block_count(server, dbtx);
 
-            let current_vote = dbtx.insert(&BlockCountVoteTable, &peer, vote).unwrap_or(0);
+            let current_vote = dbtx.insert(&BlockCountVoteTable, &node, vote).unwrap_or(0);
 
             ensure!(current_vote < *vote, "Block count vote is redundant");
 
@@ -511,7 +511,7 @@ async fn process_consensus_item(
 
             if new_block_count != old_block_count {
                 info!(
-                    %peer,
+                    %node,
                     vote,
                     old_block_count,
                     new_block_count,
@@ -525,7 +525,7 @@ async fn process_consensus_item(
             let default_version = server.cfg.consensus.default_version;
 
             let current_vote = dbtx
-                .insert(&ConsensusVersionVoteTable, &peer, vote)
+                .insert(&ConsensusVersionVoteTable, &node, vote)
                 .unwrap_or(default_version);
 
             ensure!(current_vote < *vote, "Consensus version vote is redundant");
@@ -554,7 +554,7 @@ fn build_keychain(cfg: &ServerConfig) -> BftKeychain {
 
     let pubkeys = cfg
         .consensus
-        .peers
+        .nodes
         .iter()
         .map(|(id, ep)| (*id, ep.broadcast_pk))
         .collect();

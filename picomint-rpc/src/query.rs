@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::mem;
 
-use picomint_core::{NumPeers, PeerId};
+use picomint_core::{NumPeers, NodeId};
 
 /// Picomint query strategy
 ///
@@ -11,18 +11,18 @@ use picomint_core::{NumPeers, PeerId};
 /// responses from the Mint members. This trait abstracts away the details
 /// of each specific strategy for the generic client Api code.
 pub trait QueryStrategy<IR, OR = IR> {
-    fn process(&mut self, peer: PeerId, response: IR) -> QueryStep<OR>;
+    fn process(&mut self, node: NodeId, response: IR) -> QueryStep<OR>;
 }
 
-/// Results from the strategy handling a response from a peer
+/// Results from the strategy handling a response from a node
 ///
 /// Note that the implementation driving the [`QueryStrategy`] returning
 /// [`QueryStep`] is responsible from remembering and collecting errors
-/// for each peer.
+/// for each node.
 #[derive(Debug)]
 pub enum QueryStep<R> {
-    /// Retry requests to this peers
-    Retry(BTreeSet<PeerId>),
+    /// Retry requests to this nodes
+    Retry(BTreeSet<NodeId>),
     /// Do nothing yet, keep waiting for requests
     Continue,
     /// Return the successful result
@@ -34,14 +34,14 @@ pub enum QueryStep<R> {
 /// Returns when we obtain a threshold of valid responses. RPC call errors or
 /// invalid responses are not retried.
 pub struct FilterMapThreshold<R, T> {
-    filter_map: Box<dyn Fn(PeerId, R) -> anyhow::Result<T> + Send + Sync>,
-    filtered_responses: BTreeMap<PeerId, T>,
+    filter_map: Box<dyn Fn(NodeId, R) -> anyhow::Result<T> + Send + Sync>,
+    filtered_responses: BTreeMap<NodeId, T>,
     threshold: usize,
 }
 
 impl<R, T> FilterMapThreshold<R, T> {
     pub fn new(
-        verifier: impl Fn(PeerId, R) -> anyhow::Result<T> + Send + Sync + 'static,
+        verifier: impl Fn(NodeId, R) -> anyhow::Result<T> + Send + Sync + 'static,
         num_peers: NumPeers,
     ) -> Self {
         Self {
@@ -52,11 +52,11 @@ impl<R, T> FilterMapThreshold<R, T> {
     }
 }
 
-impl<R, T> QueryStrategy<R, BTreeMap<PeerId, T>> for FilterMapThreshold<R, T> {
-    fn process(&mut self, peer: PeerId, response: R) -> QueryStep<BTreeMap<PeerId, T>> {
-        match (self.filter_map)(peer, response) {
+impl<R, T> QueryStrategy<R, BTreeMap<NodeId, T>> for FilterMapThreshold<R, T> {
+    fn process(&mut self, node: NodeId, response: R) -> QueryStep<BTreeMap<NodeId, T>> {
+        match (self.filter_map)(node, response) {
             Ok(response) => {
-                self.filtered_responses.insert(peer, response);
+                self.filtered_responses.insert(node, response);
 
                 if self.filtered_responses.len() == self.threshold {
                     QueryStep::Success(mem::take(&mut self.filtered_responses))
@@ -70,12 +70,12 @@ impl<R, T> QueryStrategy<R, BTreeMap<PeerId, T>> for FilterMapThreshold<R, T> {
 }
 
 /// Returns when we obtain a threshold of identical responses. Responses are not
-/// assumed to be static and may be updated by the peers; on failure to
+/// assumed to be static and may be updated by the nodes; on failure to
 /// establish consensus with a threshold of responses, we retry the requests.
 /// RPC call errors are not retried.
 pub struct ThresholdConsensus<R> {
-    responses: BTreeMap<PeerId, R>,
-    retry: BTreeSet<PeerId>,
+    responses: BTreeMap<NodeId, R>,
+    retry: BTreeSet<NodeId>,
     threshold: usize,
 }
 
@@ -90,14 +90,14 @@ impl<R> ThresholdConsensus<R> {
 }
 
 impl<R: Eq + Clone> QueryStrategy<R> for ThresholdConsensus<R> {
-    fn process(&mut self, peer: PeerId, response: R) -> QueryStep<R> {
-        self.responses.insert(peer, response.clone());
+    fn process(&mut self, node: NodeId, response: R) -> QueryStep<R> {
+        self.responses.insert(node, response.clone());
 
         if self.responses.values().filter(|r| **r == response).count() == self.threshold {
             return QueryStep::Success(response);
         }
 
-        assert!(self.retry.insert(peer));
+        assert!(self.retry.insert(node));
 
         if self.retry.len() == self.threshold {
             QueryStep::Retry(mem::take(&mut self.retry))
@@ -112,28 +112,28 @@ fn test_threshold_consensus() {
     let mut consensus = ThresholdConsensus::<u64>::new(NumPeers::from(4));
 
     assert!(matches!(
-        consensus.process(PeerId::from(0), 1),
+        consensus.process(NodeId::from(0), 1),
         QueryStep::Continue
     ));
     assert!(matches!(
-        consensus.process(PeerId::from(1), 1),
+        consensus.process(NodeId::from(1), 1),
         QueryStep::Continue
     ));
     assert!(matches!(
-        consensus.process(PeerId::from(2), 0),
+        consensus.process(NodeId::from(2), 0),
         QueryStep::Retry(..)
     ));
 
     assert!(matches!(
-        consensus.process(PeerId::from(0), 1),
+        consensus.process(NodeId::from(0), 1),
         QueryStep::Continue
     ));
     assert!(matches!(
-        consensus.process(PeerId::from(1), 1),
+        consensus.process(NodeId::from(1), 1),
         QueryStep::Continue
     ));
     assert!(matches!(
-        consensus.process(PeerId::from(2), 1),
+        consensus.process(NodeId::from(2), 1),
         QueryStep::Success(1)
     ));
 }

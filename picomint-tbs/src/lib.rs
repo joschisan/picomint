@@ -128,7 +128,7 @@ pub fn aggregate_signature_shares(
             shares
                 .keys()
                 .cloned()
-                .map(|peer| Scalar::from(peer + 1))
+                .map(|node| Scalar::from(node + 1))
                 .collect(),
         )
         .into_iter()

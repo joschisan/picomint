@@ -14,9 +14,9 @@ pub const MAX_GUARDIANS_PER_LNURL: usize = 8;
 ///
 /// Names no mint id and no gateways. `info` is the hash of the
 /// [`MintInfoResponse`] the daemon expects back, which is what lets a
-/// single guardian answer: it can refuse, but a forged peer set will not
+/// single guardian answer: it can refuse, but a forged node set will not
 /// hash. Everything downstream — the tpe aggregate key, the announced
-/// gateways — is then threshold-read from the peer set that response carries.
+/// gateways — is then threshold-read from the node set that response carries.
 ///
 /// Every field is immutable for the mint's lifetime, so the string
 /// stays valid however often the gateway set turns over.

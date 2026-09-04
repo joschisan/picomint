@@ -7,7 +7,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::post;
 use picomint_guardian_cli_core::{
-    CLI_SOCKET_FILENAME, ROUTE_SETUP_ADD_PEER, ROUTE_SETUP_RESTORE, ROUTE_SETUP_SET_LOCAL_PARAMS,
+    CLI_SOCKET_FILENAME, ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_RESTORE, ROUTE_SETUP_SET_LOCAL_PARAMS,
     ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddPeerRequest, SetupAddPeerResponse,
     SetupSetLocalParamsRequest, SetupSetLocalParamsResponse, SetupStatus,
 };
@@ -64,7 +64,7 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
     let router = Router::new()
         .route(ROUTE_SETUP_STATUS, post(setup_status))
         .route(ROUTE_SETUP_SET_LOCAL_PARAMS, post(setup_set_local_params))
-        .route(ROUTE_SETUP_ADD_PEER, post(setup_add_peer))
+        .route(ROUTE_SETUP_ADD_NODE, post(setup_add_peer))
         .route(ROUTE_SETUP_START_DKG, post(setup_start_dkg))
         .route(ROUTE_SETUP_RESTORE, post(setup_restore))
         .with_state(setup_api)
@@ -85,7 +85,7 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     use picomint_guardian_cli_core::{
         AuditResponse, BitcoinConnectionResponse, BlockCountResponse, ExpirySetRequest,
         INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse, LightningGatewayAddRequest,
-        LightningGatewayInfo, LightningGatewayListResponse, LightningGatewayRemoveRequest, P2pResponse, PeerInfo,
+        LightningGatewayInfo, LightningGatewayListResponse, LightningGatewayRemoveRequest, P2pResponse, NodeInfo,
         PendingTxsResponse, ROUTE_AUDIT, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG,
         ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
         ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
@@ -150,24 +150,24 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     async fn p2p(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<P2pResponse>, CliError> {
-        let peers = api
+        let nodes = api
             .p2p_status_receivers
             .iter()
-            .map(|(peer, receiver)| {
+            .map(|(node, receiver)| {
                 let path = match receiver.borrow().clone() {
                     P2PConnectionStatus::Connected(path) => Some(path),
                     P2PConnectionStatus::Disconnected => None,
                 };
 
-                PeerInfo {
-                    id: *peer,
+                NodeInfo {
+                    id: *node,
                     name: api
                         .server
                         .cfg
                         .consensus
-                        .peers
-                        .get(peer)
-                        .expect("every peer is in the consensus config")
+                        .nodes
+                        .get(node)
+                        .expect("every node is in the consensus config")
                         .name
                         .clone(),
                     connected: path.is_some(),
@@ -181,7 +181,7 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
             })
             .collect();
 
-        Ok(Json(P2pResponse { peers }))
+        Ok(Json(P2pResponse { nodes }))
     }
 
     async fn bitcoin_connection(

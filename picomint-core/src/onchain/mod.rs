@@ -94,15 +94,15 @@ pub struct OutputInfo {
 pub enum OnchainConsensusItem {
     Feerate(Option<u32>),
     /// One public nonce pair per input of the unsigned transaction - a
-    /// peer's first entry into the transaction's append-only nonce log.
+    /// node's first entry into the transaction's append-only nonce log.
     /// Consecutive chunks of threshold entries form the signing sessions.
     Nonces(Txid, Vec<tss::PublicNonce>),
     /// One signature share per input for the signing session formed by the
-    /// log chunk containing the peer's latest nonce entry, plus one fresh
+    /// log chunk containing the node's latest nonce entry, plus one fresh
     /// nonce pair per input appended to the log. Since a crashed session
     /// member never appends a replacement nonce it is excluded from all
     /// future sessions, so some session completes after at most n - t + 1
-    /// attempts as long as a threshold of peers remains live.
+    /// attempts as long as a threshold of nodes remains live.
     Signatures(Txid, Vec<tss::SignatureShare>, Vec<tss::PublicNonce>),
 }
 

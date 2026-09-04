@@ -1,5 +1,5 @@
 use clap::Args;
-use picomint_core::PeerId;
+use picomint_core::NodeId;
 use picomint_core::invite::InviteCode;
 use picomint_core::module::audit::AuditSummary;
 use picomint_core::onchain::TxInfo;
@@ -21,7 +21,7 @@ pub enum SetupStatus {
 // Setup routes
 pub const ROUTE_SETUP_STATUS: &str = "/setup/status";
 pub const ROUTE_SETUP_SET_LOCAL_PARAMS: &str = "/setup/set-local-params";
-pub const ROUTE_SETUP_ADD_PEER: &str = "/setup/add-peer";
+pub const ROUTE_SETUP_ADD_NODE: &str = "/setup/add-node";
 pub const ROUTE_SETUP_START_DKG: &str = "/setup/start-dkg";
 pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
 
@@ -68,11 +68,11 @@ pub struct SetupSetLocalParamsResponse {
     pub setup_code: String,
 }
 
-// --- /setup/add-peer ---
+// --- /setup/add-node ---
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct SetupAddPeerRequest {
-    /// Peer's setup code
+    /// Node's setup code
     pub setup_code: String,
 }
 
@@ -137,12 +137,12 @@ pub struct BlockCountResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct P2pResponse {
-    pub peers: Vec<PeerInfo>,
+    pub nodes: Vec<NodeInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PeerInfo {
-    pub id: PeerId,
+pub struct NodeInfo {
+    pub id: NodeId,
     pub name: String,
     pub connected: bool,
     pub transport: Option<String>,

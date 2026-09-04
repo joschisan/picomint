@@ -16,18 +16,18 @@ use maud::{Markup, html};
 use picomint_redb::{Database, DbRead};
 
 use crate::config::db::ConfigGenParamsTable;
-use crate::config::setup::PeerSetupCode;
+use crate::config::setup::NodeSetupCode;
 use crate::ui::assets::WithStaticRoutesExt;
 use crate::ui::{ROOT_ROUTE, copiable_text, single_card_layout};
 
 /// Shared content used by both this router's fallback and the setup UI's
 /// post-`start_dkg` response, so the operator's screen is identical whether
 /// they just clicked the button or reopened the tab after a restart.
-/// `setup_code` is this guardian's `PeerSetupCode` — always available
+/// `setup_code` is this guardian's `NodeSetupCode` — always available
 /// because we only enter this phase once `ConfigGenParams` has been
 /// persisted (or, on the setup-UI side, after `start_dkg` has succeeded in
 /// the same process).
-pub fn loading_card(setup_code: &PeerSetupCode) -> Markup {
+pub fn loading_card(setup_code: &NodeSetupCode) -> Markup {
     let content = html! {
         span { "Share with guardians who still need it." }
 
@@ -57,14 +57,14 @@ async fn loading_page(State(db): State<Database>) -> impl IntoResponse {
         .get(&ConfigGenParamsTable, &())
         .expect("DKG UI only runs while ConfigGenParams is persisted");
 
-    let peer = params
-        .peers
+    let node = params
+        .nodes
         .get(&params.identity)
-        .expect("our peer id is always in the peer map");
+        .expect("our node id is always in the node map");
 
     (
         StatusCode::SERVICE_UNAVAILABLE,
-        Html(loading_card(peer).into_string()),
+        Html(loading_card(node).into_string()),
     )
 }
 

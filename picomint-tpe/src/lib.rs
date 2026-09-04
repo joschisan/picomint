@@ -172,7 +172,7 @@ pub fn aggregate_dk_shares(shares: &BTreeMap<u64, DecryptionKeyShare>) -> Aggreg
             shares
                 .keys()
                 .cloned()
-                .map(|peer| Scalar::from(peer + 1))
+                .map(|node| Scalar::from(node + 1))
                 .collect(),
         )
         .into_iter()

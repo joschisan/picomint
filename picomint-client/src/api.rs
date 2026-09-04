@@ -7,7 +7,7 @@
 
 pub use picomint_rpc::api::MintApi;
 
-use picomint_core::PeerId;
+use picomint_core::NodeId;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::methods::{
     BlockCountRequest, BlockCountResponse, CoreMethod, ExpiryStatusRequest, ExpiryStatusResponse,
@@ -43,11 +43,11 @@ pub async fn liveness(api: &MintApi) -> anyhow::Result<LivenessResponse> {
         .await
 }
 
-/// Single-peer liveness check — succeeds if `peer` answers. Useful for
-/// surfacing per-peer connection status (e.g. dashboards) where the
-/// threshold-consensus variant would mask which peer is offline.
-pub async fn liveness_peer(api: &MintApi, peer: PeerId) -> anyhow::Result<LivenessResponse> {
-    api.request_single_peer(Method::Core(CoreMethod::Liveness(LivenessRequest)), peer)
+/// Single-node liveness check — succeeds if `node` answers. Useful for
+/// surfacing per-node connection status (e.g. dashboards) where the
+/// threshold-consensus variant would mask which node is offline.
+pub async fn liveness_peer(api: &MintApi, node: NodeId) -> anyhow::Result<LivenessResponse> {
+    api.request_single_peer(Method::Core(CoreMethod::Liveness(LivenessRequest)), node)
         .await
 }
 

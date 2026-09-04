@@ -24,13 +24,13 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
         timestamp,
         successor: Some(env.invite.clone()),
     };
-    for peer in 0..NUM_ONLINE_GUARDIANS {
-        let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
+    for node in 0..NUM_ONLINE_GUARDIANS {
+        let data_dir = cli::guardian_data_dir(&env.data_dir, node);
         cli::guardian_expiry_set(&data_dir, timestamp, Some(&env.invite))?;
         let stored = cli::guardian_expiry_status(&data_dir)?;
         ensure!(
             stored.as_ref() == Some(&expected),
-            "guardian {peer} stored expiry mismatch: got {stored:?}"
+            "guardian {node} stored expiry mismatch: got {stored:?}"
         );
     }
 
@@ -56,8 +56,8 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     );
 
     info!("Clearing expiry on all online guardians");
-    for peer in 0..NUM_ONLINE_GUARDIANS {
-        let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
+    for node in 0..NUM_ONLINE_GUARDIANS {
+        let data_dir = cli::guardian_data_dir(&env.data_dir, node);
         cli::guardian_expiry_clear(&data_dir)?;
     }
 

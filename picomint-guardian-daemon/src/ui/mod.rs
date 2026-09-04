@@ -2,7 +2,7 @@
 //!
 //! The UI runs in three phases on the same TCP port:
 //!
-//! - Setup UI (before the operator confirms the peer set). Served by
+//! - Setup UI (before the operator confirms the node set). Served by
 //!   [`setup::router`] which takes an `Arc<SetupApi>` directly.
 //! - DKG UI (after the operator clicks "Start DKG" until consensus comes
 //!   up). Served by [`dkg::router`]: a stateless fallback router that

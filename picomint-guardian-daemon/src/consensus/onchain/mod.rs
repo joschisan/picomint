@@ -21,7 +21,7 @@ use common::{OutputInfo, OnchainConsensusItem, OnchainInput, OnchainOutput};
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::onchain as common;
-use picomint_core::{NumPeersExt, OutPoint, PeerId};
+use picomint_core::{NumPeersExt, OutPoint, NodeId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 use tokio::time::sleep;
@@ -100,15 +100,15 @@ fn pending_txs_unordered(dbtx: &impl DbRead) -> Vec<MintTx> {
 }
 
 /// Run DKG for the onchain module, producing a fresh `OnchainConfig` for this
-/// peer.
-pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<OnchainConfig> {
-    let (polynomial, sks) = peers.run_dkg_secp().await?;
+/// node.
+pub async fn distributed_gen(nodes: &DkgHandle<'_>) -> anyhow::Result<OnchainConfig> {
+    let (polynomial, sks) = nodes.run_dkg_secp().await?;
 
-    let pks = peers
+    let pks = nodes
         .num_peers()
-        .peer_ids()
-        .map(|peer| Ok((peer, PublicKeyShare(eval_poly(&polynomial, &peer)?))))
-        .collect::<anyhow::Result<BTreeMap<PeerId, PublicKeyShare>>>()?;
+        .node_ids()
+        .map(|node| Ok((node, PublicKeyShare(eval_poly(&polynomial, &node)?))))
+        .collect::<anyhow::Result<BTreeMap<NodeId, PublicKeyShare>>>()?;
 
     Ok(OnchainConfig {
         private: OnchainConfigPrivate {
@@ -248,20 +248,20 @@ fn threshold(server: &Server) -> usize {
 pub async fn process_consensus_item(
     server: &Server,
     dbtx: &WriteTx,
-    peer: PeerId,
+    node: NodeId,
     consensus_item: OnchainConsensusItem,
 ) -> anyhow::Result<()> {
     match consensus_item {
         OnchainConsensusItem::Feerate(feerate) => {
-            if Some(feerate) == dbtx.insert(&FeeRateVoteTable, &peer, &feerate) {
+            if Some(feerate) == dbtx.insert(&FeeRateVoteTable, &node, &feerate) {
                 return Err(anyhow!("Fee rate vote is redundant"));
             }
 
             Ok(())
         }
-        OnchainConsensusItem::Nonces(txid, nonces) => process_nonces(dbtx, peer, txid, nonces),
+        OnchainConsensusItem::Nonces(txid, nonces) => process_nonces(dbtx, node, txid, nonces),
         OnchainConsensusItem::Signatures(txid, shares, nonces) => {
-            process_signatures(server, dbtx, peer, txid, shares, nonces).await
+            process_signatures(server, dbtx, node, txid, shares, nonces).await
         }
     }
 }
@@ -626,7 +626,7 @@ pub async fn sync_blocks(
 
 fn process_nonces(
     dbtx: &WriteTx,
-    peer: PeerId,
+    node: NodeId,
     txid: Txid,
     nonces: Vec<PublicNonce>,
 ) -> anyhow::Result<()> {
@@ -645,13 +645,13 @@ fn process_nonces(
     );
 
     ensure!(
-        dbtx.iter(&NonceLogTable, |r| r.all(|entry| entry.1.0 != peer)),
+        dbtx.iter(&NonceLogTable, |r| r.all(|entry| entry.1.0 != node)),
         "Nonce entry is redundant"
     );
 
     let next_index = dbtx.iter_rev(&NonceLogTable, |r| r.next().map_or(0, |entry| entry.0 + 1));
 
-    dbtx.insert(&NonceLogTable, &next_index, &NonceEntry(peer, nonces));
+    dbtx.insert(&NonceLogTable, &next_index, &NonceEntry(node, nonces));
 
     Ok(())
 }
@@ -659,7 +659,7 @@ fn process_nonces(
 async fn process_signatures(
     server: &Server,
     dbtx: &WriteTx,
-    peer: PeerId,
+    node: NodeId,
     txid: Txid,
     shares: Vec<SignatureShare>,
     fresh_nonces: Vec<PublicNonce>,
@@ -683,15 +683,15 @@ async fn process_signatures(
         "Incorrect number of replacement nonces"
     );
 
-    // The session of the peer's latest entry is the only one it might
+    // The session of the node's latest entry is the only one it might
     // not have signed yet, since appending an entry requires signing the
     // session of the previous one.
     let latest = dbtx
         .iter_rev(&NonceLogTable, |r| {
-            r.find(|entry| entry.1.0 == peer)
+            r.find(|entry| entry.1.0 == node)
                 .map(|entry| entry.0 as usize)
         })
-        .context("Peer has no nonce entry")?;
+        .context("Node has no nonce entry")?;
 
     let session = latest / threshold(server);
 
@@ -704,7 +704,7 @@ async fn process_signatures(
 
     ensure!(
         chunk.len() == threshold(server),
-        "The signing session of the peer's latest entry is still forming"
+        "The signing session of the node's latest entry is still forming"
     );
 
     let sighashes = sighashes(server, &unsigned);
@@ -719,8 +719,8 @@ async fn process_signatures(
         ensure!(
             verify_signature_share(
                 *msg,
-                peer.to_u64(),
-                &tweaked_pks(server, &peer, &utxo.tweak),
+                node.to_u64(),
+                &tweaked_pks(server, &node, &utxo.tweak),
                 share,
                 &nonce_column(&chunk, index),
                 &tweaked_agg_pk(server, &utxo.tweak),
@@ -737,7 +737,7 @@ async fn process_signatures(
 
     let next_index = dbtx.iter_rev(&NonceLogTable, |r| r.next().map_or(0, |entry| entry.0 + 1));
 
-    dbtx.insert(&NonceLogTable, &next_index, &NonceEntry(peer, fresh_nonces));
+    dbtx.insert(&NonceLogTable, &next_index, &NonceEntry(node, fresh_nonces));
 
     let responses: Vec<Vec<SignatureShare>> = dbtx.range(&SignaturesTable, chunk_range, |r| {
         r.map(|(_, shares)| shares).collect()
@@ -853,14 +853,14 @@ fn tweaked_sks(server: &Server, tweak: &sha256::Hash) -> SecretKeyShare {
     )
 }
 
-fn tweaked_pks(server: &Server, peer: &PeerId, tweak: &sha256::Hash) -> PublicKeyShare {
+fn tweaked_pks(server: &Server, node: &NodeId, tweak: &sha256::Hash) -> PublicKeyShare {
     let pks = server
         .cfg
         .consensus
         .onchain
         .pks
-        .get(peer)
-        .expect("Failed to get public key share of peer from config");
+        .get(node)
+        .expect("Failed to get public key share of node from config");
 
     PublicKeyShare(tweak_public_key(&pks.0, tweak))
 }

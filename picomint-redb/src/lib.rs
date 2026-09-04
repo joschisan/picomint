@@ -263,7 +263,7 @@ impl Database {
     /// become durable only when a later [`Self::begin_write`] commit flushes
     /// them, and a crash rolls back to that last durable commit. Use only
     /// for state a node can reconstruct after a crash (e.g. BFT units
-    /// re-fetched from peers) — never for money-bearing or safety-critical
+    /// re-fetched from nodes) — never for money-bearing or safety-critical
     /// writes.
     pub fn begin_write_relaxed(&self) -> WriteTx {
         let mut tx = self

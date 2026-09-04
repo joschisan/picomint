@@ -6,7 +6,7 @@ use anyhow::{Context, bail, ensure};
 use bls12_381::{G1Projective, Scalar};
 use group::ff::Field;
 use picomint_core::bitcoin::hashes::sha256;
-use picomint_core::{NumPeers, PeerId};
+use picomint_core::{NumPeers, NodeId};
 use picomint_encoding::Encodable as _;
 use rand::rngs::OsRng;
 use tracing::trace;
@@ -17,15 +17,15 @@ use crate::p2p::{DkgMessageG1, P2PMessage, Recipient, ReconnectP2PConnections};
 
 struct DkgG1 {
     num_peers: NumPeers,
-    identity: PeerId,
+    identity: NodeId,
     polynomial: Vec<Scalar>,
-    hash_commitments: BTreeMap<PeerId, sha256::Hash>,
-    commitments: BTreeMap<PeerId, Vec<G1Projective>>,
-    sk_shares: BTreeMap<PeerId, Scalar>,
+    hash_commitments: BTreeMap<NodeId, sha256::Hash>,
+    commitments: BTreeMap<NodeId, Vec<G1Projective>>,
+    sk_shares: BTreeMap<NodeId, Scalar>,
 }
 
 impl DkgG1 {
-    fn new(num_peers: NumPeers, identity: PeerId) -> Self {
+    fn new(num_peers: NumPeers, identity: NodeId) -> Self {
         let polynomial = (0..num_peers.threshold())
             .map(|_| Scalar::random(&mut OsRng))
             .collect::<Vec<Scalar>>();
@@ -51,13 +51,13 @@ impl DkgG1 {
     }
 
     /// Runs a single step of the DKG algorithm
-    fn step(&mut self, peer: PeerId, msg: DkgMessageG1) -> anyhow::Result<DkgStepG1> {
-        trace!(?peer, ?msg, "Running DKG G1 step");
+    fn step(&mut self, node: NodeId, msg: DkgMessageG1) -> anyhow::Result<DkgStepG1> {
+        trace!(?node, ?msg, "Running DKG G1 step");
         match msg {
             DkgMessageG1::Hash(hash) => {
                 ensure!(
-                    self.hash_commitments.insert(peer, hash).is_none(),
-                    "DKG G1: peer {peer} sent us two hash commitments."
+                    self.hash_commitments.insert(node, hash).is_none(),
+                    "DKG G1: node {node} sent us two hash commitments."
                 );
 
                 if self.hash_commitments.len() == self.num_peers.total() {
@@ -68,20 +68,20 @@ impl DkgG1 {
             }
             DkgMessageG1::Commitment(polynomial) => {
                 ensure!(
-                    *self.hash_commitments.get(&peer).with_context(|| format!(
-                        "DKG G1: hash commitment not found for peer {peer}"
+                    *self.hash_commitments.get(&node).with_context(|| format!(
+                        "DKG G1: hash commitment not found for node {node}"
                     ))? == polynomial.consensus_hash_sha256(),
-                    "DKG G1: polynomial commitment from peer {peer} is of wrong degree."
+                    "DKG G1: polynomial commitment from node {node} is of wrong degree."
                 );
 
                 ensure!(
                     self.num_peers.threshold() == polynomial.len(),
-                    "DKG G1: polynomial commitment from peer {peer} is of wrong degree."
+                    "DKG G1: polynomial commitment from node {node} is of wrong degree."
                 );
 
                 ensure!(
-                    self.commitments.insert(peer, polynomial).is_none(),
-                    "DKG G1: peer {peer} sent us two commitments."
+                    self.commitments.insert(node, polynomial).is_none(),
+                    "DKG G1: node {node} sent us two commitments."
                 );
 
                 // Once everyone has send their commitments, send out the key shares...
@@ -89,13 +89,13 @@ impl DkgG1 {
                 if self.commitments.len() == self.num_peers.total() {
                     let mut messages = vec![];
 
-                    for peer in self.num_peers.peer_ids() {
-                        let s = eval_poly_scalar(&self.polynomial, &scalar(&peer));
+                    for node in self.num_peers.node_ids() {
+                        let s = eval_poly_scalar(&self.polynomial, &scalar(&node));
 
-                        if peer == self.identity {
+                        if node == self.identity {
                             self.sk_shares.insert(self.identity, s);
                         } else {
-                            messages.push((peer, DkgMessageG1::Share(s)));
+                            messages.push((node, DkgMessageG1::Share(s)));
                         }
                     }
 
@@ -103,8 +103,8 @@ impl DkgG1 {
                 }
             }
             DkgMessageG1::Share(s) => {
-                let polynomial = self.commitments.get(&peer).with_context(|| {
-                    format!("DKG G1: polynomial commitment not found for peer {peer}.")
+                let polynomial = self.commitments.get(&node).with_context(|| {
+                    format!("DKG G1: polynomial commitment not found for node {node}.")
                 })?;
 
                 let checksum: G1Projective = polynomial
@@ -112,13 +112,13 @@ impl DkgG1 {
                     .zip((0..).map(|k| scalar(&self.identity).pow(&[k, 0, 0, 0])))
                     .map(|(c, x)| c * x)
                     .reduce(|a, b| a + b)
-                    .expect("DKG G1: polynomial commitment from peer is empty.");
+                    .expect("DKG G1: polynomial commitment from node is empty.");
 
-                ensure!(g1(&s) == checksum, "DKG G1: share from {peer} is invalid.");
+                ensure!(g1(&s) == checksum, "DKG G1: share from {node} is invalid.");
 
                 ensure!(
-                    self.sk_shares.insert(peer, s).is_none(),
-                    "Peer {peer} sent us two sk shares."
+                    self.sk_shares.insert(node, s).is_none(),
+                    "Node {node} sent us two sk shares."
                 );
 
                 if self.sk_shares.len() == self.num_peers.total() {
@@ -143,11 +143,11 @@ impl DkgG1 {
     }
 }
 
-/// Runs the DKG G1 algorithm with our peers. We do not handle any unexpected
-/// messages and all peers are expected to be cooperative.
+/// Runs the DKG G1 algorithm with our nodes. We do not handle any unexpected
+/// messages and all nodes are expected to be cooperative.
 pub async fn run_dkg_g1(
     num_peers: NumPeers,
-    identity: PeerId,
+    identity: NodeId,
     connections: &ReconnectP2PConnections,
 ) -> anyhow::Result<(Vec<G1Projective>, Scalar)> {
     let mut dkg = DkgG1::new(num_peers, identity);
@@ -158,9 +158,9 @@ pub async fn run_dkg_g1(
     );
 
     loop {
-        for peer in num_peers.peer_ids().filter(|p| *p != identity) {
+        for node in num_peers.node_ids().filter(|p| *p != identity) {
             let message = connections
-                .receive_from_peer(peer)
+                .receive_from_peer(node)
                 .await
                 .context("Unexpected shutdown of p2p connections during dkg g1")?;
 
@@ -169,13 +169,13 @@ pub async fn run_dkg_g1(
                 _ => bail!("Received unexpected message during DKG G1: {message:?}"),
             };
 
-            match dkg.step(peer, message)? {
+            match dkg.step(node, message)? {
                 DkgStepG1::Broadcast(message) => {
                     connections.send(Recipient::Everyone, P2PMessage::DkgG1(message));
                 }
                 DkgStepG1::Messages(messages) => {
-                    for (peer, message) in messages {
-                        connections.send(Recipient::Peer(peer), P2PMessage::DkgG1(message));
+                    for (node, message) in messages {
+                        connections.send(Recipient::Node(node), P2PMessage::DkgG1(message));
                     }
                 }
                 DkgStepG1::Result(result) => {
@@ -197,7 +197,7 @@ fn eval_poly_scalar(coefficients: &[Scalar], x: &Scalar) -> Scalar {
 
 enum DkgStepG1 {
     Broadcast(DkgMessageG1),
-    Messages(Vec<(PeerId, DkgMessageG1)>),
+    Messages(Vec<(NodeId, DkgMessageG1)>),
     Result((Vec<G1Projective>, Scalar)),
 }
 
@@ -207,7 +207,7 @@ mod tests {
 
     use crate::config::poly::{eval_poly_g1, g1};
     use group::Curve;
-    use picomint_core::{NumPeers, PeerId};
+    use picomint_core::{NumPeers, NodeId};
 
     use super::{DkgG1, DkgStepG1};
 
@@ -216,21 +216,21 @@ mod tests {
         let num_peers = NumPeers::from(7);
 
         let mut dkgs = num_peers
-            .peer_ids()
-            .map(|peer| (peer, DkgG1::new(num_peers, peer)))
-            .collect::<BTreeMap<PeerId, DkgG1>>();
+            .node_ids()
+            .map(|node| (node, DkgG1::new(num_peers, node)))
+            .collect::<BTreeMap<NodeId, DkgG1>>();
 
         let mut steps = dkgs
             .iter()
-            .map(|(peer, dkg)| (*peer, DkgStepG1::Broadcast(dkg.initial_message())))
-            .collect::<VecDeque<(PeerId, DkgStepG1)>>();
+            .map(|(node, dkg)| (*node, DkgStepG1::Broadcast(dkg.initial_message())))
+            .collect::<VecDeque<(NodeId, DkgStepG1)>>();
 
         let mut keys = BTreeMap::new();
 
         while keys.len() < num_peers.total() {
             match steps.pop_front().unwrap() {
                 (send_peer, DkgStepG1::Broadcast(message)) => {
-                    for receive_peer in num_peers.peer_ids().filter(|p| *p != send_peer) {
+                    for receive_peer in num_peers.node_ids().filter(|p| *p != send_peer) {
                         let step = dkgs
                             .get_mut(&receive_peer)
                             .unwrap()
@@ -257,9 +257,9 @@ mod tests {
 
         assert!(steps.is_empty());
 
-        for (peer, (poly_g1, sks)) in keys {
+        for (node, (poly_g1, sks)) in keys {
             assert_eq!(poly_g1.len(), 5);
-            assert_eq!(eval_poly_g1(&poly_g1, &peer), g1(&sks).to_affine());
+            assert_eq!(eval_poly_g1(&poly_g1, &node), g1(&sks).to_affine());
         }
     }
 }

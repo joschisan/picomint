@@ -12,15 +12,15 @@ use picomint_encoding::{Decodable, Encodable};
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct InviteCode {
     pub mint: MintId,
-    pub node_id: PublicKey,
+    pub iroh_pk: PublicKey,
     pub invite_id: [u8; 16],
 }
 
 impl InviteCode {
-    pub fn new(node_id: PublicKey, mint: MintId, invite_id: [u8; 16]) -> Self {
+    pub fn new(iroh_pk: PublicKey, mint: MintId, invite_id: [u8; 16]) -> Self {
         Self {
             mint,
-            node_id,
+            iroh_pk,
             invite_id,
         }
     }

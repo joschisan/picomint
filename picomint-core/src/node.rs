@@ -22,9 +22,9 @@ use picomint_encoding::{Decodable, Encodable};
     Display,
     FromStr,
 )]
-pub struct PeerId(u8);
+pub struct NodeId(u8);
 
-impl PeerId {
+impl NodeId {
     pub fn to_usize(self) -> usize {
         self.0 as usize
     }
@@ -34,15 +34,15 @@ impl PeerId {
     }
 }
 
-impl From<u8> for PeerId {
+impl From<u8> for NodeId {
     fn from(id: u8) -> Self {
         Self(id)
     }
 }
 
-impl From<PeerId> for u8 {
-    fn from(peer: PeerId) -> Self {
-        peer.0
+impl From<NodeId> for u8 {
+    fn from(node: NodeId) -> Self {
+        node.0
     }
 }
 
@@ -51,16 +51,16 @@ impl From<PeerId> for u8 {
 pub const ALLOWED_MINT_SIZES: &[usize] = &[4, 7, 10, 13, 16, 19, 22];
 
 /// The size of a mint, parameterized by `f` (the maximum tolerated
-/// number of byzantine peers). picomint only supports mints of
+/// number of byzantine nodes). picomint only supports mints of
 /// size `3f + 1`, so storing `f` lets every derived quantity drop out
 /// of one multiplication or addition with no rounding involved.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NumPeers(usize);
 
 impl NumPeers {
-    /// Returns an iterator over all peer IDs in the mint.
-    pub fn peer_ids(self) -> impl Iterator<Item = PeerId> {
-        (0u8..(self.total() as u8)).map(PeerId)
+    /// Returns an iterator over all node IDs in the mint.
+    pub fn node_ids(self) -> impl Iterator<Item = NodeId> {
+        (0u8..(self.total() as u8)).map(NodeId)
     }
 
     /// Total number of guardians: `3f + 1`.
@@ -68,12 +68,12 @@ impl NumPeers {
         3 * self.0 + 1
     }
 
-    /// Maximum tolerated byzantine peers: `f`.
+    /// Maximum tolerated byzantine nodes: `f`.
     pub fn max_evil(self) -> usize {
         self.0
     }
 
-    /// Smallest set guaranteed to contain at least one honest peer: `f + 1`.
+    /// Smallest set guaranteed to contain at least one honest node: `f + 1`.
     pub fn one_honest(self) -> usize {
         self.0 + 1
     }
@@ -100,13 +100,13 @@ pub trait NumPeersExt {
     fn to_num_peers(&self) -> NumPeers;
 }
 
-impl<T> NumPeersExt for BTreeMap<PeerId, T> {
+impl<T> NumPeersExt for BTreeMap<NodeId, T> {
     fn to_num_peers(&self) -> NumPeers {
         NumPeers::from(self.len())
     }
 }
 
-impl NumPeersExt for BTreeSet<PeerId> {
+impl NumPeersExt for BTreeSet<NodeId> {
     fn to_num_peers(&self) -> NumPeers {
         NumPeers::from(self.len())
     }

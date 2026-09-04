@@ -6,7 +6,7 @@ use anyhow::ensure;
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::ecash::{Denomination, verify_note};
-use picomint_core::{PeerId, TransactionId};
+use picomint_core::{NodeId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
@@ -47,7 +47,7 @@ pub struct ECashStateMachine {
 }
 
 impl StateMachine for ECashStateMachine {
-    type Outcome = Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String>;
+    type Outcome = Result<BTreeMap<NodeId, Vec<BlindedSignatureShare>>, String>;
 
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         ctx.await_tx_accepted(self.operation, self.txid).await?;
@@ -85,7 +85,7 @@ impl StateMachine for ECashStateMachine {
             let agg_blind_signature = aggregate_signature_shares(
                 &signatures
                     .iter()
-                    .map(|(peer, shares)| (peer.to_usize() as u64, shares[i]))
+                    .map(|(node, shares)| (node.to_usize() as u64, shares[i]))
                     .collect(),
             );
 
@@ -134,10 +134,10 @@ impl StateMachine for ECashStateMachine {
 }
 
 pub fn verify_blind_shares(
-    peer: PeerId,
+    node: NodeId,
     signatures: Vec<BlindedSignatureShare>,
     issuance_requests: &[NoteIssuanceRequest],
-    tbs_pks: &BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
+    tbs_pks: &BTreeMap<Denomination, BTreeMap<NodeId, PublicKeyShare>>,
 ) -> anyhow::Result<Vec<BlindedSignatureShare>> {
     ensure!(
         signatures.len() == issuance_requests.len(),
@@ -148,8 +148,8 @@ pub fn verify_blind_shares(
         let amount_key = tbs_pks
             .get(&request.denomination)
             .expect("No pk shares found for denomination")
-            .get(&peer)
-            .expect("No pk share found for peer");
+            .get(&node)
+            .expect("No pk share found for node");
 
         ensure!(
             tbs::verify_signature_share(request.blinded_message(), *share, *amount_key),

@@ -15,12 +15,12 @@ fn dealer_agg_pk() -> AggregatePublicKey {
     AggregatePublicKey((G1Projective::generator() * coefficient(0)).to_affine())
 }
 
-fn dealer_pk(threshold: u64, peer: u64) -> PublicKeyShare {
-    derive_pk_share(&dealer_sk(threshold, peer))
+fn dealer_pk(threshold: u64, node: u64) -> PublicKeyShare {
+    derive_pk_share(&dealer_sk(threshold, node))
 }
 
-fn dealer_sk(threshold: u64, peer: u64) -> SecretKeyShare {
-    let x = Scalar::from(peer + 1);
+fn dealer_sk(threshold: u64, node: u64) -> SecretKeyShare {
+    let x = Scalar::from(node + 1);
 
     // We evaluate the scalar polynomial of degree threshold - 1 at the point x
     // using the Horner schema.
@@ -42,7 +42,7 @@ fn coefficient(index: u64) -> Scalar {
 
 #[test]
 fn test_roundtrip() {
-    const PEERS: u64 = 4;
+    const NODES: u64 = 4;
     const THRESHOLD: u64 = 3;
 
     let encryption_seed = [7_u8; 32];
@@ -52,17 +52,17 @@ fn test_roundtrip() {
 
     assert!(verify_ciphertext(&ct, &commitment));
 
-    for peer in 0..PEERS {
+    for node in 0..NODES {
         assert!(verify_dk_share(
-            &dealer_pk(THRESHOLD, peer),
-            &create_dk_share(&dealer_sk(THRESHOLD, peer), &ct),
+            &dealer_pk(THRESHOLD, node),
+            &create_dk_share(&dealer_sk(THRESHOLD, node), &ct),
             &ct,
             &commitment
         ));
     }
 
     let selected_shares = (0..THRESHOLD)
-        .map(|peer| (peer, create_dk_share(&dealer_sk(THRESHOLD, peer), &ct)))
+        .map(|node| (node, create_dk_share(&dealer_sk(THRESHOLD, node), &ct)))
         .collect();
 
     let agg_dk = aggregate_dk_shares(&selected_shares);

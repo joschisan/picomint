@@ -6,20 +6,20 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use dkg::DkgHandle;
 use picomint_core::config::ConsensusConfig;
-pub use picomint_core::config::{MintId, PeerEndpoint};
+pub use picomint_core::config::{MintId, NodeEndpoint};
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::config::LightningConfigPrivate;
 use picomint_core::ecash::config::{ECashConfig, ECashConfigPrivate};
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::onchain::config::{OnchainConfig, OnchainConfigPrivate};
-use picomint_core::{NumPeersExt, PeerId, secp256k1};
+use picomint_core::{NumPeersExt, NodeId, secp256k1};
 use rand::rngs::OsRng;
 use secp256k1::{Secp256k1, SecretKey, XOnlyPublicKey};
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 
-use crate::config::setup::PeerSetupCode;
+use crate::config::setup::NodeSetupCode;
 use crate::p2p::{P2PMessage, P2PStatusReceivers, Recipient, ReconnectP2PConnections};
 use picomint_encoding::{Decodable, Encodable};
 
@@ -35,16 +35,16 @@ pub mod setup;
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 /// Full picomint server config (persisted in the guardian database).
 pub struct ServerConfig {
-    /// Mint-wide config, identical across peers
+    /// Mint-wide config, identical across nodes
     pub consensus: ConsensusConfig,
-    /// Per-peer secrets (identity + DKG keys)
+    /// Per-node secrets (identity + DKG keys)
     pub private: ServerConfigPrivate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ServerConfigPrivate {
-    /// Our peer id
-    pub identity: PeerId,
+    /// Our node id
+    pub identity: NodeId,
     /// Secret key for our single iroh endpoint (p2p + api)
     pub iroh_sk: iroh::SecretKey,
     /// Secret key for the atomic broadcast to sign messages
@@ -84,12 +84,12 @@ pub enum SetupResult {
 /// * Guardians can create the parameters using a setup UI or CLI tool
 /// * Used for distributed or trusted config generation
 pub struct ConfigGenParams {
-    /// Our own peer id
-    pub identity: PeerId,
+    /// Our own node id
+    pub identity: NodeId,
     /// Secret key for our single iroh endpoint (p2p + api)
     pub iroh_sk: iroh::SecretKey,
     /// Endpoints of all servers
-    pub peers: BTreeMap<PeerId, PeerSetupCode>,
+    pub nodes: BTreeMap<NodeId, NodeSetupCode>,
     /// Mint name, chosen by the lead guardian during setup.
     pub name: String,
     /// Bitcoin network for this mint
@@ -102,30 +102,30 @@ impl ServerConfig {
     /// DKG outputs.
     pub fn from(
         params: ConfigGenParams,
-        identity: PeerId,
-        broadcast_public_keys: BTreeMap<PeerId, XOnlyPublicKey>,
+        identity: NodeId,
+        broadcast_public_keys: BTreeMap<NodeId, XOnlyPublicKey>,
         broadcast_secret_key: SecretKey,
         ecash: ECashConfig,
         lightning: picomint_core::lightning::config::LightningConfig,
         onchain: OnchainConfig,
     ) -> Self {
-        let peers = params
-            .peers
+        let nodes = params
+            .nodes
             .iter()
-            .map(|(id, peer)| {
-                let endpoint = PeerEndpoint {
-                    iroh_pk: peer.pk,
+            .map(|(id, node)| {
+                let endpoint = NodeEndpoint {
+                    iroh_pk: node.pk,
                     broadcast_pk: *broadcast_public_keys
                         .get(id)
-                        .expect("broadcast pk for every peer"),
-                    name: peer.name.clone(),
+                        .expect("broadcast pk for every node"),
+                    name: node.name.clone(),
                 };
                 (*id, endpoint)
             })
             .collect();
 
         let consensus = ConsensusConfig {
-            peers,
+            nodes,
             network: params.network,
             name: params.name.clone(),
             default_version: CONSENSUS_VERSION,
@@ -155,7 +155,7 @@ impl ServerConfig {
     }
 
     pub fn validate_config(&self) -> anyhow::Result<()> {
-        let peers = &self.consensus.peers;
+        let nodes = &self.consensus.nodes;
         let my_public_key = self
             .private
             .broadcast_secret_key
@@ -163,14 +163,14 @@ impl ServerConfig {
             .x_only_public_key()
             .0;
 
-        if Some(my_public_key) != peers.get(&self.private.identity).map(|p| p.broadcast_pk) {
+        if Some(my_public_key) != nodes.get(&self.private.identity).map(|p| p.broadcast_pk) {
             bail!("Broadcast secret key doesn't match corresponding public key");
         }
-        if peers.keys().max().copied().map(PeerId::to_usize) != Some(peers.len() - 1) {
-            bail!("Peer ids are not indexed from 0");
+        if nodes.keys().max().copied().map(NodeId::to_usize) != Some(nodes.len() - 1) {
+            bail!("Node ids are not indexed from 0");
         }
-        if peers.keys().min().copied() != Some(PeerId::from(0)) {
-            bail!("Peer ids are not indexed from 0");
+        if nodes.keys().min().copied() != Some(NodeId::from(0)) {
+            bail!("Node ids are not indexed from 0");
         }
 
         crate::consensus::ecash::validate_config(self)?;
@@ -189,7 +189,7 @@ impl ServerConfig {
         info!("Waiting for all p2p connections to open...");
 
         loop {
-            let disconnected_peers: BTreeSet<PeerId> = p2p_status_receivers
+            let disconnected_peers: BTreeSet<NodeId> = p2p_status_receivers
                 .iter()
                 .filter_map(|(p, r)| r.borrow().is_disconnected().then_some(*p))
                 .collect();
@@ -206,38 +206,38 @@ impl ServerConfig {
             sleep(Duration::from_secs(3)).await;
         }
 
-        let checksum = params.peers.consensus_hash_sha256();
+        let checksum = params.nodes.consensus_hash_sha256();
 
         info!("Comparing connection codes checksum {checksum}...");
 
         connections.send(Recipient::Everyone, P2PMessage::Checksum(checksum));
 
-        for peer in params
-            .peer_ids()
+        for node in params
+            .node_ids()
             .into_iter()
             .filter(|p| *p != params.identity)
         {
-            let peer_message = connections
-                .receive_from_peer(peer)
+            let node_message = connections
+                .receive_from_peer(node)
                 .await
                 .context("Unexpected shutdown of p2p connections")?;
 
-            if peer_message != P2PMessage::Checksum(checksum) {
+            if node_message != P2PMessage::Checksum(checksum) {
                 error!(
                     expected = ?P2PMessage::Checksum(checksum),
-                    received = ?peer_message,
-                    "Peer {peer} has sent invalid connection code checksum message"
+                    received = ?node_message,
+                    "Node {node} has sent invalid connection code checksum message"
                 );
 
-                bail!("Peer {peer} has sent invalid connection code checksum message");
+                bail!("Node {node} has sent invalid connection code checksum message");
             }
 
-            info!("Peer {peer} has sent valid connection code checksum message");
+            info!("Node {node} has sent valid connection code checksum message");
         }
 
         info!("Running config generation...");
 
-        let handle = DkgHandle::new(params.peers.to_num_peers(), params.identity, &connections);
+        let handle = DkgHandle::new(params.nodes.to_num_peers(), params.identity, &connections);
 
         let (broadcast_sk, broadcast_pk) = secp256k1::generate_keypair(&mut OsRng);
         let broadcast_pk = broadcast_pk.x_only_public_key().0;
@@ -272,28 +272,28 @@ impl ServerConfig {
 
         connections.send(Recipient::Everyone, P2PMessage::Checksum(checksum));
 
-        for peer in params
-            .peer_ids()
+        for node in params
+            .node_ids()
             .into_iter()
             .filter(|p| *p != params.identity)
         {
-            let peer_message = connections
-                .receive_from_peer(peer)
+            let node_message = connections
+                .receive_from_peer(node)
                 .await
                 .context("Unexpected shutdown of p2p connections")?;
 
-            if peer_message != P2PMessage::Checksum(checksum) {
+            if node_message != P2PMessage::Checksum(checksum) {
                 warn!(
                     expected = ?P2PMessage::Checksum(checksum),
-                    received = ?peer_message,
+                    received = ?node_message,
                     config = ?cfg.consensus,
-                    "Peer {peer} has sent invalid consensus config checksum message"
+                    "Node {node} has sent invalid consensus config checksum message"
                 );
 
-                bail!("Peer {peer} has sent invalid consensus config checksum message");
+                bail!("Node {node} has sent invalid consensus config checksum message");
             }
 
-            info!("Peer {peer} has sent valid consensus config checksum message");
+            info!("Node {node} has sent valid consensus config checksum message");
         }
 
         info!("Config generation has completed successfully!");
@@ -303,11 +303,11 @@ impl ServerConfig {
 }
 
 impl ConfigGenParams {
-    pub fn peer_ids(&self) -> Vec<PeerId> {
-        self.peers.keys().copied().collect()
+    pub fn node_ids(&self) -> Vec<NodeId> {
+        self.nodes.keys().copied().collect()
     }
 
-    pub fn iroh_pks(&self) -> BTreeMap<PeerId, iroh_base::PublicKey> {
-        self.peers.iter().map(|(id, peer)| (*id, peer.pk)).collect()
+    pub fn iroh_pks(&self) -> BTreeMap<NodeId, iroh_base::PublicKey> {
+        self.nodes.iter().map(|(id, node)| (*id, node.pk)).collect()
     }
 }

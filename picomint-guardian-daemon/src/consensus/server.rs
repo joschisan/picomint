@@ -12,7 +12,7 @@ use picomint_core::module::audit::AuditSummary;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
-use picomint_core::{Amount, OutPoint, PeerId, TransactionId};
+use picomint_core::{Amount, OutPoint, NodeId, TransactionId};
 use picomint_redb::{Database, WriteTx};
 use tokio::sync::watch;
 use tracing::info;
@@ -35,12 +35,12 @@ impl Server {
     pub async fn process_module_ci(
         &self,
         dbtx: &WriteTx,
-        peer: PeerId,
+        node: NodeId,
         item: &wire::ModuleConsensusItem,
     ) -> anyhow::Result<()> {
         match item {
             wire::ModuleConsensusItem::Onchain(ci) => {
-                onchain::process_consensus_item(self, dbtx, peer, ci.clone()).await
+                onchain::process_consensus_item(self, dbtx, node, ci.clone()).await
             }
         }
     }

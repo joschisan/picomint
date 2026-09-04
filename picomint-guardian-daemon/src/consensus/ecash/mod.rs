@@ -26,23 +26,23 @@ use self::db::{
     IssuanceCounterTable, NoteNonceTable,
 };
 
-/// Run DKG for the mint module, producing a fresh `ECashConfig` for this peer.
-pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<ECashConfig> {
+/// Run DKG for the mint module, producing a fresh `ECashConfig` for this node.
+pub async fn distributed_gen(nodes: &DkgHandle<'_>) -> anyhow::Result<ECashConfig> {
     let mut tbs_sks = BTreeMap::new();
     let mut tbs_agg_pks = BTreeMap::new();
     let mut tbs_pks = BTreeMap::new();
 
     for denomination in consensus_denominations() {
-        let (poly, sk) = peers.run_dkg_g2().await?;
+        let (poly, sk) = nodes.run_dkg_g2().await?;
 
         tbs_sks.insert(denomination, tbs::SecretKeyShare(sk));
 
         tbs_agg_pks.insert(denomination, AggregatePublicKey(poly[0].to_affine()));
 
-        let pks = peers
+        let pks = nodes
             .num_peers()
-            .peer_ids()
-            .map(|peer| (peer, PublicKeyShare(eval_poly_g2(&poly, &peer))))
+            .node_ids()
+            .map(|node| (node, PublicKeyShare(eval_poly_g2(&poly, &node))))
             .collect();
 
         tbs_pks.insert(denomination, pks);

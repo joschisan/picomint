@@ -12,7 +12,7 @@ pub use amount::*;
 /// Mostly re-exported for [`Decodable`] macros.
 pub use anyhow;
 pub use bitcoin::hashes::Hash as BitcoinHash;
-pub use peer::*;
+pub use node::*;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 pub use {bitcoin, hex, secp256k1};
@@ -40,8 +40,8 @@ pub mod methods;
 pub mod ecash;
 /// Extendable module sysystem
 pub mod module;
-/// `PeerId` type
-mod peer;
+/// `NodeId` type
+mod node;
 /// Consensus session outcome types (AcceptedItem, SessionOutcome, …).
 pub mod secret;
 

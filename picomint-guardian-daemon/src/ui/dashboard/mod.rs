@@ -68,15 +68,15 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
         .server
         .cfg
         .consensus
-        .peers
+        .nodes
         .iter()
-        .map(|(peer, endpoint)| (*peer, endpoint.name.clone()))
+        .map(|(node, endpoint)| (*node, endpoint.name.clone()))
         .collect();
     let mint_name = api.server.cfg.consensus.name.clone();
     let p2p_connection_status: BTreeMap<_, _> = api
         .p2p_status_receivers
         .iter()
-        .map(|(peer, receiver)| (*peer, receiver.borrow().clone()))
+        .map(|(node, receiver)| (*node, receiver.borrow().clone()))
         .collect();
     let bitcoin_rpc_status = api.server.btc_rpc.status();
 

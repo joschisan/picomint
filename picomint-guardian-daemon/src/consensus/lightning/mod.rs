@@ -33,17 +33,17 @@ use self::db::{
 };
 
 /// Run DKG for the lightning module, producing a fresh `LightningConfig` for
-/// this peer.
-pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<LightningConfig> {
-    let (polynomial, sks) = peers.run_dkg_g1().await?;
+/// this node.
+pub async fn distributed_gen(nodes: &DkgHandle<'_>) -> anyhow::Result<LightningConfig> {
+    let (polynomial, sks) = nodes.run_dkg_g1().await?;
 
     Ok(LightningConfig {
         consensus: LightningConfigConsensus {
             tpe_agg_pk: tpe::AggregatePublicKey(polynomial[0].to_affine()),
-            tpe_pks: peers
+            tpe_pks: nodes
                 .num_peers()
-                .peer_ids()
-                .map(|peer| (peer, PublicKeyShare(eval_poly_g1(&polynomial, &peer))))
+                .node_ids()
+                .map(|node| (node, PublicKeyShare(eval_poly_g1(&polynomial, &node))))
                 .collect(),
             input_fee: Amount::from_sat(1),
             output_fee: Amount::from_sat(1),

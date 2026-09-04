@@ -192,13 +192,13 @@ async fn resolve_and_fetch_invoice(
 ) -> anyhow::Result<(GatewayPk, Bolt11Invoice)> {
     let info = fetch_mint_info(endpoint, &request.guardians, request.info).await?;
 
-    let peers = info
-        .peers
+    let nodes = info
+        .nodes
         .iter()
-        .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
+        .map(|(node, endpoint)| (*node, endpoint.iroh_pk))
         .collect();
 
-    let api = MintApi::new(endpoint.clone(), peers);
+    let api = MintApi::new(endpoint.clone(), nodes);
 
     let (aggregate_pk, gateways) = try_join!(fetch_aggregate_pk(&api), fetch_gateways(&api))?;
 
@@ -274,12 +274,12 @@ async fn resolve_and_fetch_invoice(
 
 /// Take the first guardian response that hashes to the payload's commitment.
 /// That commitment is what makes a single guardian enough: one can stall or
-/// refuse, but a forged peer set will not hash. The payload carries `f + 1` of
+/// refuse, but a forged node set will not hash. The payload carries `f + 1` of
 /// them, so one is honest and reachable whenever the mint itself is.
 ///
 /// One request per guardian and no reuse, so this dials directly rather than
 /// standing up a [`MintApi`] — and the guardians are a subset, which a
-/// mint-shaped peer set has no room for.
+/// mint-shaped node set has no room for.
 async fn fetch_mint_info(
     endpoint: &Endpoint,
     guardians: &[iroh::PublicKey],
@@ -314,7 +314,7 @@ async fn fetch_mint_info(
 }
 
 /// Threshold-read the mint's tpe aggregate key. Not committed to by the
-/// lnurl: the peer set it is read from is, and `2f + 1` guardians agreeing on
+/// lnurl: the node set it is read from is, and `2f + 1` guardians agreeing on
 /// a value is the same assumption the rest of the mint already rests on.
 async fn fetch_aggregate_pk(api: &MintApi) -> anyhow::Result<AggregatePublicKey> {
     let response: TpeAggregatePkResponse = api

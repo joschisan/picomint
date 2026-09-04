@@ -75,7 +75,7 @@ pub struct TestEnv {
     pub gateway_pk: GatewayPk,
     pub lnurl_daemon_url: String,
     pub client_counter: AtomicU64,
-    /// One per guardian, indexed by peer id. `None` once we've killed it.
+    /// One per guardian, indexed by node id. `None` once we've killed it.
     pub guardian_processes: Mutex<Vec<Option<Child>>>,
 }
 
@@ -103,15 +103,15 @@ impl TestEnv {
         }
 
         info!("Running DKG...");
-        let peer_data_dirs: Vec<_> = (0..NUM_GUARDIANS)
+        let node_data_dirs: Vec<_> = (0..NUM_GUARDIANS)
             .map(|i| base.join(format!("guardian-{i}")))
             .collect();
-        runtime.block_on(run_dkg(&peer_data_dirs))?;
+        runtime.block_on(run_dkg(&node_data_dirs))?;
 
-        let peer0_data_dir = peer_data_dirs[0].clone();
+        let node0_data_dir = node_data_dirs[0].clone();
         let invite = runtime
             .block_on(retry("fetch invite code", || async {
-                cli::guardian_invite(&peer0_data_dir)
+                cli::guardian_invite(&node0_data_dir)
             }))?
             .invite;
         info!("Mint ready");
@@ -120,10 +120,10 @@ impl TestEnv {
         // runs against a mint at exactly quorum. Wait for each to
         // finalize a session first — that proves its DKG output and bft
         // state are persisted, so it can come back from its data dir.
-        for peer in NUM_ONLINE_GUARDIANS..NUM_GUARDIANS {
-            let data_dir = &peer_data_dirs[peer];
+        for node in NUM_ONLINE_GUARDIANS..NUM_GUARDIANS {
+            let data_dir = &node_data_dirs[node];
             runtime.block_on(retry(
-                &format!("guardian-{peer} finalized a session"),
+                &format!("guardian-{node} finalized a session"),
                 || async {
                     ensure!(
                         cli::guardian_session_count(data_dir)? >= 1,
@@ -133,7 +133,7 @@ impl TestEnv {
                 },
             ))?;
 
-            let mut child = guardian_processes[peer]
+            let mut child = guardian_processes[node]
                 .take()
                 .expect("guardian was started");
             runtime.block_on(async {
@@ -141,7 +141,7 @@ impl TestEnv {
                 child.wait().await?;
                 anyhow::Ok(())
             })?;
-            info!("Stopped guardian-{peer}");
+            info!("Stopped guardian-{node}");
         }
 
         let client_counter = AtomicU64::new(0);
@@ -200,23 +200,23 @@ impl TestEnv {
     /// SIGKILL a single guardian process and delete its data directory,
     /// simulating a total disk loss. Use `restart_guardian` to bring it
     /// back up against an empty data dir.
-    pub async fn wipe_guardian(&self, peer: usize) -> anyhow::Result<()> {
+    pub async fn wipe_guardian(&self, node: usize) -> anyhow::Result<()> {
         let mut procs = self.guardian_processes.lock().await;
-        if let Some(mut child) = procs[peer].take() {
+        if let Some(mut child) = procs[node].take() {
             child.kill().await?;
             child.wait().await?;
         }
         drop(procs);
 
-        let data_dir = self.data_dir.join(format!("guardian-{peer}"));
+        let data_dir = self.data_dir.join(format!("guardian-{node}"));
         tokio::fs::remove_dir_all(&data_dir).await?;
         Ok(())
     }
 
-    /// Spawn a fresh daemon for `peer` against its existing data dir.
-    pub async fn restart_guardian(&self, peer: usize) -> anyhow::Result<()> {
-        let child = start_guardian(&self.data_dir, peer).await?;
-        self.guardian_processes.lock().await[peer] = Some(child);
+    /// Spawn a fresh daemon for `node` against its existing data dir.
+    pub async fn restart_guardian(&self, node: usize) -> anyhow::Result<()> {
+        let child = start_guardian(&self.data_dir, node).await?;
+        self.guardian_processes.lock().await[node] = Some(child);
         Ok(())
     }
 
@@ -316,17 +316,17 @@ async fn build_client(
     Ok(TestClient { client, fed, db })
 }
 
-async fn start_guardian(base: &Path, peer: usize) -> anyhow::Result<Child> {
-    let p2p_port = GUARDIAN_BASE_PORT + (peer as u16 * PORTS_PER_GUARDIAN);
+async fn start_guardian(base: &Path, node: usize) -> anyhow::Result<Child> {
+    let p2p_port = GUARDIAN_BASE_PORT + (node as u16 * PORTS_PER_GUARDIAN);
     let ui_port = p2p_port + 1;
 
-    let data_dir = base.join(format!("guardian-{peer}"));
+    let data_dir = base.join(format!("guardian-{node}"));
     tokio::fs::create_dir_all(&data_dir).await?;
 
     let log_file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(base.join(format!("guardian-{peer}.log")))?;
+        .open(base.join(format!("guardian-{node}.log")))?;
 
     let child = Command::new("target/release/picomint-guardian-daemon")
         .env("DATA_DIR", data_dir.to_str().unwrap())
@@ -341,9 +341,9 @@ async fn start_guardian(base: &Path, peer: usize) -> anyhow::Result<Child> {
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
         .spawn()
-        .context(format!("Failed to start guardian-{peer}"))?;
+        .context(format!("Failed to start guardian-{node}"))?;
 
-    info!("Started guardian-{peer} on port {p2p_port} (UI: http://127.0.0.1:{ui_port})");
+    info!("Started guardian-{node} on port {p2p_port} (UI: http://127.0.0.1:{ui_port})");
     Ok(child)
 }
 
@@ -385,13 +385,13 @@ async fn start_gateway(base: &Path, name: &str, gateway_port: u16, lightning_por
     Ok(())
 }
 
-async fn run_dkg(peer_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
+async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
     use picomint_guardian_cli_core::SetupStatus;
 
     // Wait for all guardians to be ready (the CLI `setup status` call
     // returns once the daemon has bound its CLI socket).
-    for (peer, data_dir) in peer_data_dirs.iter().enumerate() {
-        retry(&format!("guardian-{peer} setup status"), || async {
+    for (node, data_dir) in node_data_dirs.iter().enumerate() {
+        retry(&format!("guardian-{node} setup status"), || async {
             let status = cli::guardian_setup_status(data_dir)?;
             ensure!(
                 status == SetupStatus::AwaitingLocalParams,
@@ -403,11 +403,11 @@ async fn run_dkg(peer_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
     }
     info!("All guardians awaiting local params");
 
-    // Set local params: peer 0 is leader, rest are followers
+    // Set local params: node 0 is leader, rest are followers
     let mut setup_codes = BTreeMap::new();
-    for (peer, data_dir) in peer_data_dirs.iter().enumerate() {
-        let name = format!("Guardian {peer}");
-        let (mint_name, mint_size) = if peer == 0 {
+    for (node, data_dir) in node_data_dirs.iter().enumerate() {
+        let name = format!("Guardian {node}");
+        let (mint_name, mint_size) = if node == 0 {
             (Some("Test Mint"), Some(NUM_GUARDIANS as u8))
         } else {
             (None, None)
@@ -423,23 +423,23 @@ async fn run_dkg(peer_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
             .and_then(|v| v.as_str())
             .context("missing setup_code in set-local-params response")?
             .to_string();
-        setup_codes.insert(peer, setup_code);
+        setup_codes.insert(node, setup_code);
     }
     info!("Local params set for all guardians");
 
-    // Exchange peer connection info
-    for (peer, code) in &setup_codes {
-        for (other_peer, data_dir) in peer_data_dirs.iter().enumerate() {
-            if other_peer == *peer {
+    // Exchange node connection info
+    for (node, code) in &setup_codes {
+        for (other_peer, data_dir) in node_data_dirs.iter().enumerate() {
+            if other_peer == *node {
                 continue;
             }
             cli::guardian_setup_add_peer(data_dir, code)?;
         }
     }
-    info!("Peer info exchanged");
+    info!("Node info exchanged");
 
-    // Start DKG on all peers
-    for data_dir in peer_data_dirs {
+    // Start DKG on all nodes
+    for data_dir in node_data_dirs {
         cli::guardian_setup_start_dkg(data_dir)?;
     }
 

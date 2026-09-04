@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{Amount, PeerId};
+use crate::{Amount, NodeId};
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use tss::{AggregatePublicKey, PublicKeyShare, SecretKeyShare};
@@ -21,7 +21,7 @@ pub struct OnchainConfigConsensus {
     /// The aggregate public key of the mint's taproot wallet
     pub agg_pk: AggregatePublicKey,
     /// The public key shares of the guardians
-    pub pks: BTreeMap<PeerId, PublicKeyShare>,
+    pub pks: BTreeMap<NodeId, PublicKeyShare>,
     /// The minimum feerate doubles for each pending transaction in the stack,
     /// protecting against catastrophic feerate estimation errors
     pub feerate_base: u32,
@@ -34,7 +34,7 @@ pub struct OnchainConfigConsensus {
 }
 
 impl OnchainConfigConsensus {
-    pub fn new(agg_pk: AggregatePublicKey, pks: BTreeMap<PeerId, PublicKeyShare>) -> Self {
+    pub fn new(agg_pk: AggregatePublicKey, pks: BTreeMap<NodeId, PublicKeyShare>) -> Self {
         Self {
             agg_pk,
             pks,

@@ -8,7 +8,7 @@ use picomint_core::ecash::methods::{
 };
 use picomint_core::module::Method;
 use picomint_core::secp256k1::XOnlyPublicKey;
-use picomint_core::{PeerId, TransactionId};
+use picomint_core::{NodeId, TransactionId};
 use picomint_rpc::query::FilterMapThreshold;
 use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 
@@ -19,12 +19,12 @@ pub async fn signatures(
     api: &MintApi,
     txid: TransactionId,
     issuance_requests: Vec<NoteIssuanceRequest>,
-    tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
-) -> BTreeMap<PeerId, Vec<BlindedSignatureShare>> {
+    tbs_pks: BTreeMap<Denomination, BTreeMap<NodeId, PublicKeyShare>>,
+) -> BTreeMap<NodeId, Vec<BlindedSignatureShare>> {
     api.request_with_strategy_retry(
         FilterMapThreshold::new(
-            move |peer, resp: SignaturesResponse| {
-                verify_blind_shares(peer, resp.shares, &issuance_requests, &tbs_pks)
+            move |node, resp: SignaturesResponse| {
+                verify_blind_shares(node, resp.shares, &issuance_requests, &tbs_pks)
             },
             api.num_peers(),
         ),
@@ -34,14 +34,14 @@ pub async fn signatures(
 }
 
 /// Fetch shares for notes a restore scan has already established the
-/// mint signed. Every message must resolve on every peer, so a
+/// mint signed. Every message must resolve on every node, so a
 /// candidate can never be silently dropped for want of a full column of
 /// shares to interpolate over.
 pub async fn signatures_restore(
     api: &MintApi,
     issuance_requests: Vec<NoteIssuanceRequest>,
-    tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
-) -> BTreeMap<PeerId, Vec<BlindedSignatureShare>> {
+    tbs_pks: BTreeMap<Denomination, BTreeMap<NodeId, PublicKeyShare>>,
+) -> BTreeMap<NodeId, Vec<BlindedSignatureShare>> {
     let messages = issuance_requests
         .iter()
         .map(NoteIssuanceRequest::blinded_message)
@@ -49,8 +49,8 @@ pub async fn signatures_restore(
 
     api.request_with_strategy_retry(
         FilterMapThreshold::new(
-            move |peer, resp: SignaturesRestoreResponse| {
-                verify_blind_shares(peer, resp.shares, &issuance_requests, &tbs_pks)
+            move |node, resp: SignaturesRestoreResponse| {
+                verify_blind_shares(node, resp.shares, &issuance_requests, &tbs_pks)
             },
             api.num_peers(),
         ),
@@ -63,9 +63,9 @@ pub async fn signatures_restore(
 
 /// Which of `nonces` the mint has already seen spent, and which of
 /// `messages` it ever signed. Both go through threshold consensus rather
-/// than a single peer: either answer coming back wrong in the negative
+/// than a single node: either answer coming back wrong in the negative
 /// direction makes a restoring wallet abandon a live note, so a lone
-/// peer must not be able to decide it.
+/// node must not be able to decide it.
 pub async fn spend_state(api: &MintApi, nonces: Vec<XOnlyPublicKey>) -> Vec<bool> {
     api.request_current_consensus_retry::<SpendStateResponse>(Method::ECash(ECashMethod::SpendState(
         SpendStateRequest { nonces },

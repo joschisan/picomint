@@ -2,7 +2,7 @@ use bitcoin::hashes::sha256;
 use picomint_encoding::{Decodable, Encodable};
 
 use crate::tx::ConsensusItem;
-use crate::{PeerId, secp256k1};
+use crate::{NodeId, secp256k1};
 
 /// A consensus item accepted in the consensus
 ///
@@ -12,7 +12,7 @@ use crate::{PeerId, secp256k1};
 /// accept it.
 #[derive(Clone, Debug, PartialEq, Eq, Encodable, Decodable)]
 pub struct AcceptedItem {
-    pub peer: PeerId,
+    pub node: NodeId,
     pub item: ConsensusItem,
 }
 
@@ -24,7 +24,7 @@ pub struct AcceptedItem {
 /// items are ordered in that time or all ordered items are discarded by
 /// Picomint Consensus.
 ///
-/// When session is closed it is signed over by the peers and produces a
+/// When session is closed it is signed over by the nodes and produces a
 /// [`SignedSessionOutcome`].
 #[derive(Clone, Debug, PartialEq, Eq, Encodable, Decodable)]
 pub struct SessionOutcome {
@@ -50,5 +50,5 @@ impl SessionOutcome {
 #[derive(Clone, Debug, Encodable, Decodable, Eq, PartialEq)]
 pub struct SignedSessionOutcome {
     pub session_outcome: SessionOutcome,
-    pub signatures: std::collections::BTreeMap<PeerId, secp256k1::schnorr::Signature>,
+    pub signatures: std::collections::BTreeMap<NodeId, secp256k1::schnorr::Signature>,
 }

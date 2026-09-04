@@ -19,7 +19,7 @@ use picomint_bft::Message as BftMessage;
 use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
 use picomint_core::session::SignedSessionOutcome;
 use picomint_core::tx::ConsensusItem;
-use picomint_core::{PeerId, secp256k1};
+use picomint_core::{NodeId, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -29,7 +29,7 @@ use tracing::{Instrument, debug, info, info_span, warn};
 /// Transport of a connection's selected network path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Transport {
-    /// Direct, hole-punched UDP path to the peer.
+    /// Direct, hole-punched UDP path to the node.
     Direct,
     /// Relayed path through an iroh relay server.
     Relay,
@@ -47,17 +47,17 @@ pub struct PathInfo {
     pub rtt: Duration,
 }
 
-/// P2P connection status for a peer.
+/// P2P connection status for a node.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum P2PConnectionStatus {
-    /// No live connection to the peer.
+    /// No live connection to the node.
     Disconnected,
     /// A live connection, described by its selected network path.
     Connected(PathInfo),
 }
 
 impl P2PConnectionStatus {
-    /// Whether the peer is currently disconnected.
+    /// Whether the node is currently disconnected.
     pub fn is_disconnected(&self) -> bool {
         matches!(self, P2PConnectionStatus::Disconnected)
     }
@@ -175,21 +175,21 @@ impl P2PConnection {
     }
 }
 
-/// Iroh-backed connector that dials peers by their pinned node id and accepts
+/// Iroh-backed connector that dials nodes by their pinned node id and accepts
 /// incoming connections authenticated against the same node-id set.
 #[derive(Clone)]
 pub struct P2PConnector {
-    node_ids: BTreeMap<PeerId, PublicKey>,
+    iroh_pks: BTreeMap<NodeId, PublicKey>,
     endpoint: Endpoint,
 }
 
 impl P2PConnector {
     pub async fn new(
         secret_key: SecretKey,
-        node_ids: BTreeMap<PeerId, PublicKey>,
+        iroh_pks: BTreeMap<NodeId, PublicKey>,
         p2p_addr: SocketAddr,
     ) -> anyhow::Result<Self> {
-        let identity = *node_ids
+        let identity = *iroh_pks
             .iter()
             .find(|entry| entry.1 == &secret_key.public())
             .expect("Our public key is not part of the keyset")
@@ -205,7 +205,7 @@ impl P2PConnector {
             .await?;
 
         Ok(Self {
-            node_ids: node_ids
+            iroh_pks: iroh_pks
                 .into_iter()
                 .filter(|entry| entry.0 != identity)
                 .collect(),
@@ -213,21 +213,21 @@ impl P2PConnector {
         })
     }
 
-    pub fn peers(&self) -> Vec<PeerId> {
-        self.node_ids.keys().copied().collect()
+    pub fn nodes(&self) -> Vec<NodeId> {
+        self.iroh_pks.keys().copied().collect()
     }
 
-    pub async fn connect(&self, peer: PeerId) -> anyhow::Result<P2PConnection> {
-        let node_id = *self.node_ids.get(&peer).expect("No node id found for peer");
+    pub async fn connect(&self, node: NodeId) -> anyhow::Result<P2PConnection> {
+        let iroh_pk = *self.iroh_pks.get(&node).expect("No iroh pk found for node");
 
-        let connection = self.endpoint.connect(node_id, picomint_rpc::ALPN).await?;
+        let connection = self.endpoint.connect(iroh_pk, picomint_rpc::ALPN).await?;
 
         Ok(P2PConnection::new(connection))
     }
 
     /// Accept the next incoming connection, fully completing the QUIC
-    /// handshake. The remote node-id is compared against the pinned peer set:
-    /// a match produces [`Accepted::Peer`] for the mint-internal p2p
+    /// handshake. The remote node-id is compared against the pinned node set:
+    /// a match produces [`Accepted::Node`] for the mint-internal p2p
     /// path; anything else is [`Accepted::Foreign`] for the public API path
     /// (one endpoint, two logical consumers demuxed here by node-id).
     pub async fn accept(&self) -> anyhow::Result<Accepted> {
@@ -239,11 +239,11 @@ impl P2PConnector {
             .accept()?
             .await?;
 
-        let node_id = connection.remote_id();
+        let iroh_pk = connection.remote_id();
 
-        for (peer, pk) in &self.node_ids {
-            if *pk == node_id {
-                return Ok(Accepted::Peer(*peer, P2PConnection::new(connection)));
+        for (node, pk) in &self.iroh_pks {
+            if *pk == iroh_pk {
+                return Ok(Accepted::Node(*node, P2PConnection::new(connection)));
             }
         }
 
@@ -251,49 +251,49 @@ impl P2PConnector {
     }
 }
 
-/// Result of [`P2PConnector::accept`]: either a mint peer (pinned
+/// Result of [`P2PConnector::accept`]: either a mint node (pinned
 /// node-id) or a foreign connection (public-API client).
 pub enum Accepted {
-    Peer(PeerId, P2PConnection),
+    Node(NodeId, P2PConnection),
     Foreign(Connection),
 }
 
 // ── Connection manager ──────────────────────────────────────────────────────
 
-pub type P2PStatusSenders = BTreeMap<PeerId, watch::Sender<P2PConnectionStatus>>;
-pub type P2PStatusReceivers = BTreeMap<PeerId, watch::Receiver<P2PConnectionStatus>>;
+pub type P2PStatusSenders = BTreeMap<NodeId, watch::Sender<P2PConnectionStatus>>;
+pub type P2PStatusReceivers = BTreeMap<NodeId, watch::Receiver<P2PConnectionStatus>>;
 
 /// This enum defines the intended recipient of a p2p message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Recipient {
     Everyone,
-    Peer(PeerId),
+    Node(NodeId),
 }
 
-pub fn p2p_status_channels(peers: Vec<PeerId>) -> (P2PStatusSenders, P2PStatusReceivers) {
+pub fn p2p_status_channels(nodes: Vec<NodeId>) -> (P2PStatusSenders, P2PStatusReceivers) {
     let mut senders = BTreeMap::new();
     let mut receivers = BTreeMap::new();
 
-    for peer in peers {
+    for node in nodes {
         let (sender, receiver) = watch::channel(P2PConnectionStatus::Disconnected);
 
-        senders.insert(peer, sender);
-        receivers.insert(peer, receiver);
+        senders.insert(node, sender);
+        receivers.insert(node, receiver);
     }
 
     (senders, receivers)
 }
 
-/// Connection manager that tries to keep iroh connections open to all peers
+/// Connection manager that tries to keep iroh connections open to all nodes
 /// and exchanges consensus-encoded [`P2PMessage`]s with them.
 #[derive(Clone)]
 pub struct ReconnectP2PConnections {
-    connections: BTreeMap<PeerId, PeerChannel>,
+    connections: BTreeMap<NodeId, NodeChannel>,
 }
 
 impl ReconnectP2PConnections {
     pub fn new(
-        identity: PeerId,
+        identity: NodeId,
         connector: P2PConnector,
         status_senders: P2PStatusSenders,
         foreign_conn_tx: Sender<Connection>,
@@ -301,24 +301,24 @@ impl ReconnectP2PConnections {
         let mut connection_senders = BTreeMap::new();
         let mut connections = BTreeMap::new();
 
-        for peer in connector.peers() {
-            assert_ne!(peer, identity);
+        for node in connector.nodes() {
+            assert_ne!(node, identity);
 
             let (connection_tx, connection_rx) = bounded(4);
 
-            let connection = PeerChannel::new(
+            let connection = NodeChannel::new(
                 identity,
-                peer,
+                node,
                 connector.clone(),
                 connection_rx,
                 status_senders
-                    .get(&peer)
-                    .expect("No p2p status sender for peer")
+                    .get(&node)
+                    .expect("No p2p status sender for node")
                     .clone(),
             );
 
-            connection_senders.insert(peer, connection_tx);
-            connections.insert(peer, connection);
+            connection_senders.insert(node, connection_tx);
+            connections.insert(node, connection);
         }
 
         tokio::spawn(async move {
@@ -326,10 +326,10 @@ impl ReconnectP2PConnections {
 
             loop {
                 match connector.accept().await {
-                    Ok(Accepted::Peer(peer, connection)) => {
+                    Ok(Accepted::Node(node, connection)) => {
                         if connection_senders
-                            .get_mut(&peer)
-                            .expect("Authenticating endpoint doesn't return unknown peers")
+                            .get_mut(&node)
+                            .expect("Authenticating endpoint doesn't return unknown nodes")
                             .send(connection)
                             .await
                             .is_err()
@@ -366,53 +366,53 @@ impl ReconnectP2PConnections {
                     connection.try_send(message.clone());
                 }
             }
-            Recipient::Peer(peer) => match self.connections.get(&peer) {
+            Recipient::Node(node) => match self.connections.get(&node) {
                 Some(connection) => {
                     connection.try_send(message);
                 }
                 _ => {
-                    warn!("No connection for peer {peer}");
+                    warn!("No connection for node {node}");
                 }
             },
         }
     }
 
-    /// Await the next message from any peer; `None` when shutting down.
-    pub async fn receive(&self) -> Option<(PeerId, P2PMessage)> {
-        select_all(self.connections.iter().map(|(&peer, connection)| {
-            Box::pin(connection.receive().map(move |m| m.map(|m| (peer, m))))
+    /// Await the next message from any node; `None` when shutting down.
+    pub async fn receive(&self) -> Option<(NodeId, P2PMessage)> {
+        select_all(self.connections.iter().map(|(&node, connection)| {
+            Box::pin(connection.receive().map(move |m| m.map(|m| (node, m))))
         }))
         .await
         .0
     }
 
-    /// Await the next message from `peer`; `None` when shutting down.
-    pub async fn receive_from_peer(&self, peer: PeerId) -> Option<P2PMessage> {
+    /// Await the next message from `node`; `None` when shutting down.
+    pub async fn receive_from_peer(&self, node: NodeId) -> Option<P2PMessage> {
         self.connections
-            .get(&peer)
-            .expect("No connection found for peer")
+            .get(&node)
+            .expect("No connection found for node")
             .receive()
             .await
     }
 }
 
-/// Per-peer outgoing queue and incoming queue, backed by a background state
+/// Per-node outgoing queue and incoming queue, backed by a background state
 /// machine that (re)establishes the underlying iroh connection.
 #[derive(Clone)]
-struct PeerChannel {
+struct NodeChannel {
     outgoing_tx: Sender<P2PMessage>,
     incoming_rx: Receiver<P2PMessage>,
 }
 
-impl PeerChannel {
+impl NodeChannel {
     fn new(
-        our_id: PeerId,
-        peer: PeerId,
+        our_id: NodeId,
+        node: NodeId,
         connector: P2PConnector,
         incoming_connections: Receiver<P2PConnection>,
         status_tx: watch::Sender<P2PConnectionStatus>,
     ) -> Self {
-        // Per-peer message queues. Sized for the BFT engine's anti-entropy
+        // Per-node message queues. Sized for the BFT engine's anti-entropy
         // bursts (push + reactive pull at unit-creation cadence) plus
         // headroom — drops are silent and the consensus layer expects to
         // resend, but a queue too small causes confirmation propagation
@@ -422,14 +422,14 @@ impl PeerChannel {
 
         tokio::spawn(
             async move {
-                info!("Starting peer connection state machine");
+                info!("Starting node connection state machine");
 
                 let mut state_machine = P2PConnectionStateMachine {
                     common: P2PConnectionSMCommon {
                         incoming_tx,
                         outgoing_rx,
                         our_id,
-                        peer,
+                        node,
                         connector,
                         incoming_connections,
                         status_tx,
@@ -441,12 +441,12 @@ impl PeerChannel {
                     state_machine = sm;
                 }
 
-                info!("Shutting down peer connection state machine");
+                info!("Shutting down node connection state machine");
             }
-            .instrument(info_span!("io-state-machine", ?peer)),
+            .instrument(info_span!("io-state-machine", ?node)),
         );
 
-        PeerChannel {
+        NodeChannel {
             outgoing_tx,
             incoming_rx,
         }
@@ -471,8 +471,8 @@ struct P2PConnectionStateMachine {
 struct P2PConnectionSMCommon {
     incoming_tx: async_channel::Sender<P2PMessage>,
     outgoing_rx: async_channel::Receiver<P2PMessage>,
-    our_id: PeerId,
-    peer: PeerId,
+    our_id: NodeId,
+    node: NodeId,
     connector: P2PConnector,
     incoming_connections: Receiver<P2PConnection>,
     status_tx: watch::Sender<P2PConnectionStatus>,
@@ -524,7 +524,7 @@ impl P2PConnectionSMCommon {
                 Some(self.send_message(connection, message.ok()?).await)
             },
             connection = self.incoming_connections.recv() => {
-                info!("Connected to peer");
+                info!("Connected to node");
 
                 Some(P2PConnectionSMState::Connected(connection.ok()?))
             },
@@ -549,7 +549,7 @@ impl P2PConnectionSMCommon {
     }
 
     fn disconnect(&self, error: anyhow::Error) -> P2PConnectionSMState {
-        info!("Disconnected from peer: {}", error);
+        info!("Disconnected from node: {}", error);
 
         P2PConnectionSMState::Disconnected(networking_backoff().build())
     }
@@ -557,9 +557,9 @@ impl P2PConnectionSMCommon {
     async fn send_message(
         &mut self,
         connection: P2PConnection,
-        peer_message: P2PMessage,
+        node_message: P2PMessage,
     ) -> P2PConnectionSMState {
-        if let Err(e) = connection.send(peer_message).await {
+        if let Err(e) = connection.send(node_message).await {
             return self.disconnect(e);
         }
 
@@ -572,22 +572,22 @@ impl P2PConnectionSMCommon {
     ) -> Option<P2PConnectionSMState> {
         tokio::select! {
             connection = self.incoming_connections.recv() => {
-                info!("Connected to peer");
+                info!("Connected to node");
 
                 Some(P2PConnectionSMState::Connected(connection.ok()?))
             },
             // To prevent reconnection ping-pongs, only the side with lower
-            // PeerId reconnects.
-            () = sleep(backoff.next().expect("Unlimited retries")), if self.our_id < self.peer => {
-                info!("Attempting to reconnect to peer");
+            // NodeId reconnects.
+            () = sleep(backoff.next().expect("Unlimited retries")), if self.our_id < self.node => {
+                info!("Attempting to reconnect to node");
 
-                match self.connector.connect(self.peer).await {
+                match self.connector.connect(self.node).await {
                     Ok(connection) => {
-                        info!("Connected to peer");
+                        info!("Connected to node");
 
                         return Some(P2PConnectionSMState::Connected(connection));
                     }
-                    Err(e) => warn!("Failed to connect to peer: {e}"),
+                    Err(e) => warn!("Failed to connect to node: {e}"),
                 }
 
                 Some(P2PConnectionSMState::Disconnected(backoff))

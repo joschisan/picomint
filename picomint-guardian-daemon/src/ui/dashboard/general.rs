@@ -1,17 +1,17 @@
 use std::collections::BTreeMap;
 
 use maud::{Markup, html};
-use picomint_core::PeerId;
+use picomint_core::NodeId;
 
 use crate::p2p::{P2PConnectionStatus, Transport};
 
-/// Renders the mint card: one row per peer with its name and p2p
+/// Renders the mint card: one row per node with its name and p2p
 /// connection status. The running guardian has no connection to itself and
 /// is omitted.
 pub fn render(
     mint_name: &str,
-    guardian_names: &BTreeMap<PeerId, String>,
-    p2p_connection_status: &BTreeMap<PeerId, P2PConnectionStatus>,
+    guardian_names: &BTreeMap<NodeId, String>,
+    p2p_connection_status: &BTreeMap<NodeId, P2PConnectionStatus>,
 ) -> Markup {
     let connected = p2p_connection_status
         .values()
@@ -23,7 +23,7 @@ pub fn render(
             div class="card-header" {
                 span class="card-title" { (mint_name) }
                 span class="card-sub" {
-                    (format!("{connected} of {} peers connected", p2p_connection_status.len()))
+                    (format!("{connected} of {} nodes connected", p2p_connection_status.len()))
                 }
             }
             table {
@@ -37,10 +37,10 @@ pub fn render(
                     }
                 }
                 tbody {
-                    @for (peer, status) in p2p_connection_status {
+                    @for (node, status) in p2p_connection_status {
                         tr {
-                            td class="mono muted" { (peer.to_string()) }
-                            td { (guardian_names.get(peer).expect("every peer is in the consensus config")) }
+                            td class="mono muted" { (node.to_string()) }
+                            td { (guardian_names.get(node).expect("every node is in the consensus config")) }
                             (connection_cells(status))
                         }
                     }

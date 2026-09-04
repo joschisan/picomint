@@ -1,5 +1,5 @@
 use bitcoin::{TxOut, Txid};
-use picomint_core::PeerId;
+use picomint_core::NodeId;
 use picomint_core::onchain::TxInfo;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::table;
@@ -10,10 +10,10 @@ use super::{MintTx, MintUtxo};
 #[derive(Clone, Debug, Encodable, Decodable, Serialize)]
 pub struct Output(pub bitcoin::OutPoint, pub TxOut);
 
-/// One peer's entry in a transaction's nonce log — one public nonce pair
+/// One node's entry in a transaction's nonce log — one public nonce pair
 /// per tx input.
 #[derive(Clone, Debug, Encodable, Decodable)]
-pub struct NonceEntry(pub PeerId, pub Vec<tss::PublicNonce>);
+pub struct NonceEntry(pub NodeId, pub Vec<tss::PublicNonce>);
 
 table!(
     OutputTable,
@@ -56,7 +56,7 @@ table!(
 // Append-only log of the accepted nonce entries for the unsigned
 // transaction. Consecutive chunks of threshold entries form the signing
 // sessions: session s consists of the entries [s * t, (s + 1) * t). The
-// incomplete tail chunk holds the peers available for the next session.
+// incomplete tail chunk holds the nodes available for the next session.
 table!(
     NonceLogTable,
     u64 => NonceEntry,
@@ -80,6 +80,6 @@ table!(
 
 table!(
     FeeRateVoteTable,
-    PeerId => Option<u32>,
+    NodeId => Option<u32>,
     "onchain-fee-rate-vote",
 );

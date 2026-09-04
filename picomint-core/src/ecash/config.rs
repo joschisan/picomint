@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tbs::{AggregatePublicKey, PublicKeyShare};
 
 use crate::ecash::Denomination;
-use crate::{Amount, PeerId};
+use crate::{Amount, NodeId};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ECashConfig {
@@ -24,7 +24,7 @@ pub fn client_denominations() -> impl DoubleEndedIterator<Item = Denomination> +
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub struct ECashConfigConsensus {
     pub tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,
-    pub tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
+    pub tbs_pks: BTreeMap<Denomination, BTreeMap<NodeId, PublicKeyShare>>,
     pub input_fee: Amount,
     pub output_fee: Amount,
 }

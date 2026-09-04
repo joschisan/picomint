@@ -118,7 +118,7 @@ async fn run_dkg_then_consensus(
 ) -> anyhow::Result<()> {
     info!("Starting DKG...");
 
-    // Single channel for foreign (non-peer) iroh connections — fed by the
+    // Single channel for foreign (non-node) iroh connections — fed by the
     // p2p accept loop's demux, drained by the consensus-phase api task.
     // Small bound: pre-DKG there's no consumer, so incoming api attempts
     // overflow and are dropped (no valid client should be talking to a
@@ -127,7 +127,7 @@ async fn run_dkg_then_consensus(
 
     let cnt = P2PConnector::new(cgp.iroh_sk.clone(), cgp.iroh_pks(), settings.p2p_addr).await?;
 
-    let (status_txs, status_rxs) = p2p_status_channels(cnt.peers());
+    let (status_txs, status_rxs) = p2p_status_channels(cnt.nodes());
 
     let connections = ReconnectP2PConnections::new(cgp.identity, cnt, status_txs, conn_tx);
 
@@ -165,7 +165,7 @@ async fn run_consensus(
     db: Database,
     bitcoin_rpc: Arc<BitcoindClient>,
 ) -> anyhow::Result<()> {
-    // Single channel for foreign (non-peer) iroh connections — fed by the
+    // Single channel for foreign (non-node) iroh connections — fed by the
     // p2p accept loop's demux, drained by the consensus-phase api task.
     // Small bound: pre-DKG there's no consumer, so incoming api attempts
     // overflow and are dropped (no valid client should be talking to a
@@ -175,15 +175,15 @@ async fn run_consensus(
     let cnt = P2PConnector::new(
         cfg.private.iroh_sk.clone(),
         cfg.consensus
-            .peers
+            .nodes
             .iter()
-            .map(|(peer, endpoint)| (*peer, endpoint.iroh_pk))
+            .map(|(node, endpoint)| (*node, endpoint.iroh_pk))
             .collect(),
         settings.p2p_addr,
     )
     .await?;
 
-    let (status_txs, status_rxs) = p2p_status_channels(cnt.peers());
+    let (status_txs, status_rxs) = p2p_status_channels(cnt.nodes());
 
     let connections = ReconnectP2PConnections::new(cfg.private.identity, cnt, status_txs, conn_tx);
 

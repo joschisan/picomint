@@ -71,19 +71,19 @@ pub(crate) async fn add_mint(
 async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<ConsensusConfig> {
     debug!(
         invite = %picomint_base32::encode(invite),
-        node_id = %invite.node_id,
+        iroh_pk = %invite.iroh_pk,
         "Downloading client config via invite code"
     );
 
     let invite_resp: ConfigResponse = picomint_rpc::request(
         endpoint,
-        invite.node_id,
+        invite.iroh_pk,
         Method::Core(CoreMethod::Config(ConfigRequest {
             invite_id: invite.invite_id,
         })),
     )
     .await
-    .map_err(|_| anyhow::anyhow!("Failed to download client config from invite peer"))?;
+    .map_err(|_| anyhow::anyhow!("Failed to download client config from invite node"))?;
 
     if invite_resp.config.calculate_mint_id() != invite.mint {
         bail!("MintId in invite code does not match client config");

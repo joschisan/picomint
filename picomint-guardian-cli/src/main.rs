@@ -17,7 +17,7 @@ use picomint_guardian_cli_core::{
     ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
     ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
     ROUTE_MODULE_ONCHAIN_FEERATE, ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE,
-    ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_PEER,
+    ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_NODE,
     ROUTE_SETUP_RESTORE, ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS,
     SetupAddPeerRequest, SetupSetLocalParamsRequest,
 };
@@ -54,7 +54,7 @@ enum Commands {
     SessionCount,
     /// Get the mint's consensus block count
     BlockCount,
-    /// Per-peer p2p connection status
+    /// Per-node p2p connection status
     P2p,
     /// Status of the local bitcoin backend
     BitcoinConnection,
@@ -82,7 +82,7 @@ enum SetupCommands {
     Status,
     /// Set local guardian parameters
     SetLocalParams(SetupSetLocalParamsRequest),
-    /// Add a peer's setup code
+    /// Add a node's setup code
     AddPeer(SetupAddPeerRequest),
     /// Start distributed key generation
     StartDkg,
@@ -224,7 +224,7 @@ async fn main() -> Result<()> {
             SetupCommands::SetLocalParams(req) => {
                 request(d, ROUTE_SETUP_SET_LOCAL_PARAMS, req).await?
             }
-            SetupCommands::AddPeer(req) => request(d, ROUTE_SETUP_ADD_PEER, req).await?,
+            SetupCommands::AddPeer(req) => request(d, ROUTE_SETUP_ADD_NODE, req).await?,
             SetupCommands::StartDkg => request(d, ROUTE_SETUP_START_DKG, ()).await?,
             SetupCommands::Restore { path } => {
                 let bytes = std::fs::read(&path)?;

@@ -19,12 +19,12 @@ fn dealer_agg_pk() -> AggregatePublicKey {
     AggregatePublicKey((G2Projective::generator() * coefficient(0)).to_affine())
 }
 
-fn dealer_pk(threshold: u64, peer: u64) -> PublicKeyShare {
-    derive_pk_share(&dealer_sk(threshold, peer))
+fn dealer_pk(threshold: u64, node: u64) -> PublicKeyShare {
+    derive_pk_share(&dealer_sk(threshold, node))
 }
 
-fn dealer_sk(threshold: u64, peer: u64) -> SecretKeyShare {
-    let x = Scalar::from(peer + 1);
+fn dealer_sk(threshold: u64, node: u64) -> SecretKeyShare {
+    let x = Scalar::from(node + 1);
 
     // We evaluate the scalar polynomial of degree threshold - 1 at the point x
     // using the Horner schema.
@@ -46,7 +46,7 @@ fn coefficient(index: u64) -> Scalar {
 
 #[test]
 fn test_roundtrip() {
-    const PEERS: u64 = 4;
+    const NODES: u64 = 4;
     const THRESHOLD: u64 = 3;
 
     let message = Message::from_public_key([7_u8; 32]);
@@ -54,16 +54,16 @@ fn test_roundtrip() {
 
     let b_message = blind_message(message, blinding_key);
 
-    for peer in 0..PEERS {
+    for node in 0..NODES {
         assert!(verify_signature_share(
             b_message,
-            sign_message(b_message, dealer_sk(THRESHOLD, peer)),
-            dealer_pk(THRESHOLD, peer)
+            sign_message(b_message, dealer_sk(THRESHOLD, node)),
+            dealer_pk(THRESHOLD, node)
         ));
     }
 
     let signature_shares = (0..THRESHOLD)
-        .map(|peer| (peer, sign_message(b_message, dealer_sk(THRESHOLD, peer))))
+        .map(|node| (node, sign_message(b_message, dealer_sk(THRESHOLD, node))))
         .collect::<BTreeMap<u64, BlindedSignatureShare>>();
 
     let signature = aggregate_signature_shares(&signature_shares);

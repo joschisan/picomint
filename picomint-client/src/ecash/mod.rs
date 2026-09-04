@@ -143,7 +143,7 @@ pub(crate) fn commit_scan(dbtx: &WriteTx, account: Account, restore: &Restore) {
 /// settled are the signature shares fetched, in a single request.
 ///
 /// Splitting membership from retrieval is what keeps a note from going
-/// missing: both probes answer under threshold consensus, so peers must agree
+/// missing: both probes answer under threshold consensus, so nodes must agree
 /// before a counter is written off, and the fetch then asks only for messages
 /// already known to resolve — a share the mint fails to produce is an
 /// error rather than a candidate quietly dropped for want of a full column to
@@ -165,7 +165,7 @@ pub(crate) async fn scan(
         for (i, request) in requests.iter().enumerate() {
             let shares = shares
                 .iter()
-                .map(|(peer, peer_shares)| (peer.to_usize() as u64, peer_shares[i]))
+                .map(|(node, node_shares)| (node.to_usize() as u64, node_shares[i]))
                 .collect();
 
             let note = request.finalize(aggregate_signature_shares(&shares));
@@ -197,7 +197,7 @@ pub(crate) async fn scan(
 ///
 /// A candidate's denomination comes back from [`MintApi::issuance_state`]
 /// rather than from the seed, since nothing under a single counter depends on
-/// it. A peer that reports the wrong one cannot make the wallet credit itself
+/// it. A node that reports the wrong one cannot make the wallet credit itself
 /// anything: the share is aggregated and checked against that denomination's
 /// aggregate public key, which the real signature will not satisfy.
 ///

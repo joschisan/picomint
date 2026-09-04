@@ -111,16 +111,16 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 }
 
 fn register_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()> {
-    for peer in 0..NUM_ONLINE_GUARDIANS {
-        let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
+    for node in 0..NUM_ONLINE_GUARDIANS {
+        let data_dir = cli::guardian_data_dir(&env.data_dir, node);
         assert!(cli::guardian_lightning_gateway_add(&data_dir, gateway_pk)?);
     }
     Ok(())
 }
 
 fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()> {
-    for peer in 0..NUM_ONLINE_GUARDIANS {
-        let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
+    for node in 0..NUM_ONLINE_GUARDIANS {
+        let data_dir = cli::guardian_data_dir(&env.data_dir, node);
         assert!(cli::guardian_lightning_gateway_remove(&data_dir, gateway_pk)?);
     }
     Ok(())

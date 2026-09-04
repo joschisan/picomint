@@ -6,9 +6,9 @@
 
 use picomint_encoding::{Decodable, Encodable};
 
-use crate::PeerId;
+use crate::NodeId;
 use crate::config::ConsensusConfig;
-use crate::config::{MintId, PeerEndpoint};
+use crate::config::{MintId, NodeEndpoint};
 use crate::expiry::ExpiryStatus;
 use crate::tx::{Transaction, TxError};
 use std::collections::BTreeMap;
@@ -74,14 +74,14 @@ pub struct ExpiryStatusResponse {
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct MintInfoRequest;
 
-/// The mint's identity and peer set. Ungated, unlike [`ConfigRequest`]:
+/// The mint's identity and node set. Ungated, unlike [`ConfigRequest`]:
 /// any joined client already holds both, and a caller that received them out
 /// of band can pin them against a hash, so serving them grants nothing an
 /// invite would otherwise gate.
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct MintInfoResponse {
     pub mint: MintId,
-    pub peers: BTreeMap<PeerId, PeerEndpoint>,
+    pub nodes: BTreeMap<NodeId, NodeEndpoint>,
 }
 
 impl MintInfoResponse {
@@ -90,7 +90,7 @@ impl MintInfoResponse {
     pub fn new(config: &ConsensusConfig) -> Self {
         Self {
             mint: config.calculate_mint_id(),
-            peers: config.peers.clone(),
+            nodes: config.nodes.clone(),
         }
     }
 }

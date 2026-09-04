@@ -33,7 +33,7 @@ mod client;
 mod context;
 /// Append-only event log shared by all mints on this host.
 pub mod eventlog;
-/// Shared kept-alive iroh connection primitive (mint peers + gateways).
+/// Shared kept-alive iroh connection primitive (mint nodes + gateways).
 /// Per-module typed state machine executor
 mod executor;
 /// Mint expiry-status cache + refresh.

@@ -55,7 +55,7 @@ const CONTRACT_CONFIRMATION_BUFFER: u32 = 12;
 ///
 /// The stream is mint-wide and a cold client walks all of it, so the
 /// batch sets how many round trips that costs — and each round trip fans out
-/// to every guardian. A thousand summaries is ~150 kB per peer, which is a
+/// to every guardian. A thousand summaries is ~150 kB per node, which is a
 /// reasonable unit of work against a set that only grows with the
 /// mint's unclaimed contracts.
 const BATCH: u64 = 1000;
@@ -616,14 +616,14 @@ impl Client {
 
         // `f + 1` guardians, sampled fresh per lnurl: enough that one is
         // honest and reachable whenever the mint itself is, and random
-        // so bootstrap load spreads instead of pinning the lowest peer ids.
+        // so bootstrap load spreads instead of pinning the lowest node ids.
         let guardians = config
-            .peers
+            .nodes
             .values()
             .map(|endpoint| endpoint.iroh_pk)
             .choose_multiple(
                 &mut rand::thread_rng(),
-                config.peers.to_num_peers().one_honest(),
+                config.nodes.to_num_peers().one_honest(),
             );
 
         let info = MintInfoResponse::new(config).consensus_hash_sha256();

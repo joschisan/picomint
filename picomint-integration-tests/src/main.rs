@@ -91,8 +91,8 @@ fn keep_alive(runtime: &tokio::runtime::Runtime, env: &env::TestEnv) -> anyhow::
     // kept-alive mint exposes no gateway and a paired phone can't do
     // Lightning.
     info!("Registering gateway with all guardians");
-    for peer in 0..env::NUM_GUARDIANS {
-        cli::guardian_lightning_gateway_add(&cli::guardian_data_dir(base, peer), &env.gateway_pk)?;
+    for node in 0..env::NUM_GUARDIANS {
+        cli::guardian_lightning_gateway_add(&cli::guardian_data_dir(base, node), &env.gateway_pk)?;
     }
 
     println!();

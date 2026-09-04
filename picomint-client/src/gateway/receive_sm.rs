@@ -10,7 +10,7 @@ use picomint_core::lightning::methods::{DecryptionKeyShareRequest, DecryptionKey
 use picomint_core::module::Method;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::wire;
-use picomint_core::{OutPoint, PeerId};
+use picomint_core::{OutPoint, NodeId};
 use picomint_encoding::{Decodable, Encodable};
 use tpe::{DecryptionKeyShare, aggregate_dk_shares};
 use tracing::warn;
@@ -42,7 +42,7 @@ pub struct ReceiveStateMachine {
 }
 
 impl StateMachine for ReceiveStateMachine {
-    type Outcome = Result<BTreeMap<PeerId, DecryptionKeyShare>, String>;
+    type Outcome = Result<BTreeMap<NodeId, DecryptionKeyShare>, String>;
 
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         ctx.await_tx_accepted(self.operation, self.outpoint.txid)
@@ -55,10 +55,10 @@ impl StateMachine for ReceiveStateMachine {
             .api
             .request_with_strategy_retry(
                 FilterMapThreshold::new(
-                    move |peer, resp: DecryptionKeyShareResponse| {
+                    move |node, resp: DecryptionKeyShareResponse| {
                         let share = resp.share;
                         if !offer.verify_decryption_share(
-                            tpe_pks.get(&peer).context("Missing TPE PK for peer")?,
+                            tpe_pks.get(&node).context("Missing TPE PK for node")?,
                             &share,
                         ) {
                             return Err(anyhow!("Invalid decryption share"));
@@ -97,7 +97,7 @@ impl StateMachine for ReceiveStateMachine {
 
         let decryption_shares: BTreeMap<u64, DecryptionKeyShare> = shares
             .into_iter()
-            .map(|(peer, share)| (peer.to_usize() as u64, share))
+            .map(|(node, share)| (node.to_usize() as u64, share))
             .collect();
         let agg_decryption_key = aggregate_dk_shares(&decryption_shares);
 

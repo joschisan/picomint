@@ -46,8 +46,8 @@ fn guardian_cmd(data_dir: &Path) -> Command {
 
 /// Helper to compute a guardian's data directory from the shared test
 /// temp root, mirroring `env::start_guardian`'s layout.
-pub fn guardian_data_dir(base: &Path, peer: usize) -> PathBuf {
-    base.join(format!("guardian-{peer}"))
+pub fn guardian_data_dir(base: &Path, node: usize) -> PathBuf {
+    base.join(format!("guardian-{node}"))
 }
 
 // ── Gateway CLI wrappers ────────────────────────────────────────────────────
@@ -184,7 +184,7 @@ pub fn guardian_setup_set_local_params(
 pub fn guardian_setup_add_peer(data_dir: &Path, setup_code: &str) -> Result<Value> {
     guardian_cmd(data_dir)
         .arg("setup")
-        .arg("add-peer")
+        .arg("add-node")
         .arg(setup_code)
         .run_cli::<Value>()
 }

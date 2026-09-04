@@ -3,7 +3,7 @@ use picomint_core::expiry;
 use picomint_core::session;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::ConsensusVersion;
-use picomint_core::{NumPeersExt, PeerId, TransactionId};
+use picomint_core::{NumPeersExt, NodeId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{DbRead, table};
 
@@ -37,21 +37,21 @@ table!(
     "signed-session-outcome",
 );
 
-// Latest block count each peer has voted for. Votes only ever increase, so a
-// missing entry means the peer has not voted since the mint was created.
+// Latest block count each node has voted for. Votes only ever increase, so a
+// missing entry means the node has not voted since the mint was created.
 table!(
     BlockCountVoteTable,
-    PeerId => u32,
+    NodeId => u32,
     "block-count-vote",
 );
 
 /// The consensus block count the mint currently runs at.
 ///
 /// Sorted descending and indexed at `threshold() - 1`, so any threshold of
-/// correct peers can increase the consensus block count and any consensus
-/// block count has been confirmed by a threshold of peers.
+/// correct nodes can increase the consensus block count and any consensus
+/// block count has been confirmed by a threshold of nodes.
 pub fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u32 {
-    let num_peers = server.cfg.consensus.peers.to_num_peers();
+    let num_peers = server.cfg.consensus.nodes.to_num_peers();
 
     let mut counts: Vec<u32> = dbtx.iter(&BlockCountVoteTable, |r| r.map(|(_, v)| v).collect());
 
@@ -64,25 +64,25 @@ pub fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u32 {
     counts.get(num_peers.threshold() - 1).copied().unwrap_or(0)
 }
 
-// Highest consensus version each peer has announced support for. A peer
+// Highest consensus version each node has announced support for. A node
 // votes once per upgrade and never downwards, so a missing entry means the
-// peer has not upgraded past the version the mint was created at.
+// node has not upgraded past the version the mint was created at.
 table!(
     ConsensusVersionVoteTable,
-    PeerId => ConsensusVersion,
+    NodeId => ConsensusVersion,
     "consensus-version-vote",
 );
 
 /// The consensus version the mint currently runs at.
 ///
-/// Sorted ascending and indexed at `max_evil()`, so `2f + 1` peers voted for
+/// Sorted ascending and indexed at `max_evil()`, so `2f + 1` nodes voted for
 /// at least this version — a threshold can run it — and `f + 1` voted for at
 /// most it, so at least one honest guardian announced it. The vec is padded
-/// rather than indexed short because a peer that has not voted still counts:
+/// rather than indexed short because a node that has not voted still counts:
 /// it supports `default_version` and nothing beyond, and that has to weigh on
 /// the result the same as a vote would.
 pub fn consensus_version(server: &Server, dbtx: &impl DbRead) -> ConsensusVersion {
-    let num_peers = server.cfg.consensus.peers.to_num_peers();
+    let num_peers = server.cfg.consensus.nodes.to_num_peers();
 
     let mut versions = dbtx.iter(&ConsensusVersionVoteTable, |r| {
         r.map(|(_, version)| version).collect::<Vec<_>>()
