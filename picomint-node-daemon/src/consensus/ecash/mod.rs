@@ -136,7 +136,7 @@ pub fn process_output(
         .ecash
         .tbs_sks
         .get(&output.denomination)
-        .map(|key| tbs::sign_message(output.nonce, *key))
+        .map(|key| tbs::sign_nonce(output.nonce, *key))
         .ok_or(EcashOutputError::InvalidDenomination)?;
 
     dbtx.insert(&BlindedSignatureShareTable, &outpoint, &signature);
@@ -167,8 +167,10 @@ pub fn audit(dbtx: &WriteTx) -> i64 {
 
 pub async fn handle_api(server: &Server, method: EcashMethod) -> Result<Vec<u8>, String> {
     match method {
-        EcashMethod::Signatures(req) => handler_async!(signatures, server, req).await,
-        EcashMethod::SignaturesRestore(req) => handler!(signatures_restore, server, req).await,
+        EcashMethod::SignatureShares(req) => handler_async!(signature_shares, server, req).await,
+        EcashMethod::SignatureSharesRestore(req) => {
+            handler!(signature_shares_restore, server, req).await
+        }
         EcashMethod::SpendState(req) => handler!(spend_state, server, req).await,
         EcashMethod::IssuanceState(req) => handler!(issuance_state, server, req).await,
     }

@@ -14,7 +14,7 @@ mod bls_serde;
 use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 
-const TAG: [u8; 30] = *b"PICOMINT_TBS_BLS12_381_MESSAGE";
+const TAG: [u8; 28] = *b"PICOMINT_TBS_BLS12_381_NONCE";
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct SecretKeyShare(#[serde(with = "bls_serde::scalar")] pub Scalar);
@@ -26,13 +26,13 @@ pub struct PublicKeyShare(#[serde(with = "bls_serde::g2")] pub G2Affine);
 pub struct AggregatePublicKey(#[serde(with = "bls_serde::g2")] pub G2Affine);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct Message(#[serde(with = "bls_serde::g1")] pub G1Affine);
+pub struct Nonce(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct BlindingKey(#[serde(with = "bls_serde::scalar")] pub Scalar);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct BlindedMessage(#[serde(with = "bls_serde::g1")] pub G1Affine);
+pub struct BlindedNonce(#[serde(with = "bls_serde::g1")] pub G1Affine);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
 pub struct BlindedSignatureShare(#[serde(with = "bls_serde::g1")] pub G1Affine);
@@ -55,8 +55,8 @@ macro_rules! point_hash_impl {
 
 point_hash_impl!(PublicKeyShare);
 point_hash_impl!(AggregatePublicKey);
-point_hash_impl!(Message);
-point_hash_impl!(BlindedMessage);
+point_hash_impl!(Nonce);
+point_hash_impl!(BlindedNonce);
 point_hash_impl!(BlindedSignatureShare);
 point_hash_impl!(BlindedSignature);
 point_hash_impl!(Signature);
@@ -71,37 +71,37 @@ impl std::hash::Hash for BlindingKey {
     }
 }
 
-impl Message {
-    /// Creates a [`Message`] by hashing a 32-byte x-only public key with
-    /// SHA-256 under the domain separator `PICOMINT_TBS_BLS12_381_MESSAGE`,
+impl Nonce {
+    /// Creates a [`Nonce`] by hashing a 32-byte x-only public key with
+    /// SHA-256 under the domain separator `PICOMINT_TBS_BLS12_381_NONCE`,
     /// then mapping the hash to a BLS12-381 G1 curve point via a seeded
     /// [`ChaChaRng`].
-    pub fn from_public_key(bytes: [u8; 32]) -> Message {
+    pub fn from_public_key(bytes: [u8; 32]) -> Nonce {
         let seed = (TAG, bytes)
             .consensus_hash::<sha256::Hash>()
             .to_byte_array();
 
-        Message(G1Projective::random(&mut ChaChaRng::from_seed(seed)).to_affine())
+        Nonce(G1Projective::random(&mut ChaChaRng::from_seed(seed)).to_affine())
     }
 }
 
-pub fn blind_message(msg: Message, blinding_key: BlindingKey) -> BlindedMessage {
-    let blinded_msg = msg.0 * blinding_key.0;
+pub fn blind_nonce(nonce: Nonce, blinding_key: BlindingKey) -> BlindedNonce {
+    let blinded_nonce = nonce.0 * blinding_key.0;
 
-    BlindedMessage(blinded_msg.to_affine())
+    BlindedNonce(blinded_nonce.to_affine())
 }
 
-pub fn sign_message(msg: BlindedMessage, sks: SecretKeyShare) -> BlindedSignatureShare {
-    let sig = msg.0 * sks.0;
+pub fn sign_nonce(nonce: BlindedNonce, sks: SecretKeyShare) -> BlindedSignatureShare {
+    let sig = nonce.0 * sks.0;
     BlindedSignatureShare(sig.to_affine())
 }
 
 pub fn verify_signature_share(
-    msg: BlindedMessage,
+    nonce: BlindedNonce,
     sig: BlindedSignatureShare,
     pk: PublicKeyShare,
 ) -> bool {
-    pairing(&msg.0, &pk.0) == pairing(&sig.0, &G2Affine::generator())
+    pairing(&nonce.0, &pk.0) == pairing(&sig.0, &G2Affine::generator())
 }
 
 /// Combines the exact threshold of valid blinded signature shares to a blinded
@@ -155,11 +155,11 @@ fn lagrange_multipliers(scalars: Vec<Scalar>) -> Vec<Scalar> {
 }
 
 pub fn verify_blinded_signature(
-    msg: BlindedMessage,
+    nonce: BlindedNonce,
     sig: BlindedSignature,
     pk: AggregatePublicKey,
 ) -> bool {
-    pairing(&msg.0, &pk.0) == pairing(&sig.0, &G2Affine::generator())
+    pairing(&nonce.0, &pk.0) == pairing(&sig.0, &G2Affine::generator())
 }
 
 pub fn unblind_signature(blinding_key: BlindingKey, blinded_sig: BlindedSignature) -> Signature {
@@ -167,8 +167,8 @@ pub fn unblind_signature(blinding_key: BlindingKey, blinded_sig: BlindedSignatur
     Signature(sig.to_affine())
 }
 
-pub fn verify(msg: Message, sig: Signature, pk: AggregatePublicKey) -> bool {
-    pairing(&msg.0, &pk.0) == pairing(&sig.0, &G2Affine::generator())
+pub fn verify(nonce: Nonce, sig: Signature, pk: AggregatePublicKey) -> bool {
+    pairing(&nonce.0, &pk.0) == pairing(&sig.0, &G2Affine::generator())
 }
 
 #[cfg(test)]

@@ -15,7 +15,7 @@ use rand::rngs::OsRng;
 table!(
     RootEntropyTable,
     () => Vec<u8>,
-    "root-entropy",
+    "gateway-root-entropy",
 );
 
 // The daemon's iroh secret key, generated once on first start —
@@ -26,30 +26,30 @@ table!(
 table!(
     IrohSecretKeyTable,
     () => [u8; 32],
-    "iroh-sk",
+    "gateway-iroh-sk",
 );
 
 table!(
     OutgoingContractTable,
     OperationId => OutgoingContractRow,
-    "outgoing-contract",
+    "gateway-outgoing-contract",
 );
 
 table!(
     IncomingOfferTable,
     OperationId => IncomingOfferRow,
-    "incoming-offer",
+    "gateway-incoming-offer",
 );
 
-// Set of LDK-event `payment_hash`es that have been fully processed by the
-// event loop (their handler committed successfully). Written atomically
-// with the handler's work inside a single daemon-DB write transaction — so
-// presence implies the handler ran to completion, absence on an incoming
-// event means it's safe to (re-)process.
+// The `payment_hash`es of LDK events the event loop has fully processed
+// (their handler committed successfully). Written atomically with the
+// handler's work inside a single daemon-DB write transaction — so presence
+// implies the handler ran to completion, absence on an incoming event
+// means it's safe to (re-)process.
 table!(
-    ProcessedLdkEventTable,
+    LdkEventPaymentHashTable,
     [u8; 32] => (),
-    "processed-ldk-event",
+    "gateway-ldk-event-payment-hash",
 );
 
 // Cursor for the daemon-wide trailer task. Value is the next (unprocessed)
@@ -57,9 +57,9 @@ table!(
 // dispatches the external side effect — so a crashed trailer simply
 // re-dispatches idempotently on restart.
 table!(
-    EventCursorTable,
+    EventLogCursorTable,
     () => EventLogId,
-    "event-cursor",
+    "gateway-event-log-cursor",
 );
 
 #[derive(Debug, Clone, Encodable, Decodable)]

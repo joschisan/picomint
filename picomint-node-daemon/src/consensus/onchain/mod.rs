@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use self::db::{
     FeeRateVoteTable, MintOnchainTable, NonceEntry, NonceLogTable, Output, OutputTable,
-    SignaturesTable, SpentOutputTable, TxInfoIndexTable, TxInfoTable, UnconfirmedTxTable,
+    SignatureSharesTable, SpentOutputIndexTable, TxInfoIndexTable, TxInfoTable, UnconfirmedTxTable,
     UnsignedTxTable,
 };
 use crate::bitcoind::BitcoindRpcMonitor;
@@ -215,7 +215,7 @@ fn signing_session_proposal(
 
     let public_nonces = fresh_nonces.iter().map(derive_public_nonce).collect();
 
-    Some(OnchainConsensusItem::Signatures(
+    Some(OnchainConsensusItem::SignatureShares(
         txid,
         shares,
         public_nonces,
@@ -263,8 +263,8 @@ pub async fn process_consensus_item(
             Ok(())
         }
         OnchainConsensusItem::Nonces(txid, nonces) => process_nonces(dbtx, node, txid, nonces),
-        OnchainConsensusItem::Signatures(txid, shares, nonces) => {
-            process_signatures(server, dbtx, node, txid, shares, nonces).await
+        OnchainConsensusItem::SignatureShares(txid, shares, nonces) => {
+            process_signature_shares(server, dbtx, node, txid, shares, nonces).await
         }
     }
 }
@@ -275,7 +275,7 @@ pub fn process_input(
     input: &OnchainInput,
 ) -> Result<(picomint_core::Amount, XOnlyPublicKey), OnchainInputError> {
     if dbtx
-        .insert(&SpentOutputTable, &input.output_index, &())
+        .insert(&SpentOutputIndexTable, &input.output_index, &())
         .is_some()
     {
         return Err(OnchainInputError::OutputAlreadySpent);
@@ -659,7 +659,7 @@ fn process_nonces(
     Ok(())
 }
 
-async fn process_signatures(
+async fn process_signature_shares(
     server: &Server,
     dbtx: &WriteTx,
     node: NodeId,
@@ -733,7 +733,7 @@ async fn process_signatures(
     }
 
     ensure!(
-        dbtx.insert(&SignaturesTable, &(latest as u64), &shares)
+        dbtx.insert(&SignatureSharesTable, &(latest as u64), &shares)
             .is_none(),
         "Already received signature shares for this entry"
     );
@@ -742,7 +742,7 @@ async fn process_signatures(
 
     dbtx.insert(&NonceLogTable, &next_index, &NonceEntry(node, fresh_nonces));
 
-    let responses: Vec<Vec<SignatureShare>> = dbtx.range(&SignaturesTable, chunk_range, |r| {
+    let responses: Vec<Vec<SignatureShare>> = dbtx.range(&SignatureSharesTable, chunk_range, |r| {
         r.map(|(_, shares)| shares).collect()
     });
 
@@ -753,7 +753,7 @@ async fn process_signatures(
 
         dbtx.clear_table(&NonceLogTable);
 
-        dbtx.clear_table(&SignaturesTable);
+        dbtx.clear_table(&SignatureSharesTable);
 
         dbtx.insert(&UnconfirmedTxTable, &txid, &unsigned);
 
@@ -984,7 +984,7 @@ fn tx_id(dbtx: &impl DbRead, outpoint: OutPoint) -> Option<Txid> {
 }
 
 fn get_outputs(dbtx: &impl DbRead, start_index: u64, end_index: u64) -> Vec<OutputInfo> {
-    let spent: BTreeSet<u64> = dbtx.range(&SpentOutputTable, start_index..end_index, |r| {
+    let spent: BTreeSet<u64> = dbtx.range(&SpentOutputIndexTable, start_index..end_index, |r| {
         r.map(|(idx, ())| idx).collect()
     });
 

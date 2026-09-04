@@ -1,8 +1,8 @@
 use picomint_core::core::Account;
-use picomint_core::ecash::{Denomination, EcashOutput, nonce_message};
+use picomint_core::ecash::{Denomination, EcashOutput};
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_encoding::{Decodable, Encodable};
-use tbs::{BlindedMessage, BlindedSignature, BlindingKey, blind_message, unblind_signature};
+use tbs::{BlindedNonce, BlindedSignature, BlindingKey, Nonce, blind_nonce, unblind_signature};
 
 use super::SpendableNote;
 use super::secret::EcashSecret;
@@ -42,8 +42,11 @@ impl NoteIssuance {
     /// roughly twenty times the cost of [`NoteIssuance::nonce`]. A restore
     /// scan derives it only for counters the mint has already reported
     /// as unspent.
-    pub fn blinded_message(&self) -> BlindedMessage {
-        blind_message(nonce_message(self.nonce()), self.blinding_key)
+    pub fn blinded_nonce(&self) -> BlindedNonce {
+        blind_nonce(
+            Nonce::from_public_key(self.nonce().serialize()),
+            self.blinding_key,
+        )
     }
 
     pub fn request(self, denomination: Denomination) -> NoteIssuanceRequest {
@@ -73,7 +76,7 @@ impl NoteIssuanceRequest {
     pub fn output(&self) -> EcashOutput {
         EcashOutput {
             denomination: self.denomination,
-            nonce: self.blinded_message(),
+            nonce: self.blinded_nonce(),
         }
     }
 
@@ -93,7 +96,7 @@ impl NoteIssuanceRequest {
         self.issuance.nonce()
     }
 
-    pub fn blinded_message(&self) -> BlindedMessage {
-        self.issuance.blinded_message()
+    pub fn blinded_nonce(&self) -> BlindedNonce {
+        self.issuance.blinded_nonce()
     }
 }

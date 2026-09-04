@@ -13,7 +13,7 @@ use tracing::{info, warn};
 
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::{
-    AcceptedItemTable, AcceptedTxTable, InviteMetaTable, InviteUserCountTable,
+    AcceptedItemTable, AcceptedTxIdTable, InviteMetaTable, InviteUserCountTable,
     SignedSessionOutcomeTable,
 };
 use crate::consensus::rpc;
@@ -84,7 +84,7 @@ async fn await_tx_outcome(api: &ConsensusApi, tx: Transaction) -> Result<(), TxE
         .server
         .db
         .begin_read()
-        .get(&AcceptedTxTable, &tx.compute_txid())
+        .get(&AcceptedTxIdTable, &tx.compute_txid())
         .is_some()
     {
         return Ok(());
@@ -106,7 +106,7 @@ async fn await_tx_outcome(api: &ConsensusApi, tx: Transaction) -> Result<(), TxE
 
         tokio::select! {
             _ = &mut notified_item => {
-                if api.server.db.begin_read().get(&AcceptedTxTable, &tx.compute_txid()).is_some() {
+                if api.server.db.begin_read().get(&AcceptedTxIdTable, &tx.compute_txid()).is_some() {
                     info!(
                         txid = %tx.compute_txid(),
                         elapsed_ms = start.elapsed().as_millis() as u64,

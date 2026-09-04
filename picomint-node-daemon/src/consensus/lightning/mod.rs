@@ -28,7 +28,7 @@ use crate::{handler, handler_async};
 
 use self::db::{
     DecryptionKeyShareTable, GatewayTable, IncomingContractIndexTable,
-    IncomingContractStreamIndexTable, IncomingContractStreamTable, IncomingContractTable,
+    IncomingContractStreamNextIndexTable, IncomingContractStreamTable, IncomingContractTable,
     OutgoingContractTable, PreimageTable,
 };
 
@@ -179,7 +179,7 @@ pub fn process_output(
             dbtx.insert(&IncomingContractTable, &outpoint, contract);
 
             let stream_index = dbtx
-                .get(&IncomingContractStreamIndexTable, &())
+                .get(&IncomingContractStreamNextIndexTable, &())
                 .unwrap_or(0);
 
             dbtx.insert(
@@ -190,7 +190,11 @@ pub fn process_output(
 
             dbtx.insert(&IncomingContractIndexTable, &outpoint, &stream_index);
 
-            dbtx.insert(&IncomingContractStreamIndexTable, &(), &(stream_index + 1));
+            dbtx.insert(
+                &IncomingContractStreamNextIndexTable,
+                &(),
+                &(stream_index + 1),
+            );
 
             let dk_share = contract
                 .offer

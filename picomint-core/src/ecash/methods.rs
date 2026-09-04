@@ -4,7 +4,7 @@
 //! ties them together.
 
 use picomint_encoding::{Decodable, Encodable};
-use tbs::{BlindedMessage, BlindedSignatureShare};
+use tbs::{BlindedNonce, BlindedSignatureShare};
 
 use crate::TransactionId;
 use crate::ecash::Denomination;
@@ -13,27 +13,27 @@ use crate::secp256k1::XOnlyPublicKey;
 // ── signature-shares ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SignaturesRequest {
+pub struct SignatureSharesRequest {
     pub txid: TransactionId,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct SignaturesResponse {
+pub struct SignatureSharesResponse {
     pub shares: Vec<BlindedSignatureShare>,
 }
 
 // ── restore-signature-shares ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct SignaturesRestoreRequest {
-    pub messages: Vec<BlindedMessage>,
+pub struct SignatureSharesRestoreRequest {
+    pub nonces: Vec<BlindedNonce>,
 }
 
-/// Errors if the mint never signed one of `messages`. Restore only asks
-/// once [`IssuanceStateResponse`] has already confirmed every message, so a
+/// Errors if the mint never signed one of `nonces`. Restore only asks
+/// once [`IssuanceStateResponse`] has already confirmed every nonce, so a
 /// miss here is a genuine fault rather than the expected outcome of probing.
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct SignaturesRestoreResponse {
+pub struct SignatureSharesRestoreResponse {
     pub shares: Vec<BlindedSignatureShare>,
 }
 
@@ -41,13 +41,13 @@ pub struct SignaturesRestoreResponse {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct IssuanceStateRequest {
-    pub messages: Vec<BlindedMessage>,
+    pub nonces: Vec<BlindedNonce>,
 }
 
-/// `issued[i]` mirrors `messages[i]`, carrying the denomination the mint
-/// signed the message under, or `None` if it never signed it. The membership
+/// `issued[i]` mirrors `nonces[i]`, carrying the denomination the mint
+/// signed the nonce under, or `None` if it never signed it. The membership
 /// half of a restore scan: the shares themselves are fetched once at the end,
-/// for the messages that survived both this and [`SpendStateResponse`].
+/// for the nonces that survived both this and [`SpendStateResponse`].
 ///
 /// A client derives its nonces from a counter alone, so the denomination is
 /// not recoverable from the seed and has to come back over the wire. It is
@@ -68,7 +68,7 @@ pub struct SpendStateRequest {
 
 /// `spent[i]` mirrors `nonces[i]`. A restore scan reads this first: a spent
 /// nonce proves the counter was used without costing the client a blinded
-/// message, which is the expensive half of a candidate.
+/// nonce, which is the expensive half of a candidate.
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct SpendStateResponse {
     pub spent: Vec<bool>,
@@ -78,8 +78,8 @@ pub struct SpendStateResponse {
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum EcashMethod {
-    Signatures(SignaturesRequest),
-    SignaturesRestore(SignaturesRestoreRequest),
+    SignatureShares(SignatureSharesRequest),
+    SignatureSharesRestore(SignatureSharesRestoreRequest),
     SpendState(SpendStateRequest),
     IssuanceState(IssuanceStateRequest),
 }

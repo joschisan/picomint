@@ -103,7 +103,7 @@ pub enum OnchainConsensusItem {
     /// member never appends a replacement nonce it is excluded from all
     /// future sessions, so some session completes after at most n - t + 1
     /// attempts as long as a threshold of nodes remains live.
-    Signatures(Txid, Vec<tss::SignatureShare>, Vec<tss::PublicNonce>),
+    SignatureShares(Txid, Vec<tss::SignatureShare>, Vec<tss::PublicNonce>),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]

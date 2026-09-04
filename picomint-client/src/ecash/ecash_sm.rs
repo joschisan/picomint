@@ -51,7 +51,7 @@ impl StateMachine for EcashStateMachine {
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         ctx.await_tx_accepted(self.operation, self.txid).await?;
 
-        let shares = super::api::signatures(
+        let shares = super::api::signature_shares(
             &ctx.api,
             self.txid,
             self.issuance_requests.clone(),
@@ -147,7 +147,7 @@ pub fn verify_blind_shares(
             .expect("No pk share found for node");
 
         ensure!(
-            tbs::verify_signature_share(request.blinded_message(), *share, *amount_key),
+            tbs::verify_signature_share(request.blinded_nonce(), *share, *amount_key),
             "Invalid blind signature"
         );
     }

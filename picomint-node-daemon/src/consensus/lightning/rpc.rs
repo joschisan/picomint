@@ -16,7 +16,7 @@ use crate::consensus::db::consensus_block_count;
 use crate::consensus::server::Server;
 
 use super::db::{
-    DecryptionKeyShareTable, GatewayTable, IncomingContractStreamIndexTable,
+    DecryptionKeyShareTable, GatewayTable, IncomingContractStreamNextIndexTable,
     IncomingContractStreamTable, OutgoingContractTable, PreimageTable,
 };
 
@@ -90,8 +90,8 @@ pub async fn await_incoming_contracts(
 
     let (mut next_index, dbtx) = server
         .db
-        .wait_table_check(&IncomingContractStreamIndexTable, |dbtx| {
-            dbtx.get(&IncomingContractStreamIndexTable, &())
+        .wait_table_check(&IncomingContractStreamNextIndexTable, |dbtx| {
+            dbtx.get(&IncomingContractStreamNextIndexTable, &())
                 .filter(|i| *i > req.start)
         })
         .await;

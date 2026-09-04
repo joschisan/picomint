@@ -4,9 +4,9 @@ use picomint_core::lightning::gateway::GatewayPk;
 use picomint_redb::table;
 
 table!(
-    IncomingContractStreamIndexTable,
+    IncomingContractStreamCursorTable,
     MintId => u64,
-    "lightning-incoming-contract-stream-index",
+    "lightning-incoming-contract-stream-cursor",
 );
 
 // The mint's announced gateway pks, mirrored to disk by
@@ -24,7 +24,7 @@ table!(
 // Used to reject duplicate pay attempts for the same invoice (the operation id is
 // derived from the invoice payment hash).
 table!(
-    SendOperationTable,
+    SendOperationIdTable,
     (MintId, OperationId) => (),
-    "lightning-send-operation",
+    "lightning-send-operation-id",
 );

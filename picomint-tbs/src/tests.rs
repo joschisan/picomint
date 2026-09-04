@@ -10,9 +10,9 @@ use rand::rngs::OsRng;
 use rand_chacha::ChaChaRng;
 
 use crate::{
-    AggregatePublicKey, BlindedSignatureShare, BlindingKey, Message, PublicKeyShare,
-    SecretKeyShare, aggregate_signature_shares, blind_message, derive_pk_share, sign_message,
-    unblind_signature, verify, verify_signature_share,
+    AggregatePublicKey, BlindedSignatureShare, BlindingKey, Nonce, PublicKeyShare, SecretKeyShare,
+    aggregate_signature_shares, blind_nonce, derive_pk_share, sign_nonce, unblind_signature,
+    verify, verify_signature_share,
 };
 
 fn dealer_agg_pk() -> AggregatePublicKey {
@@ -49,26 +49,26 @@ fn test_roundtrip() {
     const NODES: u64 = 4;
     const THRESHOLD: u64 = 3;
 
-    let message = Message::from_public_key([7_u8; 32]);
+    let nonce = Nonce::from_public_key([7_u8; 32]);
     let blinding_key = BlindingKey(Scalar::random(OsRng));
 
-    let b_message = blind_message(message, blinding_key);
+    let b_message = blind_nonce(nonce, blinding_key);
 
     for node in 0..NODES {
         assert!(verify_signature_share(
             b_message,
-            sign_message(b_message, dealer_sk(THRESHOLD, node)),
+            sign_nonce(b_message, dealer_sk(THRESHOLD, node)),
             dealer_pk(THRESHOLD, node)
         ));
     }
 
     let signature_shares = (0..THRESHOLD)
-        .map(|node| (node, sign_message(b_message, dealer_sk(THRESHOLD, node))))
+        .map(|node| (node, sign_nonce(b_message, dealer_sk(THRESHOLD, node))))
         .collect::<BTreeMap<u64, BlindedSignatureShare>>();
 
     let signature = aggregate_signature_shares(&signature_shares);
 
     let signature = unblind_signature(blinding_key, signature);
 
-    assert!(verify(message, signature, dealer_agg_pk()));
+    assert!(verify(nonce, signature, dealer_agg_pk()));
 }

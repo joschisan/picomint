@@ -22,9 +22,9 @@ table!(
 );
 
 table!(
-    SpentOutputTable,
+    SpentOutputIndexTable,
     u64 => (),
-    "onchain-spent-output",
+    "onchain-spent-output-index",
 );
 
 table!(
@@ -67,9 +67,9 @@ table!(
 // input — stored under the same index as the entry in the nonce log.
 // Session s is complete once every index of its chunk has a response.
 table!(
-    SignaturesTable,
+    SignatureSharesTable,
     u64 => Vec<tss::SignatureShare>,
-    "onchain-signatures",
+    "onchain-signature-shares",
 );
 
 table!(

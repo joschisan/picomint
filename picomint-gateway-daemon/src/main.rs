@@ -23,7 +23,7 @@ use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::lightning::gateway::PaymentFee;
 use picomint_gateway_daemon::db::{
-    IncomingOfferTable, OutgoingContractTable, ProcessedLdkEventTable,
+    IncomingOfferTable, LdkEventPaymentHashTable, OutgoingContractTable,
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
 use picomint_redb::{DbRead, WriteTx};
@@ -357,7 +357,7 @@ fn handle_payment_claimable(
     let operation = OperationId::from_encodable(&payment_hash);
 
     if dbtx
-        .insert(&ProcessedLdkEventTable, &payment_hash, &())
+        .insert(&LdkEventPaymentHashTable, &payment_hash, &())
         .is_some()
     {
         return;
@@ -414,7 +414,7 @@ fn handle_payment_successful(
     let operation = OperationId::from_encodable(&payment_hash);
 
     if dbtx
-        .insert(&ProcessedLdkEventTable, &payment_hash, &())
+        .insert(&LdkEventPaymentHashTable, &payment_hash, &())
         .is_some()
     {
         return;
@@ -441,7 +441,7 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32
     let operation = OperationId::from_encodable(&payment_hash);
 
     if dbtx
-        .insert(&ProcessedLdkEventTable, &payment_hash, &())
+        .insert(&LdkEventPaymentHashTable, &payment_hash, &())
         .is_some()
     {
         return;
