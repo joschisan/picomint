@@ -26,7 +26,7 @@ use tracing::debug;
 table!(
     ClientConfigTable,
     MintId => ConsensusConfig,
-    "client-config",
+    "client-consensus-config",
 );
 
 /// Main client type: one instance per application, holding every added

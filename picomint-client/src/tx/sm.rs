@@ -13,7 +13,7 @@ use crate::{TxAcceptEvent, TxRejectEvent};
 table!(
     TxSubmissionStateMachineTable,
     (MintId, SmId) => TxSubmissionStateMachine,
-    "tx-submission-sm",
+    "client-tx-submission-sm",
 );
 
 /// State machine that submits a transaction and waits for the final outcome.

@@ -19,7 +19,7 @@ use crate::context::ClientContext;
 table!(
     ExpiryStatusTable,
     MintId => ExpiryStatus,
-    "expiry-status",
+    "client-expiry-status",
 );
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]

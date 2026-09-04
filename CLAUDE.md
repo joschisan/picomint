@@ -43,6 +43,7 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 ### Wire + storage
 - Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-encoding`
 - Storage: redb only. No migrations (tables are declared via the `table!` macro in `picomint-redb`; keys/values use consensus encoding). The one exception is the gateway's analytics database — a separate SQLite file (rusqlite) queried via the `query` CLI command
+- Table name strings are kebab-case with the owning domain as the first segment: module tables `ecash-`/`onchain-`/`lightning-`/`gateway-`, client-core tables `client-`, embedder tables prefixed by the embedder (`gateway-` in the gateway daemon's file, `pico-` in the app's). Only the node daemon's consensus-core tables go unprefixed — it is the sole owner of its file (plus `bft-units` from picomint-bft).
 - Transport: Iroh-only (QUIC + hole-punching). No TLS/websocket/DNS announcements
 - Each node binds exactly one iroh `Endpoint` (one secret key, one node id) for both mint p2p and the public client API; the accept loop demuxes by remote node-id (node set → P2P path, otherwise → public API path).
 

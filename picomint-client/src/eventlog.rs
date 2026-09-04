@@ -141,13 +141,13 @@ impl EventLogEntry {
 table!(
     EventLogTable,
     EventLogId => EventLogEntry,
-    "event-log",
+    "client-event-log",
 );
 
 table!(
     EventLogByOperationTable,
     (OperationId, EventLogId) => EventLogEntry,
-    "operation-event-log",
+    "client-operation-event-log",
 );
 
 /// Append an event to the two tables. IDs are allocated inline under the
