@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::ln::methods::LnMethod;
 use crate::methods::CoreMethod;
 use crate::ecash::methods::ECashMethod;
-use crate::wallet::methods::WalletMethod;
+use crate::onchain::methods::OnchainMethod;
 use picomint_encoding::{Decodable, Encodable};
 
 /// The wire method dispatched to a guardian over iroh. Each variant carries
@@ -16,7 +16,7 @@ use picomint_encoding::{Decodable, Encodable};
 pub enum Method {
     Core(CoreMethod),
     ECash(ECashMethod),
-    Wallet(WalletMethod),
+    Onchain(OnchainMethod),
     Ln(LnMethod),
 }
 

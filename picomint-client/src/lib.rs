@@ -7,7 +7,7 @@
 //! in between. Every operation takes the
 //! [`picomint_core::config::FederationId`] it acts on
 //! and is named for the module that serves it — `ecash_send`,
-//! `wallet_receive`, `ln_receive`, `gw_finalize_send` — so there is
+//! `onchain_receive`, `ln_receive`, `gw_finalize_send` — so there is
 //! no per-federation handle to hold or leak.
 //!
 //! Every table is shared across federations with a
@@ -53,7 +53,7 @@ mod task;
 /// Structs and interfaces to construct Picomint transactions
 pub mod tx;
 /// Wallet module client.
-pub mod wallet;
+pub mod onchain;
 
 pub use iroh::Endpoint;
 

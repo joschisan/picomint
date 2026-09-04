@@ -1,8 +1,8 @@
 //! Freestanding API handlers for the wallet module.
 
-use picomint_core::wallet::methods::{
-    ConsensusFeerateRequest, ConsensusFeerateResponse, FederationWalletRequest,
-    FederationWalletResponse, OutputInfoSliceRequest, OutputInfoSliceResponse,
+use picomint_core::onchain::methods::{
+    ConsensusFeerateRequest, ConsensusFeerateResponse, FederationUtxoRequest,
+    FederationUtxoResponse, OutputInfoSliceRequest, OutputInfoSliceResponse,
     PendingTxChainRequest, PendingTxChainResponse, ReceiveFeeRequest, ReceiveFeeResponse,
     SendFeeRequest, SendFeeResponse, TxChainRequest, TxChainResponse, TxIdRequest, TxIdResponse,
 };
@@ -19,12 +19,12 @@ pub fn consensus_feerate(
     })
 }
 
-pub fn federation_wallet(
+pub fn federation_utxo(
     server: &Server,
-    _: FederationWalletRequest,
-) -> Result<FederationWalletResponse, String> {
-    Ok(FederationWalletResponse {
-        wallet: super::federation_wallet(&server.db.begin_read()),
+    _: FederationUtxoRequest,
+) -> Result<FederationUtxoResponse, String> {
+    Ok(FederationUtxoResponse {
+        utxo: super::federation_utxo(&server.db.begin_read()),
     })
 }
 

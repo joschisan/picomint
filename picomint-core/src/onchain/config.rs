@@ -6,18 +6,18 @@ use serde::{Deserialize, Serialize};
 use tss::{AggregatePublicKey, PublicKeyShare, SecretKeyShare};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct WalletConfig {
-    pub private: WalletConfigPrivate,
-    pub consensus: WalletConfigConsensus,
+pub struct OnchainConfig {
+    pub private: OnchainConfigPrivate,
+    pub consensus: OnchainConfigConsensus,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Encodable, Decodable)]
-pub struct WalletConfigPrivate {
+pub struct OnchainConfigPrivate {
     pub sks: SecretKeyShare,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub struct WalletConfigConsensus {
+pub struct OnchainConfigConsensus {
     /// The aggregate public key of the federation's taproot wallet
     pub agg_pk: AggregatePublicKey,
     /// The public key shares of the guardians
@@ -27,13 +27,13 @@ pub struct WalletConfigConsensus {
     pub feerate_base: u32,
     /// The minimum amount a user can send on chain
     pub dust_limit: bitcoin::Amount,
-    /// Fee charged per wallet input
+    /// Fee charged per onchain input
     pub input_fee: Amount,
-    /// Fee charged per wallet output
+    /// Fee charged per onchain output
     pub output_fee: Amount,
 }
 
-impl WalletConfigConsensus {
+impl OnchainConfigConsensus {
     pub fn new(agg_pk: AggregatePublicKey, pks: BTreeMap<PeerId, PublicKeyShare>) -> Self {
         Self {
             agg_pk,

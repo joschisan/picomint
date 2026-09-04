@@ -8,20 +8,20 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct AuditSummary {
     pub ecash: i64,
-    pub wallet: i64,
+    pub onchain: i64,
     pub ln: i64,
     pub total: i64,
 }
 
 impl AuditSummary {
-    pub fn new(ecash: i64, wallet: i64, ln: i64) -> Self {
+    pub fn new(ecash: i64, onchain: i64, ln: i64) -> Self {
         let total = ecash
-            .checked_add(wallet)
+            .checked_add(onchain)
             .and_then(|s| s.checked_add(ln))
             .expect("Overflow while summing the federation's balance sheet");
         Self {
             ecash,
-            wallet,
+            onchain,
             ln,
             total,
         }

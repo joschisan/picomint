@@ -1,12 +1,12 @@
-//! Wallet module wire methods.
+//! Onchain module wire methods.
 //!
-//! Each method has a `Request` and a `Response` type. The [`WalletMethod`] enum
+//! Each method has a `Request` and a `Response` type. The [`OnchainMethod`] enum
 //! ties them together.
 
 use picomint_encoding::{Decodable, Encodable};
 
 use crate::OutPoint;
-use crate::wallet::{FederationWallet, OutputInfo, TxInfo};
+use crate::onchain::{FederationUtxo, OutputInfo, TxInfo};
 
 // ── consensus-feerate ───────────────────────────────────────────────────────
 
@@ -18,14 +18,14 @@ pub struct ConsensusFeerateResponse {
     pub feerate: Option<u32>,
 }
 
-// ── federation-wallet ───────────────────────────────────────────────────────
+// ── federation-utxo ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct FederationWalletRequest;
+pub struct FederationUtxoRequest;
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct FederationWalletResponse {
-    pub wallet: Option<FederationWallet>,
+pub struct FederationUtxoResponse {
+    pub utxo: Option<FederationUtxo>,
 }
 
 // ── send-fee ────────────────────────────────────────────────────────────────
@@ -96,9 +96,9 @@ pub struct TxChainResponse {
 // ── dispatch enum ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub enum WalletMethod {
+pub enum OnchainMethod {
     ConsensusFeerate(ConsensusFeerateRequest),
-    FederationWallet(FederationWalletRequest),
+    FederationUtxo(FederationUtxoRequest),
     SendFee(SendFeeRequest),
     ReceiveFee(ReceiveFeeRequest),
     TxId(TxIdRequest),

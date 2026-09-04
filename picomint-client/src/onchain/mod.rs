@@ -1,4 +1,4 @@
-pub use picomint_core::wallet as common;
+pub use picomint_core::onchain as common;
 
 mod api;
 mod db;
@@ -19,8 +19,8 @@ use db::{NextOutputIndexTable, ValidAddressIndexTable};
 use events::{ReceiveEvent, SendEvent};
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
-use picomint_core::wallet::{
-    StandardScript, WalletInput, WalletOutput, is_potential_receive, tweaked_address,
+use picomint_core::onchain::{
+    StandardScript, OnchainInput, OnchainOutput, is_potential_receive, tweaked_address,
 };
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, TransactionId};
@@ -29,7 +29,7 @@ use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 use std::sync::Arc;
 use tokio::sync::Notify;
 
-pub use self::secret::WalletSecret;
+pub use self::secret::OnchainSecret;
 use secp256k1::Keypair;
 use send_sm::{SendStateMachine, SendStateMachineTable};
 use thiserror::Error;
@@ -58,7 +58,7 @@ pub(crate) async fn send_fee(ctx: &ClientContext) -> Result<bitcoin::Amount, Sen
 
 fn max_amount_at(ctx: &ClientContext, account: Account, fee: bitcoin::Amount) -> bitcoin::Amount {
     let amount = crate::ecash::largest_affordable_amount(ctx, account, |_| {
-        Amount::from_sat(fee.to_sat()) + ctx.config.wallet.output_fee
+        Amount::from_sat(fee.to_sat()) + ctx.config.onchain.output_fee
     });
 
     bitcoin::Amount::from_sat(amount.msat / 1000)
@@ -76,7 +76,7 @@ fn submit_send(
         return Err(SendError::WrongNetwork);
     }
 
-    if amount < ctx.config.wallet.dust_limit {
+    if amount < ctx.config.onchain.dust_limit {
         return Err(SendError::DustValue);
     }
 
@@ -86,13 +86,13 @@ fn submit_send(
         .ok_or(SendError::UnsupportedAddress)?;
 
     let tx_builder = TxBuilder::from_output(Output {
-        output: wire::Output::Wallet(WalletOutput {
+        output: wire::Output::Onchain(OnchainOutput {
             destination,
             value: amount,
             fee,
         }),
         amount: Amount::from_sat((amount + fee).to_sat()),
-        fee: ctx.config.wallet.output_fee,
+        fee: ctx.config.onchain.output_fee,
     });
 
     let dbtx = ctx.db.begin_write();
@@ -142,7 +142,7 @@ fn highest_valid_index(ctx: &ClientContext, account: Account) -> Option<u64> {
 
 fn derive_address(ctx: &ClientContext, account: Account, index: u64) -> Address {
     tweaked_address(
-        &ctx.config.wallet.agg_pk,
+        &ctx.config.onchain.agg_pk,
         &derive_tweak(ctx, account, index)
             .x_only_public_key()
             .0
@@ -152,14 +152,14 @@ fn derive_address(ctx: &ClientContext, account: Account, index: u64) -> Address 
 }
 
 fn derive_tweak(ctx: &ClientContext, account: Account, index: u64) -> Keypair {
-    ctx.secret.wallet_secret().address_keypair(account, index)
+    ctx.secret.onchain_secret().address_keypair(account, index)
 }
 
 /// Find `account`'s next valid index starting from (and including)
 /// `start_index`.
 #[allow(clippy::maybe_infinite_iter)]
 fn next_valid_index(ctx: &ClientContext, account: Account, start_index: u64) -> u64 {
-    let pks_hash = ctx.config.wallet.agg_pk.consensus_hash();
+    let pks_hash = ctx.config.onchain.agg_pk.consensus_hash();
 
     block_in_place(|| {
         (start_index..)
@@ -182,7 +182,7 @@ fn receive_output(
     let operation = OperationId::new_random();
 
     let tx_builder = TxBuilder::from_input(Input {
-        input: wire::Input::Wallet(WalletInput {
+        input: wire::Input::Onchain(OnchainInput {
             output_index,
             fee,
             tweak: derive_tweak(ctx, account, address_index)
@@ -191,7 +191,7 @@ fn receive_output(
         }),
         keypair: derive_tweak(ctx, account, address_index),
         amount: Amount::from_sat((amount - fee).to_sat()),
-        fee: ctx.config.wallet.input_fee,
+        fee: ctx.config.onchain.input_fee,
     });
 
     let dbtx = ctx.db.begin_write();
@@ -428,7 +428,7 @@ pub enum SendError {
 impl Client {
     /// `account`'s next unused onchain deposit address. Errors while the
     /// initial address derivation has not completed yet.
-    pub fn wallet_receive(
+    pub fn onchain_receive(
         &self,
         federation: FederationId,
         account: Account,
@@ -442,7 +442,7 @@ impl Client {
 
     /// Send an onchain payment funded from `account`. `fee` defaults to the
     /// federation's current send fee.
-    pub async fn wallet_send(
+    pub async fn onchain_send(
         &self,
         federation: FederationId,
         account: Account,
@@ -460,10 +460,10 @@ impl Client {
         submit_send(&ctx, account, address, amount, fee, false)
     }
 
-    /// The largest whole-sat amount a [`wallet_send_max`] from
+    /// The largest whole-sat amount a [`onchain_send_max`] from
     /// `account` can pay onchain at the current consensus feerate. A quote —
     /// the send itself re-prices at the moment it is submitted.
-    pub async fn wallet_send_max_amount(
+    pub async fn onchain_send_max_amount(
         &self,
         federation: FederationId,
         account: Account,
@@ -475,7 +475,7 @@ impl Client {
 
     /// Send `account`'s whole balance onchain by spending every note it
     /// holds; no change comes back.
-    pub async fn wallet_send_max(
+    pub async fn onchain_send_max(
         &self,
         federation: FederationId,
         account: Account,
@@ -491,7 +491,7 @@ impl Client {
     }
 
     /// The current fee required to send an onchain payment.
-    pub async fn wallet_send_fee(
+    pub async fn onchain_send_fee(
         &self,
         federation: FederationId,
     ) -> Result<bitcoin::Amount, SendError> {
@@ -501,19 +501,19 @@ impl Client {
     }
 
     /// The total value of bitcoin controlled by the federation.
-    pub async fn wallet_total_value(
+    pub async fn onchain_total_value(
         &self,
         federation: FederationId,
     ) -> anyhow::Result<bitcoin::Amount> {
         let ctx = self.ctx(federation)?;
 
-        api::federation_wallet(&ctx.api)
+        api::federation_utxo(&ctx.api)
             .await
             .map(|tx_out| tx_out.map_or(bitcoin::Amount::ZERO, |tx_out| tx_out.value))
     }
 
     /// The current consensus feerate.
-    pub async fn wallet_feerate(&self, federation: FederationId) -> anyhow::Result<Option<u32>> {
+    pub async fn onchain_feerate(&self, federation: FederationId) -> anyhow::Result<Option<u32>> {
         api::consensus_feerate(&self.ctx(federation)?.api).await
     }
 }

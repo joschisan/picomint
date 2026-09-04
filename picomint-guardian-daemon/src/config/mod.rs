@@ -11,7 +11,7 @@ use picomint_core::invite::InviteCode;
 use picomint_core::ln::config::LightningConfigPrivate;
 use picomint_core::ecash::config::{ECashConfig, ECashConfigPrivate};
 use picomint_core::version::CONSENSUS_VERSION;
-use picomint_core::wallet::config::{WalletConfig, WalletConfigPrivate};
+use picomint_core::onchain::config::{OnchainConfig, OnchainConfigPrivate};
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
 use rand::rngs::OsRng;
 use secp256k1::{Secp256k1, SecretKey, XOnlyPublicKey};
@@ -51,8 +51,8 @@ pub struct ServerConfigPrivate {
     pub broadcast_secret_key: SecretKey,
     /// Private key material for the mint module
     pub ecash: ECashConfigPrivate,
-    /// Private key material for the wallet module
-    pub wallet: WalletConfigPrivate,
+    /// Private key material for the onchain module
+    pub onchain: OnchainConfigPrivate,
     /// Private key material for the lightning module
     pub ln: LightningConfigPrivate,
 }
@@ -107,7 +107,7 @@ impl ServerConfig {
         broadcast_secret_key: SecretKey,
         ecash: ECashConfig,
         ln: picomint_core::ln::config::LightningConfig,
-        wallet: WalletConfig,
+        onchain: OnchainConfig,
     ) -> Self {
         let peers = params
             .peers
@@ -130,7 +130,7 @@ impl ServerConfig {
             name: params.name.clone(),
             default_version: CONSENSUS_VERSION,
             ecash: ecash.consensus,
-            wallet: wallet.consensus,
+            onchain: onchain.consensus,
             ln: ln.consensus,
         };
 
@@ -139,7 +139,7 @@ impl ServerConfig {
             iroh_sk: params.iroh_sk,
             broadcast_secret_key,
             ecash: ecash.private,
-            wallet: wallet.private,
+            onchain: onchain.private,
             ln: ln.private,
         };
 
@@ -175,7 +175,7 @@ impl ServerConfig {
 
         crate::consensus::ecash::validate_config(self)?;
         crate::consensus::ln::validate_config(self)?;
-        crate::consensus::wallet::validate_config(self)?;
+        crate::consensus::onchain::validate_config(self)?;
 
         Ok(())
     }
@@ -252,9 +252,9 @@ impl ServerConfig {
 
         let ln = crate::consensus::ln::distributed_gen(&handle).await?;
 
-        info!("Running config generation for module of kind wallet...");
+        info!("Running config generation for module of kind onchain...");
 
-        let wallet = crate::consensus::wallet::distributed_gen(&handle).await?;
+        let onchain = crate::consensus::onchain::distributed_gen(&handle).await?;
 
         let cfg = ServerConfig::from(
             params.clone(),
@@ -263,7 +263,7 @@ impl ServerConfig {
             broadcast_sk,
             mint,
             ln,
-            wallet,
+            onchain,
         );
 
         let checksum = cfg.consensus.consensus_hash_sha256();

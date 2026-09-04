@@ -5,7 +5,7 @@ use async_stream::stream;
 use bitcoincore_rpc::RpcApi;
 use futures::StreamExt;
 use picomint_client::eventlog::{EventLogEntry, EventLogId};
-use picomint_client::wallet::events::{ReceiveEvent, SendEvent, SendSuccessEvent};
+use picomint_client::onchain::events::{ReceiveEvent, SendEvent, SendSuccessEvent};
 use picomint_client::{Account, TxRejectEvent};
 use picomint_core::Amount;
 use tokio::task::block_in_place;
@@ -15,16 +15,16 @@ use crate::env::{TestClient, TestEnv, retry};
 
 #[derive(Debug)]
 #[allow(dead_code)]
-enum WalletEvent {
+enum OnchainEvent {
     Send(SendEvent),
     SendSuccess(SendSuccessEvent),
     Receive(ReceiveEvent),
     TxReject(TxRejectEvent),
 }
 
-fn wallet_event_stream(
+fn onchain_event_stream(
     client: &TestClient,
-) -> impl futures::Stream<Item = (picomint_core::core::OperationId, WalletEvent)> {
+) -> impl futures::Stream<Item = (picomint_core::core::OperationId, OnchainEvent)> {
     let client = client.clone();
     let notify = client.client.event_notify();
     let mut next_id = EventLogId::LOG_START;
@@ -49,32 +49,32 @@ fn wallet_event_stream(
 
 fn try_parse_wallet_event(
     entry: &EventLogEntry,
-) -> Option<(picomint_core::core::OperationId, WalletEvent)> {
+) -> Option<(picomint_core::core::OperationId, OnchainEvent)> {
     let op = entry.operation;
     if let Some(e) = entry.to_event() {
-        return Some((op, WalletEvent::Send(e)));
+        return Some((op, OnchainEvent::Send(e)));
     }
     if let Some(e) = entry.to_event() {
-        return Some((op, WalletEvent::SendSuccess(e)));
+        return Some((op, OnchainEvent::SendSuccess(e)));
     }
     if let Some(e) = entry.to_event() {
-        return Some((op, WalletEvent::Receive(e)));
+        return Some((op, OnchainEvent::Receive(e)));
     }
     if let Some(e) = entry.to_event() {
-        return Some((op, WalletEvent::TxReject(e)));
+        return Some((op, OnchainEvent::TxReject(e)));
     }
     None
 }
 
 pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Result<()> {
-    info!("wallet: pegin + on-chain send");
+    info!("onchain: pegin + on-chain send");
 
-    let mut send_events = pin!(wallet_event_stream(client_send));
+    let mut send_events = pin!(onchain_event_stream(client_send));
 
     let pegin_addr = retry("deposit address derived", || async {
         client_send
             .client
-            .wallet_receive(client_send.fed, Account::Primary)
+            .onchain_receive(client_send.fed, Account::Primary)
     })
     .await?;
     info!(addr = %pegin_addr, "Pegin address ready");
@@ -91,7 +91,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     env.mine_blocks(10);
 
     // Drain the wallet events emitted by the pegin itself.
-    let Some((_, WalletEvent::Receive(_))) = send_events.next().await else {
+    let Some((_, OnchainEvent::Receive(_))) = send_events.next().await else {
         panic!("Expected pegin Receive event");
     };
 
@@ -121,7 +121,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let operation = client_send
         .client
-        .wallet_send(
+        .onchain_send(
             client_send.fed,
             Account::Primary,
             external_address.as_unchecked().clone(),
@@ -130,12 +130,12 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
         )
         .await?;
 
-    let Some((op, WalletEvent::Send(_))) = send_events.next().await else {
+    let Some((op, OnchainEvent::Send(_))) = send_events.next().await else {
         panic!("Expected Send event");
     };
     assert_eq!(op, operation);
 
-    let Some((op, WalletEvent::SendSuccess(ev))) = send_events.next().await else {
+    let Some((op, OnchainEvent::SendSuccess(ev))) = send_events.next().await else {
         panic!("Expected SendSuccess event");
     };
     assert_eq!(op, operation);
@@ -166,13 +166,13 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     })
     .await?;
 
-    info!("wallet: pegin + on-chain send passed");
+    info!("onchain: pegin + on-chain send passed");
 
-    info!("wallet: zero_fee_send_aborts");
+    info!("onchain: zero_fee_send_aborts");
 
     let abort_op = client_send
         .client
-        .wallet_send(
+        .onchain_send(
             client_send.fed,
             Account::Primary,
             external_address.as_unchecked().clone(),
@@ -181,19 +181,19 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
         )
         .await?;
 
-    let Some((op, WalletEvent::Send(_))) = send_events.next().await else {
+    let Some((op, OnchainEvent::Send(_))) = send_events.next().await else {
         panic!("Expected Send event");
     };
     assert_eq!(op, abort_op);
 
-    let Some((op, WalletEvent::TxReject(_))) = send_events.next().await else {
+    let Some((op, OnchainEvent::TxReject(_))) = send_events.next().await else {
         panic!("Expected TxReject event");
     };
     assert_eq!(op, abort_op);
 
-    info!("wallet: zero_fee_send_aborts passed");
+    info!("onchain: zero_fee_send_aborts passed");
 
-    info!("wallet: send_max leaves no notes");
+    info!("onchain: send_max leaves no notes");
 
     // A fresh client, so emptying the account cannot interfere with the
     // suites that draw on `client_send` afterwards.
@@ -214,28 +214,28 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let amount = client
         .client
-        .wallet_send_max_amount(client.fed, Account::Primary)
+        .onchain_send_max_amount(client.fed, Account::Primary)
         .await?;
 
     ensure!(amount > bitcoin::Amount::ZERO, "max send amount is zero");
 
-    let mut events = pin!(wallet_event_stream(&client));
+    let mut events = pin!(onchain_event_stream(&client));
 
     let operation = client
         .client
-        .wallet_send_max(
+        .onchain_send_max(
             client.fed,
             Account::Primary,
             external_address.as_unchecked().clone(),
         )
         .await?;
 
-    let Some((op, WalletEvent::Send(_))) = events.next().await else {
+    let Some((op, OnchainEvent::Send(_))) = events.next().await else {
         panic!("Expected Send event");
     };
     assert_eq!(op, operation);
 
-    let Some((op, WalletEvent::SendSuccess(_))) = events.next().await else {
+    let Some((op, OnchainEvent::SendSuccess(_))) = events.next().await else {
         panic!("Expected SendSuccess event");
     };
     assert_eq!(op, operation);
@@ -250,14 +250,14 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     client.client.shutdown().await;
 
-    info!("wallet: send_max passed");
+    info!("onchain: send_max passed");
 
-    info!("wallet: second pegin sweeps the deposit and the federation utxo");
+    info!("onchain: second pegin sweeps the deposit and the federation utxo");
 
     let pegin_addr = retry("second deposit address derived", || async {
         client_send
             .client
-            .wallet_receive(client_send.fed, Account::Primary)
+            .onchain_receive(client_send.fed, Account::Primary)
     })
     .await?;
 
@@ -284,7 +284,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
         })
         .expect("the deposit output pays the pegin address");
 
-    let Some((_, WalletEvent::Receive(_))) = send_events.next().await else {
+    let Some((_, OnchainEvent::Receive(_))) = send_events.next().await else {
         panic!("Expected second pegin Receive event");
     };
 
@@ -305,7 +305,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     })
     .await?;
 
-    info!("wallet: second pegin sweep passed");
+    info!("onchain: second pegin sweep passed");
 
     Ok(())
 }

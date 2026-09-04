@@ -3,7 +3,7 @@
 //!
 //! The per-module wire methods are free functions over the same handle in
 //! each module's `api.rs`; the module path carries the prefix the method
-//! names used to (`wallet::api::send_fee`, not `api.wallet_send_fee()`).
+//! names used to (`onchain::api::send_fee`, not `api.onchain_send_fee()`).
 
 pub use picomint_rpc::api::FederationApi;
 

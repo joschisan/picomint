@@ -50,7 +50,7 @@ pub const LNURL_DAEMON_PORT: u16 = 28176;
 ///
 /// Non-zero so the whole suite runs against a client that pays a cut on
 /// every transaction it builds — the fee outputs, their counters and their
-/// issuance ride along with each of ecash, wallet and ln rather than needing
+/// issuance ride along with each of ecash, onchain and ln rather than needing
 /// a scenario of their own. One percent, high enough that a cut on the
 /// smallest amount the suite moves still buys a note.
 pub const CLIENT_FEE_PPM: u64 = 10_000;

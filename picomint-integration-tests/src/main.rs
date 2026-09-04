@@ -4,7 +4,7 @@ mod expiry;
 mod ln;
 mod ecash;
 mod restore;
-mod wallet;
+mod onchain;
 
 use std::sync::Arc;
 
@@ -35,8 +35,8 @@ fn main() -> anyhow::Result<()> {
     info!("Invite code: {}", picomint_base32::encode(&env.invite));
     info!("Gateway: {}", env.gw_data_dir.display());
 
-    info!("Running wallet tests...");
-    runtime.block_on(wallet::run_tests(&env, &client_send))?;
+    info!("Running onchain tests...");
+    runtime.block_on(onchain::run_tests(&env, &client_send))?;
 
     info!("Running ln + ecash tests in parallel...");
     runtime.block_on(async {

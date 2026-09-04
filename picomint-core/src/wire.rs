@@ -1,9 +1,9 @@
-//! Static wire enums for the fixed module set: ecash + wallet + ln.
+//! Static wire enums for the fixed module set: ecash + onchain + ln.
 
 use crate::ln::{LightningInput, LightningInputError, LightningOutput, LightningOutputError};
 use crate::ecash::{ECashInput, ECashInputError, ECashOutput, ECashOutputError};
-use crate::wallet::{
-    WalletConsensusItem, WalletInput, WalletInputError, WalletOutput, WalletOutputError,
+use crate::onchain::{
+    OnchainConsensusItem, OnchainInput, OnchainInputError, OnchainOutput, OnchainOutputError,
 };
 use picomint_encoding::{Decodable, Encodable};
 use thiserror::Error;
@@ -11,7 +11,7 @@ use thiserror::Error;
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum Input {
     ECash(ECashInput),
-    Wallet(WalletInput),
+    Onchain(OnchainInput),
     Ln(LightningInput),
 }
 
@@ -27,16 +27,16 @@ impl From<LightningInput> for Input {
     }
 }
 
-impl From<WalletInput> for Input {
-    fn from(v: WalletInput) -> Self {
-        Self::Wallet(v)
+impl From<OnchainInput> for Input {
+    fn from(v: OnchainInput) -> Self {
+        Self::Onchain(v)
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum Output {
     ECash(ECashOutput),
-    Wallet(WalletOutput),
+    Onchain(OnchainOutput),
     Ln(Box<LightningOutput>),
 }
 
@@ -52,20 +52,20 @@ impl From<LightningOutput> for Output {
     }
 }
 
-impl From<WalletOutput> for Output {
-    fn from(v: WalletOutput) -> Self {
-        Self::Wallet(v)
+impl From<OnchainOutput> for Output {
+    fn from(v: OnchainOutput) -> Self {
+        Self::Onchain(v)
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum ModuleConsensusItem {
-    Wallet(WalletConsensusItem),
+    Onchain(OnchainConsensusItem),
 }
 
-impl From<WalletConsensusItem> for ModuleConsensusItem {
-    fn from(v: WalletConsensusItem) -> Self {
-        Self::Wallet(v)
+impl From<OnchainConsensusItem> for ModuleConsensusItem {
+    fn from(v: OnchainConsensusItem) -> Self {
+        Self::Onchain(v)
     }
 }
 
@@ -73,8 +73,8 @@ impl From<WalletConsensusItem> for ModuleConsensusItem {
 pub enum InputError {
     #[error("ECash input error: {0}")]
     ECash(ECashInputError),
-    #[error("Wallet input error: {0}")]
-    Wallet(WalletInputError),
+    #[error("Onchain input error: {0}")]
+    Onchain(OnchainInputError),
     #[error("Lightning input error: {0}")]
     Ln(LightningInputError),
 }
@@ -91,9 +91,9 @@ impl From<LightningInputError> for InputError {
     }
 }
 
-impl From<WalletInputError> for InputError {
-    fn from(v: WalletInputError) -> Self {
-        Self::Wallet(v)
+impl From<OnchainInputError> for InputError {
+    fn from(v: OnchainInputError) -> Self {
+        Self::Onchain(v)
     }
 }
 
@@ -101,8 +101,8 @@ impl From<WalletInputError> for InputError {
 pub enum OutputError {
     #[error("ECash output error: {0}")]
     ECash(ECashOutputError),
-    #[error("Wallet output error: {0}")]
-    Wallet(WalletOutputError),
+    #[error("Onchain output error: {0}")]
+    Onchain(OnchainOutputError),
     #[error("Lightning output error: {0}")]
     Ln(LightningOutputError),
 }
@@ -119,8 +119,8 @@ impl From<LightningOutputError> for OutputError {
     }
 }
 
-impl From<WalletOutputError> for OutputError {
-    fn from(v: WalletOutputError) -> Self {
-        Self::Wallet(v)
+impl From<OnchainOutputError> for OutputError {
+    fn from(v: OnchainOutputError) -> Self {
+        Self::Onchain(v)
     }
 }

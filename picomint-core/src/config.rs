@@ -11,7 +11,7 @@ use crate::PeerId;
 use crate::ln::config::LightningConfigConsensus;
 use crate::ecash::config::ECashConfigConsensus;
 use crate::version::ConsensusVersion;
-use crate::wallet::config::WalletConfigConsensus;
+use crate::onchain::config::OnchainConfigConsensus;
 use picomint_encoding::{Decodable, Encodable};
 
 // TODO: make configurable
@@ -80,8 +80,8 @@ pub struct ConsensusConfig {
     pub default_version: ConsensusVersion,
     /// ECash module config
     pub ecash: ECashConfigConsensus,
-    /// Wallet module config
-    pub wallet: WalletConfigConsensus,
+    /// Onchain module config
+    pub onchain: OnchainConfigConsensus,
     /// Lightning module config
     pub ln: LightningConfigConsensus,
 }

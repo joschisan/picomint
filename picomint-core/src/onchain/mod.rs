@@ -59,7 +59,7 @@ pub fn is_potential_receive(pks_hash: &sha256::Hash, script_pubkey: &ScriptBuf) 
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
-pub struct FederationWallet {
+pub struct FederationUtxo {
     pub value: bitcoin::Amount,
     pub outpoint: bitcoin::OutPoint,
     pub tweak: sha256::Hash,
@@ -91,7 +91,7 @@ pub struct OutputInfo {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub enum WalletConsensusItem {
+pub enum OnchainConsensusItem {
     Feerate(Option<u32>),
     /// One public nonce pair per input of the unsigned transaction - a
     /// peer's first entry into the transaction's append-only nonce log.
@@ -107,21 +107,21 @@ pub enum WalletConsensusItem {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct WalletInput {
+pub struct OnchainInput {
     pub output_index: u64,
     pub tweak: XOnlyPublicKey,
     pub fee: bitcoin::Amount,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct WalletOutput {
+pub struct OnchainOutput {
     pub destination: StandardScript,
     pub value: bitcoin::Amount,
     pub fee: bitcoin::Amount,
 }
 
 #[derive(Debug, Error, Encodable, Decodable, Hash, Clone, Eq, PartialEq)]
-pub enum WalletInputError {
+pub enum OnchainInputError {
     #[error("The output has already been claimed")]
     OutputAlreadySpent,
     #[error("Unknown output index")]
@@ -139,7 +139,7 @@ pub enum WalletInputError {
 }
 
 #[derive(Debug, Error, Encodable, Decodable, Hash, Clone, Eq, PartialEq)]
-pub enum WalletOutputError {
+pub enum OnchainOutputError {
     #[error("The output value is below the dust limit.")]
     UnderDustLimit,
     #[error("The federation does not have any funds yet")]

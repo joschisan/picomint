@@ -7,7 +7,7 @@ pub mod ecash;
 pub mod rpc;
 pub mod server;
 pub mod tx;
-pub mod wallet;
+pub mod onchain;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -71,7 +71,7 @@ pub async fn run(
         rejected: watch::Sender::new(BTreeMap::new()),
     };
 
-    wallet::spawn_broadcast_unconfirmed_txs_task(
+    onchain::spawn_broadcast_unconfirmed_txs_task(
         btc_rpc.clone(),
         db.clone(),
         cfg.consensus.network,
@@ -185,9 +185,9 @@ async fn submit_ci_proposals(server: Server, submission_tx: async_channel::Sende
                 .ok();
         }
 
-        for item in wallet::consensus_proposal(&server, &dbtx) {
+        for item in onchain::consensus_proposal(&server, &dbtx) {
             submission_tx
-                .send(ConsensusItem::Module(wire::ModuleConsensusItem::Wallet(
+                .send(ConsensusItem::Module(wire::ModuleConsensusItem::Onchain(
                     item,
                 )))
                 .await
@@ -219,7 +219,7 @@ async fn dispatch(consensus_api: Arc<ConsensusApi>, method: Method) -> Result<Ve
     match method {
         Method::Core(m) => rpc::handle_api(&consensus_api, m).await,
         Method::ECash(m) => ecash::handle_api(&consensus_api.server, m).await,
-        Method::Wallet(m) => wallet::handle_api(&consensus_api.server, m).await,
+        Method::Onchain(m) => onchain::handle_api(&consensus_api.server, m).await,
         Method::Ln(m) => ln::handle_api(&consensus_api.server, m).await,
     }
 }

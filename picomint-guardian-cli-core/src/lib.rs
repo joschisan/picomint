@@ -2,7 +2,7 @@ use clap::Args;
 use picomint_core::PeerId;
 use picomint_core::invite::InviteCode;
 use picomint_core::module::audit::AuditSummary;
-use picomint_core::wallet::TxInfo;
+use picomint_core::onchain::TxInfo;
 use serde::{Deserialize, Serialize};
 
 /// Filename of the guardian's admin CLI Unix socket, inside `DATA_DIR`.
@@ -38,10 +38,10 @@ pub const ROUTE_EXPIRY_CLEAR: &str = "/expiry/clear";
 pub const ROUTE_EXPIRY_STATUS: &str = "/expiry/status";
 
 // Module routes
-pub const ROUTE_MODULE_WALLET_TOTAL_VALUE: &str = "/module/wallet/total-value";
-pub const ROUTE_MODULE_WALLET_FEERATE: &str = "/module/wallet/feerate";
-pub const ROUTE_MODULE_WALLET_PENDING_TXS: &str = "/module/wallet/pending-txs";
-pub const ROUTE_MODULE_WALLET_TXS: &str = "/module/wallet/txs";
+pub const ROUTE_MODULE_ONCHAIN_TOTAL_VALUE: &str = "/module/onchain/total-value";
+pub const ROUTE_MODULE_ONCHAIN_FEERATE: &str = "/module/onchain/feerate";
+pub const ROUTE_MODULE_ONCHAIN_PENDING_TXS: &str = "/module/onchain/pending-txs";
+pub const ROUTE_MODULE_ONCHAIN_TXS: &str = "/module/onchain/txs";
 pub const ROUTE_MODULE_LN_GATEWAY_ADD: &str = "/module/ln/gateway/add";
 pub const ROUTE_MODULE_LN_GATEWAY_REMOVE: &str = "/module/ln/gateway/remove";
 pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/ln/gateway/list";
@@ -119,10 +119,10 @@ pub struct AuditResponse {
     pub audit: AuditSummary,
 }
 
-// --- /module/wallet/total-value ---
+// --- /module/onchain/total-value ---
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct WalletTotalValueResponse {
+pub struct OnchainTotalValueResponse {
     pub total_value_sat: Option<u64>,
 }
 
@@ -160,21 +160,21 @@ pub struct BitcoinConnectionResponse {
     pub sync_progress: Option<f64>,
 }
 
-// --- /module/wallet/feerate ---
+// --- /module/onchain/feerate ---
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct WalletFeerateResponse {
+pub struct OnchainFeerateResponse {
     pub sat_per_vbyte: Option<u32>,
 }
 
-// --- /module/wallet/pending-txs ---
+// --- /module/onchain/pending-txs ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PendingTxsResponse {
     pub txs: Vec<TxInfo>,
 }
 
-// --- /module/wallet/txs ---
+// --- /module/onchain/txs ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TxsResponse {

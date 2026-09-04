@@ -2,7 +2,7 @@ use maud::{Markup, html};
 use picomint_core::expiry::ExpiryStatus;
 use picomint_redb::ReadTx;
 
-use crate::consensus::wallet;
+use crate::consensus::onchain;
 use crate::ui::dashboard::{BACKUP_CONFIG_ROUTE, CLEAR_EXPIRY_ROUTE, expiry};
 use crate::ui::{copiable_text, modal_header};
 
@@ -27,7 +27,7 @@ pub fn render(
     dbtx: &ReadTx,
     expiry_status: Option<&ExpiryStatus>,
 ) -> Markup {
-    let restore_keys = wallet::restore_keys(server, dbtx);
+    let restore_keys = onchain::restore_keys(server, dbtx);
 
     html! {
         // `autofocus` on the <dialog> itself makes showModal() focus the

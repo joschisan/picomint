@@ -2,14 +2,14 @@ use maud::{Markup, html};
 use picomint_redb::ReadTx;
 
 use crate::consensus::db::consensus_block_count;
-use crate::consensus::wallet;
+use crate::consensus::onchain;
 use crate::ui::dashboard::kv;
 
 /// Renders the pending transaction chain as its own card; nothing when the
 /// chain is empty.
 pub fn render_pending(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Markup {
     let consensus_block_count = consensus_block_count(server, dbtx);
-    let pending_tx_chain = wallet::pending_tx_chain(dbtx);
+    let pending_tx_chain = onchain::pending_tx_chain(dbtx);
 
     if pending_tx_chain.is_empty() {
         return html! {};
@@ -86,9 +86,9 @@ pub fn render_pending(server: &crate::consensus::server::Server, dbtx: &ReadTx) 
 }
 
 pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Markup {
-    let federation_wallet = wallet::federation_wallet(dbtx);
-    let consensus_fee_rate = wallet::consensus_feerate(server, dbtx).map(|f| f / 1000);
-    let transaction_count = wallet::total_txs(dbtx);
+    let federation_utxo = onchain::federation_utxo(dbtx);
+    let consensus_fee_rate = onchain::consensus_feerate(server, dbtx).map(|f| f / 1000);
+    let transaction_count = onchain::total_txs(dbtx);
 
     html! {
         div class="card" {
@@ -98,7 +98,7 @@ pub fn render(server: &crate::consensus::server::Server, dbtx: &ReadTx) -> Marku
 
             div class="kv" {
                 span class="kv-label" { "Transaction Tip" }
-                @if let Some(wallet) = federation_wallet {
+                @if let Some(wallet) = federation_utxo {
                     a href={ "https://mempool.space/tx/" (wallet.outpoint.txid) } target="_blank" {
                         "mempool.space"
                     }

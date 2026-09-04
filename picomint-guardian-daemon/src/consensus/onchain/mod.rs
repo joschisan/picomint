@@ -16,11 +16,11 @@ use bitcoin::hashes::{Hash, sha256};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
-use common::config::WalletConfigConsensus;
-use common::{OutputInfo, WalletConsensusItem, WalletInput, WalletOutput};
+use common::config::OnchainConfigConsensus;
+use common::{OutputInfo, OnchainConsensusItem, OnchainInput, OnchainOutput};
 use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::secp256k1::XOnlyPublicKey;
-use picomint_core::wallet as common;
+use picomint_core::onchain as common;
 use picomint_core::{NumPeersExt, OutPoint, PeerId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
@@ -34,10 +34,10 @@ use crate::consensus::db::consensus_block_count;
 use crate::consensus::server::Server;
 use crate::handler;
 use picomint_core::secret::Secret;
-use picomint_core::wallet::config::{WalletConfig, WalletConfigPrivate};
-use picomint_core::wallet::methods::WalletMethod;
-use picomint_core::wallet::{
-    FederationWallet, TxInfo, WalletInputError, WalletOutputError, is_potential_receive,
+use picomint_core::onchain::config::{OnchainConfig, OnchainConfigPrivate};
+use picomint_core::onchain::methods::OnchainMethod;
+use picomint_core::onchain::{
+    FederationUtxo, TxInfo, OnchainInputError, OnchainOutputError, is_potential_receive,
     tweak_public_key, tweaked_script_pubkey,
 };
 use secp256k1::Scalar;
@@ -69,7 +69,7 @@ const MIN_FEERATE_VOTE_SATS_PER_KVB: u32 = 1000;
 /// script a [`StandardScript`] can carry (34 bytes, P2WSH/P2TR), so smaller
 /// destinations are overcharged by up to 3 vbytes.
 ///
-/// [`StandardScript`]: picomint_core::wallet::StandardScript
+/// [`StandardScript`]: picomint_core::onchain::StandardScript
 const SEND_TX_VBYTES: u64 = 154;
 
 /// A receive sweeps the deposit and the federation UTXO into one change
@@ -99,9 +99,9 @@ fn pending_txs_unordered(dbtx: &impl DbRead) -> Vec<FederationTx> {
     unsigned.into_iter().chain(unconfirmed).collect()
 }
 
-/// Run DKG for the wallet module, producing a fresh `WalletConfig` for this
+/// Run DKG for the onchain module, producing a fresh `OnchainConfig` for this
 /// peer.
-pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<WalletConfig> {
+pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<OnchainConfig> {
     let (polynomial, sks) = peers.run_dkg_secp().await?;
 
     let pks = peers
@@ -110,32 +110,32 @@ pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<WalletConf
         .map(|peer| Ok((peer, PublicKeyShare(eval_poly(&polynomial, &peer)?))))
         .collect::<anyhow::Result<BTreeMap<PeerId, PublicKeyShare>>>()?;
 
-    Ok(WalletConfig {
-        private: WalletConfigPrivate {
+    Ok(OnchainConfig {
+        private: OnchainConfigPrivate {
             sks: SecretKeyShare(sks),
         },
-        consensus: WalletConfigConsensus::new(AggregatePublicKey(polynomial[0]), pks),
+        consensus: OnchainConfigConsensus::new(AggregatePublicKey(polynomial[0]), pks),
     })
 }
 
-/// Verify our wallet secret key share matches the corresponding public key
+/// Verify our onchain secret key share matches the corresponding public key
 /// share in the consensus config.
 pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
     ensure!(
         cfg.consensus
-            .wallet
+            .onchain
             .pks
             .get(&cfg.private.identity)
             .context("Public key share set has no key for our identity")?
-            == &derive_pk_share(&cfg.private.wallet.sks),
+            == &derive_pk_share(&cfg.private.onchain.sks),
         "Wallet secret key share does not match our public key share"
     );
 
     Ok(())
 }
 
-pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<WalletConsensusItem> {
-    let mut items: Vec<WalletConsensusItem> = dbtx
+pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<OnchainConsensusItem> {
+    let mut items: Vec<OnchainConsensusItem> = dbtx
         .get(&UnsignedTxTable, &())
         .and_then(|unsigned_tx| signing_session_proposal(server, dbtx, &unsigned_tx))
         .into_iter()
@@ -150,7 +150,7 @@ pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<WalletConsensus
     // `None` retracts our vote while the bitcoin backend is down or
     // still syncing and thus unable to estimate fees.
     if dbtx.get(&FeeRateVoteTable, &server.cfg.private.identity) != Some(feerate_vote) {
-        items.push(WalletConsensusItem::Feerate(feerate_vote));
+        items.push(OnchainConsensusItem::Feerate(feerate_vote));
     }
 
     items
@@ -165,7 +165,7 @@ fn signing_session_proposal(
     server: &Server,
     dbtx: &ReadTx,
     unsigned_tx: &FederationTx,
-) -> Option<WalletConsensusItem> {
+) -> Option<OnchainConsensusItem> {
     let txid = unsigned_tx.tx.compute_txid();
 
     let inputs = unsigned_tx.spent_tx_outs.len();
@@ -180,7 +180,7 @@ fn signing_session_proposal(
 
         let public_nonces = nonces.iter().map(derive_public_nonce).collect();
 
-        return Some(WalletConsensusItem::Nonces(txid, public_nonces));
+        return Some(OnchainConsensusItem::Nonces(txid, public_nonces));
     };
 
     let session = latest / threshold(server);
@@ -216,7 +216,7 @@ fn signing_session_proposal(
 
     let public_nonces = fresh_nonces.iter().map(derive_public_nonce).collect();
 
-    Some(WalletConsensusItem::Signatures(txid, shares, public_nonces))
+    Some(OnchainConsensusItem::Signatures(txid, shares, public_nonces))
 }
 
 /// Derives the secret nonces for our nonce entry of the given generation,
@@ -232,7 +232,7 @@ fn derive_secret_nonces(
     generation: u64,
     inputs: usize,
 ) -> Vec<SecretNonce> {
-    let secret = Secret::new_root(&server.cfg.private.wallet.sks)
+    let secret = Secret::new_root(&server.cfg.private.onchain.sks)
         .child(&txid)
         .child(&generation);
 
@@ -242,25 +242,25 @@ fn derive_secret_nonces(
 }
 
 fn threshold(server: &Server) -> usize {
-    server.cfg.consensus.wallet.pks.to_num_peers().threshold()
+    server.cfg.consensus.onchain.pks.to_num_peers().threshold()
 }
 
 pub async fn process_consensus_item(
     server: &Server,
     dbtx: &WriteTx,
     peer: PeerId,
-    consensus_item: WalletConsensusItem,
+    consensus_item: OnchainConsensusItem,
 ) -> anyhow::Result<()> {
     match consensus_item {
-        WalletConsensusItem::Feerate(feerate) => {
+        OnchainConsensusItem::Feerate(feerate) => {
             if Some(feerate) == dbtx.insert(&FeeRateVoteTable, &peer, &feerate) {
                 return Err(anyhow!("Fee rate vote is redundant"));
             }
 
             Ok(())
         }
-        WalletConsensusItem::Nonces(txid, nonces) => process_nonces(dbtx, peer, txid, nonces),
-        WalletConsensusItem::Signatures(txid, shares, nonces) => {
+        OnchainConsensusItem::Nonces(txid, nonces) => process_nonces(dbtx, peer, txid, nonces),
+        OnchainConsensusItem::Signatures(txid, shares, nonces) => {
             process_signatures(server, dbtx, peer, txid, shares, nonces).await
         }
     }
@@ -269,40 +269,40 @@ pub async fn process_consensus_item(
 pub fn process_input(
     server: &Server,
     dbtx: &WriteTx,
-    input: &WalletInput,
-) -> Result<(picomint_core::Amount, XOnlyPublicKey), WalletInputError> {
+    input: &OnchainInput,
+) -> Result<(picomint_core::Amount, XOnlyPublicKey), OnchainInputError> {
     if dbtx
         .insert(&SpentOutputTable, &input.output_index, &())
         .is_some()
     {
-        return Err(WalletInputError::OutputAlreadySpent);
+        return Err(OnchainInputError::OutputAlreadySpent);
     }
 
     let Output(tracked_outpoint, tracked_output) = dbtx
         .get(&OutputTable, &input.output_index)
-        .ok_or(WalletInputError::UnknownOutputIndex)?;
+        .ok_or(OnchainInputError::UnknownOutputIndex)?;
 
     let tweaked_script = script_pubkey(server, &input.tweak.consensus_hash());
 
     if tracked_output.script_pubkey != tweaked_script {
-        return Err(WalletInputError::WrongTweak);
+        return Err(OnchainInputError::WrongTweak);
     }
 
     let consensus_receive_fee =
-        receive_fee(server, dbtx).ok_or(WalletInputError::NoConsensusFeerateAvailable)?;
+        receive_fee(server, dbtx).ok_or(OnchainInputError::NoConsensusFeerateAvailable)?;
 
     // We allow for a higher fee such that a guardian could construct a CPFP
     // transaction. This is the last line of defense should the federations
     // transactions ever get stuck due to a critical failure of the feerate
     // estimation.
     if input.fee < consensus_receive_fee {
-        return Err(WalletInputError::InsufficientTotalFee);
+        return Err(OnchainInputError::InsufficientTotalFee);
     }
 
     let output_value = tracked_output
         .value
         .checked_sub(input.fee)
-        .ok_or(WalletInputError::ArithmeticOverflow)?;
+        .ok_or(OnchainInputError::ArithmeticOverflow)?;
 
     if let Some(wallet) = dbtx.remove(&FederationWalletTable, &()) {
         // Assuming the first receive into the federation is made through a
@@ -311,7 +311,7 @@ pub fn process_input(
         let change_value = wallet
             .value
             .checked_add(output_value)
-            .ok_or(WalletInputError::ArithmeticOverflow)?;
+            .ok_or(OnchainInputError::ArithmeticOverflow)?;
 
         let tx = Transaction {
             version: Version(2),
@@ -339,7 +339,7 @@ pub fn process_input(
         dbtx.insert(
             &FederationWalletTable,
             &(),
-            &FederationWallet {
+            &FederationUtxo {
                 value: change_value,
                 outpoint: bitcoin::OutPoint {
                     txid: tx.compute_txid(),
@@ -384,13 +384,13 @@ pub fn process_input(
         };
 
         if dbtx.insert(&UnsignedTxTable, &(), &unsigned_tx).is_some() {
-            return Err(WalletInputError::PendingTransaction);
+            return Err(OnchainInputError::PendingTransaction);
         }
     } else {
         dbtx.insert(
             &FederationWalletTable,
             &(),
-            &FederationWallet {
+            &FederationUtxo {
                 value: tracked_output.value,
                 outpoint: tracked_outpoint,
                 tweak: input.tweak.consensus_hash(),
@@ -402,7 +402,7 @@ pub fn process_input(
         .to_sat()
         .checked_mul(1000)
         .map(picomint_core::Amount::from_msat)
-        .ok_or(WalletInputError::ArithmeticOverflow)?;
+        .ok_or(OnchainInputError::ArithmeticOverflow)?;
 
     Ok((amount, input.tweak))
 }
@@ -410,40 +410,40 @@ pub fn process_input(
 pub fn process_output(
     server: &Server,
     dbtx: &WriteTx,
-    output: &WalletOutput,
+    output: &OnchainOutput,
     outpoint: OutPoint,
-) -> Result<picomint_core::Amount, WalletOutputError> {
-    if output.value < server.cfg.consensus.wallet.dust_limit {
-        return Err(WalletOutputError::UnderDustLimit);
+) -> Result<picomint_core::Amount, OnchainOutputError> {
+    if output.value < server.cfg.consensus.onchain.dust_limit {
+        return Err(OnchainOutputError::UnderDustLimit);
     }
 
     let wallet = dbtx
         .remove(&FederationWalletTable, &())
-        .ok_or(WalletOutputError::NoFederationUTXO)?;
+        .ok_or(OnchainOutputError::NoFederationUTXO)?;
 
     let consensus_send_fee =
-        send_fee(server, dbtx).ok_or(WalletOutputError::NoConsensusFeerateAvailable)?;
+        send_fee(server, dbtx).ok_or(OnchainOutputError::NoConsensusFeerateAvailable)?;
 
     // We allow for a higher fee such that a guardian could construct a CPFP
     // transaction. This is the last line of defense should the federations
     // transactions ever get stuck due to a critical failure of the feerate
     // estimation.
     if output.fee < consensus_send_fee {
-        return Err(WalletOutputError::InsufficientTotalFee);
+        return Err(OnchainOutputError::InsufficientTotalFee);
     }
 
     let output_value = output
         .value
         .checked_add(output.fee)
-        .ok_or(WalletOutputError::ArithmeticOverflow)?;
+        .ok_or(OnchainOutputError::ArithmeticOverflow)?;
 
     let change_value = wallet
         .value
         .checked_sub(output_value)
-        .ok_or(WalletOutputError::ArithmeticOverflow)?;
+        .ok_or(OnchainOutputError::ArithmeticOverflow)?;
 
-    if change_value < server.cfg.consensus.wallet.dust_limit {
-        return Err(WalletOutputError::ChangeUnderDustLimit);
+    if change_value < server.cfg.consensus.onchain.dust_limit {
+        return Err(OnchainOutputError::ChangeUnderDustLimit);
     }
 
     let script_pubkey_out = output.destination.script_pubkey();
@@ -472,7 +472,7 @@ pub fn process_output(
     dbtx.insert(
         &FederationWalletTable,
         &(),
-        &FederationWallet {
+        &FederationUtxo {
             value: change_value,
             outpoint: bitcoin::OutPoint {
                 txid: tx.compute_txid(),
@@ -513,14 +513,14 @@ pub fn process_output(
     };
 
     if dbtx.insert(&UnsignedTxTable, &(), &unsigned_tx).is_some() {
-        return Err(WalletOutputError::PendingTransaction);
+        return Err(OnchainOutputError::PendingTransaction);
     }
 
     output_value
         .to_sat()
         .checked_mul(1000)
         .map(picomint_core::Amount::from_msat)
-        .ok_or(WalletOutputError::ArithmeticOverflow)
+        .ok_or(OnchainOutputError::ArithmeticOverflow)
 }
 
 pub fn audit(dbtx: &WriteTx) -> i64 {
@@ -528,16 +528,16 @@ pub fn audit(dbtx: &WriteTx) -> i64 {
         .map_or(0, |wallet| 1000 * wallet.value.to_sat() as i64)
 }
 
-pub async fn handle_api(server: &Server, method: WalletMethod) -> Result<Vec<u8>, String> {
+pub async fn handle_api(server: &Server, method: OnchainMethod) -> Result<Vec<u8>, String> {
     match method {
-        WalletMethod::ConsensusFeerate(req) => handler!(consensus_feerate, server, req).await,
-        WalletMethod::FederationWallet(req) => handler!(federation_wallet, server, req).await,
-        WalletMethod::SendFee(req) => handler!(send_fee, server, req).await,
-        WalletMethod::ReceiveFee(req) => handler!(receive_fee, server, req).await,
-        WalletMethod::TxId(req) => handler!(tx_id, server, req).await,
-        WalletMethod::OutputInfoSlice(req) => handler!(output_info_slice, server, req).await,
-        WalletMethod::PendingTxChain(req) => handler!(pending_tx_chain, server, req).await,
-        WalletMethod::TxChain(req) => handler!(tx_chain, server, req).await,
+        OnchainMethod::ConsensusFeerate(req) => handler!(consensus_feerate, server, req).await,
+        OnchainMethod::FederationUtxo(req) => handler!(federation_utxo, server, req).await,
+        OnchainMethod::SendFee(req) => handler!(send_fee, server, req).await,
+        OnchainMethod::ReceiveFee(req) => handler!(receive_fee, server, req).await,
+        OnchainMethod::TxId(req) => handler!(tx_id, server, req).await,
+        OnchainMethod::OutputInfoSlice(req) => handler!(output_info_slice, server, req).await,
+        OnchainMethod::PendingTxChain(req) => handler!(pending_tx_chain, server, req).await,
+        OnchainMethod::TxChain(req) => handler!(tx_chain, server, req).await,
     }
 }
 
@@ -596,7 +596,7 @@ pub async fn sync_blocks(
 
         assert_eq!(block.block_hash(), block_hash, "Block hash mismatch");
 
-        let pks_hash = server.cfg.consensus.wallet.agg_pk.consensus_hash();
+        let pks_hash = server.cfg.consensus.onchain.agg_pk.consensus_hash();
 
         for tx in block.txdata {
             dbtx.remove(&UnconfirmedTxTable, &tx.compute_txid());
@@ -781,7 +781,7 @@ async fn await_local_sync_to_block_count(server: &Server, block_count: u32) {
 }
 
 pub fn consensus_feerate(server: &Server, dbtx: &impl DbRead) -> Option<u32> {
-    let num_peers = server.cfg.consensus.wallet.pks.to_num_peers();
+    let num_peers = server.cfg.consensus.onchain.pks.to_num_peers();
 
     let mut rates: Vec<u32> = dbtx.iter(&FeeRateVoteTable, |r| r.filter_map(|(_, v)| v).collect());
 
@@ -803,7 +803,7 @@ pub fn consensus_fee(server: &Server, dbtx: &impl DbRead, tx_vbytes: u64) -> Opt
     assert!(pending_txs.len() <= 32);
 
     let feerate = u64::from(consensus_feerate(server, dbtx)?)
-        .max(u64::from(server.cfg.consensus.wallet.feerate_base) << pending_txs.len());
+        .max(u64::from(server.cfg.consensus.onchain.feerate_base) << pending_txs.len());
 
     let tx_fee = tx_vbytes.saturating_mul(feerate).saturating_div(1000);
 
@@ -833,7 +833,7 @@ pub fn receive_fee(server: &Server, dbtx: &impl DbRead) -> Option<Amount> {
 }
 
 fn script_pubkey(server: &Server, tweak: &sha256::Hash) -> ScriptBuf {
-    tweaked_script_pubkey(&server.cfg.consensus.wallet.agg_pk, tweak)
+    tweaked_script_pubkey(&server.cfg.consensus.onchain.agg_pk, tweak)
 }
 
 fn tweak_scalar(tweak: &sha256::Hash) -> Scalar {
@@ -845,7 +845,7 @@ fn tweaked_sks(server: &Server, tweak: &sha256::Hash) -> SecretKeyShare {
         server
             .cfg
             .private
-            .wallet
+            .onchain
             .sks
             .0
             .add_tweak(&tweak_scalar(tweak))
@@ -857,7 +857,7 @@ fn tweaked_pks(server: &Server, peer: &PeerId, tweak: &sha256::Hash) -> PublicKe
     let pks = server
         .cfg
         .consensus
-        .wallet
+        .onchain
         .pks
         .get(peer)
         .expect("Failed to get public key share of peer from config");
@@ -867,7 +867,7 @@ fn tweaked_pks(server: &Server, peer: &PeerId, tweak: &sha256::Hash) -> PublicKe
 
 fn tweaked_agg_pk(server: &Server, tweak: &sha256::Hash) -> AggregatePublicKey {
     AggregatePublicKey(tweak_public_key(
-        &server.cfg.consensus.wallet.agg_pk.0,
+        &server.cfg.consensus.onchain.agg_pk.0,
         tweak,
     ))
 }
@@ -1026,7 +1026,7 @@ pub fn total_txs(dbtx: &impl DbRead) -> u64 {
 }
 
 /// The current federation wallet, if a first receive has established one.
-pub fn federation_wallet(dbtx: &impl DbRead) -> Option<FederationWallet> {
+pub fn federation_utxo(dbtx: &impl DbRead) -> Option<FederationUtxo> {
     dbtx.get(&FederationWalletTable, &())
 }
 
@@ -1039,7 +1039,7 @@ pub fn federation_wallet(dbtx: &impl DbRead) -> Option<FederationWallet> {
 /// single-key taproot wallet. Returns None if the federation wallet has
 /// not been initialized yet.
 pub fn restore_keys(server: &Server, dbtx: &impl DbRead) -> Option<(String, String)> {
-    let wallet = federation_wallet(dbtx)?;
+    let wallet = federation_utxo(dbtx)?;
 
     Some((
         tweaked_agg_pk(server, &wallet.tweak).0.to_string(),

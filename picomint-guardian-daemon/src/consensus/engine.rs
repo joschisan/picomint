@@ -22,7 +22,7 @@ use crate::consensus::db::{
     ConsensusVersionVoteTable, SignedSessionOutcomeTable, consensus_block_count, consensus_version,
 };
 use crate::consensus::server::{Server, audit};
-use crate::consensus::wallet;
+use crate::consensus::onchain;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
 /// BFT rounds a session runs for, which is what sets how long one lasts.
@@ -518,7 +518,7 @@ async fn process_consensus_item(
                     "consensus block count advanced"
                 );
 
-                wallet::sync_blocks(server, dbtx, old_block_count, new_block_count).await;
+                onchain::sync_blocks(server, dbtx, old_block_count, new_block_count).await;
             }
         }
         ConsensusItem::Version(vote) => {

@@ -16,8 +16,8 @@ use picomint_guardian_cli_core::{
     LnGatewayRemoveRequest, ROUTE_AUDIT, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG,
     ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
     ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
-    ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TXS, ROUTE_MODULE_WALLET_TOTAL_VALUE,
-    ROUTE_MODULE_WALLET_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_PEER,
+    ROUTE_MODULE_ONCHAIN_FEERATE, ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE,
+    ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_PEER,
     ROUTE_SETUP_RESTORE, ROUTE_SETUP_SET_LOCAL_PARAMS, ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS,
     SetupAddPeerRequest, SetupSetLocalParamsRequest,
 };
@@ -95,17 +95,17 @@ enum SetupCommands {
 
 #[derive(Subcommand)]
 enum ModuleCommands {
-    /// Wallet module commands
+    /// Onchain module commands
     #[command(subcommand)]
-    Wallet(WalletCommands),
+    Onchain(OnchainCommands),
     /// LN module commands
     #[command(subcommand)]
     Ln(LnCommands),
 }
 
 #[derive(Subcommand)]
-enum WalletCommands {
-    /// Get total wallet value
+enum OnchainCommands {
+    /// Get total onchain value
     TotalValue,
     /// Get consensus fee rate
     Feerate,
@@ -234,15 +234,15 @@ async fn main() -> Result<()> {
         },
 
         Commands::Module(cmd) => match cmd {
-            ModuleCommands::Wallet(cmd) => match cmd {
-                WalletCommands::TotalValue => {
-                    request(d, ROUTE_MODULE_WALLET_TOTAL_VALUE, ()).await?
+            ModuleCommands::Onchain(cmd) => match cmd {
+                OnchainCommands::TotalValue => {
+                    request(d, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ()).await?
                 }
-                WalletCommands::Feerate => request(d, ROUTE_MODULE_WALLET_FEERATE, ()).await?,
-                WalletCommands::PendingTxs => {
-                    request(d, ROUTE_MODULE_WALLET_PENDING_TXS, ()).await?
+                OnchainCommands::Feerate => request(d, ROUTE_MODULE_ONCHAIN_FEERATE, ()).await?,
+                OnchainCommands::PendingTxs => {
+                    request(d, ROUTE_MODULE_ONCHAIN_PENDING_TXS, ()).await?
                 }
-                WalletCommands::Txs => request(d, ROUTE_MODULE_WALLET_TXS, ()).await?,
+                OnchainCommands::Txs => request(d, ROUTE_MODULE_ONCHAIN_TXS, ()).await?,
             },
             ModuleCommands::Ln(cmd) => match cmd {
                 LnCommands::Gateway(cmd) => match cmd {

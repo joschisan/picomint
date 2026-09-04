@@ -145,7 +145,7 @@ pub(crate) fn select_gateway(
 
 /// Empty `account` to `lnurl` through a caller-selected gateway: resolve
 /// it, size the max, pay — the Lightning shape of
-/// [`crate::wallet::Wallet::send_max`]. The max needs no
+/// [`crate::onchain::Wallet::send_max`]. The max needs no
 /// invoice to price, so the one invoice resolved is the one paid, for
 /// the figure that empties the account: every note goes in and no change
 /// comes back. An account that moved since the caller previewed

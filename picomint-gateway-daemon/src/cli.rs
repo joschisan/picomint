@@ -14,7 +14,7 @@ use ldk_node::payment::{PaymentKind, PaymentStatus};
 use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use picomint_client::gw::GATEWAY_ACCOUNT;
-use picomint_client::wallet::events::{SendFailureEvent, SendSuccessEvent};
+use picomint_client::onchain::events::{SendFailureEvent, SendSuccessEvent};
 use picomint_client::{TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::FederationId;
 use picomint_core::ln::gateway::GatewayPk;
@@ -24,8 +24,8 @@ use picomint_gateway_cli_core::{
     FederationListResponse, FederationMintCountRequest, FederationMintCountResponse,
     FederationMintReceiveRequest, FederationMintReceiveResponse, FederationMintSendRequest,
     FederationMintSendResponse, FederationRemoveRequest, FederationWalletReceiveRequest,
-    FederationWalletReceiveResponse, FederationWalletSendFeeRequest,
-    FederationWalletSendFeeResponse, FederationWalletSendRequest, FederationWalletSendResponse,
+    FederationWalletReceiveResponse, FederationOnchainSendFeeRequest,
+    FederationOnchainSendFeeResponse, FederationOnchainSendRequest, FederationOnchainSendResponse,
     InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelListResponse,
     LdkChannelOpenRequest, LdkChannelSpliceInRequest, LdkChannelSpliceOutRequest,
     LdkLnProbeRequest, LdkLnReceiveRequest, LdkLnReceiveResponse, LdkLnSendRequest,
@@ -34,8 +34,8 @@ use picomint_gateway_cli_core::{
     PeerInfo, QueryRequest, QueryResponse, ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE,
     ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_ECASH_COUNT,
     ROUTE_FEDERATION_MODULE_ECASH_RECEIVE, ROUTE_FEDERATION_MODULE_ECASH_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_FEDERATION_REMOVE, ROUTE_INFO,
+    ROUTE_FEDERATION_MODULE_ONCHAIN_RECEIVE, ROUTE_FEDERATION_MODULE_ONCHAIN_SEND,
+    ROUTE_FEDERATION_MODULE_ONCHAIN_SEND_FEE, ROUTE_FEDERATION_REMOVE, ROUTE_INFO,
     ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LN_PROBE,
     ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
@@ -149,15 +149,15 @@ fn router() -> Router<AppState> {
             post(federation_module_mint_receive),
         )
         .route(
-            ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE,
+            ROUTE_FEDERATION_MODULE_ONCHAIN_SEND_FEE,
             post(federation_module_wallet_send_fee),
         )
         .route(
-            ROUTE_FEDERATION_MODULE_WALLET_SEND,
+            ROUTE_FEDERATION_MODULE_ONCHAIN_SEND,
             post(federation_module_wallet_send),
         )
         .route(
-            ROUTE_FEDERATION_MODULE_WALLET_RECEIVE,
+            ROUTE_FEDERATION_MODULE_ONCHAIN_RECEIVE,
             post(federation_module_wallet_receive),
         )
 }
@@ -789,15 +789,15 @@ async fn federation_module_mint_receive(
 #[instrument(skip_all, err)]
 async fn federation_module_wallet_send_fee(
     State(state): State<AppState>,
-    Json(payload): Json<FederationWalletSendFeeRequest>,
-) -> Result<Json<FederationWalletSendFeeResponse>, CliError> {
+    Json(payload): Json<FederationOnchainSendFeeRequest>,
+) -> Result<Json<FederationOnchainSendFeeResponse>, CliError> {
     let federation = resolve_federation(&state, payload.federation)?;
     let fee = state
         .client
-        .wallet_send_fee(federation)
+        .onchain_send_fee(federation)
         .await
         .map_err(|e| CliError::internal(format!("Failed to fetch send fee: {e}")))?;
-    Ok(Json(FederationWalletSendFeeResponse { fee }))
+    Ok(Json(FederationOnchainSendFeeResponse { fee }))
 }
 
 /// Withdraw onchain from a federation. Blocks until the send reaches a
@@ -806,12 +806,12 @@ async fn federation_module_wallet_send_fee(
 #[instrument(skip_all, err)]
 async fn federation_module_wallet_send(
     State(state): State<AppState>,
-    Json(payload): Json<FederationWalletSendRequest>,
-) -> Result<Json<FederationWalletSendResponse>, CliError> {
+    Json(payload): Json<FederationOnchainSendRequest>,
+) -> Result<Json<FederationOnchainSendResponse>, CliError> {
     let federation = resolve_federation(&state, payload.federation)?;
     let operation = state
         .client
-        .wallet_send(
+        .onchain_send(
             federation,
             GATEWAY_ACCOUNT,
             payload.address,
@@ -824,7 +824,7 @@ async fn federation_module_wallet_send(
     let mut events = state.client.subscribe_operation_events(operation);
     while let Some(entry) = events.next().await {
         if let Some(e) = entry.to_event::<SendSuccessEvent>() {
-            return Ok(Json(FederationWalletSendResponse { txid: e.txid }));
+            return Ok(Json(FederationOnchainSendResponse { txid: e.txid }));
         }
         if let Some(e) = entry.to_event::<TxRejectEvent>() {
             return Err(CliError::bad_request(format!(
@@ -851,7 +851,7 @@ async fn federation_module_wallet_receive(
 
     let address = state
         .client
-        .wallet_receive(federation, GATEWAY_ACCOUNT)
+        .onchain_receive(federation, GATEWAY_ACCOUNT)
         .map_err(CliError::internal)?;
 
     Ok(Json(FederationWalletReceiveResponse {

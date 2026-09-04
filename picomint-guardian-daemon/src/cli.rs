@@ -15,7 +15,7 @@ use tokio::net::UnixListener;
 
 use crate::config::ServerConfig;
 use crate::config::setup::SetupApi;
-use crate::consensus::{ln, wallet};
+use crate::consensus::{ln, onchain};
 
 #[derive(Debug)]
 pub struct CliError {
@@ -76,7 +76,7 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
 }
 
 /// Build the Dashboard-phase CLI router that exposes read-only federation
-/// endpoints (audit, invite) plus the LN/wallet module-admin routes.
+/// endpoints (audit, invite) plus the LN/onchain module-admin routes.
 pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     use crate::p2p::{P2PConnectionStatus, Transport};
     use axum::Json;
@@ -89,9 +89,9 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         PendingTxsResponse, ROUTE_AUDIT, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG,
         ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
         ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
-        ROUTE_MODULE_WALLET_FEERATE, ROUTE_MODULE_WALLET_PENDING_TXS,
-        ROUTE_MODULE_WALLET_TOTAL_VALUE, ROUTE_MODULE_WALLET_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
-        TxsResponse, WalletFeerateResponse, WalletTotalValueResponse,
+        ROUTE_MODULE_ONCHAIN_FEERATE, ROUTE_MODULE_ONCHAIN_PENDING_TXS,
+        ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
+        TxsResponse, OnchainFeerateResponse, OnchainTotalValueResponse,
     };
 
     async fn config(
@@ -130,11 +130,11 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         }))
     }
 
-    async fn wallet_total_value(
+    async fn onchain_total_value(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<WalletTotalValueResponse>, CliError> {
-        Ok(Json(WalletTotalValueResponse {
-            total_value_sat: wallet::federation_wallet(&api.server.db.begin_read())
+    ) -> Result<Json<OnchainTotalValueResponse>, CliError> {
+        Ok(Json(OnchainTotalValueResponse {
+            total_value_sat: onchain::federation_utxo(&api.server.db.begin_read())
                 .map(|w| w.value.to_sat()),
         }))
     }
@@ -200,28 +200,28 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         }))
     }
 
-    async fn wallet_feerate(
+    async fn onchain_feerate(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<WalletFeerateResponse>, CliError> {
-        Ok(Json(WalletFeerateResponse {
-            sat_per_vbyte: wallet::consensus_feerate(&api.server, &api.server.db.begin_read())
+    ) -> Result<Json<OnchainFeerateResponse>, CliError> {
+        Ok(Json(OnchainFeerateResponse {
+            sat_per_vbyte: onchain::consensus_feerate(&api.server, &api.server.db.begin_read())
                 .map(|f| f / 1000),
         }))
     }
 
-    async fn wallet_pending_txs(
+    async fn onchain_pending_txs(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<PendingTxsResponse>, CliError> {
         Ok(Json(PendingTxsResponse {
-            txs: wallet::pending_tx_chain(&api.server.db.begin_read()),
+            txs: onchain::pending_tx_chain(&api.server.db.begin_read()),
         }))
     }
 
-    async fn wallet_txs(
+    async fn onchain_txs(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<TxsResponse>, CliError> {
         Ok(Json(TxsResponse {
-            txs: wallet::tx_chain(&api.server.db.begin_read()),
+            txs: onchain::tx_chain(&api.server.db.begin_read()),
         }))
     }
 
@@ -282,10 +282,10 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         .route(ROUTE_BLOCK_COUNT, post(block_count))
         .route(ROUTE_P2P, post(p2p))
         .route(ROUTE_BITCOIN_CONNECTION, post(bitcoin_connection))
-        .route(ROUTE_MODULE_WALLET_TOTAL_VALUE, post(wallet_total_value))
-        .route(ROUTE_MODULE_WALLET_FEERATE, post(wallet_feerate))
-        .route(ROUTE_MODULE_WALLET_PENDING_TXS, post(wallet_pending_txs))
-        .route(ROUTE_MODULE_WALLET_TXS, post(wallet_txs))
+        .route(ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, post(onchain_total_value))
+        .route(ROUTE_MODULE_ONCHAIN_FEERATE, post(onchain_feerate))
+        .route(ROUTE_MODULE_ONCHAIN_PENDING_TXS, post(onchain_pending_txs))
+        .route(ROUTE_MODULE_ONCHAIN_TXS, post(onchain_txs))
         .route(ROUTE_MODULE_LN_GATEWAY_ADD, post(ln_gateway_add))
         .route(ROUTE_MODULE_LN_GATEWAY_REMOVE, post(ln_gateway_remove))
         .route(ROUTE_MODULE_LN_GATEWAY_LIST, post(ln_gateway_list))

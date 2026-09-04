@@ -14,15 +14,15 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_gateway_cli_core::{
     CLI_SOCKET_FILENAME, FederationAddRequest, FederationBalanceRequest, FederationConfigRequest,
     FederationMintCountRequest, FederationMintReceiveRequest, FederationMintSendRequest,
-    FederationRemoveRequest, FederationWalletReceiveRequest, FederationWalletSendFeeRequest,
-    FederationWalletSendRequest, LdkChannelCloseRequest, LdkChannelOpenRequest,
+    FederationRemoveRequest, FederationWalletReceiveRequest, FederationOnchainSendFeeRequest,
+    FederationOnchainSendRequest, LdkChannelCloseRequest, LdkChannelOpenRequest,
     LdkChannelSpliceInRequest, LdkChannelSpliceOutRequest, LdkLnProbeRequest, LdkLnReceiveRequest,
     LdkLnSendRequest, LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
     QueryRequest, ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
     ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_ECASH_COUNT,
     ROUTE_FEDERATION_MODULE_ECASH_RECEIVE, ROUTE_FEDERATION_MODULE_ECASH_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
-    ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_FEDERATION_REMOVE, ROUTE_INFO,
+    ROUTE_FEDERATION_MODULE_ONCHAIN_RECEIVE, ROUTE_FEDERATION_MODULE_ONCHAIN_SEND,
+    ROUTE_FEDERATION_MODULE_ONCHAIN_SEND_FEE, ROUTE_FEDERATION_REMOVE, ROUTE_INFO,
     ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LN_PROBE,
     ROUTE_LDK_LN_RECEIVE, ROUTE_LDK_LN_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
@@ -147,9 +147,9 @@ enum ModuleCommands {
     /// ECash module commands
     #[command(subcommand)]
     ECash(ECashCommands),
-    /// Wallet module commands
+    /// Onchain module commands
     #[command(subcommand)]
-    Wallet(WalletCommands),
+    Onchain(OnchainCommands),
 }
 
 #[derive(Subcommand)]
@@ -163,11 +163,11 @@ enum ECashCommands {
 }
 
 #[derive(Subcommand)]
-enum WalletCommands {
+enum OnchainCommands {
     /// Get send fee estimate
-    SendFee(FederationWalletSendFeeRequest),
-    /// Send onchain from federation wallet
-    Send(FederationWalletSendRequest),
+    SendFee(FederationOnchainSendFeeRequest),
+    /// Send onchain from the federation
+    Send(FederationOnchainSendRequest),
     /// Get receive address
     Receive(FederationWalletReceiveRequest),
 }
@@ -298,15 +298,15 @@ async fn main() -> Result<()> {
                         request(d, ROUTE_FEDERATION_MODULE_ECASH_RECEIVE, req).await?
                     }
                 },
-                ModuleCommands::Wallet(cmd) => match cmd {
-                    WalletCommands::SendFee(req) => {
-                        request(d, ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, req).await?
+                ModuleCommands::Onchain(cmd) => match cmd {
+                    OnchainCommands::SendFee(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_ONCHAIN_SEND_FEE, req).await?
                     }
-                    WalletCommands::Send(req) => {
-                        request(d, ROUTE_FEDERATION_MODULE_WALLET_SEND, req).await?
+                    OnchainCommands::Send(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_ONCHAIN_SEND, req).await?
                     }
-                    WalletCommands::Receive(req) => {
-                        request(d, ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, req).await?
+                    OnchainCommands::Receive(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_ONCHAIN_RECEIVE, req).await?
                     }
                 },
             },

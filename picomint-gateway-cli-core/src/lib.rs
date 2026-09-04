@@ -49,9 +49,9 @@ pub const ROUTE_FEDERATION_REMOVE: &str = "/federation/remove";
 pub const ROUTE_FEDERATION_MODULE_ECASH_COUNT: &str = "/federation/module/ecash/count";
 pub const ROUTE_FEDERATION_MODULE_ECASH_SEND: &str = "/federation/module/ecash/send";
 pub const ROUTE_FEDERATION_MODULE_ECASH_RECEIVE: &str = "/federation/module/ecash/receive";
-pub const ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE: &str = "/federation/module/wallet/send-fee";
-pub const ROUTE_FEDERATION_MODULE_WALLET_SEND: &str = "/federation/module/wallet/send";
-pub const ROUTE_FEDERATION_MODULE_WALLET_RECEIVE: &str = "/federation/module/wallet/receive";
+pub const ROUTE_FEDERATION_MODULE_ONCHAIN_SEND_FEE: &str = "/federation/module/onchain/send-fee";
+pub const ROUTE_FEDERATION_MODULE_ONCHAIN_SEND: &str = "/federation/module/onchain/send";
+pub const ROUTE_FEDERATION_MODULE_ONCHAIN_RECEIVE: &str = "/federation/module/onchain/receive";
 
 // --- /info ---
 
@@ -395,23 +395,23 @@ pub struct FederationMintReceiveResponse {
     pub amount: Amount,
 }
 
-// --- /federation/module/wallet/send-fee ---
+// --- /federation/module/onchain/send-fee ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationWalletSendFeeRequest {
+pub struct FederationOnchainSendFeeRequest {
     #[arg(long = "id")]
     pub federation: Option<FederationId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FederationWalletSendFeeResponse {
+pub struct FederationOnchainSendFeeResponse {
     pub fee: bitcoin::Amount,
 }
 
-// --- /federation/module/wallet/send ---
+// --- /federation/module/onchain/send ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct FederationWalletSendRequest {
+pub struct FederationOnchainSendRequest {
     pub address: bitcoin::Address<NetworkUnchecked>,
     pub amount: bitcoin::Amount,
     #[arg(long)]
@@ -421,11 +421,11 @@ pub struct FederationWalletSendRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FederationWalletSendResponse {
+pub struct FederationOnchainSendResponse {
     pub txid: bitcoin::Txid,
 }
 
-// --- /federation/module/wallet/receive ---
+// --- /federation/module/onchain/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationWalletReceiveRequest {

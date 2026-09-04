@@ -2,7 +2,7 @@
 //!
 //! This crate hosts both the daemon library and the `picomint-guardian-daemon`
 //! binary (`src/main.rs`). It drives config generation, consensus, and the
-//! admin UI/CLI for the fixed module set (ecash + lightning + wallet).
+//! admin UI/CLI for the fixed module set (ecash + lightning + onchain).
 
 extern crate picomint_core;
 

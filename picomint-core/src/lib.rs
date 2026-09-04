@@ -50,8 +50,8 @@ pub mod session;
 pub mod tx;
 /// Consensus version of the federation and the vote that advances it.
 pub mod version;
-/// Wallet module wire types / helpers (shared between client and server).
-pub mod wallet;
+/// Onchain module wire types / helpers (shared between client and server).
+pub mod onchain;
 /// Static wire enums over the fixed module set.
 pub mod wire;
 

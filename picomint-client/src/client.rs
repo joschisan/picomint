@@ -160,7 +160,7 @@ impl Client {
         );
 
         crate::ecash::wipe_tables(&dbtx, federation);
-        crate::wallet::wipe_tables(&dbtx, federation);
+        crate::onchain::wipe_tables(&dbtx, federation);
         crate::ln::wipe_tables(&dbtx, federation);
         crate::gw::wipe_tables(&dbtx, federation);
         crate::tx::wipe_tables(&dbtx, federation);
@@ -266,7 +266,7 @@ impl Client {
         crate::tx::operation_is_active(&dbtx, federation, operation)
             || crate::ecash::operation_is_active(&dbtx, federation, operation)
             || crate::ln::operation_is_active(&dbtx, federation, operation)
-            || crate::wallet::operation_is_active(&dbtx, federation, operation)
+            || crate::onchain::operation_is_active(&dbtx, federation, operation)
             || crate::gw::operation_is_active(&dbtx, federation, operation)
     }
 
@@ -289,7 +289,7 @@ impl Client {
             crate::tx::sm_notifies(&self.db),
             crate::ecash::sm_notifies(&self.db),
             crate::ln::sm_notifies(&self.db),
-            crate::wallet::sm_notifies(&self.db),
+            crate::onchain::sm_notifies(&self.db),
             crate::gw::sm_notifies(&self.db),
         ]
         .concat();
@@ -350,7 +350,7 @@ fn build_ctx(
 
     crate::ecash::resume(&ctx);
 
-    crate::wallet::resume(&ctx);
+    crate::onchain::resume(&ctx);
 
     crate::ln::resume(&ctx);
 
