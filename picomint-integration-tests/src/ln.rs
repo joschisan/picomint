@@ -24,7 +24,7 @@ use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_
 use tracing::info;
 
 use crate::cli;
-use crate::env::{NUM_GUARDIANS, TestClient, TestEnv, retry};
+use crate::env::{NUM_ONLINE_GUARDIANS, TestClient, TestEnv, retry};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -111,7 +111,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 }
 
 fn register_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()> {
-    for peer in 0..NUM_GUARDIANS {
+    for peer in 0..NUM_ONLINE_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
         assert!(cli::guardian_ln_gateway_add(&data_dir, gateway_pk)?);
     }
@@ -119,7 +119,7 @@ fn register_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()>
 }
 
 fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()> {
-    for peer in 0..NUM_GUARDIANS {
+    for peer in 0..NUM_ONLINE_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
         assert!(cli::guardian_ln_gateway_remove(&data_dir, gateway_pk)?);
     }

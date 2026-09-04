@@ -2,7 +2,7 @@ use anyhow::{Result, ensure};
 use tracing::info;
 
 use crate::cli;
-use crate::env::{TestEnv, retry};
+use crate::env::{NUM_GUARDIANS, NUM_ONLINE_GUARDIANS, TestEnv, retry};
 
 /// Poll until guardian `peer` reports `target` finalized sessions or
 /// more. Returns the observed count.
@@ -23,14 +23,28 @@ async fn retry_session_count_at_least(env: &TestEnv, peer: usize, target: u64) -
     .await
 }
 
-/// Wipe two guardians at once, restore both, and verify the federation
-/// resumes ordering sessions past where it was. With 2-of-4 wiped, the
-/// surviving 2 can't reach threshold on their own, so this exercises
-/// the bft column-state quorum gate: both wiped peers must observe
-/// `threshold` peer views of their column before authoring round-0,
-/// otherwise they'd fork their own column against pre-wipe predecessors.
+/// Two-phase guardian recovery test. First the two guardians taken
+/// offline right after DKG come back against their stale data dirs and
+/// catch up on every session ordered while they were down. Then three
+/// further guardians are wiped and restored from config backups. With
+/// 3-of-7 wiped, the surviving 4 can't reach threshold on their own,
+/// so this exercises the bft column-state quorum gate: every wiped
+/// peer must observe `threshold` peer views of its column before
+/// authoring round-0, otherwise it'd fork its own column against
+/// pre-wipe predecessors.
 pub async fn run_test(env: &TestEnv) -> Result<()> {
-    let peers = [0_usize, 1];
+    info!("bringing the offline guardians back online");
+    for peer in NUM_ONLINE_GUARDIANS..NUM_GUARDIANS {
+        env.restart_guardian(peer).await?;
+    }
+
+    let current = retry_session_count_at_least(env, 0, 1).await?;
+    for peer in NUM_ONLINE_GUARDIANS..NUM_GUARDIANS {
+        retry_session_count_at_least(env, peer, current).await?;
+    }
+    info!("offline guardians caught up to session {current}");
+
+    let peers = [0_usize, 1, 2];
     let data_dirs: Vec<_> = peers
         .iter()
         .map(|p| env.data_dir.join(format!("guardian-{p}")))
