@@ -2,12 +2,12 @@ use picomint_redb::table;
 use picomint_redb::{Database, DbRead};
 
 use crate::config::setup::InitParams;
-use crate::config::{ConfigGenParams, ServerConfig};
+use crate::config::{DkgParams, NodeConfig};
 
 table!(
-    ServerConfigTable,
-    () => ServerConfig,
-    "server-config",
+    NodeConfigTable,
+    () => NodeConfig,
+    "node-config",
 );
 
 table!(
@@ -17,28 +17,28 @@ table!(
 );
 
 table!(
-    ConfigGenParamsTable,
-    () => ConfigGenParams,
-    "setup-config-gen-params",
+    DkgParamsTable,
+    () => DkgParams,
+    "setup-dkg-params",
 );
 
-pub async fn load_server_config(db: &Database) -> Option<ServerConfig> {
-    db.begin_read().get(&ServerConfigTable, &())
+pub async fn load_node_config(db: &Database) -> Option<NodeConfig> {
+    db.begin_read().get(&NodeConfigTable, &())
 }
 
-/// Persist the finalized `ServerConfig` and drop any leftover setup-phase
+/// Persist the finalized `NodeConfig` and drop any leftover setup-phase
 /// state in the same write tx — once consensus has a config, the
-/// `InitParams` / `ConfigGenParams` entries are dead weight.
-pub async fn store_server_config(db: &Database, cfg: &ServerConfig) {
+/// `InitParams` / `DkgParams` entries are dead weight.
+pub async fn store_node_config(db: &Database, cfg: &NodeConfig) {
     let dbtx = db.begin_write();
 
     assert!(
-        dbtx.insert(&ServerConfigTable, &(), cfg).is_none(),
-        "Server config already present in database"
+        dbtx.insert(&NodeConfigTable, &(), cfg).is_none(),
+        "Node config already present in database"
     );
 
     dbtx.clear_table(&InitParamsTable);
-    dbtx.clear_table(&ConfigGenParamsTable);
+    dbtx.clear_table(&DkgParamsTable);
 
     dbtx.commit();
 }

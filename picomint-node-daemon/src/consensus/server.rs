@@ -17,13 +17,13 @@ use picomint_redb::{Database, WriteTx};
 use tokio::sync::watch;
 use tracing::info;
 
-use crate::config::ServerConfig;
+use crate::config::NodeConfig;
 use crate::consensus::tx::FundingVerifier;
 use crate::consensus::{ecash, lightning, onchain};
 
 #[derive(Clone)]
 pub struct Server {
-    pub cfg: ServerConfig,
+    pub cfg: NodeConfig,
     pub db: Database,
     pub btc_rpc: BitcoindRpcMonitor,
     /// The finally rejected txs of the running session, watched by their

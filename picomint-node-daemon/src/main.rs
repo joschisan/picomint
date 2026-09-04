@@ -11,7 +11,7 @@ use anyhow::ensure;
 use bitcoin::Network;
 use clap::Parser;
 use picomint_node_daemon::bitcoind::BitcoindClient;
-use picomint_node_daemon::config::ConfigGenSettings;
+use picomint_node_daemon::config::DaemonSettings;
 use picomint_node_daemon::{DB_FILE, run_server};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -75,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
     let db = picomint_redb::Database::open(server_opts.data_dir.join(DB_FILE))
         .expect("Failed to open picomint-node-daemon database");
 
-    let settings = ConfigGenSettings {
+    let settings = DaemonSettings {
         p2p_addr: server_opts.p2p_addr,
         ui_addr: server_opts.ui_addr,
         network: server_opts.bitcoin_network,

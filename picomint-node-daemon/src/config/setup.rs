@@ -10,10 +10,10 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
-use crate::config::db::{ConfigGenParamsTable, InitParamsTable, store_server_config};
-use crate::config::{ConfigGenParams, ConfigGenSettings, ServerConfig, SetupResult};
+use crate::config::db::{DkgParamsTable, InitParamsTable, store_node_config};
+use crate::config::{DaemonSettings, DkgParams, NodeConfig, SetupResult};
 
-/// Connection information shared between nodes during setup.
+/// The setup code shared between nodes during setup.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable, Serialize)]
 pub struct NodeSetupCode {
     /// Name of the node
@@ -34,7 +34,7 @@ pub struct SetupState {
     /// This node's own parameters; `None` until `init` has run
     init_params: Option<InitParams>,
     /// Setup codes received from other nodes
-    setup_codes: std::collections::BTreeSet<NodeSetupCode>,
+    other_setup_codes: std::collections::BTreeSet<NodeSetupCode>,
 }
 
 #[derive(Clone, Debug, Encodable, Decodable)]
@@ -68,7 +68,7 @@ impl InitParams {
 #[derive(Clone)]
 pub struct SetupApi {
     /// The daemon's locally-configured settings
-    settings: ConfigGenSettings,
+    settings: DaemonSettings,
     /// In-memory state machine, mirroring the on-disk setup tables.
     state: Arc<Mutex<SetupState>>,
     /// Signals the setup loop with either DKG params or a restored config
@@ -80,10 +80,10 @@ pub struct SetupApi {
 }
 
 impl SetupApi {
-    pub fn new(settings: ConfigGenSettings, sender: Sender<SetupResult>, db: Database) -> Self {
+    pub fn new(settings: DaemonSettings, sender: Sender<SetupResult>, db: Database) -> Self {
         let state = SetupState {
             init_params: db.begin_read().get(&InitParamsTable, &()),
-            setup_codes: std::collections::BTreeSet::new(),
+            other_setup_codes: std::collections::BTreeSet::new(),
         };
 
         Self {
@@ -116,7 +116,7 @@ impl SetupApi {
         self.state
             .lock()
             .await
-            .setup_codes
+            .other_setup_codes
             .clone()
             .into_iter()
             .map(|info| info.name)
@@ -124,7 +124,7 @@ impl SetupApi {
     }
 
     pub async fn reset_setup_codes(&self) {
-        self.state.lock().await.setup_codes.clear();
+        self.state.lock().await.other_setup_codes.clear();
     }
 
     pub async fn init(
@@ -187,7 +187,7 @@ impl SetupApi {
 
         let mut state = self.state.lock().await;
 
-        if state.setup_codes.contains(&info) {
+        if state.other_setup_codes.contains(&info) {
             return Ok(info.name.clone());
         }
 
@@ -202,7 +202,7 @@ impl SetupApi {
         );
 
         if let Some(mint_name) = state
-            .setup_codes
+            .other_setup_codes
             .iter()
             .chain(once(&init_params.setup_code()))
             .find_map(|info| info.mint_name.clone())
@@ -214,7 +214,7 @@ impl SetupApi {
         }
 
         if let Some(mint_size) = state
-            .setup_codes
+            .other_setup_codes
             .iter()
             .chain(once(&init_params.setup_code()))
             .find_map(|info| info.mint_size)
@@ -225,51 +225,50 @@ impl SetupApi {
             );
         }
 
-        state.setup_codes.insert(info.clone());
+        state.other_setup_codes.insert(info.clone());
 
         Ok(info.name)
     }
 
     pub async fn start_dkg(&self) -> anyhow::Result<()> {
-        let mut state = self.state.lock().await.clone();
+        let state = self.state.lock().await.clone();
 
         let init_params = state
             .init_params
-            .clone()
             .context("The node has not been initialized yet")?;
 
         let our_setup_code = init_params.setup_code();
 
-        state.setup_codes.insert(our_setup_code.clone());
+        let mut setup_codes = state.other_setup_codes;
 
-        ensure!(state.setup_codes.len() >= 4, "Mint size must be at least 4");
+        setup_codes.insert(our_setup_code.clone());
 
-        if let Some(mint_size) = state.setup_codes.iter().find_map(|info| info.mint_size) {
+        ensure!(setup_codes.len() >= 4, "Mint size must be at least 4");
+
+        if let Some(mint_size) = setup_codes.iter().find_map(|info| info.mint_size) {
             ensure!(
-                state.setup_codes.len() == mint_size as usize,
+                setup_codes.len() == mint_size as usize,
                 "Expected {mint_size} nodes but got {}",
-                state.setup_codes.len()
+                setup_codes.len()
             );
         }
 
-        let mint_name = state
-            .setup_codes
+        let mint_name = setup_codes
             .iter()
             .find_map(|info| info.mint_name.clone())
             .context("We need one node to configure the mints name")?;
 
-        let our_id = state
-            .setup_codes
+        let our_id = setup_codes
             .iter()
             .position(|info| info == &our_setup_code)
             .expect("We inserted the key above.");
 
-        let params = ConfigGenParams {
+        let params = DkgParams {
             identity: NodeId::from(our_id as u8),
             iroh_sk: init_params.iroh_sk,
             nodes: (0..)
                 .map(|i| NodeId::from(i as u8))
-                .zip(state.setup_codes.clone())
+                .zip(setup_codes)
                 .collect(),
             name: mint_name,
             network: self.settings.network,
@@ -277,29 +276,29 @@ impl SetupApi {
 
         // Atomically transition out of the code-exchange phase: drop the
         // `InitParams` (its iroh secret key is now inside `params`) and
-        // persist `ConfigGenParams` so a daemon restart auto-resumes DKG
+        // persist `DkgParams` so a daemon restart auto-resumes DKG
         // without operator interaction.
         let dbtx = self.db.begin_write();
 
         dbtx.clear_table(&InitParamsTable);
 
-        dbtx.insert(&ConfigGenParamsTable, &(), &params);
+        dbtx.insert(&DkgParamsTable, &(), &params);
 
         dbtx.commit();
 
         self.sender
             .send(SetupResult::Dkg(Box::new(params)))
             .await
-            .context("Failed to send config gen params")?;
+            .context("Failed to send DKG params")?;
 
         Ok(())
     }
 
-    pub async fn restore_config(&self, cfg: ServerConfig) -> anyhow::Result<()> {
+    pub async fn restore_config(&self, cfg: NodeConfig) -> anyhow::Result<()> {
         cfg.validate_config()
             .context("Restored config failed validation")?;
 
-        store_server_config(&self.db, &cfg).await;
+        store_node_config(&self.db, &cfg).await;
 
         self.sender
             .send(SetupResult::Restored(Box::new(cfg)))
@@ -313,7 +312,7 @@ impl SetupApi {
         let state = self.state.lock().await;
         let our_setup_code = state.init_params.as_ref().map(InitParams::setup_code);
         state
-            .setup_codes
+            .other_setup_codes
             .iter()
             .chain(our_setup_code.iter())
             .find_map(|info| info.mint_size)
@@ -323,7 +322,7 @@ impl SetupApi {
         let state = self.state.lock().await;
         let our_setup_code = state.init_params.as_ref().map(InitParams::setup_code);
         state
-            .setup_codes
+            .other_setup_codes
             .iter()
             .chain(our_setup_code.iter())
             .find_map(|info| info.mint_name.clone())

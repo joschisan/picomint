@@ -13,7 +13,7 @@ use picomint_node_cli_core::{
 };
 use tokio::net::UnixListener;
 
-use crate::config::ServerConfig;
+use crate::config::NodeConfig;
 use crate::config::setup::SetupApi;
 use crate::consensus::{lightning, onchain};
 
@@ -98,7 +98,7 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
 
     async fn config(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<ServerConfig>, CliError> {
+    ) -> Result<Json<NodeConfig>, CliError> {
         Ok(Json(api.server.cfg.clone()))
     }
 
@@ -364,7 +364,7 @@ async fn setup_start_dkg(State(setup_api): State<Arc<SetupApi>>) -> Result<Json<
 
 async fn setup_restore(
     State(setup_api): State<Arc<SetupApi>>,
-    Json(cfg): Json<ServerConfig>,
+    Json(cfg): Json<NodeConfig>,
 ) -> Result<Json<()>, CliError> {
     setup_api
         .restore_config(cfg)

@@ -1,10 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::time::Duration;
 
-use anyhow::{Context, bail};
-use dkg::DkgHandle;
+use anyhow::bail;
+use bitcoin::Network;
 use picomint_core::config::ConsensusConfig;
 pub use picomint_core::config::{MintId, NodeEndpoint};
 use picomint_core::ecash::config::{EcashConfig, EcashConfigPrivate};
@@ -12,15 +11,11 @@ use picomint_core::invite::InviteCode;
 use picomint_core::lightning::config::LightningConfigPrivate;
 use picomint_core::onchain::config::{OnchainConfig, OnchainConfigPrivate};
 use picomint_core::version::CONSENSUS_VERSION;
-use picomint_core::{NodeId, NumNodesExt, secp256k1};
-use rand::rngs::OsRng;
+use picomint_core::{NodeId, secp256k1};
 use secp256k1::{Secp256k1, SecretKey, XOnlyPublicKey};
 use serde::{Deserialize, Serialize};
-use tokio::time::sleep;
-use tracing::{error, info, warn};
 
 use crate::config::setup::NodeSetupCode;
-use crate::p2p::{P2PMessage, P2PStatusReceivers, Recipient, ReconnectP2PConnections};
 use picomint_encoding::{Decodable, Encodable};
 
 pub mod db;
@@ -33,16 +28,16 @@ pub mod setup;
 
 #[allow(clippy::unsafe_derive_deserialize)] // clippy fires on `select!` https://github.com/rust-lang/rust-clippy/issues/13062
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
-/// Full picomint server config (persisted in the node database).
-pub struct ServerConfig {
+/// Full picomint node config (persisted in the node database).
+pub struct NodeConfig {
     /// Mint-wide config, identical across nodes
     pub consensus: ConsensusConfig,
     /// Per-node secrets (identity + DKG keys)
-    pub private: ServerConfigPrivate,
+    pub private: NodeConfigPrivate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
-pub struct ServerConfigPrivate {
+pub struct NodeConfigPrivate {
     /// Our node id
     pub identity: NodeId,
     /// Secret key for our single iroh endpoint (p2p + api)
@@ -57,51 +52,50 @@ pub struct ServerConfigPrivate {
     pub lightning: LightningConfigPrivate,
 }
 
-/// All the info we configure prior to config gen starting
+/// Process-level settings of the daemon, configured via env vars / args.
+/// Live for the whole process — setup, DKG, and consensus alike.
 #[derive(Clone)]
-pub struct ConfigGenSettings {
+pub struct DaemonSettings {
     /// Bind address for our P2P connection
     pub p2p_addr: SocketAddr,
     /// Web UI bind address.
     pub ui_addr: SocketAddr,
     /// Bitcoin network for the mint
-    pub network: bitcoin::Network,
+    pub network: Network,
     /// Path to the folder holding the database and the admin CLI socket
     pub data_dir: PathBuf,
 }
 
 /// Outcome of the setup phase: either fresh DKG params (run a DKG) or a
-/// previously-backed-up `ServerConfig` to restore in place of one.
+/// previously-backed-up `NodeConfig` to restore in place of one.
 #[derive(Debug, Clone)]
 pub enum SetupResult {
-    Dkg(Box<ConfigGenParams>),
-    Restored(Box<ServerConfig>),
+    Dkg(Box<DkgParams>),
+    Restored(Box<NodeConfig>),
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-/// All the parameters necessary for generating the `ServerConfig` during setup
-///
-/// * Nodes can create the parameters using a setup UI or CLI tool
-/// * Used for distributed config generation
-pub struct ConfigGenParams {
+/// Everything [`dkg::run`] needs to generate the `NodeConfig`: the output of
+/// the setup phase, persisted so a daemon restart auto-resumes the DKG.
+pub struct DkgParams {
     /// Our own node id
     pub identity: NodeId,
     /// Secret key for our single iroh endpoint (p2p + api)
     pub iroh_sk: iroh::SecretKey,
-    /// Endpoints of all servers
+    /// Setup codes of all nodes
     pub nodes: BTreeMap<NodeId, NodeSetupCode>,
-    /// Mint name, chosen by the lead node during setup.
+    /// Mint name, chosen by the leader during setup.
     pub name: String,
     /// Bitcoin network for this mint
-    pub network: bitcoin::Network,
+    pub network: Network,
 }
 
-impl ServerConfig {
-    /// Assemble a fresh `ServerConfig` from config-gen parameters, the
+impl NodeConfig {
+    /// Assemble a fresh `NodeConfig` from the DKG parameters, the
     /// threshold-signing key pair we generated locally, and the per-module
     /// DKG outputs.
     pub fn from(
-        params: ConfigGenParams,
+        params: DkgParams,
         identity: NodeId,
         broadcast_public_keys: BTreeMap<NodeId, XOnlyPublicKey>,
         broadcast_secret_key: SecretKey,
@@ -134,7 +128,7 @@ impl ServerConfig {
             lightning: lightning.consensus,
         };
 
-        let private = ServerConfigPrivate {
+        let private = NodeConfigPrivate {
             identity,
             iroh_sk: params.iroh_sk,
             broadcast_secret_key,
@@ -179,130 +173,9 @@ impl ServerConfig {
 
         Ok(())
     }
-
-    /// Runs the distributed key gen algorithm
-    pub async fn generate(
-        params: &ConfigGenParams,
-        connections: ReconnectP2PConnections,
-        p2p_status_receivers: P2PStatusReceivers,
-    ) -> anyhow::Result<Self> {
-        info!("Waiting for all p2p connections to open...");
-
-        loop {
-            let disconnected_nodes: BTreeSet<NodeId> = p2p_status_receivers
-                .iter()
-                .filter_map(|(p, r)| r.borrow().is_disconnected().then_some(*p))
-                .collect();
-
-            if disconnected_nodes.is_empty() {
-                break;
-            }
-
-            info!(
-                pending = ?disconnected_nodes,
-                "Waiting for all p2p connections to open..."
-            );
-
-            sleep(Duration::from_secs(3)).await;
-        }
-
-        let checksum = params.nodes.consensus_hash_sha256();
-
-        info!("Comparing connection codes checksum {checksum}...");
-
-        connections.send(Recipient::Everyone, P2PMessage::Checksum(checksum));
-
-        for node in params
-            .node_ids()
-            .into_iter()
-            .filter(|p| *p != params.identity)
-        {
-            let node_message = connections
-                .receive_from_node(node)
-                .await
-                .context("Unexpected shutdown of p2p connections")?;
-
-            if node_message != P2PMessage::Checksum(checksum) {
-                error!(
-                    expected = ?P2PMessage::Checksum(checksum),
-                    received = ?node_message,
-                    "Node {node} has sent invalid connection code checksum message"
-                );
-
-                bail!("Node {node} has sent invalid connection code checksum message");
-            }
-
-            info!("Node {node} has sent valid connection code checksum message");
-        }
-
-        info!("Running config generation...");
-
-        let handle = DkgHandle::new(params.nodes.to_num_nodes(), params.identity, &connections);
-
-        let (broadcast_sk, broadcast_pk) = secp256k1::generate_keypair(&mut OsRng);
-        let broadcast_pk = broadcast_pk.x_only_public_key().0;
-
-        let broadcast_public_keys = handle.exchange_encodable(broadcast_pk).await?;
-
-        info!("Running config generation for module of kind ecash...");
-
-        let ecash = crate::consensus::ecash::distributed_gen(&handle).await?;
-
-        info!("Running config generation for module of kind lightning...");
-
-        let lightning = crate::consensus::lightning::distributed_gen(&handle).await?;
-
-        info!("Running config generation for module of kind onchain...");
-
-        let onchain = crate::consensus::onchain::distributed_gen(&handle).await?;
-
-        let cfg = ServerConfig::from(
-            params.clone(),
-            params.identity,
-            broadcast_public_keys,
-            broadcast_sk,
-            ecash,
-            lightning,
-            onchain,
-        );
-
-        let checksum = cfg.consensus.consensus_hash_sha256();
-
-        info!("Comparing consensus config checksum {checksum}...");
-
-        connections.send(Recipient::Everyone, P2PMessage::Checksum(checksum));
-
-        for node in params
-            .node_ids()
-            .into_iter()
-            .filter(|p| *p != params.identity)
-        {
-            let node_message = connections
-                .receive_from_node(node)
-                .await
-                .context("Unexpected shutdown of p2p connections")?;
-
-            if node_message != P2PMessage::Checksum(checksum) {
-                warn!(
-                    expected = ?P2PMessage::Checksum(checksum),
-                    received = ?node_message,
-                    config = ?cfg.consensus,
-                    "Node {node} has sent invalid consensus config checksum message"
-                );
-
-                bail!("Node {node} has sent invalid consensus config checksum message");
-            }
-
-            info!("Node {node} has sent valid consensus config checksum message");
-        }
-
-        info!("Config generation has completed successfully!");
-
-        Ok(cfg)
-    }
 }
 
-impl ConfigGenParams {
+impl DkgParams {
     pub fn node_ids(&self) -> Vec<NodeId> {
         self.nodes.keys().copied().collect()
     }

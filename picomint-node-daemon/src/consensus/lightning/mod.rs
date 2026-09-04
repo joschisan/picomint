@@ -19,7 +19,7 @@ use picomint_core::{Amount, OutPoint};
 use picomint_redb::{DbRead, WriteTx};
 use tpe::{PublicKeyShare, SecretKeyShare};
 
-use crate::config::ServerConfig;
+use crate::config::NodeConfig;
 use crate::config::dkg::DkgHandle;
 use crate::config::poly::eval_poly_g1;
 use crate::consensus::db::consensus_block_count;
@@ -34,7 +34,7 @@ use self::db::{
 
 /// Run DKG for the lightning module, producing a fresh `LightningConfig` for
 /// this node.
-pub async fn distributed_gen(nodes: &DkgHandle<'_>) -> anyhow::Result<LightningConfig> {
+pub async fn dkg(nodes: &DkgHandle<'_>) -> anyhow::Result<LightningConfig> {
     let (polynomial, sks) = nodes.run_dkg_g1().await?;
 
     Ok(LightningConfig {
@@ -56,7 +56,7 @@ pub async fn distributed_gen(nodes: &DkgHandle<'_>) -> anyhow::Result<LightningC
 
 /// Verify our private tpe share matches the public share in the consensus
 /// config.
-pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
+pub fn validate_config(cfg: &NodeConfig) -> anyhow::Result<()> {
     ensure!(
         tpe::derive_pk_share(&cfg.private.lightning.sk)
             == *cfg

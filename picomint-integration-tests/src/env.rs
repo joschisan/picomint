@@ -425,7 +425,7 @@ async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
     }
     info!("All nodes initialized");
 
-    // Exchange node connection info
+    // Exchange setup codes between all nodes
     for (node, code) in &setup_codes {
         for (other_node, data_dir) in node_data_dirs.iter().enumerate() {
             if other_node == *node {

@@ -28,7 +28,7 @@ pub const SET_EXPIRY_ROUTE: &str = "/expiry/set";
 pub const CLEAR_EXPIRY_ROUTE: &str = "/expiry/clear";
 
 async fn backup_config(State(state): State<Arc<ConsensusApi>>) -> impl IntoResponse {
-    let body = serde_json::to_vec_pretty(&state.server.cfg).expect("ServerConfig is serializable");
+    let body = serde_json::to_vec_pretty(&state.server.cfg).expect("NodeConfig is serializable");
 
     (
         [

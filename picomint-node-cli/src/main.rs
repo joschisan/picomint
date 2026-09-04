@@ -48,7 +48,7 @@ enum Commands {
     Invite(InviteRequest),
     /// Show mint audit summary
     Audit,
-    /// Dump full server config as JSON (use `> config.json` to save)
+    /// Dump full node config as JSON (use `> config.json` to save)
     Config,
     /// Number of consensus sessions this node has finalized
     SessionCount,
