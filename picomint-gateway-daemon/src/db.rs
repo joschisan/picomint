@@ -41,15 +41,15 @@ table!(
     "gateway-incoming-offer",
 );
 
-// Set of LDK-event `payment_hash`es that have been fully processed by the
-// event loop (their handler committed successfully). Written atomically
-// with the handler's work inside a single daemon-DB write transaction — so
-// presence implies the handler ran to completion, absence on an incoming
-// event means it's safe to (re-)process.
+// The `payment_hash`es of LDK events the event loop has fully processed
+// (their handler committed successfully). Written atomically with the
+// handler's work inside a single daemon-DB write transaction — so presence
+// implies the handler ran to completion, absence on an incoming event
+// means it's safe to (re-)process.
 table!(
-    ProcessedLdkEventTable,
+    LdkEventPaymentHashTable,
     [u8; 32] => (),
-    "gateway-processed-ldk-event",
+    "gateway-ldk-event-payment-hash",
 );
 
 // Cursor for the daemon-wide trailer task. Value is the next (unprocessed)
