@@ -11,7 +11,7 @@
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse};
+use axum::response::{Html, IntoResponse, Response};
 use maud::{Markup, html};
 use picomint_redb::{Database, DbRead};
 
@@ -23,10 +23,7 @@ use crate::ui::{ROOT_ROUTE, copiable_text, single_card_layout};
 /// Shared content used by both this router's fallback and the setup UI's
 /// post-`start_dkg` response, so the operator's screen is identical whether
 /// they just clicked the button or reopened the tab after a restart.
-/// `setup_code` is this node's `NodeSetupCode` — always available
-/// because we only enter this phase once `ConfigGenParams` has been
-/// persisted (or, on the setup-UI side, after `start_dkg` has succeeded in
-/// the same process).
+/// `setup_code` is this node's `NodeSetupCode`.
 pub fn loading_card(setup_code: &NodeSetupCode) -> Markup {
     let content = html! {
         span { "Share with nodes who still need it." }
@@ -51,11 +48,13 @@ pub fn loading_card(setup_code: &NodeSetupCode) -> Markup {
     single_card_layout("Generating Keys...", content)
 }
 
-async fn loading_page(State(db): State<Database>) -> impl IntoResponse {
-    let params = db
-        .begin_read()
-        .get(&ConfigGenParamsTable, &())
-        .expect("DKG UI only runs while ConfigGenParams is persisted");
+async fn loading_page(State(db): State<Database>) -> Response {
+    // `store_server_config` clears the table moments before this router is
+    // aborted, so a request can land after DKG has completed. A bare 503
+    // keeps the polling page up until the consensus UI takes over the port.
+    let Some(params) = db.begin_read().get(&ConfigGenParamsTable, &()) else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
 
     let node = params
         .nodes
@@ -66,6 +65,7 @@ async fn loading_page(State(db): State<Database>) -> impl IntoResponse {
         StatusCode::SERVICE_UNAVAILABLE,
         Html(loading_card(node).into_string()),
     )
+        .into_response()
 }
 
 pub fn router(db: Database) -> Router {
