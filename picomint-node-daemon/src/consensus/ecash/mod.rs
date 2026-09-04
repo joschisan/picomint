@@ -25,7 +25,7 @@ use crate::{handler, handler_async};
 
 use self::db::{
     BlindedNonceTable, BlindedSignatureShareRestoreTable, BlindedSignatureShareTable,
-    IssuanceDerivationCounterTable, NoteNonceTable,
+    IssuanceCounterTable, NoteNonceTable,
 };
 
 /// Run DKG for the ecash module, producing a fresh `EcashConfig` for this node.
@@ -101,13 +101,13 @@ pub fn process_input(
     }
 
     let new_count = dbtx
-        .remove(&IssuanceDerivationCounterTable, &input.note.denomination)
+        .remove(&IssuanceCounterTable, &input.note.denomination)
         .unwrap_or(0)
         .checked_sub(1)
         .expect("Failed to decrement issuance counter");
 
     dbtx.insert(
-        &IssuanceDerivationCounterTable,
+        &IssuanceCounterTable,
         &input.note.denomination,
         &new_count,
     );
@@ -152,13 +152,13 @@ pub fn process_output(
     );
 
     let new_count = dbtx
-        .remove(&IssuanceDerivationCounterTable, &output.denomination)
+        .remove(&IssuanceCounterTable, &output.denomination)
         .unwrap_or(0)
         .checked_add(1)
         .expect("Failed to increment issuance counter");
 
     dbtx.insert(
-        &IssuanceDerivationCounterTable,
+        &IssuanceCounterTable,
         &output.denomination,
         &new_count,
     );
@@ -167,7 +167,7 @@ pub fn process_output(
 }
 
 pub fn audit(dbtx: &WriteTx) -> i64 {
-    dbtx.iter(&IssuanceDerivationCounterTable, |r| {
+    dbtx.iter(&IssuanceCounterTable, |r| {
         r.map(|(denomination, count)| -((denomination.amount().msat * count) as i64))
             .sum()
     })
