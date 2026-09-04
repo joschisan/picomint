@@ -3,9 +3,23 @@ name: Build Docker Images
 on:
   push:
     branches: [ main ]
+  # One-off publish of a single image as :main from any branch — for
+  # bootstrapping a newly renamed image that main has not published yet,
+  # without overwriting the other images' :main tags.
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Image to publish as :main"
+        required: true
+        type: choice
+        options:
+          - picomint-node-daemon
+          - picomint-gateway-daemon
+          - picomint-lnurl-daemon
 
 jobs:
   build-and-push:
+    if: github.event_name == 'push' || matrix.image == inputs.image
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -38,6 +52,7 @@ jobs:
         tags: |
           type=ref,event=branch
           type=sha
+          type=raw,value=main,enable=${{ github.event_name == 'workflow_dispatch' }}
 
     - uses: docker/build-push-action@v5
       with:

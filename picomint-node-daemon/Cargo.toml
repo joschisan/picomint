@@ -51,9 +51,9 @@ tbs = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
 tpe = { workspace = true }
-tss = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tss = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
