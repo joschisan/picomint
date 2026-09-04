@@ -35,7 +35,12 @@ pub struct TestClient {
 pub const BTC_RPC_PORT: u16 = 18443;
 pub const GUARDIAN_BASE_PORT: u16 = 17000;
 pub const PORTS_PER_GUARDIAN: u16 = 5;
-pub const NUM_GUARDIANS: usize = 4;
+pub const NUM_GUARDIANS: usize = 7;
+
+/// Guardians `NUM_ONLINE_GUARDIANS..` are taken offline right after DKG,
+/// so the entire suite runs against a federation at exactly quorum
+/// (5 of 7). The restore test brings them back online.
+pub const NUM_ONLINE_GUARDIANS: usize = 5;
 pub const GW_PORT: u16 = 28175;
 pub const GW_LN_PORT: u16 = 9735;
 pub const TEST_LDK_PORT: u16 = 9736;
@@ -110,6 +115,34 @@ impl TestEnv {
             }))?
             .invite;
         info!("Federation ready");
+
+        // Take the last two guardians offline so the rest of the suite
+        // runs against a federation at exactly quorum. Wait for each to
+        // finalize a session first — that proves its DKG output and bft
+        // state are persisted, so it can come back from its data dir.
+        for peer in NUM_ONLINE_GUARDIANS..NUM_GUARDIANS {
+            let data_dir = &peer_data_dirs[peer];
+            runtime.block_on(retry(
+                &format!("guardian-{peer} finalized a session"),
+                || async {
+                    ensure!(
+                        cli::guardian_session_count(data_dir)? >= 1,
+                        "no finalized session yet"
+                    );
+                    Ok(())
+                },
+            ))?;
+
+            let mut child = guardian_processes[peer]
+                .take()
+                .expect("guardian was started");
+            runtime.block_on(async {
+                child.kill().await?;
+                child.wait().await?;
+                anyhow::Ok(())
+            })?;
+            info!("Stopped guardian-{peer}");
+        }
 
         let client_counter = AtomicU64::new(0);
         let client_send = runtime.block_on(build_client(

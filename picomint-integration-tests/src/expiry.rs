@@ -8,7 +8,7 @@ use picomint_core::expiry::ExpiryStatus;
 use tracing::info;
 
 use crate::cli;
-use crate::env::{NUM_GUARDIANS, TestEnv};
+use crate::env::{NUM_ONLINE_GUARDIANS, TestEnv};
 
 pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     info!("expiry: announce + client refresh");
@@ -19,12 +19,12 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     // successor field exercised end-to-end.
     let timestamp = 4_102_444_800; // 2100-01-01 UTC
 
-    info!("Setting expiry on all {NUM_GUARDIANS} guardians");
+    info!("Setting expiry on all {NUM_ONLINE_GUARDIANS} online guardians");
     let expected = ExpiryStatus {
         timestamp,
         successor: Some(env.invite.clone()),
     };
-    for peer in 0..NUM_GUARDIANS {
+    for peer in 0..NUM_ONLINE_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
         cli::guardian_expiry_set(&data_dir, timestamp, Some(&env.invite))?;
         let stored = cli::guardian_expiry_status(&data_dir)?;
@@ -55,8 +55,8 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
         "client expiry mismatch: got {cached:?}, want {expected:?}"
     );
 
-    info!("Clearing expiry on all guardians");
-    for peer in 0..NUM_GUARDIANS {
+    info!("Clearing expiry on all online guardians");
+    for peer in 0..NUM_ONLINE_GUARDIANS {
         let data_dir = cli::guardian_data_dir(&env.data_dir, peer);
         cli::guardian_expiry_clear(&data_dir)?;
     }
