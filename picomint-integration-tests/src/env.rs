@@ -328,7 +328,6 @@ async fn start_node(base: &Path, node: usize) -> anyhow::Result<Child> {
 
     let child = Command::new("target/release/picomint-node-daemon")
         .env("DATA_DIR", data_dir.to_str().unwrap())
-        .env("BITCOIN_NETWORK", "regtest")
         .env(
             "BITCOIND_URL",
             format!("http://{BTC_RPC_USER}:{BTC_RPC_PASS}@127.0.0.1:{BTC_RPC_PORT}"),
@@ -374,7 +373,7 @@ async fn start_gateway(
         .env("DATA_DIR", data_dir.to_str().unwrap())
         .env("API_ADDR", format!("0.0.0.0:{gateway_port}"))
         .env("LDK_ADDR", format!("0.0.0.0:{lightning_port}"))
-        .env("BITCOIN_NETWORK", "regtest")
+        .env("NETWORK", "regtest")
         .env(
             "BITCOIND_URL",
             format!("http://{BTC_RPC_USER}:{BTC_RPC_PASS}@127.0.0.1:{BTC_RPC_PORT}"),

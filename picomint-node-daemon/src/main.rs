@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::ensure;
-use bitcoin::Network;
 use clap::Parser;
 use picomint_node_daemon::bitcoind::BitcoindClient;
 use picomint_node_daemon::config::DaemonSettings;
@@ -26,10 +25,6 @@ struct ServerOpts {
     /// Path to folder containing mint config files
     #[arg(long = "data-dir", env = "DATA_DIR")]
     data_dir: PathBuf,
-
-    /// The bitcoin network of the mint
-    #[arg(long, env = "BITCOIN_NETWORK", default_value = "bitcoin")]
-    bitcoin_network: Network,
 
     /// Bitcoind RPC URL with embedded credentials, e.g.
     /// `http://user:pass@127.0.0.1:8332`. The node must be unpruned —
@@ -78,7 +73,6 @@ async fn main() -> anyhow::Result<()> {
     let settings = DaemonSettings {
         p2p_addr: server_opts.p2p_addr,
         ui_addr: server_opts.ui_addr,
-        network: server_opts.bitcoin_network,
         data_dir: server_opts.data_dir,
     };
 

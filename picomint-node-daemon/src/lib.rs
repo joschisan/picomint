@@ -77,7 +77,7 @@ pub async fn run_server(
 
     let (setup_tx, mut setup_rx) = tokio::sync::mpsc::channel(1);
 
-    let setup_api = Arc::new(SetupApi::new(settings.clone(), setup_tx, db.clone()));
+    let setup_api = Arc::new(SetupApi::new(bitcoin.clone(), setup_tx, db.clone()));
 
     let setup_ui_handle = tokio::spawn(ui::run(
         settings.ui_addr,

@@ -10,8 +10,9 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
+use crate::bitcoind::BitcoindClient;
 use crate::config::db::{DkgParamsTable, InitParamsTable, store_node_config};
-use crate::config::{DaemonSettings, DkgParams, NodeConfig, SetupResult};
+use crate::config::{DkgParams, NodeConfig, SetupResult};
 
 /// The setup code shared between nodes during setup.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable, Serialize)]
@@ -67,8 +68,9 @@ impl InitParams {
 /// Serves the setup API endpoints
 #[derive(Clone)]
 pub struct SetupApi {
-    /// The daemon's locally-configured settings
-    settings: DaemonSettings,
+    /// Bitcoin backend; `start_dkg` reads the mint's network off it
+    /// instead of trusting a locally-configured value.
+    bitcoin: Arc<BitcoindClient>,
     /// In-memory state machine, mirroring the on-disk setup tables.
     state: Arc<Mutex<SetupState>>,
     /// Signals the setup loop with either DKG params or a restored config
@@ -80,14 +82,14 @@ pub struct SetupApi {
 }
 
 impl SetupApi {
-    pub fn new(settings: DaemonSettings, sender: Sender<SetupResult>, db: Database) -> Self {
+    pub fn new(bitcoin: Arc<BitcoindClient>, sender: Sender<SetupResult>, db: Database) -> Self {
         let state = SetupState {
             init_params: db.begin_read().get(&InitParamsTable, &()),
             other_setup_codes: std::collections::BTreeSet::new(),
         };
 
         Self {
-            settings,
+            bitcoin,
             state: Arc::new(Mutex::new(state)),
             sender,
             db,
@@ -263,6 +265,12 @@ impl SetupApi {
             .position(|info| info == &our_setup_code)
             .expect("We inserted the key above.");
 
+        let network = self
+            .bitcoin
+            .network()
+            .await
+            .context("Failed to determine the network from the bitcoin backend")?;
+
         let params = DkgParams {
             identity: NodeId::from(our_id as u8),
             iroh_sk: init_params.iroh_sk,
@@ -271,7 +279,7 @@ impl SetupApi {
                 .zip(setup_codes)
                 .collect(),
             name: mint_name,
-            network: self.settings.network,
+            network,
         };
 
         // Atomically transition out of the code-exchange phase: drop the
