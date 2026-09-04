@@ -5,24 +5,24 @@ use crate::executor::{SmId, StateMachine};
 use anyhow::ensure;
 use picomint_core::config::FederationId;
 use picomint_core::core::{Account, OperationId};
-use picomint_core::mint::{Denomination, verify_note};
+use picomint_core::ecash::{Denomination, verify_note};
 use picomint_core::{PeerId, TransactionId};
 use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use super::client_db::NoteTable;
-use super::events::{MintFailureEvent, MintSuccessEvent};
+use super::events::{ECashFailureEvent, ECashSuccessEvent};
 use super::{NoteIssuanceRequest, SpendableNote};
 use crate::context::ClientContext;
 
 table!(
-    MintStateMachineTable,
-    (FederationId, SmId) => MintStateMachine,
+    ECashStateMachineTable,
+    (FederationId, SmId) => ECashStateMachine,
     "mint-mint-sm",
 );
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
-pub struct MintStateMachine {
+pub struct ECashStateMachine {
     /// Account whose balance this issuance settles into. Carried in the state
     /// rather than in the table name, so one executor drives every account's
     /// state machines.
@@ -46,7 +46,7 @@ pub struct MintStateMachine {
     pub issuance_requests: Vec<NoteIssuanceRequest>,
 }
 
-impl StateMachine for MintStateMachine {
+impl StateMachine for ECashStateMachine {
     type Outcome = Result<BTreeMap<PeerId, Vec<BlindedSignatureShare>>, String>;
 
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
@@ -56,7 +56,7 @@ impl StateMachine for MintStateMachine {
             &ctx.api,
             self.txid,
             self.issuance_requests.clone(),
-            ctx.config.mint.tbs_pks.clone(),
+            ctx.config.ecash.tbs_pks.clone(),
         )
         .await;
 
@@ -93,13 +93,13 @@ impl StateMachine for MintStateMachine {
 
             let pk = *ctx
                 .config
-                .mint
+                .ecash
                 .tbs_agg_pks
                 .get(&request.denomination)
                 .expect("No aggregated pk found for denomination");
 
             if !verify_note(spendable_note.note(), pk) {
-                ctx.log_event(dbtx, self.account, self.operation, MintFailureEvent);
+                ctx.log_event(dbtx, self.account, self.operation, ECashFailureEvent);
 
                 return None;
             }
@@ -117,7 +117,7 @@ impl StateMachine for MintStateMachine {
         // The log entry is filed under this state machine's account, so it
         // reports what that account received — not what a fee output filed
         // elsewhere in the same transaction did.
-        let event = MintSuccessEvent {
+        let event = ECashSuccessEvent {
             txid: self.txid,
             amount: self
                 .issuance_requests

@@ -3,7 +3,7 @@ pub mod bft;
 pub mod db;
 pub mod engine;
 pub mod ln;
-pub mod mint;
+pub mod ecash;
 pub mod rpc;
 pub mod server;
 pub mod tx;
@@ -218,7 +218,7 @@ async fn run_iroh_api(
 async fn dispatch(consensus_api: Arc<ConsensusApi>, method: Method) -> Result<Vec<u8>, String> {
     match method {
         Method::Core(m) => rpc::handle_api(&consensus_api, m).await,
-        Method::Mint(m) => mint::handle_api(&consensus_api.server, m).await,
+        Method::ECash(m) => ecash::handle_api(&consensus_api.server, m).await,
         Method::Wallet(m) => wallet::handle_api(&consensus_api.server, m).await,
         Method::Ln(m) => ln::handle_api(&consensus_api.server, m).await,
     }

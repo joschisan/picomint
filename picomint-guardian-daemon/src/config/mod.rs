@@ -9,7 +9,7 @@ use picomint_core::config::ConsensusConfig;
 pub use picomint_core::config::{FederationId, PeerEndpoint};
 use picomint_core::invite::InviteCode;
 use picomint_core::ln::config::LightningConfigPrivate;
-use picomint_core::mint::config::{MintConfig, MintConfigPrivate};
+use picomint_core::ecash::config::{ECashConfig, ECashConfigPrivate};
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::wallet::config::{WalletConfig, WalletConfigPrivate};
 use picomint_core::{NumPeersExt, PeerId, secp256k1};
@@ -50,7 +50,7 @@ pub struct ServerConfigPrivate {
     /// Secret key for the atomic broadcast to sign messages
     pub broadcast_secret_key: SecretKey,
     /// Private key material for the mint module
-    pub mint: MintConfigPrivate,
+    pub ecash: ECashConfigPrivate,
     /// Private key material for the wallet module
     pub wallet: WalletConfigPrivate,
     /// Private key material for the lightning module
@@ -105,7 +105,7 @@ impl ServerConfig {
         identity: PeerId,
         broadcast_public_keys: BTreeMap<PeerId, XOnlyPublicKey>,
         broadcast_secret_key: SecretKey,
-        mint: MintConfig,
+        ecash: ECashConfig,
         ln: picomint_core::ln::config::LightningConfig,
         wallet: WalletConfig,
     ) -> Self {
@@ -129,7 +129,7 @@ impl ServerConfig {
             network: params.network,
             name: params.name.clone(),
             default_version: CONSENSUS_VERSION,
-            mint: mint.consensus,
+            ecash: ecash.consensus,
             wallet: wallet.consensus,
             ln: ln.consensus,
         };
@@ -138,7 +138,7 @@ impl ServerConfig {
             identity,
             iroh_sk: params.iroh_sk,
             broadcast_secret_key,
-            mint: mint.private,
+            ecash: ecash.private,
             wallet: wallet.private,
             ln: ln.private,
         };
@@ -173,7 +173,7 @@ impl ServerConfig {
             bail!("Peer ids are not indexed from 0");
         }
 
-        crate::consensus::mint::validate_config(self)?;
+        crate::consensus::ecash::validate_config(self)?;
         crate::consensus::ln::validate_config(self)?;
         crate::consensus::wallet::validate_config(self)?;
 
@@ -246,7 +246,7 @@ impl ServerConfig {
 
         info!("Running config generation for module of kind mint...");
 
-        let mint = crate::consensus::mint::distributed_gen(&handle).await?;
+        let mint = crate::consensus::ecash::distributed_gen(&handle).await?;
 
         info!("Running config generation for module of kind ln...");
 

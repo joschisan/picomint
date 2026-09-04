@@ -132,7 +132,7 @@ impl StateMachine for ReceiveStateMachine {
             fee: ctx.config.ln.input_fee,
         });
 
-        crate::mint::finalize_and_submit_tx(
+        crate::ecash::finalize_and_submit_tx(
             ctx,
             dbtx,
             super::GATEWAY_ACCOUNT,

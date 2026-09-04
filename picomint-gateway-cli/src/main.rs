@@ -19,8 +19,8 @@ use picomint_gateway_cli_core::{
     LdkChannelSpliceInRequest, LdkChannelSpliceOutRequest, LdkLnProbeRequest, LdkLnReceiveRequest,
     LdkLnSendRequest, LdkOnchainSendRequest, LdkPeerConnectRequest, LdkPeerDisconnectRequest,
     QueryRequest, ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE, ROUTE_FEDERATION_CONFIG,
-    ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
-    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
+    ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_ECASH_COUNT,
+    ROUTE_FEDERATION_MODULE_ECASH_RECEIVE, ROUTE_FEDERATION_MODULE_ECASH_SEND,
     ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
     ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_FEDERATION_REMOVE, ROUTE_INFO,
     ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
@@ -144,16 +144,16 @@ enum FederationCommands {
 
 #[derive(Subcommand)]
 enum ModuleCommands {
-    /// Mint module commands
+    /// ECash module commands
     #[command(subcommand)]
-    Mint(MintCommands),
+    ECash(ECashCommands),
     /// Wallet module commands
     #[command(subcommand)]
     Wallet(WalletCommands),
 }
 
 #[derive(Subcommand)]
-enum MintCommands {
+enum ECashCommands {
     /// Count ecash notes by denomination
     Count(FederationMintCountRequest),
     /// Send ecash
@@ -287,15 +287,15 @@ async fn main() -> Result<()> {
             FederationCommands::Config(req) => request(d, ROUTE_FEDERATION_CONFIG, req).await?,
             FederationCommands::Balance(req) => request(d, ROUTE_FEDERATION_BALANCE, req).await?,
             FederationCommands::Module(cmd) => match cmd {
-                ModuleCommands::Mint(cmd) => match cmd {
-                    MintCommands::Count(req) => {
-                        request(d, ROUTE_FEDERATION_MODULE_MINT_COUNT, req).await?
+                ModuleCommands::ECash(cmd) => match cmd {
+                    ECashCommands::Count(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_ECASH_COUNT, req).await?
                     }
-                    MintCommands::Send(req) => {
-                        request(d, ROUTE_FEDERATION_MODULE_MINT_SEND, req).await?
+                    ECashCommands::Send(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_ECASH_SEND, req).await?
                     }
-                    MintCommands::Receive(req) => {
-                        request(d, ROUTE_FEDERATION_MODULE_MINT_RECEIVE, req).await?
+                    ECashCommands::Receive(req) => {
+                        request(d, ROUTE_FEDERATION_MODULE_ECASH_RECEIVE, req).await?
                     }
                 },
                 ModuleCommands::Wallet(cmd) => match cmd {

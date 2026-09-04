@@ -19,7 +19,7 @@ use tracing::info;
 
 use crate::config::ServerConfig;
 use crate::consensus::tx::FundingVerifier;
-use crate::consensus::{ln, mint, wallet};
+use crate::consensus::{ecash, ln, wallet};
 
 #[derive(Clone)]
 pub struct Server {
@@ -51,8 +51,8 @@ impl Server {
         input: &wire::Input,
     ) -> Result<(Amount, XOnlyPublicKey), wire::InputError> {
         match input {
-            wire::Input::Mint(i) => {
-                mint::process_input(self, dbtx, i).map_err(wire::InputError::Mint)
+            wire::Input::ECash(i) => {
+                ecash::process_input(self, dbtx, i).map_err(wire::InputError::ECash)
             }
             wire::Input::Wallet(i) => {
                 wallet::process_input(self, dbtx, i).map_err(wire::InputError::Wallet)
@@ -68,8 +68,8 @@ impl Server {
         out_point: OutPoint,
     ) -> Result<Amount, wire::OutputError> {
         match output {
-            wire::Output::Mint(o) => {
-                mint::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::Mint)
+            wire::Output::ECash(o) => {
+                ecash::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::ECash)
             }
             wire::Output::Wallet(o) => {
                 wallet::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::Wallet)
@@ -82,7 +82,7 @@ impl Server {
 
     fn input_fee(&self, input: &wire::Input) -> Amount {
         match input {
-            wire::Input::Mint(..) => self.cfg.consensus.mint.input_fee,
+            wire::Input::ECash(..) => self.cfg.consensus.ecash.input_fee,
             wire::Input::Wallet(..) => self.cfg.consensus.wallet.input_fee,
             wire::Input::Ln(..) => self.cfg.consensus.ln.input_fee,
         }
@@ -90,7 +90,7 @@ impl Server {
 
     fn output_fee(&self, output: &wire::Output) -> Amount {
         match output {
-            wire::Output::Mint(..) => self.cfg.consensus.mint.output_fee,
+            wire::Output::ECash(..) => self.cfg.consensus.ecash.output_fee,
             wire::Output::Wallet(..) => self.cfg.consensus.wallet.output_fee,
             wire::Output::Ln(..) => self.cfg.consensus.ln.output_fee,
         }
@@ -162,5 +162,5 @@ impl Server {
 
 /// Balance-sheet snapshot across all modules.
 pub fn audit(dbtx: &WriteTx) -> AuditSummary {
-    AuditSummary::new(mint::audit(dbtx), wallet::audit(dbtx), ln::audit(dbtx))
+    AuditSummary::new(ecash::audit(dbtx), wallet::audit(dbtx), ln::audit(dbtx))
 }

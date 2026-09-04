@@ -17,7 +17,7 @@ use crate::{TxAcceptEvent, TxRejectEvent};
 /// db, the federation config, the root secret, and the task group. Every
 /// state machine runs against a clone of this, and every module operation
 /// is a function over it — module configs, public key sets and per-module
-/// secrets are projections (`config.mint.tbs_pks`, `secret.mint_secret()`),
+/// secrets are projections (`config.ecash.tbs_pks`, `secret.ecash_secret()`),
 /// never copies.
 #[derive(Clone)]
 pub struct ClientContext {

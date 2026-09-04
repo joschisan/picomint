@@ -16,11 +16,11 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const SOURCE: EventSource = EventSource::Mint;
+    const SOURCE: EventSource = EventSource::ECash;
     const KIND: EventKind = EventKind::from_static("send");
 }
 
-/// Terminal success event for [`crate::mint::Mint::send`].
+/// Terminal success event for [`crate::ecash::Mint::send`].
 /// `ecash` is the assembled bundle as its `picomint`-prefixed base32
 /// string — the exact form callers hand off and `ECash::from_str`
 /// reverses. Kept encoded so a client replaying history does not decode
@@ -33,19 +33,19 @@ pub struct SendSuccessEvent {
 }
 
 impl Event for SendSuccessEvent {
-    const SOURCE: EventSource = EventSource::Mint;
+    const SOURCE: EventSource = EventSource::ECash;
     const KIND: EventKind = EventKind::from_static("send-success");
 }
 
-/// Terminal failure event for [`crate::mint::Mint::send`].
-/// Fires when reissuance failed (`TxRejectEvent`/`MintFailureEvent`)
+/// Terminal failure event for [`crate::ecash::Mint::send`].
+/// Fires when reissuance failed (`TxRejectEvent`/`ECashFailureEvent`)
 /// or — defensively — when the post-reissuance NoteTable table no longer
 /// has the exact denominations the send needs.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendFailureEvent;
 
 impl Event for SendFailureEvent {
-    const SOURCE: EventSource = EventSource::Mint;
+    const SOURCE: EventSource = EventSource::ECash;
     const KIND: EventKind = EventKind::from_static("send-failure");
 }
 
@@ -57,13 +57,13 @@ pub struct RemintEvent {
 }
 
 impl Event for RemintEvent {
-    const SOURCE: EventSource = EventSource::Mint;
+    const SOURCE: EventSource = EventSource::ECash;
     const KIND: EventKind = EventKind::from_static("remint");
 }
 
 /// Emitted when a receive (reissuance) operation is initiated. Also covers
 /// restore, which hands its restored notes to
-/// [`crate::mint::Mint::receive`] as an ordinary bundle — the
+/// [`crate::ecash::Mint::receive`] as an ordinary bundle — the
 /// two are the same operation, notes someone else may know traded for notes
 /// only this wallet does.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -73,29 +73,29 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const SOURCE: EventSource = EventSource::Mint;
+    const SOURCE: EventSource = EventSource::ECash;
     const KIND: EventKind = EventKind::from_static("receive");
 }
 
 /// Emitted when a mint state machine successfully finalises new notes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct MintSuccessEvent {
+pub struct ECashSuccessEvent {
     pub txid: TransactionId,
     /// Total amount of notes finalized into the local note table by this
     /// state machine (sum of all issuance-request denominations).
     pub amount: Amount,
 }
 
-impl Event for MintSuccessEvent {
-    const SOURCE: EventSource = EventSource::Mint;
+impl Event for ECashSuccessEvent {
+    const SOURCE: EventSource = EventSource::ECash;
     const KIND: EventKind = EventKind::from_static("success");
 }
 
 /// Emitted when a mint state machine fails to finalise notes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct MintFailureEvent;
+pub struct ECashFailureEvent;
 
-impl Event for MintFailureEvent {
-    const SOURCE: EventSource = EventSource::Mint;
+impl Event for ECashFailureEvent {
+    const SOURCE: EventSource = EventSource::ECash;
     const KIND: EventKind = EventKind::from_static("failure");
 }

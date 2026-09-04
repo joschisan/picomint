@@ -22,7 +22,7 @@ use tracing::debug;
 
 use crate::api::FederationApi;
 use crate::client::Client;
-use crate::mint::Restore;
+use crate::ecash::Restore;
 use crate::secret::ClientSecret;
 
 /// Download a federation's config, check it against `network` if given, and
@@ -51,11 +51,11 @@ pub(crate) async fn add(
 
     let api = FederationApi::new(client.endpoint.clone(), config.iroh_pks());
 
-    let secret = ClientSecret::new(&client.mnemonic, federation).mint_secret();
+    let secret = ClientSecret::new(&client.mnemonic, federation).ecash_secret();
 
     let scans = try_join_all(
         Account::ALL
-            .map(|account| crate::mint::scan(&api, &secret, &config.mint, federation, account)),
+            .map(|account| crate::ecash::scan(&api, &secret, &config.ecash, federation, account)),
     )
     .await?;
 

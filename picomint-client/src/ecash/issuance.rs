@@ -1,11 +1,11 @@
 use picomint_core::core::Account;
-use picomint_core::mint::{Denomination, MintOutput, nonce_message};
+use picomint_core::ecash::{Denomination, ECashOutput, nonce_message};
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedMessage, BlindedSignature, BlindingKey, blind_message, unblind_signature};
 
 use super::SpendableNote;
-use super::secret::MintSecret;
+use super::secret::ECashSecret;
 
 /// One counter's key material, before a denomination is attached.
 ///
@@ -25,12 +25,12 @@ pub struct NoteIssuance {
 }
 
 impl NoteIssuance {
-    pub fn new(account: Account, counter: u64, mint_secret: &MintSecret) -> Self {
+    pub fn new(account: Account, counter: u64, ecash_secret: &ECashSecret) -> Self {
         Self {
             account,
             counter,
-            keypair: mint_secret.note_nonce_keypair(account, counter),
-            blinding_key: mint_secret.note_blinding_key(account, counter),
+            keypair: ecash_secret.note_nonce_keypair(account, counter),
+            blinding_key: ecash_secret.note_blinding_key(account, counter),
         }
     }
 
@@ -65,13 +65,13 @@ impl NoteIssuanceRequest {
         account: Account,
         denomination: Denomination,
         counter: u64,
-        mint_secret: &MintSecret,
+        ecash_secret: &ECashSecret,
     ) -> Self {
-        NoteIssuance::new(account, counter, mint_secret).request(denomination)
+        NoteIssuance::new(account, counter, ecash_secret).request(denomination)
     }
 
-    pub fn output(&self) -> MintOutput {
-        MintOutput {
+    pub fn output(&self) -> ECashOutput {
+        ECashOutput {
             denomination: self.denomination,
             nonce: self.blinded_message(),
         }

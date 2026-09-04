@@ -133,7 +133,7 @@ impl Client {
         let amount = offer.commitment.amount;
         let fee = offer.commitment.fee;
 
-        let txid = crate::mint::finalize_and_submit_tx(
+        let txid = crate::ecash::finalize_and_submit_tx(
             &ctx,
             dbtx,
             GATEWAY_ACCOUNT,
@@ -188,7 +188,7 @@ impl Client {
                     fee: ctx.config.ln.input_fee,
                 });
 
-                crate::mint::finalize_and_submit_tx(
+                crate::ecash::finalize_and_submit_tx(
                     &ctx,
                     dbtx,
                     GATEWAY_ACCOUNT,

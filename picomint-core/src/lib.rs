@@ -36,8 +36,8 @@ pub mod invite;
 pub mod ln;
 /// Guardian wire method names dispatched over Iroh.
 pub mod methods;
-/// Mint module wire types / helpers (shared between client and server).
-pub mod mint;
+/// ECash module wire types / helpers (shared between client and server).
+pub mod ecash;
 /// Extendable module sysystem
 pub mod module;
 /// `PeerId` type

@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use crate::api::FederationApi;
-use picomint_core::mint::Denomination;
-use picomint_core::mint::methods::{
-    IssuanceStateRequest, IssuanceStateResponse, MintMethod, SignaturesRequest, SignaturesResponse,
+use picomint_core::ecash::Denomination;
+use picomint_core::ecash::methods::{
+    IssuanceStateRequest, IssuanceStateResponse, ECashMethod, SignaturesRequest, SignaturesResponse,
     SignaturesRestoreRequest, SignaturesRestoreResponse, SpendStateRequest, SpendStateResponse,
 };
 use picomint_core::module::Method;
@@ -13,7 +13,7 @@ use picomint_rpc::query::FilterMapThreshold;
 use tbs::{BlindedMessage, BlindedSignatureShare, PublicKeyShare};
 
 use super::NoteIssuanceRequest;
-use super::mint_sm::verify_blind_shares;
+use super::ecash_sm::verify_blind_shares;
 
 pub async fn signatures(
     api: &FederationApi,
@@ -28,7 +28,7 @@ pub async fn signatures(
             },
             api.num_peers(),
         ),
-        Method::Mint(MintMethod::Signatures(SignaturesRequest { txid })),
+        Method::ECash(ECashMethod::Signatures(SignaturesRequest { txid })),
     )
     .await
 }
@@ -54,7 +54,7 @@ pub async fn signatures_restore(
             },
             api.num_peers(),
         ),
-        Method::Mint(MintMethod::SignaturesRestore(SignaturesRestoreRequest {
+        Method::ECash(ECashMethod::SignaturesRestore(SignaturesRestoreRequest {
             messages,
         })),
     )
@@ -67,7 +67,7 @@ pub async fn signatures_restore(
 /// direction makes a restoring wallet abandon a live note, so a lone
 /// peer must not be able to decide it.
 pub async fn spend_state(api: &FederationApi, nonces: Vec<XOnlyPublicKey>) -> Vec<bool> {
-    api.request_current_consensus_retry::<SpendStateResponse>(Method::Mint(MintMethod::SpendState(
+    api.request_current_consensus_retry::<SpendStateResponse>(Method::ECash(ECashMethod::SpendState(
         SpendStateRequest { nonces },
     )))
     .await
@@ -82,8 +82,8 @@ pub async fn issuance_state(
     api: &FederationApi,
     messages: Vec<BlindedMessage>,
 ) -> Vec<Option<Denomination>> {
-    api.request_current_consensus_retry::<IssuanceStateResponse>(Method::Mint(
-        MintMethod::IssuanceState(IssuanceStateRequest { messages }),
+    api.request_current_consensus_retry::<IssuanceStateResponse>(Method::ECash(
+        ECashMethod::IssuanceState(IssuanceStateRequest { messages }),
     ))
     .await
     .issued

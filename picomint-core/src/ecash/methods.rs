@@ -1,13 +1,13 @@
-//! Mint module wire methods.
+//! ECash module wire methods.
 //!
-//! Each method has a `Request` and a `Response` type. The [`MintMethod`] enum
+//! Each method has a `Request` and a `Response` type. The [`ECashMethod`] enum
 //! ties them together.
 
 use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedMessage, BlindedSignatureShare};
 
 use crate::TransactionId;
-use crate::mint::Denomination;
+use crate::ecash::Denomination;
 use crate::secp256k1::XOnlyPublicKey;
 
 // ── signature-shares ────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ pub struct SpendStateResponse {
 // ── dispatch enum ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub enum MintMethod {
+pub enum ECashMethod {
     Signatures(SignaturesRequest),
     SignaturesRestore(SignaturesRestoreRequest),
     SpendState(SpendStateRequest),

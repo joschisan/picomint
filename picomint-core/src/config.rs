@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::PeerId;
 use crate::ln::config::LightningConfigConsensus;
-use crate::mint::config::MintConfigConsensus;
+use crate::ecash::config::ECashConfigConsensus;
 use crate::version::ConsensusVersion;
 use crate::wallet::config::WalletConfigConsensus;
 use picomint_encoding::{Decodable, Encodable};
@@ -78,8 +78,8 @@ pub struct ConsensusConfig {
     ///
     /// [`CONSENSUS_VERSION`]: crate::version::CONSENSUS_VERSION
     pub default_version: ConsensusVersion,
-    /// Mint module config
-    pub mint: MintConfigConsensus,
+    /// ECash module config
+    pub ecash: ECashConfigConsensus,
     /// Wallet module config
     pub wallet: WalletConfigConsensus,
     /// Lightning module config

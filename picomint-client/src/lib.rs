@@ -6,7 +6,7 @@
 //! wipes one. An added federation is always up — there is no dormant state
 //! in between. Every operation takes the
 //! [`picomint_core::config::FederationId`] it acts on
-//! and is named for the module that serves it — `mint_send`,
+//! and is named for the module that serves it — `ecash_send`,
 //! `wallet_receive`, `ln_receive`, `gw_finalize_send` — so there is
 //! no per-federation handle to hold or leak.
 //!
@@ -14,10 +14,10 @@
 //! [`picomint_core::config::FederationId`]-prefixed key, so adds, removes,
 //! and all module writes commit through one database.
 //!
-//! Per-module logic lives in [`mod@mint`], [`mod@wallet`], [`mod@ln`], and
+//! Per-module logic lives in [`mod@ecash`], [`mod@wallet`], [`mod@ln`], and
 //! [`mod@gw`]. Each module owns its own state machines and contributes its
 //! slice of the flat [`Client`] surface. Submission ownership lives
-//! entirely in the mint module — non-mint modules build a
+//! entirely in the ecash module — non-ecash modules build a
 //! [`crate::tx::TxBuilder`] and call its `finalize_and_submit_tx`, which
 //! balances against the wallet and submits via its own
 //! [`crate::tx::TxSubmissionStateMachine`].
@@ -43,8 +43,8 @@ pub mod expiry;
 pub mod gw;
 /// Lightning module client.
 pub mod ln;
-/// Mint module client.
-pub mod mint;
+/// ECash module client.
+pub mod ecash;
 /// Client query-consensus strategies
 /// Secret handling & derivation
 pub mod secret;

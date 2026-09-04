@@ -4,13 +4,13 @@ use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use tbs::{AggregatePublicKey, PublicKeyShare};
 
-use crate::mint::Denomination;
+use crate::ecash::Denomination;
 use crate::{Amount, PeerId};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MintConfig {
-    pub private: MintConfigPrivate,
-    pub consensus: MintConfigConsensus,
+pub struct ECashConfig {
+    pub private: ECashConfigPrivate,
+    pub consensus: ECashConfigConsensus,
 }
 
 pub fn consensus_denominations() -> impl DoubleEndedIterator<Item = Denomination> {
@@ -22,7 +22,7 @@ pub fn client_denominations() -> impl DoubleEndedIterator<Item = Denomination> +
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
-pub struct MintConfigConsensus {
+pub struct ECashConfigConsensus {
     pub tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,
     pub tbs_pks: BTreeMap<Denomination, BTreeMap<PeerId, PublicKeyShare>>,
     pub input_fee: Amount,
@@ -30,6 +30,6 @@ pub struct MintConfigConsensus {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Encodable, Decodable)]
-pub struct MintConfigPrivate {
+pub struct ECashConfigPrivate {
     pub tbs_sks: BTreeMap<Denomination, tbs::SecretKeyShare>,
 }

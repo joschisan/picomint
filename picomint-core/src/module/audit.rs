@@ -7,20 +7,20 @@ use serde::{Deserialize, Serialize};
 /// accepted transaction by the consensus engine.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct AuditSummary {
-    pub mint: i64,
+    pub ecash: i64,
     pub wallet: i64,
     pub ln: i64,
     pub total: i64,
 }
 
 impl AuditSummary {
-    pub fn new(mint: i64, wallet: i64, ln: i64) -> Self {
-        let total = mint
+    pub fn new(ecash: i64, wallet: i64, ln: i64) -> Self {
+        let total = ecash
             .checked_add(wallet)
             .and_then(|s| s.checked_add(ln))
             .expect("Overflow while summing the federation's balance sheet");
         Self {
-            mint,
+            ecash,
             wallet,
             ln,
             total,

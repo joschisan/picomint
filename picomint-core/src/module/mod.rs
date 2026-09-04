@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ln::methods::LnMethod;
 use crate::methods::CoreMethod;
-use crate::mint::methods::MintMethod;
+use crate::ecash::methods::ECashMethod;
 use crate::wallet::methods::WalletMethod;
 use picomint_encoding::{Decodable, Encodable};
 
@@ -15,7 +15,7 @@ use picomint_encoding::{Decodable, Encodable};
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum Method {
     Core(CoreMethod),
-    Mint(MintMethod),
+    ECash(ECashMethod),
     Wallet(WalletMethod),
     Ln(LnMethod),
 }

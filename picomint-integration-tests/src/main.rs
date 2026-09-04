@@ -2,7 +2,7 @@ mod cli;
 mod env;
 mod expiry;
 mod ln;
-mod mint;
+mod ecash;
 mod restore;
 mod wallet;
 
@@ -38,11 +38,11 @@ fn main() -> anyhow::Result<()> {
     info!("Running wallet tests...");
     runtime.block_on(wallet::run_tests(&env, &client_send))?;
 
-    info!("Running ln + mint tests in parallel...");
+    info!("Running ln + ecash tests in parallel...");
     runtime.block_on(async {
         tokio::try_join!(
             ln::run_tests(&env, &client_send),
-            mint::run_tests(&env, &client_send),
+            ecash::run_tests(&env, &client_send),
         )
     })?;
 

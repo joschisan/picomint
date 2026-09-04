@@ -100,7 +100,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     retry("pegin balance", || async {
         let balance = client_send
             .client
-            .mint_balance(client_send.fed, Account::Primary);
+            .ecash_balance(client_send.fed, Account::Primary);
         ensure!(balance > Amount::ZERO, "Balance is zero");
         Ok(())
     })
@@ -201,14 +201,14 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let ecash = client_send
         .client
-        .mint_send(client_send.fed, Account::Primary, Amount::from_sat(100_000))
+        .ecash_send(client_send.fed, Account::Primary, Amount::from_sat(100_000))
         .await?;
 
     let operation = client
         .client
-        .mint_receive(client.fed, Account::Primary, &ecash)?;
+        .ecash_receive(client.fed, Account::Primary, &ecash)?;
 
-    crate::mint::await_tx_outcome(&client, operation)
+    crate::ecash::await_tx_outcome(&client, operation)
         .await
         .expect("funding receive should be accepted");
 
@@ -243,7 +243,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     ensure!(
         client
             .client
-            .mint_count(client.fed, Account::Primary)
+            .ecash_count(client.fed, Account::Primary)
             .is_empty(),
         "send_max left notes behind"
     );

@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 use bitcoin::address::NetworkUnchecked;
 use clap::Args;
 use lightning_invoice::Bolt11Invoice;
-use picomint_client::mint::ECash;
+use picomint_client::ecash::ECash;
 use picomint_core::config::FederationId;
 use picomint_core::invite::InviteCode;
-use picomint_core::mint::Denomination;
+use picomint_core::ecash::Denomination;
 use picomint_core::{Amount, secp256k1};
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
@@ -46,9 +46,9 @@ pub const ROUTE_FEDERATION_BALANCE: &str = "/federation/balance";
 pub const ROUTE_FEDERATION_REMOVE: &str = "/federation/remove";
 
 // Per-federation module commands
-pub const ROUTE_FEDERATION_MODULE_MINT_COUNT: &str = "/federation/module/mint/count";
-pub const ROUTE_FEDERATION_MODULE_MINT_SEND: &str = "/federation/module/mint/send";
-pub const ROUTE_FEDERATION_MODULE_MINT_RECEIVE: &str = "/federation/module/mint/receive";
+pub const ROUTE_FEDERATION_MODULE_ECASH_COUNT: &str = "/federation/module/ecash/count";
+pub const ROUTE_FEDERATION_MODULE_ECASH_SEND: &str = "/federation/module/ecash/send";
+pub const ROUTE_FEDERATION_MODULE_ECASH_RECEIVE: &str = "/federation/module/ecash/receive";
 pub const ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE: &str = "/federation/module/wallet/send-fee";
 pub const ROUTE_FEDERATION_MODULE_WALLET_SEND: &str = "/federation/module/wallet/send";
 pub const ROUTE_FEDERATION_MODULE_WALLET_RECEIVE: &str = "/federation/module/wallet/receive";
@@ -355,7 +355,7 @@ pub struct QueryRequest {
 /// `sqlite3 --json` prints.
 pub type QueryResponse = Vec<serde_json::Map<String, serde_json::Value>>;
 
-// --- /federation/module/mint/count ---
+// --- /federation/module/ecash/count ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationMintCountRequest {
@@ -369,7 +369,7 @@ pub struct FederationMintCountResponse {
     pub counts: BTreeMap<Denomination, u64>,
 }
 
-// --- /federation/module/mint/send ---
+// --- /federation/module/ecash/send ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationMintSendRequest {
@@ -383,7 +383,7 @@ pub struct FederationMintSendResponse {
     pub ecash: ECash,
 }
 
-// --- /federation/module/mint/receive ---
+// --- /federation/module/ecash/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct FederationMintReceiveRequest {

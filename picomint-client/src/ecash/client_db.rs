@@ -12,7 +12,7 @@ use super::SpendableNote;
 table!(
     ReceiveOperationTable,
     (FederationId, OperationId) => (),
-    "mint-receive-operation",
+    "ecash-receive-operation",
 );
 
 // Every federation's accounts share one table, split by the key's leading
@@ -21,7 +21,7 @@ table!(
 table!(
     NoteTable,
     (FederationId, Account, SpendableNote) => (),
-    "mint-note",
+    "ecash-note",
 );
 
 // Next unused issuance counter, per account. One space serves every
@@ -36,5 +36,5 @@ table!(
 table!(
     CounterTable,
     (FederationId, Account) => u64,
-    "mint-counter",
+    "ecash-counter",
 );

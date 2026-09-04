@@ -126,7 +126,7 @@ async fn update_gateway_info(ctx: ClientContext) {
 /// the invoice, the gateway's fee and the federation's transaction fee,
 /// with the sub-sat remainder donated.
 fn send_max_amount(ctx: &ClientContext, account: Account, gateway_info: &GatewayInfo) -> Amount {
-    crate::mint::largest_affordable_amount(ctx, account, |amount| {
+    crate::ecash::largest_affordable_amount(ctx, account, |amount| {
         gateway_info.send_fee.fee(amount.msat) + ctx.config.ln.output_fee
     })
 }
@@ -246,7 +246,7 @@ async fn send_inner(
         return Err(SendPaymentError::InvoiceAlreadyAttempted);
     }
 
-    let txid = crate::mint::finalize_and_submit_tx(
+    let txid = crate::ecash::finalize_and_submit_tx(
         ctx,
         &dbtx,
         account,
@@ -382,7 +382,7 @@ fn receive_incoming_contract(
     let amount = summary.amount;
     let fee = summary.fee;
 
-    crate::mint::finalize_and_submit_tx(
+    crate::ecash::finalize_and_submit_tx(
         ctx,
         dbtx,
         account,

@@ -2,7 +2,7 @@
 
 use picomint_core::OutPoint;
 use picomint_core::TransactionId;
-use picomint_core::mint::methods::{
+use picomint_core::ecash::methods::{
     IssuanceStateRequest, IssuanceStateResponse, SignaturesRequest, SignaturesResponse,
     SignaturesRestoreRequest, SignaturesRestoreResponse, SpendStateRequest, SpendStateResponse,
 };

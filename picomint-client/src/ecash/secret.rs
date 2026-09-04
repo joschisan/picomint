@@ -1,5 +1,5 @@
-//! Mint-module derivation tree. Only constructible via
-//! [`ClientSecret::mint_secret`]; the path enum is private.
+//! ECash-module derivation tree. Only constructible via
+//! [`ClientSecret::ecash_secret`]; the path enum is private.
 //!
 //! Each account owns a subtree, and within it both leaves hang off a single
 //! issuance counter, so a counter yields exactly one note and nothing here
@@ -7,7 +7,7 @@
 //! candidate's denomination on its own and learns it from the federation,
 //! which reports it alongside membership in `issuance_state`.
 //!
-//! [`ClientSecret::mint_secret`]: crate::secret::ClientSecret::mint_secret
+//! [`ClientSecret::ecash_secret`]: crate::secret::ClientSecret::ecash_secret
 
 use picomint_core::core::Account;
 use picomint_core::secp256k1::Keypair;
@@ -22,9 +22,9 @@ enum Path {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct MintSecret(Secret);
+pub struct ECashSecret(Secret);
 
-impl MintSecret {
+impl ECashSecret {
     pub(crate) fn new(module_root: Secret) -> Self {
         Self(module_root)
     }

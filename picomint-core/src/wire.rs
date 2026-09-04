@@ -1,7 +1,7 @@
-//! Static wire enums for the fixed module set: mint + wallet + ln.
+//! Static wire enums for the fixed module set: ecash + wallet + ln.
 
 use crate::ln::{LightningInput, LightningInputError, LightningOutput, LightningOutputError};
-use crate::mint::{MintInput, MintInputError, MintOutput, MintOutputError};
+use crate::ecash::{ECashInput, ECashInputError, ECashOutput, ECashOutputError};
 use crate::wallet::{
     WalletConsensusItem, WalletInput, WalletInputError, WalletOutput, WalletOutputError,
 };
@@ -10,14 +10,14 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum Input {
-    Mint(MintInput),
+    ECash(ECashInput),
     Wallet(WalletInput),
     Ln(LightningInput),
 }
 
-impl From<MintInput> for Input {
-    fn from(v: MintInput) -> Self {
-        Self::Mint(v)
+impl From<ECashInput> for Input {
+    fn from(v: ECashInput) -> Self {
+        Self::ECash(v)
     }
 }
 
@@ -35,14 +35,14 @@ impl From<WalletInput> for Input {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum Output {
-    Mint(MintOutput),
+    ECash(ECashOutput),
     Wallet(WalletOutput),
     Ln(Box<LightningOutput>),
 }
 
-impl From<MintOutput> for Output {
-    fn from(v: MintOutput) -> Self {
-        Self::Mint(v)
+impl From<ECashOutput> for Output {
+    fn from(v: ECashOutput) -> Self {
+        Self::ECash(v)
     }
 }
 
@@ -71,17 +71,17 @@ impl From<WalletConsensusItem> for ModuleConsensusItem {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable, Error)]
 pub enum InputError {
-    #[error("Mint input error: {0}")]
-    Mint(MintInputError),
+    #[error("ECash input error: {0}")]
+    ECash(ECashInputError),
     #[error("Wallet input error: {0}")]
     Wallet(WalletInputError),
     #[error("Lightning input error: {0}")]
     Ln(LightningInputError),
 }
 
-impl From<MintInputError> for InputError {
-    fn from(v: MintInputError) -> Self {
-        Self::Mint(v)
+impl From<ECashInputError> for InputError {
+    fn from(v: ECashInputError) -> Self {
+        Self::ECash(v)
     }
 }
 
@@ -99,17 +99,17 @@ impl From<WalletInputError> for InputError {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable, Error)]
 pub enum OutputError {
-    #[error("Mint output error: {0}")]
-    Mint(MintOutputError),
+    #[error("ECash output error: {0}")]
+    ECash(ECashOutputError),
     #[error("Wallet output error: {0}")]
     Wallet(WalletOutputError),
     #[error("Lightning output error: {0}")]
     Ln(LightningOutputError),
 }
 
-impl From<MintOutputError> for OutputError {
-    fn from(v: MintOutputError) -> Self {
-        Self::Mint(v)
+impl From<ECashOutputError> for OutputError {
+    fn from(v: ECashOutputError) -> Self {
+        Self::ECash(v)
     }
 }
 

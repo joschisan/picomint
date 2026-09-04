@@ -57,7 +57,7 @@ pub(crate) async fn send_fee(ctx: &ClientContext) -> Result<bitcoin::Amount, Sen
 }
 
 fn max_amount_at(ctx: &ClientContext, account: Account, fee: bitcoin::Amount) -> bitcoin::Amount {
-    let amount = crate::mint::largest_affordable_amount(ctx, account, |_| {
+    let amount = crate::ecash::largest_affordable_amount(ctx, account, |_| {
         Amount::from_sat(fee.to_sat()) + ctx.config.wallet.output_fee
     });
 
@@ -97,7 +97,7 @@ fn submit_send(
 
     let dbtx = ctx.db.begin_write();
 
-    let txid = crate::mint::finalize_and_submit_tx(
+    let txid = crate::ecash::finalize_and_submit_tx(
         ctx,
         &dbtx,
         account,
@@ -200,7 +200,7 @@ fn receive_output(
         .as_unchecked()
         .clone();
 
-    let txid = crate::mint::finalize_and_submit_tx(
+    let txid = crate::ecash::finalize_and_submit_tx(
         ctx,
         &dbtx,
         account,

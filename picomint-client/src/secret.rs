@@ -13,7 +13,7 @@ use rand::{CryptoRng, RngCore};
 
 use crate::gw::GwSecret;
 use crate::ln::LnSecret;
-use crate::mint::MintSecret;
+use crate::ecash::ECashSecret;
 use crate::wallet::WalletSecret;
 
 const WORD_COUNT: usize = 12;
@@ -45,8 +45,8 @@ impl ClientSecret {
         Self(Secret::new_root(&mnemonic.to_entropy()).child(&federation))
     }
 
-    pub fn mint_secret(&self) -> MintSecret {
-        MintSecret::new(self.0.child(&Path::Mint))
+    pub fn ecash_secret(&self) -> ECashSecret {
+        ECashSecret::new(self.0.child(&Path::Mint))
     }
 
     pub fn wallet_secret(&self) -> WalletSecret {

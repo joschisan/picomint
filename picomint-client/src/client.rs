@@ -112,7 +112,7 @@ impl Client {
         dbtx.insert(&ClientConfigTable, &federation, &config);
 
         for (account, restore) in &restores {
-            crate::mint::commit_scan(&dbtx, *account, restore);
+            crate::ecash::commit_scan(&dbtx, *account, restore);
         }
 
         dbtx.commit();
@@ -159,7 +159,7 @@ impl Client {
             "Federation is not added"
         );
 
-        crate::mint::wipe_tables(&dbtx, federation);
+        crate::ecash::wipe_tables(&dbtx, federation);
         crate::wallet::wipe_tables(&dbtx, federation);
         crate::ln::wipe_tables(&dbtx, federation);
         crate::gw::wipe_tables(&dbtx, federation);
@@ -264,7 +264,7 @@ impl Client {
         let dbtx = self.db.begin_read();
 
         crate::tx::operation_is_active(&dbtx, federation, operation)
-            || crate::mint::operation_is_active(&dbtx, federation, operation)
+            || crate::ecash::operation_is_active(&dbtx, federation, operation)
             || crate::ln::operation_is_active(&dbtx, federation, operation)
             || crate::wallet::operation_is_active(&dbtx, federation, operation)
             || crate::gw::operation_is_active(&dbtx, federation, operation)
@@ -287,7 +287,7 @@ impl Client {
     pub async fn subscribe_completion(&self, federation: FederationId, operation: OperationId) {
         let notifies = [
             crate::tx::sm_notifies(&self.db),
-            crate::mint::sm_notifies(&self.db),
+            crate::ecash::sm_notifies(&self.db),
             crate::ln::sm_notifies(&self.db),
             crate::wallet::sm_notifies(&self.db),
             crate::gw::sm_notifies(&self.db),
@@ -348,7 +348,7 @@ fn build_ctx(
         TaskGroup::new(),
     );
 
-    crate::mint::resume(&ctx);
+    crate::ecash::resume(&ctx);
 
     crate::wallet::resume(&ctx);
 

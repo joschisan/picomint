@@ -677,7 +677,7 @@ async fn test_claim_outgoing_contract(client: &TestClient) -> anyhow::Result<()>
 
     client
         .client
-        .mint_finalize_and_submit_tx(
+        .ecash_finalize_and_submit_tx(
             client.fed,
             &dbtx,
             Account::Primary,

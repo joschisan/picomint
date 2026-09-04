@@ -5,11 +5,11 @@ use std::collections::BTreeMap;
 
 use anyhow::ensure;
 use group::Curve;
-use picomint_core::mint::config::{
-    MintConfig, MintConfigConsensus, MintConfigPrivate, consensus_denominations,
+use picomint_core::ecash::config::{
+    ECashConfig, ECashConfigConsensus, ECashConfigPrivate, consensus_denominations,
 };
-use picomint_core::mint::methods::MintMethod;
-use picomint_core::mint::{MintInput, MintInputError, MintOutput, MintOutputError, verify_note};
+use picomint_core::ecash::methods::ECashMethod;
+use picomint_core::ecash::{ECashInput, ECashInputError, ECashOutput, ECashOutputError, verify_note};
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{Amount, OutPoint};
 use picomint_redb::{DbRead, WriteTx};
@@ -26,8 +26,8 @@ use self::db::{
     IssuanceCounterTable, NoteNonceTable,
 };
 
-/// Run DKG for the mint module, producing a fresh `MintConfig` for this peer.
-pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<MintConfig> {
+/// Run DKG for the mint module, producing a fresh `ECashConfig` for this peer.
+pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<ECashConfig> {
     let mut tbs_sks = BTreeMap::new();
     let mut tbs_agg_pks = BTreeMap::new();
     let mut tbs_pks = BTreeMap::new();
@@ -48,9 +48,9 @@ pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<MintConfig
         tbs_pks.insert(denomination, pks);
     }
 
-    Ok(MintConfig {
-        private: MintConfigPrivate { tbs_sks },
-        consensus: MintConfigConsensus {
+    Ok(ECashConfig {
+        private: ECashConfigPrivate { tbs_sks },
+        consensus: ECashConfigConsensus {
             tbs_agg_pks,
             tbs_pks,
             input_fee: Amount::from_msat(100),
@@ -63,10 +63,10 @@ pub async fn distributed_gen(peers: &DkgHandle<'_>) -> anyhow::Result<MintConfig
 /// config.
 pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
     for denomination in consensus_denominations() {
-        let pk = derive_pk_share(&cfg.private.mint.tbs_sks[&denomination]);
+        let pk = derive_pk_share(&cfg.private.ecash.tbs_sks[&denomination]);
 
         ensure!(
-            pk == cfg.consensus.mint.tbs_pks[&denomination][&cfg.private.identity],
+            pk == cfg.consensus.ecash.tbs_pks[&denomination][&cfg.private.identity],
             "Mint private key doesn't match pubkey share"
         );
     }
@@ -77,25 +77,25 @@ pub fn validate_config(cfg: &ServerConfig) -> anyhow::Result<()> {
 pub fn process_input(
     server: &Server,
     dbtx: &WriteTx,
-    input: &MintInput,
-) -> Result<(Amount, XOnlyPublicKey), MintInputError> {
+    input: &ECashInput,
+) -> Result<(Amount, XOnlyPublicKey), ECashInputError> {
     if dbtx
         .insert(&NoteNonceTable, &input.note.nonce, &())
         .is_some()
     {
-        return Err(MintInputError::SpentCoin);
+        return Err(ECashInputError::SpentCoin);
     }
 
     let pk = server
         .cfg
         .consensus
-        .mint
+        .ecash
         .tbs_agg_pks
         .get(&input.note.denomination)
-        .ok_or(MintInputError::InvalidDenomination)?;
+        .ok_or(ECashInputError::InvalidDenomination)?;
 
     if !verify_note(input.note, *pk) {
-        return Err(MintInputError::InvalidSignature);
+        return Err(ECashInputError::InvalidSignature);
     }
 
     let new_count = dbtx
@@ -112,9 +112,9 @@ pub fn process_input(
 pub fn process_output(
     server: &Server,
     dbtx: &WriteTx,
-    output: &MintOutput,
+    output: &ECashOutput,
     outpoint: OutPoint,
-) -> Result<Amount, MintOutputError> {
+) -> Result<Amount, ECashOutputError> {
     // Signing a blinded nonce twice mints two notes that share a nonce, so
     // spending either strands the other. A client derives nonces from an
     // issuance counter, so a wallet restored without running restore would
@@ -125,17 +125,17 @@ pub fn process_output(
         .insert(&BlindedNonceTable, &output.nonce, &output.denomination)
         .is_some()
     {
-        return Err(MintOutputError::ReusedNonce);
+        return Err(ECashOutputError::ReusedNonce);
     }
 
     let signature = server
         .cfg
         .private
-        .mint
+        .ecash
         .tbs_sks
         .get(&output.denomination)
         .map(|key| tbs::sign_message(output.nonce, *key))
-        .ok_or(MintOutputError::InvalidDenomination)?;
+        .ok_or(ECashOutputError::InvalidDenomination)?;
 
     dbtx.insert(&BlindedSignatureShareTable, &outpoint, &signature);
 
@@ -163,11 +163,11 @@ pub fn audit(dbtx: &WriteTx) -> i64 {
     })
 }
 
-pub async fn handle_api(server: &Server, method: MintMethod) -> Result<Vec<u8>, String> {
+pub async fn handle_api(server: &Server, method: ECashMethod) -> Result<Vec<u8>, String> {
     match method {
-        MintMethod::Signatures(req) => handler_async!(signatures, server, req).await,
-        MintMethod::SignaturesRestore(req) => handler!(signatures_restore, server, req).await,
-        MintMethod::SpendState(req) => handler!(spend_state, server, req).await,
-        MintMethod::IssuanceState(req) => handler!(issuance_state, server, req).await,
+        ECashMethod::Signatures(req) => handler_async!(signatures, server, req).await,
+        ECashMethod::SignaturesRestore(req) => handler!(signatures_restore, server, req).await,
+        ECashMethod::SpendState(req) => handler!(spend_state, server, req).await,
+        ECashMethod::IssuanceState(req) => handler!(issuance_state, server, req).await,
     }
 }

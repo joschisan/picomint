@@ -32,8 +32,8 @@ use picomint_gateway_cli_core::{
     LdkLnSendResponse, LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
     LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
     PeerInfo, QueryRequest, QueryResponse, ROUTE_FEDERATION_ADD, ROUTE_FEDERATION_BALANCE,
-    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_MINT_COUNT,
-    ROUTE_FEDERATION_MODULE_MINT_RECEIVE, ROUTE_FEDERATION_MODULE_MINT_SEND,
+    ROUTE_FEDERATION_CONFIG, ROUTE_FEDERATION_LIST, ROUTE_FEDERATION_MODULE_ECASH_COUNT,
+    ROUTE_FEDERATION_MODULE_ECASH_RECEIVE, ROUTE_FEDERATION_MODULE_ECASH_SEND,
     ROUTE_FEDERATION_MODULE_WALLET_RECEIVE, ROUTE_FEDERATION_MODULE_WALLET_SEND,
     ROUTE_FEDERATION_MODULE_WALLET_SEND_FEE, ROUTE_FEDERATION_REMOVE, ROUTE_INFO,
     ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
@@ -137,15 +137,15 @@ fn router() -> Router<AppState> {
         .route(ROUTE_FEDERATION_BALANCE, post(federation_balance))
         // Per-federation module commands
         .route(
-            ROUTE_FEDERATION_MODULE_MINT_COUNT,
+            ROUTE_FEDERATION_MODULE_ECASH_COUNT,
             post(federation_module_mint_count),
         )
         .route(
-            ROUTE_FEDERATION_MODULE_MINT_SEND,
+            ROUTE_FEDERATION_MODULE_ECASH_SEND,
             post(federation_module_mint_send),
         )
         .route(
-            ROUTE_FEDERATION_MODULE_MINT_RECEIVE,
+            ROUTE_FEDERATION_MODULE_ECASH_RECEIVE,
             post(federation_module_mint_receive),
         )
         .route(
@@ -695,7 +695,7 @@ async fn federation_balance(
 ) -> Result<Json<FederationBalanceResponse>, CliError> {
     let federation = resolve_federation(&state, payload.federation)?;
 
-    let balance_msat = state.client.mint_balance(federation, GATEWAY_ACCOUNT);
+    let balance_msat = state.client.ecash_balance(federation, GATEWAY_ACCOUNT);
 
     Ok(Json(FederationBalanceResponse { balance_msat }))
 }
@@ -730,7 +730,7 @@ async fn federation_module_mint_count(
     Json(payload): Json<FederationMintCountRequest>,
 ) -> Result<Json<FederationMintCountResponse>, CliError> {
     let federation = resolve_federation(&state, payload.federation)?;
-    let counts = state.client.mint_count(federation, GATEWAY_ACCOUNT);
+    let counts = state.client.ecash_count(federation, GATEWAY_ACCOUNT);
     Ok(Json(FederationMintCountResponse { counts }))
 }
 
@@ -744,7 +744,7 @@ async fn federation_module_mint_send(
 
     let ecash = state
         .client
-        .mint_send(
+        .ecash_send(
             federation,
             GATEWAY_ACCOUNT,
             picomint_core::Amount::from_sat(payload.amount.to_sat()),
@@ -767,7 +767,7 @@ async fn federation_module_mint_receive(
 
     let operation = state
         .client
-        .mint_receive(payload.ecash.mint, GATEWAY_ACCOUNT, &payload.ecash)
+        .ecash_receive(payload.ecash.mint, GATEWAY_ACCOUNT, &payload.ecash)
         .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
 
     let mut events = state.client.subscribe_operation_events(operation);

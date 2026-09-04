@@ -215,7 +215,7 @@ fn submit_refund(
 
     let operation = old_state.common.operation;
 
-    crate::mint::finalize_and_submit_tx(
+    crate::ecash::finalize_and_submit_tx(
         ctx,
         dbtx,
         old_state.common.account,
