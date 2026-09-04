@@ -42,9 +42,9 @@ impl MintApi {
     pub fn new(endpoint: Endpoint, nodes: BTreeMap<NodeId, PublicKey>) -> Self {
         let mut states = BTreeMap::new();
 
-        for (node, node_id) in &nodes {
+        for (node, iroh_pk) in &nodes {
             let (tx, rx) = watch::channel(None);
-            tokio::spawn(connection_task(*node_id, endpoint.clone(), tx));
+            tokio::spawn(connection_task(*iroh_pk, endpoint.clone(), tx));
             states.insert(*node, rx);
         }
 

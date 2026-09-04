@@ -708,7 +708,7 @@ pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
     ]
 }
 
-/// Resume this mint's persisted mint state machines. Called exactly
+/// Resume this mint's persisted ecash state machines. Called exactly
 /// once, at mint bring-up.
 pub(crate) fn resume(ctx: &ClientContext) {
     crate::executor::resume::<TxSubmissionStateMachine, _>(ctx, TxSubmissionStateMachineTable);

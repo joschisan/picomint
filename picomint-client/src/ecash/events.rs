@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// wallet has assembled the actual ecash. On the fast path
 /// `SendSuccessEvent` lands atomically in the same dbtx; on the slow
 /// path it lands later, after the reissuance tx runs through consensus
-/// and the mint state machine finalises notes. Slow-path observers can
+/// and the ecash state machine finalises notes. Slow-path observers can
 /// recover the reissuance txid from the immediately-following
 /// `RemintEvent` / `TxCreateEvent` under the same operation id.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -77,7 +77,7 @@ impl Event for ReceiveEvent {
     const KIND: EventKind = EventKind::from_static("receive");
 }
 
-/// Emitted when a mint state machine successfully finalises new notes.
+/// Emitted when an ecash state machine successfully finalises new notes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct EcashSuccessEvent {
     pub txid: TransactionId,
@@ -91,7 +91,7 @@ impl Event for EcashSuccessEvent {
     const KIND: EventKind = EventKind::from_static("success");
 }
 
-/// Emitted when a mint state machine fails to finalise notes.
+/// Emitted when an ecash state machine fails to finalise notes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct EcashFailureEvent;
 

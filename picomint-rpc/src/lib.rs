@@ -54,17 +54,17 @@ pub fn transport_config() -> QuicTransportConfig {
         .build()
 }
 
-/// Open a fresh iroh connection to `node_id`, send `request`, read the
+/// Open a fresh iroh connection to `iroh_pk`, send `request`, read the
 /// response, close. The wire envelope (`Result<Vec<u8>, String>`) is
 /// unwrapped here — the caller gets back the consensus-decoded `Resp`
 /// directly, or an `anyhow::Error` carrying the server-side error string.
 pub async fn request<Req: Encodable, Resp: Decodable>(
     endpoint: &Endpoint,
-    node_id: PublicKey,
+    iroh_pk: PublicKey,
     request: Req,
 ) -> anyhow::Result<Resp> {
     let connection = endpoint
-        .connect(node_id, ALPN)
+        .connect(iroh_pk, ALPN)
         .await
         .context("Connection failed")?;
 

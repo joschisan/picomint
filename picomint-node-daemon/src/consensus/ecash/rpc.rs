@@ -1,4 +1,4 @@
-//! Freestanding API handlers for the mint module.
+//! Freestanding API handlers for the ecash module.
 
 use picomint_core::OutPoint;
 use picomint_core::TransactionId;

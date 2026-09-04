@@ -49,7 +49,7 @@ pub struct ServerConfigPrivate {
     pub iroh_sk: iroh::SecretKey,
     /// Secret key for the atomic broadcast to sign messages
     pub broadcast_secret_key: SecretKey,
-    /// Private key material for the mint module
+    /// Private key material for the ecash module
     pub ecash: EcashConfigPrivate,
     /// Private key material for the onchain module
     pub onchain: OnchainConfigPrivate,

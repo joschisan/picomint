@@ -28,7 +28,7 @@ use self::db::{
     IssuanceCounterTable, NoteNonceTable,
 };
 
-/// Run DKG for the mint module, producing a fresh `EcashConfig` for this node.
+/// Run DKG for the ecash module, producing a fresh `EcashConfig` for this node.
 pub async fn distributed_gen(nodes: &DkgHandle<'_>) -> anyhow::Result<EcashConfig> {
     let mut tbs_sks = BTreeMap::new();
     let mut tbs_agg_pks = BTreeMap::new();
