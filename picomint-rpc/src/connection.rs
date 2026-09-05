@@ -15,7 +15,13 @@ use picomint_core::backoff::{BackoffBuilder, networking_backoff};
 use crate::{ALPN, request_on_connection};
 use picomint_encoding::{Decodable, Encodable};
 use tokio::sync::watch;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
+use tracing::warn;
+
+/// A connect that has not produced a connection within this window is
+/// treated as failed, so a peer that is unreachable through every path
+/// still surfaces as `Disconnected` instead of leaving the state at `None`.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Live connection state for one node, published on a watch channel by its
 /// [`connection_task`]. `None` (the channel's initial value) means the task
@@ -66,7 +72,12 @@ pub async fn connection_task(
         let mut backoff = networking_backoff().build();
 
         loop {
-            match endpoint.connect(iroh_pk, ALPN).await {
+            let connect = timeout(CONNECT_TIMEOUT, endpoint.connect(iroh_pk, ALPN))
+                .await
+                .map_err(|_| anyhow!("timed out after {CONNECT_TIMEOUT:?}"))
+                .and_then(|result| result.map_err(anyhow::Error::from));
+
+            match connect {
                 Ok(conn) => {
                     backoff = networking_backoff().build();
 
@@ -76,7 +87,13 @@ pub async fn connection_task(
 
                     state.send_replace(Some(ConnState::Disconnected));
                 }
-                Err(_) => {
+                Err(error) => {
+                    warn!(%iroh_pk, error = %format_args!("{error:#}"), "connect failed");
+
+                    // Publish the failure: a request waiting for the first
+                    // state must error out, not hang until the peer appears.
+                    state.send_replace(Some(ConnState::Disconnected));
+
                     sleep(backoff.next().expect("networking_backoff retries forever")).await;
                 }
             }
