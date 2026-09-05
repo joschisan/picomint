@@ -6,8 +6,9 @@ WORKDIR /app
 
 COPY . .
 
-RUN cargo build --release --target x86_64-unknown-linux-musl --bin picomint-lnurl-daemon \
-    && strip target/x86_64-unknown-linux-musl/release/picomint-lnurl-daemon
+# Symbols are kept: a wedged daemon is diagnosed with `gdb -p` on the host,
+# which needs them to name the functions each thread is blocked in.
+RUN cargo build --release --target x86_64-unknown-linux-musl --bin picomint-lnurl-daemon
 
 FROM gcr.io/distroless/static-debian12:nonroot
 

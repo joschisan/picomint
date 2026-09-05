@@ -134,3 +134,6 @@ url = "2.5.8"
 # crypto-heavy hot paths and worth the modest extra release-build time.
 [profile.release]
 lto = "thin"
+# Line tables only, not full debug info: backtraces from a wedged daemon
+# carry file:line, and the images are no longer stripped either.
+debug = "line-tables-only"
