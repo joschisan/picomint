@@ -48,7 +48,20 @@ pub struct Client {
     pub(crate) endpoint: Endpoint,
     pub(crate) db: Database,
     pub(crate) mnemonic: Mnemonic,
+    role: Role,
     mints: RwLock<BTreeMap<MintId, ClientContext>>,
+}
+
+/// Which side of a lightning payment this client sits on. A user pays and
+/// receives through gateways, so its mint contexts pool the announced
+/// gateways and run the lightning module's state machines and scans. A
+/// gateway daemon embeds the client to hold its own ecash and settle
+/// contracts, so its contexts run the gateway module instead — and never
+/// pool gateways, which would include dialing its own key.
+#[derive(Debug, Clone, Copy)]
+enum Role {
+    User,
+    Gateway,
 }
 
 impl Client {
@@ -64,8 +77,20 @@ impl Client {
     /// restarts.
     ///
     pub fn new(endpoint: Endpoint, db: Database, mnemonic: Mnemonic) -> Client {
+        Self::build(endpoint, db, mnemonic, Role::User)
+    }
+
+    /// Gateway-flavor counterpart of [`Client::new`] for the gateway daemon:
+    /// its mint contexts run the gateway module and skip everything a user
+    /// needs to pay through gateways, including the gateway pool.
+    pub fn new_gateway(endpoint: Endpoint, db: Database, mnemonic: Mnemonic) -> Client {
+        Self::build(endpoint, db, mnemonic, Role::Gateway)
+    }
+
+    fn build(endpoint: Endpoint, db: Database, mnemonic: Mnemonic, role: Role) -> Client {
         debug!(
             version = %env!("CARGO_PKG_VERSION"),
+            ?role,
             "Building picomint client",
         );
 
@@ -73,13 +98,14 @@ impl Client {
             .begin_read()
             .iter(&ClientConfigTable, |r| r.collect::<Vec<_>>())
             .into_iter()
-            .map(|entry| (entry.0, build_ctx(&endpoint, &db, &mnemonic, entry.1)))
+            .map(|entry| (entry.0, build_ctx(&endpoint, &db, &mnemonic, entry.1, role)))
             .collect();
 
         Client {
             endpoint,
             db,
             mnemonic,
+            role,
             mints: RwLock::new(mints),
         }
     }
@@ -117,7 +143,7 @@ impl Client {
 
         dbtx.commit();
 
-        let ctx = build_ctx(&self.endpoint, &self.db, &self.mnemonic, config);
+        let ctx = build_ctx(&self.endpoint, &self.db, &self.mnemonic, config, self.role);
 
         self.mints
             .write()
@@ -335,6 +361,7 @@ fn build_ctx(
     db: &Database,
     mnemonic: &Mnemonic,
     config: ConsensusConfig,
+    role: Role,
 ) -> ClientContext {
     let mint = config.calculate_mint_id();
 
@@ -351,9 +378,10 @@ fn build_ctx(
 
     crate::onchain::resume(&ctx);
 
-    crate::lightning::resume(&ctx);
-
-    crate::gateway::resume(&ctx);
+    match role {
+        Role::User => crate::lightning::resume(&ctx),
+        Role::Gateway => crate::gateway::resume(&ctx),
+    }
 
     ctx.tg.spawn(crate::expiry::refresh(ctx.clone()));
 
