@@ -191,18 +191,20 @@ CREATE TABLE receive_refund (
     PRIMARY KEY (mint, operation)
 );
 
+-- The tx tables are keyed by txid as well: one operation may submit
+-- several txs — a direct swap funds the incoming contract and claims the
+-- outgoing one under a single operation, and a send may be followed by
+-- its refund.
 CREATE TABLE tx_create (
     operation     TEXT NOT NULL,
     ts            INTEGER NOT NULL,
-    mint    TEXT NOT NULL,
+    mint          TEXT NOT NULL,
     txid          TEXT NOT NULL,
     remint_msat   INTEGER NOT NULL,
     fee_msat      INTEGER NOT NULL,
-    PRIMARY KEY (mint, operation)
+    PRIMARY KEY (mint, operation, txid)
 );
 
--- Keyed by txid as well: one operation may submit several txs (e.g. a
--- lightning send followed by its refund), each accepted on its own.
 CREATE TABLE tx_accept (
     operation     TEXT NOT NULL,
     ts            INTEGER NOT NULL,
@@ -227,6 +229,10 @@ CREATE INDEX idx_receive_success_ts  ON receive_success(ts);
 CREATE INDEX idx_tx_create_ts        ON tx_create(ts);
 CREATE INDEX idx_tx_accept_ts        ON tx_accept(ts);
 
+-- The tx columns name the gateway's own mint tx on that side: the claim
+-- of the outgoing contract (which only exists once the payment succeeded)
+-- and the funding of the incoming contract. Joining by txid keeps a
+-- direct swap's two txs on their own sides of the ledger.
 CREATE VIEW outgoing_payments AS
 SELECT
     s.mint,
@@ -255,7 +261,7 @@ LEFT JOIN send_success succ
 LEFT JOIN send_cancel  canc
        ON canc.mint = s.mint AND canc.operation = s.operation
 LEFT JOIN tx_create    tx
-       ON tx.mint = s.mint AND tx.operation = s.operation;
+       ON tx.mint = s.mint AND tx.operation = s.operation AND tx.txid = succ.txid;
 
 CREATE VIEW incoming_payments AS
 SELECT
@@ -283,7 +289,7 @@ LEFT JOIN receive_failure fail
 LEFT JOIN receive_refund  refund
        ON refund.mint = r.mint AND refund.operation = r.operation
 LEFT JOIN tx_create       tx
-       ON tx.mint = r.mint AND tx.operation = r.operation;
+       ON tx.mint = r.mint AND tx.operation = r.operation AND tx.txid = r.txid;
 
 CREATE VIEW tx_acceptance AS
 SELECT
