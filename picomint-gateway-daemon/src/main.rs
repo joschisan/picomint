@@ -170,7 +170,7 @@ fn main() -> anyhow::Result<()> {
     // background tasks — so the runtime stays entered from here on.
     let _rt = runtime.enter();
 
-    let client = Arc::new(picomint_client::Client::new(
+    let client = Arc::new(picomint_client::Client::new_gateway(
         endpoint.clone(),
         gateway_db.clone(),
         mnemonic.clone(),
