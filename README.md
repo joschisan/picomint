@@ -331,7 +331,7 @@ picomint-gateway-cli query \
 | `gateway_fee_msat`    | INTEGER | The gateway's fee cut                                                  |
 | `tx_fee_msat`    | INTEGER | Mint consensus tx fee (NULL until the tx lands)                  |
 | `tx_remint_msat` | INTEGER | Mint tx remint amount                                            |
-| `tx_txid`        | TEXT    | Mint tx id (NULL until the tx lands)                             |
+| `tx_txid`        | TEXT    | The gateway's own mint tx on this side: the outgoing contract's claim (NULL until `status = 'success'`) or the incoming contract's funding |
 | `preimage`       | TEXT    | Hex-encoded; NULL unless `status = 'success'`                          |
 
 **Additional columns on `outgoing_payments`:**
