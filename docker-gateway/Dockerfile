@@ -6,8 +6,9 @@ WORKDIR /app
 
 COPY . .
 
+# Symbols are kept: a wedged daemon is diagnosed with `gdb -p` on the host,
+# which needs them to name the functions each thread is blocked in.
 RUN cargo build --release --target x86_64-unknown-linux-musl --bin picomint-gateway-daemon --bin picomint-gateway-cli \
-    && strip target/x86_64-unknown-linux-musl/release/picomint-gateway-daemon target/x86_64-unknown-linux-musl/release/picomint-gateway-cli \
     && mkdir /data
 
 FROM gcr.io/distroless/static-debian12:nonroot
