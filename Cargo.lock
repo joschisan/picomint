@@ -3603,6 +3603,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-load-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "clap",
+ "futures",
+ "iroh",
+ "iroh-mdns-address-lookup",
+ "picomint-client",
+ "picomint-core",
+ "picomint-redb",
+ "picomint-rpc",
+ "rand 0.8.6",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "picomint-node-cli"
 version = "0.1.0"
 dependencies = [

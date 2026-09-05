@@ -19,6 +19,8 @@ jobs:
             dockerfile: docker-gateway/Dockerfile
           - image: picomint-lnurl-daemon
             dockerfile: docker-lnurl/Dockerfile
+          - image: picomint-load-daemon
+            dockerfile: docker-load/Dockerfile
 
     steps:
     - uses: actions/checkout@v4

@@ -13,6 +13,7 @@ members = [
     "picomint-gateway-daemon",
     "picomint-integration-tests",
     "picomint-lnurl",
+    "picomint-load-daemon",
     "picomint-lnurl-daemon",
     "picomint-node-cli",
     "picomint-node-cli-core",

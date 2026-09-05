@@ -1,0 +1,25 @@
+[package]
+authors = { workspace = true }
+description = "Synthetic load generator: one self-payment through a mint's gateway every N seconds"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-load-daemon"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+anyhow = { workspace = true }
+bitcoin = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+iroh = { workspace = true, default-features = false }
+iroh-mdns-address-lookup = { workspace = true }
+picomint-client = { workspace = true }
+picomint-core = { workspace = true }
+picomint-redb = { workspace = true }
+picomint-rpc = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
