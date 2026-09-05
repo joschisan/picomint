@@ -345,9 +345,32 @@ picomint-gateway-cli query \
 - `outgoing_payments`: `pending`, `success`, `cancelled`
 - `incoming_payments`: `pending`, `success`, `failure`, `refunded`
 
+**Transaction acceptance latency.** Every mint transaction the gateway
+submits is also tracked from creation to the mint's accept or reject in
+the `tx_acceptance` view — one row per `(mint, operation, txid)` with
+`created_at`, `resolved_at`, `status` (`pending`, `accepted`,
+`rejected`), `latency_ms` and, for rejects, the mint's `error`. This
+measures consensus round-trip only, independent of any Lightning leg.
+Average and worst case:
+
+```bash
+picomint-gateway-cli query \
+    "SELECT COUNT(*) AS n, AVG(latency_ms) AS avg_ms, MAX(latency_ms) AS max_ms \
+     FROM tx_acceptance WHERE status='accepted'"
+```
+
+The 99th percentile (SQLite has no percentile function, so sort and skip):
+
+```bash
+picomint-gateway-cli query \
+    "SELECT latency_ms AS p99_ms FROM tx_acceptance WHERE status='accepted' \
+     ORDER BY latency_ms LIMIT 1 OFFSET \
+     (SELECT COUNT(*) * 99 / 100 FROM tx_acceptance WHERE status='accepted')"
+```
+
 The raw event tables (`send`, `send_success`, `send_cancel`, `receive`,
-`receive_success`, `receive_failure`, `receive_refund`, `tx_create`) are
-also queryable if you need a finer view.
+`receive_success`, `receive_failure`, `receive_refund`, `tx_create`,
+`tx_accept`, `tx_reject`) are also queryable if you need a finer view.
 
 ### Interfaces
 

@@ -3,9 +3,10 @@
 //! A single daemon-wide trailer task reads from the global event log and
 //! `INSERT`s rows into `{DATA_DIR}/analytics.sqlite`. One table per event
 //! kind plus `outgoing_payments` and `incoming_payments` views that each
-//! stitch the relevant event tables into a single row per op. Mint
-//! id is read directly off each event entry — every event is
-//! mint-scoped at log time.
+//! stitch the relevant event tables into a single row per op, and a
+//! `tx_acceptance` view pairing every submitted mint tx with its accept
+//! or reject for consensus-latency statistics. Mint id is read directly
+//! off each event entry — every event is mint-scoped at log time.
 //!
 //! The file is **wiped on every gateway startup** — analytics state is
 //! derived, not authoritative. The event log in the gateway db is the
@@ -26,7 +27,7 @@ use picomint_client::gateway::events::{
     ReceiveEvent, ReceiveFailureEvent, ReceiveRefundEvent, ReceiveSuccessEvent, SendCancelEvent,
     SendEvent, SendSuccessEvent,
 };
-use picomint_client::{Client, TxCreateEvent};
+use picomint_client::{Client, TxAcceptEvent, TxCreateEvent, TxRejectEvent};
 use picomint_gateway_cli_core::QueryResponse;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
@@ -200,11 +201,31 @@ CREATE TABLE tx_create (
     PRIMARY KEY (mint, operation)
 );
 
+-- Keyed by txid as well: one operation may submit several txs (e.g. a
+-- lightning send followed by its refund), each accepted on its own.
+CREATE TABLE tx_accept (
+    operation     TEXT NOT NULL,
+    ts            INTEGER NOT NULL,
+    mint          TEXT NOT NULL,
+    txid          TEXT NOT NULL,
+    PRIMARY KEY (mint, operation, txid)
+);
+
+CREATE TABLE tx_reject (
+    operation     TEXT NOT NULL,
+    ts            INTEGER NOT NULL,
+    mint          TEXT NOT NULL,
+    txid          TEXT NOT NULL,
+    error         TEXT NOT NULL,
+    PRIMARY KEY (mint, operation, txid)
+);
+
 CREATE INDEX idx_send_ts             ON send(ts);
 CREATE INDEX idx_send_success_ts     ON send_success(ts);
 CREATE INDEX idx_receive_ts          ON receive(ts);
 CREATE INDEX idx_receive_success_ts  ON receive_success(ts);
 CREATE INDEX idx_tx_create_ts        ON tx_create(ts);
+CREATE INDEX idx_tx_accept_ts        ON tx_accept(ts);
 
 CREATE VIEW outgoing_payments AS
 SELECT
@@ -263,6 +284,26 @@ LEFT JOIN receive_refund  refund
        ON refund.mint = r.mint AND refund.operation = r.operation
 LEFT JOIN tx_create       tx
        ON tx.mint = r.mint AND tx.operation = r.operation;
+
+CREATE VIEW tx_acceptance AS
+SELECT
+    c.mint,
+    c.operation,
+    c.txid,
+    c.ts AS created_at,
+    COALESCE(a.ts, r.ts) AS resolved_at,
+    CASE
+        WHEN a.txid IS NOT NULL THEN 'accepted'
+        WHEN r.txid IS NOT NULL THEN 'rejected'
+        ELSE 'pending'
+    END AS status,
+    COALESCE(a.ts, r.ts) - c.ts AS latency_ms,
+    r.error
+FROM tx_create c
+LEFT JOIN tx_accept a
+       ON a.mint = c.mint AND a.operation = c.operation AND a.txid = c.txid
+LEFT JOIN tx_reject r
+       ON r.mint = c.mint AND r.operation = c.operation AND r.txid = c.txid;
 "#;
 
 /// Drain the global event log forward in chunks and mirror each gateway event
@@ -391,6 +432,18 @@ fn insert_batch(analytics: &Analytics, entries: &[EventLogEntry]) -> anyhow::Res
                     e.remint.msat as i64,
                     e.fee.msat as i64,
                 ],
+            )?;
+        } else if let Some(e) = entry.to_event::<TxAcceptEvent>() {
+            tx.execute(
+                "INSERT OR IGNORE INTO tx_accept \
+                 (mint, operation, ts, txid) VALUES (?, ?, ?, ?)",
+                rusqlite::params![mint, operation, ts, e.txid.to_string()],
+            )?;
+        } else if let Some(e) = entry.to_event::<TxRejectEvent>() {
+            tx.execute(
+                "INSERT OR IGNORE INTO tx_reject \
+                 (mint, operation, ts, txid, error) VALUES (?, ?, ?, ?, ?)",
+                rusqlite::params![mint, operation, ts, e.txid.to_string(), e.error],
             )?;
         }
     }
