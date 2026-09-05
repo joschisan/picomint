@@ -20,6 +20,47 @@ pub enum Method {
     Lightning(LightningMethod),
 }
 
+impl Method {
+    /// Short stable name for log lines. Requests carry whole transactions,
+    /// so their `Debug` output is far too big to log on the hot path.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Method::Core(CoreMethod::Config(_)) => "core/config",
+            Method::Core(CoreMethod::SubmitTx(_)) => "core/submit-tx",
+            Method::Core(CoreMethod::BlockCount(_)) => "core/block-count",
+            Method::Core(CoreMethod::Liveness(_)) => "core/liveness",
+            Method::Core(CoreMethod::ExpiryStatus(_)) => "core/expiry-status",
+            Method::Core(CoreMethod::MintInfo(_)) => "core/mint-info",
+            Method::Ecash(EcashMethod::SignatureShares(_)) => "ecash/signature-shares",
+            Method::Ecash(EcashMethod::SignatureSharesRestore(_)) => {
+                "ecash/signature-shares-restore"
+            }
+            Method::Ecash(EcashMethod::SpendState(_)) => "ecash/spend-state",
+            Method::Ecash(EcashMethod::IssuanceState(_)) => "ecash/issuance-state",
+            Method::Onchain(OnchainMethod::ConsensusFeerate(_)) => "onchain/consensus-feerate",
+            Method::Onchain(OnchainMethod::MintUtxo(_)) => "onchain/mint-utxo",
+            Method::Onchain(OnchainMethod::SendFee(_)) => "onchain/send-fee",
+            Method::Onchain(OnchainMethod::ReceiveFee(_)) => "onchain/receive-fee",
+            Method::Onchain(OnchainMethod::TxId(_)) => "onchain/txid",
+            Method::Onchain(OnchainMethod::OutputInfoSlice(_)) => "onchain/output-info-slice",
+            Method::Onchain(OnchainMethod::PendingTxChain(_)) => "onchain/pending-tx-chain",
+            Method::Onchain(OnchainMethod::TxChain(_)) => "onchain/tx-chain",
+            Method::Lightning(LightningMethod::AwaitPreimage(_)) => "lightning/await-preimage",
+            Method::Lightning(LightningMethod::DecryptionKeyShare(_)) => {
+                "lightning/decryption-key-share"
+            }
+            Method::Lightning(LightningMethod::OutgoingContractExpiry(_)) => {
+                "lightning/outgoing-contract-expiry"
+            }
+            Method::Lightning(LightningMethod::AwaitIncomingContracts(_)) => {
+                "lightning/await-incoming-contracts"
+            }
+            Method::Lightning(LightningMethod::Gateways(_)) => "lightning/gateways",
+            Method::Lightning(LightningMethod::TpeAggregatePk(_)) => "lightning/tpe-aggregate-pk",
+        }
+    }
+}
+
 /// Authentication secret used to verify node admin API requests.
 ///
 /// The inner value is private to prevent timing leaks via direct comparison.

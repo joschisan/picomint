@@ -13,7 +13,7 @@ use picomint_core::{NodeId, NumNodesExt};
 use picomint_encoding::Encodable;
 use picomint_redb::{DbRead, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
 use crate::config::NodeConfig;
 use crate::consensus::bft::{DataProvider, Network};
@@ -196,8 +196,12 @@ async fn adopt_session(
                 }
             }
             _ = request_interval.tick() => {
+                let node = random_node(&server.cfg);
+
+                debug!(session_index, %node, "polling node for a signed session outcome");
+
                 connections.send(
-                    Recipient::Node(random_node(&server.cfg)),
+                    Recipient::Node(node),
                     P2PMessage::SessionIndex(session_index),
                 );
             }
@@ -329,6 +333,8 @@ async fn collect_threshold_signatures(
                 }
             }
             _ = broadcast_interval.tick() => {
+                debug!(session_index, collected = signatures.len(), "broadcasting our session signature");
+
                 connections.send(
                     Recipient::Everyone,
                     P2PMessage::SessionSignature(our_signature),

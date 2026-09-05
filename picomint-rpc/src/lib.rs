@@ -26,10 +26,16 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use futures::TryFutureExt;
-use iroh::endpoint::{Connection, IdleTimeout, QuicTransportConfig};
+use iroh::endpoint::{Connection, IdleTimeout, QuicTransportConfig, WriteError};
 use iroh::{Endpoint, PublicKey};
 use picomint_encoding::{Decodable, Encodable};
-use tracing::warn;
+use tokio::time::sleep;
+use tracing::{debug, warn};
+
+/// How long a request may wait for a stream slot before we say so. A QUIC
+/// connection allows 100 concurrent bi streams; a client that pins that
+/// many long-polls stalls every further request without any other signal.
+const STREAM_SLOT_WARN_AFTER: Duration = Duration::from_secs(5);
 
 /// ALPN identifier for picomint RPC. Every picomint process — mint nodes
 /// and gateways alike — speaks the same ALPN; the demux happens at the
@@ -86,7 +92,20 @@ pub async fn request_on_connection<Req: Encodable, Resp: Decodable>(
 ) -> anyhow::Result<Resp> {
     let request_bytes = request.consensus_encode_to_vec();
 
-    let (mut sink, mut stream) = connection.open_bi().await.context("Failed to open bi")?;
+    let open_bi = connection.open_bi();
+    tokio::pin!(open_bi);
+
+    let (mut sink, mut stream) = tokio::select! {
+        opened = &mut open_bi => opened.context("Failed to open bi")?,
+        () = sleep(STREAM_SLOT_WARN_AFTER) => {
+            warn!(
+                remote = %connection.remote_id(),
+                "waited {STREAM_SLOT_WARN_AFTER:?} for a stream slot; is the connection's stream budget pinned by long-polls?"
+            );
+
+            open_bi.await.context("Failed to open bi")?
+        }
+    };
 
     sink.write_all(&request_bytes)
         .await
@@ -180,8 +199,16 @@ where
             }
             .await;
 
+            // A requester that got its answer elsewhere stops the stream;
+            // threshold strategies do that to every slower node on every
+            // request, so it is churn, not a fault.
             if let Err(e) = result {
-                warn!(?e, "iroh request stream failed");
+                match e.downcast_ref::<WriteError>() {
+                    Some(WriteError::Stopped(_)) => {
+                        debug!(?e, "iroh request stream stopped by peer")
+                    }
+                    _ => warn!(?e, "iroh request stream failed"),
+                }
             }
         });
     }

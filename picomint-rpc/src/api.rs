@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::future::pending;
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use futures::StreamExt;
@@ -12,8 +13,34 @@ use picomint_core::{NodeId, NumNodes, NumNodesExt};
 use picomint_encoding::Decodable;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
+use tokio::time::{Instant, sleep_until};
 use tokio_stream::wrappers::WatchStream;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
+
+/// A mint request still unresolved after this long is logged once at
+/// warn, with what it has heard so far, so a silent hang has a signature.
+const PENDING_WARN_AFTER: Duration = Duration::from_secs(10);
+
+/// Run one node's request and log how it went at debug.
+async fn timed_request<R: Decodable>(
+    node: NodeId,
+    mut rx: watch::Receiver<Option<ConnState>>,
+    method: Method,
+) -> (NodeId, anyhow::Result<R>) {
+    let name = method.name();
+    let start = Instant::now();
+    let result = request_on_state(&mut rx, method).await;
+
+    debug!(
+        %node,
+        method = name,
+        elapsed_ms = start.elapsed().as_millis() as u64,
+        ok = result.is_ok(),
+        "node request finished"
+    );
+
+    (node, result)
+}
 
 use crate::connection::{ConnState, ConnStatus, connection_task, request_on_state};
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
@@ -116,34 +143,43 @@ impl MintApi {
     ) -> anyhow::Result<F> {
         let mut tasks = JoinSet::new();
 
-        for (node, mut rx) in self.states.clone() {
-            let method = method.clone();
-            tasks.spawn(async move {
-                let result = request_on_state(&mut rx, method).await;
-                (node, result)
-            });
+        for (node, rx) in self.states.clone() {
+            tasks.spawn(timed_request(node, rx, method.clone()));
         }
 
         let mut node_errors = BTreeMap::new();
         let node_error_threshold = self.num_nodes().one_honest();
 
+        let start = Instant::now();
+        let mut answered = 0usize;
+        let mut warned = false;
+
         loop {
-            let (node, result) = tasks
-                .join_next()
-                .await
+            let joined = tokio::select! {
+                joined = tasks.join_next() => joined,
+                () = sleep_until(start + PENDING_WARN_AFTER), if !warned => {
+                    warned = true;
+                    warn!(
+                        method = method.name(),
+                        answered,
+                        errors = node_errors.len(),
+                        "mint request still pending after {PENDING_WARN_AFTER:?}"
+                    );
+                    continue;
+                }
+            };
+
+            let (node, result) = joined
                 .expect("Query strategy ran out of nodes to query without returning a result")
                 .expect("Per-node request task panicked");
+
+            answered += 1;
 
             match result {
                 Ok(response) => match strategy.process(node, response) {
                     QueryStep::Retry(nodes) => {
                         for node in nodes {
-                            let mut rx = self.state(node);
-                            let method = method.clone();
-                            tasks.spawn(async move {
-                                let result = request_on_state(&mut rx, method).await;
-                                (node, result)
-                            });
+                            tasks.spawn(timed_request(node, self.state(node), method.clone()));
                         }
                     }
                     QueryStep::Success(response) => return Ok(response),
@@ -180,11 +216,30 @@ impl MintApi {
             });
         }
 
+        let start = Instant::now();
+        let mut answered = 0usize;
+        let mut warned = false;
+
         loop {
-            let (node, response) = match tasks.join_next().await {
+            let joined = tokio::select! {
+                joined = tasks.join_next() => joined,
+                () = sleep_until(start + PENDING_WARN_AFTER), if !warned => {
+                    warned = true;
+                    warn!(
+                        method = method.name(),
+                        answered,
+                        "mint request still pending after {PENDING_WARN_AFTER:?}"
+                    );
+                    continue;
+                }
+            };
+
+            let (node, response) = match joined {
                 Some(joined) => joined.expect("Per-node request task panicked"),
                 None => pending().await,
             };
+
+            answered += 1;
 
             match strategy.process(node, response) {
                 QueryStep::Retry(nodes) => {

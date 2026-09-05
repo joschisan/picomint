@@ -26,6 +26,10 @@ use tokio::sync::watch;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
+/// Cadence of the "consensus alive" line. A stalled runtime produces no
+/// log output at all; this is the signal whose absence means trouble.
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+
 use crate::config::{DaemonSettings, NodeConfig};
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::{BlockCountVoteTable, ConsensusVersionVoteTable};
@@ -88,6 +92,8 @@ pub async fn run(
     info!("Starting Consensus Api...");
 
     tokio::spawn(run_iroh_api(consensus_api.clone(), foreign_conn_rx));
+
+    tokio::spawn(heartbeat(consensus_api.clone()));
 
     info!("Starting Submission of Module CI proposals...");
 
@@ -195,6 +201,25 @@ async fn submit_ci_proposals(server: Server, submission_tx: async_channel::Sende
         }
 
         interval.tick().await;
+    }
+}
+
+async fn heartbeat(consensus_api: Arc<ConsensusApi>) {
+    loop {
+        sleep(HEARTBEAT_INTERVAL).await;
+
+        let connected = consensus_api
+            .p2p_status_receivers
+            .values()
+            .filter(|receiver| !receiver.borrow().is_disconnected())
+            .count();
+
+        info!(
+            sessions = consensus_api.session_count(),
+            block_count = consensus_api.block_count(),
+            connected,
+            "consensus alive"
+        );
     }
 }
 

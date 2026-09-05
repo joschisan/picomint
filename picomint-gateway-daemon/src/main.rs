@@ -104,9 +104,11 @@ pub struct GatewayOpts {
 }
 
 fn main() -> anyhow::Result<()> {
+    // mDNS announces "no addresses for peer" at info on every tick.
     let filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::INFO.into())
-        .from_env_lossy();
+        .from_env_lossy()
+        .add_directive("swarm_discovery=warn".parse().expect("valid directive"));
     tracing_subscriber::registry()
         .with(filter)
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))

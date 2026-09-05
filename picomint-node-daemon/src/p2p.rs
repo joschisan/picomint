@@ -24,7 +24,7 @@ use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio::time::sleep;
-use tracing::{Instrument, debug, info, info_span, warn};
+use tracing::{Instrument, info, info_span, warn};
 
 /// Transport of a connection's selected network path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -340,8 +340,10 @@ impl ReconnectP2PConnections {
                         // Public API client. Drop on backpressure — the
                         // api-layer consumer isn't running yet during DKG and
                         // a pre-bootstrap client has no business connecting.
+                        let remote = connection.remote_id();
+
                         if foreign_conn_tx.try_send(connection).is_err() {
-                            debug!("Dropping foreign connection: api channel full or closed");
+                            warn!(%remote, "Dropping foreign connection: api channel full or closed");
                         }
                     }
                     Err(err) => {
@@ -399,6 +401,7 @@ impl ReconnectP2PConnections {
 /// machine that (re)establishes the underlying iroh connection.
 #[derive(Clone)]
 struct NodeChannel {
+    node: NodeId,
     outgoing_tx: Sender<P2PMessage>,
     incoming_rx: Receiver<P2PMessage>,
 }
@@ -446,14 +449,18 @@ impl NodeChannel {
         );
 
         NodeChannel {
+            node,
             outgoing_tx,
             incoming_rx,
         }
     }
 
+    // Drops are silent to the sender by design, so they must not be silent
+    // in the log: a lost session signature or signed outcome costs a poll
+    // interval at the next cut.
     fn try_send(&self, message: P2PMessage) {
         if self.outgoing_tx.try_send(message).is_err() {
-            debug!("Outgoing message channel is full");
+            warn!(node = %self.node, "Outgoing message channel is full, dropping message");
         }
     }
 
@@ -536,7 +543,7 @@ impl P2PConnectionSMCommon {
                 match P2PConnection::read_frame(&mut stream).await {
                     Ok(message) => {
                         if self.incoming_tx.try_send(message).is_err() {
-                            debug!("Incoming message channel is full");
+                            warn!("Incoming message channel is full, dropping message");
                         }
 
                         Some(P2PConnectionSMState::Connected(connection))

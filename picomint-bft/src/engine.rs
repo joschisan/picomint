@@ -7,7 +7,7 @@ use picomint_core::{NodeId, NumNodes};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, DbRead, Table, WriteTx};
 use tokio::time::{Instant, sleep_until};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::data::DataProvider;
 use crate::keychain::Keychain;
@@ -16,6 +16,11 @@ use crate::unit::{Round, Unit, UnitData, UnitEnvelope, UnitHash};
 
 /// Periodic own-unit push interval. Pull is demand-driven, not periodic.
 const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Rejected messages are counted per sender and reported once per
+/// interval. Stale units from the previous session fail admission in
+/// bursts at every cut, so logging each one would bury real warnings.
+const REJECTION_REPORT_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Minimum interval between successive `Request` sends for the same
 /// unit. Caps the parent-walk fan-out so anti-entropy retransmits of
@@ -141,6 +146,10 @@ where
 
         let mut next_anti_entropy_at = Instant::now();
 
+        let mut next_rejection_report_at = Instant::now() + REJECTION_REPORT_INTERVAL;
+
+        let mut rejections: BTreeMap<NodeId, u64> = BTreeMap::new();
+
         loop {
             tokio::select! {
                 maybe_msg = self.network.receive() => {
@@ -149,9 +158,21 @@ where
                     match self.handle_message(sender, msg).await {
                         Ok(()) => self.create_units().await,
                         Err(err) => {
-                            warn!(%sender, err = %format_args!("{err:#}"), "rejected bft message");
+                            debug!(%sender, err = %format_args!("{err:#}"), "rejected bft message");
+
+                            *rejections.entry(sender).or_default() += 1;
                         }
                     }
+                }
+
+                _ = sleep_until(next_rejection_report_at) => {
+                    if !rejections.is_empty() {
+                        warn!(?rejections, "rejected bft messages in the last {REJECTION_REPORT_INTERVAL:?}");
+
+                        rejections.clear();
+                    }
+
+                    next_rejection_report_at = Instant::now() + REJECTION_REPORT_INTERVAL;
                 }
 
                 _ = self.data_provider.wait_for_data() => {
@@ -242,7 +263,13 @@ where
 
                 let hash = ev.unit.hash();
 
-                self.insert_unit(&dbtx, &ev, hash)?;
+                // Re-sends by anti-entropy and request replies are how the
+                // DAG heals; a unit we already hold is expected traffic.
+                if !self.insert_unit(&dbtx, &ev, hash)? {
+                    debug!(%sender, "duplicate unit");
+
+                    return Ok(());
+                }
 
                 self.try_extend(&dbtx, hash);
                 self.run_extender(&dbtx).await;
@@ -338,7 +365,14 @@ where
     /// `hash` (its unit hash, computed by the caller), then index it
     /// in `rounds` and advance `own_top` for our own units. A
     /// duplicate unit hits the same key and errors.
-    fn insert_unit(&mut self, dbtx: &WriteTx, ev: &UnitEnvelope<D>, hash: UnitHash) -> Result<()> {
+    /// Admit `ev` into the DAG. `Ok(false)` means the unit was already
+    /// stored; `Err` means it failed admission.
+    fn insert_unit(
+        &mut self,
+        dbtx: &WriteTx,
+        ev: &UnitEnvelope<D>,
+        hash: UnitHash,
+    ) -> Result<bool> {
         // Before the signature check, which looks the creator up in the
         // keychain — an out-of-mint creator has no key there.
         ensure!(
@@ -379,10 +413,9 @@ where
             "payload does not match the unit's data commitment",
         );
 
-        ensure!(
-            dbtx.insert(&self.units_table, &hash, ev).is_none(),
-            "unit already stored",
-        );
+        if dbtx.insert(&self.units_table, &hash, ev).is_some() {
+            return Ok(false);
+        }
 
         self.rounds.entry(ev.unit.round).or_default().insert(hash);
 
@@ -390,7 +423,7 @@ where
             self.own_top = Some((ev.unit.round, hash));
         }
 
-        Ok(())
+        Ok(true)
     }
 
     async fn try_create_unit(&mut self) -> bool {
@@ -429,8 +462,11 @@ where
         // restart would let us build a *different* unit at this round
         // from a fresh data_provider draw — nodes that saw the
         // original would consider us a forker.
-        self.insert_unit(&dbtx, &ev, hash)
-            .expect("newly built unit must insert");
+        assert!(
+            self.insert_unit(&dbtx, &ev, hash)
+                .expect("newly built unit must insert"),
+            "newly built unit is already stored"
+        );
 
         if ev.unit.data.is_some() {
             self.unordered_own_data.insert(round);
