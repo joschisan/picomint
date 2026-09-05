@@ -51,6 +51,17 @@ impl StateMachine for EcashStateMachine {
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         ctx.await_tx_accepted(self.operation, self.txid).await?;
 
+        // A tx without ecash outputs (the spent notes exactly covered its
+        // deficit) still runs this machine to restore the notes on
+        // rejection, but it has nothing to be signed — and the nodes'
+        // `SignatureShares` long-poll never resolves for such a txid.
+        // Asking would pin one stream per node for the life of the
+        // process, and enough of those exhaust the per-connection stream
+        // budget and stall every other request.
+        if self.issuance_requests.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+
         let shares = super::api::signature_shares(
             &ctx.api,
             self.txid,
@@ -75,6 +86,10 @@ impl StateMachine for EcashStateMachine {
 
             return None;
         };
+
+        if self.issuance_requests.is_empty() {
+            return None;
+        }
 
         for (i, request) in self.issuance_requests.iter().enumerate() {
             let agg_blind_signature = aggregate_signature_shares(
