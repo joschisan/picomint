@@ -18,7 +18,7 @@ use crate::context::ClientContext;
 table!(
     EcashStateMachineTable,
     (MintId, SmId) => EcashStateMachine,
-    "ecash-sm",
+    "ecash-issuance-sm",
 );
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
@@ -45,11 +45,30 @@ pub struct EcashStateMachine {
     pub issuance_requests: Vec<NoteIssuanceRequest>,
 }
 
+/// Outcome produced by [`EcashStateMachine::trigger`].
+pub enum IssuanceOutcome {
+    /// The tx was rejected; the notes it spent go back into `NoteTable`.
+    Rejected,
+    /// The tx was accepted and every issuance request finalized into a
+    /// note that verifies against the mint's aggregate key, in request
+    /// order.
+    Issued(Vec<(Account, SpendableNote)>),
+    /// The tx was accepted but a finalized note fails verification: the
+    /// nodes' shares aggregated into something the mint won't honour.
+    Invalid,
+}
+
 impl StateMachine for EcashStateMachine {
-    type Outcome = Result<BTreeMap<NodeId, Vec<BlindedSignatureShare>>, String>;
+    type Outcome = IssuanceOutcome;
 
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
-        ctx.await_tx_accepted(self.operation, self.txid).await?;
+        if ctx
+            .await_tx_accepted(self.operation, self.txid)
+            .await
+            .is_err()
+        {
+            return IssuanceOutcome::Rejected;
+        }
 
         // A tx without ecash outputs (the spent notes exactly covered its
         // deficit) still runs this machine to restore the notes on
@@ -59,10 +78,10 @@ impl StateMachine for EcashStateMachine {
         // process, and enough of those exhaust the per-connection stream
         // budget and stall every other request.
         if self.issuance_requests.is_empty() {
-            return Ok(BTreeMap::new());
+            return IssuanceOutcome::Issued(Vec::new());
         }
 
-        let shares = super::api::signature_shares(
+        let signatures = super::api::signature_shares(
             &ctx.api,
             self.txid,
             self.issuance_requests.clone(),
@@ -70,26 +89,11 @@ impl StateMachine for EcashStateMachine {
         )
         .await;
 
-        Ok(shares)
-    }
-
-    fn transition(
-        &self,
-        ctx: &ClientContext,
-        dbtx: &WriteTx,
-        outcome: Self::Outcome,
-    ) -> Option<Self> {
-        let Ok(signatures) = outcome else {
-            for note in &self.spendable_notes {
-                dbtx.insert(&NoteTable, &(ctx.mint, self.account, note.clone()), &());
-            }
-
-            return None;
-        };
-
-        if self.issuance_requests.is_empty() {
-            return None;
-        }
+        // Aggregation and verification are pairings per note, so they run
+        // here rather than in `transition`: the transition holds the
+        // database's single write lock, and every other state machine's
+        // commit — a tx accept in particular — would queue behind them.
+        let mut notes = Vec::new();
 
         for (i, request) in self.issuance_requests.iter().enumerate() {
             let agg_blind_signature = aggregate_signature_shares(
@@ -109,35 +113,51 @@ impl StateMachine for EcashStateMachine {
                 .expect("No aggregated pk found for denomination");
 
             if !verify_note(spendable_note.note(), pk) {
-                ctx.log_event(dbtx, self.account, self.operation, IssuanceFailureEvent);
-
-                return None;
+                return IssuanceOutcome::Invalid;
             }
 
-            assert!(
-                dbtx.insert(
-                    &NoteTable,
-                    &(ctx.mint, request.account(), spendable_note),
-                    &()
-                )
-                .is_none()
-            );
+            notes.push((request.account(), spendable_note));
         }
 
-        // The log entry is filed under this state machine's account, so it
-        // reports what that account received — not what a fee output filed
-        // elsewhere in the same transaction did.
-        let event = IssuanceSuccessEvent {
-            txid: self.txid,
-            amount: self
-                .issuance_requests
-                .iter()
-                .filter(|r| r.account() == self.account)
-                .map(|r| r.denomination.amount())
-                .sum(),
-        };
+        IssuanceOutcome::Issued(notes)
+    }
 
-        ctx.log_event(dbtx, self.account, self.operation, event);
+    fn transition(
+        &self,
+        ctx: &ClientContext,
+        dbtx: &WriteTx,
+        outcome: Self::Outcome,
+    ) -> Option<Self> {
+        match outcome {
+            IssuanceOutcome::Rejected => {
+                for note in &self.spendable_notes {
+                    dbtx.insert_new(&NoteTable, &(ctx.mint, self.account, note.clone()), &());
+                }
+            }
+            IssuanceOutcome::Invalid => {
+                ctx.log_event(dbtx, self.account, self.operation, IssuanceFailureEvent);
+            }
+            IssuanceOutcome::Issued(notes) if notes.is_empty() => {}
+            IssuanceOutcome::Issued(notes) => {
+                // The log entry is filed under this state machine's account, so it
+                // reports what that account received — not what a fee output filed
+                // elsewhere in the same transaction did.
+                let event = IssuanceSuccessEvent {
+                    txid: self.txid,
+                    amount: notes
+                        .iter()
+                        .filter(|entry| entry.0 == self.account)
+                        .map(|entry| entry.1.amount())
+                        .sum(),
+                };
+
+                for (account, note) in notes {
+                    dbtx.insert_new(&NoteTable, &(ctx.mint, account, note), &());
+                }
+
+                ctx.log_event(dbtx, self.account, self.operation, event);
+            }
+        }
 
         None
     }

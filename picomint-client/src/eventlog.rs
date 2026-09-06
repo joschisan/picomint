@@ -187,16 +187,9 @@ pub fn log_event_raw(
         payload,
     };
 
-    assert!(
-        dbtx.insert(&EventLogTable, &id, &entry).is_none(),
-        "Must never overwrite existing event"
-    );
+    dbtx.insert_new(&EventLogTable, &id, &entry);
 
-    assert!(
-        dbtx.insert(&EventLogByOperationTable, &(operation, id), &entry)
-            .is_none(),
-        "Must never overwrite existing event"
-    );
+    dbtx.insert_new(&EventLogByOperationTable, &(operation, id), &entry);
 }
 
 /// Typed convenience: encode an [`Event`] into the log.

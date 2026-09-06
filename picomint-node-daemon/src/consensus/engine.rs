@@ -449,14 +449,10 @@ async fn finalize_session(
 
     dbtx.clear_table(&BftUnitsTable);
 
-    assert!(
-        dbtx.insert(
-            &SignedSessionOutcomeTable,
-            &session_index,
-            &signed_session_outcome,
-        )
-        .is_none(),
-        "We tried to overwrite a signed session outcome"
+    dbtx.insert_new(
+        &SignedSessionOutcomeTable,
+        &session_index,
+        &signed_session_outcome,
     );
 
     dbtx.commit();
