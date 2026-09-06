@@ -189,7 +189,7 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
 
     // Amounts land as integer msat columns
     let sum: i64 = conn.query_row(
-        "SELECT SUM(s.amount_msat) FROM gateway_send s \
+        "SELECT SUM(s.amount) FROM gateway_send s \
          INNER JOIN gateway_send_success ss USING (operation)",
         [],
         |r| r.get(0),
