@@ -2,12 +2,14 @@
 //! four engines at once, the way a tx submission fans out to every node,
 //! and the run reports how long the threshold-th node takes to emit it
 //! and how many rounds the committing head trails the earliest unit
-//! that carried the item. Run with
-//! `cargo test -p picomint-bft --test latency -- --ignored --nocapture`.
+//! that carried the item, and how many rounds the head's decision
+//! took to settle. Runs on tokio's paused clock, so the mock network's
+//! delays are exact and the report is about the DAG rules alone. Run
+//! with `cargo test -p picomint-bft --test latency -- --ignored --nocapture`.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_channel::{Receiver, Sender};
 use async_trait::async_trait;
@@ -18,7 +20,7 @@ use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
 use picomint_core::{NodeId, NumNodes};
 use picomint_redb::{Database, table};
 use rand::Rng;
-use tokio::time::{sleep, timeout};
+use tokio::time::{Instant, sleep, timeout};
 use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id};
 use tracing::{Event, Instrument, Subscriber, info_span};
@@ -30,7 +32,7 @@ table!(BftUnits, UnitHash => UnitEnvelope<u64>, "bft-units");
 
 const N_NODES: usize = 4;
 const SESSION: u32 = 0;
-const N_ITEMS: u64 = 200;
+const N_ITEMS: u64 = 400;
 
 struct Profile {
     name: &'static str,
@@ -176,12 +178,14 @@ impl DataProvider<u64> for ChannelDataProvider {
 struct NodeTag(u8);
 
 /// What the engines logged, per node: the instant and round of every
-/// `created unit`, and for every `emitted unit` the round of the head
-/// that emitted it, keyed by the unit's `(round, creator)`.
+/// `created unit`, for every `emitted unit` the round of the head that
+/// emitted it, keyed by the unit's `(round, creator)`, and for every
+/// `elected head` the round its decision settled in.
 #[derive(Default)]
 struct Trace {
     created: BTreeMap<u8, Vec<(Instant, Round)>>,
     emitted: BTreeMap<u8, BTreeMap<(Round, NodeId), Round>>,
+    decided_at: BTreeMap<u8, BTreeMap<Round, Round>>,
 }
 
 #[derive(Default)]
@@ -194,6 +198,7 @@ struct FieldVisitor {
     id: Option<u64>,
     round: Option<u64>,
     head_round: Option<u64>,
+    decided_at: Option<u64>,
     creator: Option<u8>,
     message: String,
 }
@@ -204,6 +209,7 @@ impl Visit for FieldVisitor {
             "id" => self.id = Some(value),
             "round" => self.round = Some(value),
             "head_round" => self.head_round = Some(value),
+            "decided_at" => self.decided_at = Some(value),
             _ => {}
         }
     }
@@ -252,6 +258,15 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for TraceLayer {
                 .entry(node.0)
                 .or_default()
                 .push((Instant::now(), round as Round)),
+            "elected head" => {
+                if let Some(decided_at) = visitor.decided_at {
+                    trace
+                        .decided_at
+                        .entry(node.0)
+                        .or_default()
+                        .insert(round as Round, decided_at as Round);
+                }
+            }
             "emitted unit" => {
                 if let (Some(creator), Some(head)) = (visitor.creator, visitor.head_round) {
                     trace
@@ -408,6 +423,7 @@ async fn run_profile(profile: &Profile, trace: Arc<Mutex<Trace>>) {
     let mut spread = BTreeMap::new();
     let mut lag_latency: BTreeMap<Round, Vec<f64>> = BTreeMap::new();
     let mut joint: BTreeMap<(Round, Round), usize> = BTreeMap::new();
+    let mut settle_latency: BTreeMap<Round, Vec<f64>> = BTreeMap::new();
 
     for (item, t0) in &injected {
         let mut arrivals: Vec<Duration> = received
@@ -452,6 +468,15 @@ async fn run_profile(profile: &Profile, trace: Arc<Mutex<Trace>>) {
             .entry(head.saturating_sub(*min))
             .or_default()
             .push(latency);
+
+        // A well-referenced head decides two rounds up; every round
+        // beyond that is a seeded tie-break on a split vote.
+        if let Some(decided_at) = trace.decided_at[&0].get(&head) {
+            settle_latency
+                .entry(decided_at.saturating_sub(head + 2))
+                .or_default()
+                .push(latency);
+        }
     }
 
     accept.sort_by(f64::total_cmp);
@@ -483,9 +508,22 @@ async fn run_profile(profile: &Profile, trace: Arc<Mutex<Trace>>) {
             pct(&latencies, 0.9)
         );
     }
+
+    println!("   head settle rounds beyond R+2 |    n | p50 ms | p90 ms");
+
+    for (settle, mut latencies) in settle_latency {
+        latencies.sort_by(f64::total_cmp);
+
+        println!(
+            "   {settle:29} | {:4} | {:6.1} | {:6.1}",
+            latencies.len(),
+            pct(&latencies, 0.5),
+            pct(&latencies, 0.9)
+        );
+    }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::test(start_paused = true)]
 #[ignore = "prints a latency report; run explicitly with --ignored --nocapture"]
 async fn head_lag_report() {
     let layer = TraceLayer::default();
