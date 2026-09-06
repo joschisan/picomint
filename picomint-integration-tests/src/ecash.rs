@@ -3,7 +3,7 @@ use std::pin::pin;
 use anyhow::ensure;
 use async_stream::stream;
 use futures::StreamExt;
-use picomint_client::ecash::{EcashSuccessEvent, ReceiveEvent, SendEvent};
+use picomint_client::ecash::{IssuanceSuccessEvent, ReceiveEvent, SendEvent};
 use picomint_client::eventlog::{EventLogEntry, EventLogId};
 use picomint_client::{Account, Mnemonic, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
@@ -77,15 +77,15 @@ async fn wait_mint_event<S>(
 }
 
 /// Wait until a receive operation is fully settled. Returns:
-/// - `Ok` once both `TxAcceptEvent` AND `EcashSuccessEvent` have been
+/// - `Ok` once both `TxAcceptEvent` AND `IssuanceSuccessEvent` have been
 ///   observed — at that point the spendable notes have been written
 ///   to the local NoteTable table and the balance reflects the receive.
 /// - `Err` on `TxRejectEvent` (mint rejected the tx).
 ///
-/// Callers must wait for `EcashSuccessEvent`, not just `TxAcceptEvent`,
+/// Callers must wait for `IssuanceSuccessEvent`, not just `TxAcceptEvent`,
 /// because the issuance state machine still has to fetch threshold
 /// signatures after the tx is accepted before the notes land. Reading
-/// `ecash_balance` between TxAccept and EcashSuccessEvent returns a
+/// `ecash_balance` between TxAccept and IssuanceSuccessEvent returns a
 /// stale (lower) figure.
 pub(crate) async fn await_tx_outcome(
     client: &TestClient,
@@ -104,7 +104,7 @@ pub(crate) async fn await_tx_outcome(
             return Err(ev.error);
         }
 
-        if tx_accepted && entry.to_event::<EcashSuccessEvent>().is_some() {
+        if tx_accepted && entry.to_event::<IssuanceSuccessEvent>().is_some() {
             return Ok(());
         }
     }

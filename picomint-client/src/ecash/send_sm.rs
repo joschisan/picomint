@@ -8,7 +8,9 @@ use picomint_redb::{WriteTx, table};
 use crate::TxRejectEvent;
 use crate::executor::{SmId, StateMachine};
 
-use super::events::{EcashFailureEvent, EcashSuccessEvent, SendFailureEvent, SendSuccessEvent};
+use super::events::{
+    IssuanceFailureEvent, IssuanceSuccessEvent, SendFailureEvent, SendSuccessEvent,
+};
 use crate::context::ClientContext;
 
 table!(
@@ -33,10 +35,10 @@ pub struct SendStateMachine {
 
 #[derive(Debug)]
 pub enum SendOutcome {
-    /// `EcashSuccessEvent` landed — the freshly reissued notes are in
+    /// `IssuanceSuccessEvent` landed — the freshly reissued notes are in
     /// `NoteTable`, attempt assembly.
     Success,
-    /// `TxRejectEvent` or `EcashFailureEvent` landed — reissuance is
+    /// `TxRejectEvent` or `IssuanceFailureEvent` landed — reissuance is
     /// dead, the send can't complete.
     Failure,
 }
@@ -47,10 +49,10 @@ impl StateMachine for SendStateMachine {
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         let mut stream = ctx.subscribe_operation_events(self.operation);
         while let Some(entry) = stream.next().await {
-            if entry.to_event::<EcashSuccessEvent>().is_some() {
+            if entry.to_event::<IssuanceSuccessEvent>().is_some() {
                 return SendOutcome::Success;
             }
-            if entry.to_event::<EcashFailureEvent>().is_some() {
+            if entry.to_event::<IssuanceFailureEvent>().is_some() {
                 return SendOutcome::Failure;
             }
             if entry.to_event::<TxRejectEvent>().is_some() {

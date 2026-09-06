@@ -902,7 +902,7 @@ impl Client {
         }
 
         // Everything below lands in the same dbtx that submits the
-        // reissuance: SendEvent → RemintEvent → TxCreateEvent →
+        // reissuance: SendEvent → ReissuanceEvent → TxCreateEvent →
         // EcashSM + SendSM. A crash before the commit leaves no half-state
         // behind; on restart the operation simply doesn't exist.
         ctx.log_event(&dbtx, account, operation, SendEvent { amount });
@@ -915,7 +915,7 @@ impl Client {
             builder,
             targets,
             false,
-            |txid| RemintEvent { txid },
+            |txid| ReissuanceEvent { txid },
         )
         .ok_or(SendEcashError::InsufficientBalance)?;
 

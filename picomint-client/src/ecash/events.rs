@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// path it lands later, after the reissuance tx runs through consensus
 /// and the ecash state machine finalises notes. Slow-path observers can
 /// recover the reissuance txid from the immediately-following
-/// `RemintEvent` / `TxCreateEvent` under the same operation id.
+/// `ReissuanceEvent` / `TxCreateEvent` under the same operation id.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct SendEvent {
     pub amount: Amount,
@@ -38,7 +38,7 @@ impl Event for SendSuccessEvent {
 }
 
 /// Terminal failure event for [`crate::Client::ecash_send`].
-/// Fires when reissuance failed (`TxRejectEvent`/`EcashFailureEvent`)
+/// Fires when reissuance failed (`TxRejectEvent`/`IssuanceFailureEvent`)
 /// or — defensively — when the post-reissuance NoteTable table no longer
 /// has the exact denominations the send needs.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -52,11 +52,11 @@ impl Event for SendFailureEvent {
 /// Emitted when a send operation requires re-minting notes before the sender
 /// has enough of the right denominations to send.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct RemintEvent {
+pub struct ReissuanceEvent {
     pub txid: TransactionId,
 }
 
-impl Event for RemintEvent {
+impl Event for ReissuanceEvent {
     const SOURCE: EventSource = EventSource::Ecash;
     const KIND: EventKind = EventKind::from_static("remint");
 }
@@ -75,23 +75,23 @@ impl Event for ReceiveEvent {
 
 /// Emitted when an ecash state machine successfully finalises new notes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct EcashSuccessEvent {
+pub struct IssuanceSuccessEvent {
     pub txid: TransactionId,
     /// Total amount of notes finalized into the local note table by this
     /// state machine (sum of all issuance-request denominations).
     pub amount: Amount,
 }
 
-impl Event for EcashSuccessEvent {
+impl Event for IssuanceSuccessEvent {
     const SOURCE: EventSource = EventSource::Ecash;
     const KIND: EventKind = EventKind::from_static("success");
 }
 
 /// Emitted when an ecash state machine fails to finalise notes.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct EcashFailureEvent;
+pub struct IssuanceFailureEvent;
 
-impl Event for EcashFailureEvent {
+impl Event for IssuanceFailureEvent {
     const SOURCE: EventSource = EventSource::Ecash;
     const KIND: EventKind = EventKind::from_static("failure");
 }
