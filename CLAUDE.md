@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitcoin — two binaries (mint node + Lightning gateway), Iroh networking, redb storage, static module set (ecash, onchain, lightning). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. See README.md for deployment.
+Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitcoin — two binaries (mint node + Lightning gateway) plus a headless client daemon for load and latency work, Iroh networking, redb storage, static module set (ecash, onchain, lightning). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. See README.md for deployment.
 
 ### Naming
 
@@ -30,6 +30,7 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 - `picomint-node-cli` / `picomint-node-cli-core` — admin CLI for the node daemon (HTTP-over-Unix-socket) + shared route/request types
 - `picomint-gateway-daemon` — Lightning gateway binary with embedded LDK node
 - `picomint-gateway-cli` / `picomint-gateway-cli-core` — admin CLI for the gateway daemon + shared route/request types
+- `picomint-client-daemon` / `picomint-client-cli` / `picomint-client-cli-core` — headless client for machines: the client library behind an admin socket, with analytics; cli-core holds its routes and payloads; the gateway's `client` subcommand keeps its own copies of the overlapping types on purpose
 - `picomint-analytics` — SQLite mirror of a client's event log, one derived table per event (`SqlRow` derive from `picomint-derive`, column rules in `picomint_core::sql`); no views, read via the daemon's `query` command
 - `picomint-client` — multi-mint client library; owns the concrete per-module client state machines and the append-only event log (`src/eventlog.rs`)
 - `picomint-redb` — redb-backed typed database layer (`table!` macro; consensus-encoded keys/values)
@@ -45,7 +46,7 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 ### Wire + storage
 - Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-encoding`
 - Storage: redb only. No migrations (tables are declared via the `table!` macro in `picomint-redb`; keys/values use consensus encoding). The one exception is the analytics database (`picomint-analytics`) — a separate SQLite file (rusqlite), wiped and rebuilt from the event log on every start, queried via the `query` CLI command
-- Table name strings are kebab-case with the owning domain as the first segment: module tables `ecash-`/`onchain-`/`lightning-`/`gateway-`, client-core tables `client-`, embedder tables prefixed by the embedder (`gateway-` in the gateway daemon's file, `pico-` in the app's). Only the node daemon's consensus-core tables go unprefixed — it is the sole owner of its file (plus `bft-units` from picomint-bft).
+- Table name strings are kebab-case with the owning domain as the first segment: module tables `ecash-`/`onchain-`/`lightning-`/`gateway-`, client-core tables `client-`, embedder tables prefixed by the embedder (`gateway-` in the gateway daemon's file, `pico-` in the app's, `client-` in the client daemon's — the same prefix as client-core, so its names must not collide). Only the node daemon's consensus-core tables go unprefixed — it is the sole owner of its file (plus `bft-units` from picomint-bft).
 - Transport: Iroh-only (QUIC + hole-punching). No TLS/websocket/DNS announcements
 - Each node binds exactly one iroh `Endpoint` (one secret key, one node id) for both mint p2p and the public client API; the accept loop demuxes by remote node-id (node set → P2P path, otherwise → public API path).
 

@@ -1,0 +1,15 @@
+[package]
+name = "picomint-client-cli-core"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Routes and request types of the picomint client daemon's admin CLI"
+
+[dependencies]
+bitcoin = { workspace = true }
+clap = { workspace = true }
+lightning-invoice = { workspace = true }
+picomint-client = { workspace = true }
+picomint-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

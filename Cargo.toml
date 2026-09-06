@@ -7,6 +7,9 @@ members = [
     "picomint-cli-client",
     "picomint-cli-server",
     "picomint-client",
+    "picomint-client-cli",
+    "picomint-client-cli-core",
+    "picomint-client-daemon",
     "picomint-core",
     "picomint-derive",
     "picomint-encoding",
@@ -88,6 +91,7 @@ picomint-bft = { path = "./picomint-bft", version = "=0.1.0" }
 picomint-cli-client = { path = "./picomint-cli-client", version = "=0.1.0" }
 picomint-cli-server = { path = "./picomint-cli-server", version = "=0.1.0" }
 picomint-client = { path = "./picomint-client", version = "=0.1.0" }
+picomint-client-cli-core = { path = "./picomint-client-cli-core", version = "=0.1.0" }
 picomint-core = { path = "./picomint-core", version = "=0.1.0" }
 picomint-derive = { path = "./picomint-derive", version = "=0.1.0" }
 picomint-encoding = { path = "./picomint-encoding", version = "=0.1.0" }
