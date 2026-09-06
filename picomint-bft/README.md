@@ -154,7 +154,11 @@ The protocol is split into two gates with distinct semantics.
 ### Admission (lax)
 
 `insert_unit(dbtx, envelope, hash)` installs a fresh envelope from a
-`Unit` message and indexes it in `rounds`. Admission checks:
+`Unit` message and indexes it in `rounds`. The checks run before the
+parent walk — a unit that fails them, typically one signed under another
+session by a node on the other side of a cut, must not have its parents
+requested, or those arrive, fail the same way, and request theirs in
+turn. Admission checks:
 
 - Structural validity: the creator is a mint member; round 0 has an
   empty parent map; round R>0 has exactly `threshold` parent entries,

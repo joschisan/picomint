@@ -233,6 +233,14 @@ where
     async fn handle_message(&mut self, sender: NodeId, msg: Message<D>) -> Result<()> {
         match msg {
             Message::Unit(ev) => {
+                // Before the parent walk: a unit that fails here — most
+                // often one signed under another session, from a node
+                // ahead of or behind us at a cut — must not turn into
+                // Requests. Its parents would arrive, fail the same way
+                // and have their own parents requested, a storm that
+                // keeps a node behind for as long as its peers answer.
+                self.validate_unit(&ev)?;
+
                 let dbtx = self.db.begin_write_relaxed();
 
                 // Pull missing ancestors before the install attempt so
@@ -242,7 +250,7 @@ where
 
                 let hash = ev.unit.hash();
 
-                self.insert_unit(&dbtx, &ev, hash)?;
+                self.store_unit(&dbtx, &ev, hash)?;
 
                 self.try_extend(&dbtx, hash);
                 self.run_extender(&dbtx).await;
@@ -339,6 +347,16 @@ where
     /// in `rounds` and advance `own_top` for our own units. A
     /// duplicate unit hits the same key and errors.
     fn insert_unit(&mut self, dbtx: &WriteTx, ev: &UnitEnvelope<D>, hash: UnitHash) -> Result<()> {
+        self.validate_unit(ev)?;
+
+        self.store_unit(dbtx, ev, hash)
+    }
+
+    /// The admission checks on an envelope by itself: structure, creator
+    /// signature under this session, payload commitment. Nothing about
+    /// what we already hold — a duplicate passes here and fails in
+    /// [`Self::store_unit`].
+    fn validate_unit(&self, ev: &UnitEnvelope<D>) -> Result<()> {
         // Before the signature check, which looks the creator up in the
         // keychain — an out-of-mint creator has no key there.
         ensure!(
@@ -379,6 +397,12 @@ where
             "payload does not match the unit's data commitment",
         );
 
+        Ok(())
+    }
+
+    /// Install a validated envelope under `hash` and index it. A
+    /// duplicate unit hits the same key and errors.
+    fn store_unit(&mut self, dbtx: &WriteTx, ev: &UnitEnvelope<D>, hash: UnitHash) -> Result<()> {
         ensure!(
             dbtx.insert(&self.units_table, &hash, ev).is_none(),
             "unit already stored",
