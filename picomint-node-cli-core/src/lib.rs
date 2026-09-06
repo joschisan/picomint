@@ -6,9 +6,6 @@ use picomint_core::onchain::TxInfo;
 use serde::{Deserialize, Serialize};
 
 /// Filename of the node's admin CLI Unix socket, inside `DATA_DIR`.
-/// The daemon binds and the CLI connects at `{DATA_DIR}/{CLI_SOCKET_FILENAME}`.
-pub const CLI_SOCKET_FILENAME: &str = "cli.sock";
-
 /// Status of the setup flow, as reported by `/setup/status`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SetupStatus {

@@ -1,0 +1,11 @@
+[package]
+name = "picomint-cli-server"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "The daemon side of the picomint admin socket"
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true, features = ["net"] }

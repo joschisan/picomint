@@ -4,75 +4,31 @@ use std::sync::Arc;
 use axum::Router;
 use axum::extract::{Json, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use axum::routing::post;
+use picomint_cli_server::{CliError, serve};
 use picomint_node_cli_core::{
-    CLI_SOCKET_FILENAME, ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESTORE,
-    ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddNodeRequest, SetupAddNodeResponse,
-    SetupInitRequest, SetupInitResponse, SetupStatus,
+    ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESTORE, ROUTE_SETUP_START_DKG,
+    ROUTE_SETUP_STATUS, SetupAddNodeRequest, SetupAddNodeResponse, SetupInitRequest,
+    SetupInitResponse, SetupStatus,
 };
-use tokio::net::UnixListener;
 
 use crate::config::NodeConfig;
 use crate::config::setup::SetupApi;
 use crate::consensus::{lightning, onchain};
 
-#[derive(Debug)]
-pub struct CliError {
-    pub code: StatusCode,
-    pub error: String,
-}
-
-impl std::fmt::Display for CliError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.error)
-    }
-}
-
-impl std::error::Error for CliError {}
-
-impl CliError {
-    pub fn internal(error: impl std::fmt::Display) -> Self {
-        Self {
-            code: StatusCode::INTERNAL_SERVER_ERROR,
-            error: error.to_string(),
-        }
-    }
-}
-
-impl IntoResponse for CliError {
-    fn into_response(self) -> axum::response::Response {
-        (self.code, self.error).into_response()
-    }
-}
-
-impl From<anyhow::Error> for CliError {
-    fn from(e: anyhow::Error) -> Self {
-        Self::internal(e)
-    }
-}
-
 /// Setup CLI server — runs during the setup phase and is torn down when DKG starts. Binds a Unix socket at
 /// `{data_dir}/{CLI_SOCKET_FILENAME}`; a stale socket from a previous
 /// (crashed) run is unlinked before we bind.
 pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
-    let socket_path = data_dir.join(CLI_SOCKET_FILENAME);
-    std::fs::remove_file(&socket_path).ok();
-
-    let listener = UnixListener::bind(&socket_path).expect("Failed to bind CLI server");
-
     let router = Router::new()
         .route(ROUTE_SETUP_STATUS, post(setup_status))
         .route(ROUTE_SETUP_INIT, post(setup_init))
         .route(ROUTE_SETUP_ADD_NODE, post(setup_add_node))
         .route(ROUTE_SETUP_START_DKG, post(setup_start_dkg))
         .route(ROUTE_SETUP_RESTORE, post(setup_restore))
-        .with_state(setup_api)
-        .into_make_service();
+        .with_state(setup_api);
 
-    axum::serve(listener, router)
-        .await
-        .expect("CLI admin server failed");
+    serve(&data_dir, router).await;
 }
 
 /// Build the Dashboard-phase CLI router that exposes the mint endpoints
@@ -308,15 +264,7 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
 /// socket at `{data_dir}/{CLI_SOCKET_FILENAME}`; a stale socket from a
 /// previous (crashed) run is unlinked before we bind.
 pub async fn run(data_dir: PathBuf, router: Router) {
-    let socket_path = data_dir.join(CLI_SOCKET_FILENAME);
-
-    std::fs::remove_file(&socket_path).ok();
-
-    let listener = UnixListener::bind(&socket_path).expect("Failed to bind module CLI server");
-
-    axum::serve(listener, router.into_make_service())
-        .await
-        .expect("Module CLI admin server failed");
+    serve(&data_dir, router).await;
 }
 
 // Setup handlers

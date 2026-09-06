@@ -3390,6 +3390,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-cli-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-service",
+]
+
+[[package]]
+name = "picomint-cli-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "tokio",
+]
+
+[[package]]
 name = "picomint-client"
 version = "0.1.0"
 dependencies = [
@@ -3489,14 +3512,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "http-body-util",
- "hyper",
- "hyper-util",
+ "picomint-cli-client",
  "picomint-gateway-cli-core",
- "serde",
  "serde_json",
  "tokio",
- "tower-service",
 ]
 
 [[package]]
@@ -3530,6 +3549,7 @@ dependencies = [
  "lightning",
  "lightning-invoice",
  "picomint-analytics",
+ "picomint-cli-server",
  "picomint-client",
  "picomint-core",
  "picomint-encoding",
@@ -3623,14 +3643,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "http-body-util",
- "hyper",
- "hyper-util",
+ "picomint-cli-client",
  "picomint-node-cli-core",
- "serde",
  "serde_json",
  "tokio",
- "tower-service",
 ]
 
 [[package]]
@@ -3663,6 +3679,7 @@ dependencies = [
  "maud",
  "picomint-base32",
  "picomint-bft",
+ "picomint-cli-server",
  "picomint-core",
  "picomint-encoding",
  "picomint-node-cli-core",
