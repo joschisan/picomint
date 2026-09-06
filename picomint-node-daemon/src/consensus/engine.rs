@@ -13,7 +13,7 @@ use picomint_core::{NodeId, NumNodesExt};
 use picomint_encoding::Encodable;
 use picomint_redb::{DbRead, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
-use tracing::{info, instrument};
+use tracing::{Instrument, info, info_span, instrument};
 
 use crate::config::NodeConfig;
 use crate::consensus::bft::{DataProvider, Network};
@@ -281,7 +281,10 @@ async fn order_items_until_cut(
 
         let dbtx = server.db.begin_write();
 
+        // The round joins a tx's "Verified tx" line to the bft engine's
+        // unit and head traces; the adopted suffix at a cut has none.
         if process_consensus_item(server, &dbtx, node, item.clone())
+            .instrument(info_span!("ordered", round))
             .await
             .is_ok()
         {
