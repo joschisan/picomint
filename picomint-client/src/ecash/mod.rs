@@ -200,11 +200,22 @@ pub(crate) async fn scan(
 ) -> anyhow::Result<Restore> {
     let (counter, requests) = scan_counters(api, secret, account).await;
 
-    let mut notes = Vec::with_capacity(requests.len());
+    if requests.is_empty() {
+        return Ok(Restore {
+            mint,
+            notes: Vec::new(),
+            counter,
+        });
+    }
 
-    if !requests.is_empty() {
-        let shares =
-            api::signature_shares_restore(api, requests.clone(), cfg.tbs_pks.clone()).await;
+    let shares = api::signature_shares_restore(api, requests.clone(), cfg.tbs_pks.clone()).await;
+
+    // A pairing per restored note, and a restore can hold hundreds — off
+    // the runtime worker.
+    let agg_pks = cfg.tbs_agg_pks.clone();
+
+    let notes = tokio::task::spawn_blocking(move || {
+        let mut notes = Vec::with_capacity(requests.len());
 
         for (i, request) in requests.iter().enumerate() {
             let shares = shares
@@ -214,8 +225,7 @@ pub(crate) async fn scan(
 
             let note = request.finalize(aggregate_signature_shares(&shares));
 
-            let pk = cfg
-                .tbs_agg_pks
+            let pk = agg_pks
                 .get(&note.denomination)
                 .expect("No aggregated pk found for denomination");
 
@@ -226,7 +236,11 @@ pub(crate) async fn scan(
 
             notes.push(note);
         }
-    }
+
+        Ok(notes)
+    })
+    .await
+    .expect("Note verification cannot panic")?;
 
     Ok(Restore {
         mint,

@@ -93,33 +93,39 @@ impl StateMachine for EcashStateMachine {
         // here rather than in `transition`: the transition holds the
         // database's single write lock, and every other state machine's
         // commit — a tx accept in particular — would queue behind them.
-        let mut notes = Vec::new();
+        // And on the blocking pool rather than a worker, so a burst of
+        // them doesn't stall the runtime either.
+        let requests = self.issuance_requests.clone();
+        let agg_pks = ctx.config.ecash.tbs_agg_pks.clone();
 
-        for (i, request) in self.issuance_requests.iter().enumerate() {
-            let agg_blind_signature = aggregate_signature_shares(
-                &signatures
-                    .iter()
-                    .map(|(node, shares)| (node.to_usize() as u64, shares[i]))
-                    .collect(),
-            );
+        tokio::task::spawn_blocking(move || {
+            let mut notes = Vec::new();
 
-            let spendable_note = request.finalize(agg_blind_signature);
+            for (i, request) in requests.iter().enumerate() {
+                let agg_blind_signature = aggregate_signature_shares(
+                    &signatures
+                        .iter()
+                        .map(|(node, shares)| (node.to_usize() as u64, shares[i]))
+                        .collect(),
+                );
 
-            let pk = *ctx
-                .config
-                .ecash
-                .tbs_agg_pks
-                .get(&request.denomination)
-                .expect("No aggregated pk found for denomination");
+                let spendable_note = request.finalize(agg_blind_signature);
 
-            if !verify_note(spendable_note.note(), pk) {
-                return IssuanceOutcome::Invalid;
+                let pk = *agg_pks
+                    .get(&request.denomination)
+                    .expect("No aggregated pk found for denomination");
+
+                if !verify_note(spendable_note.note(), pk) {
+                    return IssuanceOutcome::Invalid;
+                }
+
+                notes.push((request.account(), spendable_note));
             }
 
-            notes.push((request.account(), spendable_note));
-        }
-
-        IssuanceOutcome::Issued(notes)
+            IssuanceOutcome::Issued(notes)
+        })
+        .await
+        .expect("Note verification cannot panic")
     }
 
     fn transition(

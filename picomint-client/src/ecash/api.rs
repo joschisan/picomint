@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::api::MintApi;
 use picomint_core::ecash::Denomination;
@@ -22,10 +23,18 @@ pub async fn signature_shares(
     issuance_requests: Vec<NoteIssuanceRequest>,
     tbs_pks: BTreeMap<Denomination, BTreeMap<NodeId, PublicKeyShare>>,
 ) -> BTreeMap<NodeId, Vec<BlindedSignatureShare>> {
+    let issuance_requests = Arc::new(issuance_requests);
+    let tbs_pks = Arc::new(tbs_pks);
+
     api.request_with_strategy_retry(
         FilterMapThreshold::new(
             move |node, resp: SignatureSharesResponse| {
-                verify_blind_shares(node, resp.shares, &issuance_requests, &tbs_pks)
+                verify_blind_shares_blocking(
+                    node,
+                    resp.shares,
+                    issuance_requests.clone(),
+                    tbs_pks.clone(),
+                )
             },
             api.num_nodes(),
         ),
@@ -34,6 +43,21 @@ pub async fn signature_shares(
         })),
     )
     .await
+}
+
+/// [`verify_blind_shares`] on the blocking pool: a pairing per share,
+/// which would otherwise pin a runtime worker for the whole batch.
+async fn verify_blind_shares_blocking(
+    node: NodeId,
+    shares: Vec<BlindedSignatureShare>,
+    issuance_requests: Arc<Vec<NoteIssuanceRequest>>,
+    tbs_pks: Arc<BTreeMap<Denomination, BTreeMap<NodeId, PublicKeyShare>>>,
+) -> anyhow::Result<Vec<BlindedSignatureShare>> {
+    tokio::task::spawn_blocking(move || {
+        verify_blind_shares(node, shares, &issuance_requests, &tbs_pks)
+    })
+    .await
+    .expect("Share verification cannot panic")
 }
 
 /// Fetch shares for notes a restore scan has already established the
@@ -50,10 +74,18 @@ pub async fn signature_shares_restore(
         .map(NoteIssuanceRequest::blinded_nonce)
         .collect();
 
+    let issuance_requests = Arc::new(issuance_requests);
+    let tbs_pks = Arc::new(tbs_pks);
+
     api.request_with_strategy_retry(
         FilterMapThreshold::new(
             move |node, resp: SignatureSharesRestoreResponse| {
-                verify_blind_shares(node, resp.shares, &issuance_requests, &tbs_pks)
+                verify_blind_shares_blocking(
+                    node,
+                    resp.shares,
+                    issuance_requests.clone(),
+                    tbs_pks.clone(),
+                )
             },
             api.num_nodes(),
         ),

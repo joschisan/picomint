@@ -135,7 +135,7 @@ impl MintApi {
                 .expect("Per-node request task panicked");
 
             match result {
-                Ok(response) => match strategy.process(node, response) {
+                Ok(response) => match strategy.process(node, response).await {
                     QueryStep::Retry(nodes) => {
                         for node in nodes {
                             let mut rx = self.state(node);
@@ -186,7 +186,7 @@ impl MintApi {
                 None => pending().await,
             };
 
-            match strategy.process(node, response) {
+            match strategy.process(node, response).await {
                 QueryStep::Retry(nodes) => {
                     for node in nodes {
                         let rx = self.state(node);
