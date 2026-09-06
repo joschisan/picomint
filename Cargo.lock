@@ -3444,6 +3444,55 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-client-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "picomint-cli-client",
+ "picomint-client-cli-core",
+ "tokio",
+]
+
+[[package]]
+name = "picomint-client-cli-core"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "clap",
+ "lightning-invoice",
+ "picomint-client",
+ "picomint-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "picomint-client-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "bitcoin",
+ "clap",
+ "iroh",
+ "iroh-mdns-address-lookup",
+ "picomint-analytics",
+ "picomint-cli-server",
+ "picomint-client",
+ "picomint-client-cli-core",
+ "picomint-core",
+ "picomint-redb",
+ "picomint-rpc",
+ "rand 0.8.6",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "picomint-core"
 version = "0.1.0"
 dependencies = [

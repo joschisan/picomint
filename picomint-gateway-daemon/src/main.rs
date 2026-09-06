@@ -104,9 +104,14 @@ pub struct GatewayOpts {
 }
 
 fn main() -> anyhow::Result<()> {
+    tokio_rustls::rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+
     let filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::INFO.into())
         .from_env_lossy();
+
     tracing_subscriber::registry()
         .with(filter)
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
@@ -140,13 +145,7 @@ fn main() -> anyhow::Result<()> {
         PaymentFee::RECEIVE_FEE_LIMIT,
     );
 
-    let runtime = Arc::new(tokio::runtime::Runtime::new()?);
-
     // 2. Open database
-    tokio_rustls::rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
-
     let gateway_db = picomint_redb::Database::open(opts.data_dir.join(DB_FILE))?;
 
     // 3. Load or init the gateway identity: the mnemonic (mint-client
@@ -155,6 +154,8 @@ fn main() -> anyhow::Result<()> {
     let mnemonic = picomint_gateway_daemon::db::load_or_init_mnemonic(&gateway_db)?;
 
     let iroh_secret_key = picomint_gateway_daemon::db::load_or_init_iroh_secret_key(&gateway_db);
+
+    let runtime = Arc::new(tokio::runtime::Runtime::new()?);
 
     let endpoint = runtime.block_on(
         iroh::Endpoint::builder(N0)

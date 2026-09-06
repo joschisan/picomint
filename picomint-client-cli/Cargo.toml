@@ -1,0 +1,13 @@
+[package]
+name = "picomint-client-cli"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Admin CLI for the picomint client daemon"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+picomint-cli-client = { workspace = true }
+picomint-client-cli-core = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
