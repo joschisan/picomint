@@ -7,7 +7,7 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 use iroh::{Endpoint, PublicKey};
 use picomint_core::backoff::{Retryable, networking_backoff};
-use picomint_core::module::Method;
+use picomint_core::methods::Method;
 use picomint_core::{NodeId, NumNodes, NumNodesExt};
 use picomint_encoding::Decodable;
 use tokio::sync::watch;

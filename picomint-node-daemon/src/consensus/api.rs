@@ -1,9 +1,9 @@
 //! Implements the client API through which users interact with the mint
 
 use chrono::{Days, Utc};
+use picomint_core::audit::AuditSummary;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
-use picomint_core::module::audit::AuditSummary;
 use picomint_core::tx::ConsensusItem;
 
 use picomint_redb::DbRead;

@@ -123,7 +123,6 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.149", features = ["preserve_order"] }
 serde_with = { version = "3", features = ["hex"] }
 serdect = "0.4.3"
-subtle = "2.6.1"
 syn = "2.0"
 tbs = { package = "picomint-tbs", path = "./picomint-tbs", version = "=0.1.0" }
 tempfile = "3.27.0"

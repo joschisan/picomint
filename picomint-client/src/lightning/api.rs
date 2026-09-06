@@ -6,7 +6,7 @@ use picomint_core::lightning::methods::{
     AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitPreimageRequest,
     AwaitPreimageResponse, GatewaysRequest, GatewaysResponse, LightningMethod,
 };
-use picomint_core::module::Method;
+use picomint_core::methods::Method;
 
 pub async fn await_preimage(api: &MintApi, outpoint: OutPoint, expiry: u32) -> Option<[u8; 32]> {
     api.request_current_consensus_retry::<AwaitPreimageResponse>(Method::Lightning(

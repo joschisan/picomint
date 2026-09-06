@@ -26,8 +26,7 @@ use picomint_core::lightning::methods::{
     VerifyResponse as WireVerifyResponse,
 };
 use picomint_core::lightning::secret::IncomingContractSecret;
-use picomint_core::methods::{CoreMethod, MintInfoRequest, MintInfoResponse};
-use picomint_core::module::Method;
+use picomint_core::methods::{CoreMethod, Method, MintInfoRequest, MintInfoResponse};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_lnurl::{
     InvoiceResponse, LnurlResponse, PayResponse, VerifyResponse, pay_request_tag,

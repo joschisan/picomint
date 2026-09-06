@@ -11,9 +11,8 @@ use picomint_core::NodeId;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::methods::{
     BlockCountRequest, BlockCountResponse, CoreMethod, ExpiryStatusRequest, ExpiryStatusResponse,
-    LivenessRequest, LivenessResponse, SubmitTxRequest, SubmitTxResponse,
+    LivenessRequest, LivenessResponse, Method, SubmitTxRequest, SubmitTxResponse,
 };
-use picomint_core::module::Method;
 use picomint_core::tx::{Transaction, TxError};
 
 /// Submit a transaction and await the final outcome. The server long-

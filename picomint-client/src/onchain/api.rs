@@ -1,6 +1,6 @@
 use crate::api::MintApi;
 use picomint_core::OutPoint;
-use picomint_core::module::Method;
+use picomint_core::methods::Method;
 use picomint_core::onchain::methods::{
     ConsensusFeerateRequest, ConsensusFeerateResponse, MintUtxoRequest, MintUtxoResponse,
     OnchainMethod, OutputInfoSliceRequest, OutputInfoSliceResponse, PendingTxChainRequest,

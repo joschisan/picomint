@@ -4,7 +4,7 @@ use picomint_core::lightning::ContractId;
 use picomint_core::lightning::methods::{
     LightningMethod, OutgoingContractExpiryRequest, OutgoingContractExpiryResponse,
 };
-use picomint_core::module::Method;
+use picomint_core::methods::Method;
 
 /// The contract id and expiry of a confirmed outgoing contract, or `None`
 /// while it is unconfirmed. Called by the gateway daemon to validate a

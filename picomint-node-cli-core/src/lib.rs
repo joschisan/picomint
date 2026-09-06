@@ -1,7 +1,7 @@
 use clap::Args;
 use picomint_core::NodeId;
+use picomint_core::audit::AuditSummary;
 use picomint_core::invite::InviteCode;
-use picomint_core::module::audit::AuditSummary;
 use picomint_core::onchain::TxInfo;
 use serde::{Deserialize, Serialize};
 
