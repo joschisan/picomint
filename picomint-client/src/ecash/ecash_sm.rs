@@ -11,7 +11,7 @@ use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use super::client_db::NoteTable;
-use super::events::{EcashFailureEvent, EcashSuccessEvent};
+use super::events::{IssuanceFailureEvent, IssuanceSuccessEvent};
 use super::{NoteIssuanceRequest, SpendableNote};
 use crate::context::ClientContext;
 
@@ -109,7 +109,7 @@ impl StateMachine for EcashStateMachine {
                 .expect("No aggregated pk found for denomination");
 
             if !verify_note(spendable_note.note(), pk) {
-                ctx.log_event(dbtx, self.account, self.operation, EcashFailureEvent);
+                ctx.log_event(dbtx, self.account, self.operation, IssuanceFailureEvent);
 
                 return None;
             }
@@ -127,7 +127,7 @@ impl StateMachine for EcashStateMachine {
         // The log entry is filed under this state machine's account, so it
         // reports what that account received — not what a fee output filed
         // elsewhere in the same transaction did.
-        let event = EcashSuccessEvent {
+        let event = IssuanceSuccessEvent {
             txid: self.txid,
             amount: self
                 .issuance_requests
