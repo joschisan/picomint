@@ -6,6 +6,7 @@ use async_channel::Sender;
 use picomint_core::{NodeId, NumNodes};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, DbRead, Table, WriteTx};
+use tokio::task::yield_now;
 use tokio::time::{Instant, sleep_until};
 use tracing::warn;
 
@@ -164,6 +165,15 @@ where
                     next_anti_entropy_at = Instant::now() + ANTI_ENTROPY_INTERVAL;
                 }
             }
+
+            // The inbox is an `async_channel`, outside tokio's cooperative
+            // budget, and nothing above returns Pending while a message is
+            // queued — so a full inbox would keep this task on its worker
+            // indefinitely, and the session's abort could only land once
+            // the inbox drained. On the 2026-09-06 load run that took 10–18 s
+            // per session cut. One yield per iteration bounds it to one
+            // message.
+            yield_now().await;
         }
     }
 
