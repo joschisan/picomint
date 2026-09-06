@@ -313,6 +313,15 @@ async fn collect_threshold_signatures(
 
     let our_signature = keychain.sign(session_index, &header);
 
+    // Send before counting: the last nodes to reach the cut usually find a
+    // threshold of signatures already buffered and leave the loop below
+    // before its first tick, so without this the faster nodes never see
+    // their signature and fall back to adopting the outcome.
+    connections.send(
+        Recipient::Everyone,
+        P2PMessage::SessionSignature(our_signature),
+    );
+
     let mut signatures = BTreeMap::from_iter([(server.cfg.private.identity, our_signature)]);
 
     let mut broadcast_interval = tokio::time::interval(Duration::from_secs(1));
