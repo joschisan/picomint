@@ -165,12 +165,12 @@ impl DataProvider<u64> for ChannelDataProvider {
 #[derive(Clone, Copy)]
 struct NodeTag(u8);
 
-/// Per node, the instants and rounds of every `created unit` and
-/// `elected head` event the engine logged.
+/// What the engines logged, per node: the instant and round of every
+/// `created unit`, and for every `emitted unit` the round of the head
+/// that emitted it, keyed by the unit's `(round, creator)`.
 #[derive(Default)]
 struct Trace {
     created: BTreeMap<u8, Vec<(Instant, Round)>>,
-    /// Per node, the head round that emitted each `(round, creator)` unit.
     emitted: BTreeMap<u8, BTreeMap<(Round, NodeId), Round>>,
 }
 
