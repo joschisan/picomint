@@ -70,11 +70,7 @@ pub fn derive_sql_row(input: TokenStream) -> TokenStream {
         impl ::picomint_core::sql::SqlRow for #ident {
             fn columns() -> Vec<(String, &'static str)> {
                 vec![#((
-                    format!(
-                        "{}{}",
-                        stringify!(#names),
-                        <#types as ::picomint_core::sql::SqlColumn>::SUFFIX,
-                    ),
+                    stringify!(#names).to_string(),
                     <#types as ::picomint_core::sql::SqlColumn>::TYPE,
                 )),*]
             }

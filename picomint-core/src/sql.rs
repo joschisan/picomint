@@ -26,10 +26,6 @@ pub trait SqlColumn {
     /// SQLite storage class of the column: `INTEGER` or `TEXT`.
     const TYPE: &'static str;
 
-    /// Unit suffix appended to the column name, e.g. `_msat`. Empty for
-    /// unitless fields.
-    const SUFFIX: &'static str = "";
-
     fn sql_value(&self) -> SqlValue;
 }
 
@@ -80,7 +76,6 @@ impl SqlColumn for bool {
 
 impl SqlColumn for Amount {
     const TYPE: &'static str = "INTEGER";
-    const SUFFIX: &'static str = "_msat";
 
     fn sql_value(&self) -> SqlValue {
         SqlValue::Integer(self.msat as i64)
@@ -89,7 +84,6 @@ impl SqlColumn for Amount {
 
 impl SqlColumn for bitcoin::Amount {
     const TYPE: &'static str = "INTEGER";
-    const SUFFIX: &'static str = "_sat";
 
     fn sql_value(&self) -> SqlValue {
         SqlValue::Integer(self.to_sat() as i64)
