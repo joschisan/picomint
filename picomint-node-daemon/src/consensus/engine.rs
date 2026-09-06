@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, ensure};
 use async_channel::Receiver;
@@ -13,7 +13,7 @@ use picomint_core::{NodeId, NumNodesExt};
 use picomint_encoding::Encodable;
 use picomint_redb::{DbRead, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
-use tracing::{Instrument, info, info_span, instrument};
+use tracing::{Instrument, debug, info, info_span, instrument};
 
 use crate::config::NodeConfig;
 use crate::consensus::bft::{DataProvider, Network};
@@ -271,6 +271,8 @@ async fn order_items_until_cut(
 
         let (index, (round, node, item)) = deliveries.next().await?;
 
+        debug!(round, %node, "received ordered item");
+
         if index < resume_from {
             continue;
         }
@@ -279,7 +281,17 @@ async fn order_items_until_cut(
             return Some(());
         }
 
+        // The engine holds the single write lock while it extends and
+        // elects; this is where the ordering loop queues behind it.
+        let lock_wait = Instant::now();
+
         let dbtx = server.db.begin_write();
+
+        debug!(
+            round,
+            wait_ms = lock_wait.elapsed().as_millis() as u64,
+            "acquired write lock for ordered item"
+        );
 
         // The round joins a tx's "Verified tx" line to the bft engine's
         // unit and head traces; the adopted suffix at a cut has none.
