@@ -8,7 +8,7 @@ use picomint_core::ecash::methods::{
     SignatureSharesResponse, SignatureSharesRestoreRequest, SignatureSharesRestoreResponse,
     SpendStateRequest, SpendStateResponse,
 };
-use picomint_core::module::Method;
+use picomint_core::methods::Method;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{NodeId, TransactionId};
 use picomint_rpc::query::FilterMapThreshold;

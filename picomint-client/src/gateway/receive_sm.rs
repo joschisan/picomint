@@ -10,7 +10,7 @@ use picomint_core::lightning::contracts::IncomingOffer;
 use picomint_core::lightning::methods::{
     DecryptionKeyShareRequest, DecryptionKeyShareResponse, LightningMethod,
 };
-use picomint_core::module::Method;
+use picomint_core::methods::Method;
 use picomint_core::secp256k1::Keypair;
 use picomint_core::wire;
 use picomint_core::{NodeId, OutPoint};

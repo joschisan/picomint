@@ -17,7 +17,7 @@ use crate::bitcoind::{BitcoindClient, BitcoindRpcMonitor};
 use anyhow::ensure;
 use bitcoin::Network;
 use futures::TryFutureExt;
-use picomint_core::module::Method;
+use picomint_core::methods::Method;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::wire;

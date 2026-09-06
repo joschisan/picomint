@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use crate::bitcoind::BitcoindRpcMonitor;
-use picomint_core::module::audit::AuditSummary;
+use picomint_core::audit::AuditSummary;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;

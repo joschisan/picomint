@@ -21,6 +21,8 @@ use picomint_encoding::{Decodable, Encodable};
 
 /// Bitcoin amount types
 mod amount;
+/// The mint's balance-sheet snapshot
+pub mod audit;
 /// Fibonacci backoff policies for retry loops.
 pub mod backoff;
 /// Mint configuration
@@ -38,7 +40,6 @@ pub mod lightning;
 /// Node wire method names dispatched over Iroh.
 pub mod methods;
 /// Static module system types
-pub mod module;
 /// `NodeId` type
 mod node;
 /// Deterministic key derivation from the root secret.

@@ -9,9 +9,23 @@ use picomint_encoding::{Decodable, Encodable};
 use crate::NodeId;
 use crate::config::ConsensusConfig;
 use crate::config::{MintId, NodeEndpoint};
+use crate::ecash::methods::EcashMethod;
 use crate::expiry::ExpiryStatus;
+use crate::lightning::methods::LightningMethod;
+use crate::onchain::methods::OnchainMethod;
 use crate::tx::{Transaction, TxError};
 use std::collections::BTreeMap;
+
+/// The wire method dispatched to a node over iroh. Each variant carries
+/// the concrete request for its module; the response type is determined by
+/// the variant the client sent.
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub enum Method {
+    Core(CoreMethod),
+    Ecash(EcashMethod),
+    Onchain(OnchainMethod),
+    Lightning(LightningMethod),
+}
 
 // ── config ──────────────────────────────────────────────────────────────────
 
