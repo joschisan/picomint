@@ -5,6 +5,7 @@ use clap::Args;
 use lightning_invoice::Bolt11Invoice;
 use picomint_client::ecash::Ecash;
 use picomint_core::config::MintId;
+use picomint_core::core::OperationId;
 use picomint_core::ecash::Denomination;
 use picomint_core::invite::InviteCode;
 use picomint_core::{Amount, secp256k1};
@@ -385,7 +386,7 @@ pub struct ClientEcashReceiveRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClientEcashReceiveResponse {
-    pub amount: Amount,
+    pub operation: OperationId,
 }
 
 // --- /client/onchain/send-fee ---
@@ -413,7 +414,7 @@ pub struct ClientOnchainSendRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClientOnchainSendResponse {
-    pub txid: bitcoin::Txid,
+    pub operation: OperationId,
 }
 
 // --- /client/onchain/receive ---

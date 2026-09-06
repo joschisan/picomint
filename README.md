@@ -256,7 +256,7 @@ Then send:
 picomint-gateway-cli client onchain send <mint-id> <address> <amount>
 ```
 
-Passing `--fee <amount>` overrides the feerate with an exact value; otherwise whatever `send-fee` currently reports is used.
+Passing `--fee <amount>` overrides the feerate with an exact value; otherwise whatever `send-fee` currently reports is used. The command returns the operation id; the onchain txid lands in the analytics as `onchain_send_success` once the mint has broadcast.
 
 **Send Ecash:** spend part of the mint balance as a base32-encoded ecash string you can hand to another client:
 
@@ -264,7 +264,7 @@ Passing `--fee <amount>` overrides the feerate with an exact value; otherwise wh
 picomint-gateway-cli client ecash send <mint-id> <amount>
 ```
 
-**Receive Ecash:** reissue an ecash string produced by `client ecash send` (on this gateway or any other client) into your balance:
+**Receive Ecash:** reissue an ecash string produced by `client ecash send` (on this gateway or any other client) into your balance. Returns the operation id; the reissuance's acceptance shows up in the analytics as `core_tx_accept`:
 
 ```bash
 picomint-gateway-cli client ecash receive <ecash>
