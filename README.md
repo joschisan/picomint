@@ -228,12 +228,12 @@ For the gateway to actually route payments on behalf of a mint, its nodes also n
 
 ### Manage Mint Liquidity
 
-Every command below except `ecash receive` takes the mint id as its first argument; `ecash receive` reads the target mint from the ecash string itself.
+Every command below except `ecash receive` takes the mint id as its first argument; `ecash receive` reads the target mint from the ecash string itself. Commands that move or read funds also name the account, one of `primary`, `secondary`, `tertiary`, `quaternary` or `quinary`. Payments are always routed from `primary`; funds in any other account sit outside the routing pool, which is how an operator keeps a reserve the payment flow can't touch.
 
 The gateway holds its own ecash balance in every mint it has added. Check it with:
 
 ```bash
-picomint-gateway-cli client balance <mint-id>
+picomint-gateway-cli client balance <mint-id> <account>
 ```
 
 You can move funds in and out either onchain or as an ecash string.
@@ -241,7 +241,7 @@ You can move funds in and out either onchain or as an ecash string.
 **Receive Onchain:** generate a mint deposit address and send bitcoin to it. When the transaction confirms the mint issues ecash to the gateway.
 
 ```bash
-picomint-gateway-cli client onchain receive <mint-id>
+picomint-gateway-cli client onchain receive <mint-id> <account>
 ```
 
 **Send Onchain:** burn ecash in exchange for an onchain transfer to the given address. The mint picks a feerate; check what it will charge first:
@@ -253,7 +253,7 @@ picomint-gateway-cli client onchain send-fee <mint-id>
 Then send:
 
 ```bash
-picomint-gateway-cli client onchain send <mint-id> <address> <amount>
+picomint-gateway-cli client onchain send <mint-id> <account> <address> <amount>
 ```
 
 Passing `--fee <amount>` overrides the feerate with an exact value; otherwise whatever `send-fee` currently reports is used. The command returns the operation id; the onchain txid lands in the analytics as `onchain_send_success` once the mint has broadcast.
@@ -261,13 +261,13 @@ Passing `--fee <amount>` overrides the feerate with an exact value; otherwise wh
 **Send Ecash:** spend part of the mint balance as a base32-encoded ecash string you can hand to another client:
 
 ```bash
-picomint-gateway-cli client ecash send <mint-id> <amount>
+picomint-gateway-cli client ecash send <mint-id> <account> <amount>
 ```
 
 **Receive Ecash:** reissue an ecash string produced by `client ecash send` (on this gateway or any other client) into your balance. Returns the operation id; the reissuance's acceptance shows up in the analytics as `core_tx_accept`:
 
 ```bash
-picomint-gateway-cli client ecash receive <ecash>
+picomint-gateway-cli client ecash receive <account> <ecash>
 ```
 
 ### Restore

@@ -101,7 +101,7 @@ impl StateMachine for ReceiveStateMachine {
             Err(_) => {
                 ctx.log_event(
                     dbtx,
-                    super::GATEWAY_ACCOUNT,
+                    super::ROUTING_ACCOUNT,
                     self.operation,
                     ReceiveFailureEvent,
                 );
@@ -123,7 +123,7 @@ impl StateMachine for ReceiveStateMachine {
             warn!("Aggregate decryption key invalid — TPE config inconsistent");
             ctx.log_event(
                 dbtx,
-                super::GATEWAY_ACCOUNT,
+                super::ROUTING_ACCOUNT,
                 self.operation,
                 ReceiveFailureEvent,
             );
@@ -133,7 +133,7 @@ impl StateMachine for ReceiveStateMachine {
         if let Some(preimage) = self.offer.decrypt_preimage(&agg_decryption_key) {
             ctx.log_event(
                 dbtx,
-                super::GATEWAY_ACCOUNT,
+                super::ROUTING_ACCOUNT,
                 self.operation,
                 ReceiveSuccessEvent { preimage },
             );
@@ -153,7 +153,7 @@ impl StateMachine for ReceiveStateMachine {
         crate::ecash::finalize_and_submit_tx(
             ctx,
             dbtx,
-            super::GATEWAY_ACCOUNT,
+            super::ROUTING_ACCOUNT,
             self.operation,
             tx_builder,
             Vec::new(),

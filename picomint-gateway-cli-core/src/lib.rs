@@ -5,6 +5,7 @@ use clap::Args;
 use lightning_invoice::Bolt11Invoice;
 use picomint_client::ecash::Ecash;
 use picomint_core::config::MintId;
+use picomint_core::core::Account;
 use picomint_core::core::OperationId;
 use picomint_core::ecash::Denomination;
 use picomint_core::invite::InviteCode;
@@ -306,6 +307,7 @@ pub struct ClientRemoveRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientBalanceRequest {
     pub mint: MintId,
+    pub account: Account,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -356,6 +358,7 @@ pub type QueryResponse = Vec<serde_json::Map<String, serde_json::Value>>;
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientEcashCountRequest {
     pub mint: MintId,
+    pub account: Account,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -369,6 +372,7 @@ pub struct ClientEcashCountResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientEcashSendRequest {
     pub mint: MintId,
+    pub account: Account,
     pub amount: bitcoin::Amount,
 }
 
@@ -381,6 +385,7 @@ pub struct ClientEcashSendResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientEcashReceiveRequest {
+    pub account: Account,
     pub ecash: Ecash,
 }
 
@@ -406,6 +411,7 @@ pub struct ClientOnchainSendFeeResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientOnchainSendRequest {
     pub mint: MintId,
+    pub account: Account,
     pub address: bitcoin::Address<NetworkUnchecked>,
     pub amount: bitcoin::Amount,
     #[arg(long)]
@@ -422,6 +428,7 @@ pub struct ClientOnchainSendResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientOnchainReceiveRequest {
     pub mint: MintId,
+    pub account: Account,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

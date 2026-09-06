@@ -25,11 +25,10 @@ use tracing::warn;
 pub use self::secret::GatewaySecret;
 use receive_sm::{ReceiveStateMachine, ReceiveStateMachineTable};
 
-/// A gateway client holds a single balance, so every account-scoped call this
-/// module makes names this one. Accounts are a wallet-facing split; the
-/// gateway has no use for a second balance and [`GatewaySecret`] grows no account
-/// hop to derive one.
-pub const GATEWAY_ACCOUNT: Account = Account::Primary;
+/// The account payments are routed from: every contract this module funds
+/// or claims settles here. The other accounts are the operator's — funds
+/// parked there through the admin CLI are outside the routing pool.
+pub const ROUTING_ACCOUNT: Account = Account::Primary;
 
 /// Resume this mint's persisted receive state machines. Called
 /// exactly once, at mint bring-up.
@@ -91,7 +90,7 @@ impl Client {
         crate::eventlog::log_event(
             dbtx,
             mint,
-            GATEWAY_ACCOUNT,
+            ROUTING_ACCOUNT,
             operation,
             SendEvent {
                 outpoint,
@@ -134,7 +133,7 @@ impl Client {
         let txid = crate::ecash::finalize_and_submit_tx(
             &ctx,
             dbtx,
-            GATEWAY_ACCOUNT,
+            ROUTING_ACCOUNT,
             operation,
             tx_builder,
             Vec::new(),
@@ -189,7 +188,7 @@ impl Client {
                 crate::ecash::finalize_and_submit_tx(
                     &ctx,
                     dbtx,
-                    GATEWAY_ACCOUNT,
+                    ROUTING_ACCOUNT,
                     operation,
                     tx_builder,
                     Vec::new(),
@@ -210,7 +209,7 @@ impl Client {
                     .sign_schnorr(contract.forfeit_message());
                 ctx.log_event(
                     dbtx,
-                    GATEWAY_ACCOUNT,
+                    ROUTING_ACCOUNT,
                     operation,
                     SendCancelEvent { signature },
                 );

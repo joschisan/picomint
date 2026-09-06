@@ -90,3 +90,14 @@ impl Account {
         Account::Quinary,
     ];
 }
+
+impl std::str::FromStr for Account {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        Account::ALL
+            .into_iter()
+            .find(|account| account.to_string().eq_ignore_ascii_case(s))
+            .ok_or_else(|| anyhow::anyhow!("Unknown account {s}"))
+    }
+}
