@@ -385,6 +385,7 @@ pub struct ClientEcashSendResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientEcashReceiveRequest {
+    pub mint: MintId,
     pub account: Account,
     pub ecash: Ecash,
 }

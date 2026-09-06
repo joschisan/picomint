@@ -657,9 +657,8 @@ async fn client_ecash_send(
     Ok(Json(ClientEcashSendResponse { ecash }))
 }
 
-/// Receive ecash into the gateway. The ecash bundle itself carries the target
-/// mint id, so no `--id` is needed. Blocks until issuance either
-/// completes or fails mint-side.
+/// Reissue an ecash string into the named account. Returns the operation
+/// id; acceptance shows up in the analytics as `core_tx_accept`.
 #[instrument(skip_all, err)]
 async fn client_ecash_receive(
     State(state): State<AppState>,
@@ -667,7 +666,7 @@ async fn client_ecash_receive(
 ) -> Result<Json<ClientEcashReceiveResponse>, CliError> {
     let operation = state
         .client
-        .ecash_receive(payload.ecash.mint, payload.account, &payload.ecash)
+        .ecash_receive(payload.mint, payload.account, &payload.ecash)
         .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
 
     Ok(Json(ClientEcashReceiveResponse { operation }))

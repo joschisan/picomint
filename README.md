@@ -228,7 +228,7 @@ For the gateway to actually route payments on behalf of a mint, its nodes also n
 
 ### Manage Mint Liquidity
 
-Every command below except `ecash receive` takes the mint id as its first argument; `ecash receive` reads the target mint from the ecash string itself. Commands that move or read funds also name the account, one of `primary`, `secondary`, `tertiary`, `quaternary` or `quinary`. Payments are always routed from `primary`; funds in any other account sit outside the routing pool, which is how an operator keeps a reserve the payment flow can't touch.
+Every command below takes the mint id as its first argument. Commands that move or read funds also name the account, one of `primary`, `secondary`, `tertiary`, `quaternary` or `quinary`. Payments are always routed from `primary`; funds in any other account sit outside the routing pool, which is how an operator keeps a reserve the payment flow can't touch.
 
 The gateway holds its own ecash balance in every mint it has added. Check it with:
 
@@ -267,7 +267,7 @@ picomint-gateway-cli client ecash send <mint-id> <account> <amount>
 **Receive Ecash:** reissue an ecash string produced by `client ecash send` (on this gateway or any other client) into your balance. Returns the operation id; the reissuance's acceptance shows up in the analytics as `core_tx_accept`:
 
 ```bash
-picomint-gateway-cli client ecash receive <account> <ecash>
+picomint-gateway-cli client ecash receive <mint-id> <account> <ecash>
 ```
 
 ### Restore
