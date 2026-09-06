@@ -155,6 +155,15 @@ where
             let batch = self.bfs_batch(dbtx, head);
 
             for ev in batch {
+                if ev.unit.data.is_some() {
+                    debug!(
+                        round = ev.unit.round,
+                        creator = %ev.unit.creator,
+                        head_round = self.next_decide_round,
+                        "emitted unit"
+                    );
+                }
+
                 for item in ev.data {
                     // Unbounded channel; send() returns Err only
                     // when the receiver is dropped — which means
