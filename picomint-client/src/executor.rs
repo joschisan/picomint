@@ -96,10 +96,7 @@ where
     T: Table<Key = (MintId, SmId), Value = S> + Copy + Send + Sync + 'static,
 {
     let id = SmId::random();
-    assert!(
-        dbtx.insert(&table, &(ctx.mint, id), &state).is_none(),
-        "SmId collision"
-    );
+    dbtx.insert_new(&table, &(ctx.mint, id), &state);
 
     let ctx = ctx.clone();
 

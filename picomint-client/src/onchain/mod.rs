@@ -234,11 +234,7 @@ async fn output_scanner(ctx: ClientContext) {
 
         let index = next_valid_index(&ctx, account, 0);
         let dbtx = ctx.db.begin_write();
-        assert!(
-            dbtx.insert(&ValidAddressIndexTable, &(ctx.mint, account, index), &())
-                .is_none(),
-            "seed address index already present"
-        );
+        dbtx.insert_new(&ValidAddressIndexTable, &(ctx.mint, account, index), &());
         dbtx.commit();
     }
 

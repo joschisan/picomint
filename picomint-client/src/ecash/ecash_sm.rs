@@ -114,13 +114,10 @@ impl StateMachine for EcashStateMachine {
                 return None;
             }
 
-            assert!(
-                dbtx.insert(
-                    &NoteTable,
-                    &(ctx.mint, request.account(), spendable_note),
-                    &()
-                )
-                .is_none()
+            dbtx.insert_new(
+                &NoteTable,
+                &(ctx.mint, request.account(), spendable_note),
+                &(),
             );
         }
 

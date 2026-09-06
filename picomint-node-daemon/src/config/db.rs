@@ -32,10 +32,7 @@ pub async fn load_node_config(db: &Database) -> Option<NodeConfig> {
 pub async fn store_node_config(db: &Database, cfg: &NodeConfig) {
     let dbtx = db.begin_write();
 
-    assert!(
-        dbtx.insert(&NodeConfigTable, &(), cfg).is_none(),
-        "Node config already present in database"
-    );
+    dbtx.insert_new(&NodeConfigTable, &(), cfg);
 
     dbtx.clear_table(&InitParamsTable);
     dbtx.clear_table(&DkgParamsTable);

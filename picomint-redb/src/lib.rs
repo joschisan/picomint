@@ -597,6 +597,18 @@ impl WriteTx {
             .map(|previous| decode(previous.value()))
     }
 
+    /// Insert `value` under `key` that must not be present yet. A stored
+    /// value is an invariant violation — a duplicate id, a double-driven
+    /// state machine, an overwritten log entry — so it panics rather than
+    /// silently replacing.
+    pub fn insert_new<D: Table>(&self, def: &D, key: &D::Key, value: &D::Value) {
+        assert!(
+            self.insert(def, key, value).is_none(),
+            "insert_new overwrote an existing entry in {}",
+            def.name()
+        );
+    }
+
     /// Remove the entry under `key`, returning the previously stored value.
     pub fn remove<D: Table>(&self, def: &D, key: &D::Key) -> Option<D::Value> {
         self.touch(def);
