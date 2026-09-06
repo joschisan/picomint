@@ -304,8 +304,7 @@ pub struct ClientRemoveRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientBalanceRequest {
-    #[arg(long = "id")]
-    pub mint: Option<MintId>,
+    pub mint: MintId,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -330,8 +329,7 @@ pub struct MintInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientConfigRequest {
-    #[arg(long = "id")]
-    pub mint: Option<MintId>,
+    pub mint: MintId,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -356,8 +354,7 @@ pub type QueryResponse = Vec<serde_json::Map<String, serde_json::Value>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientEcashCountRequest {
-    #[arg(long = "id")]
-    pub mint: Option<MintId>,
+    pub mint: MintId,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -370,9 +367,8 @@ pub struct ClientEcashCountResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientEcashSendRequest {
+    pub mint: MintId,
     pub amount: bitcoin::Amount,
-    #[arg(long = "id")]
-    pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -396,8 +392,7 @@ pub struct ClientEcashReceiveResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientOnchainSendFeeRequest {
-    #[arg(long = "id")]
-    pub mint: Option<MintId>,
+    pub mint: MintId,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -409,12 +404,11 @@ pub struct ClientOnchainSendFeeResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientOnchainSendRequest {
+    pub mint: MintId,
     pub address: bitcoin::Address<NetworkUnchecked>,
     pub amount: bitcoin::Amount,
     #[arg(long)]
     pub fee: Option<bitcoin::Amount>,
-    #[arg(long = "id")]
-    pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -426,8 +420,7 @@ pub struct ClientOnchainSendResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientOnchainReceiveRequest {
-    #[arg(long = "id")]
-    pub mint: Option<MintId>,
+    pub mint: MintId,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

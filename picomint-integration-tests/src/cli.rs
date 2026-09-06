@@ -85,7 +85,6 @@ pub fn gateway_mint_balance(gateway_data_dir: &Path, mint: &str) -> Result<Clien
     gateway_cmd(gateway_data_dir)
         .arg("client")
         .arg("balance")
-        .arg("--id")
         .arg(mint)
         .run_cli::<ClientBalanceResponse>()
 }
