@@ -12,9 +12,6 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 
 /// Filename of the gateway's admin CLI Unix socket, inside `DATA_DIR`.
-/// The daemon binds and the CLI connects at `{DATA_DIR}/{CLI_SOCKET_FILENAME}`.
-pub const CLI_SOCKET_FILENAME: &str = "cli.sock";
-
 // Top-level
 pub const ROUTE_INFO: &str = "/info";
 pub const ROUTE_MNEMONIC: &str = "/mnemonic";
@@ -39,19 +36,19 @@ pub const ROUTE_LDK_PEER_LIST: &str = "/ldk/peer/list";
 pub const ROUTE_QUERY: &str = "/query";
 
 // Mint management
-pub const ROUTE_MINT_ADD: &str = "/mint/add";
-pub const ROUTE_MINT_LIST: &str = "/mint/list";
-pub const ROUTE_MINT_CONFIG: &str = "/mint/config";
-pub const ROUTE_MINT_BALANCE: &str = "/mint/balance";
-pub const ROUTE_MINT_REMOVE: &str = "/mint/remove";
+pub const ROUTE_CLIENT_ADD: &str = "/client/add";
+pub const ROUTE_CLIENT_LIST: &str = "/client/list";
+pub const ROUTE_CLIENT_CONFIG: &str = "/client/config";
+pub const ROUTE_CLIENT_BALANCE: &str = "/client/balance";
+pub const ROUTE_CLIENT_REMOVE: &str = "/client/remove";
 
-// Per-mint module commands
-pub const ROUTE_MINT_MODULE_ECASH_COUNT: &str = "/mint/module/ecash/count";
-pub const ROUTE_MINT_MODULE_ECASH_SEND: &str = "/mint/module/ecash/send";
-pub const ROUTE_MINT_MODULE_ECASH_RECEIVE: &str = "/mint/module/ecash/receive";
-pub const ROUTE_MINT_MODULE_ONCHAIN_SEND_FEE: &str = "/mint/module/onchain/send-fee";
-pub const ROUTE_MINT_MODULE_ONCHAIN_SEND: &str = "/mint/module/onchain/send";
-pub const ROUTE_MINT_MODULE_ONCHAIN_RECEIVE: &str = "/mint/module/onchain/receive";
+// Client module commands
+pub const ROUTE_CLIENT_ECASH_COUNT: &str = "/client/ecash/count";
+pub const ROUTE_CLIENT_ECASH_SEND: &str = "/client/ecash/send";
+pub const ROUTE_CLIENT_ECASH_RECEIVE: &str = "/client/ecash/receive";
+pub const ROUTE_CLIENT_ONCHAIN_SEND_FEE: &str = "/client/onchain/send-fee";
+pub const ROUTE_CLIENT_ONCHAIN_SEND: &str = "/client/onchain/send";
+pub const ROUTE_CLIENT_ONCHAIN_RECEIVE: &str = "/client/onchain/receive";
 
 // --- /info ---
 
@@ -289,37 +286,37 @@ pub struct PeerInfo {
     pub is_connected: bool,
 }
 
-// --- /mint/add ---
+// --- /client/add ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintAddRequest {
+pub struct ClientAddRequest {
     pub invite: InviteCode,
 }
 
-// --- /mint/remove ---
+// --- /client/remove ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintRemoveRequest {
+pub struct ClientRemoveRequest {
     pub mint: MintId,
 }
 
-// --- /mint/balance ---
+// --- /client/balance ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintBalanceRequest {
+pub struct ClientBalanceRequest {
     #[arg(long = "id")]
     pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintBalanceResponse {
+pub struct ClientBalanceResponse {
     pub balance_msat: Amount,
 }
 
-// --- /mint/list ---
+// --- /client/list ---
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintListResponse {
+pub struct ClientListResponse {
     pub mints: Vec<MintInfo>,
 }
 
@@ -329,16 +326,16 @@ pub struct MintInfo {
     pub mint_name: String,
 }
 
-// --- /mint/config ---
+// --- /client/config ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintConfigRequest {
+pub struct ClientConfigRequest {
     #[arg(long = "id")]
     pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct MintConfigResponse {
+pub struct ClientConfigResponse {
     pub config: serde_json::Value,
 }
 
@@ -347,7 +344,7 @@ pub struct MintConfigResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct QueryRequest {
     /// Read-only SQL run against the analytics db, e.g.
-    /// "SELECT * FROM outgoing_payments ORDER BY started_at DESC LIMIT 10"
+    /// "SELECT * FROM gateway_send ORDER BY ts DESC LIMIT 10"
     pub query: String,
 }
 
@@ -355,63 +352,63 @@ pub struct QueryRequest {
 /// `sqlite3 --json` prints.
 pub type QueryResponse = Vec<serde_json::Map<String, serde_json::Value>>;
 
-// --- /mint/module/ecash/count ---
+// --- /client/ecash/count ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintEcashCountRequest {
+pub struct ClientEcashCountRequest {
     #[arg(long = "id")]
     pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintEcashCountResponse {
+pub struct ClientEcashCountResponse {
     /// Count of held ecash notes keyed by denomination.
     pub counts: BTreeMap<Denomination, u64>,
 }
 
-// --- /mint/module/ecash/send ---
+// --- /client/ecash/send ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintEcashSendRequest {
+pub struct ClientEcashSendRequest {
     pub amount: bitcoin::Amount,
     #[arg(long = "id")]
     pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintEcashSendResponse {
+pub struct ClientEcashSendResponse {
     pub ecash: Ecash,
 }
 
-// --- /mint/module/ecash/receive ---
+// --- /client/ecash/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintEcashReceiveRequest {
+pub struct ClientEcashReceiveRequest {
     pub ecash: Ecash,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintEcashReceiveResponse {
+pub struct ClientEcashReceiveResponse {
     pub amount: Amount,
 }
 
-// --- /mint/module/onchain/send-fee ---
+// --- /client/onchain/send-fee ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintOnchainSendFeeRequest {
+pub struct ClientOnchainSendFeeRequest {
     #[arg(long = "id")]
     pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintOnchainSendFeeResponse {
+pub struct ClientOnchainSendFeeResponse {
     pub fee: bitcoin::Amount,
 }
 
-// --- /mint/module/onchain/send ---
+// --- /client/onchain/send ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintOnchainSendRequest {
+pub struct ClientOnchainSendRequest {
     pub address: bitcoin::Address<NetworkUnchecked>,
     pub amount: bitcoin::Amount,
     #[arg(long)]
@@ -421,19 +418,19 @@ pub struct MintOnchainSendRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintOnchainSendResponse {
+pub struct ClientOnchainSendResponse {
     pub txid: bitcoin::Txid,
 }
 
-// --- /mint/module/onchain/receive ---
+// --- /client/onchain/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct MintOnchainReceiveRequest {
+pub struct ClientOnchainReceiveRequest {
     #[arg(long = "id")]
     pub mint: Option<MintId>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MintOnchainReceiveResponse {
+pub struct ClientOnchainReceiveResponse {
     pub address: bitcoin::Address<bitcoin::address::NetworkUnchecked>,
 }

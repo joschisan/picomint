@@ -207,19 +207,19 @@ picomint-gateway-cli ldk channel list
 The gateway can serve multiple mints simultaneously. Add one with an invite code (see [Invite Users](#invite-users) above for how nodes produce these):
 
 ```bash
-picomint-gateway-cli mint add <invite>
+picomint-gateway-cli client add <invite>
 ```
 
 List added mints:
 
 ```bash
-picomint-gateway-cli mint list
+picomint-gateway-cli client list
 ```
 
 Remove a mint and delete all of its data:
 
 ```bash
-picomint-gateway-cli mint remove <mint-id>
+picomint-gateway-cli client remove <mint-id>
 ```
 
 This is destructive: check for in-flight payments via `query` first, otherwise you might lose funds.
@@ -233,7 +233,7 @@ Every command below except `ecash receive` accepts `--id <mint-id>` to target a 
 The gateway holds its own ecash balance in every mint it has added. Check it with:
 
 ```bash
-picomint-gateway-cli mint balance
+picomint-gateway-cli client balance
 ```
 
 You can move funds in and out either onchain or as an ecash string.
@@ -241,19 +241,19 @@ You can move funds in and out either onchain or as an ecash string.
 **Receive Onchain:** generate a mint deposit address and send bitcoin to it. When the transaction confirms the mint issues ecash to the gateway.
 
 ```bash
-picomint-gateway-cli mint module onchain receive
+picomint-gateway-cli client onchain receive
 ```
 
 **Send Onchain:** burn ecash in exchange for an onchain transfer to the given address. The mint picks a feerate; check what it will charge first:
 
 ```bash
-picomint-gateway-cli mint module onchain send-fee
+picomint-gateway-cli client onchain send-fee
 ```
 
 Then send:
 
 ```bash
-picomint-gateway-cli mint module onchain send <address> <amount>
+picomint-gateway-cli client onchain send <address> <amount>
 ```
 
 Passing `--fee <amount>` overrides the feerate with an exact value; otherwise whatever `send-fee` currently reports is used.
@@ -261,13 +261,13 @@ Passing `--fee <amount>` overrides the feerate with an exact value; otherwise wh
 **Send Ecash:** spend part of the mint balance as a base32-encoded ecash string you can hand to another client:
 
 ```bash
-picomint-gateway-cli mint module ecash send <amount>
+picomint-gateway-cli client ecash send <amount>
 ```
 
-**Receive Ecash:** reissue an ecash string produced by `mint module ecash send` (on this gateway or any other client) into your balance:
+**Receive Ecash:** reissue an ecash string produced by `client ecash send` (on this gateway or any other client) into your balance:
 
 ```bash
-picomint-gateway-cli mint module ecash receive <ecash>
+picomint-gateway-cli client ecash receive <ecash>
 ```
 
 ### Restore
@@ -282,95 +282,66 @@ The mnemonic can be used with any Bip 39 compatible wallet to restore the onchai
 
 ### Analytics
 
-The gateway mirrors every gateway-module event into a SQLite database at
+The gateway mirrors its client's event log into a SQLite database at
 `{DATA_DIR}/analytics/analytics.sqlite`. The directory is **wiped on every
 startup** and rebuilt by replaying the event log — analytics are derived,
 not authoritative, so it's safe to delete and let it rebuild.
 
-Activity is exposed through two per-direction views,
-`outgoing_payments` and `incoming_payments`. Each row is one operation,
-joined across the underlying event tables. They are kept separate
-because the outgoing side carries an LN-routing-fee budget that doesn't
-exist on the incoming side — a single unified view would mean three
-permanent NULL columns on every incoming row.
+The schema is a 1:1 translation of the log: one table per event, named
+after its source and kind (`gateway_send`, `gateway_send_success`,
+`core_tx_create`, `core_tx_accept`, `ecash_success`, ...). Every table
+starts with the same columns — `id` (position in the event log), `ts`
+(ms since epoch), `mint`, `account`, `operation` — followed by the
+event's own fields: amounts as integer `*_msat` or `*_sat` columns,
+hashes, ids and keys as hex or bech32 text. There are no views; an
+operation's story is a join on `operation`, and the tables of one
+operation carry the txids that tie its transactions to their outcome.
+List them with `SELECT name FROM sqlite_master WHERE type='table'`.
 
 Query it with read-only SQL through the admin CLI — the daemon runs the
 query against the live db and returns one JSON object per row, the same
-shape `sqlite3 --json` prints. Ten most recent outgoing payments:
+shape `sqlite3 --json` prints. Ten most recent outgoing payments with
+their outcome:
 
 ```bash
 picomint-gateway-cli query \
-    "SELECT * FROM outgoing_payments ORDER BY started_at DESC LIMIT 10"
+    "SELECT s.ts, s.amount_msat, s.fee_msat, \
+            ss.preimage IS NOT NULL AS succeeded, sc.id IS NOT NULL AS cancelled \
+     FROM gateway_send s \
+     LEFT JOIN gateway_send_success ss USING (operation) \
+     LEFT JOIN gateway_send_cancel sc USING (operation) \
+     ORDER BY s.ts DESC LIMIT 10"
 ```
 
-Status breakdown for outgoing:
+Successful outgoing volume per mint, in sat:
 
 ```bash
 picomint-gateway-cli query \
-    "SELECT status, COUNT(*) AS n FROM outgoing_payments GROUP BY status"
+    "SELECT s.mint, SUM(s.amount_msat)/1000 AS sat \
+     FROM gateway_send s INNER JOIN gateway_send_success USING (operation) \
+     GROUP BY s.mint"
 ```
 
-Total outgoing volume per mint, in sat:
+Mint transaction acceptance latency, the time between the gateway
+submitting a transaction and consensus accepting it:
 
 ```bash
 picomint-gateway-cli query \
-    "SELECT mint, SUM(amount_msat)/1000 AS sat \
-     FROM outgoing_payments WHERE status='success' GROUP BY mint"
+    "SELECT c.txid, a.ts - c.ts AS latency_ms \
+     FROM core_tx_create c INNER JOIN core_tx_accept a USING (operation, txid) \
+     ORDER BY c.ts DESC LIMIT 10"
 ```
 
-**Columns common to both views:**
-
-| Column           | Type    | Notes                                                                  |
-|------------------|---------|------------------------------------------------------------------------|
-| `mint`     | TEXT    | Hex-encoded mint id                                              |
-| `operation`      | TEXT    | Hex-encoded operation id; unique per mint within the view                       |
-| `status`         | TEXT    | See below                                                              |
-| `started_at`     | INTEGER | When the operation was initiated (ms since epoch)                      |
-| `completed_at`   | INTEGER | NULL while `status = 'pending'`                                        |
-| `amount_msat`    | INTEGER | Payment amount, msat                                                   |
-| `gateway_fee_msat`    | INTEGER | The gateway's fee cut                                                  |
-| `tx_fee_msat`    | INTEGER | Mint consensus tx fee (NULL until the tx lands)                  |
-| `tx_remint_msat` | INTEGER | Mint tx remint amount                                            |
-| `tx_txid`        | TEXT    | The gateway's own mint tx on this side: the outgoing contract's claim (NULL until `status = 'success'`) or the incoming contract's funding |
-| `preimage`       | TEXT    | Hex-encoded; NULL unless `status = 'success'`                          |
-
-**Additional columns on `outgoing_payments`:**
-
-| Column             | Type    | Notes                                                                  |
-|--------------------|---------|------------------------------------------------------------------------|
-| `gateway_fee_kept_msat` | INTEGER | `gateway_fee_msat` less the realized LN routing cost (NULL while pending; 0 if cancelled) |
-
-**Status values:**
-
-- `outgoing_payments`: `pending`, `success`, `cancelled`
-- `incoming_payments`: `pending`, `success`, `failure`, `refunded`
-
-**Transaction acceptance latency.** Every mint transaction the gateway
-submits is also tracked from creation to the mint's accept or reject in
-the `tx_acceptance` view — one row per `(mint, operation, txid)` with
-`created_at`, `resolved_at`, `status` (`pending`, `accepted`,
-`rejected`), `latency_ms` and, for rejects, the mint's `error`. This
-measures consensus round-trip only, independent of any Lightning leg.
-Average and worst case:
+Incoming payments still waiting on their claim:
 
 ```bash
 picomint-gateway-cli query \
-    "SELECT COUNT(*) AS n, AVG(latency_ms) AS avg_ms, MAX(latency_ms) AS max_ms \
-     FROM tx_acceptance WHERE status='accepted'"
+    "SELECT r.operation, r.ts, r.amount_msat FROM gateway_receive r \
+     LEFT JOIN gateway_receive_success rs USING (operation) \
+     LEFT JOIN gateway_receive_refund rr USING (operation) \
+     LEFT JOIN gateway_receive_failure rf USING (operation) \
+     WHERE rs.id IS NULL AND rr.id IS NULL AND rf.id IS NULL"
 ```
-
-The 99th percentile (SQLite has no percentile function, so sort and skip):
-
-```bash
-picomint-gateway-cli query \
-    "SELECT latency_ms AS p99_ms FROM tx_acceptance WHERE status='accepted' \
-     ORDER BY latency_ms LIMIT 1 OFFSET \
-     (SELECT COUNT(*) * 99 / 100 FROM tx_acceptance WHERE status='accepted')"
-```
-
-The raw event tables (`send`, `send_success`, `send_cancel`, `receive`,
-`receive_success`, `receive_failure`, `receive_refund`, `tx_create`,
-`tx_accept`, `tx_reject`) are also queryable if you need a finer view.
 
 ### Interfaces
 

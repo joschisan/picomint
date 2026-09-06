@@ -60,10 +60,11 @@ pub use picomint_rpc::connection::ConnStatus;
 pub use secret::{Mnemonic, random as random_mnemonic};
 
 use crate::eventlog::{Event, EventKind, EventSource};
+use picomint_core::sql::SqlRow;
 use picomint_core::{Amount, TransactionId};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, SqlRow)]
 pub struct TxCreateEvent {
     pub txid: TransactionId,
     /// Amount the mint over-funded by when balancing the caller's
@@ -81,7 +82,7 @@ impl Event for TxCreateEvent {
     const KIND: EventKind = EventKind::from_static("tx-create");
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, SqlRow)]
 pub struct TxAcceptEvent {
     pub txid: TransactionId,
 }
@@ -91,7 +92,7 @@ impl Event for TxAcceptEvent {
     const KIND: EventKind = EventKind::from_static("tx-accept");
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, SqlRow)]
 pub struct TxRejectEvent {
     pub txid: TransactionId,
     pub error: String,

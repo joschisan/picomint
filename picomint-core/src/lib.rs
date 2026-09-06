@@ -48,6 +48,9 @@ pub mod secret;
 pub mod onchain;
 /// Consensus session outcome types (AcceptedItem, SessionOutcome, …).
 pub mod session;
+
+/// Analytics column mapping for event fields.
+pub mod sql;
 /// Wire-level Transaction and ConsensusItem types.
 pub mod tx;
 /// Consensus version of the mint and the vote that advances it.

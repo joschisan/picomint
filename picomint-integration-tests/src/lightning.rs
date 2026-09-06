@@ -155,44 +155,42 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
         Ok(n as u64)
     };
 
-    // Raw event tables
-    assert_eq!(count("SELECT COUNT(*) FROM send")?, 4);
-    assert_eq!(count("SELECT COUNT(*) FROM send_success")?, 1);
-    assert_eq!(count("SELECT COUNT(*) FROM send_cancel")?, 3);
-    assert_eq!(count("SELECT COUNT(*) FROM receive")?, 2);
-    assert_eq!(count("SELECT COUNT(*) FROM receive_success")?, 2);
-    assert_eq!(count("SELECT COUNT(*) FROM receive_failure")?, 0);
-    assert_eq!(count("SELECT COUNT(*) FROM receive_refund")?, 0);
+    // One table per event, named after its source and kind
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send")?, 4);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_success")?, 1);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_cancel")?, 3);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_success")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_failure")?, 0);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_refund")?, 0);
 
-    // outgoing_payments / incoming_payments split sends/receives into
-    // per-direction views with one row per operation
-    assert_eq!(count("SELECT COUNT(*) FROM outgoing_payments")?, 4);
-    assert_eq!(count("SELECT COUNT(*) FROM incoming_payments")?, 2);
-    assert_eq!(
-        count("SELECT COUNT(*) FROM outgoing_payments WHERE status='success'")?,
-        1
-    );
-    assert_eq!(
-        count("SELECT COUNT(*) FROM outgoing_payments WHERE status='cancelled'")?,
-        3
-    );
-    assert_eq!(
-        count("SELECT COUNT(*) FROM incoming_payments WHERE status='success'")?,
-        2
-    );
-
-    // Join key sanity — `operation` must match across event tables
+    // No views: an operation's outcome is a join on `operation`
     assert_eq!(
         count(
-            "SELECT COUNT(*) FROM send s \
-             INNER JOIN send_success ss USING (operation)"
+            "SELECT COUNT(*) FROM gateway_send s \
+             INNER JOIN gateway_send_success ss USING (operation)"
         )?,
         1
     );
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM gateway_send s \
+             INNER JOIN gateway_send_cancel sc USING (operation)"
+        )?,
+        3
+    );
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM gateway_receive r \
+             INNER JOIN gateway_receive_success rs USING (operation)"
+        )?,
+        2
+    );
 
-    // Amount extraction
+    // Amounts land as integer msat columns
     let sum: i64 = conn.query_row(
-        "SELECT SUM(amount_msat) FROM outgoing_payments WHERE status='success'",
+        "SELECT SUM(s.amount_msat) FROM gateway_send s \
+         INNER JOIN gateway_send_success ss USING (operation)",
         [],
         |r| r.get(0),
     )?;

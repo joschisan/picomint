@@ -1,6 +1,7 @@
 use crate::eventlog::{Event, EventKind, EventSource};
 use picomint_core::Amount;
 use picomint_core::TransactionId;
+use picomint_core::sql::SqlRow;
 use serde::{Deserialize, Serialize};
 
 /// Emitted immediately when a send operation is initiated, before the
@@ -10,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// and the ecash state machine finalises notes. Slow-path observers can
 /// recover the reissuance txid from the immediately-following
 /// `ReissuanceEvent` / `TxCreateEvent` under the same operation id.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendEvent {
     pub amount: Amount,
 }
@@ -27,7 +28,7 @@ impl Event for SendEvent {
 /// every bundle it scrolls past. The logged bytes are unchanged from
 /// when this field was typed: `Ecash`'s serde impl serialises as this
 /// same string.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, SqlRow)]
 pub struct SendSuccessEvent {
     pub ecash: String,
 }
@@ -41,7 +42,7 @@ impl Event for SendSuccessEvent {
 /// Fires when reissuance failed (`TxRejectEvent`/`IssuanceFailureEvent`)
 /// or — defensively — when the post-reissuance NoteTable table no longer
 /// has the exact denominations the send needs.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendFailureEvent;
 
 impl Event for SendFailureEvent {
@@ -51,7 +52,7 @@ impl Event for SendFailureEvent {
 
 /// Emitted when a send operation requires re-minting notes before the sender
 /// has enough of the right denominations to send.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReissuanceEvent {
     pub txid: TransactionId,
 }
@@ -62,7 +63,7 @@ impl Event for ReissuanceEvent {
 }
 
 /// Emitted when a receive (reissuance) operation is initiated.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveEvent {
     pub txid: TransactionId,
     pub amount: Amount,
@@ -74,7 +75,7 @@ impl Event for ReceiveEvent {
 }
 
 /// Emitted when an ecash state machine successfully finalises new notes.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct IssuanceSuccessEvent {
     pub txid: TransactionId,
     /// Total amount of notes finalized into the local note table by this
@@ -88,7 +89,7 @@ impl Event for IssuanceSuccessEvent {
 }
 
 /// Emitted when an ecash state machine fails to finalise notes.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct IssuanceFailureEvent;
 
 impl Event for IssuanceFailureEvent {
