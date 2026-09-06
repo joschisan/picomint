@@ -5,7 +5,6 @@ use axum::Router;
 use axum::extract::{Json, State};
 use axum::routing::post;
 use bitcoin::FeeRate;
-use futures::StreamExt as _;
 use hex::ToHex;
 use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
@@ -14,8 +13,6 @@ use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use picomint_cli_server::{CliError, serve};
 use picomint_client::gateway::GATEWAY_ACCOUNT;
-use picomint_client::onchain::events::{SendFailureEvent, SendSuccessEvent};
-use picomint_client::{TxAcceptEvent, TxRejectEvent};
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
     ChannelInfo, ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse,
@@ -669,26 +666,12 @@ async fn client_ecash_receive(
     State(state): State<AppState>,
     Json(payload): Json<ClientEcashReceiveRequest>,
 ) -> Result<Json<ClientEcashReceiveResponse>, CliError> {
-    let amount = payload.ecash.amount();
-
     let operation = state
         .client
         .ecash_receive(payload.ecash.mint, GATEWAY_ACCOUNT, &payload.ecash)
         .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
 
-    let mut events = state.client.subscribe_operation_events(operation);
-    while let Some(entry) = events.next().await {
-        if entry.to_event::<TxAcceptEvent>().is_some() {
-            return Ok(Json(ClientEcashReceiveResponse { amount }));
-        }
-        if let Some(e) = entry.to_event::<TxRejectEvent>() {
-            return Err(CliError::bad_request(format!(
-                "Transaction rejected: {}",
-                e.error
-            )));
-        }
-    }
-    Err(CliError::internal("Event stream ended unexpectedly"))
+    Ok(Json(ClientEcashReceiveResponse { operation }))
 }
 
 /// Fetch the current onchain send-fee for a mint
@@ -727,22 +710,7 @@ async fn client_onchain_send(
         .await
         .map_err(|e| CliError::internal(format!("Failed to submit onchain send: {e}")))?;
 
-    let mut events = state.client.subscribe_operation_events(operation);
-    while let Some(entry) = events.next().await {
-        if let Some(e) = entry.to_event::<SendSuccessEvent>() {
-            return Ok(Json(ClientOnchainSendResponse { txid: e.txid }));
-        }
-        if let Some(e) = entry.to_event::<TxRejectEvent>() {
-            return Err(CliError::bad_request(format!(
-                "Transaction rejected: {}",
-                e.error
-            )));
-        }
-        if entry.to_event::<SendFailureEvent>().is_some() {
-            return Err(CliError::internal("Failure to retrieve txid from mint"));
-        }
-    }
-    Err(CliError::internal("Event stream ended unexpectedly"))
+    Ok(Json(ClientOnchainSendResponse { operation }))
 }
 
 /// Generate deposit address for a mint
