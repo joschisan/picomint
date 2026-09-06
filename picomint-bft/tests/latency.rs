@@ -30,13 +30,26 @@ table!(BftUnits, UnitHash => UnitEnvelope<u64>, "bft-units");
 
 const N_NODES: usize = 4;
 const SESSION: u32 = 0;
-const N_ITEMS: u64 = 400;
+const N_ITEMS: u64 = 200;
 
 struct Profile {
     name: &'static str,
     base: Duration,
     jitter: Duration,
-    interval: Duration,
+}
+
+impl Profile {
+    /// The DAG winds down for several rounds after a commit before it
+    /// goes quiescent; items arrive far enough apart that every one of
+    /// them finds an idle DAG, the way a payment does on a quiet mint.
+    fn interval(&self) -> Duration {
+        (self.base + self.jitter) * 30 + Duration::from_millis(100)
+    }
+
+    /// Idle for this long means the wind-down is over.
+    fn idle_threshold(&self) -> Duration {
+        (self.base + self.jitter) * 3
+    }
 }
 
 const PROFILES: [Profile; 3] = [
@@ -44,19 +57,16 @@ const PROFILES: [Profile; 3] = [
         name: "loopback 1ms",
         base: Duration::from_millis(1),
         jitter: Duration::ZERO,
-        interval: Duration::from_millis(60),
     },
     Profile {
         name: "metro 10ms +-3",
         base: Duration::from_millis(10),
         jitter: Duration::from_millis(3),
-        interval: Duration::from_millis(100),
     },
     Profile {
         name: "residential 30ms +-10",
         base: Duration::from_millis(30),
         jitter: Duration::from_millis(10),
-        interval: Duration::from_millis(200),
     },
 ];
 
@@ -346,15 +356,31 @@ async fn run_profile(profile: &Profile, trace: Arc<Mutex<Trace>>) {
     }
 
     let mut injected: BTreeMap<u64, Instant> = BTreeMap::new();
+    let mut idle_at_injection = 0;
 
     for item in 0..N_ITEMS {
-        injected.insert(item, Instant::now());
+        let now = Instant::now();
+
+        let last_created = trace
+            .lock()
+            .expect("no poisoning")
+            .created
+            .values()
+            .filter_map(|events| events.last())
+            .map(|event| event.0)
+            .max();
+
+        if last_created.is_none_or(|last| now.duration_since(last) > profile.idle_threshold()) {
+            idle_at_injection += 1;
+        }
+
+        injected.insert(item, now);
 
         for submitter in submitters.values() {
             submitter.send(item).await.expect("engine alive");
         }
 
-        sleep(profile.interval).await;
+        sleep(profile.interval()).await;
     }
 
     let deadline = Duration::from_secs(30);
@@ -442,6 +468,7 @@ async fn run_profile(profile: &Profile, trace: Arc<Mutex<Trace>>) {
         pct(&accept, 0.9),
         pct(&accept, 0.99)
     );
+    println!("   items injected into an idle DAG: {idle_at_injection} of {N_ITEMS}");
     println!("   carry-round spread across nodes: {spread:?}");
     println!("   (spread, lag) -> n: {joint:?}");
     println!("   lag rounds |    n | p50 ms | p90 ms");
