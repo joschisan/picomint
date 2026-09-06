@@ -57,6 +57,7 @@ use std::collections::{BTreeMap, VecDeque};
 use bitcoin::hashes::Hash as _;
 use picomint_encoding::Encodable;
 use picomint_redb::{DbRead, Table};
+use tracing::debug;
 
 use crate::data::DataProvider;
 use crate::engine::{Engine, extended_at};
@@ -194,10 +195,26 @@ where
         // Collected because `decide` needs `&mut self` for its caches.
         let candidates: Vec<UnitHash> = extended_at(&self.rounds, &self.extended, round).collect();
 
+        // The latest round that decided a candidate walked before the
+        // head: how long the excluded prefix held the election.
+        let mut prefix_decided_at: Option<Round> = None;
+
         for candidate in candidates {
             match self.decide(candidate) {
-                Some(true) => return Some(candidate),
-                Some(false) => continue,
+                Some(true) => {
+                    debug!(
+                        round,
+                        creator = %self.extended[&candidate].creator,
+                        decided_at = self.decided[&candidate].1,
+                        prefix_decided_at,
+                        "elected head"
+                    );
+
+                    return Some(candidate);
+                }
+                Some(false) => {
+                    prefix_decided_at = prefix_decided_at.max(Some(self.decided[&candidate].1));
+                }
                 None => return None,
             }
         }
@@ -212,8 +229,8 @@ where
     /// every later round's votes — so they are cached for the engine's
     /// lifetime.
     fn decide(&mut self, candidate: UnitHash) -> Option<bool> {
-        if let Some(bit) = self.decided.get(&candidate) {
-            return Some(*bit);
+        if let Some(decision) = self.decided.get(&candidate) {
+            return Some(decision.0);
         }
 
         let candidate_round = self
@@ -242,7 +259,7 @@ where
                     .count();
 
                 if matching >= self.n.threshold() {
-                    self.decided.insert(candidate, v);
+                    self.decided.insert(candidate, (v, round));
 
                     return Some(v);
                 }

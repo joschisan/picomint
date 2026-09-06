@@ -8,7 +8,7 @@ use picomint_encoding::Encodable;
 use picomint_redb::{Database, DbRead, Table, WriteTx};
 use tokio::task::yield_now;
 use tokio::time::{Instant, sleep_until};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::data::DataProvider;
 use crate::keychain::Keychain;
@@ -75,7 +75,9 @@ where
     /// for the engine's lifetime. Sound because decisions propagate:
     /// one deciding unit forces its whole round and every round above
     /// to vote its value (see [`crate::extender`]).
-    pub(crate) decided: BTreeMap<UnitHash, bool>,
+    /// Each decided candidate's bit and the round of the unit that
+    /// decided it.
+    pub(crate) decided: BTreeMap<UnitHash, (bool, Round)>,
     /// Memoized virtual votes, keyed by `(candidate, voter)` and kept
     /// for the engine's lifetime. A vote is a pure function of the
     /// voter's fixed ancestry, so caching never goes stale.
@@ -259,6 +261,17 @@ where
                 self.cascade_parents(&dbtx, sender, &ev.unit);
 
                 let hash = ev.unit.hash();
+
+                // Re-gossip and anti-entropy make a duplicate the common
+                // case, not a fault — silently done once the walk above
+                // has fired.
+                if self
+                    .rounds
+                    .get(&ev.unit.round)
+                    .is_some_and(|units| units.contains(&hash))
+                {
+                    return Ok(());
+                }
 
                 self.store_unit(&dbtx, &ev, hash)?;
 
@@ -452,6 +465,12 @@ where
         };
 
         let hash = unit.hash();
+
+        debug!(
+            round,
+            parents = %unit.parents.keys().map(ToString::to_string).collect::<Vec<_>>().join(","),
+            "created unit"
+        );
 
         let ev = UnitEnvelope {
             sig: self.keychain.sign(self.session, &unit),
