@@ -12,21 +12,21 @@ use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use picomint_gateway_cli_core::{
-    CLI_SOCKET_FILENAME, LdkChannelCloseRequest, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
+    CLI_SOCKET_FILENAME, ClientAddRequest, ClientBalanceRequest, ClientConfigRequest,
+    ClientEcashCountRequest, ClientEcashReceiveRequest, ClientEcashSendRequest,
+    ClientOnchainReceiveRequest, ClientOnchainSendFeeRequest, ClientOnchainSendRequest,
+    ClientRemoveRequest, LdkChannelCloseRequest, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
     LdkChannelSpliceOutRequest, LdkLightningProbeRequest, LdkLightningReceiveRequest,
     LdkLightningSendRequest, LdkOnchainSendRequest, LdkPeerConnectRequest,
-    LdkPeerDisconnectRequest, MintAddRequest, MintBalanceRequest, MintConfigRequest,
-    MintEcashCountRequest, MintEcashReceiveRequest, MintEcashSendRequest,
-    MintOnchainReceiveRequest, MintOnchainSendFeeRequest, MintOnchainSendRequest,
-    MintRemoveRequest, QueryRequest, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
-    ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_CHANNEL_SPLICE_IN,
-    ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE, ROUTE_LDK_LIGHTNING_RECEIVE,
-    ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
-    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MINT_ADD,
-    ROUTE_MINT_BALANCE, ROUTE_MINT_CONFIG, ROUTE_MINT_LIST, ROUTE_MINT_MODULE_ECASH_COUNT,
-    ROUTE_MINT_MODULE_ECASH_RECEIVE, ROUTE_MINT_MODULE_ECASH_SEND,
-    ROUTE_MINT_MODULE_ONCHAIN_RECEIVE, ROUTE_MINT_MODULE_ONCHAIN_SEND,
-    ROUTE_MINT_MODULE_ONCHAIN_SEND_FEE, ROUTE_MINT_REMOVE, ROUTE_MNEMONIC, ROUTE_QUERY,
+    LdkPeerDisconnectRequest, QueryRequest, ROUTE_CLIENT_ADD, ROUTE_CLIENT_BALANCE,
+    ROUTE_CLIENT_CONFIG, ROUTE_CLIENT_ECASH_COUNT, ROUTE_CLIENT_ECASH_RECEIVE,
+    ROUTE_CLIENT_ECASH_SEND, ROUTE_CLIENT_LIST, ROUTE_CLIENT_ONCHAIN_RECEIVE,
+    ROUTE_CLIENT_ONCHAIN_SEND, ROUTE_CLIENT_ONCHAIN_SEND_FEE, ROUTE_CLIENT_REMOVE, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE,
+    ROUTE_LDK_LIGHTNING_RECEIVE, ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE,
+    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    ROUTE_MNEMONIC, ROUTE_QUERY,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -57,9 +57,9 @@ enum Commands {
     /// LDK lightning node management
     #[command(subcommand)]
     Ldk(LdkCommands),
-    /// Mint management
+    /// The gateway as a client of its mints
     #[command(subcommand)]
-    Mint(MintCommands),
+    Client(ClientCommands),
 }
 
 #[derive(Subcommand)]
@@ -123,26 +123,19 @@ enum LdkPeerCommands {
 }
 
 #[derive(Subcommand)]
-enum MintCommands {
+enum ClientCommands {
     /// Add a mint
-    Add(MintAddRequest),
+    Add(ClientAddRequest),
     /// Remove a mint and delete all of its data. Destructive:
     /// check for in-flight payments via `query` first — failing to
     /// check might result in loss of funds.
-    Remove(MintRemoveRequest),
+    Remove(ClientRemoveRequest),
     /// List connected mints
     List,
     /// Get a connected mint's JSON client config
-    Config(MintConfigRequest),
+    Config(ClientConfigRequest),
     /// Get a mint's ecash balance
-    Balance(MintBalanceRequest),
-    /// Per-mint module commands
-    #[command(subcommand)]
-    Module(ModuleCommands),
-}
-
-#[derive(Subcommand)]
-enum ModuleCommands {
+    Balance(ClientBalanceRequest),
     /// Ecash module commands
     #[command(subcommand)]
     Ecash(EcashCommands),
@@ -154,21 +147,21 @@ enum ModuleCommands {
 #[derive(Subcommand)]
 enum EcashCommands {
     /// Count ecash notes by denomination
-    Count(MintEcashCountRequest),
+    Count(ClientEcashCountRequest),
     /// Send ecash
-    Send(MintEcashSendRequest),
+    Send(ClientEcashSendRequest),
     /// Receive ecash
-    Receive(MintEcashReceiveRequest),
+    Receive(ClientEcashReceiveRequest),
 }
 
 #[derive(Subcommand)]
 enum OnchainCommands {
     /// Get send fee estimate
-    SendFee(MintOnchainSendFeeRequest),
+    SendFee(ClientOnchainSendFeeRequest),
     /// Send onchain from the mint
-    Send(MintOnchainSendRequest),
+    Send(ClientOnchainSendRequest),
     /// Get receive address
-    Receive(MintOnchainReceiveRequest),
+    Receive(ClientOnchainReceiveRequest),
 }
 
 /// Tiny connector that dials a fixed Unix socket path, ignoring the URI
@@ -285,35 +278,25 @@ async fn main() -> Result<()> {
             },
         },
 
-        Commands::Mint(cmd) => match cmd {
-            MintCommands::Add(req) => request(d, ROUTE_MINT_ADD, req).await?,
-            MintCommands::Remove(req) => request(d, ROUTE_MINT_REMOVE, req).await?,
-            MintCommands::List => request(d, ROUTE_MINT_LIST, ()).await?,
-            MintCommands::Config(req) => request(d, ROUTE_MINT_CONFIG, req).await?,
-            MintCommands::Balance(req) => request(d, ROUTE_MINT_BALANCE, req).await?,
-            MintCommands::Module(cmd) => match cmd {
-                ModuleCommands::Ecash(cmd) => match cmd {
-                    EcashCommands::Count(req) => {
-                        request(d, ROUTE_MINT_MODULE_ECASH_COUNT, req).await?
-                    }
-                    EcashCommands::Send(req) => {
-                        request(d, ROUTE_MINT_MODULE_ECASH_SEND, req).await?
-                    }
-                    EcashCommands::Receive(req) => {
-                        request(d, ROUTE_MINT_MODULE_ECASH_RECEIVE, req).await?
-                    }
-                },
-                ModuleCommands::Onchain(cmd) => match cmd {
-                    OnchainCommands::SendFee(req) => {
-                        request(d, ROUTE_MINT_MODULE_ONCHAIN_SEND_FEE, req).await?
-                    }
-                    OnchainCommands::Send(req) => {
-                        request(d, ROUTE_MINT_MODULE_ONCHAIN_SEND, req).await?
-                    }
-                    OnchainCommands::Receive(req) => {
-                        request(d, ROUTE_MINT_MODULE_ONCHAIN_RECEIVE, req).await?
-                    }
-                },
+        Commands::Client(cmd) => match cmd {
+            ClientCommands::Add(req) => request(d, ROUTE_CLIENT_ADD, req).await?,
+            ClientCommands::Remove(req) => request(d, ROUTE_CLIENT_REMOVE, req).await?,
+            ClientCommands::List => request(d, ROUTE_CLIENT_LIST, ()).await?,
+            ClientCommands::Config(req) => request(d, ROUTE_CLIENT_CONFIG, req).await?,
+            ClientCommands::Balance(req) => request(d, ROUTE_CLIENT_BALANCE, req).await?,
+            ClientCommands::Ecash(cmd) => match cmd {
+                EcashCommands::Count(req) => request(d, ROUTE_CLIENT_ECASH_COUNT, req).await?,
+                EcashCommands::Send(req) => request(d, ROUTE_CLIENT_ECASH_SEND, req).await?,
+                EcashCommands::Receive(req) => request(d, ROUTE_CLIENT_ECASH_RECEIVE, req).await?,
+            },
+            ClientCommands::Onchain(cmd) => match cmd {
+                OnchainCommands::SendFee(req) => {
+                    request(d, ROUTE_CLIENT_ONCHAIN_SEND_FEE, req).await?
+                }
+                OnchainCommands::Send(req) => request(d, ROUTE_CLIENT_ONCHAIN_SEND, req).await?,
+                OnchainCommands::Receive(req) => {
+                    request(d, ROUTE_CLIENT_ONCHAIN_RECEIVE, req).await?
+                }
             },
         },
     };

@@ -19,26 +19,27 @@ use picomint_client::{TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::MintId;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
-    CLI_SOCKET_FILENAME, ChannelInfo, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
+    CLI_SOCKET_FILENAME, ChannelInfo, ClientAddRequest, ClientBalanceRequest,
+    ClientBalanceResponse, ClientConfigRequest, ClientConfigResponse, ClientEcashCountRequest,
+    ClientEcashCountResponse, ClientEcashReceiveRequest, ClientEcashReceiveResponse,
+    ClientEcashSendRequest, ClientEcashSendResponse, ClientListResponse,
+    ClientOnchainReceiveRequest, ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest,
+    ClientOnchainSendFeeResponse, ClientOnchainSendRequest, ClientOnchainSendResponse,
+    ClientRemoveRequest, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
     LdkChannelListResponse, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
     LdkChannelSpliceOutRequest, LdkLightningProbeRequest, LdkLightningReceiveRequest,
     LdkLightningReceiveResponse, LdkLightningSendRequest, LdkLightningSendResponse,
     LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
-    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MintAddRequest,
-    MintBalanceRequest, MintBalanceResponse, MintConfigRequest, MintConfigResponse,
-    MintEcashCountRequest, MintEcashCountResponse, MintEcashReceiveRequest,
-    MintEcashReceiveResponse, MintEcashSendRequest, MintEcashSendResponse, MintListResponse,
-    MintOnchainReceiveRequest, MintOnchainReceiveResponse, MintOnchainSendFeeRequest,
-    MintOnchainSendFeeResponse, MintOnchainSendRequest, MintOnchainSendResponse, MintRemoveRequest,
-    MnemonicResponse, PeerInfo, QueryRequest, QueryResponse, ROUTE_INFO, ROUTE_LDK_BALANCES,
-    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
+    PeerInfo, QueryRequest, QueryResponse, ROUTE_CLIENT_ADD, ROUTE_CLIENT_BALANCE,
+    ROUTE_CLIENT_CONFIG, ROUTE_CLIENT_ECASH_COUNT, ROUTE_CLIENT_ECASH_RECEIVE,
+    ROUTE_CLIENT_ECASH_SEND, ROUTE_CLIENT_LIST, ROUTE_CLIENT_ONCHAIN_RECEIVE,
+    ROUTE_CLIENT_ONCHAIN_SEND, ROUTE_CLIENT_ONCHAIN_SEND_FEE, ROUTE_CLIENT_REMOVE, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE,
     ROUTE_LDK_LIGHTNING_RECEIVE, ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
-    ROUTE_MINT_ADD, ROUTE_MINT_BALANCE, ROUTE_MINT_CONFIG, ROUTE_MINT_LIST,
-    ROUTE_MINT_MODULE_ECASH_COUNT, ROUTE_MINT_MODULE_ECASH_RECEIVE, ROUTE_MINT_MODULE_ECASH_SEND,
-    ROUTE_MINT_MODULE_ONCHAIN_RECEIVE, ROUTE_MINT_MODULE_ONCHAIN_SEND,
-    ROUTE_MINT_MODULE_ONCHAIN_SEND_FEE, ROUTE_MINT_REMOVE, ROUTE_MNEMONIC, ROUTE_QUERY,
+    ROUTE_MNEMONIC, ROUTE_QUERY,
 };
 use reqwest::StatusCode;
 use tokio::net::UnixListener;
@@ -128,30 +129,18 @@ fn router() -> Router<AppState> {
         .route(ROUTE_LDK_PEER_DISCONNECT, post(ldk_peer_disconnect))
         .route(ROUTE_LDK_PEER_LIST, post(ldk_peer_list))
         // Mint management
-        .route(ROUTE_MINT_ADD, post(mint_add))
-        .route(ROUTE_MINT_REMOVE, post(mint_remove))
-        .route(ROUTE_MINT_LIST, post(mint_list))
-        .route(ROUTE_MINT_CONFIG, post(mint_config))
-        .route(ROUTE_MINT_BALANCE, post(mint_balance))
+        .route(ROUTE_CLIENT_ADD, post(client_add))
+        .route(ROUTE_CLIENT_REMOVE, post(client_remove))
+        .route(ROUTE_CLIENT_LIST, post(client_list))
+        .route(ROUTE_CLIENT_CONFIG, post(client_config))
+        .route(ROUTE_CLIENT_BALANCE, post(client_balance))
         // Per-mint module commands
-        .route(ROUTE_MINT_MODULE_ECASH_COUNT, post(mint_module_ecash_count))
-        .route(ROUTE_MINT_MODULE_ECASH_SEND, post(mint_module_ecash_send))
-        .route(
-            ROUTE_MINT_MODULE_ECASH_RECEIVE,
-            post(mint_module_ecash_receive),
-        )
-        .route(
-            ROUTE_MINT_MODULE_ONCHAIN_SEND_FEE,
-            post(mint_module_onchain_send_fee),
-        )
-        .route(
-            ROUTE_MINT_MODULE_ONCHAIN_SEND,
-            post(mint_module_onchain_send),
-        )
-        .route(
-            ROUTE_MINT_MODULE_ONCHAIN_RECEIVE,
-            post(mint_module_onchain_receive),
-        )
+        .route(ROUTE_CLIENT_ECASH_COUNT, post(client_ecash_count))
+        .route(ROUTE_CLIENT_ECASH_SEND, post(client_ecash_send))
+        .route(ROUTE_CLIENT_ECASH_RECEIVE, post(client_ecash_receive))
+        .route(ROUTE_CLIENT_ONCHAIN_SEND_FEE, post(client_onchain_send_fee))
+        .route(ROUTE_CLIENT_ONCHAIN_SEND, post(client_onchain_send))
+        .route(ROUTE_CLIENT_ONCHAIN_RECEIVE, post(client_onchain_receive))
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +183,7 @@ async fn query(
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, CliError> {
     let rows = tokio::task::spawn_blocking(move || {
-        crate::analytics::query(&state.data_dir, &request.query)
+        picomint_analytics::query(&state.data_dir, &request.query)
     })
     .await
     .map_err(CliError::internal)?
@@ -618,9 +607,9 @@ async fn ldk_peer_list(
 
 /// Add a new mint
 #[instrument(skip_all, err)]
-async fn mint_add(
+async fn client_add(
     State(state): State<AppState>,
-    Json(payload): Json<MintAddRequest>,
+    Json(payload): Json<ClientAddRequest>,
 ) -> Result<Json<()>, CliError> {
     state
         .client
@@ -636,9 +625,9 @@ async fn mint_add(
 /// checks for in-flight payments via the query route before removing;
 /// failing to check might result in loss of funds.
 #[instrument(skip_all, err)]
-async fn mint_remove(
+async fn client_remove(
     State(state): State<AppState>,
-    Json(payload): Json<MintRemoveRequest>,
+    Json(payload): Json<ClientRemoveRequest>,
 ) -> Result<Json<()>, CliError> {
     let dbtx = state.client.begin_remove_mint(payload.mint).await?;
 
@@ -653,18 +642,18 @@ async fn mint_remove(
 
 /// List connected mints
 #[instrument(skip_all, err)]
-async fn mint_list(State(state): State<AppState>) -> Result<Json<MintListResponse>, CliError> {
-    Ok(Json(MintListResponse {
+async fn client_list(State(state): State<AppState>) -> Result<Json<ClientListResponse>, CliError> {
+    Ok(Json(ClientListResponse {
         mints: state.mint_list(),
     }))
 }
 
 /// Display mint config
 #[instrument(skip_all, err)]
-async fn mint_config(
+async fn client_config(
     State(state): State<AppState>,
-    Json(payload): Json<MintConfigRequest>,
-) -> Result<Json<MintConfigResponse>, CliError> {
+    Json(payload): Json<ClientConfigRequest>,
+) -> Result<Json<ClientConfigResponse>, CliError> {
     let mint = resolve_mint(&state, payload.mint)?;
 
     let config = state
@@ -672,22 +661,22 @@ async fn mint_config(
         .config(mint)
         .ok_or_else(|| CliError::bad_request("Mint not added"))?;
 
-    Ok(Json(MintConfigResponse {
+    Ok(Json(ClientConfigResponse {
         config: serde_json::to_value(config).expect("ConsensusConfig is serializable"),
     }))
 }
 
 /// Get a mint's ecash balance
 #[instrument(skip_all, err)]
-async fn mint_balance(
+async fn client_balance(
     State(state): State<AppState>,
-    Json(payload): Json<MintBalanceRequest>,
-) -> Result<Json<MintBalanceResponse>, CliError> {
+    Json(payload): Json<ClientBalanceRequest>,
+) -> Result<Json<ClientBalanceResponse>, CliError> {
     let mint = resolve_mint(&state, payload.mint)?;
 
     let balance_msat = state.client.ecash_balance(mint, GATEWAY_ACCOUNT);
 
-    Ok(Json(MintBalanceResponse { balance_msat }))
+    Ok(Json(ClientBalanceResponse { balance_msat }))
 }
 
 // ---------------------------------------------------------------------------
@@ -712,21 +701,21 @@ fn resolve_mint(state: &AppState, id: Option<MintId>) -> Result<MintId, CliError
 
 /// Count held ecash notes by denomination
 #[instrument(skip_all, err)]
-async fn mint_module_ecash_count(
+async fn client_ecash_count(
     State(state): State<AppState>,
-    Json(payload): Json<MintEcashCountRequest>,
-) -> Result<Json<MintEcashCountResponse>, CliError> {
+    Json(payload): Json<ClientEcashCountRequest>,
+) -> Result<Json<ClientEcashCountResponse>, CliError> {
     let mint = resolve_mint(&state, payload.mint)?;
     let counts = state.client.ecash_count(mint, GATEWAY_ACCOUNT);
-    Ok(Json(MintEcashCountResponse { counts }))
+    Ok(Json(ClientEcashCountResponse { counts }))
 }
 
 /// Spend ecash from a mint
 #[instrument(skip_all, err)]
-async fn mint_module_ecash_send(
+async fn client_ecash_send(
     State(state): State<AppState>,
-    Json(payload): Json<MintEcashSendRequest>,
-) -> Result<Json<MintEcashSendResponse>, CliError> {
+    Json(payload): Json<ClientEcashSendRequest>,
+) -> Result<Json<ClientEcashSendResponse>, CliError> {
     let mint = resolve_mint(&state, payload.mint)?;
 
     let ecash = state
@@ -739,17 +728,17 @@ async fn mint_module_ecash_send(
         .await
         .map_err(CliError::internal)?;
 
-    Ok(Json(MintEcashSendResponse { ecash }))
+    Ok(Json(ClientEcashSendResponse { ecash }))
 }
 
 /// Receive ecash into the gateway. The ecash bundle itself carries the target
 /// mint id, so no `--id` is needed. Blocks until issuance either
 /// completes or fails mint-side.
 #[instrument(skip_all, err)]
-async fn mint_module_ecash_receive(
+async fn client_ecash_receive(
     State(state): State<AppState>,
-    Json(payload): Json<MintEcashReceiveRequest>,
-) -> Result<Json<MintEcashReceiveResponse>, CliError> {
+    Json(payload): Json<ClientEcashReceiveRequest>,
+) -> Result<Json<ClientEcashReceiveResponse>, CliError> {
     let amount = payload.ecash.amount();
 
     let operation = state
@@ -760,7 +749,7 @@ async fn mint_module_ecash_receive(
     let mut events = state.client.subscribe_operation_events(operation);
     while let Some(entry) = events.next().await {
         if entry.to_event::<TxAcceptEvent>().is_some() {
-            return Ok(Json(MintEcashReceiveResponse { amount }));
+            return Ok(Json(ClientEcashReceiveResponse { amount }));
         }
         if let Some(e) = entry.to_event::<TxRejectEvent>() {
             return Err(CliError::bad_request(format!(
@@ -774,27 +763,27 @@ async fn mint_module_ecash_receive(
 
 /// Fetch the current onchain send-fee for a mint
 #[instrument(skip_all, err)]
-async fn mint_module_onchain_send_fee(
+async fn client_onchain_send_fee(
     State(state): State<AppState>,
-    Json(payload): Json<MintOnchainSendFeeRequest>,
-) -> Result<Json<MintOnchainSendFeeResponse>, CliError> {
+    Json(payload): Json<ClientOnchainSendFeeRequest>,
+) -> Result<Json<ClientOnchainSendFeeResponse>, CliError> {
     let mint = resolve_mint(&state, payload.mint)?;
     let fee = state
         .client
         .onchain_send_fee(mint)
         .await
         .map_err(|e| CliError::internal(format!("Failed to fetch send fee: {e}")))?;
-    Ok(Json(MintOnchainSendFeeResponse { fee }))
+    Ok(Json(ClientOnchainSendFeeResponse { fee }))
 }
 
 /// Withdraw onchain from a mint. Blocks until the send reaches a
 /// terminal state: confirmed broadcast, mint rejected the input tx, or
 /// the mint accepted but never produced a bitcoin txid.
 #[instrument(skip_all, err)]
-async fn mint_module_onchain_send(
+async fn client_onchain_send(
     State(state): State<AppState>,
-    Json(payload): Json<MintOnchainSendRequest>,
-) -> Result<Json<MintOnchainSendResponse>, CliError> {
+    Json(payload): Json<ClientOnchainSendRequest>,
+) -> Result<Json<ClientOnchainSendResponse>, CliError> {
     let mint = resolve_mint(&state, payload.mint)?;
     let operation = state
         .client
@@ -811,7 +800,7 @@ async fn mint_module_onchain_send(
     let mut events = state.client.subscribe_operation_events(operation);
     while let Some(entry) = events.next().await {
         if let Some(e) = entry.to_event::<SendSuccessEvent>() {
-            return Ok(Json(MintOnchainSendResponse { txid: e.txid }));
+            return Ok(Json(ClientOnchainSendResponse { txid: e.txid }));
         }
         if let Some(e) = entry.to_event::<TxRejectEvent>() {
             return Err(CliError::bad_request(format!(
@@ -828,10 +817,10 @@ async fn mint_module_onchain_send(
 
 /// Generate deposit address for a mint
 #[instrument(skip_all, err)]
-async fn mint_module_onchain_receive(
+async fn client_onchain_receive(
     State(state): State<AppState>,
-    Json(payload): Json<MintOnchainReceiveRequest>,
-) -> Result<Json<MintOnchainReceiveResponse>, CliError> {
+    Json(payload): Json<ClientOnchainReceiveRequest>,
+) -> Result<Json<ClientOnchainReceiveResponse>, CliError> {
     let mint = resolve_mint(&state, payload.mint)?;
 
     let address = state
@@ -839,7 +828,7 @@ async fn mint_module_onchain_receive(
         .onchain_receive(mint, GATEWAY_ACCOUNT)
         .map_err(CliError::internal)?;
 
-    Ok(Json(MintOnchainReceiveResponse {
+    Ok(Json(ClientOnchainReceiveResponse {
         address: address.as_unchecked().clone(),
     }))
 }

@@ -2,10 +2,11 @@ use crate::eventlog::{Event, EventKind, EventSource};
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, Txid};
 use picomint_core::TransactionId;
+use picomint_core::sql::SqlRow;
 use serde::{Deserialize, Serialize};
 
 /// Emitted when a pegout (send to onchain) operation is initiated.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendEvent {
     pub txid: TransactionId,
     pub address: Address<NetworkUnchecked>,
@@ -19,7 +20,7 @@ impl Event for SendEvent {
 }
 
 /// Emitted when the pegout is observed on bitcoin with a confirmed txid.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendSuccessEvent {
     pub txid: Txid,
 }
@@ -30,7 +31,7 @@ impl Event for SendSuccessEvent {
 }
 
 /// Emitted when the pegout fails to reach onchain confirmation.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendFailureEvent;
 
 impl Event for SendFailureEvent {
@@ -39,7 +40,7 @@ impl Event for SendFailureEvent {
 }
 
 /// Emitted when a pegin operation is initiated.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveEvent {
     pub txid: TransactionId,
     pub address: Address<NetworkUnchecked>,

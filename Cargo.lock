@@ -3352,6 +3352,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-analytics"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "picomint-client",
+ "picomint-core",
+ "rusqlite",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "picomint-base32"
 version = "0.1.0"
 dependencies = [
@@ -3420,6 +3434,7 @@ dependencies = [
  "iroh-base",
  "lightning-invoice",
  "picomint-base32",
+ "picomint-derive",
  "picomint-encoding",
  "picomint-tbs",
  "picomint-tpe",
@@ -3514,6 +3529,7 @@ dependencies = [
  "ldk-node",
  "lightning",
  "lightning-invoice",
+ "picomint-analytics",
  "picomint-client",
  "picomint-core",
  "picomint-encoding",
@@ -3522,7 +3538,6 @@ dependencies = [
  "picomint-rpc",
  "rand 0.8.6",
  "reqwest 0.13.3",
- "rusqlite",
  "serde_json",
  "tokio",
  "tokio-rustls",

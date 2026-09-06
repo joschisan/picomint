@@ -6,8 +6,8 @@ use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
-    InfoResponse, LdkChannelListResponse, LdkLightningReceiveResponse, LdkOnchainReceiveResponse,
-    MintBalanceResponse, MintListResponse,
+    ClientBalanceResponse, ClientListResponse, InfoResponse, LdkChannelListResponse,
+    LdkLightningReceiveResponse, LdkOnchainReceiveResponse,
 };
 use picomint_node_cli_core::{InviteResponse, SetupStatus};
 use serde::de::DeserializeOwned;
@@ -60,7 +60,7 @@ pub fn gateway_info(gateway_data_dir: &Path) -> Result<InfoResponse> {
 
 pub fn gateway_mint_add(gateway_data_dir: &Path, invite: &InviteCode) -> Result<Value> {
     gateway_cmd(gateway_data_dir)
-        .arg("mint")
+        .arg("client")
         .arg("add")
         .arg(picomint_base32::encode(invite))
         .run_cli::<Value>()
@@ -68,26 +68,26 @@ pub fn gateway_mint_add(gateway_data_dir: &Path, invite: &InviteCode) -> Result<
 
 pub fn gateway_mint_remove(gateway_data_dir: &Path, mint: &str) -> Result<Value> {
     gateway_cmd(gateway_data_dir)
-        .arg("mint")
+        .arg("client")
         .arg("remove")
         .arg(mint)
         .run_cli::<Value>()
 }
 
-pub fn gateway_mint_list(gateway_data_dir: &Path) -> Result<MintListResponse> {
+pub fn gateway_mint_list(gateway_data_dir: &Path) -> Result<ClientListResponse> {
     gateway_cmd(gateway_data_dir)
-        .arg("mint")
+        .arg("client")
         .arg("list")
-        .run_cli::<MintListResponse>()
+        .run_cli::<ClientListResponse>()
 }
 
-pub fn gateway_mint_balance(gateway_data_dir: &Path, mint: &str) -> Result<MintBalanceResponse> {
+pub fn gateway_mint_balance(gateway_data_dir: &Path, mint: &str) -> Result<ClientBalanceResponse> {
     gateway_cmd(gateway_data_dir)
-        .arg("mint")
+        .arg("client")
         .arg("balance")
         .arg("--id")
         .arg(mint)
-        .run_cli::<MintBalanceResponse>()
+        .run_cli::<ClientBalanceResponse>()
 }
 
 pub fn gateway_ldk_onchain_receive(gateway_data_dir: &Path) -> Result<LdkOnchainReceiveResponse> {

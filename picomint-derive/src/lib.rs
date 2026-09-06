@@ -34,6 +34,59 @@ pub fn derive_encodable(input: TokenStream) -> TokenStream {
     .into()
 }
 
+/// One analytics table row per struct: every named field becomes a
+/// column named after it (plus the field type's unit suffix), typed and
+/// rendered by its `SqlColumn` impl. Unit structs map to a table with no
+/// payload columns.
+#[proc_macro_derive(SqlRow)]
+pub fn derive_sql_row(input: TokenStream) -> TokenStream {
+    let DeriveInput { ident, data, .. } = parse_macro_input!(input);
+
+    let fields = match data {
+        Data::Struct(DataStruct {
+            fields: Fields::Named(fields),
+            ..
+        }) => fields.named.into_iter().collect::<Vec<_>>(),
+        Data::Struct(DataStruct {
+            fields: Fields::Unit,
+            ..
+        }) => Vec::new(),
+        _ => {
+            return error(
+                &ident,
+                "SqlRow can only be derived for named-field or unit structs",
+            )
+            .into();
+        }
+    };
+
+    let names = fields
+        .iter()
+        .map(|f| f.ident.clone().unwrap())
+        .collect::<Vec<_>>();
+    let types = fields.iter().map(|f| f.ty.clone()).collect::<Vec<_>>();
+
+    quote! {
+        impl ::picomint_core::sql::SqlRow for #ident {
+            fn columns() -> Vec<(String, &'static str)> {
+                vec![#((
+                    format!(
+                        "{}{}",
+                        stringify!(#names),
+                        <#types as ::picomint_core::sql::SqlColumn>::SUFFIX,
+                    ),
+                    <#types as ::picomint_core::sql::SqlColumn>::TYPE,
+                )),*]
+            }
+
+            fn values(&self) -> Vec<::picomint_core::sql::SqlValue> {
+                vec![#(::picomint_core::sql::SqlColumn::sql_value(&self.#names)),*]
+            }
+        }
+    }
+    .into()
+}
+
 #[proc_macro_derive(Decodable)]
 pub fn derive_decodable(input: TokenStream) -> TokenStream {
     let DeriveInput {

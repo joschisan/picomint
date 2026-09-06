@@ -1,4 +1,3 @@
-pub mod analytics;
 pub mod cli;
 pub mod connect;
 pub mod db;
@@ -52,7 +51,7 @@ pub struct AppState {
     pub receive_fee: PaymentFee,
     pub invoice_expiry_secs: u32,
     pub cltv_expiry_delta: u32,
-    pub analytics: analytics::Analytics,
+    pub analytics: picomint_analytics::Analytics,
 }
 
 impl AppState {

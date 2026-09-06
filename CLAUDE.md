@@ -29,6 +29,7 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 - `picomint-node-cli` / `picomint-node-cli-core` — admin CLI for the node daemon (HTTP-over-Unix-socket) + shared route/request types
 - `picomint-gateway-daemon` — Lightning gateway binary with embedded LDK node
 - `picomint-gateway-cli` / `picomint-gateway-cli-core` — admin CLI for the gateway daemon + shared route/request types
+- `picomint-analytics` — SQLite mirror of a client's event log, one derived table per event (`SqlRow` derive from `picomint-derive`, column rules in `picomint_core::sql`); no views, read via the daemon's `query` command
 - `picomint-client` — multi-mint client library; owns the concrete per-module client state machines and the append-only event log (`src/eventlog.rs`)
 - `picomint-redb` — redb-backed typed database layer (`table!` macro; consensus-encoded keys/values)
 - `picomint-rpc` — iroh RPC primitives shared by client and server (pooled connections, one request per bi stream)
@@ -42,7 +43,7 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 
 ### Wire + storage
 - Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-encoding`
-- Storage: redb only. No migrations (tables are declared via the `table!` macro in `picomint-redb`; keys/values use consensus encoding). The one exception is the gateway's analytics database — a separate SQLite file (rusqlite) queried via the `query` CLI command
+- Storage: redb only. No migrations (tables are declared via the `table!` macro in `picomint-redb`; keys/values use consensus encoding). The one exception is the analytics database (`picomint-analytics`) — a separate SQLite file (rusqlite), wiped and rebuilt from the event log on every start, queried via the `query` CLI command
 - Table name strings are kebab-case with the owning domain as the first segment: module tables `ecash-`/`onchain-`/`lightning-`/`gateway-`, client-core tables `client-`, embedder tables prefixed by the embedder (`gateway-` in the gateway daemon's file, `pico-` in the app's). Only the node daemon's consensus-core tables go unprefixed — it is the sole owner of its file (plus `bft-units` from picomint-bft).
 - Transport: Iroh-only (QUIC + hole-punching). No TLS/websocket/DNS announcements
 - Each node binds exactly one iroh `Endpoint` (one secret key, one node id) for both mint p2p and the public client API; the accept loop demuxes by remote node-id (node set → P2P path, otherwise → public API path).
