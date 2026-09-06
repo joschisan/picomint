@@ -1,5 +1,6 @@
 use picomint_redb::{WriteTx, table};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use picomint_core::config::MintId;
@@ -51,21 +52,31 @@ impl StateMachine for ReceiveStateMachine {
             .await
             .map_err(|e| e.to_string())?;
 
-        let tpe_pks = ctx.config.lightning.tpe_pks.clone();
-        let offer = self.offer.clone();
+        let tpe_pks = Arc::new(ctx.config.lightning.tpe_pks.clone());
+        let offer = Arc::new(self.offer.clone());
         let shares = ctx
             .api
             .request_with_strategy_retry(
                 FilterMapThreshold::new(
                     move |node, resp: DecryptionKeyShareResponse| {
-                        let share = resp.share;
-                        if !offer.verify_decryption_share(
-                            tpe_pks.get(&node).context("Missing TPE PK for node")?,
-                            &share,
-                        ) {
-                            return Err(anyhow!("Invalid decryption share"));
+                        let tpe_pks = tpe_pks.clone();
+                        let offer = offer.clone();
+
+                        // A pairing per share; keep it off the runtime worker.
+                        async move {
+                            tokio::task::spawn_blocking(move || {
+                                let share = resp.share;
+                                if !offer.verify_decryption_share(
+                                    tpe_pks.get(&node).context("Missing TPE PK for node")?,
+                                    &share,
+                                ) {
+                                    return Err(anyhow!("Invalid decryption share"));
+                                }
+                                Ok(share)
+                            })
+                            .await
+                            .expect("Share verification cannot panic")
                         }
-                        Ok(share)
                     },
                     ctx.api.num_nodes(),
                 ),

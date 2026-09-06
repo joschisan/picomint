@@ -256,7 +256,15 @@ impl AppState {
     /// table insert and LDK's `receive_for_hash` refuse a repeated payment
     /// hash.
     pub async fn receive(&self, payload: ReceiveRequest) -> anyhow::Result<Bolt11Invoice> {
-        ensure!(payload.offer.verify(), "The offer is invalid");
+        // Two pairings; keep them off the worker serving the request.
+        let offer = payload.offer.clone();
+
+        ensure!(
+            tokio::task::spawn_blocking(move || offer.verify())
+                .await
+                .expect("Offer verification cannot panic"),
+            "The offer is invalid"
+        );
 
         ensure!(
             self.client.config(payload.mint).is_some(),

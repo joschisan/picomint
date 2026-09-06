@@ -33,7 +33,6 @@ pub use self::secret::OnchainSecret;
 use secp256k1::Keypair;
 use send_sm::{SendStateMachine, SendStateMachineTable};
 use thiserror::Error;
-use tokio::task::block_in_place;
 use tokio::time::sleep;
 use tracing::warn;
 
@@ -158,16 +157,23 @@ fn derive_tweak(ctx: &ClientContext, account: Account, index: u64) -> Keypair {
 /// Find `account`'s next valid index starting from (and including)
 /// `start_index`.
 #[allow(clippy::maybe_infinite_iter)]
-fn next_valid_index(ctx: &ClientContext, account: Account, start_index: u64) -> u64 {
+async fn next_valid_index(ctx: &ClientContext, account: Account, start_index: u64) -> u64 {
     let pks_hash = ctx.config.onchain.agg_pk.consensus_hash();
 
-    block_in_place(|| {
+    let ctx = ctx.clone();
+
+    tokio::task::spawn_blocking(move || {
         (start_index..)
             .find(|i| {
-                is_potential_receive(&pks_hash, &derive_address(ctx, account, *i).script_pubkey())
+                is_potential_receive(
+                    &pks_hash,
+                    &derive_address(&ctx, account, *i).script_pubkey(),
+                )
             })
             .expect("Will always find a valid index")
     })
+    .await
+    .expect("Address derivation cannot panic")
 }
 
 /// Issue ecash into `account` for an unspent output with a given fee.
@@ -232,7 +238,7 @@ async fn output_scanner(ctx: ClientContext) {
             continue;
         }
 
-        let index = next_valid_index(&ctx, account, 0);
+        let index = next_valid_index(&ctx, account, 0).await;
         let dbtx = ctx.db.begin_write();
         dbtx.insert_new(&ValidAddressIndexTable, &(ctx.mint, account, index), &());
         dbtx.commit();
@@ -304,7 +310,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
             // If we used this account's highest valid index, add its next
             // valid one
             if address_index == next_address_index {
-                let index = next_valid_index(ctx, account, next_address_index + 1);
+                let index = next_valid_index(ctx, account, next_address_index + 1).await;
 
                 let dbtx = ctx.db.begin_write();
 
