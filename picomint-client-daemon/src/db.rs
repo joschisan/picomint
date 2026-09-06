@@ -13,7 +13,7 @@ pub const DB_FILE: &str = "client.redb";
 table!(
     RootEntropyTable,
     () => Vec<u8>,
-    "client-root-entropy",
+    "root-entropy",
 );
 
 /// Load the persisted mnemonic, or generate and persist a fresh one on

@@ -15,7 +15,7 @@ use rand::rngs::OsRng;
 table!(
     RootEntropyTable,
     () => Vec<u8>,
-    "gateway-root-entropy",
+    "root-entropy",
 );
 
 // The daemon's iroh secret key, generated once on first start —
@@ -26,19 +26,19 @@ table!(
 table!(
     IrohSecretKeyTable,
     () => [u8; 32],
-    "gateway-iroh-sk",
+    "iroh-sk",
 );
 
 table!(
     OutgoingContractTable,
     OperationId => OutgoingContractRow,
-    "gateway-outgoing-contract",
+    "outgoing-contract",
 );
 
 table!(
     IncomingOfferTable,
     OperationId => IncomingOfferRow,
-    "gateway-incoming-offer",
+    "incoming-offer",
 );
 
 // The `payment_hash`es of LDK events the event loop has fully processed
@@ -49,7 +49,7 @@ table!(
 table!(
     LdkEventPaymentHashTable,
     [u8; 32] => (),
-    "gateway-ldk-event-payment-hash",
+    "ldk-event-payment-hash",
 );
 
 // Cursor for the daemon-wide trailer task. Value is the next (unprocessed)
@@ -59,7 +59,7 @@ table!(
 table!(
     EventLogCursorTable,
     () => EventLogId,
-    "gateway-event-log-cursor",
+    "event-log-cursor",
 );
 
 #[derive(Debug, Clone, Encodable, Decodable)]
