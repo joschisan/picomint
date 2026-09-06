@@ -12,7 +12,6 @@ use ldk_node::payment::{PaymentKind, PaymentStatus};
 use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use picomint_cli_server::{CliError, serve};
-use picomint_client::gateway::GATEWAY_ACCOUNT;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
     ChannelInfo, ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse,
@@ -617,7 +616,7 @@ async fn client_balance(
 ) -> Result<Json<ClientBalanceResponse>, CliError> {
     let mint = payload.mint;
 
-    let balance_msat = state.client.ecash_balance(mint, GATEWAY_ACCOUNT);
+    let balance_msat = state.client.ecash_balance(mint, payload.account);
 
     Ok(Json(ClientBalanceResponse { balance_msat }))
 }
@@ -633,7 +632,7 @@ async fn client_ecash_count(
     Json(payload): Json<ClientEcashCountRequest>,
 ) -> Result<Json<ClientEcashCountResponse>, CliError> {
     let mint = payload.mint;
-    let counts = state.client.ecash_count(mint, GATEWAY_ACCOUNT);
+    let counts = state.client.ecash_count(mint, payload.account);
     Ok(Json(ClientEcashCountResponse { counts }))
 }
 
@@ -649,7 +648,7 @@ async fn client_ecash_send(
         .client
         .ecash_send(
             mint,
-            GATEWAY_ACCOUNT,
+            payload.account,
             picomint_core::Amount::from_sat(payload.amount.to_sat()),
         )
         .await
@@ -658,9 +657,8 @@ async fn client_ecash_send(
     Ok(Json(ClientEcashSendResponse { ecash }))
 }
 
-/// Receive ecash into the gateway. The ecash bundle itself carries the target
-/// mint id, so no `--id` is needed. Blocks until issuance either
-/// completes or fails mint-side.
+/// Reissue an ecash string into the named account. Returns the operation
+/// id; acceptance shows up in the analytics as `core_tx_accept`.
 #[instrument(skip_all, err)]
 async fn client_ecash_receive(
     State(state): State<AppState>,
@@ -668,7 +666,7 @@ async fn client_ecash_receive(
 ) -> Result<Json<ClientEcashReceiveResponse>, CliError> {
     let operation = state
         .client
-        .ecash_receive(payload.ecash.mint, GATEWAY_ACCOUNT, &payload.ecash)
+        .ecash_receive(payload.mint, payload.account, &payload.ecash)
         .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
 
     Ok(Json(ClientEcashReceiveResponse { operation }))
@@ -702,7 +700,7 @@ async fn client_onchain_send(
         .client
         .onchain_send(
             mint,
-            GATEWAY_ACCOUNT,
+            payload.account,
             payload.address,
             payload.amount,
             payload.fee,
@@ -723,7 +721,7 @@ async fn client_onchain_receive(
 
     let address = state
         .client
-        .onchain_receive(mint, GATEWAY_ACCOUNT)
+        .onchain_receive(mint, payload.account)
         .map_err(CliError::internal)?;
 
     Ok(Json(ClientOnchainReceiveResponse {
