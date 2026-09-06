@@ -292,7 +292,8 @@ after its source and kind (`gateway_send`, `gateway_send_success`,
 `core_tx_create`, `core_tx_accept`, `ecash_success`, ...). Every table
 starts with the same columns — `id` (position in the event log), `ts`
 (ms since epoch), `mint`, `account`, `operation` — followed by the
-event's own fields: amounts as integer `*_msat` or `*_sat` columns,
+event's own fields: amounts as integers, msat everywhere except the
+onchain tables, which are sat,
 hashes, ids and keys as hex or bech32 text. There are no views; an
 operation's story is a join on `operation`, and the tables of one
 operation carry the txids that tie its transactions to their outcome.
@@ -305,7 +306,7 @@ their outcome:
 
 ```bash
 picomint-gateway-cli query \
-    "SELECT s.ts, s.amount_msat, s.fee_msat, \
+    "SELECT s.ts, s.amount, s.fee, \
             ss.preimage IS NOT NULL AS succeeded, sc.id IS NOT NULL AS cancelled \
      FROM gateway_send s \
      LEFT JOIN gateway_send_success ss USING (operation) \
@@ -317,7 +318,7 @@ Successful outgoing volume per mint, in sat:
 
 ```bash
 picomint-gateway-cli query \
-    "SELECT s.mint, SUM(s.amount_msat)/1000 AS sat \
+    "SELECT s.mint, SUM(s.amount)/1000 AS sat \
      FROM gateway_send s INNER JOIN gateway_send_success USING (operation) \
      GROUP BY s.mint"
 ```
@@ -336,7 +337,7 @@ Incoming payments still waiting on their claim:
 
 ```bash
 picomint-gateway-cli query \
-    "SELECT r.operation, r.ts, r.amount_msat FROM gateway_receive r \
+    "SELECT r.operation, r.ts, r.amount FROM gateway_receive r \
      LEFT JOIN gateway_receive_success rs USING (operation) \
      LEFT JOIN gateway_receive_refund rr USING (operation) \
      LEFT JOIN gateway_receive_failure rf USING (operation) \
