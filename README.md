@@ -228,12 +228,12 @@ For the gateway to actually route payments on behalf of a mint, its nodes also n
 
 ### Manage Mint Liquidity
 
-Every command below except `ecash receive` accepts `--id <mint-id>` to target a specific mint (`ecash receive` reads the target mint from the ecash string itself). When exactly one mint is added (the common case) the flag can be omitted and that mint is used.
+Every command below except `ecash receive` takes the mint id as its first argument; `ecash receive` reads the target mint from the ecash string itself.
 
 The gateway holds its own ecash balance in every mint it has added. Check it with:
 
 ```bash
-picomint-gateway-cli client balance
+picomint-gateway-cli client balance <mint-id>
 ```
 
 You can move funds in and out either onchain or as an ecash string.
@@ -241,19 +241,19 @@ You can move funds in and out either onchain or as an ecash string.
 **Receive Onchain:** generate a mint deposit address and send bitcoin to it. When the transaction confirms the mint issues ecash to the gateway.
 
 ```bash
-picomint-gateway-cli client onchain receive
+picomint-gateway-cli client onchain receive <mint-id>
 ```
 
 **Send Onchain:** burn ecash in exchange for an onchain transfer to the given address. The mint picks a feerate; check what it will charge first:
 
 ```bash
-picomint-gateway-cli client onchain send-fee
+picomint-gateway-cli client onchain send-fee <mint-id>
 ```
 
 Then send:
 
 ```bash
-picomint-gateway-cli client onchain send <address> <amount>
+picomint-gateway-cli client onchain send <mint-id> <address> <amount>
 ```
 
 Passing `--fee <amount>` overrides the feerate with an exact value; otherwise whatever `send-fee` currently reports is used.
@@ -261,7 +261,7 @@ Passing `--fee <amount>` overrides the feerate with an exact value; otherwise wh
 **Send Ecash:** spend part of the mint balance as a base32-encoded ecash string you can hand to another client:
 
 ```bash
-picomint-gateway-cli client ecash send <amount>
+picomint-gateway-cli client ecash send <mint-id> <amount>
 ```
 
 **Receive Ecash:** reissue an ecash string produced by `client ecash send` (on this gateway or any other client) into your balance:

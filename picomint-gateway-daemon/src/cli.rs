@@ -16,7 +16,6 @@ use picomint_cli_server::{CliError, serve};
 use picomint_client::gateway::GATEWAY_ACCOUNT;
 use picomint_client::onchain::events::{SendFailureEvent, SendSuccessEvent};
 use picomint_client::{TxAcceptEvent, TxRejectEvent};
-use picomint_core::config::MintId;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
     ChannelInfo, ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse,
@@ -601,7 +600,7 @@ async fn client_config(
     State(state): State<AppState>,
     Json(payload): Json<ClientConfigRequest>,
 ) -> Result<Json<ClientConfigResponse>, CliError> {
-    let mint = resolve_mint(&state, payload.mint)?;
+    let mint = payload.mint;
 
     let config = state
         .client
@@ -619,7 +618,7 @@ async fn client_balance(
     State(state): State<AppState>,
     Json(payload): Json<ClientBalanceRequest>,
 ) -> Result<Json<ClientBalanceResponse>, CliError> {
-    let mint = resolve_mint(&state, payload.mint)?;
+    let mint = payload.mint;
 
     let balance_msat = state.client.ecash_balance(mint, GATEWAY_ACCOUNT);
 
@@ -630,29 +629,13 @@ async fn client_balance(
 // Per-mint module handlers
 // ---------------------------------------------------------------------------
 
-/// Resolve the target mint. When `id` is `None` and the gateway has
-/// exactly one mint added, that one is used; otherwise the caller must
-/// supply `--id`.
-fn resolve_mint(state: &AppState, id: Option<MintId>) -> Result<MintId, CliError> {
-    match id {
-        Some(id) => Ok(id),
-        None => match state.mint_list().as_slice() {
-            [] => Err(CliError::bad_request("No mints connected")),
-            [info] => Ok(info.mint),
-            _ => Err(CliError::bad_request(
-                "Multiple mints connected — pass --id <MINT_ID>",
-            )),
-        },
-    }
-}
-
 /// Count held ecash notes by denomination
 #[instrument(skip_all, err)]
 async fn client_ecash_count(
     State(state): State<AppState>,
     Json(payload): Json<ClientEcashCountRequest>,
 ) -> Result<Json<ClientEcashCountResponse>, CliError> {
-    let mint = resolve_mint(&state, payload.mint)?;
+    let mint = payload.mint;
     let counts = state.client.ecash_count(mint, GATEWAY_ACCOUNT);
     Ok(Json(ClientEcashCountResponse { counts }))
 }
@@ -663,7 +646,7 @@ async fn client_ecash_send(
     State(state): State<AppState>,
     Json(payload): Json<ClientEcashSendRequest>,
 ) -> Result<Json<ClientEcashSendResponse>, CliError> {
-    let mint = resolve_mint(&state, payload.mint)?;
+    let mint = payload.mint;
 
     let ecash = state
         .client
@@ -714,7 +697,7 @@ async fn client_onchain_send_fee(
     State(state): State<AppState>,
     Json(payload): Json<ClientOnchainSendFeeRequest>,
 ) -> Result<Json<ClientOnchainSendFeeResponse>, CliError> {
-    let mint = resolve_mint(&state, payload.mint)?;
+    let mint = payload.mint;
     let fee = state
         .client
         .onchain_send_fee(mint)
@@ -731,7 +714,7 @@ async fn client_onchain_send(
     State(state): State<AppState>,
     Json(payload): Json<ClientOnchainSendRequest>,
 ) -> Result<Json<ClientOnchainSendResponse>, CliError> {
-    let mint = resolve_mint(&state, payload.mint)?;
+    let mint = payload.mint;
     let operation = state
         .client
         .onchain_send(
@@ -768,7 +751,7 @@ async fn client_onchain_receive(
     State(state): State<AppState>,
     Json(payload): Json<ClientOnchainReceiveRequest>,
 ) -> Result<Json<ClientOnchainReceiveResponse>, CliError> {
-    let mint = resolve_mint(&state, payload.mint)?;
+    let mint = payload.mint;
 
     let address = state
         .client
