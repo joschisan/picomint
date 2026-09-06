@@ -1,0 +1,16 @@
+[package]
+name = "picomint-cli-client"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "The CLI side of the picomint admin socket"
+
+[dependencies]
+anyhow = { workspace = true }
+http-body-util = "0.1"
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
+tower-service = "0.3"

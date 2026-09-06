@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::extract::{Json, State};
-use axum::response::IntoResponse;
 use axum::routing::post;
 use bitcoin::FeeRate;
 use futures::StreamExt as _;
@@ -13,98 +12,46 @@ use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
+use picomint_cli_server::{CliError, serve};
 use picomint_client::gateway::GATEWAY_ACCOUNT;
 use picomint_client::onchain::events::{SendFailureEvent, SendSuccessEvent};
 use picomint_client::{TxAcceptEvent, TxRejectEvent};
 use picomint_core::config::MintId;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
-    CLI_SOCKET_FILENAME, ChannelInfo, ClientAddRequest, ClientBalanceRequest,
-    ClientBalanceResponse, ClientConfigRequest, ClientConfigResponse, ClientEcashCountRequest,
-    ClientEcashCountResponse, ClientEcashReceiveRequest, ClientEcashReceiveResponse,
-    ClientEcashSendRequest, ClientEcashSendResponse, ClientListResponse,
-    ClientOnchainReceiveRequest, ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest,
-    ClientOnchainSendFeeResponse, ClientOnchainSendRequest, ClientOnchainSendResponse,
-    ClientRemoveRequest, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
-    LdkChannelListResponse, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
-    LdkChannelSpliceOutRequest, LdkLightningProbeRequest, LdkLightningReceiveRequest,
-    LdkLightningReceiveResponse, LdkLightningSendRequest, LdkLightningSendResponse,
-    LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
-    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
-    PeerInfo, QueryRequest, QueryResponse, ROUTE_CLIENT_ADD, ROUTE_CLIENT_BALANCE,
-    ROUTE_CLIENT_CONFIG, ROUTE_CLIENT_ECASH_COUNT, ROUTE_CLIENT_ECASH_RECEIVE,
-    ROUTE_CLIENT_ECASH_SEND, ROUTE_CLIENT_LIST, ROUTE_CLIENT_ONCHAIN_RECEIVE,
-    ROUTE_CLIENT_ONCHAIN_SEND, ROUTE_CLIENT_ONCHAIN_SEND_FEE, ROUTE_CLIENT_REMOVE, ROUTE_INFO,
-    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
-    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE,
-    ROUTE_LDK_LIGHTNING_RECEIVE, ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE,
-    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
-    ROUTE_MNEMONIC, ROUTE_QUERY,
+    ChannelInfo, ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse,
+    ClientConfigRequest, ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
+    ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendRequest,
+    ClientEcashSendResponse, ClientListResponse, ClientOnchainReceiveRequest,
+    ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse,
+    ClientOnchainSendRequest, ClientOnchainSendResponse, ClientRemoveRequest, InfoResponse,
+    LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelListResponse, LdkChannelOpenRequest,
+    LdkChannelSpliceInRequest, LdkChannelSpliceOutRequest, LdkLightningProbeRequest,
+    LdkLightningReceiveRequest, LdkLightningReceiveResponse, LdkLightningSendRequest,
+    LdkLightningSendResponse, LdkOnchainReceiveResponse, LdkOnchainSendRequest,
+    LdkOnchainSendResponse, LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse,
+    MnemonicResponse, PeerInfo, QueryRequest, QueryResponse, ROUTE_CLIENT_ADD,
+    ROUTE_CLIENT_BALANCE, ROUTE_CLIENT_CONFIG, ROUTE_CLIENT_ECASH_COUNT,
+    ROUTE_CLIENT_ECASH_RECEIVE, ROUTE_CLIENT_ECASH_SEND, ROUTE_CLIENT_LIST,
+    ROUTE_CLIENT_ONCHAIN_RECEIVE, ROUTE_CLIENT_ONCHAIN_SEND, ROUTE_CLIENT_ONCHAIN_SEND_FEE,
+    ROUTE_CLIENT_REMOVE, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
+    ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_CHANNEL_SPLICE_IN,
+    ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE, ROUTE_LDK_LIGHTNING_RECEIVE,
+    ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
+    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
+    ROUTE_QUERY,
 };
-use reqwest::StatusCode;
-use tokio::net::UnixListener;
 use tower_http::cors::CorsLayer;
 use tracing::{info, instrument};
 
 use crate::AppState;
 
-/// Simple error type for CLI/admin endpoints.
-#[derive(Debug)]
-pub struct CliError {
-    pub code: StatusCode,
-    pub error: String,
-}
-
-impl std::fmt::Display for CliError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.error)
-    }
-}
-
-impl std::error::Error for CliError {}
-
-impl CliError {
-    pub fn bad_request(error: impl std::fmt::Display) -> Self {
-        Self {
-            code: StatusCode::BAD_REQUEST,
-            error: error.to_string(),
-        }
-    }
-
-    pub fn internal(error: impl std::fmt::Display) -> Self {
-        Self {
-            code: StatusCode::INTERNAL_SERVER_ERROR,
-            error: error.to_string(),
-        }
-    }
-}
-
-impl IntoResponse for CliError {
-    fn into_response(self) -> axum::response::Response {
-        (self.code, self.error).into_response()
-    }
-}
-
-impl From<anyhow::Error> for CliError {
-    fn from(e: anyhow::Error) -> Self {
-        Self::internal(e)
-    }
-}
-
 pub async fn run(state: AppState) {
-    let socket_path = state.data_dir.join(CLI_SOCKET_FILENAME);
-    std::fs::remove_file(&socket_path).ok();
+    let data_dir = state.data_dir.clone();
 
-    let listener = UnixListener::bind(&socket_path).expect("Failed to bind CLI server");
+    let router = router().with_state(state).layer(CorsLayer::permissive());
 
-    let router = router()
-        .with_state(state)
-        .layer(CorsLayer::permissive())
-        .into_make_service();
-
-    axum::serve(listener, router)
-        .await
-        .expect("CLI webserver failed");
+    serve(&data_dir, router).await;
 }
 
 fn router() -> Router<AppState> {

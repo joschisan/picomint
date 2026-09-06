@@ -1,21 +1,13 @@
-use std::future::Future;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::path::PathBuf;
 
-use anyhow::{Context as _, Result, ensure};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
-use http_body_util::{BodyExt, Full};
-use hyper::Request;
-use hyper::body::Bytes;
-use hyper_util::client::legacy::Client;
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use picomint_cli_client::{print_json, request};
 use picomint_gateway_cli_core::{
-    CLI_SOCKET_FILENAME, ClientAddRequest, ClientBalanceRequest, ClientConfigRequest,
-    ClientEcashCountRequest, ClientEcashReceiveRequest, ClientEcashSendRequest,
-    ClientOnchainReceiveRequest, ClientOnchainSendFeeRequest, ClientOnchainSendRequest,
-    ClientRemoveRequest, LdkChannelCloseRequest, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
+    ClientAddRequest, ClientBalanceRequest, ClientConfigRequest, ClientEcashCountRequest,
+    ClientEcashReceiveRequest, ClientEcashSendRequest, ClientOnchainReceiveRequest,
+    ClientOnchainSendFeeRequest, ClientOnchainSendRequest, ClientRemoveRequest,
+    LdkChannelCloseRequest, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
     LdkChannelSpliceOutRequest, LdkLightningProbeRequest, LdkLightningReceiveRequest,
     LdkLightningSendRequest, LdkOnchainSendRequest, LdkPeerConnectRequest,
     LdkPeerDisconnectRequest, QueryRequest, ROUTE_CLIENT_ADD, ROUTE_CLIENT_BALANCE,
@@ -28,10 +20,6 @@ use picomint_gateway_cli_core::{
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_MNEMONIC, ROUTE_QUERY,
 };
-use serde::Serialize;
-use serde_json::Value;
-use tokio::net::UnixStream;
-use tower_service::Service;
 
 #[derive(Parser)]
 #[command(version)]
@@ -162,73 +150,6 @@ enum OnchainCommands {
     Send(ClientOnchainSendRequest),
     /// Get receive address
     Receive(ClientOnchainReceiveRequest),
-}
-
-/// Tiny connector that dials a fixed Unix socket path, ignoring the URI
-/// entirely. Plugs into `hyper_util::client::legacy::Client` where a TCP
-/// connector would normally go.
-#[derive(Clone)]
-struct UnixConnector {
-    path: PathBuf,
-}
-
-impl Service<hyper::Uri> for UnixConnector {
-    type Response = TokioIo<UnixStream>;
-    type Error = io::Error;
-    type Future = Pin<Box<dyn Future<Output = io::Result<TokioIo<UnixStream>>> + Send>>;
-
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, _: hyper::Uri) -> Self::Future {
-        let path = self.path.clone();
-        Box::pin(async move { UnixStream::connect(path).await.map(TokioIo::new) })
-    }
-}
-
-async fn request<R: Serialize>(data_dir: &Path, route: &str, payload: R) -> Result<Value> {
-    let socket_path = data_dir.join(CLI_SOCKET_FILENAME);
-    let connector = UnixConnector {
-        path: socket_path.clone(),
-    };
-    let client = Client::builder(TokioExecutor::new()).build(connector);
-
-    let body_bytes = serde_json::to_vec(&payload)?;
-    let uri: hyper::Uri = format!("http://localhost{route}").parse()?;
-    let req = Request::post(uri)
-        .header("content-type", "application/json")
-        .body(Full::new(Bytes::from(body_bytes)))?;
-
-    let resp = client.request(req).await.with_context(|| {
-        format!(
-            "Failed to POST {route} to gateway at {}",
-            socket_path.display()
-        )
-    })?;
-
-    let status = resp.status();
-    let resp_bytes = resp.into_body().collect().await?.to_bytes();
-
-    ensure!(
-        status.is_success(),
-        "API error ({}): {}",
-        status.as_u16(),
-        String::from_utf8_lossy(&resp_bytes)
-    );
-
-    if resp_bytes.is_empty() {
-        Ok(Value::Null)
-    } else {
-        serde_json::from_slice(&resp_bytes).context("Failed to parse gateway response")
-    }
-}
-
-fn print_json(value: &Value) {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(value).expect("Cannot serialize")
-    );
 }
 
 #[tokio::main(flavor = "current_thread")]

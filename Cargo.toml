@@ -4,6 +4,8 @@ members = [
     "picomint-analytics",
     "picomint-base32",
     "picomint-bft",
+    "picomint-cli-client",
+    "picomint-cli-server",
     "picomint-client",
     "picomint-core",
     "picomint-derive",
@@ -83,6 +85,8 @@ maud = "0.27.0"
 picomint-analytics = { path = "./picomint-analytics", version = "=0.1.0" }
 picomint-base32 = { path = "./picomint-base32", version = "=0.1.0" }
 picomint-bft = { path = "./picomint-bft", version = "=0.1.0" }
+picomint-cli-client = { path = "./picomint-cli-client", version = "=0.1.0" }
+picomint-cli-server = { path = "./picomint-cli-server", version = "=0.1.0" }
 picomint-client = { path = "./picomint-client", version = "=0.1.0" }
 picomint-core = { path = "./picomint-core", version = "=0.1.0" }
 picomint-derive = { path = "./picomint-derive", version = "=0.1.0" }
