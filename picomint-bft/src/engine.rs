@@ -13,6 +13,7 @@ use crate::data::DataProvider;
 use crate::keychain::Keychain;
 use crate::network::{INetwork, Message, Recipient};
 use crate::unit::{Round, Unit, UnitData, UnitEnvelope, UnitHash};
+use crate::view::{UnitView, View, merge_element, merge_views};
 
 /// Periodic own-unit push interval. Pull is demand-driven, not periodic.
 const ANTI_ENTROPY_INTERVAL: Duration = Duration::from_secs(1);
@@ -91,6 +92,15 @@ where
     /// throttle re-asks so anti-entropy retransmits don't fan out
     /// duplicate parent-walks every tick.
     request_sent_at: BTreeMap<UnitHash, Instant>,
+    /// Per-extended-unit ancestry views — inputs to the reference
+    /// rule (see [`crate::view`]). Computed at extension from the
+    /// parents' memoized views and, like `votes`, kept for the
+    /// engine's lifetime.
+    views: BTreeMap<UnitHash, UnitView>,
+    /// Units refused by the reference rule — they pin a creator their
+    /// other parents prove forked. Never extended; cached so the
+    /// cascade doesn't re-judge them on every sweep.
+    invalid: BTreeSet<UnitHash>,
 }
 
 impl<P, D, T, N> Engine<P, D, T, N>
@@ -131,6 +141,8 @@ where
             unordered_own_data: BTreeSet::new(),
             own_top: None,
             request_sent_at: BTreeMap::new(),
+            views: BTreeMap::new(),
+            invalid: BTreeSet::new(),
         }
     }
 
@@ -502,9 +514,12 @@ where
     /// key its own branches under other creators to fake the
     /// distinct-creator quorums the decision rule tallies. Round-0
     /// units have empty parent maps (enforced at insert), so their
-    /// parent check is vacuously true.
+    /// parent check is vacuously true. On top of the position check,
+    /// every parent entry must pass the reference rule (see
+    /// [`crate::view`]): a unit pinning a creator its other parents
+    /// prove forked is invalid and never extends.
     fn maybe_extend(&mut self, dbtx: &impl DbRead, hash: UnitHash) -> Option<Round> {
-        if self.is_extended(hash) {
+        if self.is_extended(hash) || self.invalid.contains(&hash) {
             return None;
         }
 
@@ -520,9 +535,81 @@ where
             return None;
         }
 
+        if let Some(forked) = ev
+            .unit
+            .parents
+            .keys()
+            .find(|creator| self.pin_forked(&ev.unit.parents, **creator))
+        {
+            warn!(creator = %forked, unit = ?hash, "unit pins a forked creator; refusing to extend it");
+
+            self.invalid.insert(hash);
+
+            return None;
+        }
+
+        let view = self.compute_view(&ev.unit, hash);
+
+        self.views.insert(hash, view);
+
         self.extended.insert(hash, ev.unit.clone());
 
         Some(ev.unit.round)
+    }
+
+    /// The reference-rule judgment for one parent entry: true iff the
+    /// combined views of the *other* parents prove `creator` forked.
+    /// The judged pin itself is excluded so the first unit whose
+    /// parents span both fork branches — the merge point that carries
+    /// the evidence upward — stays valid.
+    fn pin_forked(&self, parents: &BTreeMap<NodeId, UnitHash>, creator: NodeId) -> bool {
+        let mut judgment: Option<View> = None;
+
+        for entry in parents.iter().filter(|entry| *entry.0 != creator) {
+            let Some(view) = self.views.get(entry.1).and_then(|view| view.get(&creator)) else {
+                continue;
+            };
+
+            judgment = Some(match judgment {
+                None => *view,
+                Some(so_far) => merge_element(&self.extended, creator, so_far, *view),
+            });
+        }
+
+        judgment == Some(View::Forked)
+    }
+
+    /// A unit's view: its parents' views merged, plus the unit itself
+    /// chained onto its own column — or `Forked` there if it does not
+    /// extend the column tip its ancestry already contains, since two
+    /// own units off one chain are themselves a fork.
+    fn compute_view(&self, unit: &Unit, hash: UnitHash) -> UnitView {
+        let mut view = UnitView::new();
+
+        for parent in unit.parents.values() {
+            let parent_view = self
+                .views
+                .get(parent)
+                .expect("parents are extended and extended units have views");
+
+            merge_views(&self.extended, &mut view, parent_view);
+        }
+
+        let own = match view.get(&unit.creator).copied() {
+            None => View::Tip(unit.round, hash),
+            Some(View::Forked) => View::Forked,
+            Some(View::Tip(round, tip)) => {
+                if unit.parents.get(&unit.creator) == Some(&tip) && round + 1 == unit.round {
+                    View::Tip(unit.round, hash)
+                } else {
+                    View::Forked
+                }
+            }
+        };
+
+        view.insert(unit.creator, own);
+
+        view
     }
 
     /// Our own unit at `round-1` plus the `threshold - 1` lowest-`NodeId`
@@ -555,12 +642,39 @@ where
 
         let t = self.n.threshold();
 
-        let parents: BTreeMap<NodeId, UnitHash> = std::iter::once((self.id, own))
-            .chain(extended_row.into_iter().filter(|(c, _)| *c != self.id))
-            .take(t)
-            .collect();
+        // Mirror of the receivers' reference rule: drop any creator
+        // the chosen row would judge forked and refill, so we never
+        // sign a unit receivers refuse to extend. Each pass removes a
+        // creator, so the loop ends.
+        loop {
+            let parents: BTreeMap<NodeId, UnitHash> = std::iter::once((self.id, own))
+                .chain(
+                    extended_row
+                        .iter()
+                        .filter(|entry| *entry.0 != self.id)
+                        .map(|entry| (*entry.0, *entry.1)),
+                )
+                .take(t)
+                .collect();
 
-        (parents.len() == t).then_some(parents)
+            if parents.len() < t {
+                return None;
+            }
+
+            let Some(forked) = parents
+                .keys()
+                .find(|creator| self.pin_forked(&parents, **creator))
+                .copied()
+            else {
+                return Some(parents);
+            };
+
+            if forked == self.id {
+                return None;
+            }
+
+            extended_row.remove(&forked);
+        }
     }
 }
 

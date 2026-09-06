@@ -120,6 +120,8 @@ votes:              BTreeMap<(UnitHash, UnitHash), bool>, // memoized virtual vo
 unordered_own_data: BTreeSet<Round>,                // own rounds with unemitted items (work gate)
 own_top:            Option<(Round, UnitHash)>,      // own column top: next-round base + anti-entropy push
 request_sent_at:    BTreeMap<UnitHash, Instant>,    // demand-pull throttle
+views:              BTreeMap<UnitHash, UnitView>,   // per-extended-unit ancestry views (reference rule)
+invalid:            BTreeSet<UnitHash>,             // units refused by the reference rule
 ```
 
 The `rounds` index is written at exactly one point in steady state
@@ -178,12 +180,32 @@ extending units that satisfy:
 3. Every parent is already in `extended`, was created by the node it
    is keyed under, and sits at exactly `round − 1` (round-0 parent
    maps are empty, so vacuously true).
+4. No parent entry names a creator the unit's *other* parents'
+   ancestries prove forked — the **reference rule**.
 
 The parent position check pins each unit's claimed position to its
 parents' — inductively down to round 0 — so extended rounds are
 gap-free and a forker cannot key its own branches under other
 creators to fake the distinct-creator quorums the decision rule
 tallies.
+
+The reference rule quarantines forkers through the DAG itself. Every
+extended unit carries a derived *view* — per creator, the tip of the
+single self-parent chain of that creator's units its ancestry
+contains, or *forked* once the ancestry holds two units of one
+creator not on one chain (self-authenticating proof of misbehavior,
+absorbing). A unit pinning a creator its **other** parents already
+prove forked is invalid and never extends; excluding the judged pin
+itself keeps the first merge of two branches valid, so the evidence
+can enter the DAG and spread. Own-unit creation mirrors the judgment
+and drops forked creators from the parent row, so honest units are
+always valid. Once the evidence is ancestry-wide — a round or two
+after both branches meet — nothing new by the forker (its own
+self-pin fails the same judgment) or by colluders that keep pinning
+it can ever be referenced, voted on, or emitted. Local rules only:
+no alerts, no extra messages, and identical verdicts everywhere,
+because the judgment is a pure function of the unit's fixed
+ancestry.
 
 Extension records the bare unit in `extended` — the unit set the
 extender scans when extracting the total order. The
@@ -373,6 +395,8 @@ orders of magnitude smaller. Catch-up under loss is O(n × R) Request
 - [`keychain.rs`] — schnorr `sign(session, value)` / `verify(session,
   value, sig, node)` with session-binding hash prefix.
 - [`data.rs`] — `DataProvider<D>` trait for unit payload sourcing.
+- [`view.rs`] — ancestry views and the reference rule (fork
+  quarantine).
 
 [`lib.rs`]: src/lib.rs
 [`unit.rs`]: src/unit.rs
@@ -381,3 +405,4 @@ orders of magnitude smaller. Catch-up under loss is O(n × R) Request
 [`network.rs`]: src/network.rs
 [`keychain.rs`]: src/keychain.rs
 [`data.rs`]: src/data.rs
+[`view.rs`]: src/view.rs

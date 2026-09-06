@@ -665,6 +665,103 @@ async fn engines_reject_units_from_unknown_creator() {
     );
 }
 
+/// The reference rule quarantines a forker's column once the fork
+/// evidence spreads. Node 0 splits its round-0 position between the
+/// halves of the mint, then keeps building rounds exactly like an
+/// honest node on one branch, feeding a fresh payload into every
+/// unit. Its early units are innocently referenced, but as soon as
+/// both branches meet in the honest nodes' ancestries, units pinning
+/// node 0 — its own self-chaining units first of all — are judged
+/// invalid and never extend, so the payload stream must cut off. The
+/// spread is jitter-timed (evidence travels only when the backbone
+/// happens to reference node 3's column), hence the generous
+/// quarantine margin; the three honest nodes must agree throughout.
+#[tokio::test]
+async fn engines_quarantine_forker_after_evidence_spreads() {
+    let n = NumNodes::from(N_NODES);
+    let keychains = build_keychains(n);
+    let mut channels = MockChannel::mesh(n, 0.0);
+
+    let forker = NodeId::from(0u8);
+    let forker_channel = channels.remove(&forker).expect("mesh built above");
+
+    let engines = spawn_engines(n, &keychains, channels);
+
+    let branch_a = build_envelope(&keychains[&forker], 0, forker, BTreeMap::new(), 1);
+    let branch_b = build_envelope(&keychains[&forker], 0, forker, BTreeMap::new(), 2);
+
+    forker_channel.deliver(NodeId::from(1u8), Message::Unit(branch_a.clone()));
+    forker_channel.deliver(NodeId::from(2u8), Message::Unit(branch_a.clone()));
+    forker_channel.deliver(NodeId::from(3u8), Message::Unit(branch_b.clone()));
+
+    // Drive the forker's column off its inbox: build round k on the
+    // branch_a chain plus two harvested honest round-(k-1) parents,
+    // just as an honest engine would.
+    let mut own_top = branch_a.unit.clone();
+    let mut honest_rows: BTreeMap<Round, BTreeMap<NodeId, UnitHash>> = BTreeMap::new();
+    let mut sent = 0u32;
+
+    while sent < 30 {
+        let (_, msg) = forker_channel.rx.recv().await.expect("mesh alive");
+
+        let Message::Unit(ev) = msg else { continue };
+
+        if ev.unit.creator != forker {
+            honest_rows
+                .entry(ev.unit.round)
+                .or_default()
+                .insert(ev.unit.creator, ev.unit.hash());
+        }
+
+        let round = own_top.round + 1;
+
+        let Some(row) = honest_rows.get(&(round - 1)) else {
+            continue;
+        };
+
+        if row.len() < 2 {
+            continue;
+        }
+
+        let parents: BTreeMap<NodeId, UnitHash> = std::iter::once((forker, own_top.hash()))
+            .chain(row.iter().take(2).map(|entry| (*entry.0, *entry.1)))
+            .collect();
+
+        let ev = build_envelope(
+            &keychains[&forker],
+            round,
+            forker,
+            parents,
+            100 + round as u64,
+        );
+
+        for recipient in [1u8, 2u8, 3u8] {
+            forker_channel.deliver(NodeId::from(recipient), Message::Unit(ev.clone()));
+        }
+
+        own_top = ev.unit.clone();
+        sent += 1;
+    }
+
+    let sequences = collect_sequences(engines.ordered_rxs).await;
+
+    for h in engines.handles {
+        h.abort();
+    }
+
+    let reference = assert_agreement(&sequences);
+
+    for entry in &reference {
+        if entry.0 == forker {
+            assert!(
+                entry.1 <= 2 || entry.1 < 115,
+                "forker payload {} ordered long after the evidence spread",
+                entry.1,
+            );
+        }
+    }
+}
+
 /// Restarting an engine on its persisted unit table must reproduce the
 /// exact live emission sequence — including under forks. Runs the
 /// forking-node scenario, then replays node 1's engine on a clone of

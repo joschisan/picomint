@@ -26,6 +26,7 @@ mod extender;
 mod keychain;
 mod network;
 mod unit;
+mod view;
 
 pub use data::DataProvider;
 pub use engine::Engine;
