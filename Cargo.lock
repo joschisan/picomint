@@ -3514,7 +3514,6 @@ dependencies = [
  "clap",
  "picomint-cli-client",
  "picomint-gateway-cli-core",
- "serde_json",
  "tokio",
 ]
 
@@ -3557,7 +3556,6 @@ dependencies = [
  "picomint-redb",
  "picomint-rpc",
  "rand 0.8.6",
- "reqwest 0.13.3",
  "serde_json",
  "tokio",
  "tokio-rustls",

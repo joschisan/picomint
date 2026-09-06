@@ -34,7 +34,6 @@ picomint-gateway-cli-core = { workspace = true }
 picomint-redb = { workspace = true }
 picomint-rpc = { workspace = true }
 rand = { workspace = true }
-reqwest = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["signal"] }
 tokio-rustls = { workspace = true }
