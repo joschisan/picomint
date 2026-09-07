@@ -14,7 +14,7 @@ use tracing::{info, warn};
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::{
     AcceptedItemTable, AcceptedTxidTable, InviteMetaTable, InviteUserCountTable,
-    SignedSessionOutcomeTable,
+    SessionSignaturesTable,
 };
 use crate::consensus::rpc;
 use crate::{handler, handler_async};
@@ -75,7 +75,7 @@ async fn await_tx_outcome(api: &ConsensusApi, tx: Transaction) -> Result<(), TxE
     let mut rejected = api.server.rejected.subscribe();
 
     let notify_item = api.server.db.notify_for_table(&AcceptedItemTable);
-    let notify_session = api.server.db.notify_for_table(&SignedSessionOutcomeTable);
+    let notify_session = api.server.db.notify_for_table(&SessionSignaturesTable);
 
     let mut notified_item = Box::pin(notify_item.notified());
     let mut notified_session = Box::pin(notify_session.notified());

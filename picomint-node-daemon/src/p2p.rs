@@ -17,7 +17,7 @@ use iroh::{Endpoint, PublicKey, SecretKey};
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_bft::Message as BftMessage;
 use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backoff};
-use picomint_core::session::SignedSessionOutcome;
+use picomint_core::session::SessionOutcome;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::{NodeId, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
@@ -75,7 +75,7 @@ pub enum P2PMessage {
     Bft(BftMessage<ConsensusItem>),
     SessionSignature(secp256k1::schnorr::Signature),
     SessionIndex(u32),
-    SignedSessionOutcome(SignedSessionOutcome),
+    SessionOutcome(SessionOutcome),
     Checksum(sha256::Hash),
     DkgG1(DkgMessageG1),
     DkgG2(DkgMessageG2),

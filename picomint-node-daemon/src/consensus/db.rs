@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use picomint_bft::{Unit, UnitHash};
 use picomint_core::expiry;
 use picomint_core::secp256k1::schnorr;
@@ -10,15 +12,28 @@ use picomint_redb::{DbRead, table};
 
 use crate::consensus::server::Server;
 
+// Every accepted item under its session and its dense position within
+// it, written once as it is accepted and never moved: a session's items
+// are read back only to serve a node catching up, or to resume after a
+// crash.
 table!(
     AcceptedItemTable,
-    u64 => session::AcceptedItem,
+    (u32, u64) => session::AcceptedItem,
     "accepted-item",
+);
+
+// The bft delivery position the running session resumes from after a
+// crash: every position below it was processed, accepted or rejected.
+// Cleared with the signatures at the cut.
+table!(
+    ResumeIndexTable,
+    () => u64,
+    "resume-index",
 );
 
 // The bft engine's three tables — declared here, lent to
 // `picomint_bft::Engine` via `Engine::new`, and cleared at the session
-// boundary by `finalize_session` alongside `AcceptedItemTable`.
+// boundary by `finalize_session`.
 
 table!(
     BftUnitTable,
@@ -44,10 +59,13 @@ table!(
     "accepted-txid",
 );
 
+// A threshold of node signatures over a closed session's header. The
+// signed outcome a node catching up asks for is assembled from this and
+// the session's items on request.
 table!(
-    SignedSessionOutcomeTable,
-    u32 => session::SignedSessionOutcome,
-    "signed-session-outcome",
+    SessionSignaturesTable,
+    u32 => BTreeMap<NodeId, schnorr::Signature>,
+    "session-signatures",
 );
 
 // Latest block count each node has voted for. Votes only ever increase, so a
