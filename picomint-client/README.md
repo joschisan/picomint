@@ -20,7 +20,7 @@ These come from the transaction-submission and ecash state machines and appear a
 
 | Event | Source | Meaning |
 |---|---|---|
-| `TxCreateEvent { txid, remint, fee }` | Core | Tx submitted to the mint. `fee` is the mint fee paid; `remint` is the over-pull beyond the deficit that the mint reissues back as fresh notes once the tx is accepted. |
+| `TxCreateEvent { txid, reissue, fee }` | Core | Tx submitted to the mint. `fee` is the mint fee paid; `reissue` is the over-pull beyond the deficit that the mint reissues back as fresh notes once the tx is accepted. |
 | `TxAcceptEvent { txid }` | Core | Mint accepted the tx into consensus. |
 | `TxRejectEvent { txid, error }` | Core | Mint definitively rejected the tx (double-spend, invalid input, fee too low, …). |
 | `EcashSuccessEvent { txid, amount }` | Ecash | Threshold blind-sig shares aggregated and the resulting `SpendableNote`s written to the local note table. |
@@ -46,7 +46,7 @@ ReceiveEvent ── TxCreateEvent
 
 ### `ecash_send(mint, account, amount)` — produce out-of-band ecash
 
-Returns an `Ecash` bundle directly (or `SendEcashError` on failure); `Ecash`'s serde representation is the `picomint`-prefixed base32 string callers hand off out-of-band, and the same encoding lands in the event log. Internally `send` awaits the operation's terminal `SendSuccessEvent` / `SendFailureEvent`, so observers see the same shape regardless of fast/slow path. `SendEvent` fires immediately so a UI can render an in-flight card right away. On the slow path the immediately-following `RemintEvent` / `TxCreateEvent` carry the reissuance txid.
+Returns an `Ecash` bundle directly (or `SendEcashError` on failure); `Ecash`'s serde representation is the `picomint`-prefixed base32 string callers hand off out-of-band, and the same encoding lands in the event log. Internally `send` awaits the operation's terminal `SendSuccessEvent` / `SendFailureEvent`, so observers see the same shape regardless of fast/slow path. `SendEvent` fires immediately so a UI can render an in-flight card right away. On the slow path the immediately-following `ReissueEvent` / `TxCreateEvent` carry the reissuance txid.
 
 Two paths. The fast path triggers when the wallet already holds notes whose denominations sum exactly to `amount` — `SendEvent` and `SendSuccessEvent` land atomically in one dbtx, no tx, no SM. Otherwise the slow path reissues notes through the mint first, and an `ecash::SendStateMachine` watches the reissuance terminate and emits the terminal `SendSuccessEvent` (assembling the ecash from the freshly minted notes) or `SendFailureEvent`.
 
@@ -55,7 +55,7 @@ ecash_send(mint, account, amount)
     │
     ├── SendEvent ── SendSuccessEvent                          (fast path, atomic)
     │
-    └── SendEvent ── RemintEvent ── TxCreateEvent
+    └── SendEvent ── ReissueEvent ── TxCreateEvent
                                           │
                                           ├── TxAcceptEvent ──┬── EcashSuccessEvent ──┬── SendSuccessEvent
                                           │                   │                      └── SendFailureEvent  (assembly failed — defensive)
@@ -170,7 +170,7 @@ The complete `(source, kind)` set the client emits, for integrators wiring up an
 | `Ecash` · `send` |
 | `Ecash` · `send-success` |
 | `Ecash` · `send-failure` |
-| `Ecash` · `remint` |
+| `Ecash` · `reissue` |
 | `Ecash` · `success` |
 | `Ecash` · `failure` |
 | `Onchain` · `receive` |

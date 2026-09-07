@@ -42,6 +42,12 @@ struct ServerOpts {
     /// README.md.
     #[arg(long = "ui-addr", env = "UI_ADDR", default_value = "127.0.0.1:3000")]
     ui_addr: SocketAddr,
+
+    /// Shorten the polling intervals that pace an idle mint, so the
+    /// integration test reaches session cuts in seconds. Consensus values
+    /// are untouched: the test runs the same sessions as mainnet.
+    #[arg(long, env = "INTEGRATION_TEST", default_value_t = false)]
+    integration_test: bool,
 }
 
 #[tokio::main]
@@ -74,6 +80,7 @@ async fn main() -> anyhow::Result<()> {
         p2p_addr: server_opts.p2p_addr,
         ui_addr: server_opts.ui_addr,
         data_dir: server_opts.data_dir,
+        integration_test: server_opts.integration_test,
     };
 
     // The reqwest client inside `BitcoindClient` requires an installed

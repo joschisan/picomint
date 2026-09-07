@@ -241,7 +241,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     await_tx_outcome(&restored, operation)
         .await
-        .expect("self-remint should be accepted");
+        .expect("self-reissue should be accepted");
 
     let swept = restored
         .client
@@ -249,10 +249,10 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     ensure!(
         swept > Amount::ZERO && swept < expected,
-        "remint left balance out of range: {swept} vs {expected}"
+        "reissue left balance out of range: {swept} vs {expected}"
     );
 
-    // The remint pays the mint for its outputs and the integrator its
+    // The reissue pays the mint for its outputs and the integrator its
     // cut of what moved, so the cut over the whole balance is the loosest
     // bound that still catches fees running away.
     let cut = Amount::from_msat(expected.msat * CLIENT_FEE_PPM / 1_000_000);
@@ -260,7 +260,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     let loss = expected.checked_sub(swept).expect("swept < expected");
     ensure!(
         loss < cut + Amount::from_sat(50),
-        "remint lost more than expected to fees: {expected} -> {swept} (loss {loss})"
+        "reissue lost more than expected to fees: {expected} -> {swept} (loss {loss})"
     );
 
     restored.client.shutdown().await;
@@ -268,7 +268,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     // Restoring a second time is the only phase that exercises the counter
     // mark the first restore persisted. A mark one batch too high opens a gap
     // as wide as the one a scan refuses to cross, stranding every note the
-    // remint issued behind it, and the wallet comes back empty rather than
+    // reissue issued behind it, and the wallet comes back empty rather than
     // merely short.
     info!("ecash: second restore (expected balance {swept})");
 

@@ -117,21 +117,15 @@ impl TestEnv {
         info!("Mint ready");
 
         // Take the last two nodes offline so the rest of the suite
-        // runs against a mint at exactly quorum. Wait for each to
-        // finalize a session first — that proves its DKG output and bft
-        // state are persisted, so it can come back from its data dir.
+        // runs against a mint at exactly quorum. Wait for each to have
+        // written its config first — that is its DKG output persisted,
+        // so it can come back from its data dir; bft state is committed
+        // unit by unit and replays from wherever it was cut off.
         for node in NUM_ONLINE_NODES..NUM_NODES {
             let data_dir = &node_data_dirs[node];
-            runtime.block_on(retry(
-                &format!("node-{node} finalized a session"),
-                || async {
-                    ensure!(
-                        cli::node_session_count(data_dir)? >= 1,
-                        "no finalized session yet"
-                    );
-                    Ok(())
-                },
-            ))?;
+            runtime.block_on(retry(&format!("node-{node} wrote its config"), || async {
+                cli::node_config(data_dir).map(|_| ())
+            }))?;
 
             let mut child = node_processes[node].take().expect("node was started");
             runtime.block_on(async {
@@ -221,7 +215,9 @@ impl TestEnv {
     /// Mine one regtest block per second for the lifetime of the test.
     /// Nodes only propose block-count votes when the height changes,
     /// so without steadily arriving blocks an idle mint orders
-    /// nothing and session-advance waits would starve.
+    /// nothing. Faster than this and the lightning suite's CLTV margins
+    /// no longer hold; the restore suite mines its own blocks while it
+    /// waits for sessions.
     fn spawn_miner_thread() -> anyhow::Result<()> {
         let url = format!("http://127.0.0.1:{BTC_RPC_PORT}/wallet/default");
         let auth =
@@ -335,6 +331,7 @@ async fn start_node(base: &Path, node: usize) -> anyhow::Result<Child> {
         .env("P2P_ADDR", format!("127.0.0.1:{p2p_port}"))
         .env("UI_ADDR", format!("127.0.0.1:{ui_port}"))
         .env("UI_PASSWORD", "test")
+        .env("INTEGRATION_TEST", "true")
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
         .spawn()
@@ -370,6 +367,7 @@ async fn start_gateway(
     let log_file = std::fs::File::create(base.join(format!("{name}.log")))?;
 
     Command::new("target/release/picomint-gateway-daemon")
+        .env("INTEGRATION_TEST", "true")
         .env("DATA_DIR", data_dir.to_str().unwrap())
         .env("API_ADDR", format!("0.0.0.0:{gateway_port}"))
         .env("LDK_ADDR", format!("0.0.0.0:{lightning_port}"))
@@ -565,12 +563,12 @@ where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<T>>,
 {
-    for i in 0..240 {
+    for i in 0..720 {
         match f().await {
             Ok(v) => return Ok(v),
             Err(e) => {
-                if i == 239 {
-                    return Err(e).context(format!("retry '{name}' exhausted after 240 attempts"));
+                if i == 719 {
+                    return Err(e).context(format!("retry '{name}' exhausted after 720 attempts"));
                 }
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }

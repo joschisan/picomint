@@ -57,8 +57,8 @@ pub async fn run(
 
     let btc_rpc = BitcoindRpcMonitor::new(
         btc_rpc,
-        if cfg.consensus.network == Network::Regtest {
-            Duration::from_secs(1)
+        if settings.integration_test {
+            Duration::from_millis(100)
         } else {
             Duration::from_secs(10)
         },
@@ -69,12 +69,13 @@ pub async fn run(
         db: db.clone(),
         btc_rpc: btc_rpc.clone(),
         rejected: watch::Sender::new(BTreeMap::new()),
+        integration_test: settings.integration_test,
     };
 
     onchain::spawn_broadcast_unconfirmed_txs_task(
         btc_rpc.clone(),
         db.clone(),
-        cfg.consensus.network,
+        settings.integration_test,
     );
 
     let (submission_tx, submission_rx) = async_channel::bounded(TX_BUFFER);
@@ -91,9 +92,16 @@ pub async fn run(
 
     info!("Starting Submission of Module CI proposals...");
 
+    let proposal_interval = if settings.integration_test {
+        Duration::from_millis(100)
+    } else {
+        Duration::from_secs(1)
+    };
+
     tokio::spawn(submit_ci_proposals(
         consensus_api.server.clone(),
         submission_tx.clone(),
+        proposal_interval,
     ));
 
     let ui_router = crate::ui::dashboard::router(consensus_api.clone());
@@ -147,8 +155,12 @@ async fn await_bitcoin_sync(
     }
 }
 
-async fn submit_ci_proposals(server: Server, submission_tx: async_channel::Sender<ConsensusItem>) {
-    let mut interval = tokio::time::interval(Duration::from_secs(1));
+async fn submit_ci_proposals(
+    server: Server,
+    submission_tx: async_channel::Sender<ConsensusItem>,
+    interval: Duration,
+) {
+    let mut interval = tokio::time::interval(interval);
 
     loop {
         let dbtx = server.db.begin_read();

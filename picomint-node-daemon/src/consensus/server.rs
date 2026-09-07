@@ -29,6 +29,8 @@ pub struct Server {
     /// The finally rejected txs of the running session, watched by their
     /// waiting submission RPCs and cleared at the session boundary.
     pub rejected: watch::Sender<BTreeMap<TransactionId, TxError>>,
+    /// Shortened polling intervals for the integration test.
+    pub integration_test: bool,
 }
 
 impl Server {
