@@ -48,47 +48,58 @@ impl StateMachine for ReceiveStateMachine {
     type Outcome = Result<BTreeMap<NodeId, DecryptionKeyShare>, String>;
 
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
-        ctx.await_tx_accepted(self.operation, self.outpoint.txid)
-            .await
-            .map_err(|e| e.to_string())?;
-
         let tpe_pks = Arc::new(ctx.config.lightning.tpe_pks.clone());
         let offer = Arc::new(self.offer.clone());
-        let shares = ctx
-            .api
-            .request_with_strategy_retry(
-                FilterMapThreshold::new(
-                    move |node, resp: DecryptionKeyShareResponse| {
-                        let tpe_pks = tpe_pks.clone();
-                        let offer = offer.clone();
 
-                        // A pairing per share; keep it off the runtime worker.
-                        async move {
-                            tokio::task::spawn_blocking(move || {
-                                let share = resp.share;
-                                if !offer.verify_decryption_share(
-                                    tpe_pks.get(&node).context("Missing TPE PK for node")?,
-                                    &share,
-                                ) {
-                                    return Err(anyhow!("Invalid decryption share"));
-                                }
-                                Ok(share)
-                            })
-                            .await
-                            .expect("Share verification cannot panic")
-                        }
-                    },
-                    ctx.api.num_nodes(),
-                ),
-                Method::Lightning(LightningMethod::DecryptionKeyShare(
-                    DecryptionKeyShareRequest {
-                        outpoint: self.outpoint,
-                    },
-                )),
-            )
-            .await;
+        // The nodes hold the share request until the contract is
+        // processed, so it goes out alongside the wait for the funding
+        // transaction instead of after it: one round trip less per
+        // receive. A threshold of verified shares proves the contract
+        // was funded; a rejection drops the pending request.
+        let accepted = ctx.await_tx_accepted(self.operation, self.outpoint.txid);
 
-        Ok(shares)
+        let shares = ctx.api.request_with_strategy_retry(
+            FilterMapThreshold::new(
+                move |node, resp: DecryptionKeyShareResponse| {
+                    let tpe_pks = tpe_pks.clone();
+                    let offer = offer.clone();
+
+                    // A pairing per share; keep it off the runtime worker.
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            let share = resp.share;
+                            if !offer.verify_decryption_share(
+                                tpe_pks.get(&node).context("Missing TPE PK for node")?,
+                                &share,
+                            ) {
+                                return Err(anyhow!("Invalid decryption share"));
+                            }
+                            Ok(share)
+                        })
+                        .await
+                        .expect("Share verification cannot panic")
+                    }
+                },
+                ctx.api.num_nodes(),
+            ),
+            Method::Lightning(LightningMethod::DecryptionKeyShare(
+                DecryptionKeyShareRequest {
+                    outpoint: self.outpoint,
+                },
+            )),
+        );
+
+        tokio::pin!(accepted);
+        tokio::pin!(shares);
+
+        tokio::select! {
+            result = &mut accepted => {
+                result.map_err(|e| e.to_string())?;
+
+                Ok(shares.await)
+            }
+            shares = &mut shares => Ok(shares),
+        }
     }
 
     fn transition(

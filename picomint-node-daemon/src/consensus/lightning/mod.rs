@@ -240,7 +240,7 @@ pub async fn handle_api(server: &Server, method: LightningMethod) -> Result<Vec<
     match method {
         LightningMethod::AwaitPreimage(req) => handler_async!(await_preimage, server, req).await,
         LightningMethod::DecryptionKeyShare(req) => {
-            handler!(decryption_key_share, server, req).await
+            handler_async!(decryption_key_share, server, req).await
         }
         LightningMethod::OutgoingContractExpiry(req) => {
             handler!(outgoing_contract_expiry, server, req).await
