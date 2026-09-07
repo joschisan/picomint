@@ -7,19 +7,20 @@ use picomint_cli_server::{CliError, serve};
 use picomint_client_cli_core::{
     ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse, ClientConfigRequest,
     ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
-    ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendRequest,
-    ClientEcashSendResponse, ClientLightningLnurlRequest, ClientLightningLnurlResponse,
-    ClientLightningReceiveRequest, ClientLightningReceiveResponse,
-    ClientLightningRefreshGatewaysRequest, ClientLightningSendMaxRequest,
-    ClientLightningSendMaxResponse, ClientLightningSendRequest, ClientLightningSendResponse,
-    ClientListResponse, ClientOnchainReceiveRequest, ClientOnchainReceiveResponse,
-    ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse, ClientOnchainSendRequest,
+    ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
+    ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
+    ClientLightningLnurlRequest, ClientLightningLnurlResponse, ClientLightningReceiveRequest,
+    ClientLightningReceiveResponse, ClientLightningRefreshGatewaysRequest,
+    ClientLightningSendMaxRequest, ClientLightningSendMaxResponse, ClientLightningSendRequest,
+    ClientLightningSendResponse, ClientListResponse, ClientOnchainReceiveRequest,
+    ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse,
+    ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse, ClientOnchainSendRequest,
     ClientOnchainSendResponse, ClientRemoveRequest, MintInfo, MnemonicResponse, QueryRequest,
     QueryResponse, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE,
-    ROUTE_ECASH_SEND, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
+    ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
     ROUTE_LIGHTNING_REFRESH_GATEWAYS, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST,
-    ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_QUERY,
-    ROUTE_REMOVE,
+    ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE,
+    ROUTE_ONCHAIN_SEND_MAX, ROUTE_QUERY, ROUTE_REMOVE,
 };
 use picomint_core::Amount;
 use tracing::instrument;
@@ -39,9 +40,11 @@ pub async fn run(state: AppState) {
         .route(ROUTE_BALANCE, post(balance))
         .route(ROUTE_ECASH_COUNT, post(ecash_count))
         .route(ROUTE_ECASH_SEND, post(ecash_send))
+        .route(ROUTE_ECASH_SEND_MAX, post(ecash_send_max))
         .route(ROUTE_ECASH_RECEIVE, post(ecash_receive))
         .route(ROUTE_ONCHAIN_SEND_FEE, post(onchain_send_fee))
         .route(ROUTE_ONCHAIN_SEND, post(onchain_send))
+        .route(ROUTE_ONCHAIN_SEND_MAX, post(onchain_send_max))
         .route(ROUTE_ONCHAIN_RECEIVE, post(onchain_receive))
         .route(ROUTE_LIGHTNING_SEND, post(lightning_send))
         .route(ROUTE_LIGHTNING_SEND_MAX, post(lightning_send_max))
@@ -174,6 +177,19 @@ async fn ecash_send(
 }
 
 #[instrument(skip_all, err)]
+async fn ecash_send_max(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientEcashSendMaxRequest>,
+) -> Result<Json<ClientEcashSendMaxResponse>, CliError> {
+    let ecash = state
+        .client
+        .ecash_send_max(payload.mint, payload.account)
+        .map_err(CliError::internal)?;
+
+    Ok(Json(ClientEcashSendMaxResponse { ecash }))
+}
+
+#[instrument(skip_all, err)]
 async fn ecash_receive(
     State(state): State<AppState>,
     Json(payload): Json<ClientEcashReceiveRequest>,
@@ -218,6 +234,20 @@ async fn onchain_send(
         .map_err(CliError::internal)?;
 
     Ok(Json(ClientOnchainSendResponse { operation }))
+}
+
+#[instrument(skip_all, err)]
+async fn onchain_send_max(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientOnchainSendMaxRequest>,
+) -> Result<Json<ClientOnchainSendMaxResponse>, CliError> {
+    let operation = state
+        .client
+        .onchain_send_max(payload.mint, payload.account, payload.address)
+        .await
+        .map_err(CliError::internal)?;
+
+    Ok(Json(ClientOnchainSendMaxResponse { operation }))
 }
 
 #[instrument(skip_all, err)]

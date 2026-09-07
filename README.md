@@ -256,6 +256,8 @@ Then send:
 picomint-gateway-cli client onchain send <mint-id> <account> <address> <amount>
 ```
 
+To empty the account instead, `client onchain send-max <mint-id> <account> <address>` sends everything minus the fee.
+
 Passing `--fee <amount>` overrides the feerate with an exact value; otherwise whatever `send-fee` currently reports is used. The command returns the operation id; the onchain txid lands in the analytics as `onchain_send_success` once the mint has broadcast.
 
 **Send Ecash:** spend part of the mint balance as a base32-encoded ecash string you can hand to another client:
@@ -263,6 +265,8 @@ Passing `--fee <amount>` overrides the feerate with an exact value; otherwise wh
 ```bash
 picomint-gateway-cli client ecash send <mint-id> <account> <amount>
 ```
+
+`client ecash send-max <mint-id> <account>` hands out the whole balance as one string.
 
 **Receive Ecash:** reissue an ecash string produced by `client ecash send` (on this gateway or any other client) into your balance. Returns the operation id; the reissuance's acceptance shows up in the analytics as `core_tx_accept`:
 
@@ -393,9 +397,11 @@ config <mint>
 balance <mint> <account>
 ecash count <mint> <account>
 ecash send <mint> <account> <amount>
+ecash send-max <mint> <account>
 ecash receive <mint> <account> <ecash>
 onchain send-fee <mint>
 onchain send <mint> <account> <address> <amount> [--fee <amount>]
+onchain send-max <mint> <account> <address>
 onchain receive <mint> <account>
 lightning send <mint> <account> <invoice>
 lightning send-max <mint> <account> <lnurl>

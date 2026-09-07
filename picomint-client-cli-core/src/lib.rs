@@ -29,9 +29,11 @@ pub const ROUTE_BALANCE: &str = "/balance";
 
 pub const ROUTE_ECASH_COUNT: &str = "/ecash/count";
 pub const ROUTE_ECASH_SEND: &str = "/ecash/send";
+pub const ROUTE_ECASH_SEND_MAX: &str = "/ecash/send-max";
 pub const ROUTE_ECASH_RECEIVE: &str = "/ecash/receive";
 pub const ROUTE_ONCHAIN_SEND_FEE: &str = "/onchain/send-fee";
 pub const ROUTE_ONCHAIN_SEND: &str = "/onchain/send";
+pub const ROUTE_ONCHAIN_SEND_MAX: &str = "/onchain/send-max";
 pub const ROUTE_ONCHAIN_RECEIVE: &str = "/onchain/receive";
 
 pub const ROUTE_LIGHTNING_SEND: &str = "/lightning/send";
@@ -140,6 +142,20 @@ pub struct ClientEcashSendResponse {
     pub ecash: Ecash,
 }
 
+// --- /ecash/send-max ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientEcashSendMaxRequest {
+    pub mint: MintId,
+    pub account: Account,
+}
+
+/// `None` when the account holds no notes.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ClientEcashSendMaxResponse {
+    pub ecash: Option<Ecash>,
+}
+
 // --- /ecash/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
@@ -180,6 +196,20 @@ pub struct ClientOnchainSendRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClientOnchainSendResponse {
+    pub operation: OperationId,
+}
+
+// --- /onchain/send-max ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientOnchainSendMaxRequest {
+    pub mint: MintId,
+    pub account: Account,
+    pub address: bitcoin::Address<NetworkUnchecked>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ClientOnchainSendMaxResponse {
     pub operation: OperationId,
 }
 

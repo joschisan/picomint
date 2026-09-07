@@ -5,15 +5,16 @@ use clap::{Parser, Subcommand};
 use picomint_cli_client::{print_json, request};
 use picomint_client_cli_core::{
     ClientAddRequest, ClientBalanceRequest, ClientConfigRequest, ClientEcashCountRequest,
-    ClientEcashReceiveRequest, ClientEcashSendRequest, ClientLightningLnurlRequest,
-    ClientLightningReceiveRequest, ClientLightningRefreshGatewaysRequest,
-    ClientLightningSendMaxRequest, ClientLightningSendRequest, ClientOnchainReceiveRequest,
-    ClientOnchainSendFeeRequest, ClientOnchainSendRequest, ClientRemoveRequest, QueryRequest,
+    ClientEcashReceiveRequest, ClientEcashSendMaxRequest, ClientEcashSendRequest,
+    ClientLightningLnurlRequest, ClientLightningReceiveRequest,
+    ClientLightningRefreshGatewaysRequest, ClientLightningSendMaxRequest,
+    ClientLightningSendRequest, ClientOnchainReceiveRequest, ClientOnchainSendFeeRequest,
+    ClientOnchainSendMaxRequest, ClientOnchainSendRequest, ClientRemoveRequest, QueryRequest,
     ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE,
-    ROUTE_ECASH_SEND, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
+    ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
     ROUTE_LIGHTNING_REFRESH_GATEWAYS, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST,
-    ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_QUERY,
-    ROUTE_REMOVE,
+    ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE,
+    ROUTE_ONCHAIN_SEND_MAX, ROUTE_QUERY, ROUTE_REMOVE,
 };
 
 #[derive(Parser)]
@@ -61,6 +62,8 @@ enum EcashCommands {
     Count(ClientEcashCountRequest),
     /// Send ecash
     Send(ClientEcashSendRequest),
+    /// Send the account's entire ecash balance
+    SendMax(ClientEcashSendMaxRequest),
     /// Receive ecash
     Receive(ClientEcashReceiveRequest),
 }
@@ -71,6 +74,8 @@ enum OnchainCommands {
     SendFee(ClientOnchainSendFeeRequest),
     /// Send onchain
     Send(ClientOnchainSendRequest),
+    /// Send the account's entire balance onchain, minus the fee
+    SendMax(ClientOnchainSendMaxRequest),
     /// Get receive address
     Receive(ClientOnchainReceiveRequest),
 }
@@ -105,11 +110,13 @@ async fn main() -> Result<()> {
         Commands::Ecash(cmd) => match cmd {
             EcashCommands::Count(req) => request(d, ROUTE_ECASH_COUNT, req).await?,
             EcashCommands::Send(req) => request(d, ROUTE_ECASH_SEND, req).await?,
+            EcashCommands::SendMax(req) => request(d, ROUTE_ECASH_SEND_MAX, req).await?,
             EcashCommands::Receive(req) => request(d, ROUTE_ECASH_RECEIVE, req).await?,
         },
         Commands::Onchain(cmd) => match cmd {
             OnchainCommands::SendFee(req) => request(d, ROUTE_ONCHAIN_SEND_FEE, req).await?,
             OnchainCommands::Send(req) => request(d, ROUTE_ONCHAIN_SEND, req).await?,
+            OnchainCommands::SendMax(req) => request(d, ROUTE_ONCHAIN_SEND_MAX, req).await?,
             OnchainCommands::Receive(req) => request(d, ROUTE_ONCHAIN_RECEIVE, req).await?,
         },
         Commands::Lightning(cmd) => match cmd {
