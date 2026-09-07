@@ -125,12 +125,10 @@ impl StateMachine for ReceiveStateMachine {
             .into_iter()
             .map(|(node, share)| (node.to_usize() as u64, share))
             .collect();
-        let agg_decryption_key = aggregate_dk_shares(&decryption_shares);
-
-        if !self
-            .offer
-            .verify_agg_decryption_key(&ctx.config.lightning.tpe_agg_pk, &agg_decryption_key)
-        {
+        let Some(agg_decryption_key) = aggregate_dk_shares(&decryption_shares).filter(|key| {
+            self.offer
+                .verify_agg_decryption_key(&ctx.config.lightning.tpe_agg_pk, key)
+        }) else {
             warn!("Aggregate decryption key invalid — TPE config inconsistent");
             ctx.log_event(
                 dbtx,
@@ -139,7 +137,7 @@ impl StateMachine for ReceiveStateMachine {
                 ReceiveFailureEvent,
             );
             return None;
-        }
+        };
 
         if let Some(preimage) = self.offer.decrypt_preimage(&agg_decryption_key) {
             ctx.log_event(

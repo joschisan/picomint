@@ -48,7 +48,7 @@ pub struct EcashOutputBlindSignature(pub tbs::BlindedSignature);
 ///
 /// In this form it can only be validated, not spent since for that the
 /// corresponding secret spend key is required.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct Note {
     pub denomination: Denomination,
     pub nonce: XOnlyPublicKey,
@@ -78,10 +78,10 @@ impl EcashOutput {
     }
 }
 
-pub fn verify_note(note: Note, pk: tbs::AggregatePublicKey) -> bool {
+pub fn verify_note(note: &Note, pk: &tbs::AggregatePublicKey) -> bool {
     tbs::verify(
-        Nonce::from_public_key(note.nonce.serialize()),
-        note.signature,
+        &Nonce::from_public_key(note.nonce.serialize()),
+        &note.signature,
         pk,
     )
 }
@@ -100,6 +100,8 @@ pub enum EcashInputError {
 pub enum EcashOutputError {
     #[error("The blinded nonce has already been signed")]
     ReusedNonce,
+    #[error("The blinded nonce is not a curve point")]
+    InvalidNonce,
     #[error("The note has an invalid amount not issued by the mint")]
     InvalidDenomination,
 }

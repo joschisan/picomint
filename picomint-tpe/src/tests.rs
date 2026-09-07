@@ -12,11 +12,13 @@ use crate::{
 };
 
 fn dealer_agg_pk() -> AggregatePublicKey {
-    AggregatePublicKey((G1Projective::generator() * coefficient(0)).to_affine())
+    (G1Projective::generator() * coefficient(0))
+        .to_affine()
+        .into()
 }
 
 fn dealer_pk(threshold: u64, node: u64) -> PublicKeyShare {
-    derive_pk_share(&dealer_sk(threshold, node))
+    derive_pk_share(&dealer_sk(threshold, node)).unwrap()
 }
 
 fn dealer_sk(threshold: u64, node: u64) -> SecretKeyShare {
@@ -31,7 +33,7 @@ fn dealer_sk(threshold: u64, node: u64) -> SecretKeyShare {
         .reduce(|accumulator, c| accumulator * x + c)
         .expect("We have at least one coefficient");
 
-    SecretKeyShare(y)
+    y.into()
 }
 
 fn coefficient(index: u64) -> Scalar {
@@ -48,26 +50,34 @@ fn test_roundtrip() {
     let encryption_seed = [7_u8; 32];
     let preimage = [42_u8; 32];
     let commitment = sha256::Hash::hash(&[0_u8; 32]);
-    let ct = encrypt_preimage(&dealer_agg_pk(), &encryption_seed, &preimage, &commitment);
+    let ct = encrypt_preimage(&dealer_agg_pk(), &encryption_seed, &preimage, &commitment).unwrap();
 
     assert!(verify_ciphertext(&ct, &commitment));
 
     for node in 0..NODES {
         assert!(verify_dk_share(
             &dealer_pk(THRESHOLD, node),
-            &create_dk_share(&dealer_sk(THRESHOLD, node), &ct),
+            &create_dk_share(&dealer_sk(THRESHOLD, node), &ct).unwrap(),
             &ct,
             &commitment
         ));
     }
 
     let selected_shares = (0..THRESHOLD)
-        .map(|node| (node, create_dk_share(&dealer_sk(THRESHOLD, node), &ct)))
+        .map(|node| {
+            (
+                node,
+                create_dk_share(&dealer_sk(THRESHOLD, node), &ct).unwrap(),
+            )
+        })
         .collect();
 
-    let agg_dk = aggregate_dk_shares(&selected_shares);
+    let agg_dk = aggregate_dk_shares(&selected_shares).unwrap();
 
-    assert_eq!(agg_dk, derive_agg_dk(&dealer_agg_pk(), &encryption_seed));
+    assert_eq!(
+        agg_dk,
+        derive_agg_dk(&dealer_agg_pk(), &encryption_seed).unwrap()
+    );
 
     assert!(verify_agg_dk(&dealer_agg_pk(), &agg_dk, &ct, &commitment));
 

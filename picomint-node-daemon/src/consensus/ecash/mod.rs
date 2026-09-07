@@ -3,7 +3,7 @@ mod rpc;
 
 use std::collections::BTreeMap;
 
-use anyhow::ensure;
+use anyhow::{Context, ensure};
 use group::Curve;
 use picomint_core::ecash::config::{
     EcashConfig, EcashConfigConsensus, EcashConfigPrivate, consensus_denominations,
@@ -15,7 +15,7 @@ use picomint_core::ecash::{
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{Amount, OutPoint};
 use picomint_redb::{DbRead, WriteTx};
-use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
+use tbs::derive_pk_share;
 
 use crate::config::NodeConfig;
 use crate::config::dkg::DkgHandle;
@@ -37,14 +37,14 @@ pub async fn dkg(nodes: &DkgHandle<'_>) -> anyhow::Result<EcashConfig> {
     for denomination in consensus_denominations() {
         let (poly, sk) = nodes.run_dkg_g2().await?;
 
-        tbs_sks.insert(denomination, tbs::SecretKeyShare(sk));
+        tbs_sks.insert(denomination, sk.into());
 
-        tbs_agg_pks.insert(denomination, AggregatePublicKey(poly[0].to_affine()));
+        tbs_agg_pks.insert(denomination, poly[0].to_affine().into());
 
         let pks = nodes
             .num_nodes()
             .node_ids()
-            .map(|node| (node, PublicKeyShare(eval_poly_g2(&poly, &node))))
+            .map(|node| (node, eval_poly_g2(&poly, &node).into()))
             .collect();
 
         tbs_pks.insert(denomination, pks);
@@ -65,7 +65,8 @@ pub async fn dkg(nodes: &DkgHandle<'_>) -> anyhow::Result<EcashConfig> {
 /// config.
 pub fn validate_config(cfg: &NodeConfig) -> anyhow::Result<()> {
     for denomination in consensus_denominations() {
-        let pk = derive_pk_share(&cfg.private.ecash.tbs_sks[&denomination]);
+        let pk = derive_pk_share(&cfg.private.ecash.tbs_sks[&denomination])
+            .context("Ecash tbs secret key share is not a scalar")?;
 
         ensure!(
             pk == cfg.consensus.ecash.tbs_pks[&denomination][&cfg.private.identity],
@@ -96,7 +97,7 @@ pub fn process_input(
         .get(&input.note.denomination)
         .ok_or(EcashInputError::InvalidDenomination)?;
 
-    if !verify_note(input.note, *pk) {
+    if !verify_note(&input.note, pk) {
         return Err(EcashInputError::InvalidSignature);
     }
 
@@ -130,14 +131,15 @@ pub fn process_output(
         return Err(EcashOutputError::ReusedNonce);
     }
 
-    let signature = server
+    let key = server
         .cfg
         .private
         .ecash
         .tbs_sks
         .get(&output.denomination)
-        .map(|key| tbs::sign_nonce(output.nonce, *key))
         .ok_or(EcashOutputError::InvalidDenomination)?;
+
+    let signature = tbs::sign_nonce(&output.nonce, key).ok_or(EcashOutputError::InvalidNonce)?;
 
     dbtx.insert(&BlindedSignatureShareTable, &outpoint, &signature);
 

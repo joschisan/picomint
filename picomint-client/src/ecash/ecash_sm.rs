@@ -102,22 +102,22 @@ impl StateMachine for EcashStateMachine {
             let mut notes = Vec::new();
 
             for (i, request) in requests.iter().enumerate() {
-                let agg_blind_signature = aggregate_signature_shares(
-                    &signatures
-                        .iter()
-                        .map(|(node, shares)| (node.to_usize() as u64, shares[i]))
-                        .collect(),
-                );
-
-                let spendable_note = request.finalize(agg_blind_signature);
-
-                let pk = *agg_pks
+                let pk = agg_pks
                     .get(&request.denomination)
                     .expect("No aggregated pk found for denomination");
 
-                if !verify_note(spendable_note.note(), pk) {
+                let spendable_note = aggregate_signature_shares(
+                    &signatures
+                        .iter()
+                        .map(|(node, shares)| (node.to_usize() as u64, shares[i].clone()))
+                        .collect(),
+                )
+                .and_then(|agg_blind_signature| request.finalize(agg_blind_signature))
+                .filter(|spendable_note| verify_note(&spendable_note.note(), pk));
+
+                let Some(spendable_note) = spendable_note else {
                     return IssuanceOutcome::Invalid;
-                }
+                };
 
                 notes.push((request.account(), spendable_note));
             }
@@ -188,7 +188,7 @@ pub fn verify_blind_shares(
             .expect("No pk share found for node");
 
         ensure!(
-            tbs::verify_signature_share(request.blinded_nonce(), *share, *amount_key),
+            tbs::verify_signature_share(&request.blinded_nonce(), share, amount_key),
             "Invalid blind signature"
         );
     }

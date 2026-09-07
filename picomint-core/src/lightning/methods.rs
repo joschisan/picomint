@@ -161,6 +161,9 @@ pub struct VerifyResponse {
 
 // ── gateway dispatch enum ───────────────────────────────────────────────────
 
+// The receive request carries an offer whose points keep their decoded
+// form next to their bytes, so that variant outweighs the others in memory.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum GatewayMethod {
     Info(InfoRequest),

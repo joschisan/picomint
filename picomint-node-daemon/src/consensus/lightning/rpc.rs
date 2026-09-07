@@ -140,6 +140,6 @@ pub fn tpe_aggregate_pk(
     _: TpeAggregatePkRequest,
 ) -> Result<TpeAggregatePkResponse, String> {
     Ok(TpeAggregatePkResponse {
-        tpe_agg_pk: server.cfg.consensus.lightning.tpe_agg_pk,
+        tpe_agg_pk: server.cfg.consensus.lightning.tpe_agg_pk.clone(),
     })
 }

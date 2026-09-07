@@ -63,7 +63,7 @@ pub struct Commitment {
 impl IncomingOffer {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        agg_pk: AggregatePublicKey,
+        agg_pk: &AggregatePublicKey,
         encryption_seed: [u8; 32],
         preimage: [u8; 32],
         payment_hash: sha256::Hash,
@@ -71,7 +71,7 @@ impl IncomingOffer {
         fee: Amount,
         claim_pk: XOnlyPublicKey,
         ephemeral_pk: PublicKey,
-    ) -> Self {
+    ) -> Option<Self> {
         let commitment = Commitment {
             payment_hash,
             amount,
@@ -81,16 +81,16 @@ impl IncomingOffer {
         };
 
         let ciphertext = encrypt_preimage(
-            &agg_pk,
+            agg_pk,
             &encryption_seed,
             &preimage,
             &commitment.consensus_hash(),
-        );
+        )?;
 
-        Self {
+        Some(Self {
             commitment,
             ciphertext,
-        }
+        })
     }
 
     /// Identity of the offer: the commitment and the ciphertext over it.
@@ -148,7 +148,9 @@ impl IncomingOffer {
         }
     }
 
-    pub fn create_decryption_key_share(&self, sk: &SecretKeyShare) -> DecryptionKeyShare {
+    /// `None` if the ciphertext's ephemeral key is not a point, which
+    /// [`Self::verify`] rejects.
+    pub fn create_decryption_key_share(&self, sk: &SecretKeyShare) -> Option<DecryptionKeyShare> {
         create_dk_share(sk, &self.ciphertext)
     }
 }
@@ -242,7 +244,7 @@ impl IncomingContractSummary {
         let encryption_seed = contract_secret.encryption_seed();
 
         let rebuilt = IncomingOffer::new(
-            *agg_pk,
+            agg_pk,
             encryption_seed,
             preimage,
             self.payment_hash,
@@ -250,13 +252,13 @@ impl IncomingContractSummary {
             self.fee,
             claim_pk,
             self.ephemeral_pk,
-        );
+        )?;
 
         if rebuilt.offer_id() != self.offer_id {
             return None;
         }
 
-        Some((claim_keypair, derive_agg_dk(agg_pk, &encryption_seed)))
+        Some((claim_keypair, derive_agg_dk(agg_pk, &encryption_seed)?))
     }
 }
 

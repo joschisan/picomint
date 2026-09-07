@@ -15,8 +15,6 @@ path = "src/lib.rs"
 [dependencies]
 bitcoin = { workspace = true }
 bitcoin-io = { workspace = true }
-bls12_381 = { workspace = true }
-group = { workspace = true }
 hex = { workspace = true }
 iroh-base = { workspace = true, default-features = false, features = ["key"] }
 lightning-invoice = { workspace = true }

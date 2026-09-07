@@ -323,7 +323,7 @@ async fn create_offer_and_fetch_invoice(
         .0;
 
     let offer = IncomingOffer::new(
-        ctx.config.lightning.tpe_agg_pk,
+        &ctx.config.lightning.tpe_agg_pk,
         encryption_seed,
         preimage,
         preimage.consensus_hash(),
@@ -331,7 +331,8 @@ async fn create_offer_and_fetch_invoice(
         fee,
         claim_pk,
         ephemeral_kp.public_key(),
-    );
+    )
+    .expect("a mint config's aggregate key is a curve point");
 
     let invoice = ctx
         .gateways

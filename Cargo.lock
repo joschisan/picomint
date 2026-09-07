@@ -3534,8 +3534,6 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "bitcoin-io",
- "bls12_381",
- "group",
  "hex",
  "iroh-base",
  "lightning-invoice",
@@ -3740,6 +3738,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "serde_json",
+ "serdect",
  "test-log",
  "tokio",
  "tokio-rustls",

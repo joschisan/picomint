@@ -38,7 +38,7 @@ impl EcashSecret {
     }
 
     pub fn note_blinding_key(&self, account: Account, counter: u64) -> BlindingKey {
-        BlindingKey(
+        BlindingKey::from(
             self.0
                 .child(&account)
                 .child(&Path::NoteBlinding)

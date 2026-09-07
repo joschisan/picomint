@@ -1,50 +1,42 @@
+//! # Threshold Point Encryption
+//!
+//! Every value is held as its bytes and decoded at most once, on first use —
+//! see `picomint_encoding::lazy_bytes`. A value built from a curve element
+//! always decodes; one decoded from the wire or storage may not, which is
+//! why the operations that need the element are fallible.
+
 use std::collections::BTreeMap;
 use std::ops::Mul;
 
 use bitcoin_hashes::{Hash, sha256};
-pub use bls12_381::{G1Affine, G2Affine};
-use bls12_381::{G1Projective, G2Projective, Scalar, pairing};
+use bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective, Scalar, pairing};
 use group::ff::Field;
 use group::{Curve, Group};
-use picomint_encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable, bls_g1, bls_g2, bls_scalar};
 use rand_chacha::ChaChaRng;
 use rand_chacha::rand_core::SeedableRng;
 use serde::{Deserialize, Serialize};
 
-mod bls_serde;
-
 const TAG: [u8; 30] = *b"PICOMINT_TPE_BLS12_381_MESSAGE";
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct SecretKeyShare(#[serde(with = "bls_serde::scalar")] pub Scalar);
+bls_scalar!(SecretKeyShare);
+bls_g1!(PublicKeyShare);
+bls_g1!(AggregatePublicKey);
+bls_g1!(DecryptionKeyShare);
+bls_g1!(AggregateDecryptionKey);
+bls_g1!(EphemeralPublicKey);
+bls_g2!(EphemeralSignature);
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct PublicKeyShare(#[serde(with = "bls_serde::g1")] pub G1Affine);
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct AggregatePublicKey(#[serde(with = "bls_serde::g1")] pub G1Affine);
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct DecryptionKeyShare(#[serde(with = "bls_serde::g1")] pub G1Affine);
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct AggregateDecryptionKey(#[serde(with = "bls_serde::g1")] pub G1Affine);
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct EphemeralPublicKey(#[serde(with = "bls_serde::g1")] pub G1Affine);
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Encodable, Decodable, Serialize, Deserialize)]
-pub struct EphemeralSignature(#[serde(with = "bls_serde::g2")] pub G2Affine);
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable, Serialize, Deserialize)]
 pub struct CipherText {
     pub encrypted_preimage: [u8; 32],
     pub pk: EphemeralPublicKey,
     pub signature: EphemeralSignature,
 }
 
-pub fn derive_pk_share(sk: &SecretKeyShare) -> PublicKeyShare {
-    PublicKeyShare(G1Projective::generator().mul(sk.0).to_affine())
+pub fn derive_pk_share(sk: &SecretKeyShare) -> Option<PublicKeyShare> {
+    sk.scalar()
+        .map(|sk| G1Projective::generator().mul(sk).to_affine().into())
 }
 
 pub fn encrypt_preimage(
@@ -52,8 +44,8 @@ pub fn encrypt_preimage(
     encryption_seed: &[u8; 32],
     preimage: &[u8; 32],
     commitment: &sha256::Hash,
-) -> CipherText {
-    let agg_dk = derive_agg_dk(agg_pk, encryption_seed);
+) -> Option<CipherText> {
+    let agg_dk = derive_agg_dk(agg_pk, encryption_seed)?;
     let encrypted_preimage = xor_with_hash(*preimage, &agg_dk);
 
     let ephemeral_sk = derive_ephemeral_sk(encryption_seed);
@@ -62,23 +54,22 @@ pub fn encrypt_preimage(
         .mul(ephemeral_sk)
         .to_affine();
 
-    CipherText {
+    Some(CipherText {
         encrypted_preimage,
-        pk: EphemeralPublicKey(ephemeral_pk),
-        signature: EphemeralSignature(ephemeral_signature),
-    }
+        pk: ephemeral_pk.into(),
+        signature: ephemeral_signature.into(),
+    })
 }
 
 pub fn derive_agg_dk(
     agg_pk: &AggregatePublicKey,
     encryption_seed: &[u8; 32],
-) -> AggregateDecryptionKey {
-    AggregateDecryptionKey(
-        agg_pk
-            .0
-            .mul(derive_ephemeral_sk(encryption_seed))
-            .to_affine(),
-    )
+) -> Option<AggregateDecryptionKey> {
+    agg_pk.point().map(|pk| {
+        pk.mul(derive_ephemeral_sk(encryption_seed))
+            .to_affine()
+            .into()
+    })
 }
 
 fn derive_ephemeral_sk(encryption_seed: &[u8; 32]) -> Scalar {
@@ -86,7 +77,7 @@ fn derive_ephemeral_sk(encryption_seed: &[u8; 32]) -> Scalar {
 }
 
 fn xor_with_hash(mut bytes: [u8; 32], agg_dk: &AggregateDecryptionKey) -> [u8; 32] {
-    let hash = sha256::Hash::hash(&agg_dk.0.to_compressed());
+    let hash = sha256::Hash::hash(agg_dk.as_bytes());
 
     for i in 0..32 {
         bytes[i] ^= hash[i];
@@ -100,88 +91,114 @@ fn hash_to_message(
     ephemeral_pk: &G1Affine,
     commitment: &sha256::Hash,
 ) -> G2Affine {
-    let seed = (TAG, encrypted_point, ephemeral_pk, commitment)
+    let seed = (
+        TAG,
+        encrypted_point,
+        ephemeral_pk.to_compressed(),
+        commitment,
+    )
         .consensus_hash::<sha256::Hash>()
         .to_byte_array();
 
     G2Projective::random(&mut ChaChaRng::from_seed(seed)).to_affine()
 }
 
-/// Verifying a ciphertext guarantees that it has not been malleated.
 pub fn verify_ciphertext(ct: &CipherText, commitment: &sha256::Hash) -> bool {
-    let message = hash_to_message(&ct.encrypted_preimage, &ct.pk.0, commitment);
+    let (Some(pk), Some(signature)) = (ct.pk.point(), ct.signature.point()) else {
+        return false;
+    };
 
-    pairing(&G1Affine::generator(), &ct.signature.0) == pairing(&ct.pk.0, &message)
+    let message = hash_to_message(&ct.encrypted_preimage, pk, commitment);
+
+    pairing(&G1Affine::generator(), signature) == pairing(pk, &message)
 }
 
 pub fn decrypt_preimage(ct: &CipherText, agg_dk: &AggregateDecryptionKey) -> [u8; 32] {
     xor_with_hash(ct.encrypted_preimage, agg_dk)
 }
 
-/// The function asserts that the ciphertext is valid.
 pub fn verify_agg_dk(
     agg_pk: &AggregatePublicKey,
     agg_dk: &AggregateDecryptionKey,
     ct: &CipherText,
     commitment: &sha256::Hash,
 ) -> bool {
-    let message = hash_to_message(&ct.encrypted_preimage, &ct.pk.0, commitment);
+    let (Some(pk), Some(signature), Some(agg_pk), Some(agg_dk)) = (
+        ct.pk.point(),
+        ct.signature.point(),
+        agg_pk.point(),
+        agg_dk.point(),
+    ) else {
+        return false;
+    };
+
+    let message = hash_to_message(&ct.encrypted_preimage, pk, commitment);
 
     assert_eq!(
-        pairing(&G1Affine::generator(), &ct.signature.0),
-        pairing(&ct.pk.0, &message)
+        pairing(&G1Affine::generator(), signature),
+        pairing(pk, &message)
     );
 
-    // Since the ciphertext is valid its signature is the ecdh point of the message
-    // and the ephemeral public key. Hence, the following equation holds if and only
-    // if the aggregate decryption key is the ecdh point of the ephemeral public key
-    // and the aggregate public key.
-
-    pairing(&agg_dk.0, &message) == pairing(&agg_pk.0, &ct.signature.0)
+    pairing(agg_dk, &message) == pairing(agg_pk, signature)
 }
 
-pub fn create_dk_share(sks: &SecretKeyShare, ct: &CipherText) -> DecryptionKeyShare {
-    DecryptionKeyShare(ct.pk.0.mul(sks.0).to_affine())
+/// `None` if the ciphertext's ephemeral key is not a point of the
+/// prime-order subgroup — a small-order point would leak the key share.
+pub fn create_dk_share(sks: &SecretKeyShare, ct: &CipherText) -> Option<DecryptionKeyShare> {
+    ct.pk
+        .point()
+        .zip(sks.scalar())
+        .map(|(pk, sk)| pk.mul(sk).to_affine().into())
 }
 
-/// The function asserts that the ciphertext is valid.
 pub fn verify_dk_share(
     pks: &PublicKeyShare,
     dks: &DecryptionKeyShare,
     ct: &CipherText,
     commitment: &sha256::Hash,
 ) -> bool {
-    let message = hash_to_message(&ct.encrypted_preimage, &ct.pk.0, commitment);
+    let (Some(pk), Some(signature), Some(pks), Some(dks)) = (
+        ct.pk.point(),
+        ct.signature.point(),
+        pks.point(),
+        dks.point(),
+    ) else {
+        return false;
+    };
+
+    let message = hash_to_message(&ct.encrypted_preimage, pk, commitment);
 
     assert_eq!(
-        pairing(&G1Affine::generator(), &ct.signature.0),
-        pairing(&ct.pk.0, &message)
+        pairing(&G1Affine::generator(), signature),
+        pairing(pk, &message)
     );
 
-    // Since the ciphertext is valid its signature is the ecdh point of the message
-    // and the ephemeral public key. Hence, the following equation holds if and only
-    // if the decryption key share is the ecdh point of the ephemeral public key and
-    // the public key share.
-
-    pairing(&dks.0, &message) == pairing(&pks.0, &ct.signature.0)
+    pairing(dks, &message) == pairing(pks, signature)
 }
 
-pub fn aggregate_dk_shares(shares: &BTreeMap<u64, DecryptionKeyShare>) -> AggregateDecryptionKey {
-    AggregateDecryptionKey(
-        lagrange_multipliers(
-            shares
-                .keys()
-                .cloned()
-                .map(|node| Scalar::from(node + 1))
-                .collect(),
-        )
-        .into_iter()
-        .zip(shares.values())
-        .map(|(lagrange_multiplier, share)| lagrange_multiplier * share.0)
-        .reduce(|a, b| a + b)
-        .expect("We have at least one share")
-        .to_affine(),
+/// `None` if a share is not a point.
+pub fn aggregate_dk_shares(
+    shares: &BTreeMap<u64, DecryptionKeyShare>,
+) -> Option<AggregateDecryptionKey> {
+    let points = shares
+        .values()
+        .map(|share| share.point().copied())
+        .collect::<Option<Vec<_>>>()?;
+
+    let agg_dk = lagrange_multipliers(
+        shares
+            .keys()
+            .cloned()
+            .map(|node| Scalar::from(node + 1))
+            .collect(),
     )
+    .into_iter()
+    .zip(points)
+    .map(|(lagrange_multiplier, point)| lagrange_multiplier * point)
+    .reduce(|a, b| a + b)
+    .expect("We have at least one share");
+
+    Some(agg_dk.to_affine().into())
 }
 
 fn lagrange_multipliers(scalars: Vec<Scalar>) -> Vec<Scalar> {
@@ -197,23 +214,6 @@ fn lagrange_multipliers(scalars: Vec<Scalar>) -> Vec<Scalar> {
         })
         .collect()
 }
-
-macro_rules! impl_hash_with_serialized_compressed {
-    ($type:ty) => {
-        impl std::hash::Hash for $type {
-            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-                state.write(&self.0.to_compressed());
-            }
-        }
-    };
-}
-
-impl_hash_with_serialized_compressed!(AggregatePublicKey);
-impl_hash_with_serialized_compressed!(DecryptionKeyShare);
-impl_hash_with_serialized_compressed!(AggregateDecryptionKey);
-impl_hash_with_serialized_compressed!(EphemeralPublicKey);
-impl_hash_with_serialized_compressed!(EphemeralSignature);
-impl_hash_with_serialized_compressed!(PublicKeyShare);
 
 #[cfg(test)]
 mod tests;

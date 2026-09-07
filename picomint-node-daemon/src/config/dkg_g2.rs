@@ -4,6 +4,7 @@ use std::iter::once;
 use crate::config::poly::{g2, scalar};
 use anyhow::{Context, bail, ensure};
 use bls12_381::{G2Projective, Scalar};
+use group::Curve;
 use group::ff::Field;
 use picomint_core::bitcoin::hashes::sha256;
 use picomint_core::{NodeId, NumNodes};
@@ -11,7 +12,7 @@ use picomint_encoding::Encodable as _;
 use rand::rngs::OsRng;
 use tracing::trace;
 
-use crate::p2p::{DkgMessageG2, P2PMessage, Recipient, ReconnectP2PConnections};
+use crate::p2p::{DkgMessageG2, G2Coefficient, P2PMessage, Recipient, ReconnectP2PConnections};
 
 // Implementation of the classic Pedersen DKG for G2.
 
@@ -36,14 +37,15 @@ impl DkgG2 {
             num_nodes,
             identity,
             polynomial,
-            hash_commitments: once((identity, commitment.consensus_hash_sha256())).collect(),
+            hash_commitments: once((identity, coefficients(&commitment).consensus_hash_sha256()))
+                .collect(),
             commitments: once((identity, commitment)).collect(),
             sk_shares: BTreeMap::new(),
         }
     }
 
-    fn commitment(&self) -> Vec<G2Projective> {
-        self.polynomial.iter().map(g2).collect()
+    fn commitment(&self) -> Vec<G2Coefficient> {
+        coefficients(&self.polynomial.iter().map(g2).collect::<Vec<_>>())
     }
 
     fn initial_message(&self) -> DkgMessageG2 {
@@ -66,18 +68,24 @@ impl DkgG2 {
                     )));
                 }
             }
-            DkgMessageG2::Commitment(polynomial) => {
+            DkgMessageG2::Commitment(coefficients) => {
                 ensure!(
                     *self.hash_commitments.get(&node).with_context(|| format!(
                         "DKG G2: hash commitment not found for node {node}"
-                    ))? == polynomial.consensus_hash_sha256(),
+                    ))? == coefficients.consensus_hash_sha256(),
                     "DKG G2: polynomial commitment from node {node} is of wrong degree."
                 );
 
                 ensure!(
-                    self.num_nodes.threshold() == polynomial.len(),
+                    self.num_nodes.threshold() == coefficients.len(),
                     "DKG G2: polynomial commitment from node {node} is of wrong degree."
                 );
+
+                let polynomial = coefficients
+                    .iter()
+                    .map(|c| c.point().copied().map(G2Projective::from))
+                    .collect::<Option<Vec<_>>>()
+                    .context("DKG G2: commitment not on the curve")?;
 
                 ensure!(
                     self.commitments.insert(node, polynomial).is_none(),
@@ -95,14 +103,16 @@ impl DkgG2 {
                         if node == self.identity {
                             self.sk_shares.insert(self.identity, s);
                         } else {
-                            messages.push((node, DkgMessageG2::Share(s)));
+                            messages.push((node, DkgMessageG2::Share(s.into())));
                         }
                     }
 
                     return Ok(DkgStepG2::Messages(messages));
                 }
             }
-            DkgMessageG2::Share(s) => {
+            DkgMessageG2::Share(share) => {
+                let s = *share.scalar().context("DKG G2: share not a scalar")?;
+
                 let polynomial = self.commitments.get(&node).with_context(|| {
                     format!("DKG G2: polynomial commitment not found for node {node}.")
                 })?;
@@ -199,6 +209,10 @@ enum DkgStepG2 {
     Broadcast(DkgMessageG2),
     Messages(Vec<(NodeId, DkgMessageG2)>),
     Result((Vec<G2Projective>, Scalar)),
+}
+
+fn coefficients(commitment: &[G2Projective]) -> Vec<G2Coefficient> {
+    commitment.iter().map(|c| c.to_affine().into()).collect()
 }
 
 #[cfg(test)]

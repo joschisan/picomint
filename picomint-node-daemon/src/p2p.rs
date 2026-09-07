@@ -8,7 +8,6 @@ use std::time::Duration;
 use anyhow::Context as _;
 use async_channel::{Receiver, Sender, bounded};
 use bitcoin::hashes::sha256;
-use bls12_381::{G1Projective, G2Projective, Scalar};
 use futures::FutureExt;
 use futures::future::select_all;
 use iroh::endpoint::presets::N0;
@@ -21,6 +20,7 @@ use picomint_core::session::SignedSessionOutcome;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::{NodeId, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
+use picomint_encoding::{bls_g1, bls_g2, bls_scalar};
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio::time::sleep;
@@ -83,18 +83,24 @@ pub enum P2PMessage {
     Encodable(Vec<u8>),
 }
 
+// A DKG polynomial's coefficients and the secret share evaluated from
+// it, as they go over the wire.
+bls_g1!(G1Coefficient);
+bls_g2!(G2Coefficient);
+bls_scalar!(SecretShare);
+
 #[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]
 pub enum DkgMessageG1 {
     Hash(sha256::Hash),
-    Commitment(Vec<G1Projective>),
-    Share(Scalar),
+    Commitment(Vec<G1Coefficient>),
+    Share(SecretShare),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]
 pub enum DkgMessageG2 {
     Hash(sha256::Hash),
-    Commitment(Vec<G2Projective>),
-    Share(Scalar),
+    Commitment(Vec<G2Coefficient>),
+    Share(SecretShare),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]

@@ -44,9 +44,10 @@ impl NoteIssuance {
     /// as unspent.
     pub fn blinded_nonce(&self) -> BlindedNonce {
         blind_nonce(
-            Nonce::from_public_key(self.nonce().serialize()),
-            self.blinding_key,
+            &Nonce::from_public_key(self.nonce().serialize()),
+            &self.blinding_key,
         )
+        .expect("a nonce mapped to the curve is a point and a derived blinding key is a scalar")
     }
 
     pub fn request(self, denomination: Denomination) -> NoteIssuanceRequest {
@@ -80,12 +81,13 @@ impl NoteIssuanceRequest {
         }
     }
 
-    pub fn finalize(&self, signature: BlindedSignature) -> SpendableNote {
-        SpendableNote {
+    /// `None` if the blinded signature is not a point.
+    pub fn finalize(&self, signature: BlindedSignature) -> Option<SpendableNote> {
+        Some(SpendableNote {
             denomination: self.denomination,
             keypair: self.issuance.keypair,
-            signature: unblind_signature(self.issuance.blinding_key, signature),
-        }
+            signature: unblind_signature(&self.issuance.blinding_key, &signature)?,
+        })
     }
 
     pub fn account(&self) -> Account {

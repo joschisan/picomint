@@ -17,7 +17,6 @@ use picomint_core::lightning::{
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{Amount, OutPoint};
 use picomint_redb::{DbRead, WriteTx};
-use tpe::{PublicKeyShare, SecretKeyShare};
 
 use crate::config::NodeConfig;
 use crate::config::dkg::DkgHandle;
@@ -39,32 +38,32 @@ pub async fn dkg(nodes: &DkgHandle<'_>) -> anyhow::Result<LightningConfig> {
 
     Ok(LightningConfig {
         consensus: LightningConfigConsensus {
-            tpe_agg_pk: tpe::AggregatePublicKey(polynomial[0].to_affine()),
+            tpe_agg_pk: polynomial[0].to_affine().into(),
             tpe_pks: nodes
                 .num_nodes()
                 .node_ids()
-                .map(|node| (node, PublicKeyShare(eval_poly_g1(&polynomial, &node))))
+                .map(|node| (node, eval_poly_g1(&polynomial, &node).into()))
                 .collect(),
             input_fee: Amount::from_sat(1),
             output_fee: Amount::from_sat(1),
         },
-        private: LightningConfigPrivate {
-            sk: SecretKeyShare(sks),
-        },
+        private: LightningConfigPrivate { sk: sks.into() },
     })
 }
 
 /// Verify our private tpe share matches the public share in the consensus
 /// config.
 pub fn validate_config(cfg: &NodeConfig) -> anyhow::Result<()> {
+    let pk = tpe::derive_pk_share(&cfg.private.lightning.sk)
+        .context("Preimage encryption secret key share is not a scalar")?;
+
     ensure!(
-        tpe::derive_pk_share(&cfg.private.lightning.sk)
-            == *cfg
-                .consensus
-                .lightning
-                .tpe_pks
-                .get(&cfg.private.identity)
-                .context("Public key set has no key for our identity")?,
+        cfg.consensus
+            .lightning
+            .tpe_pks
+            .get(&cfg.private.identity)
+            .context("Public key set has no key for our identity")?
+            == &pk,
         "Preimage encryption secret key share does not match our public key share"
     );
 
@@ -198,7 +197,8 @@ pub fn process_output(
 
             let dk_share = contract
                 .offer
-                .create_decryption_key_share(&server.cfg.private.lightning.sk);
+                .create_decryption_key_share(&server.cfg.private.lightning.sk)
+                .expect("the offer was verified when the contract was accepted");
 
             dbtx.insert(&DecryptionKeyShareTable, &outpoint, &dk_share);
 

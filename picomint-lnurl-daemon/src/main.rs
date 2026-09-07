@@ -238,7 +238,7 @@ async fn resolve_and_fetch_invoice(
         .0;
 
     let offer = IncomingOffer::new(
-        aggregate_pk,
+        &aggregate_pk,
         encryption_seed,
         preimage,
         preimage.consensus_hash(),
@@ -246,7 +246,8 @@ async fn resolve_and_fetch_invoice(
         fee,
         claim_pk,
         ephemeral_keypair.public_key(),
-    );
+    )
+    .context("The mint's aggregate key is not a curve point")?;
 
     let receive = ReceiveRequest {
         mint: info.mint,

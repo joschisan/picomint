@@ -20,7 +20,7 @@ use crate::client::Client;
 use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use crate::tx::{TxSubmissionStateMachine, TxSubmissionStateMachineTable};
-use anyhow::ensure;
+use anyhow::bail;
 use client_db::{DerivationCounterTable, NoteTable, ReceiveOperationIdTable};
 pub use events::*;
 use futures::StreamExt;
@@ -87,7 +87,7 @@ impl SpendableNote {
         Note {
             denomination: self.denomination,
             nonce: self.nonce(),
-            signature: self.signature,
+            signature: self.signature.clone(),
         }
     }
 }
@@ -220,19 +220,19 @@ pub(crate) async fn scan(
         for (i, request) in requests.iter().enumerate() {
             let shares = shares
                 .iter()
-                .map(|(node, node_shares)| (node.to_usize() as u64, node_shares[i]))
+                .map(|(node, node_shares)| (node.to_usize() as u64, node_shares[i].clone()))
                 .collect();
 
-            let note = request.finalize(aggregate_signature_shares(&shares));
-
             let pk = agg_pks
-                .get(&note.denomination)
+                .get(&request.denomination)
                 .expect("No aggregated pk found for denomination");
 
-            ensure!(
-                picomint_core::ecash::verify_note(note.note(), *pk),
-                "Restored note failed verification against the aggregate public key"
-            );
+            let Some(note) = aggregate_signature_shares(&shares)
+                .and_then(|signature| request.finalize(signature))
+                .filter(|note| picomint_core::ecash::verify_note(&note.note(), pk))
+            else {
+                bail!("Restored note failed verification against the aggregate public key");
+            };
 
             notes.push(note);
         }
