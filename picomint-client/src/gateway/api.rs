@@ -12,10 +12,10 @@ use picomint_core::methods::Method;
 pub async fn outgoing_contract_expiry(
     api: &MintApi,
     outpoint: OutPoint,
-) -> anyhow::Result<Option<(ContractId, u32)>> {
+) -> anyhow::Result<(ContractId, u32)> {
     api.request_current_consensus::<OutgoingContractExpiryResponse>(Method::Lightning(
         LightningMethod::OutgoingContractExpiry(OutgoingContractExpiryRequest { outpoint }),
     ))
     .await
-    .map(|resp| resp.contract)
+    .map(|resp| (resp.contract, resp.expiry))
 }

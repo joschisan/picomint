@@ -60,19 +60,17 @@ pub struct SendSMCommon {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub enum SendSMState {
     Funding,
-    Funded,
     Refunding(TransactionId),
 }
 
 /// Outcome produced by [`SendStateMachine::trigger`]. Which variant is
 /// yielded depends on the current [`SendSMState`]:
-/// - `Funding`     → [`SendOutcome::FundingResult`]
-/// - `Funded`      → [`SendOutcome::GatewayResponse`] / [`SendOutcome::PreimageTable`]
-///   / [`SendOutcome::Expired`]
+/// - `Funding`     → [`SendOutcome::Rejected`] / [`SendOutcome::GatewayResponse`]
+///   / [`SendOutcome::PreimageTable`] / [`SendOutcome::Expired`]
 /// - `Refunding{}` → [`SendOutcome::Refunded`] / [`SendOutcome::PreimageTable`]
 ///   / [`SendOutcome::Failure`]
 pub enum SendOutcome {
-    FundingResult(Result<(), String>),
+    Rejected,
     GatewayResponse(Result<[u8; 32], Signature>),
     PreimageTable([u8; 32]),
     Expired,
@@ -87,12 +85,17 @@ impl StateMachine for SendStateMachine {
 
     async fn trigger(&self, ctx: &ClientContext) -> Self::Outcome {
         match &self.state {
-            SendSMState::Funding => SendOutcome::FundingResult(
-                ctx.await_tx_accepted(self.common.operation, self.common.outpoint.txid)
-                    .await,
-            ),
-            SendSMState::Funded => {
+            SendSMState::Funding => {
+                // The gateway and the mint both wait for the contract
+                // themselves, so the request and the preimage poll go out
+                // before the funding transaction is accepted; acceptance
+                // is only awaited for its rejection.
                 tokio::select! {
+                    _ = await_rejected_sm(
+                        ctx,
+                        self.common.operation,
+                        self.common.outpoint.txid,
+                    ) => SendOutcome::Rejected,
                     response = gateway_send_sm(
                         ctx.gateways.clone(),
                         self.common.gateway_pk,
@@ -147,8 +150,7 @@ impl StateMachine for SendStateMachine {
         outcome: Self::Outcome,
     ) -> Option<Self> {
         match outcome {
-            SendOutcome::FundingResult(Ok(())) => Some(self.update(SendSMState::Funded)),
-            SendOutcome::FundingResult(Err(_)) => None,
+            SendOutcome::Rejected => None,
             SendOutcome::PreimageTable(preimage) => {
                 ctx.log_event(
                     dbtx,
@@ -262,6 +264,14 @@ async fn gateway_send_sm(
     .retry(networking_backoff())
     .await
     .expect("networking_backoff retries forever")
+}
+
+/// Resolves only if the funding transaction is rejected; acceptance is
+/// not an outcome of its own, the gateway's answer or the preimage is.
+async fn await_rejected_sm(ctx: &ClientContext, operation: OperationId, txid: TransactionId) {
+    if ctx.await_tx_accepted(operation, txid).await.is_ok() {
+        pending().await
+    }
 }
 
 #[instrument(skip(api))]

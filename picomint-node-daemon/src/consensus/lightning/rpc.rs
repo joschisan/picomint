@@ -66,22 +66,27 @@ pub async fn decryption_key_share(
     Ok(DecryptionKeyShareResponse { share })
 }
 
-pub fn outgoing_contract_expiry(
+/// Waits for the contract rather than reporting its absence, so a
+/// gateway can be asked to pay while the funding transaction is still
+/// in flight.
+pub async fn outgoing_contract_expiry(
     server: &Server,
     req: OutgoingContractExpiryRequest,
 ) -> Result<OutgoingContractExpiryResponse, String> {
-    let dbtx = server.db.begin_read();
-
-    let Some(contract) = dbtx.get(&OutgoingContractTable, &req.outpoint) else {
-        return Ok(OutgoingContractExpiryResponse { contract: None });
-    };
+    let (contract, dbtx) = server
+        .db
+        .wait_table_check(&OutgoingContractTable, |dbtx| {
+            dbtx.get(&OutgoingContractTable, &req.outpoint)
+        })
+        .await;
 
     let expiry = contract
         .expiry
         .saturating_sub(consensus_block_count(server, &dbtx));
 
     Ok(OutgoingContractExpiryResponse {
-        contract: Some((contract.contract_id(), expiry)),
+        contract: contract.contract_id(),
+        expiry,
     })
 }
 
