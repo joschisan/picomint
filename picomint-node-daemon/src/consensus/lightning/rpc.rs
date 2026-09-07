@@ -49,16 +49,21 @@ pub async fn await_preimage(
     }
 }
 
-pub fn decryption_key_share(
+/// Waits for the share rather than reporting its absence, so a gateway
+/// can ask for it while its funding transaction is still in flight and
+/// have it the moment the contract is processed.
+pub async fn decryption_key_share(
     server: &Server,
     req: DecryptionKeyShareRequest,
 ) -> Result<DecryptionKeyShareResponse, String> {
-    server
+    let (share, _dbtx) = server
         .db
-        .begin_read()
-        .get(&DecryptionKeyShareTable, &req.outpoint)
-        .map(|share| DecryptionKeyShareResponse { share })
-        .ok_or_else(|| "No decryption key share found".to_string())
+        .wait_table_check(&DecryptionKeyShareTable, |dbtx| {
+            dbtx.get(&DecryptionKeyShareTable, &req.outpoint)
+        })
+        .await;
+
+    Ok(DecryptionKeyShareResponse { share })
 }
 
 pub fn outgoing_contract_expiry(
