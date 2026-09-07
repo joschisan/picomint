@@ -51,23 +51,19 @@ pub async fn await_preimage(
 
 /// Waits for the share rather than reporting its absence, so a gateway
 /// can ask for it while its funding transaction is still in flight and
-/// have it the moment the contract is processed. The contract has no
-/// expiry to end the wait on, so it is capped; a request for a funding
-/// transaction that never lands returns the error after the cap.
+/// have it the moment the contract is processed.
 pub async fn decryption_key_share(
     server: &Server,
     req: DecryptionKeyShareRequest,
 ) -> Result<DecryptionKeyShareResponse, String> {
-    let wait = server
+    let (share, _dbtx) = server
         .db
         .wait_table_check(&DecryptionKeyShareTable, |dbtx| {
             dbtx.get(&DecryptionKeyShareTable, &req.outpoint)
-        });
+        })
+        .await;
 
-    match timeout(Duration::from_secs(30), wait).await {
-        Ok((share, _dbtx)) => Ok(DecryptionKeyShareResponse { share }),
-        Err(_) => Err("No decryption key share found".to_string()),
-    }
+    Ok(DecryptionKeyShareResponse { share })
 }
 
 pub fn outgoing_contract_expiry(
