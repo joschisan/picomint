@@ -30,7 +30,9 @@ use std::sync::{Arc, Mutex};
 
 use picomint_encoding::{Decodable, Encodable};
 use redb::{Durability, Range, ReadableDatabase, TableDefinition};
+use tokio::runtime::{Handle, RuntimeFlavor};
 use tokio::sync::Notify;
+use tokio::task::block_in_place;
 
 /// Decode a key or value from its stored bytes.
 fn decode<T: Decodable>(bytes: &[u8]) -> T {
@@ -248,14 +250,32 @@ impl Database {
 
     pub fn begin_write(&self) -> WriteTx {
         WriteTx {
-            tx: self
-                .inner
-                .env
-                .begin_write()
-                .expect("redb begin_write failed"),
+            tx: self.take_write_lock(),
             db: self.inner.clone(),
             touched: Mutex::new(BTreeSet::new()),
             on_commit: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// redb has one write transaction at a time and parks the calling
+    /// thread until the live one ends. A task that holds one across an
+    /// await keeps it on a parked future, so taking it from a runtime
+    /// worker must not pin that worker: with two of them pinned nothing
+    /// is left to run the holder, and the node wedges. `block_in_place`
+    /// hands the worker's duties to another thread for the wait.
+    fn take_write_lock(&self) -> redb::WriteTransaction {
+        let begin = || {
+            self.inner
+                .env
+                .begin_write()
+                .expect("redb begin_write failed")
+        };
+
+        match Handle::try_current() {
+            Ok(handle) if handle.runtime_flavor() == RuntimeFlavor::MultiThread => {
+                block_in_place(begin)
+            }
+            _ => begin(),
         }
     }
 
@@ -266,11 +286,7 @@ impl Database {
     /// re-fetched from nodes) — never for money-bearing or safety-critical
     /// writes.
     pub fn begin_write_relaxed(&self) -> WriteTx {
-        let mut tx = self
-            .inner
-            .env
-            .begin_write()
-            .expect("redb begin_write failed");
+        let mut tx = self.take_write_lock();
 
         tx.set_durability(Durability::None)
             .expect("set_durability only fails with a persistent savepoint, which we never create");
@@ -1018,6 +1034,42 @@ mod tests {
         let db = Database::open(&path).unwrap();
         let tx = db.begin_read();
         assert_eq!(tx.get(&UsersTable, &1), Some("alice".to_string()));
+    }
+
+    /// A task holding the write transaction across an await, with every
+    /// worker parked on the lock behind it. Without `block_in_place` the
+    /// holder is never polled again and this hangs rather than fails: the
+    /// timeout runs on the same pinned workers.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn write_lock_does_not_pin_the_workers() {
+        let db = Database::open_in_memory();
+
+        let holder = tokio::spawn({
+            let db = db.clone();
+            async move {
+                let tx = db.begin_write();
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                tx.commit();
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let waiters: Vec<_> = (0..2)
+            .map(|_| {
+                let db = db.clone();
+                tokio::spawn(async move { db.begin_write().commit() })
+            })
+            .collect();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            holder.await.expect("holder finishes");
+            for waiter in waiters {
+                waiter.await.expect("waiter finishes");
+            }
+        })
+        .await
+        .expect("the holder's sleep was polled while the waiters held the workers");
     }
 
     #[tokio::test]

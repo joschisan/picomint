@@ -16,8 +16,8 @@ path = "src/lib.rs"
 anyhow = { workspace = true }
 picomint-encoding = { workspace = true }
 redb = { workspace = true }
-tokio = { workspace = true, features = ["sync", "rt"] }
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time"] }
