@@ -243,7 +243,7 @@ pub async fn handle_api(server: &Server, method: LightningMethod) -> Result<Vec<
             handler_async!(decryption_key_share, server, req).await
         }
         LightningMethod::OutgoingContractExpiry(req) => {
-            handler!(outgoing_contract_expiry, server, req).await
+            handler_async!(outgoing_contract_expiry, server, req).await
         }
         LightningMethod::AwaitIncomingContracts(req) => {
             handler_async!(await_incoming_contracts, server, req).await

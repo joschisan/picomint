@@ -109,8 +109,7 @@ impl AppState {
 
         let (contract_id, expiry) = api::outgoing_contract_expiry(&api, payload.outpoint)
             .await
-            .map_err(|_| anyhow!("The gateway cannot reach the mint"))?
-            .ok_or(anyhow!("The outgoing contract has not yet been confirmed"))?;
+            .map_err(|_| anyhow!("The gateway cannot reach the mint"))?;
 
         ensure!(
             contract_id == payload.contract.contract_id(),

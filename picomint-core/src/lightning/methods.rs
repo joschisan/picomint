@@ -51,7 +51,8 @@ pub struct OutgoingContractExpiryRequest {
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct OutgoingContractExpiryResponse {
-    pub contract: Option<(ContractId, u32)>,
+    pub contract: ContractId,
+    pub expiry: u32,
 }
 
 // ── await-incoming-contracts ────────────────────────────────────────────────
