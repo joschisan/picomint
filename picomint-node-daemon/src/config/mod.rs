@@ -62,6 +62,8 @@ pub struct DaemonSettings {
     pub ui_addr: SocketAddr,
     /// Path to the folder holding the database and the admin CLI socket
     pub data_dir: PathBuf,
+    /// Shortened polling intervals for the integration test.
+    pub integration_test: bool,
 }
 
 /// Outcome of the setup phase: either fresh DKG params (run a DKG) or a

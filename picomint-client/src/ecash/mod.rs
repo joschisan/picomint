@@ -374,9 +374,9 @@ pub(crate) fn finalize_and_submit_tx<E: crate::eventlog::Event + Send>(
 
     let funding: Amount = spendable_notes.iter().map(|n| n.amount()).sum();
 
-    let remint = funding.saturating_sub(deficit);
+    let reissue = funding.saturating_sub(deficit);
 
-    let txid = submit(ctx, dbtx, account, operation, builder, remint, event);
+    let txid = submit(ctx, dbtx, account, operation, builder, reissue, event);
 
     if !spendable_notes.is_empty() || !issuance_requests.is_empty() {
         let sm = EcashStateMachine {
@@ -466,7 +466,7 @@ fn submit<E: crate::eventlog::Event + Send>(
     account: Account,
     operation: OperationId,
     builder: TxBuilder,
-    remint: Amount,
+    reissue: Amount,
     event: impl FnOnce(TransactionId) -> E,
 ) -> TransactionId {
     let fee = builder.total_fee();
@@ -488,7 +488,7 @@ fn submit<E: crate::eventlog::Event + Send>(
         dbtx,
         account,
         operation,
-        crate::TxCreateEvent { txid, remint, fee },
+        crate::TxCreateEvent { txid, reissue, fee },
     );
 
     txid

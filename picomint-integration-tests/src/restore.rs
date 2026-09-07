@@ -5,13 +5,17 @@ use crate::cli;
 use crate::env::{NUM_NODES, NUM_ONLINE_NODES, TestEnv, retry};
 
 /// Poll until node `node` reports `target` finalized sessions or
-/// more. Returns the observed count.
+/// more, mining a block per attempt: sessions cut on rounds, rounds
+/// only advance on work, and with the nodes polling bitcoind every
+/// 100 ms the block-count votes are that work. Returns the observed
+/// count.
 async fn retry_session_count_at_least(env: &TestEnv, node: usize, target: u64) -> Result<u64> {
     let data_dir = env.data_dir.join(format!("node-{node}"));
 
     retry(&format!("node-{node} session count >= {target}"), || {
         let data_dir = data_dir.clone();
         async move {
+            env.mine_blocks(1);
             let count = cli::node_session_count(&data_dir)?;
             ensure!(count >= target, "session count {count} < {target}");
             Ok(count)
@@ -92,10 +96,11 @@ pub async fn run_test(env: &TestEnv) -> Result<()> {
         cli::node_setup_restore(&data_dirs[i], &backup_paths[i])?;
     }
 
-    let target = heights.iter().copied().max().unwrap() + 1;
-    info!("waiting for nodes {nodes:?} to advance to session >= {target}");
+    // A restored node starts at session 0 and catches up from there;
+    // finalizing any session proves it rejoined.
+    info!("waiting for nodes {nodes:?} to leave session 0");
     for &node in &nodes {
-        retry_session_count_at_least(env, node, target).await?;
+        retry_session_count_at_least(env, node, 1).await?;
     }
 
     info!("verifying restored configs match originals");

@@ -71,7 +71,7 @@ pub struct TxCreateEvent {
     /// builder: `sum(funding_notes) - deficit`. Reissued back to the
     /// wallet (minus mint fees on the change outputs) as fresh
     /// notes once the tx is accepted.
-    pub remint: Amount,
+    pub reissue: Amount,
     /// Mint fee paid by this transaction (sum of per-input and
     /// per-output fees the mint deducts).
     pub fee: Amount,

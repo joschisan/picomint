@@ -256,7 +256,9 @@ async fn output_scanner(ctx: ClientContext) {
             }
         }
 
-        if ctx.config.network == bitcoin::Network::Regtest {
+        // The one place the library reads the environment: the scan
+        // interval paces the integration test, not the protocol.
+        if std::env::var_os("INTEGRATION_TEST").is_some() {
             sleep(Duration::from_secs(1)).await;
         } else {
             sleep(Duration::from_secs(60)).await;

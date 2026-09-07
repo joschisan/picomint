@@ -59,6 +59,9 @@ docker exec "$CONTAINER_NAME" bitcoin-cli \
     -regtest -rpcuser=bitcoin -rpcpassword=bitcoin \
     createwallet default > /dev/null
 
+# The in-process test clients poll at the test cadence too.
+export INTEGRATION_TEST=true
+
 if [[ -n "$KEEP_ALIVE" ]]; then
     echo "Bringing up mint (stays up until Ctrl-C)..."
     KEEP_ALIVE=1 RUST_LOG="${RUST_LOG:-info}" ./target/release/picomint-integration-tests

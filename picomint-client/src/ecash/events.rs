@@ -50,7 +50,7 @@ impl Event for SendFailureEvent {
     const KIND: EventKind = EventKind::from_static("send-failure");
 }
 
-/// Emitted when a send operation requires re-minting notes before the sender
+/// Emitted when a send operation requires reissuing notes before the sender
 /// has enough of the right denominations to send.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReissuanceEvent {
@@ -59,7 +59,7 @@ pub struct ReissuanceEvent {
 
 impl Event for ReissuanceEvent {
     const SOURCE: EventSource = EventSource::Ecash;
-    const KIND: EventKind = EventKind::from_static("remint");
+    const KIND: EventKind = EventKind::from_static("reissue");
 }
 
 /// Emitted when a receive (reissuance) operation is initiated.

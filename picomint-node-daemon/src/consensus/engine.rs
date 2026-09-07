@@ -27,17 +27,10 @@ use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
 /// BFT rounds a session runs for, which is what sets how long one lasts.
 ///
-/// Follows from the network rather than being agreed at DKG: every node
-/// on a mint is on the same network by construction, so the two can
-/// never disagree, and a mint that wants shorter sessions is a
-/// mint running a different binary.
-fn rounds_per_session(cfg: &NodeConfig) -> u32 {
-    if cfg.consensus.network == bitcoin::Network::Regtest {
-        100
-    } else {
-        10000
-    }
-}
+/// Not agreed at DKG: a mint that wants a different session length is a
+/// mint running a different binary, and every node runs the same one by
+/// construction.
+const ROUNDS_PER_SESSION: u32 = 1000;
 
 /// Bytes of accepted items a session collects before it closes.
 ///
@@ -90,7 +83,7 @@ async fn run_session(
     // The bft engine creates units unpaced but work-gated: as fast as
     // new parents arrive while items await ordering, not at all while
     // idle. The session stops ordering items once it reaches
-    // [`rounds_per_session`] rounds (see [`order_items_until_cut`]),
+    // [`ROUNDS_PER_SESSION`] rounds (see [`order_items_until_cut`]),
     // which on a quiet mint can take arbitrarily long in wall
     // clock.
 
@@ -176,7 +169,7 @@ async fn adopt_session(
     session_index: u32,
     outcomes_rx: Receiver<(NodeId, SignedSessionOutcome)>,
 ) -> Option<SignedSessionOutcome> {
-    let request_interval = if server.cfg.consensus.network == bitcoin::Network::Regtest {
+    let request_interval = if server.integration_test {
         Duration::from_millis(300)
     } else {
         Duration::from_secs(3)
@@ -275,7 +268,7 @@ async fn order_items_until_cut(
             continue;
         }
 
-        if round >= rounds_per_session(&server.cfg) {
+        if round >= ROUNDS_PER_SESSION {
             return Some(());
         }
 

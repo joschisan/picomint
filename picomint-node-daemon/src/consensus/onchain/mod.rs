@@ -15,7 +15,7 @@ use bitcoin::absolute::LockTime;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::Version;
-use bitcoin::{Amount, Network, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
+use bitcoin::{Amount, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
 use common::config::OnchainConfigConsensus;
 use common::{OnchainConsensusItem, OnchainInput, OnchainOutput, OutputInfo};
 use picomint_core::backoff::{Retryable, networking_backoff};
@@ -547,7 +547,7 @@ pub async fn handle_api(server: &Server, method: OnchainMethod) -> Result<Vec<u8
 pub fn spawn_broadcast_unconfirmed_txs_task(
     btc_rpc: BitcoindRpcMonitor,
     db: Database,
-    network: Network,
+    integration_test: bool,
 ) {
     tokio::spawn(async move {
         loop {
@@ -559,7 +559,7 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
                 btc_rpc.submit_tx(unconfirmed_tx.tx).await;
             }
 
-            if network == Network::Regtest {
+            if integration_test {
                 sleep(Duration::from_secs(1)).await;
             } else {
                 sleep(Duration::from_secs(60)).await;
@@ -775,10 +775,10 @@ async fn await_local_sync_to_block_count(server: &Server, block_count: u32) {
 
         info!("Waiting for local bitcoin backend to sync to block count {block_count}");
 
-        if server.cfg.consensus.network == Network::Regtest {
+        if server.integration_test {
             sleep(Duration::from_secs(1)).await;
         } else {
-            sleep(Duration::from_secs(60)).await;
+            sleep(Duration::from_secs(10)).await;
         }
     }
 }
