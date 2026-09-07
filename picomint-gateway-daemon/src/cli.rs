@@ -16,25 +16,27 @@ use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
     ChannelInfo, ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse,
     ClientConfigRequest, ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
-    ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendRequest,
-    ClientEcashSendResponse, ClientListResponse, ClientOnchainReceiveRequest,
-    ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse,
-    ClientOnchainSendRequest, ClientOnchainSendResponse, ClientRemoveRequest, InfoResponse,
-    LdkBalancesResponse, LdkChannelCloseRequest, LdkChannelListResponse, LdkChannelOpenRequest,
-    LdkChannelSpliceInRequest, LdkChannelSpliceOutRequest, LdkLightningProbeRequest,
-    LdkLightningReceiveRequest, LdkLightningReceiveResponse, LdkLightningSendRequest,
-    LdkLightningSendResponse, LdkOnchainReceiveResponse, LdkOnchainSendRequest,
-    LdkOnchainSendResponse, LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse,
-    MnemonicResponse, PeerInfo, QueryRequest, QueryResponse, ROUTE_CLIENT_ADD,
-    ROUTE_CLIENT_BALANCE, ROUTE_CLIENT_CONFIG, ROUTE_CLIENT_ECASH_COUNT,
-    ROUTE_CLIENT_ECASH_RECEIVE, ROUTE_CLIENT_ECASH_SEND, ROUTE_CLIENT_LIST,
+    ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
+    ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
+    ClientListResponse, ClientOnchainReceiveRequest, ClientOnchainReceiveResponse,
+    ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse, ClientOnchainSendMaxRequest,
+    ClientOnchainSendMaxResponse, ClientOnchainSendRequest, ClientOnchainSendResponse,
+    ClientRemoveRequest, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
+    LdkChannelListResponse, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
+    LdkChannelSpliceOutRequest, LdkLightningProbeRequest, LdkLightningReceiveRequest,
+    LdkLightningReceiveResponse, LdkLightningSendRequest, LdkLightningSendResponse,
+    LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
+    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
+    PeerInfo, QueryRequest, QueryResponse, ROUTE_CLIENT_ADD, ROUTE_CLIENT_BALANCE,
+    ROUTE_CLIENT_CONFIG, ROUTE_CLIENT_ECASH_COUNT, ROUTE_CLIENT_ECASH_RECEIVE,
+    ROUTE_CLIENT_ECASH_SEND, ROUTE_CLIENT_ECASH_SEND_MAX, ROUTE_CLIENT_LIST,
     ROUTE_CLIENT_ONCHAIN_RECEIVE, ROUTE_CLIENT_ONCHAIN_SEND, ROUTE_CLIENT_ONCHAIN_SEND_FEE,
-    ROUTE_CLIENT_REMOVE, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
-    ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_CHANNEL_SPLICE_IN,
-    ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE, ROUTE_LDK_LIGHTNING_RECEIVE,
-    ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
-    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
-    ROUTE_QUERY,
+    ROUTE_CLIENT_ONCHAIN_SEND_MAX, ROUTE_CLIENT_REMOVE, ROUTE_INFO, ROUTE_LDK_BALANCES,
+    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE,
+    ROUTE_LDK_LIGHTNING_RECEIVE, ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE,
+    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
+    ROUTE_MNEMONIC, ROUTE_QUERY,
 };
 use tower_http::cors::CorsLayer;
 use tracing::{info, instrument};
@@ -79,9 +81,11 @@ fn router() -> Router<AppState> {
         // Per-mint module commands
         .route(ROUTE_CLIENT_ECASH_COUNT, post(client_ecash_count))
         .route(ROUTE_CLIENT_ECASH_SEND, post(client_ecash_send))
+        .route(ROUTE_CLIENT_ECASH_SEND_MAX, post(client_ecash_send_max))
         .route(ROUTE_CLIENT_ECASH_RECEIVE, post(client_ecash_receive))
         .route(ROUTE_CLIENT_ONCHAIN_SEND_FEE, post(client_onchain_send_fee))
         .route(ROUTE_CLIENT_ONCHAIN_SEND, post(client_onchain_send))
+        .route(ROUTE_CLIENT_ONCHAIN_SEND_MAX, post(client_onchain_send_max))
         .route(ROUTE_CLIENT_ONCHAIN_RECEIVE, post(client_onchain_receive))
 }
 
@@ -657,6 +661,20 @@ async fn client_ecash_send(
     Ok(Json(ClientEcashSendResponse { ecash }))
 }
 
+/// Spend the account's entire balance as one ecash string.
+#[instrument(skip_all, err)]
+async fn client_ecash_send_max(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientEcashSendMaxRequest>,
+) -> Result<Json<ClientEcashSendMaxResponse>, CliError> {
+    let ecash = state
+        .client
+        .ecash_send_max(payload.mint, payload.account)
+        .map_err(CliError::internal)?;
+
+    Ok(Json(ClientEcashSendMaxResponse { ecash }))
+}
+
 /// Reissue an ecash string into the named account. Returns the operation
 /// id; acceptance shows up in the analytics as `core_tx_accept`.
 #[instrument(skip_all, err)]
@@ -709,6 +727,21 @@ async fn client_onchain_send(
         .map_err(|e| CliError::internal(format!("Failed to submit onchain send: {e}")))?;
 
     Ok(Json(ClientOnchainSendResponse { operation }))
+}
+
+/// Send the account's entire balance onchain, minus the mint's fee.
+#[instrument(skip_all, err)]
+async fn client_onchain_send_max(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientOnchainSendMaxRequest>,
+) -> Result<Json<ClientOnchainSendMaxResponse>, CliError> {
+    let operation = state
+        .client
+        .onchain_send_max(payload.mint, payload.account, payload.address)
+        .await
+        .map_err(|e| CliError::internal(format!("Failed to submit onchain send: {e}")))?;
+
+    Ok(Json(ClientOnchainSendMaxResponse { operation }))
 }
 
 /// Generate deposit address for a mint

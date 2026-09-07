@@ -47,9 +47,11 @@ pub const ROUTE_CLIENT_REMOVE: &str = "/client/remove";
 // Client module commands
 pub const ROUTE_CLIENT_ECASH_COUNT: &str = "/client/ecash/count";
 pub const ROUTE_CLIENT_ECASH_SEND: &str = "/client/ecash/send";
+pub const ROUTE_CLIENT_ECASH_SEND_MAX: &str = "/client/ecash/send-max";
 pub const ROUTE_CLIENT_ECASH_RECEIVE: &str = "/client/ecash/receive";
 pub const ROUTE_CLIENT_ONCHAIN_SEND_FEE: &str = "/client/onchain/send-fee";
 pub const ROUTE_CLIENT_ONCHAIN_SEND: &str = "/client/onchain/send";
+pub const ROUTE_CLIENT_ONCHAIN_SEND_MAX: &str = "/client/onchain/send-max";
 pub const ROUTE_CLIENT_ONCHAIN_RECEIVE: &str = "/client/onchain/receive";
 
 // --- /info ---
@@ -381,6 +383,20 @@ pub struct ClientEcashSendResponse {
     pub ecash: Ecash,
 }
 
+// --- /client/ecash/send-max ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientEcashSendMaxRequest {
+    pub mint: MintId,
+    pub account: Account,
+}
+
+/// `None` when the account holds no notes.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ClientEcashSendMaxResponse {
+    pub ecash: Option<Ecash>,
+}
+
 // --- /client/ecash/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
@@ -421,6 +437,20 @@ pub struct ClientOnchainSendRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClientOnchainSendResponse {
+    pub operation: OperationId,
+}
+
+// --- /client/onchain/send-max ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientOnchainSendMaxRequest {
+    pub mint: MintId,
+    pub account: Account,
+    pub address: bitcoin::Address<NetworkUnchecked>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ClientOnchainSendMaxResponse {
     pub operation: OperationId,
 }
 

@@ -5,15 +5,16 @@ use clap::{Parser, Subcommand};
 use picomint_cli_client::{print_json, request};
 use picomint_gateway_cli_core::{
     ClientAddRequest, ClientBalanceRequest, ClientConfigRequest, ClientEcashCountRequest,
-    ClientEcashReceiveRequest, ClientEcashSendRequest, ClientOnchainReceiveRequest,
-    ClientOnchainSendFeeRequest, ClientOnchainSendRequest, ClientRemoveRequest,
-    LdkChannelCloseRequest, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
-    LdkChannelSpliceOutRequest, LdkLightningProbeRequest, LdkLightningReceiveRequest,
-    LdkLightningSendRequest, LdkOnchainSendRequest, LdkPeerConnectRequest,
-    LdkPeerDisconnectRequest, QueryRequest, ROUTE_CLIENT_ADD, ROUTE_CLIENT_BALANCE,
-    ROUTE_CLIENT_CONFIG, ROUTE_CLIENT_ECASH_COUNT, ROUTE_CLIENT_ECASH_RECEIVE,
-    ROUTE_CLIENT_ECASH_SEND, ROUTE_CLIENT_LIST, ROUTE_CLIENT_ONCHAIN_RECEIVE,
-    ROUTE_CLIENT_ONCHAIN_SEND, ROUTE_CLIENT_ONCHAIN_SEND_FEE, ROUTE_CLIENT_REMOVE, ROUTE_INFO,
+    ClientEcashReceiveRequest, ClientEcashSendMaxRequest, ClientEcashSendRequest,
+    ClientOnchainReceiveRequest, ClientOnchainSendFeeRequest, ClientOnchainSendMaxRequest,
+    ClientOnchainSendRequest, ClientRemoveRequest, LdkChannelCloseRequest, LdkChannelOpenRequest,
+    LdkChannelSpliceInRequest, LdkChannelSpliceOutRequest, LdkLightningProbeRequest,
+    LdkLightningReceiveRequest, LdkLightningSendRequest, LdkOnchainSendRequest,
+    LdkPeerConnectRequest, LdkPeerDisconnectRequest, QueryRequest, ROUTE_CLIENT_ADD,
+    ROUTE_CLIENT_BALANCE, ROUTE_CLIENT_CONFIG, ROUTE_CLIENT_ECASH_COUNT,
+    ROUTE_CLIENT_ECASH_RECEIVE, ROUTE_CLIENT_ECASH_SEND, ROUTE_CLIENT_ECASH_SEND_MAX,
+    ROUTE_CLIENT_LIST, ROUTE_CLIENT_ONCHAIN_RECEIVE, ROUTE_CLIENT_ONCHAIN_SEND,
+    ROUTE_CLIENT_ONCHAIN_SEND_FEE, ROUTE_CLIENT_ONCHAIN_SEND_MAX, ROUTE_CLIENT_REMOVE, ROUTE_INFO,
     ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE,
     ROUTE_LDK_LIGHTNING_RECEIVE, ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE,
@@ -138,6 +139,8 @@ enum EcashCommands {
     Count(ClientEcashCountRequest),
     /// Send ecash
     Send(ClientEcashSendRequest),
+    /// Send the account's entire ecash balance
+    SendMax(ClientEcashSendMaxRequest),
     /// Receive ecash
     Receive(ClientEcashReceiveRequest),
 }
@@ -148,6 +151,8 @@ enum OnchainCommands {
     SendFee(ClientOnchainSendFeeRequest),
     /// Send onchain from the mint
     Send(ClientOnchainSendRequest),
+    /// Send the account's entire balance onchain, minus the fee
+    SendMax(ClientOnchainSendMaxRequest),
     /// Get receive address
     Receive(ClientOnchainReceiveRequest),
 }
@@ -208,6 +213,7 @@ async fn main() -> Result<()> {
             ClientCommands::Ecash(cmd) => match cmd {
                 EcashCommands::Count(req) => request(d, ROUTE_CLIENT_ECASH_COUNT, req).await?,
                 EcashCommands::Send(req) => request(d, ROUTE_CLIENT_ECASH_SEND, req).await?,
+                EcashCommands::SendMax(req) => request(d, ROUTE_CLIENT_ECASH_SEND_MAX, req).await?,
                 EcashCommands::Receive(req) => request(d, ROUTE_CLIENT_ECASH_RECEIVE, req).await?,
             },
             ClientCommands::Onchain(cmd) => match cmd {
@@ -215,6 +221,9 @@ async fn main() -> Result<()> {
                     request(d, ROUTE_CLIENT_ONCHAIN_SEND_FEE, req).await?
                 }
                 OnchainCommands::Send(req) => request(d, ROUTE_CLIENT_ONCHAIN_SEND, req).await?,
+                OnchainCommands::SendMax(req) => {
+                    request(d, ROUTE_CLIENT_ONCHAIN_SEND_MAX, req).await?
+                }
                 OnchainCommands::Receive(req) => {
                     request(d, ROUTE_CLIENT_ONCHAIN_RECEIVE, req).await?
                 }
