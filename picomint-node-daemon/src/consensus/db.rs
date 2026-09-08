@@ -7,7 +7,7 @@ use picomint_core::session;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::ConsensusVersion;
 use picomint_core::{NodeId, NumNodesExt, TransactionId};
-use picomint_encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable, Undecoded};
 use picomint_redb::{DbRead, table};
 
 use crate::consensus::server::Server;
@@ -43,7 +43,7 @@ table!(
 
 table!(
     BftUnitDataTable,
-    UnitHash => Vec<ConsensusItem>,
+    UnitHash => Vec<Undecoded<ConsensusItem>>,
     "bft-unit-data",
 );
 

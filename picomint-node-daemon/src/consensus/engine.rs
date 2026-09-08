@@ -11,6 +11,7 @@ use picomint_core::session::{AcceptedItem, SessionOutcome, SessionState, session
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::{NodeId, NumNodesExt};
+use picomint_encoding::Undecoded;
 use picomint_redb::{DbRead, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
 use tracing::{Instrument, info, info_span, instrument};
@@ -213,7 +214,7 @@ async fn participate_in_session(
     server: &Server,
     connections: &ReconnectP2PConnections,
     session: u32,
-    ordered_rx: Receiver<(BftRound, NodeId, ConsensusItem)>,
+    ordered_rx: Receiver<(BftRound, NodeId, Undecoded<ConsensusItem>)>,
     signatures_rx: Receiver<(NodeId, schnorr::Signature)>,
 ) -> Option<BTreeMap<NodeId, schnorr::Signature>> {
     let header = order_items_until_cut(server, session, ordered_rx).await?;
@@ -231,7 +232,7 @@ async fn participate_in_session(
 async fn order_items_until_cut(
     server: &Server,
     session: u32,
-    ordered_rx: Receiver<(BftRound, NodeId, ConsensusItem)>,
+    ordered_rx: Receiver<(BftRound, NodeId, Undecoded<ConsensusItem>)>,
 ) -> Option<sha256::Hash> {
     // On crash replay bft re-emits from position 0, so we resume past
     // every position the prior run processed. The header and the byte
@@ -273,13 +274,19 @@ async fn order_items_until_cut(
             return Some(state.header);
         }
 
+        // An item that doesn't decode is rejected like any other invalid
+        // item: it leaves no trace beyond its position being skipped.
+        let Ok(decoded) = item.decode() else {
+            continue;
+        };
+
         let dbtx = server.db.begin_write();
 
         dbtx.insert(&ResumeIndexTable, &(), &(index + 1));
 
         // The round joins a tx's "Verified tx" line to the bft engine's
         // unit and head traces; the adopted suffix at a cut has none.
-        if process_consensus_item(server, &dbtx, node, item.clone())
+        if process_consensus_item(server, &dbtx, node, decoded)
             .instrument(info_span!("ordered", round))
             .await
             .is_err()
@@ -416,7 +423,12 @@ async fn finalize_session(server: &Server, session: u32, close: SessionClose) {
             );
 
             for (index, item) in (accepted.len() as u64..).zip(unprocessed) {
-                process_consensus_item(server, &dbtx, item.node, item.item.clone())
+                let decoded = item
+                    .item
+                    .decode()
+                    .expect("Undecodable item accepted by mint consensus");
+
+                process_consensus_item(server, &dbtx, item.node, decoded)
                     .await
                     .expect("Rejected item accepted by mint consensus");
 

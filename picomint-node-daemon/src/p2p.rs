@@ -20,6 +20,7 @@ use picomint_core::backoff::{BackoffBuilder, FibonacciBackoff, networking_backof
 use picomint_core::session::SessionOutcome;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::{NodeId, secp256k1};
+use picomint_encoding::Undecoded;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
@@ -72,7 +73,7 @@ pub enum P2PMessage {
     /// are produced over `(session, unit)`, so a stale `Unit` from another
     /// session fails verification and is discarded. A stale `Request` at
     /// worst backfills a unit the recipient does not hold.
-    Bft(BftMessage<ConsensusItem>),
+    Bft(BftMessage<Undecoded<ConsensusItem>>),
     SessionSignature(secp256k1::schnorr::Signature),
     SessionIndex(u32),
     SessionOutcome(SessionOutcome),

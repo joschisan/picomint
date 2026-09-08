@@ -21,6 +21,7 @@ use picomint_core::secp256k1::schnorr;
 use picomint_core::session::SessionOutcome;
 use picomint_core::tx::ConsensusItem;
 use picomint_encoding::Encodable;
+use picomint_encoding::Undecoded;
 use picomint_redb::{Database, DbRead};
 use tracing::error;
 
@@ -67,13 +68,13 @@ fn into_p2p_recipient(r: BftRecipient) -> P2PRecipient {
     }
 }
 
-impl INetwork<ConsensusItem> for Network {
-    fn send(&self, recipient: BftRecipient, msg: BftMessage<ConsensusItem>) {
+impl INetwork<Undecoded<ConsensusItem>> for Network {
+    fn send(&self, recipient: BftRecipient, msg: BftMessage<Undecoded<ConsensusItem>>) {
         self.connections
             .send(into_p2p_recipient(recipient), P2PMessage::Bft(msg));
     }
 
-    async fn receive(&self) -> Option<(NodeId, BftMessage<ConsensusItem>)> {
+    async fn receive(&self) -> Option<(NodeId, BftMessage<Undecoded<ConsensusItem>>)> {
         loop {
             let (node, message) = self.connections.receive().await?;
 
@@ -114,7 +115,8 @@ impl INetwork<ConsensusItem> for Network {
 /// `DataProvider` impl draining the daemon's submission channel into the
 /// next unit's payload, cut off once the payload reaches
 /// [`BFT_UNIT_BYTE_TARGET`]. `pending_items` holds items pulled off the
-/// channel by `wait_for_data` to wake the engine out of quiescence.
+/// channel by `wait_for_data` to wake the engine out of quiescence. Items
+/// are encoded as they are handed to the engine, which never decodes one.
 pub struct DataProvider {
     submission_rx: Receiver<ConsensusItem>,
     pending_items: VecDeque<ConsensusItem>,
@@ -128,16 +130,17 @@ impl DataProvider {
         }
     }
 
-    fn next_item(&mut self) -> Option<ConsensusItem> {
+    fn next_item(&mut self) -> Option<Undecoded<ConsensusItem>> {
         self.pending_items
             .pop_front()
             .or_else(|| self.submission_rx.try_recv().ok())
+            .map(Undecoded::from)
     }
 }
 
 #[async_trait]
-impl BftDataProvider<ConsensusItem> for DataProvider {
-    fn get_data(&mut self) -> Vec<ConsensusItem> {
+impl BftDataProvider<Undecoded<ConsensusItem>> for DataProvider {
+    fn get_data(&mut self) -> Vec<Undecoded<ConsensusItem>> {
         let mut items = Vec::new();
 
         // The target bounds a unit's memory footprint, nothing consensus

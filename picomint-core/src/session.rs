@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use bitcoin::hashes::sha256;
-use picomint_encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable, Undecoded};
 
 use crate::NodeId;
 use crate::secp256k1::schnorr;
@@ -16,7 +16,7 @@ use crate::tx::ConsensusItem;
 #[derive(Clone, Debug, PartialEq, Eq, Encodable, Decodable)]
 pub struct AcceptedItem {
     pub node: NodeId,
-    pub item: ConsensusItem,
+    pub item: Undecoded<ConsensusItem>,
 }
 
 /// A session as far as its accepted items go: how many, the header they
