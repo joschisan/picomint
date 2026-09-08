@@ -3,14 +3,14 @@ use std::time::Duration;
 
 use anyhow::{anyhow, ensure};
 use async_channel::Receiver;
+use bitcoin::hashes::sha256;
 use futures::{StreamExt, stream};
 use picomint_bft::{Engine as BftEngine, Keychain as BftKeychain, Round as BftRound};
 use picomint_core::secp256k1::{SECP256K1, schnorr};
-use picomint_core::session::{AcceptedItem, SessionOutcome, SignedSessionOutcome};
+use picomint_core::session::{AcceptedItem, SessionOutcome, SessionState, session_header};
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::{NodeId, NumNodesExt};
-use picomint_encoding::Encodable;
 use picomint_redb::{DbRead, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
 use tracing::{Instrument, info, info_span, instrument};
@@ -19,7 +19,7 @@ use crate::config::NodeConfig;
 use crate::consensus::bft::{DataProvider, Network};
 use crate::consensus::db::{
     AcceptedItemTable, AcceptedTxidTable, BftUnitDataTable, BftUnitSignatureTable, BftUnitTable,
-    BlockCountVoteTable, ConsensusVersionVoteTable, SignedSessionOutcomeTable,
+    BlockCountVoteTable, ConsensusVersionVoteTable, ResumeIndexTable, SessionSignaturesTable,
     consensus_block_count, consensus_version,
 };
 use crate::consensus::onchain;
@@ -60,18 +60,18 @@ pub async fn run(
     assert!(server.cfg.consensus.nodes.to_num_nodes().total() >= 4);
 
     loop {
-        let session_index = get_finished_session_count(&server.db.begin_read());
+        let session = get_finished_session_count(&server.db.begin_read());
 
-        info!(session_index, "Starting consensus session");
+        info!(session, "Starting consensus session");
 
-        if run_session(&server, &connections, &submission_rx, session_index)
+        if run_session(&server, &connections, &submission_rx, session)
             .await
             .is_none()
         {
             return Ok(());
         }
 
-        info!(session_index, "Completed consensus session");
+        info!(session, "Completed consensus session");
     }
 }
 
@@ -79,7 +79,7 @@ async fn run_session(
     server: &Server,
     connections: &ReconnectP2PConnections,
     submission_rx: &Receiver<ConsensusItem>,
-    session_index: u32,
+    session: u32,
 ) -> Option<()> {
     // The bft engine creates units unpaced but work-gated: as fast as
     // new parents arrive while items await ordering, not at all while
@@ -110,7 +110,7 @@ async fn run_session(
 
     let bft_engine = BftEngine::new(
         server.cfg.private.identity,
-        session_index,
+        session,
         num_nodes,
         server.db.clone(),
         build_keychain(&server.cfg),
@@ -132,34 +132,39 @@ async fn run_session(
     // That holds because module processing keeps no state outside the
     // WriteTx and its only external effect, the onchain module's tx broadcast,
     // tolerates replay — new module code has to preserve both properties.
-    let signed_session_outcome = tokio::select! {
-        outcome = adopt_session(server, connections, session_index, outcomes_rx) => outcome?,
-        outcome = participate_in_session(
+    let close = tokio::select! {
+        outcome = adopt_session(server, connections, session, outcomes_rx) => {
+            SessionClose::Adopted(outcome?)
+        }
+        signatures = participate_in_session(
             server,
             connections,
-            session_index,
+            session,
             ordered_rx,
             signatures_rx,
-        ) => outcome?,
+        ) => SessionClose::Signed(signatures?),
     };
 
-    assert!(
-        validate_signed_session_outcome(&server.cfg, session_index, &signed_session_outcome),
-        "Our created signed session outcome fails validation"
-    );
-
-    info!(session_index, "Terminating BFT session");
+    info!(session, "Terminating BFT session");
 
     // The engine has no internal stopping condition, and it has to be dead
     // before [`finalize_session`] clears BFT_UNITS underneath it; abort it
     // now that we hold the signed outcome — nodes that still need it will
-    // fetch via SessionIndex/SignedSessionOutcome.
+    // fetch via SessionIndex/SessionOutcome.
     bft_handle.abort();
     bft_handle.await.ok();
 
-    finalize_session(server, session_index, signed_session_outcome).await;
+    finalize_session(server, session, close).await;
 
     Some(())
+}
+
+/// How the running session closed: with a threshold of signatures over
+/// the header we folded ourselves, or with a signed outcome adopted from
+/// a node that got there first.
+enum SessionClose {
+    Signed(BTreeMap<NodeId, schnorr::Signature>),
+    Adopted(SessionOutcome),
 }
 
 /// Obtains the signed session outcome without ordering a single item, by
@@ -169,9 +174,9 @@ async fn run_session(
 async fn adopt_session(
     server: &Server,
     connections: &ReconnectP2PConnections,
-    session_index: u32,
-    outcomes_rx: Receiver<(NodeId, SignedSessionOutcome)>,
-) -> Option<SignedSessionOutcome> {
+    session: u32,
+    outcomes_rx: Receiver<(NodeId, SessionOutcome)>,
+) -> Option<SessionOutcome> {
     let request_interval = if server.integration_test {
         Duration::from_millis(300)
     } else {
@@ -185,8 +190,8 @@ async fn adopt_session(
             result = outcomes_rx.recv() => {
                 let (node, outcome) = result.ok()?;
 
-                if validate_signed_session_outcome(&server.cfg, session_index, &outcome) {
-                    info!(session_index, %node, "Adopted signed session outcome from node");
+                if validate_session_outcome(&server.cfg, session, &outcome) {
+                    info!(session, %node, "Adopted signed session outcome from node");
 
                     return Some(outcome);
                 }
@@ -194,65 +199,58 @@ async fn adopt_session(
             _ = request_interval.tick() => {
                 connections.send(
                     Recipient::Node(random_node(&server.cfg)),
-                    P2PMessage::SessionIndex(session_index),
+                    P2PMessage::SessionIndex(session),
                 );
             }
         }
     }
 }
 
-/// Obtains the signed session outcome by taking part in the session: order
-/// items until the session cut, then sign the resulting outcome and collect
-/// a threshold of node signatures over it.
+/// Takes part in the session: orders items until the session cut, then
+/// signs the header folded on the way and collects a threshold of node
+/// signatures over it.
 async fn participate_in_session(
     server: &Server,
     connections: &ReconnectP2PConnections,
-    session_index: u32,
+    session: u32,
     ordered_rx: Receiver<(BftRound, NodeId, ConsensusItem)>,
     signatures_rx: Receiver<(NodeId, schnorr::Signature)>,
-) -> Option<SignedSessionOutcome> {
-    order_items_until_cut(server, ordered_rx).await?;
+) -> Option<BTreeMap<NodeId, schnorr::Signature>> {
+    let header = order_items_until_cut(server, session, ordered_rx).await?;
 
-    let session_outcome = SessionOutcome {
-        items: pending_accepted_items(server),
-    };
-
-    collect_threshold_signatures(
-        server,
-        connections,
-        session_index,
-        session_outcome,
-        signatures_rx,
-    )
-    .await
+    collect_threshold_signatures(server, connections, session, header, signatures_rx).await
 }
 
 /// Processes bft deliveries one committed write transaction at a time until
 /// the session cut — the byte target or the round cap, whichever comes
-/// first. Accepted items land in ACCEPTED_ITEM under their
-/// delivery position; rejected ones leave no trace beyond their position
-/// being skipped.
+/// first — and returns the header folded over the accepted items. Each
+/// accepted item lands in ACCEPTED_ITEM under the session and its dense
+/// position, with RESUME_INDEX advanced past it; a rejection rolls back
+/// and leaves no trace, so a restart processes it again and rejects it
+/// again.
 async fn order_items_until_cut(
     server: &Server,
+    session: u32,
     ordered_rx: Receiver<(BftRound, NodeId, ConsensusItem)>,
-) -> Option<()> {
-    // We enumerate every bft delivery for this session; ACCEPTED_ITEM is
-    // sparse (rejected positions are absent). On crash replay bft re-emits
-    // from position 0, so we resume past the highest position already in
-    // the table — every position up to and including it was already
-    // processed (accepted *or* rejected) by the prior run.
+) -> Option<sha256::Hash> {
+    // On crash replay bft re-emits from position 0, so we resume past
+    // every position the prior run processed. The header and the byte
+    // budget resume with it: a session that cut at a different item than
+    // its nodes is one they never sign together.
     let resume_from = server
         .db
         .begin_read()
-        .iter_rev(&AcceptedItemTable, |r| r.next().map(|entry| entry.0))
-        .map_or(0, |k| k + 1);
+        .get(&ResumeIndexTable, &())
+        .unwrap_or(0);
 
-    // The byte budget resumes where the prior run left it for the same
-    // reason: a session that cut at a different item than its nodes is one
-    // they never sign together.
-    let mut n_bytes: usize = server.db.begin_read().iter(&AcceptedItemTable, |r| {
-        r.map(|entry| entry.1.consensus_encode_to_vec().len()).sum()
-    });
+    let mut state = SessionState::new(session);
+
+    server
+        .db
+        .begin_read()
+        .prefix(&AcceptedItemTable, &session, |r| {
+            r.for_each(|entry| state.fold(&entry.1));
+        });
 
     let mut deliveries = Box::pin(stream::iter(0u64..).zip(ordered_rx));
 
@@ -261,8 +259,8 @@ async fn order_items_until_cut(
         // that crashed between crossing the target and closing the session
         // comes back with the count already past it, and has to cut where
         // its nodes did rather than one item further on.
-        if n_bytes >= SESSION_OUTCOME_BYTE_TARGET {
-            return Some(());
+        if state.bytes >= SESSION_OUTCOME_BYTE_TARGET {
+            return Some(state.header);
         }
 
         let (index, (round, node, item)) = deliveries.next().await?;
@@ -272,26 +270,30 @@ async fn order_items_until_cut(
         }
 
         if round >= ROUNDS_PER_SESSION {
-            return Some(());
+            return Some(state.header);
         }
 
         let dbtx = server.db.begin_write();
+
+        dbtx.insert(&ResumeIndexTable, &(), &(index + 1));
 
         // The round joins a tx's "Verified tx" line to the bft engine's
         // unit and head traces; the adopted suffix at a cut has none.
         if process_consensus_item(server, &dbtx, node, item.clone())
             .instrument(info_span!("ordered", round))
             .await
-            .is_ok()
+            .is_err()
         {
-            let accepted_item = AcceptedItem { node, item };
-
-            dbtx.insert(&AcceptedItemTable, &index, &accepted_item);
-
-            dbtx.commit();
-
-            n_bytes += accepted_item.consensus_encode_to_vec().len();
+            continue;
         }
+
+        let item = AcceptedItem { node, item };
+
+        dbtx.insert(&AcceptedItemTable, &(session, state.index), &item);
+
+        dbtx.commit();
+
+        state.fold(&item);
     }
 }
 
@@ -300,17 +302,15 @@ async fn order_items_until_cut(
 async fn collect_threshold_signatures(
     server: &Server,
     connections: &ReconnectP2PConnections,
-    session_index: u32,
-    session_outcome: SessionOutcome,
+    session: u32,
+    header: sha256::Hash,
     signatures_rx: Receiver<(NodeId, schnorr::Signature)>,
-) -> Option<SignedSessionOutcome> {
-    let header = session_outcome.header(session_index);
-
-    info!(session_index, "Signing session header...");
+) -> Option<BTreeMap<NodeId, schnorr::Signature>> {
+    info!(session, "Signing session header...");
 
     let keychain = build_keychain(&server.cfg);
 
-    let our_signature = keychain.sign(session_index, &header);
+    let our_signature = keychain.sign(session, &header);
 
     // Send before counting: the last nodes to reach the cut usually find a
     // threshold of signatures already buffered and leave the loop below
@@ -330,10 +330,10 @@ async fn collect_threshold_signatures(
             result = signatures_rx.recv() => {
                 let (node, signature) = result.ok()?;
 
-                if keychain.verify(session_index, &header, &signature, node) {
+                if keychain.verify(session, &header, &signature, node) {
                     signatures.insert(node, signature);
 
-                    info!(session_index, %node, "Collected signature from node via P2P");
+                    info!(session, %node, "Collected signature from node via P2P");
                 }
             }
             _ = broadcast_interval.tick() => {
@@ -345,15 +345,9 @@ async fn collect_threshold_signatures(
         }
     }
 
-    info!(
-        session_index,
-        "Successfully collected threshold of signatures"
-    );
+    info!(session, "Successfully collected threshold of signatures");
 
-    Some(SignedSessionOutcome {
-        session_outcome,
-        signatures,
-    })
+    Some(signatures)
 }
 
 /// Returns a random node ID excluding ourselves
@@ -367,96 +361,81 @@ fn random_node(cfg: &NodeConfig) -> NodeId {
         .expect("We have at least four nodes")
 }
 
-/// Validate a SignedSessionOutcome received via P2P
-fn validate_signed_session_outcome(
-    cfg: &NodeConfig,
-    session_index: u32,
-    outcome: &SignedSessionOutcome,
-) -> bool {
+/// Validate a SessionOutcome received via P2P
+fn validate_session_outcome(cfg: &NodeConfig, session: u32, outcome: &SessionOutcome) -> bool {
     if outcome.signatures.len() != cfg.consensus.nodes.to_num_nodes().threshold() {
         return false;
     }
 
-    let header = outcome.session_outcome.header(session_index);
+    let header = session_header(session, &outcome.items);
 
     let keychain = build_keychain(cfg);
 
     outcome
         .signatures
         .iter()
-        .all(|(signer_id, sig)| keychain.verify(session_index, &header, sig, *signer_id))
+        .all(|(signer_id, sig)| keychain.verify(session, &header, sig, *signer_id))
 }
 
-fn pending_accepted_items(server: &Server) -> Vec<AcceptedItem> {
-    server
-        .db
-        .begin_read()
-        .iter(&AcceptedItemTable, |r| r.map(|entry| entry.1).collect())
-}
-
-/// Closes the session in a single write transaction: process whatever suffix
-/// of the outcome we have not applied yet, clear the per-session tables and
-/// store the signed outcome. The atomicity is what makes adoption crash-safe
-/// — either the whole session landed or none of it did, so a restart always
-/// finds ACCEPTED_ITEM agreeing with everything already applied.
+/// Closes the session in a single write transaction: store the signatures,
+/// clear the bft units and the delivery position for the next
+/// session — and, for an adopted outcome, first process and store the
+/// suffix of items we had not ordered ourselves. The atomicity is what
+/// makes adoption crash-safe: either the whole session landed or none of
+/// it did.
 ///
 /// Determinism of item processing guarantees the items we accepted ourselves
-/// form a prefix of the signed outcome; anything else is a consensus failure.
-async fn finalize_session(
-    server: &Server,
-    session_index: u32,
-    signed_session_outcome: SignedSessionOutcome,
-) {
-    let pending_accepted_items = pending_accepted_items(server);
-
-    assert!(
-        pending_accepted_items.len() <= signed_session_outcome.session_outcome.items.len(),
-        "Consensus Failure: we accepted more items than mint consensus"
-    );
-
-    let (processed, unprocessed) = signed_session_outcome
-        .session_outcome
-        .items
-        .split_at(pending_accepted_items.len());
-
-    assert!(
-        processed.iter().eq(pending_accepted_items.iter()),
-        "Consensus Failure: pending accepted items disagree with mint consensus"
-    );
-
-    info!(
-        session_index,
-        processed = processed.len(),
-        unprocessed = unprocessed.len(),
-        "Finalizing session..."
-    );
+/// form a prefix of an adopted outcome; anything else is a consensus failure.
+async fn finalize_session(server: &Server, session: u32, close: SessionClose) {
+    info!(session, "Finalizing session...");
 
     let dbtx = server.db.begin_write();
 
-    for accepted_item in unprocessed {
-        process_consensus_item(
-            server,
-            &dbtx,
-            accepted_item.node,
-            accepted_item.item.clone(),
-        )
-        .await
-        .expect("Rejected item accepted by mint consensus");
-    }
+    let signatures = match close {
+        SessionClose::Signed(signatures) => signatures,
+        SessionClose::Adopted(outcome) => {
+            let accepted = dbtx.prefix(&AcceptedItemTable, &session, |r| {
+                r.map(|entry| entry.1).collect::<Vec<AcceptedItem>>()
+            });
 
-    dbtx.clear_table(&AcceptedItemTable);
+            let (processed, unprocessed) = outcome
+                .items
+                .split_at_checked(accepted.len())
+                .expect("Consensus Failure: we accepted more items than mint consensus");
+
+            assert!(
+                accepted == processed,
+                "Consensus Failure: our accepted items disagree with mint consensus"
+            );
+
+            info!(
+                session,
+                processed = processed.len(),
+                unprocessed = unprocessed.len(),
+                "Applying adopted session outcome"
+            );
+
+            for (index, item) in (accepted.len() as u64..).zip(unprocessed) {
+                process_consensus_item(server, &dbtx, item.node, item.item.clone())
+                    .await
+                    .expect("Rejected item accepted by mint consensus");
+
+                dbtx.insert(&AcceptedItemTable, &(session, index), item);
+            }
+
+            outcome.signatures
+        }
+    };
+
+    dbtx.insert_new(&SessionSignaturesTable, &session, &signatures);
+
+    dbtx.clear_table(&ResumeIndexTable);
 
     dbtx.clear_table(&BftUnitTable);
 
     dbtx.clear_table(&BftUnitDataTable);
 
     dbtx.clear_table(&BftUnitSignatureTable);
-
-    dbtx.insert_new(
-        &SignedSessionOutcomeTable,
-        &session_index,
-        &signed_session_outcome,
-    );
 
     dbtx.commit();
 
@@ -547,7 +526,7 @@ async fn process_consensus_item(
 }
 
 pub fn get_finished_session_count(dbtx: &ReadTx) -> u32 {
-    dbtx.iter_rev(&SignedSessionOutcomeTable, |r| {
+    dbtx.iter_rev(&SessionSignaturesTable, |r| {
         r.next().map_or(0, |entry| entry.0 + 1)
     })
 }

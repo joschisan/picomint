@@ -1,8 +1,11 @@
+use std::collections::BTreeMap;
+
 use bitcoin::hashes::sha256;
 use picomint_encoding::{Decodable, Encodable};
 
+use crate::NodeId;
+use crate::secp256k1::schnorr;
 use crate::tx::ConsensusItem;
-use crate::{NodeId, secp256k1};
 
 /// A consensus item accepted in the consensus
 ///
@@ -16,38 +19,53 @@ pub struct AcceptedItem {
     pub item: ConsensusItem,
 }
 
-/// Items ordered in a single session that have been accepted by Picomint
-/// consensus.
-///
-/// A running mint cuts a session once a byte target or round cap is
-/// reached. A [`SessionOutcome`] might be empty if no items are ordered
-/// in that window or all ordered items are discarded by consensus.
-///
-/// When session is closed it is signed over by the nodes and produces a
-/// [`SignedSessionOutcome`].
-#[derive(Clone, Debug, PartialEq, Eq, Encodable, Decodable)]
-pub struct SessionOutcome {
-    pub items: Vec<AcceptedItem>,
+/// A session as far as its accepted items go: how many, the header they
+/// fold to and their wire size. Every node that folds the same items in
+/// the same order holds the same state, whether it ordered them itself
+/// or adopted them — the ordering loop keeps it running as items land, a
+/// node resuming or adopting refolds its accepted items from disk, and a
+/// node validating an outcome refolds the items it received.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionState {
+    /// The position of the next accepted item, so also how many there are.
+    pub index: u64,
+    /// The digest the session is signed over: the hash of its index with
+    /// every accepted item folded in, in order.
+    pub header: sha256::Hash,
+    /// The wire size of the accepted items, which is what cuts a session.
+    pub bytes: usize,
 }
 
-impl SessionOutcome {
-    /// A block header pairs its index with the consensus hash of its
-    /// [`AcceptedItem`]s. Headers are only ever generated for signing
-    /// and verification — never persisted or sent — so the empty
-    /// session needs no special case.
-    pub fn header(&self, index: u32) -> (u32, sha256::Hash) {
-        (index, self.items.consensus_hash())
+impl SessionState {
+    pub fn new(index: u32) -> Self {
+        Self {
+            index: 0,
+            header: index.consensus_hash(),
+            bytes: 0,
+        }
+    }
+
+    /// Fold one more accepted item in.
+    pub fn fold(&mut self, item: &AcceptedItem) {
+        self.index += 1;
+        self.header = (self.header, item).consensus_hash();
+        self.bytes += item.consensus_encode_to_vec().len();
     }
 }
 
-/// A [`SessionOutcome`], signed by the Mint.
-///
-/// A signed block combines a block with the naive threshold secp schnorr
-/// signature for its header created by the mint. The signed blocks allow
-/// clients and recovering nodes to verify the mints consensus
-/// history. After a signed block has been created it is stored in the database.
+/// The header of a session that accepted exactly these items.
+pub fn session_header(session: u32, items: &[AcceptedItem]) -> sha256::Hash {
+    items.iter().fold(session.consensus_hash(), |header, item| {
+        (header, item).consensus_hash()
+    })
+}
+
+/// The items ordered in a session and accepted by Picomint consensus —
+/// empty if none were ordered or all were discarded — with the mint's
+/// naive threshold secp schnorr signatures over their header. It lets a
+/// recovering node verify the mint's consensus history.
 #[derive(Clone, Debug, Encodable, Decodable, Eq, PartialEq)]
-pub struct SignedSessionOutcome {
-    pub session_outcome: SessionOutcome,
-    pub signatures: std::collections::BTreeMap<NodeId, secp256k1::schnorr::Signature>,
+pub struct SessionOutcome {
+    pub items: Vec<AcceptedItem>,
+    pub signatures: BTreeMap<NodeId, schnorr::Signature>,
 }

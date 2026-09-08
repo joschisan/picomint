@@ -18,18 +18,18 @@ use picomint_bft::{
 use picomint_core::NodeId;
 use picomint_core::config::BFT_UNIT_BYTE_TARGET;
 use picomint_core::secp256k1::schnorr;
-use picomint_core::session::SignedSessionOutcome;
+use picomint_core::session::SessionOutcome;
 use picomint_core::tx::ConsensusItem;
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, DbRead};
 use tracing::error;
 
-use crate::consensus::db::SignedSessionOutcomeTable;
+use crate::consensus::db::{AcceptedItemTable, SessionSignaturesTable};
 use crate::p2p::{P2PMessage, Recipient as P2PRecipient, ReconnectP2PConnections};
 
 /// `INetwork` adapter wrapping `ReconnectP2PConnections`.
 /// Bft traffic flows on the `P2PMessage::Bft` variant; non-bft
-/// variants (`SessionSignature`, `SessionIndex`, `SignedSessionOutcome`)
+/// variants (`SessionSignature`, `SessionIndex`, `SessionOutcome`)
 /// are dispatched to their respective channels here so the engine sees
 /// only `bft::Message` on `receive`.
 ///
@@ -39,7 +39,7 @@ use crate::p2p::{P2PMessage, Recipient as P2PRecipient, ReconnectP2PConnections}
 /// session.
 pub struct Network {
     connections: ReconnectP2PConnections,
-    signed_outcomes_tx: Sender<(NodeId, SignedSessionOutcome)>,
+    outcomes_tx: Sender<(NodeId, SessionOutcome)>,
     signatures_tx: Sender<(NodeId, schnorr::Signature)>,
     db: Database,
 }
@@ -47,13 +47,13 @@ pub struct Network {
 impl Network {
     pub fn new(
         connections: ReconnectP2PConnections,
-        signed_outcomes_tx: Sender<(NodeId, SignedSessionOutcome)>,
+        outcomes_tx: Sender<(NodeId, SessionOutcome)>,
         signatures_tx: Sender<(NodeId, schnorr::Signature)>,
         db: Database,
     ) -> Self {
         Self {
             connections,
-            signed_outcomes_tx,
+            outcomes_tx,
             signatures_tx,
             db,
         }
@@ -85,19 +85,21 @@ impl INetwork<ConsensusItem> for Network {
                     self.signatures_tx.try_send((node, signature)).ok();
                 }
                 P2PMessage::SessionIndex(their_session) => {
-                    if let Some(outcome) = self
-                        .db
-                        .begin_read()
-                        .get(&SignedSessionOutcomeTable, &their_session)
-                    {
+                    let dbtx = self.db.begin_read();
+
+                    if let Some(signatures) = dbtx.get(&SessionSignaturesTable, &their_session) {
+                        let items = dbtx.prefix(&AcceptedItemTable, &their_session, |r| {
+                            r.map(|entry| entry.1).collect()
+                        });
+
                         self.connections.send(
                             P2PRecipient::Node(node),
-                            P2PMessage::SignedSessionOutcome(outcome),
+                            P2PMessage::SessionOutcome(SessionOutcome { items, signatures }),
                         );
                     }
                 }
-                P2PMessage::SignedSessionOutcome(outcome) => {
-                    self.signed_outcomes_tx.try_send((node, outcome)).ok();
+                P2PMessage::SessionOutcome(outcome) => {
+                    self.outcomes_tx.try_send((node, outcome)).ok();
                 }
                 message => error!(
                     %node,
