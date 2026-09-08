@@ -13,7 +13,7 @@ use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::{NodeId, NumNodesExt};
 use picomint_redb::{DbRead, ReadTx, WriteTx};
 use rand::seq::IteratorRandom;
-use tracing::{Instrument, info, info_span, instrument};
+use tracing::{info, instrument};
 
 use crate::config::NodeConfig;
 use crate::consensus::bft::{DataProvider, Network};
@@ -277,13 +277,7 @@ async fn order_items_until_cut(
 
         dbtx.insert(&ResumeIndexTable, &(), &(index + 1));
 
-        // The round joins a tx's "Verified tx" line to the bft engine's
-        // unit and head traces; the adopted suffix at a cut has none.
-        if process_consensus_item(server, &dbtx, node, item.clone())
-            .instrument(info_span!("ordered", round))
-            .await
-            .is_err()
-        {
+        if process_consensus_item(server, &dbtx, node, item.clone()).is_err() {
             continue;
         }
 
@@ -417,7 +411,6 @@ async fn finalize_session(server: &Server, session: u32, close: SessionClose) {
 
             for (index, item) in (accepted.len() as u64..).zip(unprocessed) {
                 process_consensus_item(server, &dbtx, item.node, item.item.clone())
-                    .await
                     .expect("Rejected item accepted by mint consensus");
 
                 dbtx.insert(&AcceptedItemTable, &(session, index), item);
@@ -446,7 +439,7 @@ async fn finalize_session(server: &Server, session: u32, close: SessionClose) {
 }
 
 #[instrument(skip(server, dbtx, item), level = "info")]
-async fn process_consensus_item(
+fn process_consensus_item(
     server: &Server,
     dbtx: &WriteTx,
     node: NodeId,
@@ -500,7 +493,7 @@ async fn process_consensus_item(
                     "consensus block count advanced"
                 );
 
-                onchain::sync_blocks(server, dbtx, old_block_count, new_block_count).await;
+                onchain::initialize_block_height(dbtx, old_block_count, new_block_count);
             }
         }
         ConsensusItem::Version(vote) => {

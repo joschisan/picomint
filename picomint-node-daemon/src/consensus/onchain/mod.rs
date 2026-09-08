@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use self::db::{
-    FeeRateVoteTable, MintOnchainTable, NonceEntry, NonceLogTable, Output, OutputTable,
-    SignatureSharesTable, SpentOutputIndexTable, TxInfoIndexTable, TxInfoTable, UnconfirmedTxTable,
-    UnsignedTxTable,
+    BlockHeightTable, BlockVoteTable, FeeRateVoteTable, MintOnchainTable, NonceEntry,
+    NonceLogTable, OutputTable, SignatureSharesTable, SpentOutputIndexTable, TxInfoIndexTable,
+    TxInfoTable, UnconfirmedTxTable, UnsignedTxTable,
 };
 use crate::bitcoind::BitcoindRpcMonitor;
 use anyhow::{Context, anyhow, ensure};
@@ -18,7 +18,6 @@ use bitcoin::transaction::Version;
 use bitcoin::{Amount, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
 use common::config::OnchainConfigConsensus;
 use common::{OnchainConsensusItem, OnchainInput, OnchainOutput, OutputInfo};
-use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::onchain as common;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{NodeId, NumNodesExt, OutPoint};
@@ -29,29 +28,25 @@ use tokio::time::sleep;
 use crate::config::NodeConfig;
 use crate::config::dkg::DkgHandle;
 use crate::config::dkg_secp::eval_poly;
-use crate::consensus::CONFIRMATION_FINALITY_DELAY;
+use crate::consensus::CONFIRMATIONS;
 use crate::consensus::db::consensus_block_count;
 use crate::consensus::server::Server;
 use crate::handler;
 use picomint_core::onchain::config::{OnchainConfig, OnchainConfigPrivate};
 use picomint_core::onchain::methods::OnchainMethod;
 use picomint_core::onchain::{
-    MintUtxo, OnchainInputError, OnchainOutputError, TxInfo, is_potential_receive,
-    tweak_public_key, tweaked_script_pubkey,
+    BlockTx, BlockVote, MintUtxo, OnchainInputError, OnchainOutputError, TrackedOutput, TxInfo,
+    is_potential_receive, tweak_public_key, tweaked_script_pubkey,
 };
 use picomint_core::secret::Secret;
 use secp256k1::Scalar;
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{info, warn};
 use tss::{
     AggregatePublicKey, PublicKeyShare, PublicNonce, SecretKeyShare, SecretNonce, SignatureShare,
     aggregate_signature_shares, derive_nonce, derive_pk_share, derive_public_nonce, sign_share,
     verify_signature_share,
 };
-
-/// Minimum fee rate vote of 1 sat/vB to ensure we never propose a fee rate
-/// below what Bitcoin Core will relay.
-const MIN_FEERATE_VOTE_SATS_PER_KVB: u32 = 1000;
 
 // A mint tx is a taproot key spend whose witness is always exactly one
 // 64-byte BIP340 signature, no matter how many nodes signed — so both tx
@@ -133,26 +128,91 @@ pub fn validate_config(cfg: &NodeConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<OnchainConsensusItem> {
-    let mut items: Vec<OnchainConsensusItem> = dbtx
-        .get(&UnsignedTxTable, &())
-        .and_then(|unsigned_tx| signing_session_proposal(server, dbtx, &unsigned_tx))
-        .into_iter()
-        .collect();
+pub async fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<OnchainConsensusItem> {
+    [
+        block_proposal(server, dbtx).await,
+        feerate_proposal(server, dbtx),
+        signing_session_proposal(server, dbtx),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
 
-    let feerate_vote = server.btc_rpc.status().and_then(|status| {
-        status
-            .fee_rate
-            .map(|fee_rate| fee_rate.sat_per_kvb.max(MIN_FEERATE_VOTE_SATS_PER_KVB))
-    });
+/// Our feerate vote whenever it differs from the one consensus holds for
+/// us. `None` retracts the vote while the bitcoin backend is down or
+/// still syncing and thus unable to estimate fees.
+fn feerate_proposal(server: &Server, dbtx: &ReadTx) -> Option<OnchainConsensusItem> {
+    let vote = server.btc_rpc.status().and_then(|status| status.fee_rate);
 
-    // `None` retracts our vote while the bitcoin backend is down or
-    // still syncing and thus unable to estimate fees.
-    if dbtx.get(&FeeRateVoteTable, &server.cfg.private.identity) != Some(feerate_vote) {
-        items.push(OnchainConsensusItem::Feerate(feerate_vote));
+    if dbtx.get(&FeeRateVoteTable, &server.cfg.private.identity) == Some(vote) {
+        return None;
     }
 
-    items
+    Some(OnchainConsensusItem::Feerate(vote))
+}
+
+/// Our vote on the block at the tracked height, once it has its
+/// confirmations on our backend and we have not voted on it yet — votes
+/// clear as the count advances: every transaction with an output the
+/// receive filter lets through, and every pending mint transaction.
+async fn block_proposal(server: &Server, dbtx: &ReadTx) -> Option<OnchainConsensusItem> {
+    let height = dbtx.get(&BlockHeightTable, &())?;
+
+    if server.btc_rpc.status()?.block_count < height + CONFIRMATIONS {
+        return None;
+    }
+
+    if dbtx
+        .get(&BlockVoteTable, &server.cfg.private.identity)
+        .is_some()
+    {
+        return None;
+    }
+
+    let block_hash = server
+        .btc_rpc
+        .get_block_hash(height)
+        .await
+        .inspect_err(|error| warn!(height, %error, "Failed to fetch the next block to vote on"))
+        .ok()?;
+
+    let block = server
+        .btc_rpc
+        .get_block(&block_hash)
+        .await
+        .inspect_err(|error| warn!(height, %error, "Failed to fetch the next block to vote on"))
+        .ok()?;
+
+    let pks_hash = server.cfg.consensus.onchain.agg_pk.consensus_hash();
+
+    let mut txs = Vec::new();
+
+    for tx in block.txdata {
+        let txid = tx.compute_txid();
+
+        let outputs = tx
+            .output
+            .into_iter()
+            .enumerate()
+            .filter(|entry| is_potential_receive(&pks_hash, &entry.1.script_pubkey))
+            .map(|entry| (u32::try_from(entry.0).expect("vout fits u32"), entry.1))
+            .collect::<Vec<(u32, TxOut)>>();
+
+        if !outputs.is_empty() || dbtx.get(&UnconfirmedTxTable, &txid).is_some() {
+            txs.push(BlockTx { txid, outputs });
+        }
+    }
+
+    Some(OnchainConsensusItem::Block(BlockVote { height, txs }))
+}
+
+/// The first non-zero consensus block count is where the mint starts
+/// tracking the chain: nothing before its first block is ever tracked.
+pub fn initialize_block_height(dbtx: &WriteTx, old_block_count: u32, new_block_count: u32) {
+    if old_block_count == 0 {
+        dbtx.insert(&BlockHeightTable, &(), &new_block_count);
+    }
 }
 
 /// Determines the next item to propose for an unsigned transaction: our
@@ -160,11 +220,9 @@ pub fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<OnchainConsensu
 /// member of a signing session we have not signed yet, or our initial
 /// nonce entry if we have never entered the log. Items are re-proposed
 /// until they are accepted; the handlers reject duplicates.
-fn signing_session_proposal(
-    server: &Server,
-    dbtx: &ReadTx,
-    unsigned_tx: &MintTx,
-) -> Option<OnchainConsensusItem> {
+fn signing_session_proposal(server: &Server, dbtx: &ReadTx) -> Option<OnchainConsensusItem> {
+    let unsigned_tx = dbtx.get(&UnsignedTxTable, &())?;
+
     let txid = unsigned_tx.tx.compute_txid();
 
     let inputs = unsigned_tx.spent_tx_outs.len();
@@ -199,7 +257,7 @@ fn signing_session_proposal(
         return None;
     }
 
-    let sighashes = sighashes(server, unsigned_tx);
+    let sighashes = sighashes(server, &unsigned_tx);
 
     let generation = dbtx.iter(&NonceLogTable, |r| {
         r.filter(|entry| entry.1.0 == server.cfg.private.identity)
@@ -209,7 +267,7 @@ fn signing_session_proposal(
 
     let nonces = derive_secret_nonces(server, txid, generation, inputs);
 
-    let shares = sign_tx(server, unsigned_tx, &sighashes, nonces, &chunk);
+    let shares = sign_tx(server, &unsigned_tx, &sighashes, nonces, &chunk);
 
     let fresh_nonces = derive_secret_nonces(server, txid, generation + 1, inputs);
 
@@ -255,6 +313,50 @@ pub fn process_consensus_item(
     consensus_item: OnchainConsensusItem,
 ) -> anyhow::Result<()> {
     match consensus_item {
+        OnchainConsensusItem::Block(vote) => {
+            ensure!(
+                Some(vote.height) == dbtx.get(&BlockHeightTable, &()),
+                "Block vote is not for the block at the tracked height"
+            );
+
+            ensure!(
+                dbtx.insert(&BlockVoteTable, &node, &vote).is_none(),
+                "Node has already voted on this block"
+            );
+
+            let votes = dbtx.iter(&BlockVoteTable, |r| {
+                r.filter(|entry| entry.1 == vote).count()
+            });
+
+            if votes >= threshold(server) {
+                let mut index =
+                    dbtx.iter_rev(&OutputTable, |r| r.next().map_or(0, |entry| entry.0 + 1));
+
+                for tx in vote.txs {
+                    dbtx.remove(&UnconfirmedTxTable, &tx.txid);
+
+                    for (vout, out) in tx.outputs {
+                        let tracked = TrackedOutput {
+                            outpoint: bitcoin::OutPoint {
+                                txid: tx.txid,
+                                vout,
+                            },
+                            out,
+                        };
+
+                        dbtx.insert(&OutputTable, &index, &tracked);
+
+                        index += 1;
+                    }
+                }
+
+                dbtx.insert(&BlockHeightTable, &(), &(vote.height + 1));
+
+                dbtx.clear_table(&BlockVoteTable);
+            }
+
+            Ok(())
+        }
         OnchainConsensusItem::Feerate(feerate) => {
             if Some(feerate) == dbtx.insert(&FeeRateVoteTable, &node, &feerate) {
                 return Err(anyhow!("Fee rate vote is redundant"));
@@ -281,13 +383,13 @@ pub fn process_input(
         return Err(OnchainInputError::OutputAlreadySpent);
     }
 
-    let Output(tracked_outpoint, tracked_output) = dbtx
+    let tracked = dbtx
         .get(&OutputTable, &input.output_index)
         .ok_or(OnchainInputError::UnknownOutputIndex)?;
 
     let tweaked_script = script_pubkey(server, &input.tweak.consensus_hash());
 
-    if tracked_output.script_pubkey != tweaked_script {
+    if tracked.out.script_pubkey != tweaked_script {
         return Err(OnchainInputError::WrongTweak);
     }
 
@@ -302,7 +404,8 @@ pub fn process_input(
         return Err(OnchainInputError::InsufficientTotalFee);
     }
 
-    let output_value = tracked_output
+    let output_value = tracked
+        .out
         .value
         .checked_sub(input.fee)
         .ok_or(OnchainInputError::ArithmeticOverflow)?;
@@ -327,7 +430,7 @@ pub fn process_input(
                     witness: bitcoin::Witness::new(),
                 },
                 TxIn {
-                    previous_output: tracked_outpoint,
+                    previous_output: tracked.outpoint,
                     script_sig: Default::default(),
                     sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
                     witness: bitcoin::Witness::new(),
@@ -378,7 +481,7 @@ pub fn process_input(
                     tweak: wallet.tweak,
                 },
                 SpentTxOut {
-                    value: tracked_output.value,
+                    value: tracked.out.value,
                     tweak: input.tweak.consensus_hash(),
                 },
             ],
@@ -394,8 +497,8 @@ pub fn process_input(
             &MintOnchainTable,
             &(),
             &MintUtxo {
-                value: tracked_output.value,
-                outpoint: tracked_outpoint,
+                value: tracked.out.value,
+                outpoint: tracked.outpoint,
                 tweak: input.tweak.consensus_hash(),
             },
         );
@@ -563,65 +666,6 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
     });
 }
 
-/// Scan the blocks the consensus block count advanced over for pegins and
-/// confirmations of the mint's own transactions. Called by the
-/// consensus engine whenever the consensus block count advances.
-pub async fn sync_blocks(
-    server: &Server,
-    dbtx: &WriteTx,
-    old_block_count: u32,
-    new_block_count: u32,
-) {
-    // We do not sync blocks that predate the mint itself.
-    if old_block_count == 0 {
-        return;
-    }
-
-    // Our bitcoin backend needs to be synced for the following calls to the
-    // get_block rpc to be safe for consensus.
-    await_local_sync_to_block_count(server, new_block_count + CONFIRMATION_FINALITY_DELAY).await;
-
-    for height in old_block_count..new_block_count {
-        let block_hash = (|| server.btc_rpc.get_block_hash(height))
-            .retry(networking_backoff())
-            .await
-            .expect("networking_backoff retries forever");
-
-        let block = (|| server.btc_rpc.get_block(&block_hash))
-            .retry(networking_backoff())
-            .await
-            .expect("networking_backoff retries forever");
-
-        assert_eq!(block.block_hash(), block_hash, "Block hash mismatch");
-
-        let pks_hash = server.cfg.consensus.onchain.agg_pk.consensus_hash();
-
-        for tx in block.txdata {
-            dbtx.remove(&UnconfirmedTxTable, &tx.compute_txid());
-
-            // We maintain an append-only log of transaction outputs that pass
-            // the probabilistic receive filter created since the mint was
-            // established. This is downloaded by clients to detect pegins and
-            // claim them by index.
-
-            for (vout, tx_out) in tx.output.iter().enumerate() {
-                if is_potential_receive(&pks_hash, &tx_out.script_pubkey) {
-                    let outpoint = bitcoin::OutPoint {
-                        txid: tx.compute_txid(),
-                        vout: u32::try_from(vout)
-                            .expect("Bitcoin transaction has more than u32::MAX outputs"),
-                    };
-
-                    let index =
-                        dbtx.iter_rev(&OutputTable, |r| r.next().map_or(0, |entry| entry.0 + 1));
-
-                    dbtx.insert(&OutputTable, &index, &Output(outpoint, tx_out.clone()));
-                }
-            }
-        }
-    }
-}
-
 fn process_nonces(
     dbtx: &WriteTx,
     node: NodeId,
@@ -761,26 +805,6 @@ fn process_signature_shares(
     }
 
     Ok(())
-}
-
-async fn await_local_sync_to_block_count(server: &Server, block_count: u32) {
-    loop {
-        if server
-            .btc_rpc
-            .status()
-            .is_some_and(|status| status.block_count >= block_count)
-        {
-            break;
-        }
-
-        info!("Waiting for local bitcoin backend to sync to block count {block_count}");
-
-        if server.integration_test {
-            sleep(Duration::from_secs(1)).await;
-        } else {
-            sleep(Duration::from_secs(10)).await;
-        }
-    }
 }
 
 pub fn consensus_feerate(server: &Server, dbtx: &impl DbRead) -> Option<u32> {
@@ -989,11 +1013,11 @@ fn get_outputs(dbtx: &impl DbRead, start_index: u64, end_index: u64) -> Vec<Outp
     });
 
     dbtx.range(&OutputTable, start_index..end_index, |r| {
-        r.filter_map(|(idx, Output(_, tx_out))| {
-            tx_out.script_pubkey.is_p2tr().then(|| OutputInfo {
+        r.filter_map(|(idx, output)| {
+            output.out.script_pubkey.is_p2tr().then(|| OutputInfo {
                 index: idx,
-                script: tx_out.script_pubkey,
-                value: tx_out.value,
+                script: output.out.script_pubkey,
+                value: output.out.value,
                 spent: spent.contains(&idx),
             })
         })

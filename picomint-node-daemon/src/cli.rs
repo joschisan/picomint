@@ -144,7 +144,7 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         Ok(Json(BitcoinConnectionResponse {
             network: status.network.to_string(),
             block_count: status.block_count,
-            fee_rate_sat_per_vb: status.fee_rate.map(|fee_rate| fee_rate.sat_per_kvb / 1000),
+            fee_rate_sat_per_vb: status.fee_rate.map(|fee_rate| fee_rate / 1000),
             sync_progress: status.sync_progress,
         }))
     }

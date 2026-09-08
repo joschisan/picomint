@@ -1,7 +1,7 @@
 use bitcoin::hashes::{Hash, hash160, sha256};
 use bitcoin::key::{TapTweak, TweakedPublicKey};
 use bitcoin::{
-    Address, Network, PubkeyHash, ScriptBuf, ScriptHash, Txid, WPubkeyHash, WScriptHash,
+    Address, Network, PubkeyHash, ScriptBuf, ScriptHash, TxOut, Txid, WPubkeyHash, WScriptHash,
 };
 use picomint_encoding::{Decodable, Encodable};
 
@@ -82,6 +82,33 @@ impl TxInfo {
     }
 }
 
+/// An output the receive filter let through, tracked under a consensus
+/// index so a client can claim it as a pegin.
+#[derive(
+    Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize, Encodable, Decodable,
+)]
+pub struct TrackedOutput {
+    pub outpoint: bitcoin::OutPoint,
+    pub out: TxOut,
+}
+
+/// A transaction the mint takes note of in a block: one with outputs the
+/// receive filter lets through, or a pending mint transaction, which
+/// lists no outputs.
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
+pub struct BlockTx {
+    pub txid: Txid,
+    pub outputs: Vec<(u32, TxOut)>,
+}
+
+/// What the mint takes from a block, as a node's own bitcoin backend has
+/// it, in block order.
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
+pub struct BlockVote {
+    pub height: u32,
+    pub txs: Vec<BlockTx>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
 pub struct OutputInfo {
     pub index: u64,
@@ -92,6 +119,12 @@ pub struct OutputInfo {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Encodable, Decodable)]
 pub enum OnchainConsensusItem {
+    /// A threshold of identical votes tracks the block's outputs, drops
+    /// the mint transactions it confirms from the pending set and advances
+    /// the tracked height.
+    Block(BlockVote),
+    /// The node's feerate estimate in sat/kvB, `None` while its backend
+    /// cannot estimate. The consensus feerate is the threshold-th lowest.
     Feerate(Option<u32>),
     /// One public nonce pair per input of the unsigned transaction - a
     /// node's first entry into the transaction's append-only nonce log.
