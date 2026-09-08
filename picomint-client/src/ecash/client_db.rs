@@ -2,7 +2,7 @@ use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_redb::table;
 
-use super::SpendableNote;
+use super::UndecodedSpendableNote;
 
 // Tracks that a `receive(ecash)` has been started for this deterministic
 // [`OperationId`]. Keyed by the bundle alone, so the guard spans every
@@ -20,7 +20,7 @@ table!(
 // so two accounts can never produce the same note.
 table!(
     NoteTable,
-    (MintId, Account, SpendableNote) => (),
+    (MintId, Account, UndecodedSpendableNote) => (),
     "ecash-note",
 );
 
