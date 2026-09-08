@@ -132,20 +132,25 @@ impl Server {
         let txid = tx.compute_txid();
 
         for input in &tx.inputs {
-            let (amount, pub_key) = self.process_input(dbtx, input).map_err(TxError::Input)?;
+            let input = input.decode().map_err(|_| TxError::UndecodableInput)?;
 
-            funding_verifier.add_input(amount, self.input_fee(input))?;
-            public_keys.push(pub_key);
+            let (amount, pk) = self.process_input(dbtx, &input).map_err(TxError::Input)?;
+
+            funding_verifier.add_input(amount, self.input_fee(&input))?;
+
+            public_keys.push(pk);
         }
 
         tx.validate_signatures(&public_keys)?;
 
         for (output, out_idx) in tx.outputs.iter().zip(0u16..) {
+            let output = output.decode().map_err(|_| TxError::UndecodableOutput)?;
+
             let amount = self
-                .process_output(dbtx, output, OutPoint { txid, out_idx })
+                .process_output(dbtx, &output, OutPoint { txid, out_idx })
                 .map_err(TxError::Output)?;
 
-            funding_verifier.add_output(amount, self.output_fee(output))?;
+            funding_verifier.add_output(amount, self.output_fee(&output))?;
         }
 
         funding_verifier.verify_funding()?;

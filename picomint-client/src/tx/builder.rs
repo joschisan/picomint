@@ -4,6 +4,7 @@ use bitcoin_hashes::Hash;
 use picomint_core::Amount;
 use picomint_core::tx::Transaction;
 use picomint_core::wire;
+use picomint_encoding::Undecoded;
 
 #[derive(Clone, Debug)]
 pub struct Input {
@@ -90,8 +91,17 @@ impl TxBuilder {
             "Transaction must have at least one output"
         );
 
-        let inputs: Vec<wire::Input> = self.inputs.iter().map(|i| i.input.clone()).collect();
-        let outputs: Vec<wire::Output> = self.outputs.iter().map(|o| o.output.clone()).collect();
+        let inputs = self
+            .inputs
+            .iter()
+            .map(|i| i.input.clone().into())
+            .collect::<Vec<Undecoded<wire::Input>>>();
+
+        let outputs = self
+            .outputs
+            .iter()
+            .map(|o| o.output.clone().into())
+            .collect::<Vec<Undecoded<wire::Output>>>();
 
         let txid = Transaction::compute_txid_from_parts(&inputs, &outputs);
 

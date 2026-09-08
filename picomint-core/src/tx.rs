@@ -5,7 +5,7 @@
 //! picomint-core.
 
 use bitcoin::hashes::Hash as _;
-use picomint_encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable, Undecoded};
 use thiserror::Error;
 
 use crate::TransactionId;
@@ -16,10 +16,15 @@ use crate::wire;
 ///
 /// The mint enforces that the total value of the outputs equals the total value
 /// of the inputs plus the fees, to prevent creating funds out of thin air.
+///
+/// Inputs and outputs travel and are stored undecoded: the id, the
+/// structural checks and every hop through the broadcast need only their
+/// bytes, and the notes inside are decoded once, where the mint verifies
+/// them. The witness decodes for free and stays as it is.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub struct Transaction {
-    pub inputs: Vec<wire::Input>,
-    pub outputs: Vec<wire::Output>,
+    pub inputs: Vec<Undecoded<wire::Input>>,
+    pub outputs: Vec<Undecoded<wire::Output>>,
     pub signatures: Vec<crate::secp256k1::schnorr::Signature>,
 }
 
@@ -38,8 +43,8 @@ impl Transaction {
     }
 
     pub fn compute_txid_from_parts(
-        inputs: &[wire::Input],
-        outputs: &[wire::Output],
+        inputs: &[Undecoded<wire::Input>],
+        outputs: &[Undecoded<wire::Output>],
     ) -> TransactionId {
         TransactionId((inputs, outputs).consensus_hash_sha256())
     }
@@ -88,6 +93,10 @@ pub enum TxError {
     InvalidWitnessLength,
     #[error("The transaction's signature is invalid")]
     InvalidSignature,
+    #[error("The transaction had an input that does not decode")]
+    UndecodableInput,
+    #[error("The transaction had an output that does not decode")]
+    UndecodableOutput,
     #[error("The transaction had an invalid input: {}", .0)]
     Input(wire::InputError),
     #[error("The transaction had an invalid output: {}", .0)]
