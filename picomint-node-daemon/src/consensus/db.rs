@@ -39,9 +39,9 @@ table!(
 );
 
 table!(
-    AcceptedTxIdTable,
+    AcceptedTxidTable,
     TransactionId => (),
-    "accepted-tx-id",
+    "accepted-txid",
 );
 
 table!(
