@@ -18,8 +18,9 @@ use tracing::{Instrument, info, info_span, instrument};
 use crate::config::NodeConfig;
 use crate::consensus::bft::{DataProvider, Network};
 use crate::consensus::db::{
-    AcceptedItemTable, AcceptedTxIdTable, BftUnitsTable, BlockCountVoteTable,
-    ConsensusVersionVoteTable, SignedSessionOutcomeTable, consensus_block_count, consensus_version,
+    AcceptedItemTable, AcceptedTxIdTable, BftUnitDataTable, BftUnitSignatureTable, BftUnitTable,
+    BlockCountVoteTable, ConsensusVersionVoteTable, SignedSessionOutcomeTable,
+    consensus_block_count, consensus_version,
 };
 use crate::consensus::onchain;
 use crate::consensus::server::Server;
@@ -116,7 +117,9 @@ async fn run_session(
         network,
         DataProvider::new(submission_rx.clone()),
         ordered_tx,
-        BftUnitsTable,
+        BftUnitTable,
+        BftUnitDataTable,
+        BftUnitSignatureTable,
     );
 
     let bft_handle = tokio::spawn(bft_engine.run());
@@ -443,7 +446,11 @@ async fn finalize_session(
 
     dbtx.clear_table(&AcceptedItemTable);
 
-    dbtx.clear_table(&BftUnitsTable);
+    dbtx.clear_table(&BftUnitTable);
+
+    dbtx.clear_table(&BftUnitDataTable);
+
+    dbtx.clear_table(&BftUnitSignatureTable);
 
     dbtx.insert_new(
         &SignedSessionOutcomeTable,

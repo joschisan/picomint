@@ -55,6 +55,7 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use bitcoin::hashes::Hash as _;
+use picomint_core::secp256k1::schnorr;
 use picomint_encoding::Encodable;
 use picomint_redb::{DbRead, Table};
 use tracing::debug;
@@ -62,7 +63,7 @@ use tracing::debug;
 use crate::data::DataProvider;
 use crate::engine::{Engine, extended_at};
 use crate::network::INetwork;
-use crate::unit::{Round, Unit, UnitData, UnitEnvelope, UnitHash};
+use crate::unit::{Round, Unit, UnitData, UnitHash};
 
 /// The common-vote bit for a candidate of round `candidate_round` as
 /// seen from round `round`: fixed 1 two rounds up (fast include),
@@ -139,11 +140,13 @@ fn vote(
     bit
 }
 
-impl<P, D, T, N> Engine<P, D, T, N>
+impl<P, D, T, S, U, N> Engine<P, D, T, U, S, N>
 where
     D: UnitData,
     P: DataProvider<D>,
-    T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
+    T: Table<Key = UnitHash, Value = Unit>,
+    U: Table<Key = UnitHash, Value = Vec<D>>,
+    S: Table<Key = UnitHash, Value = schnorr::Signature>,
     N: INetwork<D>,
 {
     /// Drain round heads from `self.next_decide_round` upward while
@@ -152,20 +155,25 @@ where
     /// item through `self.ordered_tx`.
     pub(crate) fn run_extender(&mut self, dbtx: &impl DbRead) {
         while let Some(head) = self.choose_head(self.next_decide_round) {
-            let batch = self.bfs_batch(dbtx, head);
+            for hash in self.bfs_batch(head) {
+                let unit = self
+                    .extended
+                    .get(&hash)
+                    .expect("ancestors of an extended head are extended");
 
-            for ev in batch {
-                for item in ev.data {
+                let data = dbtx
+                    .get(&self.unit_data_table, &hash)
+                    .expect("every stored unit has a payload row");
+
+                for item in data {
                     // Unbounded channel, so this never waits; it fails
                     // only once the receiver is dropped, which means the
                     // daemon is gone and we'd be shutting down anyway.
-                    let _ = self
-                        .ordered_tx
-                        .try_send((ev.unit.round, ev.unit.creator, item));
+                    let _ = self.ordered_tx.try_send((unit.round, unit.creator, item));
                 }
 
-                if ev.unit.creator == self.id {
-                    self.unordered_own_data.remove(&ev.unit.round);
+                if unit.creator == self.id {
+                    self.unordered_own_data.remove(&unit.round);
                 }
             }
 
@@ -268,43 +276,38 @@ where
     }
 
     /// BFS over the head's not-yet-emitted ancestors, marking each
-    /// visited unit in `self.emitted` as we enqueue it. Returns the
-    /// envelopes oldest-first (reversed BFS): rounds ascend since
-    /// parents sit exactly one round down, so every node's own units
-    /// emit in submission order. Within a round the order is BFS
-    /// discovery — a deterministic function of the head and the
-    /// emitted set, hence identical on every node, which is all the
-    /// ordering needs; the paper's hash tie-break within rounds is
-    /// not load-bearing.
-    fn bfs_batch(&mut self, dbtx: &impl DbRead, head: UnitHash) -> Vec<UnitEnvelope<D>> {
+    /// visited unit in `self.emitted` as we enqueue it. Walks the
+    /// in-memory `extended` units, since every ancestor of an extended
+    /// head is extended. Returns the hashes oldest-first (reversed
+    /// BFS): rounds ascend since parents sit exactly one round down, so
+    /// every node's own units emit in submission order. Within a round
+    /// the order is BFS discovery — a deterministic function of the
+    /// head and the emitted set, hence identical on every node, which
+    /// is all the ordering needs; the paper's hash tie-break within
+    /// rounds is not load-bearing.
+    fn bfs_batch(&mut self, head: UnitHash) -> Vec<UnitHash> {
         let mut batch = Vec::new();
         let mut queue = VecDeque::new();
 
         assert!(self.emitted.insert(head));
 
-        let ev = dbtx
-            .get(&self.units_table, &head)
-            .expect("commit head is stored");
+        queue.push_back(head);
 
-        queue.push_back(ev);
+        while let Some(hash) = queue.pop_front() {
+            let unit = self
+                .extended
+                .get(&hash)
+                .expect("ancestors of an extended head are extended");
 
-        while let Some(ev) = queue.pop_front() {
-            for parent in ev.unit.parents.values() {
-                if self.emitted.contains(parent) {
-                    continue;
+            for parent in unit.parents.values() {
+                // Marked as it is enqueued so the deeper BFS doesn't
+                // enqueue it twice.
+                if self.emitted.insert(*parent) {
+                    queue.push_back(*parent);
                 }
-
-                let p = dbtx
-                    .get(&self.units_table, parent)
-                    .expect("ancestors of an extended head are stored");
-
-                // Tentatively mark so the deeper BFS doesn't enqueue twice.
-                self.emitted.insert(*parent);
-
-                queue.push_back(p);
             }
 
-            batch.push(ev);
+            batch.push(hash);
         }
 
         batch.reverse();

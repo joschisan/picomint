@@ -25,7 +25,7 @@ use picomint_bft::{
     DataProvider, Engine, INetwork, Keychain, Message, Recipient, Round, Unit, UnitEnvelope,
     UnitHash,
 };
-use picomint_core::secp256k1::{Keypair, SECP256K1, rand};
+use picomint_core::secp256k1::{Keypair, SECP256K1, rand, schnorr};
 use picomint_core::{NodeId, NumNodes};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, table};
@@ -33,7 +33,9 @@ use rand::Rng;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-table!(BftUnits, UnitHash => UnitEnvelope<u64>, "bft-units");
+table!(BftUnit, UnitHash => Unit, "bft-unit");
+table!(BftUnitData, UnitHash => Vec<u64>, "bft-unit-data");
+table!(BftUnitSignature, UnitHash => schnorr::Signature, "bft-unit-signature");
 
 /// Per-recipient probability of silently dropping a message in the mock
 /// network, used by the 4-node tests. Each unicast send and each
@@ -238,7 +240,9 @@ fn spawn_engines(
             channel,
             TimestampDataProvider,
             ordered_tx,
-            BftUnits,
+            BftUnit,
+            BftUnitData,
+            BftUnitSignature,
         );
 
         engines.handles.push(tokio::spawn(engine.run()));
@@ -312,10 +316,12 @@ fn build_envelope(
         data: Some(data.consensus_hash_sha256()),
     };
 
+    let signature = keychain.sign(SESSION, &unit);
+
     UnitEnvelope {
-        sig: keychain.sign(SESSION, &unit),
         unit,
         data,
+        signature,
     }
 }
 
@@ -710,7 +716,9 @@ async fn replay_reproduces_order_under_forks() {
         NullNetwork,
         TimestampDataProvider,
         ordered_tx,
-        BftUnits,
+        BftUnit,
+        BftUnitData,
+        BftUnitSignature,
     );
 
     let handle = tokio::spawn(engine.run());

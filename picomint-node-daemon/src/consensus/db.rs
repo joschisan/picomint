@@ -1,5 +1,6 @@
-use picomint_bft::{UnitEnvelope, UnitHash};
+use picomint_bft::{Unit, UnitHash};
 use picomint_core::expiry;
+use picomint_core::secp256k1::schnorr;
 use picomint_core::session;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::ConsensusVersion;
@@ -15,14 +16,26 @@ table!(
     "accepted-item",
 );
 
-// bft table — owned by the daemon, lent to `picomint_bft::Engine`
-// via `Engine::new`. Cleaned up at session boundary by
-// `finalize_session` alongside `AcceptedItemTable`.
+// The bft engine's three tables — declared here, lent to
+// `picomint_bft::Engine` via `Engine::new`, and cleared at the session
+// boundary by `finalize_session` alongside `AcceptedItemTable`.
 
 table!(
-    BftUnitsTable,
-    UnitHash => UnitEnvelope<ConsensusItem>,
-    "bft-units",
+    BftUnitTable,
+    UnitHash => Unit,
+    "bft-unit",
+);
+
+table!(
+    BftUnitDataTable,
+    UnitHash => Vec<ConsensusItem>,
+    "bft-unit-data",
+);
+
+table!(
+    BftUnitSignatureTable,
+    UnitHash => schnorr::Signature,
+    "bft-unit-signature",
 );
 
 table!(
