@@ -33,7 +33,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn process_module_ci(
+    pub fn process_module_ci(
         &self,
         dbtx: &WriteTx,
         node: NodeId,
@@ -41,7 +41,7 @@ impl Server {
     ) -> anyhow::Result<()> {
         match item {
             wire::ModuleConsensusItem::Onchain(ci) => {
-                onchain::process_consensus_item(self, dbtx, node, ci.clone()).await
+                onchain::process_consensus_item(self, dbtx, node, ci.clone())
             }
         }
     }

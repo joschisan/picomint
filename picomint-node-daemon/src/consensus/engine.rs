@@ -478,7 +478,7 @@ async fn process_consensus_item(
             dbtx.insert(&AcceptedTxidTable, &txid, &());
         }
         ConsensusItem::Module(ci) => {
-            server.process_module_ci(dbtx, node, ci).await?;
+            server.process_module_ci(dbtx, node, ci)?;
         }
         ConsensusItem::BlockCount(vote) => {
             let old_block_count = consensus_block_count(server, dbtx);
