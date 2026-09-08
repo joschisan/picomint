@@ -14,7 +14,7 @@ use picomint_core::ecash::{
 };
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{Amount, OutPoint};
-use picomint_redb::{DbRead, WriteTx};
+use picomint_redb::WriteTx;
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
 
 use crate::config::NodeConfig;
@@ -25,7 +25,7 @@ use crate::{handler, handler_async};
 
 use self::db::{
     BlindedNonceTable, BlindedSignatureShareRestoreTable, BlindedSignatureShareTable,
-    IssuanceCounterTable, NoteNonceTable,
+    NoteNonceTable,
 };
 
 /// Run DKG for the ecash module, producing a fresh `EcashConfig` for this node.
@@ -100,14 +100,6 @@ pub fn process_input(
         return Err(EcashInputError::InvalidSignature);
     }
 
-    let new_count = dbtx
-        .remove(&IssuanceCounterTable, &input.note.denomination)
-        .unwrap_or(0)
-        .checked_sub(1)
-        .expect("Failed to decrement issuance counter");
-
-    dbtx.insert(&IssuanceCounterTable, &input.note.denomination, &new_count);
-
     Ok((input.note.amount(), input.note.nonce))
 }
 
@@ -147,22 +139,7 @@ pub fn process_output(
         &signature,
     );
 
-    let new_count = dbtx
-        .remove(&IssuanceCounterTable, &output.denomination)
-        .unwrap_or(0)
-        .checked_add(1)
-        .expect("Failed to increment issuance counter");
-
-    dbtx.insert(&IssuanceCounterTable, &output.denomination, &new_count);
-
     Ok(output.amount())
-}
-
-pub fn audit(dbtx: &WriteTx) -> i64 {
-    dbtx.iter(&IssuanceCounterTable, |r| {
-        r.map(|(denomination, count)| -((denomination.amount().msat * count) as i64))
-            .sum()
-    })
 }
 
 pub async fn handle_api(server: &Server, method: EcashMethod) -> Result<Vec<u8>, String> {

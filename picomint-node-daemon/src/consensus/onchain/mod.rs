@@ -526,11 +526,6 @@ pub fn process_output(
         .ok_or(OnchainOutputError::ArithmeticOverflow)
 }
 
-pub fn audit(dbtx: &WriteTx) -> i64 {
-    dbtx.get(&MintOnchainTable, &())
-        .map_or(0, |wallet| 1000 * wallet.value.to_sat() as i64)
-}
-
 pub async fn handle_api(server: &Server, method: OnchainMethod) -> Result<Vec<u8>, String> {
     match method {
         OnchainMethod::ConsensusFeerate(req) => handler!(consensus_feerate, server, req).await,

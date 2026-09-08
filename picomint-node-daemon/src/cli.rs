@@ -32,7 +32,7 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
 }
 
 /// Build the Dashboard-phase CLI router that exposes the mint endpoints
-/// (audit, invite, config, expiry, status probes) plus the
+/// (invite, config, expiry, status probes) plus the
 /// lightning/onchain module-admin routes.
 pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     use crate::p2p::{P2PConnectionStatus, Transport};
@@ -40,16 +40,15 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     use axum::routing::post;
     use picomint_core::expiry::ExpiryStatus;
     use picomint_node_cli_core::{
-        AuditResponse, BitcoinConnectionResponse, BlockCountResponse, ExpirySetRequest,
-        INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse, LightningGatewayAddRequest,
-        LightningGatewayInfo, LightningGatewayListResponse, LightningGatewayRemoveRequest,
-        NodeInfo, OnchainFeerateResponse, OnchainTotalValueResponse, P2pResponse,
-        PendingTxsResponse, ROUTE_AUDIT, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG,
-        ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE,
-        ROUTE_MODULE_LN_GATEWAY_ADD, ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE,
-        ROUTE_MODULE_ONCHAIN_FEERATE, ROUTE_MODULE_ONCHAIN_PENDING_TXS,
-        ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
-        TxsResponse,
+        BitcoinConnectionResponse, BlockCountResponse, ExpirySetRequest, INVITE_EXPIRY_DAYS_LIMIT,
+        InviteRequest, InviteResponse, LightningGatewayAddRequest, LightningGatewayInfo,
+        LightningGatewayListResponse, LightningGatewayRemoveRequest, NodeInfo,
+        OnchainFeerateResponse, OnchainTotalValueResponse, P2pResponse, PendingTxsResponse,
+        ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
+        ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
+        ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
+        ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE,
+        ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT, TxsResponse,
     };
 
     async fn config(
@@ -77,14 +76,6 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
 
         Ok(Json(InviteResponse {
             invite: api.create_invite_code(req.expiry_days, req.user_limit).0,
-        }))
-    }
-
-    async fn audit(
-        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<AuditResponse>, CliError> {
-        Ok(Json(AuditResponse {
-            audit: api.mint_audit(),
         }))
     }
 
@@ -238,7 +229,6 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
 
     Router::new()
         .route(ROUTE_INVITE, post(invite))
-        .route(ROUTE_AUDIT, post(audit))
         .route(ROUTE_CONFIG, post(config))
         .route(ROUTE_SESSION_COUNT, post(session_count))
         .route(ROUTE_BLOCK_COUNT, post(block_count))

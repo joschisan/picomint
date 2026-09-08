@@ -39,9 +39,3 @@ table!(
     BlindedNonce => BlindedSignatureShare,
     "ecash-blinded-signature-share-restore",
 );
-
-table!(
-    IssuanceCounterTable,
-    Denomination => u64,
-    "ecash-issuance-counter",
-);
