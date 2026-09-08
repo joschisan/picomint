@@ -150,20 +150,18 @@ where
     /// each round resolves. For every head, BFS-extract the
     /// not-yet-emitted causal ancestors (oldest-first) and send each
     /// item through `self.ordered_tx`.
-    pub(crate) async fn run_extender(&mut self, dbtx: &impl DbRead) {
+    pub(crate) fn run_extender(&mut self, dbtx: &impl DbRead) {
         while let Some(head) = self.choose_head(self.next_decide_round) {
             let batch = self.bfs_batch(dbtx, head);
 
             for ev in batch {
                 for item in ev.data {
-                    // Unbounded channel; send() returns Err only
-                    // when the receiver is dropped — which means
-                    // the daemon is gone and we'd be shutting
-                    // down anyway.
+                    // Unbounded channel, so this never waits; it fails
+                    // only once the receiver is dropped, which means the
+                    // daemon is gone and we'd be shutting down anyway.
                     let _ = self
                         .ordered_tx
-                        .send((ev.unit.round, ev.unit.creator, item))
-                        .await;
+                        .try_send((ev.unit.round, ev.unit.creator, item));
                 }
 
                 if ev.unit.creator == self.id {

@@ -138,9 +138,9 @@ where
     }
 
     pub async fn run(mut self) {
-        self.replay().await;
+        self.replay();
 
-        self.create_units().await;
+        self.create_units();
 
         let mut next_anti_entropy_at = Instant::now();
 
@@ -149,8 +149,8 @@ where
                 maybe_msg = self.network.receive() => {
                     let Some((sender, msg)) = maybe_msg else { return };
 
-                    match self.handle_message(sender, msg).await {
-                        Ok(()) => self.create_units().await,
+                    match self.handle_message(sender, msg) {
+                        Ok(()) => self.create_units(),
                         Err(err) => {
                             warn!(%sender, err = %format_args!("{err:#}"), "rejected bft message");
                         }
@@ -158,7 +158,7 @@ where
                 }
 
                 _ = self.data_provider.wait_for_data() => {
-                    self.create_units().await;
+                    self.create_units();
                 }
 
                 _ = sleep_until(next_anti_entropy_at) => {
@@ -186,8 +186,8 @@ where
     /// ours still awaits ordering. With no work pending the engine goes
     /// quiescent until `wait_for_data` resolves or an inbound message
     /// arrives.
-    async fn create_units(&mut self) {
-        while self.try_create_unit().await {}
+    fn create_units(&mut self) {
+        while self.try_create_unit() {}
     }
 
     /// Rebuild the in-memory `rounds` / `extended` / `emitted` /
@@ -201,7 +201,7 @@ where
     /// root) and then `run_extender` once produces the same `extended`
     /// set and the same channel emission sequence as the live
     /// unit-by-unit growth did before the restart.
-    async fn replay(&mut self) {
+    fn replay(&mut self) {
         let dbtx = self.db.begin_read();
 
         let units: Vec<(UnitHash, Unit)> = dbtx.iter(&self.units_table, |it| {
@@ -226,7 +226,7 @@ where
             self.try_extend(&dbtx, hash);
         }
 
-        self.run_extender(&dbtx).await;
+        self.run_extender(&dbtx);
     }
 
     /// One write tx per inbound message; on Ok commit it, on Err drop
@@ -242,7 +242,7 @@ where
     /// they need not be individually durable. The fsync barrier is
     /// [`Self::try_create_unit`], whose durable commit before broadcast both
     /// prevents our own equivocation and flushes this relaxed backlog.
-    async fn handle_message(&mut self, sender: NodeId, msg: Message<D>) -> Result<()> {
+    fn handle_message(&mut self, sender: NodeId, msg: Message<D>) -> Result<()> {
         match msg {
             Message::Unit(ev) => {
                 // Before the parent walk: a unit that fails here — most
@@ -276,7 +276,7 @@ where
                 self.store_unit(&dbtx, &ev, hash)?;
 
                 self.try_extend(&dbtx, hash);
-                self.run_extender(&dbtx).await;
+                self.run_extender(&dbtx);
 
                 dbtx.commit();
             }
@@ -440,7 +440,7 @@ where
         Ok(())
     }
 
-    async fn try_create_unit(&mut self) -> bool {
+    fn try_create_unit(&mut self) -> bool {
         let round = self.own_top.map_or(0, |(top, _)| top + 1);
 
         let Some(parents) = self.parents_for(round) else {
@@ -491,7 +491,7 @@ where
 
         self.try_extend(&dbtx, hash);
 
-        self.run_extender(&dbtx).await;
+        self.run_extender(&dbtx);
 
         dbtx.commit();
 
