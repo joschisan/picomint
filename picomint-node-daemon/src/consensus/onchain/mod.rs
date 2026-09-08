@@ -248,7 +248,7 @@ fn threshold(server: &Server) -> usize {
     server.cfg.consensus.onchain.pks.to_num_nodes().threshold()
 }
 
-pub async fn process_consensus_item(
+pub fn process_consensus_item(
     server: &Server,
     dbtx: &WriteTx,
     node: NodeId,
@@ -264,7 +264,7 @@ pub async fn process_consensus_item(
         }
         OnchainConsensusItem::Nonces(txid, nonces) => process_nonces(dbtx, node, txid, nonces),
         OnchainConsensusItem::SignatureShares(txid, shares, nonces) => {
-            process_signature_shares(server, dbtx, node, txid, shares, nonces).await
+            process_signature_shares(server, dbtx, node, txid, shares, nonces)
         }
     }
 }
@@ -654,7 +654,7 @@ fn process_nonces(
     Ok(())
 }
 
-async fn process_signature_shares(
+fn process_signature_shares(
     server: &Server,
     dbtx: &WriteTx,
     node: NodeId,
@@ -752,7 +752,12 @@ async fn process_signature_shares(
 
         dbtx.insert(&UnconfirmedTxTable, &txid, &unsigned);
 
-        server.btc_rpc.submit_tx(unsigned.tx).await;
+        // Off the ordering loop's write transaction: the broadcast is
+        // fire-and-forget, and the row above has the rebroadcast task
+        // resend the tx if this send never happens.
+        let btc_rpc = server.btc_rpc.clone();
+
+        tokio::spawn(async move { btc_rpc.submit_tx(unsigned.tx).await });
     }
 
     Ok(())
