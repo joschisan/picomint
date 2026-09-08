@@ -32,10 +32,9 @@ use crate::consensus::db::{BlockCountVoteTable, ConsensusVersionVoteTable};
 use crate::consensus::server::Server;
 use crate::p2p::{P2PStatusReceivers, ReconnectP2PConnections};
 
-/// Number of confirmations required for a transaction to be considered as
-/// final by the mint. The block that mines the transaction does
-/// not count towards the number of confirmations.
-pub const CONFIRMATION_FINALITY_DELAY: u32 = 9;
+/// Confirmations a transaction needs before the mint treats it as final,
+/// counted the usual way: the block that mines it is the first.
+pub const CONFIRMATIONS: u32 = 6;
 
 /// How many txs can be stored in memory before blocking the API.
 ///
@@ -95,7 +94,7 @@ pub async fn run(
     let proposal_interval = if settings.integration_test {
         Duration::from_millis(100)
     } else {
-        Duration::from_secs(1)
+        Duration::from_secs(5)
     };
 
     tokio::spawn(submit_ci_proposals(
@@ -166,17 +165,13 @@ async fn submit_ci_proposals(
         let dbtx = server.db.begin_read();
 
         if let Some(status) = server.btc_rpc.status() {
-            let block_count_vote = status
-                .block_count
-                .saturating_sub(CONFIRMATION_FINALITY_DELAY);
-
             let current_vote = dbtx
                 .get(&BlockCountVoteTable, &server.cfg.private.identity)
                 .unwrap_or(0);
 
-            if block_count_vote > current_vote {
+            if status.block_count > current_vote {
                 submission_tx
-                    .send(ConsensusItem::BlockCount(block_count_vote))
+                    .send(ConsensusItem::BlockCount(status.block_count))
                     .await
                     .ok();
             }
@@ -197,7 +192,7 @@ async fn submit_ci_proposals(
                 .ok();
         }
 
-        for item in onchain::consensus_proposal(&server, &dbtx) {
+        for item in onchain::consensus_proposal(&server, &dbtx).await {
             submission_tx
                 .send(ConsensusItem::Module(wire::ModuleConsensusItem::Onchain(
                     item,

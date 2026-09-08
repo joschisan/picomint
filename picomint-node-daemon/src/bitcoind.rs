@@ -25,20 +25,20 @@ const SIGNET_4: &str = "00000086d6b2636cb2a392d45edc4ec544a10024d30141c9adf4bfd9
 // <https://mutinynet.com/api/block-height/1>
 const MUTINYNET: &str = "000002855893a0a9b24eaffc5efc770558a326fee4fc10c9da22fc19cd2954f9";
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Feerate {
-    pub sat_per_kvb: u32,
-}
+/// The floor on the feerate estimate, 1 sat/vB: never propose a feerate
+/// below what Bitcoin Core will relay.
+const MIN_FEERATE_SATS_PER_KVB: u32 = 1000;
 
 /// Status of the bitcoind backend as reported by the monitor.
 #[derive(Debug, Clone)]
 pub struct BitcoindRpcStatus {
     pub network: Network,
     pub block_count: u32,
-    /// `None` while the backend is still syncing — fee estimation has no
-    /// data until the node is at the tip, and consensus (the only consumer
-    /// that needs a feerate) doesn't start until then either.
-    pub fee_rate: Option<Feerate>,
+    /// In sat/kvB, `None` while the backend is still syncing — fee
+    /// estimation has no data until the node is at the tip, and consensus
+    /// (the only consumer that needs a feerate) doesn't start until then
+    /// either.
+    pub fee_rate: Option<u32>,
     pub sync_progress: Option<f64>,
 }
 
@@ -84,7 +84,7 @@ impl BitcoindRpcMonitor {
         let sync_progress = rpc.get_sync_progress().await?;
 
         let fee_rate = if network == Network::Regtest {
-            Some(Feerate { sat_per_kvb: 1000 })
+            Some(MIN_FEERATE_SATS_PER_KVB)
         } else {
             rpc.get_feerate().await?
         };
@@ -227,14 +227,17 @@ impl BitcoindClient {
         Ok(deserialize_hex(&hex)?)
     }
 
-    pub async fn get_feerate(&self) -> anyhow::Result<Option<Feerate>> {
+    /// The backend's feerate estimate in sat/kvB, floored at what it
+    /// will relay.
+    pub async fn get_feerate(&self) -> anyhow::Result<Option<u32>> {
         let response: EstimateSmartFee = self
             .call("estimatesmartfee", json!([1, "CONSERVATIVE"]))
             .await?;
 
-        Ok(response.feerate.map(|btc_per_kvb| Feerate {
-            sat_per_kvb: u32::try_from((btc_per_kvb * 100_000_000.0).round() as u64)
-                .expect("bitcoind feerate estimates fit u32 sat/kvb"),
+        Ok(response.feerate.map(|btc_per_kvb| {
+            u32::try_from((btc_per_kvb * 100_000_000.0).round() as u64)
+                .expect("bitcoind feerate estimates fit u32 sat/kvb")
+                .max(MIN_FEERATE_SATS_PER_KVB)
         }))
     }
 

@@ -13,7 +13,7 @@ pub fn render(status: &Option<BitcoindRpcStatus>) -> Markup {
                 (kv("Block Count", html! { (status.block_count) }))
 
                 @if let Some(fee_rate) = status.fee_rate {
-                    (kv("Fee Rate", html! { (fee_rate.sat_per_kvb / 1000) " sat/vB" }))
+                    (kv("Fee Rate", html! { (fee_rate / 1000) " sat/vB" }))
                 }
 
                 @if let Some(sync) = status.sync_progress {

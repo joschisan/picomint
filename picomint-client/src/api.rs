@@ -25,8 +25,8 @@ pub async fn submit_tx(api: &MintApi, tx: Transaction) -> Result<(), TxError> {
     .outcome
 }
 
-/// Fetch the mint's consensus block count, which trails the chain
-/// tip by the confirmation finality delay.
+/// Fetch the mint's consensus block count: the block count a
+/// threshold of nodes has reached, so it tracks the chain tip.
 pub async fn block_count(api: &MintApi) -> anyhow::Result<u32> {
     api.request_current_consensus::<BlockCountResponse>(Method::Core(CoreMethod::BlockCount(
         BlockCountRequest,

@@ -1,24 +1,39 @@
-use bitcoin::{TxOut, Txid};
+use bitcoin::Txid;
 use picomint_core::NodeId;
-use picomint_core::onchain::TxInfo;
+use picomint_core::onchain::{BlockVote, TrackedOutput, TxInfo};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::table;
-use serde::Serialize;
 
 use super::{MintTx, MintUtxo};
-
-#[derive(Clone, Debug, Encodable, Decodable, Serialize)]
-pub struct Output(pub bitcoin::OutPoint, pub TxOut);
 
 /// One node's entry in a transaction's nonce log — one public nonce pair
 /// per tx input.
 #[derive(Clone, Debug, Encodable, Decodable)]
 pub struct NonceEntry(pub NodeId, pub Vec<tss::PublicNonce>);
 
+// The outputs consensus tracks, in chain order under a dense index.
 table!(
     OutputTable,
-    u64 => Output,
+    u64 => TrackedOutput,
     "onchain-output",
+);
+
+// The height of the block the mint tracks next: every block below it has
+// been tracked.
+// Set to the first non-zero consensus block count, so nothing before the
+// mint's first block is ever tracked, and absent until then.
+table!(
+    BlockHeightTable,
+    () => u32,
+    "onchain-block-height",
+);
+
+// Each node's vote on the block at the tracked height, cleared as
+// the height advances.
+table!(
+    BlockVoteTable,
+    NodeId => BlockVote,
+    "onchain-block-vote",
 );
 
 table!(
