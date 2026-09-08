@@ -532,7 +532,7 @@ pub async fn handle_api(server: &Server, method: OnchainMethod) -> Result<Vec<u8
         OnchainMethod::MintUtxo(req) => handler!(mint_utxo, server, req).await,
         OnchainMethod::SendFee(req) => handler!(send_fee, server, req).await,
         OnchainMethod::ReceiveFee(req) => handler!(receive_fee, server, req).await,
-        OnchainMethod::TxId(req) => handler!(tx_id, server, req).await,
+        OnchainMethod::Txid(req) => handler!(txid, server, req).await,
         OnchainMethod::OutputInfoSlice(req) => handler!(output_info_slice, server, req).await,
         OnchainMethod::PendingTxChain(req) => handler!(pending_tx_chain, server, req).await,
         OnchainMethod::TxChain(req) => handler!(tx_chain, server, req).await,
@@ -972,7 +972,7 @@ fn finalize_tx(
     );
 }
 
-fn tx_id(dbtx: &impl DbRead, outpoint: OutPoint) -> Option<Txid> {
+fn txid(dbtx: &impl DbRead, outpoint: OutPoint) -> Option<Txid> {
     let index = dbtx.get(&TxInfoIndexTable, &outpoint)?;
 
     dbtx.get(&TxInfoTable, &index).map(|entry| entry.txid)

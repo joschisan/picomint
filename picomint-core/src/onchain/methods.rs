@@ -51,12 +51,12 @@ pub struct ReceiveFeeResponse {
 // ── transaction-id ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct TxIdRequest {
+pub struct TxidRequest {
     pub outpoint: OutPoint,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct TxIdResponse {
+pub struct TxidResponse {
     pub txid: Option<bitcoin::Txid>,
 }
 
@@ -101,7 +101,7 @@ pub enum OnchainMethod {
     MintUtxo(MintUtxoRequest),
     SendFee(SendFeeRequest),
     ReceiveFee(ReceiveFeeRequest),
-    TxId(TxIdRequest),
+    Txid(TxidRequest),
     OutputInfoSlice(OutputInfoSliceRequest),
     PendingTxChain(PendingTxChainRequest),
     TxChain(TxChainRequest),

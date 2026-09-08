@@ -4,7 +4,7 @@ use picomint_core::onchain::methods::{
     ConsensusFeerateRequest, ConsensusFeerateResponse, MintUtxoRequest, MintUtxoResponse,
     OutputInfoSliceRequest, OutputInfoSliceResponse, PendingTxChainRequest, PendingTxChainResponse,
     ReceiveFeeRequest, ReceiveFeeResponse, SendFeeRequest, SendFeeResponse, TxChainRequest,
-    TxChainResponse, TxIdRequest, TxIdResponse,
+    TxChainResponse, TxidRequest, TxidResponse,
 };
 
 use crate::consensus::server::Server;
@@ -37,9 +37,9 @@ pub fn receive_fee(server: &Server, _: ReceiveFeeRequest) -> Result<ReceiveFeeRe
     })
 }
 
-pub fn tx_id(server: &Server, req: TxIdRequest) -> Result<TxIdResponse, String> {
-    Ok(TxIdResponse {
-        txid: super::tx_id(&server.db.begin_read(), req.outpoint),
+pub fn txid(server: &Server, req: TxidRequest) -> Result<TxidResponse, String> {
+    Ok(TxidResponse {
+        txid: super::txid(&server.db.begin_read(), req.outpoint),
     })
 }
 
