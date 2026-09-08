@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use async_channel::Sender;
+use picomint_core::secp256k1::schnorr;
 use picomint_core::{NodeId, NumNodes};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, DbRead, Table, WriteTx};
@@ -28,17 +29,19 @@ const REQUEST_DEDUP_INTERVAL: Duration = Duration::from_secs(1);
 /// the engine, then awaits `run()` (typically in a spawned task) and
 /// keeps the receiving end of `ordered_tx` for items as they commit.
 ///
-/// On startup `run()` replays ``"bft-units"`` through `try_extend` +
+/// On startup `run()` replays ``"bft-unit"`` through `try_extend` +
 /// `run_extender` to rebuild the in-memory `rounds` / `extended` /
 /// `emitted` / `next_decide_round` and re-emit every
 /// previously-committed item through `ordered_tx`. The caller-side
 /// idempotency check (e.g. the daemon's `resume_from` cursor over its
 /// accepted-items table) absorbs the redelivery.
-pub struct Engine<P, D, T, N>
+pub struct Engine<P, D, T, U, S, N>
 where
     D: UnitData,
     P: DataProvider<D>,
-    T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
+    T: Table<Key = UnitHash, Value = Unit>,
+    U: Table<Key = UnitHash, Value = Vec<D>>,
+    S: Table<Key = UnitHash, Value = schnorr::Signature>,
     N: INetwork<D>,
 {
     pub(crate) id: NodeId,
@@ -50,21 +53,30 @@ where
     data_provider: P,
     pub(crate) ordered_tx: Sender<(Round, NodeId, D)>,
 
-    /// Daemon-declared units table (`UnitHash => UnitEnvelope<D>`).
-    /// Bft only reads/writes it.
-    pub(crate) units_table: T,
+    /// Daemon-declared ``"bft-unit"`` table: every stored unit under
+    /// its hash. Payload and signature are kept apart in the two tables
+    /// below, so the extension cascade and the commit rule, which only
+    /// ever read here, never load them.
+    pub(crate) unit_table: T,
+    /// Daemon-declared ``"bft-unit-data"`` table: the payload each
+    /// stored unit carries. Read back only to emit, to answer a
+    /// `Request`, or to push our own top unit.
+    pub(crate) unit_data_table: U,
+    /// Daemon-declared ``"bft-unit-signature"`` table: the creator's
+    /// signature over `(session, unit)` for each stored unit. Read back
+    /// only to send the unit on.
+    pub(crate) unit_signature_table: S,
 
     /// Hashes of every stored unit keyed by round — the round index
-    /// over `units_table`. Drives the extension cascade and, filtered
+    /// over `unit_table`. Drives the extension cascade and, filtered
     /// by `extended` membership, the extender's per-round scans.
     /// Rebuilt from disk on startup; appended in `insert_unit`.
     pub(crate) rounds: BTreeMap<Round, BTreeSet<UnitHash>>,
-    /// Units whose envelope is present in `units_table` *and* whose
-    /// every parent is itself in this map, each holding its bare
-    /// [`Unit`]. The units are the complete evidence the commit rule
-    /// tallies over, so the extender never touches the db except to
-    /// read payloads at emission. Rebuilt from disk on startup; never
-    /// persisted.
+    /// Units present in `unit_table` *and* whose every parent is
+    /// itself in this map, each holding its bare [`Unit`]. The units
+    /// are the complete evidence the commit rule tallies over, so the
+    /// extender never touches the db except to read payloads at
+    /// emission. Rebuilt from disk on startup; never persisted.
     pub(crate) extended: BTreeMap<UnitHash, Unit>,
     /// Units whose payload has been sent through `ordered_tx`.
     /// Prevents re-emission across batches and within one BFS.
@@ -96,11 +108,13 @@ where
     request_sent_at: BTreeMap<UnitHash, Instant>,
 }
 
-impl<P, D, T, N> Engine<P, D, T, N>
+impl<P, D, T, S, U, N> Engine<P, D, T, U, S, N>
 where
     D: UnitData,
     P: DataProvider<D>,
-    T: Table<Key = UnitHash, Value = UnitEnvelope<D>>,
+    T: Table<Key = UnitHash, Value = Unit>,
+    U: Table<Key = UnitHash, Value = Vec<D>>,
+    S: Table<Key = UnitHash, Value = schnorr::Signature>,
     N: INetwork<D>,
 {
     #[allow(clippy::too_many_arguments)]
@@ -113,7 +127,9 @@ where
         network: N,
         data_provider: P,
         ordered_tx: Sender<(Round, NodeId, D)>,
-        units_table: T,
+        unit_table: T,
+        unit_data_table: U,
+        unit_signature_table: S,
     ) -> Self {
         Self {
             id,
@@ -124,7 +140,9 @@ where
             network,
             data_provider,
             ordered_tx,
-            units_table,
+            unit_table,
+            unit_data_table,
+            unit_signature_table,
             rounds: BTreeMap::new(),
             extended: BTreeMap::new(),
             emitted: BTreeSet::new(),
@@ -191,7 +209,7 @@ where
     }
 
     /// Rebuild the in-memory `rounds` / `extended` / `emitted` /
-    /// `next_decide_round` / `own_top` from persisted ``"bft-units"``, and
+    /// `next_decide_round` / `own_top` from persisted ``"bft-unit"``, and
     /// re-emit every committed item through `ordered_tx`.
     ///
     /// Correctness rests on determinism: `try_extend` is a fixpoint over
@@ -204,9 +222,7 @@ where
     fn replay(&mut self) {
         let dbtx = self.db.begin_read();
 
-        let units: Vec<(UnitHash, Unit)> = dbtx.iter(&self.units_table, |it| {
-            it.map(|(hash, ev)| (hash, ev.unit)).collect()
-        });
+        let units: Vec<(UnitHash, Unit)> = dbtx.iter(&self.unit_table, |it| it.collect());
 
         for (hash, unit) in units {
             self.rounds.entry(unit.round).or_default().insert(hash);
@@ -233,8 +249,8 @@ where
     /// it (any partial writes roll back). All reads in handlers see
     /// their own writes via `WriteTx`'s read-your-own-writes.
     /// In-memory mutations (`rounds`, `extended`, `emitted`, channel
-    /// sends) are not rolled back on Err — only the persistent
-    /// ``"bft-units"`` writes are. The mutators only run after the dbtx
+    /// sends) are not rolled back on Err — only the persistent unit
+    /// writes are. The mutators only run after the dbtx
     /// writes succeed via `?`.
     ///
     /// These commits use **relaxed** (non-fsync) durability: inbound units
@@ -294,9 +310,7 @@ where
         };
 
         let ev = self
-            .db
-            .begin_read()
-            .get(&self.units_table, &hash)
+            .envelope(&self.db.begin_read(), hash)
             .expect("own top unit is stored");
 
         self.network.send(Recipient::Everyone, Message::Unit(ev));
@@ -345,19 +359,19 @@ where
                 continue;
             }
 
-            let Some(ev) = dbtx.get(&self.units_table, &hash) else {
+            let Some(unit) = dbtx.get(&self.unit_table, &hash) else {
                 self.try_send_request(sender, hash);
                 continue;
             };
 
-            stack.extend(ev.unit.parents.values().copied());
+            stack.extend(unit.parents.values().copied());
         }
     }
 
     /// Reply with the stored envelope; no reply if we don't hold the
     /// unit.
     fn handle_request(&self, dbtx: &impl DbRead, requester: NodeId, hash: UnitHash) {
-        let Some(ev) = dbtx.get(&self.units_table, &hash) else {
+        let Some(ev) = self.envelope(dbtx, hash) else {
             return;
         };
 
@@ -365,7 +379,27 @@ where
             .send(Recipient::Node(requester), Message::Unit(ev));
     }
 
-    /// Validate and install a fresh unit envelope in ``"bft-units"`` under
+    /// The stored envelope under `hash`, reassembled from its three
+    /// rows.
+    pub(crate) fn envelope(&self, dbtx: &impl DbRead, hash: UnitHash) -> Option<UnitEnvelope<D>> {
+        let unit = dbtx.get(&self.unit_table, &hash)?;
+
+        let data = dbtx
+            .get(&self.unit_data_table, &hash)
+            .expect("every stored unit has a payload row");
+
+        let signature = dbtx
+            .get(&self.unit_signature_table, &hash)
+            .expect("every stored unit has a signature row");
+
+        Some(UnitEnvelope {
+            unit,
+            data,
+            signature,
+        })
+    }
+
+    /// Validate and install a fresh unit envelope under
     /// `hash` (its unit hash, computed by the caller), then index it
     /// in `rounds` and advance `own_top` for our own units. A
     /// duplicate unit hits the same key and errors.
@@ -408,7 +442,7 @@ where
 
         ensure!(
             self.keychain
-                .verify(self.session, &ev.unit, &ev.sig, ev.unit.creator),
+                .verify(self.session, &ev.unit, &ev.signature, ev.unit.creator),
             "invalid creator signature",
         );
 
@@ -427,9 +461,13 @@ where
     /// duplicate unit hits the same key and errors.
     fn store_unit(&mut self, dbtx: &WriteTx, ev: &UnitEnvelope<D>, hash: UnitHash) -> Result<()> {
         ensure!(
-            dbtx.insert(&self.units_table, &hash, ev).is_none(),
+            dbtx.insert(&self.unit_table, &hash, &ev.unit).is_none(),
             "unit already stored",
         );
+
+        dbtx.insert(&self.unit_data_table, &hash, &ev.data);
+
+        dbtx.insert(&self.unit_signature_table, &hash, &ev.signature);
 
         self.rounds.entry(ev.unit.round).or_default().insert(hash);
 
@@ -472,10 +510,12 @@ where
             "created unit"
         );
 
+        let signature = self.keychain.sign(self.session, &unit);
+
         let ev = UnitEnvelope {
-            sig: self.keychain.sign(self.session, &unit),
             unit,
             data,
+            signature,
         };
 
         // Crash barrier: persist before broadcasting, otherwise a
@@ -561,21 +601,21 @@ where
             return None;
         }
 
-        let ev = dbtx.get(&self.units_table, &hash)?;
+        let unit = dbtx.get(&self.unit_table, &hash)?;
 
-        let parents_fed = ev.unit.parents.iter().all(|(creator, parent)| {
+        let parents_fed = unit.parents.iter().all(|(creator, parent)| {
             self.extended
                 .get(parent)
-                .is_some_and(|p| p.creator == *creator && p.round + 1 == ev.unit.round)
+                .is_some_and(|p| p.creator == *creator && p.round + 1 == unit.round)
         });
 
         if !parents_fed {
             return None;
         }
 
-        self.extended.insert(hash, ev.unit.clone());
+        self.extended.insert(hash, unit.clone());
 
-        Some(ev.unit.round)
+        Some(unit.round)
     }
 
     /// Our own unit at `round-1` plus the `threshold - 1` lowest-`NodeId`

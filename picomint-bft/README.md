@@ -55,7 +55,7 @@ recovery at the 1 Hz anti-entropy cadence, not by decision depth.
 - **Round** — a row of the DAG. Round 0 is the root row; its units
   carry no parents.
 - **UnitHash** — the sha256 consensus-hash of an encoded unit; the
-  unit's identity everywhere: storage key of the units table (`"bft-units"`), element of
+  unit's identity everywhere: storage key of both tables, element of
   the in-memory sets, and how parents pin the exact parent unit. It
   covers the payload transitively through the unit's `data`
   commitment.
@@ -70,8 +70,9 @@ recovery at the 1 Hz anti-entropy cadence, not by decision depth.
   [`unit.rs`].
 - **UnitEnvelope** — the unit, its payload (`Vec<D>`), and the
   creator's schnorr signature over `(session, unit)`. The one shape
-  units travel on the wire and persist in storage.
-- **Extended** — a unit's envelope is stored *and* every parent is
+  units travel on the wire; on disk the payload is split off into its
+  own table.
+- **Extended** — a unit is stored *and* every parent is
   also extended. Equivalent to "this hash is in the in-memory
   `extended` map the extender scans". A unit must be extended before
   it can be used as a parent for a future own unit.
@@ -100,18 +101,26 @@ push of their column. Other nodes' envelopes flow only on explicit
 
 ## Storage
 
-All persisted state lives in one database table. It is *declared by the
-daemon* and passed into `Engine::new`; bft only reads and writes it:
+All persisted state lives in three database tables keyed by unit
+hash. All are *declared by the daemon* and passed into `Engine::new`;
+bft only reads and writes them:
 
 ```rust
-units_table: UnitHash => UnitEnvelope<D>   // the units table (`"bft-units"`)
+unit_table:           UnitHash => Unit                // `"bft-unit"`
+unit_data_table:      UnitHash => Vec<D>              // `"bft-unit-data"`
+unit_signature_table: UnitHash => schnorr::Signature  // `"bft-unit-signature"`
 ```
 
-Everything else is in-memory state on `Engine<P, D, T>`, rebuilt on
+The split keeps payload and signature off every path but emission and
+the two `Unit` sends: the extension cascade, the parent walk on receipt
+and the startup replay read the unit table alone, so their cost scales
+with the DAG rather than with the items it carries.
+
+Everything else is in-memory state on `Engine<P, D, T, U, S, N>`, rebuilt on
 startup and never persisted:
 
 ```rust
-rounds:             BTreeMap<Round, BTreeSet<UnitHash>>,  // round index over units_table
+rounds:             BTreeMap<Round, BTreeSet<UnitHash>>,  // round index over the unit table
 extended:           BTreeMap<UnitHash, Unit>,       // stored + all parents extended; the bare units
 emitted:            BTreeSet<UnitHash>,             // already sent through ordered_tx
 next_decide_round:  Round,                          // extender cursor
@@ -165,7 +174,7 @@ turn. Admission checks:
   all keyed by mint members.
 - The creator sig verifies against the unit under the session.
 - Whether parents are *locally present or extended* is **not**
-  checked. An out-of-order arrival lands in `units_table` anyway, so
+  checked. An out-of-order arrival is stored anyway, so
   it's ready the moment its parents catch up rather than being
   dropped and refetched.
 
@@ -178,7 +187,7 @@ errors and the per-message write rolls back.
 extending units that satisfy:
 
 1. Not already in `extended`.
-2. Envelope stored in `units_table`.
+2. Unit stored in the unit table.
 3. Every parent is already in `extended`, was created by the node it
    is keyed under, and sits at exactly `round − 1` (round-0 parent
    maps are empty, so vacuously true).
@@ -368,7 +377,7 @@ orders of magnitude smaller. Catch-up under loss is O(n × R) Request
   `Keychain`, `Message`, `Unit`, `UnitEnvelope`, `DataProvider`, …).
 - [`unit.rs`] — `Unit`, `UnitEnvelope<D>`, `UnitHash`, `UnitData`,
   `Round` type alias.
-- [`engine.rs`] — `Engine<P, D, T>`: the `run` loop (anti-entropy push,
+- [`engine.rs`] — `Engine<P, D, T, U, S, N>`: the `run` loop (anti-entropy push,
   inbound message handling, unit creation), lax insert, the extension
   cascade, and all graph state over the units table.
 - [`extender.rs`] — the virtual-voting decision rule and BFS batch

@@ -26,7 +26,8 @@ impl<T> UnitData for T where
 
 /// Hash identifying a unit: the sha256 consensus-hash of the encoded
 /// [`Unit`]. The unit's identity everywhere — storage key of
-/// ``"bft-units"``, element of the in-memory `extended` / `emitted` sets,
+/// ``"bft-unit"`` and ``"bft-unit-data"``, element of the in-memory
+/// `extended` / `emitted` sets,
 /// and how parents pin the exact parent unit, so a forked position's
 /// branches are distinguishable — the prerequisite for the
 /// fork-tolerant commit rule. Covers the payload transitively through
@@ -69,17 +70,18 @@ pub struct Unit {
 
 impl Unit {
     /// The hash identifying this unit; what parents reference and
-    /// what keys the unit's row in ``"bft-units"``.
+    /// what keys the unit's rows in ``"bft-unit"`` and ``"bft-unit-data"``.
     pub fn hash(&self) -> UnitHash {
         UnitHash(self.consensus_hash_sha256())
     }
 }
 
-/// The wire and storage envelope: the identity-bearing unit, the
-/// payload its `data` commitment pins, and the creator's schnorr
-/// signature over `(session, unit)`. The signature must live outside
-/// [`Unit`] — it cannot cover itself — and the payload is freight the
-/// ordering engine only reads at emission, so both ride alongside.
+/// The wire envelope: the identity-bearing unit, the payload its
+/// `data` commitment pins, and the creator's schnorr signature over
+/// `(session, unit)`. The signature must live outside [`Unit`] — it
+/// cannot cover itself — and the payload is freight the ordering
+/// engine only reads at emission, so both ride alongside on the wire
+/// and are stored as three rows under the unit's hash.
 #[derive(Debug, Clone, PartialEq, Eq, Encodable, Decodable)]
 pub struct UnitEnvelope<D: UnitData> {
     /// The signed unit.
@@ -88,5 +90,5 @@ pub struct UnitEnvelope<D: UnitData> {
     /// unit's items are emitted in order keyed by the unit's creator.
     pub data: Vec<D>,
     /// The creator's signature over `(session, unit)`.
-    pub sig: schnorr::Signature,
+    pub signature: schnorr::Signature,
 }
