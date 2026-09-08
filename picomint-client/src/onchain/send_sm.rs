@@ -42,7 +42,7 @@ impl StateMachine for SendStateMachine {
             return AwaitFundingResult::Aborted(error);
         }
 
-        match super::api::tx_id(&ctx.api, self.outpoint).await {
+        match super::api::txid(&ctx.api, self.outpoint).await {
             Some(txid) => AwaitFundingResult::Success(txid),
             None => AwaitFundingResult::Failure,
         }

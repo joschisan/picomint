@@ -5,7 +5,7 @@ use picomint_core::onchain::methods::{
     ConsensusFeerateRequest, ConsensusFeerateResponse, MintUtxoRequest, MintUtxoResponse,
     OnchainMethod, OutputInfoSliceRequest, OutputInfoSliceResponse, PendingTxChainRequest,
     PendingTxChainResponse, ReceiveFeeRequest, ReceiveFeeResponse, SendFeeRequest, SendFeeResponse,
-    TxIdRequest, TxIdResponse,
+    TxidRequest, TxidResponse,
 };
 use picomint_core::onchain::{MintUtxo, OutputInfo, TxInfo};
 
@@ -61,9 +61,9 @@ pub async fn output_info_slice(
     .map(|resp| resp.outputs)
 }
 
-pub async fn tx_id(api: &MintApi, outpoint: OutPoint) -> Option<bitcoin::Txid> {
-    api.request_current_consensus_retry::<TxIdResponse>(Method::Onchain(OnchainMethod::TxId(
-        TxIdRequest { outpoint },
+pub async fn txid(api: &MintApi, outpoint: OutPoint) -> Option<bitcoin::Txid> {
+    api.request_current_consensus_retry::<TxidResponse>(Method::Onchain(OnchainMethod::Txid(
+        TxidRequest { outpoint },
     )))
     .await
     .txid
