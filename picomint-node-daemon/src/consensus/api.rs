@@ -1,7 +1,6 @@
 //! Implements the client API through which users interact with the mint
 
 use chrono::{Days, Utc};
-use picomint_core::audit::AuditSummary;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::tx::ConsensusItem;
@@ -10,7 +9,7 @@ use picomint_redb::DbRead;
 
 use crate::consensus::db::{ExpiryStatusTable, InviteMeta, InviteMetaTable, consensus_block_count};
 use crate::consensus::engine::get_finished_session_count;
-use crate::consensus::server::{Server, audit};
+use crate::consensus::server::Server;
 use crate::p2p::P2PStatusReceivers;
 
 #[derive(Clone)]
@@ -62,12 +61,6 @@ impl ConsensusApi {
     /// The mint's current consensus block count.
     pub fn block_count(&self) -> u32 {
         consensus_block_count(&self.server, &self.server.db.begin_read())
-    }
-
-    pub fn mint_audit(&self) -> AuditSummary {
-        // Modules read their own tables during `audit`; we open a write tx and
-        // drop it without commit after building the audit view.
-        audit(&self.server.db.begin_write())
     }
 
     /// Read this node's announced expiry status from the local

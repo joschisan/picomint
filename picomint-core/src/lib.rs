@@ -22,7 +22,6 @@ use picomint_encoding::{Decodable, Encodable};
 /// Bitcoin amount types
 mod amount;
 /// The mint's balance-sheet snapshot
-pub mod audit;
 /// Fibonacci backoff policies for retry loops.
 pub mod backoff;
 /// Mint configuration

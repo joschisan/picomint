@@ -1,6 +1,5 @@
 use clap::Args;
 use picomint_core::NodeId;
-use picomint_core::audit::AuditSummary;
 use picomint_core::invite::InviteCode;
 use picomint_core::onchain::TxInfo;
 use serde::{Deserialize, Serialize};
@@ -22,7 +21,6 @@ pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
 
 // Dashboard routes
 pub const ROUTE_INVITE: &str = "/invite";
-pub const ROUTE_AUDIT: &str = "/audit";
 pub const ROUTE_CONFIG: &str = "/config";
 pub const ROUTE_SESSION_COUNT: &str = "/session-count";
 pub const ROUTE_BLOCK_COUNT: &str = "/block-count";
@@ -105,13 +103,6 @@ pub struct InviteRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InviteResponse {
     pub invite: InviteCode,
-}
-
-// --- /audit ---
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AuditResponse {
-    pub audit: AuditSummary,
 }
 
 // --- /module/onchain/total-value ---

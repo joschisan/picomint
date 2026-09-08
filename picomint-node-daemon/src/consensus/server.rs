@@ -8,7 +8,6 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use crate::bitcoind::BitcoindRpcMonitor;
-use picomint_core::audit::AuditSummary;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
@@ -160,13 +159,4 @@ impl Server {
 
         Ok(())
     }
-}
-
-/// Balance-sheet snapshot across all modules.
-pub fn audit(dbtx: &WriteTx) -> AuditSummary {
-    AuditSummary::new(
-        ecash::audit(dbtx),
-        onchain::audit(dbtx),
-        lightning::audit(dbtx),
-    )
 }

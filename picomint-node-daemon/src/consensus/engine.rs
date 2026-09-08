@@ -22,7 +22,7 @@ use crate::consensus::db::{
     ConsensusVersionVoteTable, SignedSessionOutcomeTable, consensus_block_count, consensus_version,
 };
 use crate::consensus::onchain;
-use crate::consensus::server::{Server, audit};
+use crate::consensus::server::Server;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
 
 /// BFT rounds a session runs for, which is what sets how long one lasts.
@@ -490,10 +490,6 @@ async fn process_consensus_item(
             }
 
             dbtx.insert(&AcceptedTxIdTable, &txid, &());
-
-            let summary = audit(dbtx);
-
-            assert!(summary.total >= 0, "Failed audit: {summary:?}");
         }
         ConsensusItem::Module(ci) => {
             server.process_module_ci(dbtx, node, ci).await?;

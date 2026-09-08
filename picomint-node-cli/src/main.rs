@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use picomint_cli_client::{print_json, request};
 use picomint_node_cli_core::{
     ExpirySetRequest, InviteRequest, LightningGatewayAddRequest, LightningGatewayRemoveRequest,
-    ROUTE_AUDIT, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
+    ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
     ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
     ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
     ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS,
@@ -34,8 +34,6 @@ enum Commands {
     Setup(SetupCommands),
     /// Generate a mint invite code
     Invite(InviteRequest),
-    /// Show mint audit summary
-    Audit,
     /// Dump full node config as JSON (use `> config.json` to save)
     Config,
     /// Number of consensus sessions this node has finalized
@@ -127,7 +125,6 @@ async fn main() -> Result<()> {
 
     let result = match cli.command {
         Commands::Invite(req) => request(d, ROUTE_INVITE, req).await?,
-        Commands::Audit => request(d, ROUTE_AUDIT, ()).await?,
         Commands::Config => request(d, ROUTE_CONFIG, ()).await?,
         Commands::SessionCount => request(d, ROUTE_SESSION_COUNT, ()).await?,
         Commands::BlockCount => request(d, ROUTE_BLOCK_COUNT, ()).await?,
