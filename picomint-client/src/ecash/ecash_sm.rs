@@ -137,7 +137,7 @@ impl StateMachine for EcashStateMachine {
         match outcome {
             IssuanceOutcome::Rejected => {
                 for note in &self.spendable_notes {
-                    dbtx.insert_new(&NoteTable, &(ctx.mint, self.account, note.clone()), &());
+                    dbtx.insert_new(&NoteTable, &(ctx.mint, self.account, note.into()), &());
                 }
             }
             IssuanceOutcome::Invalid => {
@@ -158,7 +158,7 @@ impl StateMachine for EcashStateMachine {
                 };
 
                 for (account, note) in notes {
-                    dbtx.insert_new(&NoteTable, &(ctx.mint, account, note), &());
+                    dbtx.insert_new(&NoteTable, &(ctx.mint, account, (&note).into()), &());
                 }
 
                 ctx.log_event(dbtx, self.account, self.operation, event);

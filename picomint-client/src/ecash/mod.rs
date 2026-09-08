@@ -31,7 +31,7 @@ use picomint_core::ecash::{Denomination, EcashInput, Note};
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_core::tx::Transaction;
 use picomint_core::{Amount, TransactionId, wire};
-use picomint_encoding::{Decodable, Encodable};
+use picomint_encoding::{Decodable, Encodable, Undecoded};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tbs::aggregate_signature_shares;
@@ -72,6 +72,38 @@ pub struct SpendableNote {
     pub denomination: Denomination,
     pub keypair: Keypair,
     pub signature: tbs::Signature,
+}
+
+/// A [`SpendableNote`] as the note table holds it: the denomination in the
+/// clear, since selecting notes goes by it, and the keypair and signature
+/// as their bytes — deriving a public key and decompressing a BLS point
+/// are what decoding a note costs, and a scan touches every note the
+/// account holds while a spend uses a few.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
+pub struct UndecodedSpendableNote {
+    denomination: Denomination,
+    keypair: Undecoded<Keypair, [u8; 32]>,
+    signature: Undecoded<tbs::Signature, [u8; 48]>,
+}
+
+impl UndecodedSpendableNote {
+    fn decode(&self) -> SpendableNote {
+        SpendableNote {
+            denomination: self.denomination,
+            keypair: self.keypair.decode().expect("stored notes decode"),
+            signature: self.signature.decode().expect("stored notes decode"),
+        }
+    }
+}
+
+impl From<&SpendableNote> for UndecodedSpendableNote {
+    fn from(note: &SpendableNote) -> Self {
+        Self {
+            denomination: note.denomination,
+            keypair: note.keypair.into(),
+            signature: note.signature.into(),
+        }
+    }
 }
 
 impl SpendableNote {
@@ -173,7 +205,7 @@ pub(crate) fn commit_scan(dbtx: &WriteTx, account: Account, restore: &Restore) {
     );
 
     for note in &restore.notes {
-        dbtx.insert(&NoteTable, &(restore.mint, account, note.clone()), &());
+        dbtx.insert(&NoteTable, &(restore.mint, account, note.into()), &());
     }
 }
 
@@ -500,7 +532,7 @@ fn submit<E: crate::eventlog::Event + Send>(
 fn max_spendable(ctx: &ClientContext, account: Account) -> Amount {
     account_notes(&ctx.db.begin_read(), ctx.mint, account)
         .iter()
-        .map(|note| note_value(ctx, note))
+        .map(|note| note_value(ctx, note.denomination))
         .sum()
 }
 
@@ -551,13 +583,15 @@ fn select_funding_input(
     account: Account,
     excess_output: Amount,
 ) -> Option<Vec<SpendableNote>> {
+    // Selection runs on the notes as stored; the ones it settles on are
+    // decoded at the end.
     let mut selected = Vec::new();
     let mut target_notes = Vec::new();
 
     let all_notes = account_notes(dbtx, ctx.mint, account);
 
     for amount in client_denominations().rev() {
-        let notes_amount: Vec<SpendableNote> = all_notes
+        let notes_amount: Vec<UndecodedSpendableNote> = all_notes
             .iter()
             .filter(|note| note.denomination == amount)
             .cloned()
@@ -578,18 +612,29 @@ fn select_funding_input(
         }
     }
 
-    let selected_value = selected.iter().map(|n| note_value(ctx, n)).sum();
+    let selected_value = selected
+        .iter()
+        .map(|note| note_value(ctx, note.denomination))
+        .sum();
 
     if excess_output <= selected_value {
+        let selected = selected
+            .iter()
+            .map(UndecodedSpendableNote::decode)
+            .collect();
+
         return Some(selected);
     }
 
     let mut last_note = None;
 
     for note in target_notes {
-        let selected_value = selected.iter().map(|n| note_value(ctx, n)).sum();
+        let selected_value = selected
+            .iter()
+            .map(|note| note_value(ctx, note.denomination))
+            .sum();
 
-        if note_value(ctx, &note) + selected_value <= excess_output {
+        if note_value(ctx, note.denomination) + selected_value <= excess_output {
             selected.push(note);
         } else {
             last_note = Some(note);
@@ -598,11 +643,19 @@ fn select_funding_input(
 
     selected.push(last_note?);
 
+    let selected = selected
+        .iter()
+        .map(UndecodedSpendableNote::decode)
+        .collect();
+
     Some(selected)
 }
 
-fn note_value(ctx: &ClientContext, note: &SpendableNote) -> Amount {
-    note.amount()
+/// What a note of `denomination` delivers when spent: its face value
+/// minus the input fee.
+fn note_value(ctx: &ClientContext, denomination: Denomination) -> Amount {
+    denomination
+        .amount()
         .checked_sub(ctx.config.ecash.input_fee)
         .expect("All our notes are economical")
 }
@@ -656,13 +709,17 @@ fn remove_spendable_note(
     account: Account,
     spendable_note: &SpendableNote,
 ) {
-    dbtx.remove(&NoteTable, &(mint, account, spendable_note.clone()))
+    dbtx.remove(&NoteTable, &(mint, account, spendable_note.into()))
         .expect("Must delete existing spendable note");
 }
 
-/// Every note `account` holds — an indexed prefix scan over the key's
-/// leading `(mint, account)` columns.
-fn account_notes(dbtx: &impl DbRead, mint: MintId, account: Account) -> Vec<SpendableNote> {
+/// Every note `account` holds, as stored — an indexed prefix scan over the
+/// key's leading `(mint, account)` columns.
+fn account_notes(
+    dbtx: &impl DbRead,
+    mint: MintId,
+    account: Account,
+) -> Vec<UndecodedSpendableNote> {
     dbtx.prefix(&NoteTable, &(mint, account), |r| {
         r.map(|entry| entry.0.2).collect()
     })
@@ -684,13 +741,13 @@ fn send_ecash_dbtx(
 
     let mut notes = vec![];
 
-    for spendable_note in sorted {
-        remaining_amount = match remaining_amount.checked_sub(spendable_note.amount()) {
+    for note in sorted {
+        remaining_amount = match remaining_amount.checked_sub(note.denomination.amount()) {
             Some(amount) => amount,
             None => continue,
         };
 
-        notes.push(spendable_note);
+        notes.push(note.decode());
     }
 
     if remaining_amount != Amount::ZERO {
@@ -798,7 +855,7 @@ fn represent_amount(mut remaining_amount: Amount) -> Vec<Denomination> {
 pub(crate) fn balance(dbtx: &impl DbRead, mint: MintId, account: Account) -> Amount {
     account_notes(dbtx, mint, account)
         .iter()
-        .map(|note| note.amount())
+        .map(|note| note.denomination.amount())
         .sum()
 }
 
@@ -969,7 +1026,10 @@ impl Client {
         let operation = OperationId::new_random();
         let dbtx = ctx.db.begin_write();
 
-        let notes = account_notes(&dbtx, ctx.mint, account);
+        let notes: Vec<SpendableNote> = account_notes(&dbtx, ctx.mint, account)
+            .iter()
+            .map(UndecodedSpendableNote::decode)
+            .collect();
 
         if notes.is_empty() {
             return Ok(None);
