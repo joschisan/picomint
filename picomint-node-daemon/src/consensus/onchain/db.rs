@@ -20,7 +20,7 @@ table!(
 
 // The height of the block the mint tracks next: every block below it has
 // been tracked.
-// Set to the first non-zero consensus block count, so nothing before the
+// Set to the first non-zero consensus block height, so nothing before the
 // mint's first block is ever tracked, and absent until then.
 table!(
     BlockHeightTable,

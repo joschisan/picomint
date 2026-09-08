@@ -738,9 +738,9 @@ async fn test_unilateral_refund(env: &TestEnv, client: &TestClient) -> anyhow::R
     })
     .await;
 
-    // Contract expiry = consensus_block_count + expiry_delta +
+    // Contract expiry = consensus_block_height + expiry_delta +
     // CONTRACT_CONFIRMATION_BUFFER = +62 blocks with the mock's settings.
-    // Mine 100 so the consensus block count comfortably crosses it.
+    // Mine 100 so the consensus block height comfortably crosses it.
     env.mine_blocks(100);
 
     wait_lightning_event(&mut events, send_op, |e| {

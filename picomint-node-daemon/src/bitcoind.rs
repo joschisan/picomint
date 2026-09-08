@@ -33,7 +33,7 @@ const MIN_FEERATE_SATS_PER_KVB: u32 = 1000;
 #[derive(Debug, Clone)]
 pub struct BitcoindRpcStatus {
     pub network: Network,
-    pub block_count: u32,
+    pub block_height: u32,
     /// In sat/kvB, `None` while the backend is still syncing — fee
     /// estimation has no data until the node is at the tip, and consensus
     /// (the only consumer that needs a feerate) doesn't start until then
@@ -79,7 +79,7 @@ impl BitcoindRpcMonitor {
     async fn fetch_status(rpc: &BitcoindClient) -> Result<BitcoindRpcStatus> {
         let network = rpc.network().await?;
 
-        let block_count = rpc.get_block_count().await?;
+        let block_height = rpc.get_block_height().await?;
 
         let sync_progress = rpc.get_sync_progress().await?;
 
@@ -91,7 +91,7 @@ impl BitcoindRpcMonitor {
 
         Ok(BitcoindRpcStatus {
             network,
-            block_count,
+            block_height,
             fee_rate,
             sync_progress,
         })
@@ -199,11 +199,10 @@ impl BitcoindClient {
         }
     }
 
-    pub async fn get_block_count(&self) -> anyhow::Result<u32> {
-        // The RPC method is confusingly named and actually returns the block height
-        self.call::<u32>("getblockcount", json!([]))
-            .await
-            .map(|height| height + 1)
+    /// The height of the chain tip; the RPC is named for the count but
+    /// returns the height.
+    pub async fn get_block_height(&self) -> anyhow::Result<u32> {
+        self.call("getblockcount", json!([])).await
     }
 
     pub async fn get_block_hash(&self, height: u32) -> anyhow::Result<BlockHash> {

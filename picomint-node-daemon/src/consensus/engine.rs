@@ -19,8 +19,8 @@ use crate::config::NodeConfig;
 use crate::consensus::bft::{DataProvider, Network};
 use crate::consensus::db::{
     AcceptedItemTable, AcceptedTxidTable, BftUnitDataTable, BftUnitSignatureTable, BftUnitTable,
-    BlockCountVoteTable, ConsensusVersionVoteTable, ResumeIndexTable, SessionSignaturesTable,
-    consensus_block_count, consensus_version,
+    BlockHeightVoteTable, ConsensusVersionVoteTable, ResumeIndexTable, SessionSignaturesTable,
+    consensus_block_height, consensus_version,
 };
 use crate::consensus::onchain;
 use crate::consensus::server::Server;
@@ -473,27 +473,27 @@ fn process_consensus_item(
         ConsensusItem::Module(ci) => {
             server.process_module_ci(dbtx, node, ci)?;
         }
-        ConsensusItem::BlockCount(vote) => {
-            let old_block_count = consensus_block_count(server, dbtx);
+        ConsensusItem::BlockHeight(vote) => {
+            let old_block_height = consensus_block_height(server, dbtx);
 
-            let current_vote = dbtx.insert(&BlockCountVoteTable, &node, vote).unwrap_or(0);
+            let current_vote = dbtx.insert(&BlockHeightVoteTable, &node, vote).unwrap_or(0);
 
-            ensure!(current_vote < *vote, "Block count vote is redundant");
+            ensure!(current_vote < *vote, "Block height vote is redundant");
 
-            let new_block_count = consensus_block_count(server, dbtx);
+            let new_block_height = consensus_block_height(server, dbtx);
 
-            assert!(old_block_count <= new_block_count);
+            assert!(old_block_height <= new_block_height);
 
-            if new_block_count != old_block_count {
+            if new_block_height != old_block_height {
                 info!(
                     %node,
                     vote,
-                    old_block_count,
-                    new_block_count,
-                    "consensus block count advanced"
+                    old_block_height,
+                    new_block_height,
+                    "consensus block height advanced"
                 );
 
-                onchain::initialize_block_height(dbtx, old_block_count, new_block_count);
+                onchain::initialize_block_height(dbtx, old_block_height, new_block_height);
             }
         }
         ConsensusItem::Version(vote) => {

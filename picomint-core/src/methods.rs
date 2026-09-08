@@ -55,14 +55,14 @@ pub struct SubmitTxResponse {
     pub outcome: Result<(), TxError>,
 }
 
-// ── block-count ─────────────────────────────────────────────────────────────
+// ── block-height ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct BlockCountRequest;
+pub struct BlockHeightRequest;
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct BlockCountResponse {
-    pub count: u32,
+pub struct BlockHeightResponse {
+    pub height: u32,
 }
 
 // ── liveness ────────────────────────────────────────────────────────────────
@@ -115,7 +115,7 @@ impl MintInfoResponse {
 pub enum CoreMethod {
     Config(ConfigRequest),
     SubmitTx(SubmitTxRequest),
-    BlockCount(BlockCountRequest),
+    BlockHeight(BlockHeightRequest),
     Liveness(LivenessRequest),
     ExpiryStatus(ExpiryStatusRequest),
     MintInfo(MintInfoRequest),

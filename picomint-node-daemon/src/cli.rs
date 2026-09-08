@@ -40,11 +40,11 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
     use axum::routing::post;
     use picomint_core::expiry::ExpiryStatus;
     use picomint_node_cli_core::{
-        BitcoinConnectionResponse, BlockCountResponse, ExpirySetRequest, INVITE_EXPIRY_DAYS_LIMIT,
+        BitcoinConnectionResponse, BlockHeightResponse, ExpirySetRequest, INVITE_EXPIRY_DAYS_LIMIT,
         InviteRequest, InviteResponse, LightningGatewayAddRequest, LightningGatewayInfo,
         LightningGatewayListResponse, LightningGatewayRemoveRequest, NodeInfo,
         OnchainFeerateResponse, OnchainTotalValueResponse, P2pResponse, PendingTxsResponse,
-        ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
+        ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
         ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
         ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
         ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE,
@@ -88,11 +88,11 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         }))
     }
 
-    async fn block_count(
+    async fn block_height(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<BlockCountResponse>, CliError> {
-        Ok(Json(BlockCountResponse {
-            block_count: api.block_count(),
+    ) -> Result<Json<BlockHeightResponse>, CliError> {
+        Ok(Json(BlockHeightResponse {
+            block_height: api.block_height(),
         }))
     }
 
@@ -143,7 +143,7 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
 
         Ok(Json(BitcoinConnectionResponse {
             network: status.network.to_string(),
-            block_count: status.block_count,
+            block_height: status.block_height,
             fee_rate_sat_per_vb: status.fee_rate.map(|fee_rate| fee_rate / 1000),
             sync_progress: status.sync_progress,
         }))
@@ -231,7 +231,7 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         .route(ROUTE_INVITE, post(invite))
         .route(ROUTE_CONFIG, post(config))
         .route(ROUTE_SESSION_COUNT, post(session_count))
-        .route(ROUTE_BLOCK_COUNT, post(block_count))
+        .route(ROUTE_BLOCK_HEIGHT, post(block_height))
         .route(ROUTE_P2P, post(p2p))
         .route(ROUTE_BITCOIN_CONNECTION, post(bitcoin_connection))
         .route(ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, post(onchain_total_value))

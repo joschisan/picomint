@@ -218,15 +218,15 @@ async fn send_inner(
     let fee = gateway_info.send_fee.fee(amount);
     let amount = Amount::from_msat(amount);
 
-    let consensus_block_count = crate::api::block_count(&ctx.api)
+    let consensus_block_height = crate::api::block_height(&ctx.api)
         .await
-        .map_err(|_| SendPaymentError::FailedToRequestBlockCount)?;
+        .map_err(|_| SendPaymentError::FailedToRequestBlockHeight)?;
 
     let contract = OutgoingContract {
         payment_hash: *invoice.payment_hash(),
         amount,
         fee,
-        expiry: consensus_block_count
+        expiry: consensus_block_height
             + u32::from(gateway_info.expiry_delta)
             + CONTRACT_CONFIRMATION_BUFFER,
         claim_pk: gateway_info.module_public_key,
@@ -456,8 +456,8 @@ pub enum SendPaymentError {
     GatewayFeeExceedsLimit,
     #[error("Gateway expiry time exceeds the allowed limit")]
     GatewayExpiryExceedsLimit,
-    #[error("Failed to request block count")]
-    FailedToRequestBlockCount,
+    #[error("Failed to request block height")]
+    FailedToRequestBlockHeight,
     #[error("Failed to fund the payment")]
     FailedToFundPayment(String),
     #[error("Invoice is for a different currency")]

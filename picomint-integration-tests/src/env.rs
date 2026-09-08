@@ -213,7 +213,7 @@ impl TestEnv {
     }
 
     /// Mine one regtest block per second for the lifetime of the test.
-    /// Nodes only propose block-count votes when the height changes,
+    /// Nodes only propose block-height votes when the height changes,
     /// so without steadily arriving blocks an idle mint orders
     /// nothing. Faster than this and the lightning suite's CLTV margins
     /// no longer hold; the restore suite mines its own blocks while it

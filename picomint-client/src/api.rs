@@ -10,7 +10,7 @@ pub use picomint_rpc::api::MintApi;
 use picomint_core::NodeId;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::methods::{
-    BlockCountRequest, BlockCountResponse, CoreMethod, ExpiryStatusRequest, ExpiryStatusResponse,
+    BlockHeightRequest, BlockHeightResponse, CoreMethod, ExpiryStatusRequest, ExpiryStatusResponse,
     LivenessRequest, LivenessResponse, Method, SubmitTxRequest, SubmitTxResponse,
 };
 use picomint_core::tx::{Transaction, TxError};
@@ -25,14 +25,14 @@ pub async fn submit_tx(api: &MintApi, tx: Transaction) -> Result<(), TxError> {
     .outcome
 }
 
-/// Fetch the mint's consensus block count: the block count a
-/// threshold of nodes has reached, so it tracks the chain tip.
-pub async fn block_count(api: &MintApi) -> anyhow::Result<u32> {
-    api.request_current_consensus::<BlockCountResponse>(Method::Core(CoreMethod::BlockCount(
-        BlockCountRequest,
+/// Fetch the mint's consensus block height: the height a threshold
+/// of nodes has reached, so it tracks the chain tip.
+pub async fn block_height(api: &MintApi) -> anyhow::Result<u32> {
+    api.request_current_consensus::<BlockHeightResponse>(Method::Core(CoreMethod::BlockHeight(
+        BlockHeightRequest,
     )))
     .await
-    .map(|resp| resp.count)
+    .map(|resp| resp.height)
 }
 
 /// Lightweight liveness check — succeeds if a threshold of nodes is

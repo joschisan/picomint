@@ -68,31 +68,31 @@ table!(
     "session-signatures",
 );
 
-// Latest block count each node has voted for. Votes only ever increase, so a
-// missing entry means the node has not voted since the mint was created.
+// Latest block height each node has voted for. Votes only ever increase, so
+// a missing entry means the node has not voted since the mint was created.
 table!(
-    BlockCountVoteTable,
+    BlockHeightVoteTable,
     NodeId => u32,
-    "block-count-vote",
+    "block-height-vote",
 );
 
-/// The consensus block count the mint currently runs at.
+/// The consensus block height the mint currently runs at.
 ///
 /// Sorted descending and indexed at `threshold() - 1`, so any threshold of
-/// correct nodes can increase the consensus block count and any consensus
-/// block count has been confirmed by a threshold of nodes.
-pub fn consensus_block_count(server: &Server, dbtx: &impl DbRead) -> u32 {
+/// correct nodes can increase the consensus block height and any consensus
+/// block height has been confirmed by a threshold of nodes.
+pub fn consensus_block_height(server: &Server, dbtx: &impl DbRead) -> u32 {
     let num_nodes = server.cfg.consensus.nodes.to_num_nodes();
 
-    let mut counts: Vec<u32> = dbtx.iter(&BlockCountVoteTable, |r| r.map(|(_, v)| v).collect());
+    let mut heights: Vec<u32> = dbtx.iter(&BlockHeightVoteTable, |r| r.map(|(_, v)| v).collect());
 
-    assert!(counts.len() <= num_nodes.total());
+    assert!(heights.len() <= num_nodes.total());
 
-    counts.sort_unstable();
+    heights.sort_unstable();
 
-    counts.reverse();
+    heights.reverse();
 
-    counts.get(num_nodes.threshold() - 1).copied().unwrap_or(0)
+    heights.get(num_nodes.threshold() - 1).copied().unwrap_or(0)
 }
 
 // Highest consensus version each node has announced support for. A node

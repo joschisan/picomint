@@ -7,7 +7,9 @@ use picomint_core::tx::ConsensusItem;
 
 use picomint_redb::DbRead;
 
-use crate::consensus::db::{ExpiryStatusTable, InviteMeta, InviteMetaTable, consensus_block_count};
+use crate::consensus::db::{
+    ExpiryStatusTable, InviteMeta, InviteMetaTable, consensus_block_height,
+};
 use crate::consensus::engine::get_finished_session_count;
 use crate::consensus::server::Server;
 use crate::p2p::P2PStatusReceivers;
@@ -58,9 +60,9 @@ impl ConsensusApi {
         (self.server.cfg.get_invite_code(invite_id), meta)
     }
 
-    /// The mint's current consensus block count.
-    pub fn block_count(&self) -> u32 {
-        consensus_block_count(&self.server, &self.server.db.begin_read())
+    /// The mint's current consensus block height.
+    pub fn block_height(&self) -> u32 {
+        consensus_block_height(&self.server, &self.server.db.begin_read())
     }
 
     /// Read this node's announced expiry status from the local

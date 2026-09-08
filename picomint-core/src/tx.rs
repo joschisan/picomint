@@ -101,8 +101,8 @@ pub enum ConsensusItem {
     Tx(Transaction),
     /// Any data that modules require consensus on
     Module(wire::ModuleConsensusItem),
-    /// The submitting node's bitcoin block count.
-    BlockCount(u32),
+    /// The height of the submitting node's bitcoin chain tip.
+    BlockHeight(u32),
     /// Highest consensus version the submitting node's binary can run.
     Version(ConsensusVersion),
 }
