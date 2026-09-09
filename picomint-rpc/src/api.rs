@@ -6,16 +6,17 @@ use anyhow::{Context, anyhow};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use iroh::{Endpoint, PublicKey};
-use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::methods::Method;
 use picomint_core::{NodeId, NumNodes, NumNodesExt};
 use picomint_encoding::Decodable;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio_stream::wrappers::WatchStream;
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
-use crate::connection::{ConnState, ConnStatus, connection_task, request_on_state};
+use crate::connection::{
+    ConnState, ConnStatus, connection_task, request_on_state, request_on_state_retry,
+};
 use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 
 /// Mint API client: a pool of kept-alive connections to a mint's
@@ -172,10 +173,12 @@ impl MintApi {
     ) -> F {
         let mut tasks = JoinSet::new();
 
-        for (node, rx) in self.states.clone() {
+        for (node, mut rx) in self.states.clone() {
             let method = method.clone();
             tasks.spawn(async move {
-                let response = request_on_state_retry(rx, method).await;
+                let response = request_on_state_retry(&mut rx, method)
+                    .await
+                    .expect("MintApi holds every node's receiver, so its connection task outlives this request");
                 (node, response)
             });
         }
@@ -189,17 +192,19 @@ impl MintApi {
             match strategy.process(node, response).await {
                 QueryStep::Retry(nodes) => {
                     for node in nodes {
-                        let rx = self.state(node);
+                        let mut rx = self.state(node);
                         let method = method.clone();
                         tasks.spawn(async move {
-                            let response = request_on_state_retry(rx, method).await;
+                            let response = request_on_state_retry(&mut rx, method)
+                                .await
+                                .expect("MintApi holds every node's receiver, so its connection task outlives this request");
                             (node, response)
                         });
                     }
                 }
                 QueryStep::Success(response) => return response,
                 QueryStep::Failure(e) => {
-                    debug!(error = %e, "Query strategy returned non-retryable failure");
+                    warn!(node = %node, error = %e, "Node response rejected by the query strategy");
                 }
                 QueryStep::Continue => {}
             }
@@ -221,21 +226,4 @@ impl MintApi {
         self.request_with_strategy_retry(ThresholdConsensus::new(self.num_nodes()), method)
             .await
     }
-}
-
-/// As [`request_on_state`] but retries forever on transport / decode errors
-/// using `networking_backoff`. Used by the strategy-retry fan-out where
-/// every node call must eventually yield a response.
-async fn request_on_state_retry<R: Decodable>(
-    rx: watch::Receiver<Option<ConnState>>,
-    method: Method,
-) -> R {
-    (|| async {
-        request_on_state(&mut rx.clone(), method.clone())
-            .await
-            .inspect_err(|e| debug!(error = %e, "Node request failed"))
-    })
-    .retry(networking_backoff())
-    .await
-    .expect("networking_backoff retries forever")
 }

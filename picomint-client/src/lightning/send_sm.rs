@@ -2,11 +2,9 @@ use super::gateway::Gateways;
 use crate::api::MintApi;
 use crate::executor::{SmId, StateMachine};
 use crate::tx::{Input, TxBuilder};
-use anyhow::ensure;
 use bitcoin::hashes::sha256;
 use futures::future::pending;
 use picomint_core::TransactionId;
-use picomint_core::backoff::{Retryable, networking_backoff};
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::lightning::contracts::OutgoingContract;
@@ -18,7 +16,7 @@ use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{WriteTx, table};
 use secp256k1::Keypair;
 use secp256k1::schnorr::Signature;
-use tracing::{error, instrument};
+use tracing::{error, instrument, warn};
 
 use super::LightningInvoice;
 use super::events::{SendFailureEvent, SendRefundEvent, SendSuccessEvent};
@@ -230,6 +228,10 @@ fn submit_refund(
     .expect("Cannot claim input, additional funding needed")
 }
 
+/// Resolves only with a response the contract accepts. An invalid
+/// response or a gateway that left the announced set is terminal for this
+/// branch — no retry changes either — so it parks and leaves the outcome
+/// to the preimage poll, which expires the contract and refunds.
 #[instrument(skip(refund_keypair, gateways))]
 async fn gateway_send_sm(
     gateways: Gateways,
@@ -240,30 +242,25 @@ async fn gateway_send_sm(
     invoice: LightningInvoice,
     refund_keypair: Keypair,
 ) -> Result<[u8; 32], Signature> {
-    (|| async {
-        let payment_result = gateways
-            .send(
-                gateway_pk,
-                mint,
-                outpoint,
-                contract.clone(),
-                invoice.clone(),
-                refund_keypair.sign_schnorr(secp256k1::Message::from_digest(
-                    *invoice.consensus_hash::<sha256::Hash>().as_ref(),
-                )),
-            )
-            .await?;
+    let auth = refund_keypair.sign_schnorr(secp256k1::Message::from_digest(
+        *invoice.consensus_hash::<sha256::Hash>().as_ref(),
+    ));
 
-        ensure!(
-            contract.verify_gateway_response(&payment_result),
-            "Invalid gateway response: {payment_result:?}"
-        );
+    match gateways
+        .send(gateway_pk, mint, outpoint, contract.clone(), invoice, auth)
+        .await
+    {
+        Ok(result) => {
+            if contract.verify_gateway_response(&result) {
+                return result;
+            }
 
-        Ok(payment_result)
-    })
-    .retry(networking_backoff())
-    .await
-    .expect("networking_backoff retries forever")
+            warn!(?result, "Invalid gateway response");
+        }
+        Err(e) => warn!(error = %e, "Gateway send failed"),
+    }
+
+    pending().await
 }
 
 /// Resolves only if the funding transaction is rejected; acceptance is

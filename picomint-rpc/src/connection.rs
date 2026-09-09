@@ -15,13 +15,8 @@ use picomint_core::backoff::{BackoffBuilder, networking_backoff};
 use crate::{ALPN, request_on_connection};
 use picomint_encoding::{Decodable, Encodable};
 use tokio::sync::watch;
-use tokio::time::{sleep, timeout};
-use tracing::warn;
-
-/// A connect that has not produced a connection within this window is
-/// treated as failed, so a peer that is unreachable through every path
-/// still surfaces as `Disconnected` instead of leaving the state at `None`.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+use tokio::time::sleep;
+use tracing::{debug, warn};
 
 /// Live connection state for one node, published on a watch channel by its
 /// [`connection_task`]. `None` (the channel's initial value) means the task
@@ -72,12 +67,7 @@ pub async fn connection_task(
         let mut backoff = networking_backoff().build();
 
         loop {
-            let connect = timeout(CONNECT_TIMEOUT, endpoint.connect(iroh_pk, ALPN))
-                .await
-                .map_err(|_| anyhow!("timed out after {CONNECT_TIMEOUT:?}"))
-                .and_then(|result| result.map_err(anyhow::Error::from));
-
-            match connect {
+            match endpoint.connect(iroh_pk, ALPN).await {
                 Ok(conn) => {
                     backoff = networking_backoff().build();
 
@@ -127,4 +117,37 @@ pub async fn request_on_state<R: Decodable>(
     };
 
     request_on_connection(&conn, method).await
+}
+
+/// As [`request_on_state`] but never gives up: the request is reissued on
+/// every transition of the connection state and otherwise sleeps on the
+/// watch channel. A lost connection is therefore awaited, not polled, and
+/// the reconnect backoff in [`connection_task`] is the only backoff that
+/// bounds how long a request waits. An error on a live connection is not a
+/// transport fault — a server-side error or a decode mismatch — so the node
+/// counts as unresponsive until its connection flips. Errors only if the
+/// [`connection_task`] is gone, which no reconnect can cure.
+pub async fn request_on_state_retry<R: Decodable>(
+    rx: &mut watch::Receiver<Option<ConnState>>,
+    method: impl Encodable + Clone,
+) -> anyhow::Result<R> {
+    loop {
+        let state = rx
+            .wait_for(Option::is_some)
+            .await
+            .map_err(|_| anyhow!("Connection task is gone"))?
+            .clone()
+            .expect("wait_for guarantees Some");
+
+        if let ConnState::Connected(conn) = state {
+            match request_on_connection(&conn, method.clone()).await {
+                Ok(response) => return Ok(response),
+                Err(e) => debug!(error = %e, "Node request failed"),
+            }
+        }
+
+        rx.changed()
+            .await
+            .map_err(|_| anyhow!("Connection task is gone"))?;
+    }
 }
