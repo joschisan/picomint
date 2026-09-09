@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::bail;
+use anyhow::{Context, bail};
 use futures::future::try_join_all;
 use iroh::Endpoint;
 use picomint_core::config::ConsensusConfig;
@@ -81,7 +81,7 @@ async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<Co
         })),
     )
     .await
-    .map_err(|_| anyhow::anyhow!("Failed to download client config from invite node"))?;
+    .context("Failed to download client config from invite node")?;
 
     if invite_resp.config.calculate_mint_id() != invite.mint {
         bail!("MintId in invite code does not match client config");
