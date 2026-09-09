@@ -82,8 +82,9 @@ if [[ "$DISTRO_ID" != "ubuntu" || "$DISTRO_VERSION" != "26.04" ]]; then
     exit 1
 fi
 
-# A full, unpruned bitcoind needs ~1TB, plus headroom for the node's own
-# database and future chain growth.
+# The bundled bitcoind is a full node: ~1TB, plus headroom for the node's
+# own database and future chain growth. A pruned backend would do, but
+# the bundle keeps the one setup with nothing to configure.
 AVAIL_GB=$(df -BG --output=avail "$HOME" | tail -1 | tr -dc '0-9')
 if [[ "$AVAIL_GB" -lt 1200 ]]; then
     echo "Only ${AVAIL_GB}GB free on $HOME. A full Bitcoin Core node needs ~1TB, and 1.2TB is recommended." >&2
@@ -95,7 +96,7 @@ This installer will set up a picomint node on this machine:
 
   1. Install Docker (if missing)
   2. Write the node compose, updater and log viewer into $DEPLOY_DIR
-  3. Pull and start the node + a bundled, fully validating Bitcoin Core node (~1TB)
+  3. Pull and start the node + a bundled full Bitcoin Core node (~1TB)
   4. Wait for the Web UI to come up at $UI_URL
   5. Pin Dashboard, Logs and Update shortcuts to the dock
   6. Install Signal Desktop for exchanging setup codes with co-operators
