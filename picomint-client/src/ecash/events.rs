@@ -38,10 +38,8 @@ impl Event for SendSuccessEvent {
     const KIND: EventKind = EventKind::from_static("send-success");
 }
 
-/// Terminal failure event for [`crate::Client::ecash_send`].
-/// Fires when reissuance failed (`TxRejectEvent`/`IssuanceFailureEvent`)
-/// or — defensively — when the post-reissuance NoteTable table no longer
-/// has the exact denominations the send needs.
+/// Terminal failure event for [`crate::Client::ecash_send`]: the
+/// reissuance was rejected or its notes failed to finalize.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendFailureEvent;
 
@@ -78,8 +76,8 @@ impl Event for ReceiveEvent {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct IssuanceSuccessEvent {
     pub txid: TransactionId,
-    /// Total amount of notes finalized into the local note table by this
-    /// state machine (sum of all issuance-request denominations).
+    /// Total amount of notes this state machine finalized for the account,
+    /// a send's bundle included.
     pub amount: Amount,
 }
 
