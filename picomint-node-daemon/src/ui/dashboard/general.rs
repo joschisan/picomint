@@ -80,7 +80,7 @@ fn connection_cells(status: &P2PConnectionStatus) -> Markup {
                     }
                 }
                 None => {
-                    span class="muted" { "—" }
+                    span class="muted" { "N/A" }
                 }
             }
         }
