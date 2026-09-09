@@ -252,8 +252,8 @@ impl Client {
     }
 
     /// The consensus block count of the mint.
-    pub async fn block_count(&self, mint: MintId) -> anyhow::Result<u32> {
-        crate::api::block_count(&self.ctx(mint)?.api).await
+    pub async fn block_height(&self, mint: MintId) -> anyhow::Result<u32> {
+        crate::api::block_height(&self.ctx(mint)?.api).await
     }
 
     /// Cancel every mint's tasks and wait for them to finish.

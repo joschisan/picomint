@@ -22,7 +22,7 @@ use tpe::{PublicKeyShare, SecretKeyShare};
 use crate::config::NodeConfig;
 use crate::config::dkg::DkgHandle;
 use crate::config::poly::eval_poly_g1;
-use crate::consensus::db::consensus_block_count;
+use crate::consensus::db::consensus_block_height;
 use crate::consensus::server::Server;
 use crate::{handler, handler_async};
 
@@ -84,7 +84,7 @@ pub fn process_input(
 
             let pub_key = match outgoing_witness {
                 OutgoingWitness::Claim(preimage) => {
-                    if contract.expiry <= consensus_block_count(server, dbtx) {
+                    if contract.expiry <= consensus_block_height(server, dbtx) {
                         return Err(LightningInputError::Expired);
                     }
 
@@ -97,7 +97,7 @@ pub fn process_input(
                     contract.claim_pk
                 }
                 OutgoingWitness::Refund => {
-                    if contract.expiry > consensus_block_count(server, dbtx) {
+                    if contract.expiry > consensus_block_height(server, dbtx) {
                         return Err(LightningInputError::NotExpired);
                     }
 

@@ -29,7 +29,7 @@ use crate::config::NodeConfig;
 use crate::config::dkg::DkgHandle;
 use crate::config::dkg_secp::eval_poly;
 use crate::consensus::CONFIRMATIONS;
-use crate::consensus::db::consensus_block_count;
+use crate::consensus::db::consensus_block_height;
 use crate::consensus::server::Server;
 use crate::handler;
 use picomint_core::onchain::config::{OnchainConfig, OnchainConfigPrivate};
@@ -159,7 +159,7 @@ fn feerate_proposal(server: &Server, dbtx: &ReadTx) -> Option<OnchainConsensusIt
 async fn block_proposal(server: &Server, dbtx: &ReadTx) -> Option<OnchainConsensusItem> {
     let height = dbtx.get(&BlockHeightTable, &())?;
 
-    if server.btc_rpc.status()?.block_count < height + CONFIRMATIONS {
+    if server.btc_rpc.status()?.block_height + 1 < height + CONFIRMATIONS {
         return None;
     }
 
@@ -207,11 +207,11 @@ async fn block_proposal(server: &Server, dbtx: &ReadTx) -> Option<OnchainConsens
     Some(OnchainConsensusItem::Block(BlockVote { height, txs }))
 }
 
-/// The first non-zero consensus block count is where the mint starts
+/// The first non-zero consensus block height is where the mint starts
 /// tracking the chain: nothing before its first block is ever tracked.
-pub fn initialize_block_height(dbtx: &WriteTx, old_block_count: u32, new_block_count: u32) {
-    if old_block_count == 0 {
-        dbtx.insert(&BlockHeightTable, &(), &new_block_count);
+pub fn initialize_block_height(dbtx: &WriteTx, old_block_height: u32, new_block_height: u32) {
+    if old_block_height == 0 {
+        dbtx.insert(&BlockHeightTable, &(), &new_block_height);
     }
 }
 
@@ -457,7 +457,7 @@ pub fn process_input(
 
         let tx_index = total_txs(dbtx);
 
-        let created = consensus_block_count(server, dbtx);
+        let created = consensus_block_height(server, dbtx);
 
         dbtx.insert(
             &TxInfoTable,
@@ -590,7 +590,7 @@ pub fn process_output(
 
     let tx_index = total_txs(dbtx);
 
-    let created = consensus_block_count(server, dbtx);
+    let created = consensus_block_height(server, dbtx);
 
     dbtx.insert(
         &TxInfoTable,

@@ -28,7 +28,7 @@ use tracing::{info, warn};
 
 use crate::config::{DaemonSettings, NodeConfig};
 use crate::consensus::api::ConsensusApi;
-use crate::consensus::db::{BlockCountVoteTable, ConsensusVersionVoteTable};
+use crate::consensus::db::{BlockHeightVoteTable, ConsensusVersionVoteTable};
 use crate::consensus::server::Server;
 use crate::p2p::{P2PStatusReceivers, ReconnectP2PConnections};
 
@@ -166,12 +166,12 @@ async fn submit_ci_proposals(
 
         if let Some(status) = server.btc_rpc.status() {
             let current_vote = dbtx
-                .get(&BlockCountVoteTable, &server.cfg.private.identity)
+                .get(&BlockHeightVoteTable, &server.cfg.private.identity)
                 .unwrap_or(0);
 
-            if status.block_count > current_vote {
+            if status.block_height > current_vote {
                 submission_tx
-                    .send(ConsensusItem::BlockCount(status.block_count))
+                    .send(ConsensusItem::BlockHeight(status.block_height))
                     .await
                     .ok();
             }

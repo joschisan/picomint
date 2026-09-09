@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use picomint_cli_client::{print_json, request};
 use picomint_node_cli_core::{
     ExpirySetRequest, InviteRequest, LightningGatewayAddRequest, LightningGatewayRemoveRequest,
-    ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_COUNT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
+    ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
     ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
     ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
     ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS,
@@ -38,8 +38,8 @@ enum Commands {
     Config,
     /// Number of consensus sessions this node has finalized
     SessionCount,
-    /// Get the mint's consensus block count
-    BlockCount,
+    /// Get the mint's consensus block height
+    BlockHeight,
     /// Per-node p2p connection status
     P2p,
     /// Status of the local bitcoin backend
@@ -127,7 +127,7 @@ async fn main() -> Result<()> {
         Commands::Invite(req) => request(d, ROUTE_INVITE, req).await?,
         Commands::Config => request(d, ROUTE_CONFIG, ()).await?,
         Commands::SessionCount => request(d, ROUTE_SESSION_COUNT, ()).await?,
-        Commands::BlockCount => request(d, ROUTE_BLOCK_COUNT, ()).await?,
+        Commands::BlockHeight => request(d, ROUTE_BLOCK_HEIGHT, ()).await?,
         Commands::P2p => request(d, ROUTE_P2P, ()).await?,
         Commands::BitcoinConnection => request(d, ROUTE_BITCOIN_CONNECTION, ()).await?,
 

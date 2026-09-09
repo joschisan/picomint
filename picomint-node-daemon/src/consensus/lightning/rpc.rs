@@ -12,7 +12,7 @@ use tokio::time::timeout;
 
 use picomint_redb::DbRead;
 
-use crate::consensus::db::consensus_block_count;
+use crate::consensus::db::consensus_block_height;
 use crate::consensus::server::Server;
 
 use super::db::{
@@ -43,7 +43,7 @@ pub async fn await_preimage(
             });
         }
 
-        if req.expiry <= consensus_block_count(server, &dbtx) {
+        if req.expiry <= consensus_block_height(server, &dbtx) {
             return Ok(AwaitPreimageResponse { preimage: None });
         }
     }
@@ -82,7 +82,7 @@ pub async fn outgoing_contract_expiry(
 
     let expiry = contract
         .expiry
-        .saturating_sub(consensus_block_count(server, &dbtx));
+        .saturating_sub(consensus_block_height(server, &dbtx));
 
     Ok(OutgoingContractExpiryResponse {
         contract: contract.contract_id(),

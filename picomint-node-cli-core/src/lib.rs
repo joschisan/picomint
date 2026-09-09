@@ -23,7 +23,7 @@ pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
 pub const ROUTE_INVITE: &str = "/invite";
 pub const ROUTE_CONFIG: &str = "/config";
 pub const ROUTE_SESSION_COUNT: &str = "/session-count";
-pub const ROUTE_BLOCK_COUNT: &str = "/block-count";
+pub const ROUTE_BLOCK_HEIGHT: &str = "/block-height";
 pub const ROUTE_P2P: &str = "/p2p";
 pub const ROUTE_BITCOIN_CONNECTION: &str = "/bitcoin-connection";
 pub const ROUTE_EXPIRY_SET: &str = "/expiry/set";
@@ -112,11 +112,11 @@ pub struct OnchainTotalValueResponse {
     pub total_value_sat: Option<u64>,
 }
 
-// --- /block-count ---
+// --- /block-height ---
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BlockCountResponse {
-    pub block_count: u32,
+pub struct BlockHeightResponse {
+    pub block_height: u32,
 }
 
 // --- /p2p ---
@@ -141,7 +141,7 @@ pub struct NodeInfo {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BitcoinConnectionResponse {
     pub network: String,
-    pub block_count: u32,
+    pub block_height: u32,
     pub fee_rate_sat_per_vb: Option<u32>,
     pub sync_progress: Option<f64>,
 }

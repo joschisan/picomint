@@ -18,14 +18,14 @@ pub const INVITE_CREATE_ROUTE: &str = "/invite/create";
 // Invite dialog, opened from the Actions launcher. It starts on the
 // generation form; the generated code replaces the dialog content via
 // htmx.
-pub fn render(consensus_block_count: u32) -> Markup {
+pub fn render(consensus_block_height: u32) -> Markup {
     html! {
         dialog id="invite-modal" autofocus {
             (modal_header("Generate Invite"))
-            @if consensus_block_count == 0 {
+            @if consensus_block_height == 0 {
                 div class="modal-body" {
                     div class="alert alert-warning" {
-                        "Invite codes will be available once the mint has reached consensus on a block count."
+                        "Invite codes will be available once the mint has reached consensus on a block height."
                     }
                 }
             } @else {

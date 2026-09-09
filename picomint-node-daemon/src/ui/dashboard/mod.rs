@@ -17,7 +17,7 @@ use maud::{Markup, html};
 use picomint_redb::DbRead;
 
 use crate::consensus::api::ConsensusApi;
-use crate::consensus::db::{ExpiryStatusTable, consensus_block_count, consensus_version};
+use crate::consensus::db::{ExpiryStatusTable, consensus_block_height, consensus_version};
 use crate::consensus::engine::get_finished_session_count;
 use crate::ui::assets::WithStaticRoutesExt;
 use crate::ui::dashboard::modules::{lightning, onchain};
@@ -87,7 +87,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
     let expiry_status = dbtx.get(&ExpiryStatusTable, &());
 
     let session_count = get_finished_session_count(&dbtx);
-    let block_count = consensus_block_count(&api.server, &dbtx);
+    let block_height = consensus_block_height(&api.server, &dbtx);
     let version = consensus_version(&api.server, &dbtx);
 
     let value_in_custody = crate::consensus::onchain::mint_utxo(&dbtx)
@@ -99,7 +99,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
             (tile("Value in Custody", html! {
                 (format!("{value_in_custody:.8}")) " " span class="tile-unit" { "BTC" }
             }))
-            (tile("Block Count", html! { (block_count) }))
+            (tile("Block Height", html! { (block_height) }))
             (tile("Session Count", html! { (session_count) }))
             (tile("Consensus Version", html! { (version) }))
         }
@@ -118,7 +118,7 @@ async fn dashboard_view(State(state): State<Arc<ConsensusApi>>) -> impl IntoResp
         }
 
         (actions::render(&api.server, &dbtx, expiry_status.as_ref()))
-        (invite::render(block_count))
+        (invite::render(block_height))
     };
 
     Html(dashboard_layout(&mint_name, env!("CARGO_PKG_VERSION"), content).into_string())

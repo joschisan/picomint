@@ -10,7 +10,7 @@ pub fn render(status: &Option<BitcoindRpcStatus>) -> Markup {
                 span class="card-title" { "Bitcoin Connection" }
             }
             @if let Some(status) = status {
-                (kv("Block Count", html! { (status.block_count) }))
+                (kv("Block Height", html! { (status.block_height) }))
 
                 @if let Some(fee_rate) = status.fee_rate {
                     (kv("Fee Rate", html! { (fee_rate / 1000) " sat/vB" }))

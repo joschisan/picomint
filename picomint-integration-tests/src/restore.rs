@@ -7,7 +7,7 @@ use crate::env::{NUM_NODES, NUM_ONLINE_NODES, TestEnv, retry};
 /// Poll until node `node` reports `target` finalized sessions or
 /// more, mining a block per attempt: sessions cut on rounds, rounds
 /// only advance on work, and with the nodes polling bitcoind every
-/// 100 ms the block-count votes are that work. Returns the observed
+/// 100 ms the block-height votes are that work. Returns the observed
 /// count.
 async fn retry_session_count_at_least(env: &TestEnv, node: usize, target: u64) -> Result<u64> {
     let data_dir = env.data_dir.join(format!("node-{node}"));
