@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::future::pending;
+use std::panic::resume_unwind;
 
 use anyhow::{Context, anyhow};
 use futures::StreamExt;
@@ -26,6 +27,12 @@ use crate::query::{QueryStep, QueryStrategy, ThresholdConsensus};
 /// `f + 1` nodes have errored, so the node set must have a mint's shape.
 /// A one-shot request to some subset of nodes wants [`crate::request`]
 /// instead, which pays for a connection it does not keep.
+///
+/// Nothing aborts the per-node request tasks a fan-out spawns, so a
+/// `JoinError` is either a panic, re-raised as such, or the runtime
+/// shutting down underneath a request that was still in flight — the
+/// query variant errors out and the await variant parks, since the fan-out
+/// is about to be dropped either way.
 ///
 /// Spawns one background [`connection_task`] per node at construction that
 /// eagerly opens — and reconnects — a single kept-alive iroh connection,
@@ -129,11 +136,17 @@ impl MintApi {
         let node_error_threshold = self.num_nodes().one_honest();
 
         loop {
-            let (node, result) = tasks
+            let (node, result) = match tasks
                 .join_next()
                 .await
                 .expect("Query strategy ran out of nodes to query without returning a result")
-                .expect("Per-node request task panicked");
+            {
+                Ok(joined) => joined,
+                Err(e) => match e.try_into_panic() {
+                    Ok(panic) => resume_unwind(panic),
+                    Err(_) => return Err(anyhow!("Mint request {method:?} cancelled by shutdown")),
+                },
+            };
 
             match result {
                 Ok(response) => match strategy.process(node, response).await {
@@ -185,7 +198,11 @@ impl MintApi {
 
         loop {
             let (node, response) = match tasks.join_next().await {
-                Some(joined) => joined.expect("Per-node request task panicked"),
+                Some(Ok(joined)) => joined,
+                Some(Err(e)) => match e.try_into_panic() {
+                    Ok(panic) => resume_unwind(panic),
+                    Err(_) => pending().await,
+                },
                 None => pending().await,
             };
 
