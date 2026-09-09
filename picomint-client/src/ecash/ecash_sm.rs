@@ -11,8 +11,10 @@ use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use super::client_db::NoteTable;
-use super::events::{IssuanceFailureEvent, IssuanceSuccessEvent};
-use super::{NoteIssuanceRequest, SpendableNote};
+use super::events::{
+    IssuanceFailureEvent, IssuanceSuccessEvent, SendFailureEvent, SendSuccessEvent,
+};
+use super::{Ecash, NoteIssuanceRequest, SpendableNote};
 use crate::context::ClientContext;
 
 table!(
@@ -43,6 +45,12 @@ pub struct EcashStateMachine {
     /// [`Self::account`]: a client configured with a fee pays it as an
     /// output of the transaction it is charging.
     pub issuance_requests: Vec<NoteIssuanceRequest>,
+    /// How many leading issuance requests are an `ecash_send`'s targets.
+    /// Those notes never enter `NoteTable`: the transition bundles them
+    /// into the send's `Ecash` in the dbtx that finalizes them, so no
+    /// concurrent spend can pick them off in between. Zero for every
+    /// other transaction.
+    pub targets: u64,
 }
 
 /// Outcome produced by [`EcashStateMachine::trigger`].
@@ -139,9 +147,17 @@ impl StateMachine for EcashStateMachine {
                 for note in &self.spendable_notes {
                     dbtx.insert_new(&NoteTable, &(ctx.mint, self.account, note.into()), &());
                 }
+
+                if self.targets > 0 {
+                    ctx.log_event(dbtx, self.account, self.operation, SendFailureEvent);
+                }
             }
             IssuanceOutcome::Invalid => {
                 ctx.log_event(dbtx, self.account, self.operation, IssuanceFailureEvent);
+
+                if self.targets > 0 {
+                    ctx.log_event(dbtx, self.account, self.operation, SendFailureEvent);
+                }
             }
             IssuanceOutcome::Issued(notes) if notes.is_empty() => {}
             IssuanceOutcome::Issued(notes) => {
@@ -157,11 +173,27 @@ impl StateMachine for EcashStateMachine {
                         .sum(),
                 };
 
+                let mut notes = notes.into_iter();
+
+                let bundle: Vec<SpendableNote> = notes
+                    .by_ref()
+                    .take(self.targets as usize)
+                    .map(|entry| entry.1)
+                    .collect();
+
                 for (account, note) in notes {
                     dbtx.insert_new(&NoteTable, &(ctx.mint, account, (&note).into()), &());
                 }
 
                 ctx.log_event(dbtx, self.account, self.operation, event);
+
+                if !bundle.is_empty() {
+                    let event = SendSuccessEvent {
+                        ecash: Ecash::new(ctx.mint, bundle).to_string(),
+                    };
+
+                    ctx.log_event(dbtx, self.account, self.operation, event);
+                }
             }
         }
 
