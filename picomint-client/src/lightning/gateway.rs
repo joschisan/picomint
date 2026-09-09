@@ -38,7 +38,9 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio_util::task::AbortOnDropHandle;
 
-use picomint_rpc::connection::{ConnState, connection_task, request_on_state};
+use picomint_rpc::connection::{
+    ConnState, connection_task, request_on_state, request_on_state_retry,
+};
 
 /// One announced gateway: its pooled connection and the latest info probe,
 /// dropped together when the gateway leaves the announced set.
@@ -185,6 +187,9 @@ impl Gateways {
         .map(|r| r.invoice)
     }
 
+    /// Ask `gateway_pk` to pay, retrying transport errors forever on its
+    /// pooled connection; errors only if the gateway is not a current
+    /// member, which no retry can cure.
     #[allow(clippy::too_many_arguments)]
     pub async fn send(
         &self,
@@ -195,17 +200,20 @@ impl Gateways {
         invoice: LightningInvoice,
         auth: Signature,
     ) -> anyhow::Result<Result<[u8; 32], Signature>> {
-        self.request::<SendResponse>(
-            gateway_pk,
-            GatewayMethod::Send(SendRequest {
-                mint,
-                outpoint,
-                contract,
-                invoice,
-                auth,
-            }),
-        )
-        .await
-        .map(|r| r.result)
+        let mut rx = self
+            .connection(gateway_pk)
+            .context("Gateway is not a current member")?;
+
+        let method = GatewayMethod::Send(SendRequest {
+            mint,
+            outpoint,
+            contract,
+            invoice,
+            auth,
+        });
+
+        request_on_state_retry::<SendResponse>(&mut rx, method)
+            .await
+            .map(|r| r.result)
     }
 }
