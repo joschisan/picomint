@@ -14,11 +14,11 @@ The installer is fully self-contained — the compose file, updater and log view
 
 ### Bitcoin Backend
 
-The node runs as a lightweight daemon on top of a local **unpruned** Bitcoin Core node. The bundled compose starts one for you alongside the node. Any machine that can comfortably run Bitcoin Core can run the picomint node on top — picomint's own resource footprint is negligible compared to Core's.
+The node runs as a lightweight daemon on top of a local Bitcoin Core node. The bundled compose starts one for you alongside the node. Any machine that can comfortably run Bitcoin Core can run the picomint node on top — picomint's own resource footprint is negligible compared to Core's.
 
-Pruning is not supported: a halted mint must be able to resume from blocks that may pre-date a rolling prune window.
+A pruned node works, under one rule: the mint's block height, the one the dashboard shows, has to stay inside the prune window. The mint reads blocks from that height onward and never anything older, so the prune window is what limits the longest outage the mint can recover from; a backend whose window has moved past the mint's height has to reindex. Be conservative and size the window for 30 days: `-prune=20000` keeps about that much of mainnet. The bundled compose runs a full node, which needs no such thought.
 
-Initial block download pulls the full chain over the network, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth and disk. The node will sit idle until bitcoind catches up.
+Initial block download pulls the full chain over the network either way, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth. The node will sit idle until bitcoind catches up.
 
 ### Accessing the CLI
 
@@ -133,7 +133,7 @@ picomint-node-cli …`.
 | Env                          | Required | Default           | Description                                |
 |------------------------------|----------|-------------------|--------------------------------------------|
 | `DATA_DIR`                   | yes      |                   | Directory for the database file            |
-| `BITCOIND_URL`               | yes      |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332`. Must point at an **unpruned** node — see [Bitcoin Backend](#bitcoin-backend) above. The mint's network is read off the backend at DKG time. |
+| `BITCOIND_URL`               | yes      |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332`. A pruned node works within its prune window — see [Bitcoin Backend](#bitcoin-backend) above. The mint's network is read off the backend at DKG time. |
 | `P2P_ADDR`                   | no       | `0.0.0.0:8080`    | Iroh endpoint listen address               |
 | `UI_ADDR`                    | no       | `127.0.0.1:3000`  | Web UI listen address                      |
 
