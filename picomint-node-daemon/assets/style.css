@@ -711,13 +711,6 @@ dialog:focus-visible {
   color: inherit;
 }
 
-.action-item svg {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  color: var(--accent);
-}
-
 .action-item-title {
   font-size: 14px;
   font-weight: 500;

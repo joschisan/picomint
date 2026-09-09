@@ -4,12 +4,11 @@ use picomint_redb::ReadTx;
 
 use crate::consensus::onchain;
 use crate::ui::dashboard::{BACKUP_CONFIG_ROUTE, CLEAR_EXPIRY_ROUTE, expiry};
-use crate::ui::{copiable_text, modal_header, phosphor, phosphor_icon};
+use crate::ui::{copiable_text, modal_header};
 
-fn action_item(icon: &str, title: &str, desc: &str, onclick: &str) -> Markup {
+fn action_item(title: &str, desc: &str, onclick: &str) -> Markup {
     html! {
         div class="action-item" onclick=(onclick) {
-            (phosphor_icon(icon))
             div {
                 div class="action-item-title" { (title) }
                 div class="action-item-desc" { (desc) }
@@ -38,20 +37,17 @@ pub fn render(
             (modal_header("Actions"))
             div {
                 (action_item(
-                    phosphor::TICKET,
                     "Generate Invite",
                     "Onboard users to your mint.",
                     "this.closest('dialog').close();document.getElementById('invite-modal').showModal()",
                 ))
                 (action_item(
-                    phosphor::LIGHTNING,
                     "Add Gateway",
                     "Enable lightning payments.",
                     "this.closest('dialog').close();document.getElementById('gateway-modal').showModal()",
                 ))
                 a class="action-item" href=(BACKUP_CONFIG_ROUTE) download="config.json"
                     onclick="this.closest('dialog').close()" {
-                    (phosphor_icon(phosphor::DOWNLOAD_SIMPLE))
                     div {
                         div class="action-item-title" { "Download Backup" }
                         div class="action-item-desc" { "Save keys to restore this node." }
@@ -63,7 +59,6 @@ pub fn render(
                         // HX-Refresh response reloads the page and the item
                         // flips back to "Announce Expiry Date".
                         div class="action-item" hx-post=(CLEAR_EXPIRY_ROUTE) hx-swap="none" {
-                            (phosphor_icon(phosphor::CALENDAR_BLANK))
                             div {
                                 div class="action-item-title" { "Remove Expiry Date" }
                                 div class="action-item-desc" {
@@ -77,7 +72,6 @@ pub fn render(
                     }
                     None => {
                         (action_item(
-                            phosphor::CALENDAR_BLANK,
                             "Announce Expiry Date",
                             "Instruct users to migrate funds.",
                             "this.closest('dialog').close();document.getElementById('expiry-modal').showModal()",
@@ -86,7 +80,6 @@ pub fn render(
                 }
                 @if restore_keys.is_some() {
                     (action_item(
-                        phosphor::BROOM,
                         "Sweep Wallet",
                         "Sweep remaining funds after expiry.",
                         "this.closest('dialog').close();document.getElementById('sweep-modal').showModal()",
