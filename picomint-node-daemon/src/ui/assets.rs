@@ -1,4 +1,4 @@
-//! Static asset routes for the admin UI (vendored htmx + style sheet).
+//! Static asset routes for the admin UI (vendored htmx, Inter + style sheet).
 //! Every file under `picomint-node-daemon/assets/` gets mounted under
 //! `/assets/...` by [`WithStaticRoutesExt::with_static_routes`].
 
@@ -12,6 +12,7 @@ use axum::routing::get;
 
 pub const HTMX_JS_ROUTE: &str = "/assets/htmx.org-2.0.4.min.js";
 pub const STYLE_CSS_ROUTE: &str = "/assets/style.css";
+pub const INTER_WOFF2_ROUTE: &str = "/assets/inter-latin.woff2";
 
 pub const STYLE_CSS: &str = include_str!("../../assets/style.css");
 
@@ -60,6 +61,15 @@ where
         .route(
             STYLE_CSS_ROUTE,
             get(|| async move { get_static_css(STYLE_CSS) }),
+        )
+        .route(
+            INTER_WOFF2_ROUTE,
+            get(|| async move {
+                get_static_asset(
+                    "font/woff2",
+                    include_bytes!("../../assets/inter-latin.woff2"),
+                )
+            }),
         )
     }
 }

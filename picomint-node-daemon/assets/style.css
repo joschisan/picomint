@@ -1,30 +1,48 @@
 /* Node admin UI stylesheet. Design tokens and components for the
- * whole UI — no framework, native <dialog> for modals. */
+ * whole UI — no framework, native <dialog> for modals. The tokens are the
+ * Pico app's: its Material 3 dark scheme seeded from #36A18B, Inter, and
+ * one 12px radius, so the two surfaces read as one project. */
+
+/* Vendored so the UI keeps its face offline on loopback; the latin subset
+ * of the variable font covers every weight the stylesheet uses. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/assets/inter-latin.woff2') format('woff2');
+}
 
 :root {
-  --bg: #f4f6f8;
-  --surface: #ffffff;
-  --border: #e4e7ec;
-  --border-soft: #eaecf0;
-  --border-faint: #f2f4f7;
-  --ink: #101828;
-  --ink-secondary: #475467;
-  --ink-muted: #667085;
-  --ink-faint: #98a2b3;
-  --accent: #2a7de1;
-  --accent-hover: #1b5fb8;
-  --success: #067647;
-  --success-dot: #17b26a;
-  --warning: #b54708;
-  --warning-bg: #fffaeb;
-  --warning-border: #fedf89;
-  --danger: #b42318;
-  --danger-dot: #f04438;
-  --danger-border: #fecdca;
-  --info: #175cd3;
-  --info-bg: #eff4ff;
-  --info-border: #d1e0ff;
+  --bg: #101413;
+  --surface: #181d1b;
+  --surface-high: #1f2523;
+  --border: #2a3330;
+  --border-soft: #242c29;
+  --border-faint: #1e2523;
+  --ink: #dfe4e0;
+  --ink-secondary: #b9c3bd;
+  --ink-muted: #8f9a94;
+  --ink-faint: #6b756f;
+  --accent: #66d9b9;
+  --accent-hover: #86e6c9;
+  --on-accent: #003828;
+  --success: #66d9b9;
+  --success-dot: #66d9b9;
+  --warning: #ffa000;
+  --warning-bg: rgba(255, 160, 0, 0.15);
+  --warning-border: rgba(255, 160, 0, 0.3);
+  --danger: #ff6b6b;
+  --danger-hover: #ff8f8f;
+  --danger-dot: #ff6b6b;
+  --danger-bg: rgba(255, 107, 107, 0.12);
+  --danger-border: rgba(255, 107, 107, 0.3);
+  --info: #66d9b9;
+  --info-bg: rgba(102, 217, 185, 0.1);
+  --info-border: rgba(102, 217, 185, 0.3);
+  --radius: 12px;
   --mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Liberation Mono', monospace;
+  color-scheme: dark;
 }
 
 * {
@@ -33,10 +51,11 @@
 
 body {
   margin: 0;
-  font-family: -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   background: var(--bg);
   color: var(--ink);
+  font-feature-settings: 'tnum';
 }
 
 a {
@@ -62,7 +81,7 @@ a:hover {
 }
 
 .neg {
-  color: var(--danger);
+  color: var(--ink);
 }
 
 /* Top bar */
@@ -107,7 +126,7 @@ a:hover {
   gap: 6px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 18px 20px;
 }
 
@@ -157,7 +176,7 @@ a:hover {
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -309,12 +328,12 @@ td:last-child {
   font-family: inherit;
   font-size: 13px;
   font-weight: 500;
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
 .btn-primary {
-  color: #ffffff;
+  color: var(--on-accent);
   background: var(--accent);
   border: none;
 }
@@ -324,13 +343,13 @@ td:last-child {
 }
 
 .btn-outline {
-  color: #344054;
-  background: var(--surface);
-  border: 1px solid #d0d5dd;
+  color: var(--ink);
+  background: var(--surface-high);
+  border: 1px solid var(--border);
 }
 
 .btn-outline:hover {
-  background: var(--border-faint);
+  border-color: var(--ink-faint);
 }
 
 .btn-danger {
@@ -340,7 +359,7 @@ td:last-child {
 }
 
 .btn-danger:hover {
-  background: #fef3f2;
+  background: var(--danger-bg);
 }
 
 .btn-lg {
@@ -374,7 +393,7 @@ td:last-child {
 }
 
 .link-danger:hover {
-  color: #912018;
+  color: var(--danger-hover);
 }
 
 /* Only keyboard navigation gets a focus ring — the browser focuses the
@@ -413,9 +432,9 @@ select {
   font-family: inherit;
   font-size: 14px;
   color: var(--ink);
-  background: var(--surface);
-  border: 1px solid #d0d5dd;
-  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   padding: 0 14px;
   outline: none;
 }
@@ -469,14 +488,14 @@ input[type='checkbox'] {
   padding: 0 10px;
   font-size: 14px;
   color: var(--ink-secondary);
-  background: var(--surface);
-  border: 1px solid #d0d5dd;
-  border-radius: 8px;
+  background: var(--surface-high);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
 .pill-group input[type='radio']:checked + .pill {
-  color: #ffffff;
+  color: var(--on-accent);
   font-weight: 500;
   background: var(--accent);
   border-color: var(--accent);
@@ -496,7 +515,7 @@ input[type='checkbox'] {
 
 .alert {
   padding: 12px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   font-size: 13px;
   line-height: 1.5;
   border: 1px solid;
@@ -516,7 +535,7 @@ input[type='checkbox'] {
 
 .alert-danger {
   color: var(--danger);
-  background: #fef3f2;
+  background: var(--danger-bg);
   border-color: var(--danger-border);
 }
 
@@ -538,9 +557,9 @@ input[type='checkbox'] {
   font-family: var(--mono);
   font-size: 12px;
   color: var(--ink-secondary);
-  background: #f9fafb;
+  background: var(--surface-high);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 11px 12px;
 }
 
@@ -575,7 +594,7 @@ input[type='checkbox'] {
 
 .list-bordered {
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .list-bordered .list-row {
@@ -590,7 +609,7 @@ input[type='checkbox'] {
   justify-content: space-between;
   gap: 16px;
   padding: 12px 20px;
-  background: #f9fafb;
+  background: var(--surface-high);
   border-top: 1px solid var(--border-soft);
 }
 
@@ -619,15 +638,15 @@ dialog {
   width: 440px;
   max-width: calc(100vw - 48px);
   background: var(--surface);
-  border: none;
-  border-radius: 12px;
-  box-shadow: 0 20px 48px rgba(16, 24, 40, 0.25);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
   padding: 0;
   color: var(--ink);
 }
 
 dialog::backdrop {
-  background: rgba(16, 24, 40, 0.45);
+  background: rgba(0, 0, 0, 0.6);
 }
 
 dialog:focus,
@@ -688,13 +707,15 @@ dialog:focus-visible {
 }
 
 .action-item:hover {
-  background: #f9fafb;
+  background: var(--surface-high);
   color: inherit;
 }
 
 .action-item svg {
   flex-shrink: 0;
-  color: var(--ink-muted);
+  width: 24px;
+  height: 24px;
+  color: var(--accent);
 }
 
 .action-item-title {
@@ -713,8 +734,8 @@ dialog:focus-visible {
 
 .qr-box {
   background: #ffffff;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   padding: 12px;
 }
 
@@ -751,9 +772,9 @@ dialog:focus-visible {
   flex-direction: column;
   gap: 14px;
   padding: 16px;
-  background: #f9fafb;
+  background: var(--surface-high);
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .check-row {
