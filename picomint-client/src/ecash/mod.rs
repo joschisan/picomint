@@ -6,7 +6,6 @@ mod ecash_sm;
 mod events;
 mod issuance;
 mod secret;
-mod send_sm;
 
 use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 use std::collections::BTreeMap;
@@ -40,7 +39,6 @@ use thiserror::Error;
 use self::ecash_sm::{EcashStateMachine, EcashStateMachineTable};
 use self::issuance::{NoteIssuance, NoteIssuanceRequest};
 pub use self::secret::EcashSecret;
-use self::send_sm::{SendStateMachine, SendStateMachineTable};
 
 const TARGET_PER_DENOMINATION: usize = 3;
 
@@ -376,10 +374,12 @@ fn next_counter(ctx: &ClientContext, dbtx: &WriteTx, account: Account) -> u64 {
 /// note the account holds and mints no change at all, so a committed
 /// submission leaves the account empty.
 ///
-/// `targets` are issuance requests whose outputs the caller already added
-/// to the builder, ahead of everything this method adds. They are prepended
-/// to the state machine's request list, which must mirror the transaction's
-/// ecash-output order — the signature shares come back indexed by it.
+/// `targets` are an `ecash_send`'s issuance requests, whose outputs the
+/// caller already added to the builder ahead of everything this method
+/// adds. They are prepended to the state machine's request list, which
+/// must mirror the transaction's ecash-output order — the signature shares
+/// come back indexed by it — and the state machine bundles their notes
+/// into the send's `Ecash` on issuance.
 ///
 /// `event` builds the module's initiating event (e.g. `SendEvent`)
 /// from the txid; this method logs it before the bookkeeping
@@ -396,6 +396,8 @@ pub(crate) fn finalize_and_submit_tx<E: crate::eventlog::Event + Send>(
     max: bool,
     event: impl FnOnce(TransactionId) -> E,
 ) -> Option<TransactionId> {
+    let targets_len = targets.len() as u64;
+
     let mut issuance_requests = targets;
 
     let deficit = builder.deficit();
@@ -414,9 +416,10 @@ pub(crate) fn finalize_and_submit_tx<E: crate::eventlog::Event + Send>(
         let sm = EcashStateMachine {
             account,
             operation,
-            spendable_notes,
             txid,
+            spendable_notes,
             issuance_requests,
+            targets: targets_len,
         };
         crate::executor::add_state_machine_dbtx(ctx, EcashStateMachineTable, dbtx, sm);
     }
@@ -768,7 +771,6 @@ pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
     dbtx.remove_prefix(&ReceiveOperationIdTable, &mint);
     dbtx.remove_prefix(&DerivationCounterTable, &mint);
     dbtx.remove_prefix(&EcashStateMachineTable, &mint);
-    dbtx.remove_prefix(&SendStateMachineTable, &mint);
 }
 
 /// Whether any of this module's state machines for `operation` is still
@@ -776,18 +778,13 @@ pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
 pub(crate) fn operation_is_active(dbtx: &ReadTx, operation: OperationId) -> bool {
     dbtx.iter(&EcashStateMachineTable, |r| {
         r.any(|entry| entry.1.operation == operation)
-    }) || dbtx.iter(&SendStateMachineTable, |r| {
-        r.any(|entry| entry.1.operation == operation)
     })
 }
 
 /// Notify handles for this module's state machine tables, fired on every
 /// commit that writes them.
 pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
-    vec![
-        db.notify_for_table(&EcashStateMachineTable),
-        db.notify_for_table(&SendStateMachineTable),
-    ]
+    vec![db.notify_for_table(&EcashStateMachineTable)]
 }
 
 /// Resume this mint's persisted ecash state machines. Called exactly
@@ -796,8 +793,6 @@ pub(crate) fn resume(ctx: &ClientContext) {
     crate::executor::resume::<TxSubmissionStateMachine, _>(ctx, TxSubmissionStateMachineTable);
 
     crate::executor::resume::<EcashStateMachine, _>(ctx, EcashStateMachineTable);
-
-    crate::executor::resume::<SendStateMachine, _>(ctx, SendStateMachineTable);
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
@@ -974,7 +969,7 @@ impl Client {
 
         // Everything below lands in the same dbtx that submits the
         // reissuance: SendEvent → ReissuanceEvent → TxCreateEvent →
-        // EcashSM + SendSM. A crash before the commit leaves no half-state
+        // EcashSM. A crash before the commit leaves no half-state
         // behind; on restart the operation simply doesn't exist.
         ctx.log_event(&dbtx, account, operation, SendEvent { amount });
 
@@ -990,18 +985,10 @@ impl Client {
         )
         .ok_or(SendEcashError::InsufficientBalance)?;
 
-        let send_sm = SendStateMachine {
-            account,
-            operation,
-            amount,
-        };
-
-        crate::executor::add_state_machine_dbtx(&ctx, SendStateMachineTable, &dbtx, send_sm);
-
         dbtx.commit();
 
-        // Wait for the SendStateMachine to fire its terminal event on
-        // the operation's event log.
+        // Wait for the EcashStateMachine to fire the send's terminal
+        // event on the operation's event log.
         let mut stream = ctx.subscribe_operation_events(operation);
         while let Some(entry) = stream.next().await {
             if let Some(ev) = entry.to_event::<SendSuccessEvent>() {

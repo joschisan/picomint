@@ -11,8 +11,10 @@ use picomint_encoding::{Decodable, Encodable};
 use tbs::{BlindedSignatureShare, PublicKeyShare, aggregate_signature_shares};
 
 use super::client_db::NoteTable;
-use super::events::{IssuanceFailureEvent, IssuanceSuccessEvent};
-use super::{NoteIssuanceRequest, SpendableNote};
+use super::events::{
+    IssuanceFailureEvent, IssuanceSuccessEvent, SendFailureEvent, SendSuccessEvent,
+};
+use super::{Ecash, NoteIssuanceRequest, SpendableNote};
 use crate::context::ClientContext;
 
 table!(
@@ -28,13 +30,13 @@ pub struct EcashStateMachine {
     /// state machines.
     pub account: Account,
     pub operation: OperationId,
+    /// Tx the SM is tied to.
+    pub txid: TransactionId,
     /// Notes consumed on the input side that came out of our own
     /// `NoteTable`, and are re-inserted there on tx rejection. A restore's
     /// notes do not travel here — they are credited to `NoteTable` directly
     /// by `commit_scan`.
     pub spendable_notes: Vec<SpendableNote>,
-    /// Tx the SM is tied to.
-    pub txid: TransactionId,
     /// Blinded outputs this tx issues. Finalized into `SpendableNote`s and
     /// inserted into `NoteTable` once the mint's blind-signature shares are
     /// aggregated.
@@ -43,6 +45,12 @@ pub struct EcashStateMachine {
     /// [`Self::account`]: a client configured with a fee pays it as an
     /// output of the transaction it is charging.
     pub issuance_requests: Vec<NoteIssuanceRequest>,
+    /// How many leading issuance requests are an `ecash_send`'s targets.
+    /// Those notes never enter `NoteTable`: the transition bundles them
+    /// into the send's `Ecash` in the dbtx that finalizes them, so no
+    /// concurrent spend can pick them off in between. Zero for every
+    /// other transaction.
+    pub targets: u64,
 }
 
 /// Outcome produced by [`EcashStateMachine::trigger`].
@@ -139,12 +147,20 @@ impl StateMachine for EcashStateMachine {
                 for note in &self.spendable_notes {
                     dbtx.insert_new(&NoteTable, &(ctx.mint, self.account, note.into()), &());
                 }
+
+                if self.targets > 0 {
+                    ctx.log_event(dbtx, self.account, self.operation, SendFailureEvent);
+                }
             }
             IssuanceOutcome::Invalid => {
                 ctx.log_event(dbtx, self.account, self.operation, IssuanceFailureEvent);
+
+                if self.targets > 0 {
+                    ctx.log_event(dbtx, self.account, self.operation, SendFailureEvent);
+                }
             }
             IssuanceOutcome::Issued(notes) if notes.is_empty() => {}
-            IssuanceOutcome::Issued(notes) => {
+            IssuanceOutcome::Issued(mut notes) => {
                 // The log entry is filed under this state machine's account, so it
                 // reports what that account received — not what a fee output filed
                 // elsewhere in the same transaction did.
@@ -157,11 +173,25 @@ impl StateMachine for EcashStateMachine {
                         .sum(),
                 };
 
-                for (account, note) in notes {
+                let credited = notes.split_off(self.targets as usize);
+
+                for (account, note) in credited {
                     dbtx.insert_new(&NoteTable, &(ctx.mint, account, (&note).into()), &());
                 }
 
                 ctx.log_event(dbtx, self.account, self.operation, event);
+
+                if !notes.is_empty() {
+                    let event = SendSuccessEvent {
+                        ecash: Ecash::new(
+                            ctx.mint,
+                            notes.into_iter().map(|entry| entry.1).collect(),
+                        )
+                        .to_string(),
+                    };
+
+                    ctx.log_event(dbtx, self.account, self.operation, event);
+                }
             }
         }
 
