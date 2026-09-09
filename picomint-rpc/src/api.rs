@@ -62,27 +62,42 @@ impl MintApi {
         self.nodes.to_num_nodes()
     }
 
-    /// Stream of per-node reachability. Emits a fresh `node -> status` map
-    /// whenever any node's connection comes up or goes down, starting with the
-    /// current state. Backed by the same kept-alive connections requests use,
+    /// Stream of per-node reachability. Emits the complete `node -> status`
+    /// map up front, then a fresh one whenever any node's connection comes up
+    /// or goes down. Backed by the same kept-alive connections requests use,
     /// so it reflects real reachability, not a probe; the `Connected` status
     /// carries the RTT sampled at connect.
     pub fn connection_status_stream(&self) -> BoxStream<'static, BTreeMap<NodeId, ConnStatus>> {
-        let streams = self.states.iter().map(|(&node, rx)| {
-            WatchStream::new(rx.clone()).map(move |s| {
-                (
-                    node,
-                    s.map_or(ConnStatus::Disconnected, |state| state.status()),
-                )
-            })
-        });
+        fn status(state: &Option<ConnState>) -> ConnStatus {
+            state
+                .as_ref()
+                .map_or(ConnStatus::Disconnected, ConnState::status)
+        }
 
+        // Read every node's current state into one snapshot, marking it seen
+        // on the receiver that goes on to watch for changes, so the snapshot
+        // and the change stream hand over without a gap or a repeat.
         let mut current = BTreeMap::new();
-        futures::stream::select_all(streams)
-            .map(move |(node, status)| {
-                current.insert(node, status);
-                current.clone()
+
+        let changes: Vec<_> = self
+            .states
+            .iter()
+            .map(|(&node, rx)| {
+                let mut rx = rx.clone();
+
+                current.insert(node, status(&rx.borrow_and_update()));
+
+                WatchStream::from_changes(rx).map(move |state| (node, status(&state)))
             })
+            .collect();
+
+        futures::stream::iter([current.clone()])
+            .chain(
+                futures::stream::select_all(changes).map(move |(node, status)| {
+                    current.insert(node, status);
+                    current.clone()
+                }),
+            )
             .boxed()
     }
 
@@ -238,4 +253,32 @@ async fn request_on_state_retry<R: Decodable>(
     .retry(networking_backoff())
     .await
     .expect("networking_backoff retries forever")
+}
+
+#[tokio::test]
+async fn test_connection_status_stream_opens_complete() {
+    let (tx_0, rx_0) = watch::channel(None);
+    let (_tx_1, rx_1) = watch::channel(Some(ConnState::Disconnected));
+
+    let api = MintApi {
+        nodes: BTreeMap::new(),
+        states: BTreeMap::from([(NodeId::from(0), rx_0), (NodeId::from(1), rx_1)]),
+    };
+
+    let mut stream = api.connection_status_stream();
+
+    // The first item already carries every node, the unresolved one included.
+    let first = stream.next().await.unwrap();
+    assert_eq!(first.len(), 2);
+    assert_eq!(first[&NodeId::from(0)], ConnStatus::Disconnected);
+    assert_eq!(first[&NodeId::from(1)], ConnStatus::Disconnected);
+
+    // Nothing follows the snapshot until a node's state actually changes.
+    let idle = tokio::time::timeout(std::time::Duration::from_millis(50), stream.next()).await;
+    assert!(idle.is_err());
+
+    tx_0.send_replace(Some(ConnState::Disconnected));
+
+    let second = stream.next().await.unwrap();
+    assert_eq!(second.len(), 2);
 }
