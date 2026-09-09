@@ -4,13 +4,12 @@ use std::future::pending;
 
 use anyhow::{Context, anyhow};
 use futures::StreamExt;
-use futures::stream::BoxStream;
+use futures::stream::{BoxStream, FuturesUnordered};
 use iroh::{Endpoint, PublicKey};
 use picomint_core::methods::Method;
 use picomint_core::{NodeId, NumNodes, NumNodesExt};
 use picomint_encoding::Decodable;
 use tokio::sync::watch;
-use tokio::task::JoinSet;
 use tokio_stream::wrappers::WatchStream;
 use tracing::{debug, instrument, warn};
 
@@ -107,6 +106,27 @@ impl MintApi {
         request_on_state(&mut rx, method).await
     }
 
+    /// The per-node request every fan-out is made of. Polled inline by the
+    /// fan-out rather than spawned — a request is an await on the network,
+    /// not work for another worker, and a future dropped with its fan-out
+    /// simply ends.
+    async fn request_node<P: Decodable>(
+        &self,
+        node: NodeId,
+        method: Method,
+    ) -> (NodeId, anyhow::Result<P>) {
+        (node, request_on_state(&mut self.state(node), method).await)
+    }
+
+    /// As [`Self::request_node`] but never gives up on transport errors.
+    async fn request_node_retry<P: Decodable>(&self, node: NodeId, method: Method) -> (NodeId, P) {
+        let response = request_on_state_retry(&mut self.state(node), method)
+            .await
+            .expect("MintApi holds the receiver, so the connection task outlives us");
+
+        (node, response)
+    }
+
     /// Make an aggregate request to mint, using `strategy` to logically
     /// merge the responses.
     #[instrument(skip_all, fields(method = ?method))]
@@ -115,36 +135,26 @@ impl MintApi {
         mut strategy: impl QueryStrategy<P, F> + Send,
         method: Method,
     ) -> anyhow::Result<F> {
-        let mut tasks = JoinSet::new();
-
-        for (node, mut rx) in self.states.clone() {
-            let method = method.clone();
-            tasks.spawn(async move {
-                let result = request_on_state(&mut rx, method).await;
-                (node, result)
-            });
-        }
+        let mut requests: FuturesUnordered<_> = self
+            .all_nodes()
+            .into_iter()
+            .map(|node| self.request_node(node, method.clone()))
+            .collect();
 
         let mut node_errors = BTreeMap::new();
         let node_error_threshold = self.num_nodes().one_honest();
 
         loop {
-            let (node, result) = tasks
-                .join_next()
+            let (node, result) = requests
+                .next()
                 .await
-                .expect("Query strategy ran out of nodes to query without returning a result")
-                .expect("Per-node request task panicked");
+                .expect("Query strategy ran out of nodes to query without returning a result");
 
             match result {
                 Ok(response) => match strategy.process(node, response).await {
                     QueryStep::Retry(nodes) => {
                         for node in nodes {
-                            let mut rx = self.state(node);
-                            let method = method.clone();
-                            tasks.spawn(async move {
-                                let result = request_on_state(&mut rx, method).await;
-                                (node, result)
-                            });
+                            requests.push(self.request_node(node, method.clone()));
                         }
                     }
                     QueryStep::Success(response) => return Ok(response),
@@ -171,35 +181,22 @@ impl MintApi {
         mut strategy: impl QueryStrategy<P, F> + Send,
         method: Method,
     ) -> F {
-        let mut tasks = JoinSet::new();
-
-        for (node, mut rx) in self.states.clone() {
-            let method = method.clone();
-            tasks.spawn(async move {
-                let response = request_on_state_retry(&mut rx, method)
-                    .await
-                    .expect("MintApi holds every node's receiver, so its connection task outlives this request");
-                (node, response)
-            });
-        }
+        let mut requests: FuturesUnordered<_> = self
+            .all_nodes()
+            .into_iter()
+            .map(|node| self.request_node_retry(node, method.clone()))
+            .collect();
 
         loop {
-            let (node, response) = match tasks.join_next().await {
-                Some(joined) => joined.expect("Per-node request task panicked"),
+            let (node, response) = match requests.next().await {
+                Some(next) => next,
                 None => pending().await,
             };
 
             match strategy.process(node, response).await {
                 QueryStep::Retry(nodes) => {
                     for node in nodes {
-                        let mut rx = self.state(node);
-                        let method = method.clone();
-                        tasks.spawn(async move {
-                            let response = request_on_state_retry(&mut rx, method)
-                                .await
-                                .expect("MintApi holds every node's receiver, so its connection task outlives this request");
-                            (node, response)
-                        });
+                        requests.push(self.request_node_retry(node, method.clone()));
                     }
                 }
                 QueryStep::Success(response) => return response,
