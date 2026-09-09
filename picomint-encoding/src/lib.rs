@@ -148,6 +148,7 @@ impl_encode_decode_int!(u8);
 impl_encode_decode_int!(u16);
 impl_encode_decode_int!(u32);
 impl_encode_decode_int!(u64);
+impl_encode_decode_int!(i32);
 
 // ─── bool ───────────────────────────────────────────────────────────────
 

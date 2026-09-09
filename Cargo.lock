@@ -3533,7 +3533,6 @@ name = "picomint-encoding"
 version = "0.1.0"
 dependencies = [
  "bitcoin",
- "bitcoin-io",
  "bls12_381",
  "group",
  "hex",
