@@ -4,19 +4,13 @@ A minimal implementation of a federated Chaumian ecash mint on Bitcoin.
 
 ## Deploy Node
 
-Nodes run on a fresh **Ubuntu 26.04 LTS desktop** (amd64) with a screen and keyboard:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/joschisan/picomint/main/bootstrap.sh | bash
-```
-
-The installer is fully self-contained — the compose file, updater and log viewer are embedded in the script and written to `~/picomint`. It installs Docker (if missing), brings up the node + a bundled bitcoind, pins Dashboard / Logs / Update shortcuts to the dock, and installs Signal Desktop for exchanging setup codes with co-operators. It is safe to re-run at any time; node state lives in Docker volumes a re-run never touches. CI runs the bootstrap end-to-end on GitHub Actions' `ubuntu-26.04` runner.
+Nodes run on a fresh **Ubuntu 26.04 LTS desktop** (amd64) with a screen and keyboard. The [install guide](https://joschisan.github.io/picomint/install.html) walks a first-time terminal user through it: install Docker, download [`docker-node/docker-compose.yml`](docker-node/docker-compose.yml), pull and start. The same page covers reading the logs and updating. Node state lives in Docker volumes an update never touches.
 
 ### Bitcoin Backend
 
 The node runs as a lightweight daemon on top of a local Bitcoin Core node. The bundled compose starts one for you alongside the node. Any machine that can comfortably run Bitcoin Core can run the picomint node on top — picomint's own resource footprint is negligible compared to Core's.
 
-A pruned node works, under one rule: the mint's block height, the one the dashboard shows, has to stay inside the prune window. The mint reads blocks from that height onward and never anything older, so the prune window is what limits the longest outage the mint can recover from; a backend whose window has moved past the mint's height has to reindex. Be conservative and size the window for 30 days: `-prune=20000` keeps about that much of mainnet. The bundled compose runs a full node, which needs no such thought.
+A pruned node works, under one rule: the mint's block height, the one the dashboard shows, has to stay inside the prune window. The mint reads blocks from that height onward and never anything older, so the prune window is what limits the longest outage the mint can recover from; a backend whose window has moved past the mint's height has to reindex. Be conservative and size the window for 30 days: `-prune=20000` keeps about that much of mainnet, and is what the bundled compose sets. Remove the line to run a full node.
 
 Initial block download pulls the full chain over the network either way, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth. The node will sit idle until bitcoind catches up.
 

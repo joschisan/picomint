@@ -90,17 +90,12 @@ jobs:
     - name: Run integration tests
       run: timeout 300 ./test-integration.sh
 
-  bootstrap:
-    name: Bootstrap Installer
+  compose:
+    name: Node Compose
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
 
-    - name: Run bootstrap.sh via stdin (mirrors curl|bash on a real machine)
-      env:
-        AUTO_YES: "1"
-      run: cat bootstrap.sh | bash
-
-    - name: Verify Web UI is reachable
-      run: curl -fsS --retry 10 --retry-delay 2 --retry-connrefused http://127.0.0.1:3000 > /dev/null
+    - name: Validate the compose file
+      run: docker compose -f docker-node/docker-compose.yml config --quiet
