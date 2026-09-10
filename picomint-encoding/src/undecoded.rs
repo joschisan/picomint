@@ -3,51 +3,48 @@ use std::marker::PhantomData;
 
 use crate::{Decodable, Encodable};
 
-/// A `T` carried as the bytes it is encoded as, decoded only where it is
-/// used. For a value whose decode does real work — a BLS point pays a
-/// decompression and subgroup check, ~70 µs on G1 — this lets a
-/// transaction be parsed, hashed, compared and stored without touching
-/// the values inside, and a stored note be loaded without verifying its
-/// signature again. `B` is the byte container and sets the framing: a
-/// `Vec<u8>` is length-prefixed, a `[u8; N]` is bare and so encodes
-/// exactly as the value it stands in for. Equality and hashing are on the
-/// bytes, which is exact because the consensus encoding is canonical.
+/// A `T` carried as the `N` bytes it is encoded as, decoded only where it
+/// is used. For a value whose decode does real work — a BLS point pays a
+/// decompression and subgroup check, ~70 µs on G1 — this lets a stored
+/// note be loaded, compared and hashed without verifying its signature
+/// again. The bytes are bare, so this encodes exactly as the value it
+/// stands in for. Equality and hashing are on the bytes, which is exact
+/// because the consensus encoding is canonical.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Undecoded<T, B = Vec<u8>> {
-    bytes: B,
+pub struct Undecoded<T, const N: usize> {
+    bytes: [u8; N],
     decoded: PhantomData<T>,
 }
 
-impl<T: Decodable, B: AsRef<[u8]>> Undecoded<T, B> {
+impl<T: Decodable, const N: usize> Undecoded<T, N> {
     /// The value, with whatever checks its decode runs.
     pub fn decode(&self) -> io::Result<T> {
-        T::consensus_decode(self.bytes.as_ref())
+        T::consensus_decode(&self.bytes)
     }
 }
 
-impl<T: Encodable, B: TryFrom<Vec<u8>>> From<T> for Undecoded<T, B> {
+impl<T: Encodable, const N: usize> From<T> for Undecoded<T, N> {
     fn from(value: T) -> Self {
         Self {
             bytes: value
                 .consensus_encode_to_vec()
                 .try_into()
-                .ok()
-                .expect("the value's encoding fits its container"),
+                .expect("the value encodes to exactly N bytes"),
             decoded: PhantomData,
         }
     }
 }
 
-impl<T, B: Encodable> Encodable for Undecoded<T, B> {
+impl<T, const N: usize> Encodable for Undecoded<T, N> {
     fn consensus_encode<W: io::Write>(&self, w: &mut W) -> io::Result<()> {
         self.bytes.consensus_encode(w)
     }
 }
 
-impl<T, B: Decodable> Decodable for Undecoded<T, B> {
+impl<T, const N: usize> Decodable for Undecoded<T, N> {
     fn consensus_decode_partial<R: io::Read>(r: &mut R) -> io::Result<Self> {
         Ok(Self {
-            bytes: B::consensus_decode_partial(r)?,
+            bytes: <[u8; N]>::consensus_decode_partial(r)?,
             decoded: PhantomData,
         })
     }
