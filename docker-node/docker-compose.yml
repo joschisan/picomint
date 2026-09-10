@@ -1,0 +1,56 @@
+# Both services run on the host network. The node's p2p and client api
+# share one iroh endpoint (UDP), and stacking Docker's NAT on top of the
+# router's would give iroh two layers to punch through instead of one. That
+# means each service binds its own address rather than being contained by a
+# published port, so the loopback binds below are what keep the Web UI and
+# the Bitcoin RPC off the LAN.
+services:
+  picomint-node-daemon:
+    image: ghcr.io/joschisan/picomint-node-daemon:main
+    container_name: picomint-node-daemon
+    restart: always
+    network_mode: host
+    logging:
+      options:
+        max-size: 100m
+    depends_on:
+      - bitcoind
+    volumes:
+      - picomint_node_daemon_data:/data
+    environment:
+      - DATA_DIR=/data
+      - BITCOIND_URL=http://bitcoin:bitcoin@127.0.0.1:8332
+      # The iroh endpoint must be reachable from the internet for nodes and
+      # clients to talk to your node.
+      - P2P_ADDR=0.0.0.0:8080
+      # Web UI — loopback only, reachable from a browser on this machine and
+      # nowhere else. Do not change this to 0.0.0.0: on the host network that
+      # puts node administration on your LAN.
+      - UI_ADDR=127.0.0.1:3000
+
+  bitcoind:
+    image: bitcoin/bitcoin:latest
+    container_name: bitcoind
+    restart: always
+    network_mode: host
+    logging:
+      options:
+        max-size: 100m
+    volumes:
+      - bitcoind_data:/home/bitcoin/.bitcoin
+    command:
+      - -server=1
+      # RPC is loopback only — the node shares this network namespace, and
+      # nothing else needs to reach it.
+      - -rpcbind=127.0.0.1
+      - -rpcallowip=127.0.0.1
+      - -rpcuser=bitcoin
+      - -rpcpassword=bitcoin
+      - -dbcache=1024
+      # Keeps roughly the last 30 days of blocks, which is all the mint needs.
+      # Remove this line to run a full node.
+      - -prune=20000
+
+volumes:
+  picomint_node_daemon_data:
+  bitcoind_data:
