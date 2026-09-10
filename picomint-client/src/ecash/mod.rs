@@ -80,16 +80,16 @@ pub struct SpendableNote {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Encodable, Decodable)]
 pub struct UndecodedSpendableNote {
     denomination: Denomination,
-    keypair: Undecoded<Keypair, [u8; 32]>,
-    signature: Undecoded<tbs::Signature, [u8; 48]>,
+    keypair: Undecoded<Keypair, 32>,
+    signature: Undecoded<tbs::Signature, 48>,
 }
 
-impl UndecodedSpendableNote {
-    fn decode(&self) -> SpendableNote {
-        SpendableNote {
-            denomination: self.denomination,
-            keypair: self.keypair.decode().expect("stored notes decode"),
-            signature: self.signature.decode().expect("stored notes decode"),
+impl From<&UndecodedSpendableNote> for SpendableNote {
+    fn from(note: &UndecodedSpendableNote) -> Self {
+        Self {
+            denomination: note.denomination,
+            keypair: note.keypair.decode().expect("stored notes decode"),
+            signature: note.signature.decode().expect("stored notes decode"),
         }
     }
 }
@@ -621,12 +621,7 @@ fn select_funding_input(
         .sum();
 
     if excess_output <= selected_value {
-        let selected = selected
-            .iter()
-            .map(UndecodedSpendableNote::decode)
-            .collect();
-
-        return Some(selected);
+        return Some(selected.iter().map(Into::into).collect());
     }
 
     let mut last_note = None;
@@ -646,12 +641,7 @@ fn select_funding_input(
 
     selected.push(last_note?);
 
-    let selected = selected
-        .iter()
-        .map(UndecodedSpendableNote::decode)
-        .collect();
-
-    Some(selected)
+    Some(selected.iter().map(Into::into).collect())
 }
 
 /// What a note of `denomination` delivers when spent: its face value
@@ -744,13 +734,13 @@ fn send_ecash_dbtx(
 
     let mut notes = vec![];
 
-    for note in sorted {
+    for note in &sorted {
         remaining_amount = match remaining_amount.checked_sub(note.denomination.amount()) {
             Some(amount) => amount,
             None => continue,
         };
 
-        notes.push(note.decode());
+        notes.push(note.into());
     }
 
     if remaining_amount != Amount::ZERO {
@@ -1015,7 +1005,7 @@ impl Client {
 
         let notes: Vec<SpendableNote> = account_notes(&dbtx, ctx.mint, account)
             .iter()
-            .map(UndecodedSpendableNote::decode)
+            .map(Into::into)
             .collect();
 
         if notes.is_empty() {
