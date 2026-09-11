@@ -11,6 +11,7 @@
   --border: #2a3330; --border-soft: #242c29; --border-faint: #1e2523;
   --ink: #dfe4e0; --ink-secondary: #b9c3bd; --ink-muted: #8f9a94; --ink-faint: #6b756f;
   --accent: #66d9b9; --accent-hover: #86e6c9; --on-accent: #003828;
+  --warn: #e6c26b; --warn-10: rgba(230,194,107,0.10);
   --radius: 12px;
   color-scheme: dark;
 }
@@ -39,6 +40,10 @@ svg.i { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--on-accent); }
 
+.warning { display: grid; grid-template-columns: 24px 1fr; gap: 14px; background: var(--warn-10); border: 1px solid var(--warn); border-radius: var(--radius); padding: 18px 20px; margin-top: 48px; font-size: 16px; color: var(--ink-secondary); }
+.warning svg { width: 24px; height: 24px; fill: var(--warn); margin-top: 2px; }
+.warning b { display: block; color: var(--warn); font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+
 
 @media (max-width: 900px) {
   .topbar-inner, .page { padding-left: 16px; padding-right: 16px; }
@@ -59,6 +64,10 @@ svg.i { width: 20px; height: 20px; fill: currentColor; flex: none; }
     <h1>Bitcoin Community Custody</h1>
     <p class="lede">Picomint lets communities create private community banks on Bitcoin called mints.</p>
     <p class="lede">To run a mint yourself you need at least four people to run a node each. The nodes then connect to each other and form a single replicated mint - individual nodes can fail and the mint continues to operate. Follow the guide to run your own node. Once it runs you can connect to other nodes and monitor the node through a dashboard in your browser.</p>
+    <div class="warning">
+      <svg viewBox="0 0 256 256"><path d="M236.8,188.09,149.35,36.22a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09ZM222.93,203.8a8.5,8.5,0,0,1-7.48,4.2H40.55a8.5,8.5,0,0,1-7.48-4.2,7.59,7.59,0,0,1,0-7.72L120.52,44.21a8.75,8.75,0,0,1,15,0l87.45,151.87A7.59,7.59,0,0,1,222.93,203.8ZM120,144V104a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm20,36a12,12,0,1,1-12-12A12,12,0,0,1,140,180Z"/></svg>
+      <span><b>Experimental software. Do not run this.</b>Picomint is unfinished, unaudited and under active development. Do not run this on mainnet.</span>
+    </div>
     <div class="ctas">
       <a class="btn btn-primary" href="install.html">How to run a Picomint Node</a>
       <a class="btn" href="https://github.com/joschisan/picomint">

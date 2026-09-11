@@ -1,5 +1,10 @@
 # Picomint - Alpha
 
+> [!CAUTION]
+> **Experimental software. Do not run this.**
+>
+> Picomint is unfinished, unaudited and under active development. Do not run this on mainnet.
+
 A minimal implementation of a federated Chaumian ecash mint on Bitcoin.
 
 ## Deploy Node
