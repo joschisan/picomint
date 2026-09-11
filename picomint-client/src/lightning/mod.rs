@@ -380,7 +380,7 @@ fn receive_incoming_contract(
         fee: ctx.config.lightning.input_fee,
     });
 
-    let operation = OperationId::from_encodable(&summary.outpoint);
+    let operation = OperationId::from_encodable(&summary.payment_hash);
 
     let amount = summary.amount;
     let fee = summary.fee;
@@ -576,7 +576,11 @@ impl Client {
     }
 
     /// Request an invoice into `account` from a caller-selected gateway
-    /// obtained via [`lightning_select_gateway`].
+    /// obtained via [`lightning_select_gateway`]. Returns the operation the
+    /// eventual claim will log under, so the caller can subscribe to it
+    /// before the payment arrives. It is derived from the payment hash, as
+    /// a send's is, so a self-payment shares one operation across both
+    /// legs.
     pub async fn lightning_receive(
         &self,
         mint: MintId,
@@ -584,19 +588,21 @@ impl Client {
         gateway_pk: GatewayPk,
         gateway_info: GatewayInfo,
         amount: Amount,
-    ) -> Result<Bolt11Invoice, ReceiveError> {
+    ) -> Result<(OperationId, Bolt11Invoice), ReceiveError> {
         let ctx = self.ctx(mint).map_err(|_| ReceiveError::NotAdded)?;
 
         let receive_keypair = ctx.secret.lightning_secret().receive_keypair(account);
 
-        create_offer_and_fetch_invoice(
+        let invoice = create_offer_and_fetch_invoice(
             &ctx,
             gateway_pk,
             gateway_info,
             receive_keypair.public_key(),
             amount,
         )
-        .await
+        .await?;
+
+        Ok((OperationId::from_encodable(invoice.payment_hash()), invoice))
     }
 
     /// A shareable lnurl for `account`, served by `lnurl_daemon`. Nothing
