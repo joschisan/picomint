@@ -325,7 +325,7 @@ async fn lightning_receive(
         .lightning_select_gateway(payload.mint)
         .map_err(CliError::internal)?;
 
-    let invoice = state
+    let (operation, invoice) = state
         .client
         .lightning_receive(
             payload.mint,
@@ -337,7 +337,7 @@ async fn lightning_receive(
         .await
         .map_err(CliError::internal)?;
 
-    Ok(Json(ClientLightningReceiveResponse { invoice }))
+    Ok(Json(ClientLightningReceiveResponse { operation, invoice }))
 }
 
 #[instrument(skip_all, err)]
