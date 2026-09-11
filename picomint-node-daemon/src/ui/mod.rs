@@ -52,12 +52,11 @@ pub async fn run(ui_addr: SocketAddr, router: Router) {
 
     let listener = TcpListener::bind(ui_addr).await.expect("Failed to bind UI");
 
-    axum::serve(
-        listener,
-        router.layer(from_fn(reject_foreign)).into_make_service(),
-    )
-    .await
-    .expect("Failed to serve UI");
+    let router = router.layer(from_fn(reject_foreign));
+
+    axum::serve(listener, router.into_make_service())
+        .await
+        .expect("Failed to serve UI");
 }
 
 /// Refuses the two requests a website can make the operator's browser send
