@@ -149,7 +149,8 @@ pub fn common_head(title: &str) -> Markup {
 
         script {
             (PreEscaped(r#"
-            function copyText(text, btn) {
+            function copyText(btn) {
+                var text = btn.dataset.copy;
                 if (navigator.clipboard) {
                     navigator.clipboard.writeText(text).then(function() {
                         showCopied(btn);
@@ -213,13 +214,15 @@ fn clipboard_icon() -> Markup {
     }
 }
 
-/// Renders a readonly text snippet with a copy-to-clipboard button.
+/// Renders a readonly text snippet with a copy-to-clipboard button. The
+/// text rides in a data attribute rather than inside the handler because
+/// maud escapes attribute values but not JS string literals.
 pub fn copiable_text(text: &str) -> Markup {
     html! {
         div class="copy-group" {
             span class="copy-text" { (text) }
             button type="button" class="btn btn-outline btn-icon"
-                onclick=(format!("copyText('{}', this)", text)) {
+                data-copy=(text) onclick="copyText(this)" {
                 (clipboard_icon())
             }
         }
