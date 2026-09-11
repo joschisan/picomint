@@ -1,5 +1,10 @@
 # Picomint - Alpha
 
+> [!CAUTION]
+> **Experimental software. Do not run this.**
+>
+> Picomint is unfinished, unaudited and under active development. It can lose every satoshi it holds without warning, and nothing in this repository is a recommendation to run it. Do not put money you are not willing to lose into a mint built on it.
+
 A minimal implementation of a federated Chaumian ecash mint on Bitcoin.
 
 ## Deploy Node
