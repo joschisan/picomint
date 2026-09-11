@@ -138,7 +138,7 @@ code { font-family: var(--mono); font-size: 0.9em; color: var(--ink); background
       <p><strong>Three things to know before you type anything.</strong></p>
       <ul>
         <li><strong>Pasting.</strong> <kbd>Ctrl</kbd> + <kbd>V</kbd> does nothing in a terminal. Right-click in the window and choose <span class="ui">Paste</span>, or press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>V</kbd>. Then press <kbd>Enter</kbd> to run the line.</li>
-        <li><strong>sudo.</strong> Lines starting with <code>sudo</code> change the system, so Ubuntu asks for your login password first. Nothing appears while you type it, not even dots. Type it and press <kbd>Enter</kbd>. It remembers you for a few minutes, so you will not be asked every time.</li>
+        <li><strong>sudo.</strong> Lines starting with <code>sudo</code> change the system, so Ubuntu asks for your login password first. Nothing appears while you type it, not even dots. Type it and press <kbd>Enter</kbd>. Only the two lines in Part 2 start with it; everything after that runs as you.</li>
         <li><strong>Done means quiet.</strong> A command is finished when the <code>$</code> line comes back. No news is good news. Errors are printed in words, usually with the word <span class="ui">error</span> in them.</li>
       </ul>
     </div>
@@ -148,7 +148,7 @@ code { font-family: var(--mono); font-size: 0.9em; color: var(--ink); background
     <div class="part-head">
       <div class="num">Part 2</div>
       <h2>Install Docker</h2>
-      <p>Docker runs the node and Bitcoin Core in the background and starts them again after a reboot. Ubuntu ships it, so this is one install command.</p>
+      <p>Docker runs the node and Bitcoin Core in the background and starts them again after a reboot. Ubuntu ships it, so this is one install command, one line so your account may use it without <code>sudo</code>, and a restart.</p>
     </div>
     <div class="body">
       <p>Paste this line and press <kbd>Enter</kbd>. It refreshes Ubuntu's list of available software, then installs Docker and its companion tool Compose. Type your password when asked.</p>
@@ -167,8 +167,11 @@ Setting up docker-compose-v2 (2.39.1-0ubuntu1) ...
 Processing triggers for man-db ...</span>
 <span class="p">satoshi@desktop:~$</span> <span class="cur"></span></pre>
       </div>
-      <p><strong>Check it worked.</strong> This prints Docker's version number. Any number is fine.</p>
-      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>sudo docker --version</code></pre></div>
+      <p><strong>Let your account use Docker.</strong> Out of the box only <code>sudo</code> may talk to Docker. This line adds you to the <code>docker</code> group, so every later command in this guide runs without it. Nothing is printed when it works.</p>
+      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>sudo usermod -aG docker $USER</code></pre></div>
+      <p><strong>Restart the computer.</strong> Ubuntu reads your groups once, when you log in, so the new one only takes effect after a fresh login. Closing the terminal is not enough. Click the system menu in the top-right corner and choose <span class="ui">Power Off / Log Out</span>, then <span class="ui">Restart</span>. When the desktop is back, open a terminal again with <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>T</kbd>.</p>
+      <p><strong>Check it worked.</strong> This prints Docker's version number. Any number is fine. If it says <span class="ui">permission denied</span> instead, the computer was not restarted yet.</p>
+      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>docker --version</code></pre></div>
     </div>
   </section>
 
@@ -260,21 +263,20 @@ volumes:
     </div>
     <div class="body">
       <p><strong>Download.</strong> About a gigabyte, so this takes a few minutes on a home connection. A progress bar per piece is normal.</p>
-      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>sudo docker compose -f ~/picomint/docker-compose.yml pull</code></pre></div>
+      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>docker compose -f ~/picomint/docker-compose.yml pull</code></pre></div>
       <div class="term">
         <div class="term-bar"><span class="dots"><span></span><span></span><span></span></span>satoshi@desktop: ~</div>
-        <pre><span class="p">satoshi@desktop:~$</span> sudo docker compose -f ~/picomint/docker-compose.yml pull
-[sudo] password for satoshi:
+        <pre><span class="p">satoshi@desktop:~$</span> docker compose -f ~/picomint/docker-compose.yml pull
 <span class="d">[+] Pulling 14/14
  ✔ bitcoind Pulled                                        41.2s
  ✔ picomint-node-daemon Pulled                            12.8s</span>
 <span class="p">satoshi@desktop:~$</span> <span class="cur"></span></pre>
       </div>
       <p><strong>Start.</strong> The <code>-d</code> at the end means "in the background". The terminal comes back right away and the two programs keep running without it.</p>
-      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>sudo docker compose -f ~/picomint/docker-compose.yml up -d</code></pre></div>
+      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>docker compose -f ~/picomint/docker-compose.yml up -d</code></pre></div>
       <div class="term">
         <div class="term-bar"><span class="dots"><span></span><span></span><span></span></span>satoshi@desktop: ~</div>
-        <pre><span class="p">satoshi@desktop:~$</span> sudo docker compose -f ~/picomint/docker-compose.yml up -d
+        <pre><span class="p">satoshi@desktop:~$</span> docker compose -f ~/picomint/docker-compose.yml up -d
 <span class="d">[+] Running 4/4
  ✔ Volume "picomint_bitcoind_data"              Created
  ✔ Volume "picomint_picomint_node_daemon_data"  Created
@@ -283,10 +285,10 @@ volumes:
 <span class="p">satoshi@desktop:~$</span> <span class="cur"></span></pre>
       </div>
       <p><strong>Check they are running.</strong> This lists the two programs and their state. Both should say <span class="ui">Up</span>.</p>
-      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>sudo docker compose -f ~/picomint/docker-compose.yml ps</code></pre></div>
+      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>docker compose -f ~/picomint/docker-compose.yml ps</code></pre></div>
       <div class="term">
         <div class="term-bar"><span class="dots"><span></span><span></span><span></span></span>satoshi@desktop: ~</div>
-        <pre><span class="p">satoshi@desktop:~$</span> sudo docker compose -f ~/picomint/docker-compose.yml ps
+        <pre><span class="p">satoshi@desktop:~$</span> docker compose -f ~/picomint/docker-compose.yml ps
 NAME                   IMAGE                                          STATUS
 bitcoind               bitcoin/bitcoin:latest                         Up 40 seconds
 picomint-node-daemon   ghcr.io/joschisan/picomint-node-daemon:main    Up 39 seconds
@@ -315,10 +317,10 @@ picomint-node-daemon   ghcr.io/joschisan/picomint-node-daemon:main    Up 39 seco
     </div>
     <div class="body">
       <p>Open a terminal and run this. It prints the last 200 lines of the node's log and keeps printing new ones as they happen. Without the <code>--tail</code> it would print everything the node has ever logged first, which is a lot of scrolling for nothing.</p>
-      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>sudo docker compose -f ~/picomint/docker-compose.yml logs --tail 200 -f picomint-node-daemon</code></pre></div>
+      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>docker compose -f ~/picomint/docker-compose.yml logs --tail 200 -f picomint-node-daemon</code></pre></div>
       <p>To stop watching, press <kbd>Ctrl</kbd> + <kbd>C</kbd>. That stops the log window only. The node is not affected.</p>
       <p><strong>Bitcoin Core's log</strong> is the same line with its name at the end. While it is still downloading the chain, this is where you see it progress.</p>
-      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>sudo docker compose -f ~/picomint/docker-compose.yml logs --tail 200 -f bitcoind</code></pre></div>
+      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>docker compose -f ~/picomint/docker-compose.yml logs --tail 200 -f bitcoind</code></pre></div>
 
     </div>
   </section>
@@ -331,17 +333,16 @@ picomint-node-daemon   ghcr.io/joschisan/picomint-node-daemon:main    Up 39 seco
     </div>
     <div class="body">
       <p><strong>Download the new release.</strong> The same line as in Part 4.</p>
-      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>sudo docker compose -f ~/picomint/docker-compose.yml pull</code></pre></div>
+      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>docker compose -f ~/picomint/docker-compose.yml pull</code></pre></div>
       <p><strong>Start it.</strong> Docker replaces only what changed and leaves your node's data alone.</p>
-      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>sudo docker compose -f ~/picomint/docker-compose.yml up -d</code></pre></div>
+      <div class="cmd"><div class="cmd-bar"><span>Command</span><button type="button" class="cp"><svg viewBox="0 0 256 256" aria-hidden="true"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></svg>Copy</button></div><pre><code>docker compose -f ~/picomint/docker-compose.yml up -d</code></pre></div>
       <div class="term">
         <div class="term-bar"><span class="dots"><span></span><span></span><span></span></span>satoshi@desktop: ~</div>
-        <pre><span class="p">satoshi@desktop:~$</span> sudo docker compose -f ~/picomint/docker-compose.yml pull
-[sudo] password for satoshi:
+        <pre><span class="p">satoshi@desktop:~$</span> docker compose -f ~/picomint/docker-compose.yml pull
 <span class="d">[+] Pulling 6/6
  ✔ picomint-node-daemon Pulled                            14.1s
  ✔ bitcoind Pulled                                         0.9s</span>
-<span class="p">satoshi@desktop:~$</span> sudo docker compose -f ~/picomint/docker-compose.yml up -d
+<span class="p">satoshi@desktop:~$</span> docker compose -f ~/picomint/docker-compose.yml up -d
 <span class="d">[+] Running 2/2
  ✔ Container bitcoind              Running
  ✔ Container picomint-node-daemon  Started</span>

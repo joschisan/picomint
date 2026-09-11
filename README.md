@@ -19,10 +19,10 @@ Initial block download pulls the full chain over the network either way, so expe
 The `picomint-node-cli` binary is included in the container and on the `PATH`. Run CLI commands from the host like:
 
 ```bash
-sudo docker exec picomint-node-daemon picomint-node-cli --help
+docker exec picomint-node-daemon picomint-node-cli --help
 ```
 
-The walkthroughs below use the bare `picomint-node-cli …` form — prefix with `sudo docker exec picomint-node-daemon` to run them.
+The walkthroughs below use the bare `picomint-node-cli …` form — prefix with `docker exec picomint-node-daemon` to run them.
 
 ### Setup Ceremony
 
@@ -102,7 +102,7 @@ reconstructed from nodes when a restored node rejoins.
 If your deployment is ever lost, copy the backup back into a fresh container:
 
 ```bash
-sudo docker cp config.json picomint-node-daemon:/tmp/config.json
+docker cp config.json picomint-node-daemon:/tmp/config.json
 ```
 
 And run `setup restore`:
@@ -119,7 +119,7 @@ picomint-node-cli setup restore /tmp/config.json
 | 3000 | Web UI (setup + dashboard)   | Localhost only  |
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `sudo docker exec picomint-node-daemon
+network exposure. Reach it with `docker exec picomint-node-daemon
 picomint-node-cli …`.
 
 ### Configuration
@@ -140,10 +140,10 @@ The gateway is a single container image: `ghcr.io/joschisan/picomint-gateway-dae
 The `picomint-gateway-cli` binary is included in the container and on the `PATH`. Run CLI commands from the host like:
 
 ```bash
-sudo docker exec picomint-gateway-daemon picomint-gateway-cli --help
+docker exec picomint-gateway-daemon picomint-gateway-cli --help
 ```
 
-The walkthroughs below use the bare `picomint-gateway-cli …` form — prefix with `sudo docker exec picomint-gateway-daemon` to run them.
+The walkthroughs below use the bare `picomint-gateway-cli …` form — prefix with `docker exec picomint-gateway-daemon` to run them.
 
 A first call to confirm everything is wired up:
 
@@ -350,7 +350,7 @@ picomint-gateway-cli query \
 | 9735 | LDK Lightning P2P (BOLT)     | Yes             |
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `sudo docker exec picomint-gateway-daemon
+network exposure. Reach it with `docker exec picomint-gateway-daemon
 picomint-gateway-cli …`.
 
 ### Configuration
