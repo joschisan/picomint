@@ -16,7 +16,9 @@
 //!
 //! The UI is unauthenticated. Operators are expected to bind it to loopback
 //! (or expose it via SSH tunnel / VPN). See README.md for the deployment
-//! patterns.
+//! patterns. What the bind does not keep out is the operator's own browser
+//! acting on behalf of some other website, so [`run`] refuses requests that
+//! only a browser under foreign control would send: see [`reject_foreign`].
 //!
 //! Styling is a single hand-rolled stylesheet (`assets/style.css`); modals
 //! are native `<dialog>` elements opened and closed with one-line inline
@@ -27,9 +29,15 @@ pub mod dashboard;
 pub mod dkg;
 pub mod setup;
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 use axum::Router;
+use axum::extract::Request;
+use axum::http::header::{HOST, ORIGIN};
+use axum::http::uri::Authority;
+use axum::http::{HeaderMap, Method, StatusCode, Uri};
+use axum::middleware::{Next, from_fn};
+use axum::response::{IntoResponse, Response};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use tokio::net::TcpListener;
 use tracing::info;
@@ -44,9 +52,86 @@ pub async fn run(ui_addr: SocketAddr, router: Router) {
 
     let listener = TcpListener::bind(ui_addr).await.expect("Failed to bind UI");
 
+    let router = router.layer(from_fn(reject_foreign));
+
     axum::serve(listener, router.into_make_service())
         .await
         .expect("Failed to serve UI");
+}
+
+/// Refuses the two requests a website can make the operator's browser send
+/// to a loopback service without any credentials: a DNS-rebound page reaches
+/// us with its own domain in `Host` and would read `/backup-config` as
+/// same-origin, and a cross-site form post or fetch arrives from another
+/// origin. `Host`, `Sec-Fetch-Site` and `Origin` are all set by the browser
+/// and cannot be forged by page script, which is what makes them
+/// trustworthy here. Same rule as Go's `http.CrossOriginProtection`.
+async fn reject_foreign(request: Request, next: Next) -> Response {
+    if !host_allowed(request.headers()) {
+        return (StatusCode::FORBIDDEN, "Host is not local").into_response();
+    }
+
+    if !origin_allowed(request.method(), request.headers()) {
+        return (StatusCode::FORBIDDEN, "Cross-site request refused").into_response();
+    }
+
+    next.run(request).await
+}
+
+/// A DNS name in `Host` can be rebound to loopback by whoever controls it;
+/// `localhost` and IP literals cannot, and they are all the documented
+/// deployments ever put in the address bar.
+fn host_allowed(headers: &HeaderMap) -> bool {
+    headers
+        .get(HOST)
+        .and_then(|host| host.to_str().ok())
+        .and_then(|host| host.parse::<Authority>().ok())
+        .is_some_and(|authority| {
+            let host = authority.host().trim_matches(|c| c == '[' || c == ']');
+
+            host == "localhost" || host.parse::<IpAddr>().is_ok()
+        })
+}
+
+/// Reads are left alone so a link to the dashboard keeps working; writes must
+/// come from the dashboard itself. Browsers attach `Sec-Fetch-Site` only to
+/// potentially trustworthy URLs, which covers loopback but not a plain-HTTP
+/// VPN address, so without it the decision falls back to `Origin`, which
+/// every browser sends on a cross-origin post.
+fn origin_allowed(method: &Method, headers: &HeaderMap) -> bool {
+    if method == Method::GET || method == Method::HEAD {
+        return true;
+    }
+
+    match headers
+        .get("sec-fetch-site")
+        .and_then(|site| site.to_str().ok())
+    {
+        Some(site) => site == "same-origin" || site == "none",
+        None => origin_matches_host(headers),
+    }
+}
+
+/// Neither header at all is a non-browser client such as curl, which a
+/// website cannot drive. An `Origin` of `null` has no authority and fails
+/// the comparison, as it should: that is what a sandboxed or redirected
+/// cross-site post carries.
+fn origin_matches_host(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(ORIGIN) else {
+        return true;
+    };
+
+    let host = headers
+        .get(HOST)
+        .and_then(|host| host.to_str().ok())
+        .and_then(|host| host.parse::<Authority>().ok());
+
+    origin
+        .to_str()
+        .ok()
+        .and_then(|origin| origin.parse::<Uri>().ok())
+        .and_then(|origin| origin.authority().cloned())
+        .is_some_and(|origin| Some(origin) == host)
 }
 
 pub fn common_head(title: &str) -> Markup {
@@ -64,7 +149,8 @@ pub fn common_head(title: &str) -> Markup {
 
         script {
             (PreEscaped(r#"
-            function copyText(text, btn) {
+            function copyText(btn) {
+                var text = btn.dataset.copy;
                 if (navigator.clipboard) {
                     navigator.clipboard.writeText(text).then(function() {
                         showCopied(btn);
@@ -128,13 +214,15 @@ fn clipboard_icon() -> Markup {
     }
 }
 
-/// Renders a readonly text snippet with a copy-to-clipboard button.
+/// Renders a readonly text snippet with a copy-to-clipboard button. The
+/// text rides in a data attribute rather than inside the handler because
+/// maud escapes attribute values but not JS string literals.
 pub fn copiable_text(text: &str) -> Markup {
     html! {
         div class="copy-group" {
             span class="copy-text" { (text) }
             button type="button" class="btn btn-outline btn-icon"
-                onclick=(format!("copyText('{}', this)", text)) {
+                data-copy=(text) onclick="copyText(this)" {
                 (clipboard_icon())
             }
         }
@@ -188,5 +276,106 @@ pub fn dashboard_layout(mint_name: &str, version: &str, content: Markup) -> Mark
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::{HeaderName, HeaderValue};
+
+    use super::*;
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        pairs
+            .iter()
+            .map(|pair| {
+                (
+                    HeaderName::from_static(pair.0),
+                    HeaderValue::from_str(pair.1).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn host_accepts_loopback_names_and_ip_literals() {
+        assert!(host_allowed(&headers(&[("host", "127.0.0.1:3000")])));
+        assert!(host_allowed(&headers(&[("host", "localhost:3000")])));
+        assert!(host_allowed(&headers(&[("host", "localhost")])));
+        assert!(host_allowed(&headers(&[("host", "[::1]:3000")])));
+        assert!(host_allowed(&headers(&[("host", "100.92.73.81:3000")])));
+    }
+
+    #[test]
+    fn host_rejects_dns_names_and_absence() {
+        assert!(!host_allowed(&headers(&[("host", "evil.example:3000")])));
+        assert!(!host_allowed(&headers(&[(
+            "host",
+            "localhost.evil.example"
+        )])));
+        assert!(!host_allowed(&headers(&[("host", "")])));
+        assert!(!host_allowed(&headers(&[])));
+    }
+
+    #[test]
+    fn writes_need_same_origin_fetch_metadata() {
+        assert!(origin_allowed(
+            &Method::POST,
+            &headers(&[("sec-fetch-site", "same-origin")])
+        ));
+        assert!(origin_allowed(
+            &Method::POST,
+            &headers(&[("sec-fetch-site", "none")])
+        ));
+        assert!(!origin_allowed(
+            &Method::POST,
+            &headers(&[("sec-fetch-site", "cross-site")])
+        ));
+        assert!(!origin_allowed(
+            &Method::POST,
+            &headers(&[("sec-fetch-site", "same-site")])
+        ));
+    }
+
+    #[test]
+    fn writes_without_fetch_metadata_fall_back_to_origin() {
+        let vpn = ("host", "100.92.73.81:3000");
+
+        assert!(origin_allowed(&Method::POST, &headers(&[vpn])));
+        assert!(origin_allowed(
+            &Method::POST,
+            &headers(&[vpn, ("origin", "http://100.92.73.81:3000")])
+        ));
+        assert!(!origin_allowed(
+            &Method::POST,
+            &headers(&[vpn, ("origin", "http://evil.example")])
+        ));
+        assert!(!origin_allowed(
+            &Method::POST,
+            &headers(&[vpn, ("origin", "http://100.92.73.81:8080")])
+        ));
+        assert!(!origin_allowed(
+            &Method::POST,
+            &headers(&[vpn, ("origin", "null")])
+        ));
+    }
+
+    #[test]
+    fn reads_ignore_origin() {
+        assert!(origin_allowed(
+            &Method::GET,
+            &headers(&[("sec-fetch-site", "cross-site")])
+        ));
+        assert!(origin_allowed(
+            &Method::HEAD,
+            &headers(&[("sec-fetch-site", "cross-site")])
+        ));
+        assert!(origin_allowed(
+            &Method::GET,
+            &headers(&[
+                ("host", "127.0.0.1:3000"),
+                ("origin", "http://evil.example")
+            ])
+        ));
     }
 }
