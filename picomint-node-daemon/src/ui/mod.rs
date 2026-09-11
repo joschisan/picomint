@@ -16,7 +16,9 @@
 //!
 //! The UI is unauthenticated. Operators are expected to bind it to loopback
 //! (or expose it via SSH tunnel / VPN). See README.md for the deployment
-//! patterns.
+//! patterns. What the bind does not keep out is the operator's own browser
+//! acting on behalf of some other website, so [`run`] refuses requests that
+//! only a browser under foreign control would send: see [`reject_foreign`].
 //!
 //! Styling is a single hand-rolled stylesheet (`assets/style.css`); modals
 //! are native `<dialog>` elements opened and closed with one-line inline
@@ -27,9 +29,15 @@ pub mod dashboard;
 pub mod dkg;
 pub mod setup;
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 use axum::Router;
+use axum::extract::Request;
+use axum::http::header::HOST;
+use axum::http::uri::Authority;
+use axum::http::{HeaderMap, Method, StatusCode};
+use axum::middleware::{Next, from_fn};
+use axum::response::{IntoResponse, Response};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use tokio::net::TcpListener;
 use tracing::info;
@@ -44,9 +52,62 @@ pub async fn run(ui_addr: SocketAddr, router: Router) {
 
     let listener = TcpListener::bind(ui_addr).await.expect("Failed to bind UI");
 
-    axum::serve(listener, router.into_make_service())
-        .await
-        .expect("Failed to serve UI");
+    axum::serve(
+        listener,
+        router.layer(from_fn(reject_foreign)).into_make_service(),
+    )
+    .await
+    .expect("Failed to serve UI");
+}
+
+/// Refuses the two requests a website can make the operator's browser send
+/// to a loopback service without any credentials: a DNS-rebound page reaches
+/// us with its own domain in `Host` and would read `/backup-config` as
+/// same-origin, and a cross-site form post or fetch carries a
+/// `Sec-Fetch-Site` other than `same-origin`. Neither `Host` nor
+/// `Sec-Fetch-Site` can be set by page script, which is what makes them
+/// trustworthy here.
+async fn reject_foreign(request: Request, next: Next) -> Response {
+    if !host_allowed(request.headers()) {
+        return (
+            StatusCode::FORBIDDEN,
+            "Host must be localhost or an IP address",
+        )
+            .into_response();
+    }
+
+    if !fetch_site_allowed(request.method(), request.headers()) {
+        return (StatusCode::FORBIDDEN, "Cross-site request refused").into_response();
+    }
+
+    next.run(request).await
+}
+
+/// A DNS name in `Host` can be rebound to loopback by whoever controls it;
+/// `localhost` and IP literals cannot, and they are all the documented
+/// deployments ever put in the address bar.
+fn host_allowed(headers: &HeaderMap) -> bool {
+    headers
+        .get(HOST)
+        .and_then(|host| host.to_str().ok())
+        .and_then(|host| host.parse::<Authority>().ok())
+        .is_some_and(|authority| {
+            let host = authority.host().trim_matches(|c| c == '[' || c == ']');
+
+            host == "localhost" || host.parse::<IpAddr>().is_ok()
+        })
+}
+
+/// Reads are left alone so a link to the dashboard keeps working; writes must
+/// come from the dashboard itself. An absent header is a non-browser client
+/// such as curl, which a website cannot drive.
+fn fetch_site_allowed(method: &Method, headers: &HeaderMap) -> bool {
+    method == Method::GET
+        || method == Method::HEAD
+        || headers
+            .get("sec-fetch-site")
+            .and_then(|site| site.to_str().ok())
+            .is_none_or(|site| site == "same-origin" || site == "none")
 }
 
 pub fn common_head(title: &str) -> Markup {
@@ -188,5 +249,77 @@ pub fn dashboard_layout(mint_name: &str, version: &str, content: Markup) -> Mark
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::{HeaderName, HeaderValue};
+
+    use super::*;
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        pairs
+            .iter()
+            .map(|pair| {
+                (
+                    HeaderName::from_static(pair.0),
+                    HeaderValue::from_str(pair.1).unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn host_accepts_loopback_names_and_ip_literals() {
+        assert!(host_allowed(&headers(&[("host", "127.0.0.1:3000")])));
+        assert!(host_allowed(&headers(&[("host", "localhost:3000")])));
+        assert!(host_allowed(&headers(&[("host", "localhost")])));
+        assert!(host_allowed(&headers(&[("host", "[::1]:3000")])));
+        assert!(host_allowed(&headers(&[("host", "100.92.73.81:3000")])));
+    }
+
+    #[test]
+    fn host_rejects_dns_names_and_absence() {
+        assert!(!host_allowed(&headers(&[("host", "evil.example:3000")])));
+        assert!(!host_allowed(&headers(&[(
+            "host",
+            "localhost.evil.example"
+        )])));
+        assert!(!host_allowed(&headers(&[("host", "")])));
+        assert!(!host_allowed(&headers(&[])));
+    }
+
+    #[test]
+    fn writes_need_same_origin_or_no_fetch_metadata() {
+        assert!(fetch_site_allowed(
+            &Method::POST,
+            &headers(&[("sec-fetch-site", "same-origin")])
+        ));
+        assert!(fetch_site_allowed(
+            &Method::POST,
+            &headers(&[("sec-fetch-site", "none")])
+        ));
+        assert!(fetch_site_allowed(&Method::POST, &headers(&[])));
+        assert!(!fetch_site_allowed(
+            &Method::POST,
+            &headers(&[("sec-fetch-site", "cross-site")])
+        ));
+        assert!(!fetch_site_allowed(
+            &Method::POST,
+            &headers(&[("sec-fetch-site", "same-site")])
+        ));
+    }
+
+    #[test]
+    fn reads_ignore_fetch_metadata() {
+        assert!(fetch_site_allowed(
+            &Method::GET,
+            &headers(&[("sec-fetch-site", "cross-site")])
+        ));
+        assert!(fetch_site_allowed(
+            &Method::HEAD,
+            &headers(&[("sec-fetch-site", "cross-site")])
+        ));
     }
 }
