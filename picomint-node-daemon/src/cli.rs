@@ -64,9 +64,8 @@ fn wrong_phase(phase: &'static str) -> impl Fn() -> std::future::Ready<CliError>
     }
 }
 
-/// Build the consensus-phase CLI router that exposes the mint endpoints
-/// (invite, config, expiry, status probes) plus the
-/// lightning/onchain module-admin routes.
+/// The consensus-phase CLI router: status, invite, backup and expiry,
+/// plus the onchain and gateway routes.
 pub fn router(api: Arc<ConsensusApi>) -> Router {
     use picomint_core::expiry::ExpiryStatus;
     use picomint_node_cli_core::{

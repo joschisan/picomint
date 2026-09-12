@@ -1,7 +1,7 @@
 //! Sweeps a decommissioned mint's wallet.
 //!
 //! After the mint has stopped transacting, every node exports its sweep
-//! secret with `picomint-node-cli module onchain sweep`. A threshold of
+//! secret with `picomint-node-cli onchain sweep`. A threshold of
 //! those secrets interpolates into the secret key of the mint's current
 //! UTXO, whose public key is the address holding the funds. The tool looks
 //! that address up in the UTXO set of the operator's bitcoind, drains it to
@@ -47,7 +47,7 @@ struct Cli {
     /// Defaults to bitcoind's estimate for the next three blocks
     #[arg(long)]
     fee_rate_sat_per_vb: Option<u64>,
-    /// A node's sweep secret from `picomint-node-cli module onchain sweep`; repeat once per node
+    /// A node's sweep secret from `picomint-node-cli onchain sweep`; repeat once per node
     #[arg(long, required = true)]
     secret: Vec<String>,
 }
@@ -210,7 +210,7 @@ async fn main() -> anyhow::Result<()> {
             estimate
                 .feerate
                 .map(|btc_per_kvb| (btc_per_kvb * 100_000.0).ceil() as u64)
-                .context("bitcoind has no fee estimate yet; pass --fee-rate")?
+                .context("bitcoind has no fee estimate yet; pass --fee-rate-sat-per-vb")?
                 .max(1)
         }
     };

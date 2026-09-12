@@ -67,7 +67,7 @@ impl ConsensusApi {
 
     /// Read this node's announced expiry status from the local
     /// `ExpiryStatus` table. Returned over the wire by the
-    /// `ExpiryStatus` RPC and by `status`.
+    /// `ExpiryStatus` RPC and by `expiry status`.
     #[must_use]
     pub fn expiry_status(&self) -> Option<ExpiryStatus> {
         self.server.db.begin_read().get(&ExpiryStatusTable, &())
