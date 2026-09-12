@@ -54,6 +54,11 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     cfg.validate_config()?;
 
+    anyhow::ensure!(
+        cfg.consensus.network != bitcoin::Network::Bitcoin,
+        "Picomint is experimental software and refuses to run a mint on mainnet"
+    );
+
     let btc_rpc = BitcoindRpcMonitor::new(
         btc_rpc,
         if settings.integration_test {

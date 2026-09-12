@@ -271,6 +271,11 @@ impl SetupApi {
             .await
             .context("Failed to determine the network from the bitcoin backend")?;
 
+        ensure!(
+            network != bitcoin::Network::Bitcoin,
+            "Picomint is experimental software and refuses to run a mint on mainnet"
+        );
+
         let params = DkgParams {
             identity: NodeId::from(our_id as u8),
             iroh_sk: init_params.iroh_sk,
