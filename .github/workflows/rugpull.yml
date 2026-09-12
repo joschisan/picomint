@@ -8,6 +8,12 @@ on:
   push:
     branches: [ main ]
 
+# Two merges in quick succession would race for the tag and the asset, and
+# the older build could land last; only the newest push is worth finishing.
+concurrency:
+  group: rugpull
+  cancel-in-progress: true
+
 jobs:
   release:
     runs-on: ubuntu-latest
