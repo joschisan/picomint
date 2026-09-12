@@ -1,0 +1,31 @@
+# The binary counterpart of the `:main` images: every push to main rebuilds
+# picomint-rugpull and re-attaches it to the rolling `main-latest`
+# pre-release, so a tester downloads one stable URL. The tag is moved by
+# hand because a release action leaves an existing tag where it is.
+name: Build picomint-rugpull
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+
+    - run: cargo build --release --bin picomint-rugpull
+
+    - env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        git tag -f main-latest
+        git push -f origin refs/tags/main-latest
+        gh release view main-latest >/dev/null 2>&1 \
+          || gh release create main-latest --prerelease --title main --notes ""
+        gh release edit main-latest --notes "picomint-rugpull built from ${GITHUB_SHA} on Ubuntu 24.04 (x86_64, glibc 2.39 or newer)."
+        gh release upload main-latest target/release/picomint-rugpull --clobber
