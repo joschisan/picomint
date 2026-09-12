@@ -70,12 +70,12 @@ fn wrong_phase(phase: &'static str) -> impl Fn() -> std::future::Ready<CliError>
 pub fn router(api: Arc<ConsensusApi>) -> Router {
     use picomint_core::expiry::ExpiryStatus;
     use picomint_node_cli_core::{
-        ExpirySetRequest, INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse,
+        ExpirySetRequest, HistoryResponse, INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse,
         LightningGatewayAddRequest, LightningGatewayInfo, LightningGatewayListResponse,
-        LightningGatewayRemoveRequest, OnchainStatusResponse, PendingTxsResponse, ROUTE_BACKUP,
+        LightningGatewayRemoveRequest, OnchainStatusResponse, PendingResponse, ROUTE_BACKUP,
         ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD,
-        ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_PENDING_TXS,
-        ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, ROUTE_ONCHAIN_TXS, SweepResponse, TxsResponse,
+        ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY,
+        ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, SweepResponse,
     };
 
     async fn backup(
@@ -138,18 +138,18 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         }))
     }
 
-    async fn onchain_pending_txs(
+    async fn onchain_pending(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<PendingTxsResponse>, CliError> {
-        Ok(Json(PendingTxsResponse {
+    ) -> Result<Json<PendingResponse>, CliError> {
+        Ok(Json(PendingResponse {
             txs: onchain::pending_tx_chain(&api.server.db.begin_read()),
         }))
     }
 
-    async fn onchain_txs(
+    async fn onchain_history(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<TxsResponse>, CliError> {
-        Ok(Json(TxsResponse {
+    ) -> Result<Json<HistoryResponse>, CliError> {
+        Ok(Json(HistoryResponse {
             txs: onchain::tx_chain(&api.server.db.begin_read()),
         }))
     }
@@ -212,8 +212,8 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         .route(ROUTE_INVITE, post(invite))
         .route(ROUTE_BACKUP, post(backup))
         .route(ROUTE_ONCHAIN_STATUS, post(onchain_status))
-        .route(ROUTE_ONCHAIN_PENDING_TXS, post(onchain_pending_txs))
-        .route(ROUTE_ONCHAIN_TXS, post(onchain_txs))
+        .route(ROUTE_ONCHAIN_PENDING, post(onchain_pending))
+        .route(ROUTE_ONCHAIN_HISTORY, post(onchain_history))
         .route(ROUTE_ONCHAIN_SWEEP, post(onchain_sweep))
         .route(ROUTE_GATEWAY_ADD, post(lightning_gateway_add))
         .route(ROUTE_GATEWAY_REMOVE, post(lightning_gateway_remove))

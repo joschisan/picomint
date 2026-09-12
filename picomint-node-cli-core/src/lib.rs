@@ -26,8 +26,8 @@ pub const ROUTE_EXPIRY_STATUS: &str = "/expiry/status";
 
 // Module routes
 pub const ROUTE_ONCHAIN_STATUS: &str = "/onchain/status";
-pub const ROUTE_ONCHAIN_PENDING_TXS: &str = "/onchain/pending-txs";
-pub const ROUTE_ONCHAIN_TXS: &str = "/onchain/txs";
+pub const ROUTE_ONCHAIN_PENDING: &str = "/onchain/pending";
+pub const ROUTE_ONCHAIN_HISTORY: &str = "/onchain/history";
 pub const ROUTE_ONCHAIN_SWEEP: &str = "/onchain/sweep";
 pub const ROUTE_GATEWAY_ADD: &str = "/gateway/add";
 pub const ROUTE_GATEWAY_REMOVE: &str = "/gateway/remove";
@@ -148,7 +148,7 @@ pub struct InviteResponse {
 // --- /onchain/status ---
 
 /// The mint wallet at a glance. `tx_tip` is `None` until the first deposit
-/// has established the wallet; `onchain pending-txs` lists what is in flight.
+/// has established the wallet; `onchain pending` lists what is in flight.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OnchainStatusResponse {
     pub total_value_sat: u64,
@@ -180,17 +180,17 @@ pub struct BitcoinConnectionResponse {
     pub sync_progress: Option<f64>,
 }
 
-// --- /onchain/pending-txs ---
+// --- /onchain/pending ---
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PendingTxsResponse {
+pub struct PendingResponse {
     pub txs: Vec<TxInfo>,
 }
 
-// --- /onchain/txs ---
+// --- /onchain/history ---
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TxsResponse {
+pub struct HistoryResponse {
     pub txs: Vec<TxInfo>,
 }
 

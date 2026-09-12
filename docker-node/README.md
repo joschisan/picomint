@@ -98,8 +98,8 @@ picomint-node-cli onchain status
 The mint transactions still waiting for confirmation, and the wallet's whole transaction history, are their own commands:
 
 ```bash
-picomint-node-cli onchain pending-txs
-picomint-node-cli onchain txs
+picomint-node-cli onchain pending
+picomint-node-cli onchain history
 ```
 
 Every other command belongs to exactly one phase; called in the wrong one it says so and points back here.
@@ -196,7 +196,7 @@ picomint-node-cli expiry set --timestamp <unix-seconds> [--successor <invite>]
 
 Only once the mint has expired and its last onchain transaction has confirmed are the remaining funds swept with `picomint-sweep`, a standalone Linux binary published with every release. It is not part of any image: it runs on an operator's machine, against that operator's bitcoind, with nothing but the secrets below.
 
-Every node exports its sweep secret, which is bound to the mint's current UTXO. Check first that `onchain status` reports the same `tx_tip` on every node and `onchain pending-txs` is empty everywhere, then:
+Every node exports its sweep secret, which is bound to the mint's current UTXO. Check first that `onchain status` reports the same `tx_tip` on every node and `onchain pending` is empty everywhere, then:
 
 ```bash
 picomint-node-cli onchain sweep

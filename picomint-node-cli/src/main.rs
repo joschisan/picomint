@@ -6,8 +6,8 @@ use picomint_cli_client::{print_json, request};
 use picomint_node_cli_core::{
     ExpirySetRequest, InviteRequest, LightningGatewayAddRequest, LightningGatewayRemoveRequest,
     ROUTE_BACKUP, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD,
-    ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_PENDING_TXS,
-    ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, ROUTE_ONCHAIN_TXS, ROUTE_SETUP_ADD,
+    ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY,
+    ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, ROUTE_SETUP_ADD,
     ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE, ROUTE_STATUS,
     SetupAddRequest, SetupInitRequest,
 };
@@ -77,9 +77,9 @@ enum OnchainCommands {
     /// The mint wallet at a glance: value, transaction tip and count, consensus fee rate
     Status,
     /// Mint transactions broadcast but not yet confirmed
-    PendingTxs,
+    Pending,
     /// The mint's whole transaction history
-    Txs,
+    History,
     /// This node's sweep secret; run only once the mint has expired (secret)
     Sweep,
 }
@@ -123,8 +123,8 @@ async fn main() -> Result<()> {
 
         Commands::Onchain(cmd) => match cmd {
             OnchainCommands::Status => request(d, ROUTE_ONCHAIN_STATUS, ()).await?,
-            OnchainCommands::PendingTxs => request(d, ROUTE_ONCHAIN_PENDING_TXS, ()).await?,
-            OnchainCommands::Txs => request(d, ROUTE_ONCHAIN_TXS, ()).await?,
+            OnchainCommands::Pending => request(d, ROUTE_ONCHAIN_PENDING, ()).await?,
+            OnchainCommands::History => request(d, ROUTE_ONCHAIN_HISTORY, ()).await?,
             OnchainCommands::Sweep => request(d, ROUTE_ONCHAIN_SWEEP, ()).await?,
         },
 

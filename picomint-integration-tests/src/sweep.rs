@@ -32,7 +32,7 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
                 .iter()
                 .map(|data_dir| {
                     ensure!(
-                        cli::node_onchain_pending_txs(data_dir)?.txs.is_empty(),
+                        cli::node_onchain_pending(data_dir)?.txs.is_empty(),
                         "mint txs still pending"
                     );
                     Ok(cli::node_onchain_status(data_dir)?.tx_tip)
