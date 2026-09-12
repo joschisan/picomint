@@ -92,7 +92,7 @@ For the gateway to actually route payments on behalf of a mint, its nodes also n
 
 ## Manage Mint Liquidity
 
-Every command below takes the mint id as its first argument. Commands that move or read funds also name the account, one of `primary`, `secondary`, `tertiary`, `quaternary` or `quinary`. Payments are always routed from `primary`; funds in any other account sit outside the routing pool, which is how an operator keeps a reserve the payment flow can't touch.
+Every command below takes the mint id as its first argument. Commands that move or read funds also name the account, one of `primary`, `secondary`, `tertiary`, `quaternary` or `quinary`. Payments are always routed from `primary`; funds in any other account sit outside the routing pool, which is how an operator keeps a reserve the payment flow can't touch. Amounts carry their denomination, so quote them: `"1000 sat"` or `"0.001 BTC"`.
 
 The gateway holds its own ecash balance in every mint it has added. Check it with:
 
@@ -117,7 +117,7 @@ picomint-gateway-cli client onchain send-fee <mint-id>
 Then send:
 
 ```bash
-picomint-gateway-cli client onchain send <mint-id> <account> <address> <amount>
+picomint-gateway-cli client onchain send <mint-id> <account> <address> "<amount>"
 ```
 
 To empty the account instead, `client onchain send-max <mint-id> <account> <address>` sends everything minus the fee.
@@ -127,7 +127,7 @@ Passing `--fee <amount>` overrides the feerate with an exact value; otherwise wh
 **Send Ecash:** spend part of the mint balance as a base32-encoded ecash string you can hand to another client:
 
 ```bash
-picomint-gateway-cli client ecash send <mint-id> <account> <amount>
+picomint-gateway-cli client ecash send <mint-id> <account> "<amount>"
 ```
 
 `client ecash send-max <mint-id> <account>` hands out the whole balance as one string.
