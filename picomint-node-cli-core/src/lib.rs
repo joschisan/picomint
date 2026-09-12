@@ -232,14 +232,12 @@ pub struct TxsResponse {
 
 // --- /module/onchain/sweep ---
 
-/// Recovery material for sweeping the mint wallet after decommissioning:
-/// the aggregate public key and this node's secret key share, both tweaked
-/// for the current mint UTXO, as hex. A threshold of nodes' shares
-/// interpolates into the UTXO's key. Secret.
+/// This node's base32 [`picomint_core::onchain::SweepSecret`] for the current
+/// mint UTXO. A threshold of nodes' codes sweeps the wallet after
+/// decommissioning. Secret.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SweepResponse {
-    pub aggregate_public_key: String,
-    pub secret_key_share: String,
+    pub sweep_secret: String,
 }
 
 // --- /module/lightning/gateway/* ---

@@ -156,16 +156,15 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
     async fn onchain_sweep(
         State(api): State<Arc<ConsensusApi>>,
     ) -> Result<Json<SweepResponse>, CliError> {
-        let keys =
-            onchain::restore_keys(&api.server, &api.server.db.begin_read()).ok_or(CliError {
+        let code =
+            onchain::sweep_secret(&api.server, &api.server.db.begin_read()).ok_or(CliError {
                 code: StatusCode::SERVICE_UNAVAILABLE,
                 error: "The mint wallet has not received funds yet, so there is nothing to sweep"
                     .to_string(),
             })?;
 
         Ok(Json(SweepResponse {
-            aggregate_public_key: keys.0,
-            secret_key_share: keys.1,
+            sweep_secret: picomint_base32::encode(&code),
         }))
     }
 

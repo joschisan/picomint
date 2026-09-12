@@ -27,7 +27,7 @@ pub fn render(
     dbtx: &ReadTx,
     expiry_status: Option<&ExpiryStatus>,
 ) -> Markup {
-    let restore_keys = onchain::restore_keys(server, dbtx);
+    let sweep_secret = onchain::sweep_secret(server, dbtx);
 
     html! {
         // `autofocus` on the <dialog> itself makes showModal() focus the
@@ -78,7 +78,7 @@ pub fn render(
                         ))
                     }
                 }
-                @if restore_keys.is_some() {
+                @if sweep_secret.is_some() {
                     (action_item(
                         "Sweep Wallet",
                         "Sweep remaining funds after expiry.",
@@ -99,7 +99,7 @@ pub fn render(
             }
         }
 
-        @if let Some((tweaked_agg_pk, tweaked_sks)) = &restore_keys {
+        @if let Some(code) = &sweep_secret {
             dialog id="sweep-modal" autofocus {
                 (modal_header("Sweep Wallet"))
                 div class="modal-body" {
@@ -110,13 +110,8 @@ pub fn render(
                     }
 
                     div class="field" {
-                        span class="field-label" { "Aggregate Public Key (hex)" }
-                        (copiable_text(tweaked_agg_pk))
-                    }
-
-                    div class="field" {
-                        span class="field-label" { "Your Secret Key Share (hex)" }
-                        (copiable_text(tweaked_sks))
+                        span class="field-label" { "Your Sweep Secret" }
+                        (copiable_text(&picomint_base32::encode(code)))
                     }
                 }
             }
