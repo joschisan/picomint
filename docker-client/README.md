@@ -115,7 +115,7 @@ To empty the account instead, `onchain send-max <mint> <account> <address>` send
 Lightning payments go through the gateways the mint recommends. The daemon fetches that list and probes every gateway when a mint is added; list the ones that answered, keyed by their `gateway_pk`, with the fees each charges:
 
 ```bash
-picomint-client-cli lightning gateways <mint>
+picomint-client-cli lightning gateway list <mint>
 ```
 
 ```json
@@ -134,7 +134,7 @@ picomint-client-cli lightning gateways <mint>
 Fees are in msat plus parts per million of the amount. Every send and receive names the gateway it goes through, so the fee you read here is the fee you pay: the list only changes when you refresh it, which re-fetches the mint's recommendations and re-probes every gateway:
 
 ```bash
-picomint-client-cli lightning refresh <mint>
+picomint-client-cli lightning gateway refresh <mint>
 ```
 
 **Pay an invoice:** returns the operation id. The outcome lands in the analytics as `lightning_send_success` with the preimage, or `lightning_send_refund` if the gateway could not route it:

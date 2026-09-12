@@ -6,15 +6,16 @@ use picomint_cli_client::{print_json, request};
 use picomint_client_cli_core::{
     ClientAddRequest, ClientBalanceRequest, ClientConfigRequest, ClientEcashCountRequest,
     ClientEcashReceiveRequest, ClientEcashSendMaxRequest, ClientEcashSendRequest,
-    ClientLightningGatewaysRequest, ClientLightningLnurlRequest, ClientLightningReceiveRequest,
-    ClientLightningRefreshRequest, ClientLightningSendMaxRequest, ClientLightningSendRequest,
-    ClientOnchainReceiveRequest, ClientOnchainSendFeeRequest, ClientOnchainSendMaxRequest,
-    ClientOnchainSendRequest, ClientRemoveRequest, QueryRequest, ROUTE_ADD, ROUTE_BALANCE,
-    ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX,
-    ROUTE_LIGHTNING_GATEWAYS, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
-    ROUTE_LIGHTNING_REFRESH, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST,
-    ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE,
-    ROUTE_ONCHAIN_SEND_MAX, ROUTE_QUERY, ROUTE_REMOVE,
+    ClientLightningGatewayListRequest, ClientLightningGatewayRefreshRequest,
+    ClientLightningLnurlRequest, ClientLightningReceiveRequest, ClientLightningSendMaxRequest,
+    ClientLightningSendRequest, ClientOnchainReceiveRequest, ClientOnchainSendFeeRequest,
+    ClientOnchainSendMaxRequest, ClientOnchainSendRequest, ClientRemoveRequest, QueryRequest,
+    ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE,
+    ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_LIGHTNING_GATEWAY_LIST,
+    ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
+    ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST, ROUTE_MNEMONIC,
+    ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX,
+    ROUTE_QUERY, ROUTE_REMOVE,
 };
 
 #[derive(Parser)]
@@ -82,8 +83,9 @@ enum OnchainCommands {
 
 #[derive(Subcommand)]
 enum LightningCommands {
-    /// The gateways the mint recommends that answered a probe, keyed by pk, with their fees
-    Gateways(ClientLightningGatewaysRequest),
+    /// The gateways the mint recommends, probed for their fees
+    #[command(subcommand)]
+    Gateway(LightningGatewayCommands),
     /// Pay a bolt11 invoice through a gateway
     Send(ClientLightningSendRequest),
     /// Empty an account to an lnurl
@@ -92,8 +94,14 @@ enum LightningCommands {
     Receive(ClientLightningReceiveRequest),
     /// Generate a shareable lnurl served by an lnurl daemon
     Lnurl(ClientLightningLnurlRequest),
+}
+
+#[derive(Subcommand)]
+enum LightningGatewayCommands {
+    /// The gateways that answered a probe, keyed by pk, with their fees
+    List(ClientLightningGatewayListRequest),
     /// Re-fetch the mint's gateway list and re-probe every gateway
-    Refresh(ClientLightningRefreshRequest),
+    Refresh(ClientLightningGatewayRefreshRequest),
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -122,12 +130,18 @@ async fn main() -> Result<()> {
             OnchainCommands::Receive(req) => request(d, ROUTE_ONCHAIN_RECEIVE, req).await?,
         },
         Commands::Lightning(cmd) => match cmd {
-            LightningCommands::Gateways(req) => request(d, ROUTE_LIGHTNING_GATEWAYS, req).await?,
+            LightningCommands::Gateway(cmd) => match cmd {
+                LightningGatewayCommands::List(req) => {
+                    request(d, ROUTE_LIGHTNING_GATEWAY_LIST, req).await?
+                }
+                LightningGatewayCommands::Refresh(req) => {
+                    request(d, ROUTE_LIGHTNING_GATEWAY_REFRESH, req).await?
+                }
+            },
             LightningCommands::Send(req) => request(d, ROUTE_LIGHTNING_SEND, req).await?,
             LightningCommands::SendMax(req) => request(d, ROUTE_LIGHTNING_SEND_MAX, req).await?,
             LightningCommands::Receive(req) => request(d, ROUTE_LIGHTNING_RECEIVE, req).await?,
             LightningCommands::Lnurl(req) => request(d, ROUTE_LIGHTNING_LNURL, req).await?,
-            LightningCommands::Refresh(req) => request(d, ROUTE_LIGHTNING_REFRESH, req).await?,
         },
     };
 
