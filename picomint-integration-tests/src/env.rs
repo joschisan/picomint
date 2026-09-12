@@ -46,15 +46,6 @@ pub const GW_LN_PORT: u16 = 9735;
 pub const TEST_LDK_PORT: u16 = 9736;
 pub const LNURL_DAEMON_PORT: u16 = 28176;
 
-/// Integrator's cut every test client charges itself, in parts per million.
-///
-/// Non-zero so the whole suite runs against a client that pays a cut on
-/// every transaction it builds — the fee outputs, their counters and their
-/// issuance ride along with each of ecash, onchain and lightning rather than needing
-/// a scenario of their own. One percent, high enough that a cut on the
-/// smallest amount the suite moves still buys a note.
-pub const CLIENT_FEE_PPM: u64 = 10_000;
-
 const BTC_RPC_USER: &str = "bitcoin";
 const BTC_RPC_PASS: &str = "bitcoin";
 

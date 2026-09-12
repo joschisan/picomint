@@ -10,7 +10,7 @@ use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use tracing::info;
 
-use crate::env::{CLIENT_FEE_PPM, TestClient, TestEnv};
+use crate::env::{TestClient, TestEnv};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -252,14 +252,12 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
         "reissue left balance out of range: {swept} vs {expected}"
     );
 
-    // The reissue pays the mint for its outputs and the integrator its
-    // cut of what moved, so the cut over the whole balance is the loosest
-    // bound that still catches fees running away.
-    let cut = Amount::from_msat(expected.msat * CLIENT_FEE_PPM / 1_000_000);
-
+    // The send and the reissue pay the mint a fee per note in and out,
+    // priced in msat, so a flat allowance hundreds of notes wide is still
+    // tight enough to catch fees running away.
     let loss = expected.checked_sub(swept).expect("swept < expected");
     ensure!(
-        loss < cut + Amount::from_sat(50),
+        loss < Amount::from_sat(50),
         "reissue lost more than expected to fees: {expected} -> {swept} (loss {loss})"
     );
 
