@@ -8,19 +8,10 @@ use picomint_core::onchain::TxInfo;
 use picomint_core::version::ConsensusVersion;
 use serde::{Deserialize, Serialize};
 
-/// Filename of the node's admin CLI Unix socket, inside `DATA_DIR`.
-/// Status of the setup flow, as reported by `/setup/status`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SetupStatus {
-    AwaitingInit,
-    SharingSetupCodes,
-}
-
 /// Served in every phase of the node's life; everything else is phase-bound.
 pub const ROUTE_STATUS: &str = "/status";
 
 // Setup routes
-pub const ROUTE_SETUP_STATUS: &str = "/setup/status";
 pub const ROUTE_SETUP_INIT: &str = "/setup/init";
 pub const ROUTE_SETUP_ADD_NODE: &str = "/setup/add-node";
 pub const ROUTE_SETUP_RESET: &str = "/setup/reset";
@@ -98,9 +89,6 @@ pub struct ConsensusPhase {
     pub bitcoin: Option<BitcoinConnectionResponse>,
     pub expiry: Option<ExpiryStatus>,
 }
-
-// --- /setup/status ---
-// Response: SetupStatus (defined above)
 
 // --- /setup/init ---
 

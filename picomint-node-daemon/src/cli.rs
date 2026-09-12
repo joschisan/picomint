@@ -9,8 +9,8 @@ use picomint_cli_server::{CliError, serve};
 use picomint_node_cli_core::{
     BitcoinConnectionResponse, ConsensusPhase, DkgPhase, NodeInfo, NodeStatus,
     ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET,
-    ROUTE_SETUP_RESTORE, ROUTE_SETUP_STATUS, ROUTE_STATUS, SetupAddNodeRequest,
-    SetupAddNodeResponse, SetupInitRequest, SetupInitResponse, SetupPhase, SetupStatus,
+    ROUTE_SETUP_RESTORE, ROUTE_STATUS, SetupAddNodeRequest, SetupAddNodeResponse, SetupInitRequest,
+    SetupInitResponse, SetupPhase,
 };
 use picomint_redb::{Database, DbRead};
 
@@ -28,7 +28,6 @@ use crate::p2p::{P2PConnectionStatus, Transport};
 pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
     let router = Router::new()
         .route(ROUTE_STATUS, post(setup_phase))
-        .route(ROUTE_SETUP_STATUS, post(setup_status))
         .route(ROUTE_SETUP_INIT, post(setup_init))
         .route(ROUTE_SETUP_ADD_NODE, post(setup_add_node))
         .route(ROUTE_SETUP_RESET, post(setup_reset))
@@ -413,17 +412,6 @@ async fn setup_reset(State(setup_api): State<Arc<SetupApi>>) -> Result<Json<()>,
     setup_api.reset_setup_codes().await;
 
     Ok(Json(()))
-}
-
-async fn setup_status(
-    State(setup_api): State<Arc<SetupApi>>,
-) -> Result<Json<SetupStatus>, CliError> {
-    let status = if setup_api.setup_code().await.is_some() {
-        SetupStatus::SharingSetupCodes
-    } else {
-        SetupStatus::AwaitingInit
-    };
-    Ok(Json(status))
 }
 
 async fn setup_init(

@@ -11,7 +11,7 @@ use picomint_node_cli_core::{
     ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_STATUS, ROUTE_MODULE_ONCHAIN_SWEEP,
     ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
     ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET,
-    ROUTE_SETUP_RESTORE, ROUTE_SETUP_STATUS, ROUTE_STATUS, SetupAddNodeRequest, SetupInitRequest,
+    ROUTE_SETUP_RESTORE, ROUTE_STATUS, SetupAddNodeRequest, SetupInitRequest,
 };
 use serde_json::Value;
 
@@ -67,8 +67,6 @@ enum ExpiryCommands {
 
 #[derive(Subcommand)]
 enum SetupCommands {
-    /// Whether this node has run `init` yet; `status` has the full picture
-    Status,
     /// Name this node and print its setup code for the other nodes
     Init(SetupInitRequest),
     /// Add a node's setup code
@@ -145,7 +143,6 @@ async fn main() -> Result<()> {
         },
 
         Commands::Setup(cmd) => match cmd {
-            SetupCommands::Status => request(d, ROUTE_SETUP_STATUS, ()).await?,
             SetupCommands::Init(req) => request(d, ROUTE_SETUP_INIT, req).await?,
             SetupCommands::AddNode(req) => request(d, ROUTE_SETUP_ADD_NODE, req).await?,
             SetupCommands::Reset => request(d, ROUTE_SETUP_RESET, ()).await?,

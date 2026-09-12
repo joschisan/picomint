@@ -382,18 +382,19 @@ async fn start_gateway(
 }
 
 async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
-    use picomint_node_cli_core::SetupStatus;
+    use picomint_node_cli_core::NodeStatus;
 
-    // Wait for all nodes to be ready (the CLI `setup status` call
-    // returns once the daemon has bound its CLI socket).
+    // Wait for all nodes to be ready (the CLI `status` call returns once
+    // the daemon has bound its CLI socket).
     for (node, data_dir) in node_data_dirs.iter().enumerate() {
-        retry(&format!("node-{node} setup status"), || async {
-            let status = cli::node_setup_status(data_dir)?;
-            ensure!(
-                status == SetupStatus::AwaitingInit,
-                "Unexpected status: {status:?}"
-            );
-            Ok(())
+        retry(&format!("node-{node} awaiting init"), || async {
+            match cli::node_status(data_dir)? {
+                NodeStatus::Setup(phase) => {
+                    ensure!(phase.setup_code.is_none(), "node already initialised");
+                    Ok(())
+                }
+                status => anyhow::bail!("Unexpected status: {status:?}"),
+            }
         })
         .await?;
     }

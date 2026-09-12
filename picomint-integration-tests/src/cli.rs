@@ -9,7 +9,7 @@ use picomint_gateway_cli_core::{
     ClientBalanceResponse, ClientListResponse, InfoResponse, LdkChannelListResponse,
     LdkLightningReceiveResponse, LdkOnchainReceiveResponse,
 };
-use picomint_node_cli_core::{InviteResponse, OnchainStatusResponse, SetupStatus, SweepResponse};
+use picomint_node_cli_core::{InviteResponse, NodeStatus, OnchainStatusResponse, SweepResponse};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -152,11 +152,8 @@ pub fn node_invite(data_dir: &Path) -> Result<InviteResponse> {
     node_cmd(data_dir).arg("invite").run_cli::<InviteResponse>()
 }
 
-pub fn node_setup_status(data_dir: &Path) -> Result<SetupStatus> {
-    node_cmd(data_dir)
-        .arg("setup")
-        .arg("status")
-        .run_cli::<SetupStatus>()
+pub fn node_status(data_dir: &Path) -> Result<NodeStatus> {
+    node_cmd(data_dir).arg("status").run_cli::<NodeStatus>()
 }
 
 pub fn node_setup_init(

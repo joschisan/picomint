@@ -1,4 +1,5 @@
 use anyhow::{Result, ensure};
+use picomint_node_cli_core::NodeStatus;
 use tracing::info;
 
 use crate::cli;
@@ -87,7 +88,12 @@ pub async fn run_test(env: &TestEnv) -> Result<()> {
         let data_dir = data_dirs[i].clone();
         retry(&format!("node-{node} in setup mode"), || {
             let data_dir = data_dir.clone();
-            async move { cli::node_setup_status(&data_dir) }
+            async move {
+                match cli::node_status(&data_dir)? {
+                    NodeStatus::Setup(_) => Ok(()),
+                    status => anyhow::bail!("node is not in setup: {status:?}"),
+                }
+            }
         })
         .await?;
     }
