@@ -112,7 +112,26 @@ To empty the account instead, `onchain send-max <mint> <account> <address>` send
 
 ## Lightning
 
-Lightning payments go through the gateways the mint recommends. The daemon fetches that list and probes every gateway when a mint is added; refresh it after the mint changes its recommendations:
+Lightning payments go through the gateways the mint recommends. The daemon fetches that list and probes every gateway when a mint is added; list the ones that answered, keyed by their `gateway_pk`, with the fees each charges:
+
+```bash
+picomint-client-cli lightning gateways <mint>
+```
+
+```json
+{
+  "gateways": {
+    "picomint1d2g4...c9d1": {
+      "module_public_key": "8f3a...b2e7",
+      "send_fee": { "base": 10000, "ppm": 3000 },
+      "receive_fee": { "base": 10000, "ppm": 1000 },
+      "expiry_delta": 500
+    }
+  }
+}
+```
+
+Fees are in msat plus parts per million of the amount. Every send and receive names the gateway it goes through, so the fee you read here is the fee you pay: the list only changes when you refresh it, which re-fetches the mint's recommendations and re-probes every gateway:
 
 ```bash
 picomint-client-cli lightning refresh <mint>
@@ -121,21 +140,21 @@ picomint-client-cli lightning refresh <mint>
 **Pay an invoice:** returns the operation id. The outcome lands in the analytics as `lightning_send_success` with the preimage, or `lightning_send_refund` if the gateway could not route it:
 
 ```bash
-picomint-client-cli lightning send <mint> <account> <invoice>
+picomint-client-cli lightning send <mint> <account> <gateway> <invoice>
 ```
 
-`lightning send-max <mint> <account> <lnurl>` empties the account to an lnurl.
+`lightning send-max <mint> <account> <gateway> <lnurl>` empties the account to an lnurl.
 
-**Create an invoice:** returns the operation id and the invoice. The payment lands in the analytics as `lightning_receive` once the gateway has funded it:
+**Create an invoice:** returns the invoice and the operation id. The payment lands in the analytics as `lightning_receive` once the gateway has funded it:
 
 ```bash
-picomint-client-cli lightning receive <mint> <account> "<amount>"
+picomint-client-cli lightning receive <mint> <account> <gateway> "<amount>"
 ```
 
 ```json
 {
-  "operation": "3f9c...4a5b",
-  "invoice": "lnbc10u1p5..."
+  "invoice": "lnbc10u1p5...",
+  "operation": "3f9c...4a5b"
 }
 ```
 

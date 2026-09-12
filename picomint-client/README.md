@@ -101,7 +101,7 @@ SendEvent ── TxCreateEvent
 
 ## Lightning
 
-Both `lightning_send` and `lightning_receive` take a caller-selected gateway: a `gateway_pk: GatewayPk` (its identity in the mint's announced gateway set) and a `gateway_info: GatewayInfo` (its latest probed routing info, including all fees and the outgoing-contract expiry delta). Callers pick one via `lightning_select_gateway(mint)` and inspect the returned `gateway_info` to preview the cost before committing; `lightning_refresh_gateways(mint)` re-probes the announced set. Gateways are reached over pooled iroh connections, discovered from the mint's announced pk set — there are no gateway URLs on the client side. The library still enforces `PaymentFee::SEND_FEE_LIMIT` + `EXPIRY_DELTA_LIMIT` on sends and `PaymentFee::RECEIVE_FEE_LIMIT` on receives against the supplied `gateway_info` as a backstop against an abusive gateway.
+Both `lightning_send` and `lightning_receive` take the `gateway_pk: GatewayPk` of a gateway from `lightning_gateways(mint)`, which maps every probed gateway in the mint's announced set to its latest `GatewayInfo` (all fees and the outgoing-contract expiry delta). Callers pick one, preview the cost from its info, and pass the pk; the info only changes on `lightning_refresh_gateways(mint)`, which re-probes the announced set. Gateways are reached over pooled iroh connections, discovered from the mint's announced pk set — there are no gateway URLs on the client side. The library still enforces `PaymentFee::SEND_FEE_LIMIT` + `EXPIRY_DELTA_LIMIT` on sends and `PaymentFee::RECEIVE_FEE_LIMIT` on receives against the gateway's info as a backstop against an abusive gateway.
 
 ### `lightning_receive(mint, account, gateway_pk, gateway_info, amount)` — receive over Lightning
 

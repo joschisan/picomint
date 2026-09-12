@@ -9,18 +9,19 @@ use picomint_client_cli_core::{
     ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
     ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
     ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
-    ClientLightningLnurlRequest, ClientLightningLnurlResponse, ClientLightningReceiveRequest,
-    ClientLightningReceiveResponse, ClientLightningRefreshRequest, ClientLightningSendMaxRequest,
-    ClientLightningSendMaxResponse, ClientLightningSendRequest, ClientLightningSendResponse,
-    ClientListResponse, ClientOnchainReceiveRequest, ClientOnchainReceiveResponse,
-    ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse, ClientOnchainSendMaxRequest,
-    ClientOnchainSendMaxResponse, ClientOnchainSendRequest, ClientOnchainSendResponse,
-    ClientRemoveRequest, MintInfo, MnemonicResponse, QueryRequest, QueryResponse, ROUTE_ADD,
-    ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND,
-    ROUTE_ECASH_SEND_MAX, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE, ROUTE_LIGHTNING_REFRESH,
-    ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST, ROUTE_MNEMONIC,
-    ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX,
-    ROUTE_QUERY, ROUTE_REMOVE,
+    ClientLightningGatewaysRequest, ClientLightningGatewaysResponse, ClientLightningLnurlRequest,
+    ClientLightningLnurlResponse, ClientLightningReceiveRequest, ClientLightningReceiveResponse,
+    ClientLightningRefreshRequest, ClientLightningSendMaxRequest, ClientLightningSendMaxResponse,
+    ClientLightningSendRequest, ClientLightningSendResponse, ClientListResponse,
+    ClientOnchainReceiveRequest, ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest,
+    ClientOnchainSendFeeResponse, ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse,
+    ClientOnchainSendRequest, ClientOnchainSendResponse, ClientRemoveRequest, MintInfo,
+    MnemonicResponse, QueryRequest, QueryResponse, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG,
+    ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX,
+    ROUTE_LIGHTNING_GATEWAYS, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
+    ROUTE_LIGHTNING_REFRESH, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST,
+    ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE,
+    ROUTE_ONCHAIN_SEND_MAX, ROUTE_QUERY, ROUTE_REMOVE,
 };
 use picomint_core::Amount;
 use tracing::instrument;
@@ -46,6 +47,7 @@ pub async fn run(state: AppState) {
         .route(ROUTE_ONCHAIN_SEND, post(onchain_send))
         .route(ROUTE_ONCHAIN_SEND_MAX, post(onchain_send_max))
         .route(ROUTE_ONCHAIN_RECEIVE, post(onchain_receive))
+        .route(ROUTE_LIGHTNING_GATEWAYS, post(lightning_gateways))
         .route(ROUTE_LIGHTNING_SEND, post(lightning_send))
         .route(ROUTE_LIGHTNING_SEND_MAX, post(lightning_send_max))
         .route(ROUTE_LIGHTNING_RECEIVE, post(lightning_receive))
@@ -263,22 +265,29 @@ async fn onchain_receive(
 }
 
 #[instrument(skip_all, err)]
+async fn lightning_gateways(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientLightningGatewaysRequest>,
+) -> Result<Json<ClientLightningGatewaysResponse>, CliError> {
+    let gateways = state
+        .client
+        .lightning_gateways(payload.mint)
+        .map_err(CliError::internal)?;
+
+    Ok(Json(ClientLightningGatewaysResponse { gateways }))
+}
+
+#[instrument(skip_all, err)]
 async fn lightning_send(
     State(state): State<AppState>,
     Json(payload): Json<ClientLightningSendRequest>,
 ) -> Result<Json<ClientLightningSendResponse>, CliError> {
-    let (gateway_pk, gateway_info) = state
-        .client
-        .lightning_select_gateway(payload.mint)
-        .map_err(CliError::internal)?;
-
     let operation = state
         .client
         .lightning_send(
             payload.mint,
             payload.account,
-            gateway_pk,
-            gateway_info,
+            payload.gateway,
             payload.invoice,
         )
         .await
@@ -292,18 +301,12 @@ async fn lightning_send_max(
     State(state): State<AppState>,
     Json(payload): Json<ClientLightningSendMaxRequest>,
 ) -> Result<Json<ClientLightningSendMaxResponse>, CliError> {
-    let (gateway_pk, gateway_info) = state
-        .client
-        .lightning_select_gateway(payload.mint)
-        .map_err(CliError::internal)?;
-
     let operation = state
         .client
         .lightning_send_max(
             payload.mint,
             payload.account,
-            gateway_pk,
-            gateway_info,
+            payload.gateway,
             &payload.lnurl,
         )
         .await
@@ -317,24 +320,18 @@ async fn lightning_receive(
     State(state): State<AppState>,
     Json(payload): Json<ClientLightningReceiveRequest>,
 ) -> Result<Json<ClientLightningReceiveResponse>, CliError> {
-    let (gateway_pk, gateway_info) = state
-        .client
-        .lightning_select_gateway(payload.mint)
-        .map_err(CliError::internal)?;
-
-    let (operation, invoice) = state
+    let (invoice, operation) = state
         .client
         .lightning_receive(
             payload.mint,
             payload.account,
-            gateway_pk,
-            gateway_info,
+            payload.gateway,
             Amount::from_sat(payload.amount.to_sat()),
         )
         .await
         .map_err(CliError::internal)?;
 
-    Ok(Json(ClientLightningReceiveResponse { operation, invoice }))
+    Ok(Json(ClientLightningReceiveResponse { invoice, operation }))
 }
 
 #[instrument(skip_all, err)]

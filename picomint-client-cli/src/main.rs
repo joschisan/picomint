@@ -6,14 +6,15 @@ use picomint_cli_client::{print_json, request};
 use picomint_client_cli_core::{
     ClientAddRequest, ClientBalanceRequest, ClientConfigRequest, ClientEcashCountRequest,
     ClientEcashReceiveRequest, ClientEcashSendMaxRequest, ClientEcashSendRequest,
-    ClientLightningLnurlRequest, ClientLightningReceiveRequest, ClientLightningRefreshRequest,
-    ClientLightningSendMaxRequest, ClientLightningSendRequest, ClientOnchainReceiveRequest,
-    ClientOnchainSendFeeRequest, ClientOnchainSendMaxRequest, ClientOnchainSendRequest,
-    ClientRemoveRequest, QueryRequest, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT,
-    ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_LIGHTNING_LNURL,
-    ROUTE_LIGHTNING_RECEIVE, ROUTE_LIGHTNING_REFRESH, ROUTE_LIGHTNING_SEND,
-    ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST, ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE,
-    ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX, ROUTE_QUERY, ROUTE_REMOVE,
+    ClientLightningGatewaysRequest, ClientLightningLnurlRequest, ClientLightningReceiveRequest,
+    ClientLightningRefreshRequest, ClientLightningSendMaxRequest, ClientLightningSendRequest,
+    ClientOnchainReceiveRequest, ClientOnchainSendFeeRequest, ClientOnchainSendMaxRequest,
+    ClientOnchainSendRequest, ClientRemoveRequest, QueryRequest, ROUTE_ADD, ROUTE_BALANCE,
+    ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX,
+    ROUTE_LIGHTNING_GATEWAYS, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
+    ROUTE_LIGHTNING_REFRESH, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST,
+    ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE,
+    ROUTE_ONCHAIN_SEND_MAX, ROUTE_QUERY, ROUTE_REMOVE,
 };
 
 #[derive(Parser)]
@@ -81,7 +82,9 @@ enum OnchainCommands {
 
 #[derive(Subcommand)]
 enum LightningCommands {
-    /// Pay a bolt11 invoice
+    /// The gateways the mint recommends that answered a probe, keyed by pk, with their fees
+    Gateways(ClientLightningGatewaysRequest),
+    /// Pay a bolt11 invoice through a gateway
     Send(ClientLightningSendRequest),
     /// Empty an account to an lnurl
     SendMax(ClientLightningSendMaxRequest),
@@ -119,6 +122,7 @@ async fn main() -> Result<()> {
             OnchainCommands::Receive(req) => request(d, ROUTE_ONCHAIN_RECEIVE, req).await?,
         },
         Commands::Lightning(cmd) => match cmd {
+            LightningCommands::Gateways(req) => request(d, ROUTE_LIGHTNING_GATEWAYS, req).await?,
             LightningCommands::Send(req) => request(d, ROUTE_LIGHTNING_SEND, req).await?,
             LightningCommands::SendMax(req) => request(d, ROUTE_LIGHTNING_SEND_MAX, req).await?,
             LightningCommands::Receive(req) => request(d, ROUTE_LIGHTNING_RECEIVE, req).await?,
