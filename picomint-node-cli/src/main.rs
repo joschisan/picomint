@@ -9,8 +9,9 @@ use picomint_node_cli_core::{
     ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
     ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
     ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS,
-    ROUTE_P2P, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESTORE,
-    ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddNodeRequest, SetupInitRequest,
+    ROUTE_P2P, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET,
+    ROUTE_SETUP_RESTORE, ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddNodeRequest,
+    SetupInitRequest,
 };
 use serde_json::Value;
 
@@ -70,6 +71,8 @@ enum SetupCommands {
     Init(SetupInitRequest),
     /// Add a node's setup code
     AddNode(SetupAddNodeRequest),
+    /// Forget every added setup code and start collecting them again
+    Reset,
     /// Start distributed key generation
     StartDkg,
     /// Restore node config from a config file (skips DKG)
@@ -141,6 +144,7 @@ async fn main() -> Result<()> {
             SetupCommands::Status => request(d, ROUTE_SETUP_STATUS, ()).await?,
             SetupCommands::Init(req) => request(d, ROUTE_SETUP_INIT, req).await?,
             SetupCommands::AddNode(req) => request(d, ROUTE_SETUP_ADD_NODE, req).await?,
+            SetupCommands::Reset => request(d, ROUTE_SETUP_RESET, ()).await?,
             SetupCommands::StartDkg => request(d, ROUTE_SETUP_START_DKG, ()).await?,
             SetupCommands::Restore { path } => {
                 let bytes = std::fs::read(&path)?;

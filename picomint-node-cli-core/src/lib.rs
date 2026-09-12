@@ -16,6 +16,7 @@ pub enum SetupStatus {
 pub const ROUTE_SETUP_STATUS: &str = "/setup/status";
 pub const ROUTE_SETUP_INIT: &str = "/setup/init";
 pub const ROUTE_SETUP_ADD_NODE: &str = "/setup/add-node";
+pub const ROUTE_SETUP_RESET: &str = "/setup/reset";
 pub const ROUTE_SETUP_START_DKG: &str = "/setup/start-dkg";
 pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
 

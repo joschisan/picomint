@@ -7,9 +7,9 @@ use axum::http::StatusCode;
 use axum::routing::post;
 use picomint_cli_server::{CliError, serve};
 use picomint_node_cli_core::{
-    ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESTORE, ROUTE_SETUP_START_DKG,
-    ROUTE_SETUP_STATUS, SetupAddNodeRequest, SetupAddNodeResponse, SetupInitRequest,
-    SetupInitResponse, SetupStatus,
+    ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE,
+    ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddNodeRequest, SetupAddNodeResponse,
+    SetupInitRequest, SetupInitResponse, SetupStatus,
 };
 
 use crate::config::NodeConfig;
@@ -24,6 +24,7 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
         .route(ROUTE_SETUP_STATUS, post(setup_status))
         .route(ROUTE_SETUP_INIT, post(setup_init))
         .route(ROUTE_SETUP_ADD_NODE, post(setup_add_node))
+        .route(ROUTE_SETUP_RESET, post(setup_reset))
         .route(ROUTE_SETUP_START_DKG, post(setup_start_dkg))
         .route(ROUTE_SETUP_RESTORE, post(setup_restore))
         .with_state(setup_api);
@@ -299,6 +300,12 @@ async fn setup_add_node(
         .map_err(CliError::internal)?;
 
     Ok(Json(SetupAddNodeResponse { name }))
+}
+
+async fn setup_reset(State(setup_api): State<Arc<SetupApi>>) -> Result<Json<()>, CliError> {
+    setup_api.reset_setup_codes().await;
+
+    Ok(Json(()))
 }
 
 async fn setup_start_dkg(State(setup_api): State<Arc<SetupApi>>) -> Result<Json<()>, CliError> {
