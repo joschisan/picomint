@@ -1,11 +1,15 @@
 //! The daemon side of the admin socket: [`serve`] binds
-//! `{DATA_DIR}/cli.sock` and runs an axum router on it, and [`CliError`]
-//! is what its handlers fail with. The CLI side is `picomint-cli-client`,
-//! which spells the socket filename out too — a mismatch fails the first
-//! command.
+//! `{DATA_DIR}/cli.sock` and returns the future that runs an axum router
+//! on it, and [`CliError`] is what its handlers fail with. The CLI side is
+//! `picomint-cli-client`, which spells the socket filename out too — a
+//! mismatch fails the first command.
 
+use std::fs::remove_file;
+use std::future::Future;
+use std::os::unix::net::UnixListener as StdUnixListener;
 use std::path::Path;
 
+use anyhow::{Context, Result};
 use axum::Router;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -58,17 +62,33 @@ impl From<anyhow::Error> for CliError {
     }
 }
 
-/// Bind the admin socket at `{data_dir}/{CLI_SOCKET_FILENAME}` and
-/// serve `router` on it until the process exits. A stale socket from a
-/// previous (crashed) run is unlinked before binding.
-pub async fn serve(data_dir: &Path, router: Router) {
+/// Bind the admin socket at `{data_dir}/{CLI_SOCKET_FILENAME}` and return
+/// the future that serves `router` on it until the process exits. A stale
+/// socket from a previous (crashed) run is unlinked before binding.
+///
+/// The bind happens here, synchronously, rather than inside the returned
+/// future: a daemon spawns the future, so a failure inside it would leave
+/// the daemon running with no admin surface, whereas a failure on the
+/// daemon's main path ends the process.
+pub fn serve(data_dir: &Path, router: Router) -> Result<impl Future<Output = ()> + use<>> {
     let socket_path = data_dir.join(CLI_SOCKET_FILENAME);
 
-    std::fs::remove_file(&socket_path).ok();
+    remove_file(&socket_path).ok();
 
-    let listener = UnixListener::bind(&socket_path).expect("Failed to bind the admin socket");
+    let listener = StdUnixListener::bind(&socket_path).with_context(|| {
+        format!(
+            "Failed to bind the admin socket at {}",
+            socket_path.display()
+        )
+    })?;
 
-    axum::serve(listener, router.into_make_service())
-        .await
-        .expect("Admin socket server failed");
+    listener.set_nonblocking(true)?;
+
+    Ok(async move {
+        let listener = UnixListener::from_std(listener).expect("called within a tokio runtime");
+
+        axum::serve(listener, router.into_make_service())
+            .await
+            .expect("Admin socket server failed");
+    })
 }

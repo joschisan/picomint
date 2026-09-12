@@ -103,7 +103,7 @@ fn main() -> anyhow::Result<()> {
         analytics: Analytics::wipe_and_init(&opts.data_dir)?,
     };
 
-    runtime.spawn(cli::run(state.clone()));
+    runtime.spawn(cli::run(state.clone())?);
 
     runtime.spawn(picomint_analytics::trailer(
         state.client.clone(),

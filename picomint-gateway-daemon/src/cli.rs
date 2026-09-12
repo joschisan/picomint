@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -42,12 +43,8 @@ use tracing::{info, instrument};
 
 use crate::AppState;
 
-pub async fn run(state: AppState) {
-    let data_dir = state.data_dir.clone();
-
-    let router = router().with_state(state);
-
-    serve(&data_dir, router).await;
+pub fn run(state: AppState) -> anyhow::Result<impl Future<Output = ()>> {
+    serve(&state.data_dir.clone(), router().with_state(state))
 }
 
 fn router() -> Router<AppState> {

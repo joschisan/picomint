@@ -1,5 +1,7 @@
 //! The admin socket: one route per client call.
 
+use std::future::Future;
+
 use axum::Router;
 use axum::extract::{Json, State};
 use axum::routing::post;
@@ -29,7 +31,7 @@ use tracing::instrument;
 
 use crate::AppState;
 
-pub async fn run(state: AppState) {
+pub fn run(state: AppState) -> anyhow::Result<impl Future<Output = ()>> {
     let data_dir = state.data_dir.clone();
 
     let router = Router::new()
@@ -59,7 +61,7 @@ pub async fn run(state: AppState) {
         )
         .with_state(state);
 
-    serve(&data_dir, router).await;
+    serve(&data_dir, router)
 }
 
 #[instrument(skip_all, err)]

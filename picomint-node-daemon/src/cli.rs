@@ -1,6 +1,8 @@
-use std::path::PathBuf;
+use std::future::Future;
+use std::path::Path;
 use std::sync::Arc;
 
+use anyhow::Result;
 use axum::Router;
 use axum::extract::{Json, State};
 use axum::http::StatusCode;
@@ -21,10 +23,12 @@ use crate::consensus::db::consensus_version;
 use crate::consensus::{lightning, onchain};
 use crate::p2p::{P2PConnectionStatus, Transport};
 
-/// Setup CLI server — runs during the setup phase and is torn down when DKG starts. Binds a Unix socket at
-/// `{data_dir}/{CLI_SOCKET_FILENAME}`; a stale socket from a previous
-/// (crashed) run is unlinked before we bind.
-pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
+/// Setup CLI server — runs during the setup phase and is torn down when
+/// DKG starts.
+pub fn run_cli(
+    data_dir: &Path,
+    setup_api: Arc<SetupApi>,
+) -> Result<impl Future<Output = ()> + use<>> {
     let router = Router::new()
         .route(ROUTE_STATUS, post(setup_phase))
         .route(ROUTE_SETUP_INIT, post(setup_init))
@@ -35,19 +39,19 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
         .fallback(wrong_phase("setup"))
         .with_state(setup_api);
 
-    serve(&data_dir, router).await;
+    serve(data_dir, router)
 }
 
 /// DKG-phase CLI server — answers `status` with the setup code while key
 /// generation runs, so an operator polling the socket can tell a node in
 /// DKG from one that is down. Every other route names the phase.
-pub async fn run_dkg_cli(data_dir: PathBuf, db: Database) {
+pub fn run_dkg_cli(data_dir: &Path, db: Database) -> Result<impl Future<Output = ()> + use<>> {
     let router = Router::new()
         .route(ROUTE_STATUS, post(dkg_phase))
         .fallback(wrong_phase("dkg"))
         .with_state(db);
 
-    serve(&data_dir, router).await;
+    serve(data_dir, router)
 }
 
 /// Every route is served by exactly one phase, so a miss on the socket
@@ -316,13 +320,6 @@ async fn dkg_phase(State(db): State<Database>) -> Result<Json<NodeStatus>, CliEr
     };
 
     Ok(Json(NodeStatus::Dkg(phase)))
-}
-
-/// Consensus-phase CLI server. Binds a Unix
-/// socket at `{data_dir}/{CLI_SOCKET_FILENAME}`; a stale socket from a
-/// previous (crashed) run is unlinked before we bind.
-pub async fn run(data_dir: PathBuf, router: Router) {
-    serve(&data_dir, router).await;
 }
 
 // Setup handlers
