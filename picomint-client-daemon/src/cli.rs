@@ -10,17 +10,17 @@ use picomint_client_cli_core::{
     ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
     ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
     ClientLightningLnurlRequest, ClientLightningLnurlResponse, ClientLightningReceiveRequest,
-    ClientLightningReceiveResponse, ClientLightningRefreshGatewaysRequest,
-    ClientLightningSendMaxRequest, ClientLightningSendMaxResponse, ClientLightningSendRequest,
-    ClientLightningSendResponse, ClientListResponse, ClientOnchainReceiveRequest,
-    ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse,
-    ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse, ClientOnchainSendRequest,
-    ClientOnchainSendResponse, ClientRemoveRequest, MintInfo, MnemonicResponse, QueryRequest,
-    QueryResponse, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE,
-    ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
-    ROUTE_LIGHTNING_REFRESH_GATEWAYS, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST,
-    ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE,
-    ROUTE_ONCHAIN_SEND_MAX, ROUTE_QUERY, ROUTE_REMOVE,
+    ClientLightningReceiveResponse, ClientLightningRefreshRequest, ClientLightningSendMaxRequest,
+    ClientLightningSendMaxResponse, ClientLightningSendRequest, ClientLightningSendResponse,
+    ClientListResponse, ClientOnchainReceiveRequest, ClientOnchainReceiveResponse,
+    ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse, ClientOnchainSendMaxRequest,
+    ClientOnchainSendMaxResponse, ClientOnchainSendRequest, ClientOnchainSendResponse,
+    ClientRemoveRequest, MintInfo, MnemonicResponse, QueryRequest, QueryResponse, ROUTE_ADD,
+    ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND,
+    ROUTE_ECASH_SEND_MAX, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE, ROUTE_LIGHTNING_REFRESH,
+    ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST, ROUTE_MNEMONIC,
+    ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX,
+    ROUTE_QUERY, ROUTE_REMOVE,
 };
 use picomint_core::Amount;
 use tracing::instrument;
@@ -50,10 +50,7 @@ pub async fn run(state: AppState) {
         .route(ROUTE_LIGHTNING_SEND_MAX, post(lightning_send_max))
         .route(ROUTE_LIGHTNING_RECEIVE, post(lightning_receive))
         .route(ROUTE_LIGHTNING_LNURL, post(lightning_lnurl))
-        .route(
-            ROUTE_LIGHTNING_REFRESH_GATEWAYS,
-            post(lightning_refresh_gateways),
-        )
+        .route(ROUTE_LIGHTNING_REFRESH, post(lightning_refresh))
         .with_state(state);
 
     serve(&data_dir, router).await;
@@ -354,9 +351,9 @@ async fn lightning_lnurl(
 }
 
 #[instrument(skip_all, err)]
-async fn lightning_refresh_gateways(
+async fn lightning_refresh(
     State(state): State<AppState>,
-    Json(payload): Json<ClientLightningRefreshGatewaysRequest>,
+    Json(payload): Json<ClientLightningRefreshRequest>,
 ) -> Result<Json<()>, CliError> {
     state
         .client

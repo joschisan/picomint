@@ -6,15 +6,14 @@ use picomint_cli_client::{print_json, request};
 use picomint_client_cli_core::{
     ClientAddRequest, ClientBalanceRequest, ClientConfigRequest, ClientEcashCountRequest,
     ClientEcashReceiveRequest, ClientEcashSendMaxRequest, ClientEcashSendRequest,
-    ClientLightningLnurlRequest, ClientLightningReceiveRequest,
-    ClientLightningRefreshGatewaysRequest, ClientLightningSendMaxRequest,
-    ClientLightningSendRequest, ClientOnchainReceiveRequest, ClientOnchainSendFeeRequest,
-    ClientOnchainSendMaxRequest, ClientOnchainSendRequest, ClientRemoveRequest, QueryRequest,
-    ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE,
-    ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
-    ROUTE_LIGHTNING_REFRESH_GATEWAYS, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST,
-    ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE,
-    ROUTE_ONCHAIN_SEND_MAX, ROUTE_QUERY, ROUTE_REMOVE,
+    ClientLightningLnurlRequest, ClientLightningReceiveRequest, ClientLightningRefreshRequest,
+    ClientLightningSendMaxRequest, ClientLightningSendRequest, ClientOnchainReceiveRequest,
+    ClientOnchainSendFeeRequest, ClientOnchainSendMaxRequest, ClientOnchainSendRequest,
+    ClientRemoveRequest, QueryRequest, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT,
+    ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_LIGHTNING_LNURL,
+    ROUTE_LIGHTNING_RECEIVE, ROUTE_LIGHTNING_REFRESH, ROUTE_LIGHTNING_SEND,
+    ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST, ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE,
+    ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX, ROUTE_QUERY, ROUTE_REMOVE,
 };
 
 #[derive(Parser)]
@@ -91,7 +90,7 @@ enum LightningCommands {
     /// Generate a shareable lnurl served by an lnurl daemon
     Lnurl(ClientLightningLnurlRequest),
     /// Re-fetch the mint's gateway list and re-probe every gateway
-    RefreshGateways(ClientLightningRefreshGatewaysRequest),
+    Refresh(ClientLightningRefreshRequest),
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -124,9 +123,7 @@ async fn main() -> Result<()> {
             LightningCommands::SendMax(req) => request(d, ROUTE_LIGHTNING_SEND_MAX, req).await?,
             LightningCommands::Receive(req) => request(d, ROUTE_LIGHTNING_RECEIVE, req).await?,
             LightningCommands::Lnurl(req) => request(d, ROUTE_LIGHTNING_LNURL, req).await?,
-            LightningCommands::RefreshGateways(req) => {
-                request(d, ROUTE_LIGHTNING_REFRESH_GATEWAYS, req).await?
-            }
+            LightningCommands::Refresh(req) => request(d, ROUTE_LIGHTNING_REFRESH, req).await?,
         },
     };
 

@@ -115,7 +115,7 @@ To empty the account instead, `onchain send-max <mint> <account> <address>` send
 Lightning payments go through the gateways the mint recommends. The daemon fetches that list and probes every gateway when a mint is added; refresh it after the mint changes its recommendations:
 
 ```bash
-picomint-client-cli lightning refresh-gateways <mint>
+picomint-client-cli lightning refresh <mint>
 ```
 
 **Pay an invoice:** returns the operation id. The outcome lands in the analytics as `lightning_send_success` with the preimage, or `lightning_send_refund` if the gateway could not route it:

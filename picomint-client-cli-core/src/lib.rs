@@ -40,7 +40,7 @@ pub const ROUTE_LIGHTNING_SEND: &str = "/lightning/send";
 pub const ROUTE_LIGHTNING_SEND_MAX: &str = "/lightning/send-max";
 pub const ROUTE_LIGHTNING_RECEIVE: &str = "/lightning/receive";
 pub const ROUTE_LIGHTNING_LNURL: &str = "/lightning/lnurl";
-pub const ROUTE_LIGHTNING_REFRESH_GATEWAYS: &str = "/lightning/refresh-gateways";
+pub const ROUTE_LIGHTNING_REFRESH: &str = "/lightning/refresh";
 
 // --- /mnemonic ---
 
@@ -285,9 +285,9 @@ pub struct ClientLightningLnurlResponse {
     pub lnurl: String,
 }
 
-// --- /lightning/refresh-gateways ---
+// --- /lightning/refresh ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct ClientLightningRefreshGatewaysRequest {
+pub struct ClientLightningRefreshRequest {
     pub mint: MintId,
 }
