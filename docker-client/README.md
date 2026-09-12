@@ -132,7 +132,7 @@ picomint-client-cli lightning receive <mint> <account> "<amount>"
 
 ```json
 {
-  "operation": "3f9c1a7e2b8d4c6f5a0e9b1d2c3f4a5b",
+  "operation": "3f9c...4a5b",
   "invoice": "lnbc10u1p5..."
 }
 ```
