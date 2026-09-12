@@ -42,7 +42,7 @@ pub const ROUTE_MODULE_ONCHAIN_TOTAL_VALUE: &str = "/module/onchain/total-value"
 pub const ROUTE_MODULE_ONCHAIN_FEERATE: &str = "/module/onchain/feerate";
 pub const ROUTE_MODULE_ONCHAIN_PENDING_TXS: &str = "/module/onchain/pending-txs";
 pub const ROUTE_MODULE_ONCHAIN_TXS: &str = "/module/onchain/txs";
-pub const ROUTE_MODULE_ONCHAIN_SWEEP_KEYS: &str = "/module/onchain/sweep-keys";
+pub const ROUTE_MODULE_ONCHAIN_SWEEP: &str = "/module/onchain/sweep";
 pub const ROUTE_MODULE_LN_GATEWAY_ADD: &str = "/module/lightning/gateway/add";
 pub const ROUTE_MODULE_LN_GATEWAY_REMOVE: &str = "/module/lightning/gateway/remove";
 pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/lightning/gateway/list";
@@ -232,14 +232,14 @@ pub struct TxsResponse {
     pub txs: Vec<TxInfo>,
 }
 
-// --- /module/onchain/sweep-keys ---
+// --- /module/onchain/sweep ---
 
 /// Recovery material for sweeping the mint wallet after decommissioning:
 /// the aggregate public key and this node's secret key share, both tweaked
 /// for the current mint UTXO, as hex. A threshold of nodes' shares
 /// interpolates into the UTXO's key. Secret.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SweepKeysResponse {
+pub struct SweepResponse {
     pub aggregate_public_key: String,
     pub secret_key_share: String,
 }
