@@ -9,10 +9,10 @@
 //! same bitcoind. Secrets never leave the machine.
 
 use std::collections::BTreeMap;
-use std::str::FromStr;
 
 use anyhow::{Context, bail, ensure};
 use bitcoin::absolute::LockTime;
+use bitcoin::address::NetworkUnchecked;
 use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::hashes::Hash;
 use bitcoin::key::TapTweak;
@@ -40,13 +40,13 @@ struct Cli {
     /// Number of nodes in the mint; a threshold of their secrets is required
     nodes: usize,
     /// Address to sweep the funds to, on the network bitcoind runs
-    address: String,
+    address: Address<NetworkUnchecked>,
     /// Bitcoin Core RPC URL with embedded credentials, e.g. http://user:pass@127.0.0.1:8332
     #[arg(long, env = "BITCOIND_URL")]
     bitcoind_url: String,
-    /// Fee rate in sat/vB; defaults to bitcoind's estimate for the next three blocks
+    /// Defaults to bitcoind's estimate for the next three blocks
     #[arg(long)]
-    fee_rate: Option<u64>,
+    fee_rate_sat_per_vb: Option<u64>,
     /// A node's sweep secret from `picomint-node-cli module onchain sweep`; repeat once per node
     #[arg(long, required = true)]
     secret: Vec<String>,
@@ -180,12 +180,9 @@ async fn main() -> anyhow::Result<()> {
     let network = Network::from_core_arg(&info.chain)
         .with_context(|| format!("bitcoind runs an unknown chain {}", info.chain))?;
 
-    let destination = Address::from_str(&cli.address)
-        .context("Invalid destination address")?
-        .require_network(network)
-        .with_context(|| {
-            format!("The destination address is not for {network}, which bitcoind runs")
-        })?;
+    let destination = cli.address.require_network(network).with_context(|| {
+        format!("The destination address is not for {network}, which bitcoind runs")
+    })?;
 
     let source = Address::p2tr_tweaked(output_key, network);
 
@@ -203,7 +200,7 @@ async fn main() -> anyhow::Result<()> {
         "No confirmed funds at {source}, the address these secrets reconstruct. Every node must export its secret after the mint's last onchain transaction has confirmed, and every secret must be copied exactly"
     );
 
-    let fee_rate = match cli.fee_rate {
+    let fee_rate = match cli.fee_rate_sat_per_vb {
         Some(fee_rate) => fee_rate,
         None => {
             let estimate: EstimateSmartFee = bitcoind

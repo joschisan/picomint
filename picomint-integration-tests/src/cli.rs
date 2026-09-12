@@ -243,7 +243,7 @@ pub fn sweep(
         .arg(destination.to_string())
         .arg("--bitcoind-url")
         .arg(bitcoind_url)
-        .arg("--fee-rate")
+        .arg("--fee-rate-sat-per-vb")
         .arg("2");
     for secret in secrets {
         cmd.arg("--secret").arg(secret);
