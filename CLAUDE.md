@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitcoin — two binaries (mint node + Lightning gateway) plus a headless client daemon for load and latency work, Iroh networking, redb storage, static module set (ecash, onchain, lightning). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. See README.md for deployment.
+Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitcoin — two binaries (mint node + Lightning gateway) plus a headless client daemon for load and latency work, Iroh networking, redb storage, static module set (ecash, onchain, lightning). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. Each daemon's operator manual lives next to its Dockerfile: `docker-node/README.md`, `docker-gateway/README.md`, `docker-client/README.md`.
 
 ### Naming
 
