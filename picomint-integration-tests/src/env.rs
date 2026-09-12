@@ -58,6 +58,11 @@ pub const CLIENT_FEE_PPM: u64 = 10_000;
 const BTC_RPC_USER: &str = "bitcoin";
 const BTC_RPC_PASS: &str = "bitcoin";
 
+/// The `BITCOIND_URL` every daemon under test is pointed at.
+pub fn bitcoind_url() -> String {
+    format!("http://{BTC_RPC_USER}:{BTC_RPC_PASS}@127.0.0.1:{BTC_RPC_PORT}")
+}
+
 fn dummy_address() -> bitcoin::Address {
     "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"
         .parse::<bitcoin::Address<bitcoin::address::NetworkUnchecked>>()
@@ -324,10 +329,7 @@ async fn start_node(base: &Path, node: usize) -> anyhow::Result<Child> {
 
     let child = Command::new("target/release/picomint-node-daemon")
         .env("DATA_DIR", data_dir.to_str().unwrap())
-        .env(
-            "BITCOIND_URL",
-            format!("http://{BTC_RPC_USER}:{BTC_RPC_PASS}@127.0.0.1:{BTC_RPC_PORT}"),
-        )
+        .env("BITCOIND_URL", bitcoind_url())
         .env("P2P_ADDR", format!("127.0.0.1:{p2p_port}"))
         .env("UI_ADDR", format!("127.0.0.1:{ui_port}"))
         .env("UI_PASSWORD", "test")
@@ -372,10 +374,7 @@ async fn start_gateway(
         .env("API_ADDR", format!("0.0.0.0:{gateway_port}"))
         .env("LDK_ADDR", format!("0.0.0.0:{lightning_port}"))
         .env("NETWORK", "regtest")
-        .env(
-            "BITCOIND_URL",
-            format!("http://{BTC_RPC_USER}:{BTC_RPC_PASS}@127.0.0.1:{BTC_RPC_PORT}"),
-        )
+        .env("BITCOIND_URL", bitcoind_url())
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
         .spawn()

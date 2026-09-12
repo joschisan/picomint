@@ -5,6 +5,7 @@ mod expiry;
 mod lightning;
 mod onchain;
 mod restore;
+mod sweep;
 
 use std::sync::Arc;
 
@@ -65,6 +66,9 @@ fn main() -> anyhow::Result<()> {
 
     info!("Running node backup/restore test...");
     runtime.block_on(restore::run_test(&env))?;
+
+    info!("Running sweep test...");
+    runtime.block_on(sweep::run_test(&env))?;
 
     info!(
         total_ms = t_total.elapsed().as_millis() as u64,

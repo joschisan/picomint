@@ -9,7 +9,9 @@ use picomint_gateway_cli_core::{
     ClientBalanceResponse, ClientListResponse, InfoResponse, LdkChannelListResponse,
     LdkLightningReceiveResponse, LdkOnchainReceiveResponse,
 };
-use picomint_node_cli_core::{InviteResponse, SetupStatus};
+use picomint_node_cli_core::{
+    InviteResponse, NodeStatus, PendingTxsResponse, SetupStatus, SweepResponse,
+};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -205,6 +207,48 @@ pub fn node_config(data_dir: &Path) -> Result<Value> {
 
 pub fn node_session_count(data_dir: &Path) -> Result<u64> {
     node_cmd(data_dir).arg("session-count").run_cli::<u64>()
+}
+
+pub fn node_status(data_dir: &Path) -> Result<NodeStatus> {
+    node_cmd(data_dir).arg("status").run_cli::<NodeStatus>()
+}
+
+pub fn node_onchain_pending_txs(data_dir: &Path) -> Result<PendingTxsResponse> {
+    node_cmd(data_dir)
+        .arg("module")
+        .arg("onchain")
+        .arg("pending-txs")
+        .run_cli::<PendingTxsResponse>()
+}
+
+pub fn node_onchain_sweep(data_dir: &Path) -> Result<SweepResponse> {
+    node_cmd(data_dir)
+        .arg("module")
+        .arg("onchain")
+        .arg("sweep")
+        .run_cli::<SweepResponse>()
+}
+
+/// Runs `picomint-sweep` against the test bitcoind with the given secrets
+/// and returns its report. The fee rate is explicit because a regtest
+/// bitcoind never has an estimate.
+pub fn sweep(
+    nodes: usize,
+    destination: &bitcoin::Address,
+    bitcoind_url: &str,
+    secrets: &[String],
+) -> Result<Value> {
+    let mut cmd = Command::new("target/release/picomint-sweep");
+    cmd.arg(nodes.to_string())
+        .arg(destination.to_string())
+        .arg("--bitcoind-url")
+        .arg(bitcoind_url)
+        .arg("--fee-rate")
+        .arg("2");
+    for secret in secrets {
+        cmd.arg("--secret").arg(secret);
+    }
+    cmd.run_cli::<Value>()
 }
 
 pub fn node_lightning_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
