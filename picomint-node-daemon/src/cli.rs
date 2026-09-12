@@ -342,7 +342,7 @@ async fn consensus_phase(
         consensus_version: consensus_version(&api.server, &dbtx),
         session_count: api.session_count(),
         block_height: api.block_height(),
-        total_value_sat: mint_utxo.as_ref().map(|utxo| utxo.value.to_sat()),
+        value_in_custody_sat: mint_utxo.as_ref().map(|utxo| utxo.value.to_sat()),
         mint_utxo,
         nodes: node_infos(&api),
         bitcoin: bitcoin_status(&api),
