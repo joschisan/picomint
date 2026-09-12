@@ -163,9 +163,10 @@ picomint-node-cli module lightning gateway list
 
 ## Backup
 
-Once the setup ceremony completes, save your node's config to a file on
-your local machine and stash it somewhere safe (encrypted backup, password
-manager, paper printout):
+Once the setup ceremony completes, save your node's config to a file and
+stash it somewhere safe (encrypted backup, password manager, paper
+printout). The redirect happens on your machine, so the file lands there
+even though the command runs in the container:
 
 ```bash
 picomint-node-cli backup > backup.json
@@ -176,16 +177,10 @@ node's secret keys plus the mint's consensus config. The live
 `database.redb` is operational state (BFT sessions, block sync) which is
 reconstructed from nodes when a restored node rejoins.
 
-If your deployment is ever lost, copy the backup back into a fresh container:
+If your deployment is ever lost, feed the backup to a fresh container's `setup restore` on stdin. This is the one command that needs `docker exec` to pass stdin through, so it is spelled out in full:
 
 ```bash
-docker cp backup.json picomint-node-daemon:/tmp/backup.json
-```
-
-And run `setup restore`:
-
-```bash
-picomint-node-cli setup restore /tmp/backup.json
+docker exec -i picomint-node-daemon picomint-node-cli setup restore < backup.json
 ```
 
 ## Announce Expiry

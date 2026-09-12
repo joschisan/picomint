@@ -191,11 +191,11 @@ pub fn node_setup_confirm(data_dir: &Path) -> Result<Value> {
         .run_cli::<Value>()
 }
 
-pub fn node_setup_restore(data_dir: &Path, config_path: &Path) -> Result<Value> {
+pub fn node_setup_restore(data_dir: &Path, backup_path: &Path) -> Result<Value> {
     node_cmd(data_dir)
         .arg("setup")
         .arg("restore")
-        .arg(config_path)
+        .stdin(std::fs::File::open(backup_path)?)
         .run_cli::<Value>()
 }
 

@@ -77,11 +77,8 @@ enum SetupCommands {
     Reset,
     /// Confirm the node set; once every node has, key generation starts
     Confirm,
-    /// Restore node config from a config file (skips DKG)
-    Restore {
-        /// Path to a `backup.json` previously produced by `backup`
-        path: PathBuf,
-    },
+    /// Restore the node from a `backup.json` on stdin, skipping the ceremony
+    Restore,
 }
 
 #[derive(Subcommand)]
@@ -153,9 +150,8 @@ async fn main() -> Result<()> {
             SetupCommands::AddNode(req) => request(d, ROUTE_SETUP_ADD_NODE, req).await?,
             SetupCommands::Reset => request(d, ROUTE_SETUP_RESET, ()).await?,
             SetupCommands::Confirm => request(d, ROUTE_SETUP_CONFIRM, ()).await?,
-            SetupCommands::Restore { path } => {
-                let bytes = std::fs::read(&path)?;
-                let cfg: Value = serde_json::from_slice(&bytes)?;
+            SetupCommands::Restore => {
+                let cfg: Value = serde_json::from_reader(std::io::stdin())?;
                 request(d, ROUTE_SETUP_RESTORE, cfg).await?
             }
         },
