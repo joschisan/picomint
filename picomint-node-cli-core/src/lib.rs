@@ -237,7 +237,7 @@ pub struct TxsResponse {
 /// decommissioning. Secret.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SweepResponse {
-    pub sweep_secret: String,
+    pub secret: String,
 }
 
 // --- /module/lightning/gateway/* ---

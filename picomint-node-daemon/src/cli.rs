@@ -164,7 +164,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
             })?;
 
         Ok(Json(SweepResponse {
-            sweep_secret: picomint_base32::encode(&code),
+            secret: picomint_base32::encode(&code),
         }))
     }
 
