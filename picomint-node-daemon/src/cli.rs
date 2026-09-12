@@ -67,6 +67,13 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(req): Json<InviteRequest>,
     ) -> Result<Json<InviteResponse>, CliError> {
+        if api.block_height() == 0 {
+            return Err(CliError {
+                code: StatusCode::SERVICE_UNAVAILABLE,
+                error: "Invite codes will be available once the mint has reached consensus on a block height".to_string(),
+            });
+        }
+
         if req.expiry_days > INVITE_EXPIRY_DAYS_LIMIT {
             return Err(CliError {
                 code: StatusCode::BAD_REQUEST,
