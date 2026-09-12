@@ -138,6 +138,8 @@ async fn run_dkg_then_consensus(
     // coherent waiting screen instead of a connection error.
     let dkg_ui_handle = tokio::spawn(ui::run(settings.ui_addr, ui::dkg::router(db.clone())));
 
+    let dkg_cli_handle = tokio::spawn(cli::run_dkg_cli(settings.data_dir.clone(), db.clone()));
+
     let cfg = dkg::run(&params, connections.clone(), status_rxs.clone()).await?;
 
     store_node_config(&db, &cfg).await;
@@ -145,6 +147,10 @@ async fn run_dkg_then_consensus(
     dkg_ui_handle.abort();
 
     dkg_ui_handle.await.ok();
+
+    dkg_cli_handle.abort();
+
+    dkg_cli_handle.await.ok();
 
     info!("Starting consensus...");
 

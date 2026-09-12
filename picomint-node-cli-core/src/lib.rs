@@ -1,7 +1,10 @@
 use clap::Args;
 use picomint_core::NodeId;
+use picomint_core::config::MintId;
+use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
-use picomint_core::onchain::TxInfo;
+use picomint_core::onchain::{MintUtxo, TxInfo};
+use picomint_core::version::ConsensusVersion;
 use serde::{Deserialize, Serialize};
 
 /// Filename of the node's admin CLI Unix socket, inside `DATA_DIR`.
@@ -11,6 +14,9 @@ pub enum SetupStatus {
     AwaitingInit,
     SharingSetupCodes,
 }
+
+/// Served in every phase of the node's life; everything else is phase-bound.
+pub const ROUTE_STATUS: &str = "/status";
 
 // Setup routes
 pub const ROUTE_SETUP_STATUS: &str = "/setup/status";
@@ -40,6 +46,63 @@ pub const ROUTE_MODULE_ONCHAIN_SWEEP_KEYS: &str = "/module/onchain/sweep-keys";
 pub const ROUTE_MODULE_LN_GATEWAY_ADD: &str = "/module/lightning/gateway/add";
 pub const ROUTE_MODULE_LN_GATEWAY_REMOVE: &str = "/module/lightning/gateway/remove";
 pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/lightning/gateway/list";
+
+// --- /status ---
+
+/// Which phase the node is in, with what an operator needs at that point.
+/// The variant is the first thing to look at: every other route is served
+/// by exactly one phase.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "phase")]
+pub enum NodeStatus {
+    Setup(SetupPhase),
+    Dkg(DkgPhase),
+    Consensus(Box<ConsensusPhase>),
+}
+
+/// Setup phase: the ceremony state as this node sees it. `setup_code` is
+/// `None` until `setup init` has run; `mint_name` and `mint_size` are set
+/// once any node's setup code has carried them.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SetupPhase {
+    pub setup_code: Option<String>,
+    pub node_name: Option<String>,
+    pub mint_name: Option<String>,
+    pub mint_size: Option<u8>,
+    /// Names of the other nodes whose setup codes have been added.
+    pub nodes: Vec<String>,
+}
+
+/// DKG phase: key generation is running; nothing else can be done until it
+/// completes and the node moves to consensus.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DkgPhase {
+    pub setup_code: String,
+    pub mint_name: String,
+    pub nodes: Vec<String>,
+}
+
+/// Consensus phase: the mint is running. Everything here is public; the
+/// private keys are only ever returned by `config`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ConsensusPhase {
+    pub mint_name: String,
+    pub mint_id: MintId,
+    pub network: String,
+    pub node_id: NodeId,
+    pub node_name: String,
+    pub consensus_version: ConsensusVersion,
+    pub session_count: u32,
+    pub block_height: u32,
+    pub total_value_sat: Option<u64>,
+    /// The mint's current wallet UTXO. Its tweak is what a sweep after
+    /// decommissioning needs alongside the backup, so record it before the
+    /// last node goes down.
+    pub mint_utxo: Option<MintUtxo>,
+    pub nodes: Vec<NodeInfo>,
+    pub bitcoin: Option<BitcoinConnectionResponse>,
+    pub expiry: Option<ExpiryStatus>,
+}
 
 // --- /setup/status ---
 // Response: SetupStatus (defined above)

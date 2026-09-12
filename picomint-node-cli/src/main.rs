@@ -11,7 +11,7 @@ use picomint_node_cli_core::{
     ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_SWEEP_KEYS,
     ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
     ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE,
-    ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddNodeRequest, SetupInitRequest,
+    ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, ROUTE_STATUS, SetupAddNodeRequest, SetupInitRequest,
 };
 use serde_json::Value;
 
@@ -30,6 +30,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Which phase the node is in (setup, dkg, consensus) and what an operator needs at that point
+    Status,
     /// Setup commands (DKG)
     #[command(subcommand)]
     Setup(SetupCommands),
@@ -129,6 +131,7 @@ async fn main() -> Result<()> {
     let d = &cli.data_dir;
 
     let result = match cli.command {
+        Commands::Status => request(d, ROUTE_STATUS, ()).await?,
         Commands::Invite(req) => request(d, ROUTE_INVITE, req).await?,
         Commands::Config => request(d, ROUTE_CONFIG, ()).await?,
         Commands::SessionCount => request(d, ROUTE_SESSION_COUNT, ()).await?,
