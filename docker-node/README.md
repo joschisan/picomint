@@ -54,7 +54,43 @@ picomint-node-cli status
 
 - `Setup`: the node's own setup code once `init` has run, the mint name and size once any setup code has carried them, and the nodes added so far.
 - `Dkg`: key generation is running; the setup code, for nodes that still need it.
-- `Consensus`: the mint is up. Mint name and id, network, this node's id and name, consensus version, session count, block height, the value in custody and the mint's current UTXO, every peer's connection, the bitcoind backend, and the announced expiry if any.
+- `Consensus`: the mint is up. Mint name and id, network, this node's id and name, consensus version, session count, block height, the value in custody and the mint's current UTXO, the mint transactions still waiting for confirmation, every peer's connection, the bitcoind backend, and the announced expiry if any.
+
+On a running mint it looks like this:
+
+```json
+{
+  "phase": "Consensus",
+  "mint_name": "Bitcoin Beach",
+  "mint_id": "8046bcd8c6f1e9a2b3d4c5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081920",
+  "network": "bitcoin",
+  "node_id": 2,
+  "node_name": "carol",
+  "consensus_version": { "major": 1, "minor": 0 },
+  "session_count": 48213,
+  "block_height": 912340,
+  "total_value_sat": 183500000,
+  "mint_utxo": {
+    "value": 183500000,
+    "outpoint": { "txid": "6f1e...c3a9", "vout": 0 },
+    "tweak": "b7d2...41ee"
+  },
+  "pending_txs": [],
+  "nodes": [
+    { "id": 0, "name": "alice", "connected": true, "transport": "direct", "remote_addr": "203.0.113.7:8080", "rtt_ms": 41 },
+    { "id": 1, "name": "bob", "connected": true, "transport": "relay", "remote_addr": "relay.n0.iroh.network", "rtt_ms": 118 },
+    { "id": 3, "name": "dave", "connected": false, "transport": null, "remote_addr": null, "rtt_ms": null }
+  ],
+  "bitcoin": { "network": "bitcoin", "block_height": 912341, "fee_rate_sat_per_vb": 4, "sync_progress": 1.0 },
+  "expiry": null
+}
+```
+
+The mint's transaction history grows without bound, so it stays its own command:
+
+```bash
+picomint-node-cli module onchain txs
+```
 
 Every other command belongs to exactly one phase; called in the wrong one it says so and points back here.
 
