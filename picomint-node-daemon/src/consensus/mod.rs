@@ -103,10 +103,6 @@ pub async fn run(
         proposal_interval,
     ));
 
-    let ui_router = crate::ui::dashboard::router(consensus_api.clone());
-
-    tokio::spawn(crate::ui::run(settings.ui_addr, ui_router));
-
     let cli_router = crate::cli::router(consensus_api.clone());
 
     tokio::spawn(crate::cli::run(settings.data_dir.clone(), cli_router));

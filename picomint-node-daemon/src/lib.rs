@@ -2,7 +2,7 @@
 //!
 //! This crate hosts both the daemon library and the `picomint-node-daemon`
 //! binary (`src/main.rs`). It drives setup, DKG, consensus, and the
-//! admin UI/CLI for the fixed module set (ecash + lightning + onchain).
+//! admin CLI for the fixed module set (ecash + lightning + onchain).
 
 extern crate picomint_core;
 
@@ -11,7 +11,6 @@ pub mod cli;
 pub mod config;
 pub mod consensus;
 pub mod p2p;
-pub mod ui;
 
 use std::sync::Arc;
 
@@ -73,18 +72,11 @@ pub async fn run_server(
         return run_dkg_then_consensus(params, settings, db, bitcoin).await;
     }
 
-    info!("Starting setup UI...");
+    info!("Starting setup...");
 
     let (setup_tx, mut setup_rx) = tokio::sync::mpsc::channel(1);
 
     let setup_api = Arc::new(SetupApi::new(bitcoin.clone(), setup_tx, db.clone()));
-
-    let setup_ui_handle = tokio::spawn(ui::run(
-        settings.ui_addr,
-        ui::setup::router(setup_api.clone()),
-    ));
-
-    info!("Setup UI running at http://{} 🚀", settings.ui_addr);
 
     let setup_cli_handle = tokio::spawn(cli::run_cli(settings.data_dir.clone(), setup_api.clone()));
 
@@ -93,13 +85,9 @@ pub async fn run_server(
         .await
         .expect("Setup result receiver closed unexpectedly");
 
-    // Tear down the setup UI/CLI listeners before the DKG phase rebinds
-    // the same TCP port and Unix socket. Aborting drops the listener at
-    // the next await; awaiting the handle confirms the bind is released.
-    setup_ui_handle.abort();
-
-    setup_ui_handle.await.ok();
-
+    // Tear down the setup CLI listener before the DKG phase rebinds the
+    // Unix socket. Aborting drops the listener at the next await; awaiting
+    // the handle confirms the bind is released.
     setup_cli_handle.abort();
 
     setup_cli_handle.await.ok();
@@ -132,21 +120,11 @@ async fn run_dkg_then_consensus(
 
     let connections = ReconnectP2PConnections::new(params.identity, cnt, status_txs, conn_tx);
 
-    // Serve a stateless loading page on UI_ADDR while DKG runs.
-    // Operators reloading the page during DKG — or opening it
-    // for the first time after an auto-resume restart — get a
-    // coherent waiting screen instead of a connection error.
-    let dkg_ui_handle = tokio::spawn(ui::run(settings.ui_addr, ui::dkg::router(db.clone())));
-
     let dkg_cli_handle = tokio::spawn(cli::run_dkg_cli(settings.data_dir.clone(), db.clone()));
 
     let cfg = dkg::run(&params, connections.clone(), status_rxs.clone()).await?;
 
     store_node_config(&db, &cfg).await;
-
-    dkg_ui_handle.abort();
-
-    dkg_ui_handle.await.ok();
 
     dkg_cli_handle.abort();
 

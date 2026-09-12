@@ -317,7 +317,6 @@ async fn build_client(
 
 async fn start_node(base: &Path, node: usize) -> anyhow::Result<Child> {
     let p2p_port = NODE_BASE_PORT + (node as u16 * PORTS_PER_NODE);
-    let ui_port = p2p_port + 1;
 
     let data_dir = base.join(format!("node-{node}"));
     tokio::fs::create_dir_all(&data_dir).await?;
@@ -331,15 +330,13 @@ async fn start_node(base: &Path, node: usize) -> anyhow::Result<Child> {
         .env("DATA_DIR", data_dir.to_str().unwrap())
         .env("BITCOIND_URL", bitcoind_url())
         .env("P2P_ADDR", format!("127.0.0.1:{p2p_port}"))
-        .env("UI_ADDR", format!("127.0.0.1:{ui_port}"))
-        .env("UI_PASSWORD", "test")
         .env("INTEGRATION_TEST", "true")
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
         .spawn()
         .context(format!("Failed to start node-{node}"))?;
 
-    info!("Started node-{node} on port {p2p_port} (UI: http://127.0.0.1:{ui_port})");
+    info!("Started node-{node} on port {p2p_port}");
     Ok(child)
 }
 

@@ -66,7 +66,7 @@ fn wrong_phase(phase: &'static str) -> impl Fn() -> std::future::Ready<CliError>
     }
 }
 
-/// Build the Dashboard-phase CLI router that exposes the mint endpoints
+/// Build the consensus-phase CLI router that exposes the mint endpoints
 /// (invite, config, expiry, status probes) plus the
 /// lightning/onchain module-admin routes.
 pub fn router(api: Arc<ConsensusApi>) -> Router {
@@ -371,7 +371,7 @@ async fn dkg_phase(State(db): State<Database>) -> Result<Json<NodeStatus>, CliEr
     Ok(Json(NodeStatus::Dkg(phase)))
 }
 
-/// Dashboard CLI server — runs during consensus phase. Binds a Unix
+/// Consensus-phase CLI server. Binds a Unix
 /// socket at `{data_dir}/{CLI_SOCKET_FILENAME}`; a stale socket from a
 /// previous (crashed) run is unlinked before we bind.
 pub async fn run(data_dir: PathBuf, router: Router) {

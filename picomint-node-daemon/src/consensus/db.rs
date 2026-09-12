@@ -129,7 +129,7 @@ pub fn consensus_version(server: &Server, dbtx: &impl DbRead) -> ConsensusVersio
 }
 
 // This node's locally-announced expiry status. Mutated by the admin
-// dashboard; read by [`crate::consensus::rpc::expiry_status`] and
+// CLI; read by [`crate::consensus::rpc::expiry_status`] and
 // returned over the wire so a threshold of nodes must agree on the
 // byte-equal value before clients trust it.
 table!(
@@ -149,7 +149,7 @@ pub struct InviteMeta {
 }
 
 // Expiration date and user limit for each invite code this node issued,
-// keyed by invite id. Written by the dashboard / CLI create flow, read when
+// keyed by invite id. Written by the CLI create flow, read when
 // serving the config to enforce the invite code's limits.
 table!(
     InviteMetaTable,

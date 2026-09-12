@@ -62,7 +62,6 @@ async-channel = "2.5.0"
 async-stream = "0.3.6"
 async-trait = "0.1.89"
 axum = "0.8.9"
-axum-extra = "0.12.6"
 backon = { version = "1.6.0", default-features = false }
 bech32 = "0.11.1"
 bip39 = "2.2.2"
@@ -84,7 +83,6 @@ ldk-node = "0.7.0"
 lightning = "0.2.2"
 lightning-invoice = { version = "0.34.0", features = ["serde", "std"] }
 lightning-types = "0.3.1"
-maud = "0.27.0"
 picomint-analytics = { path = "./picomint-analytics", version = "=0.1.0" }
 picomint-base32 = { path = "./picomint-base32", version = "=0.1.0" }
 picomint-bft = { path = "./picomint-bft", version = "=0.1.0" }
@@ -105,7 +103,6 @@ picomint-node-daemon = { path = "./picomint-node-daemon", version = "=0.1.0" }
 picomint-redb = { path = "./picomint-redb", version = "=0.1.0" }
 picomint-rpc = { path = "./picomint-rpc", version = "=0.1.0" }
 proc-macro2 = "1.0"
-qrcode = "0.14"
 quote = "1.0"
 rand = "0.8.6"
 rand_chacha = "0.3.1"

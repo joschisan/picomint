@@ -22,8 +22,7 @@ default = []
 anyhow = { workspace = true }
 async-channel = { workspace = true }
 async-trait = { workspace = true }
-axum = { workspace = true, features = ["macros", "multipart"] }
-axum-extra = { workspace = true, features = ["cookie", "form"] }
+axum = { workspace = true, features = ["macros"] }
 bitcoin = { workspace = true }
 bls12_381 = { workspace = true }
 chrono = { workspace = true }
@@ -33,7 +32,6 @@ group = { workspace = true }
 iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false, features = ["key"] }
 iroh-mdns-address-lookup = { workspace = true }
-maud = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-bft = { workspace = true }
 picomint-cli-server = { workspace = true }
@@ -42,7 +40,6 @@ picomint-encoding = { workspace = true }
 picomint-node-cli-core = { workspace = true }
 picomint-redb = { workspace = true }
 picomint-rpc = { workspace = true }
-qrcode = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
 secp256k1 = { workspace = true }

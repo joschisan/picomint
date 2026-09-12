@@ -37,12 +37,6 @@ struct ServerOpts {
     #[arg(long = "p2p-addr", env = "P2P_ADDR", default_value = "0.0.0.0:8080")]
     p2p_addr: SocketAddr,
 
-    /// Listen address for the Web UI. The UI is unauthenticated; bind it
-    /// to loopback (the default) or expose it via SSH tunnel / VPN. See
-    /// README.md.
-    #[arg(long = "ui-addr", env = "UI_ADDR", default_value = "127.0.0.1:3000")]
-    ui_addr: SocketAddr,
-
     /// Shorten the polling intervals that pace an idle mint, so the
     /// integration test reaches session cuts in seconds. Consensus values
     /// are untouched: the test runs the same sessions as mainnet.
@@ -78,7 +72,6 @@ async fn main() -> anyhow::Result<()> {
 
     let settings = DaemonSettings {
         p2p_addr: server_opts.p2p_addr,
-        ui_addr: server_opts.ui_addr,
         data_dir: server_opts.data_dir,
         integration_test: server_opts.integration_test,
     };

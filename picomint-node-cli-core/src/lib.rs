@@ -26,7 +26,7 @@ pub const ROUTE_SETUP_RESET: &str = "/setup/reset";
 pub const ROUTE_SETUP_START_DKG: &str = "/setup/start-dkg";
 pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
 
-// Dashboard routes
+// Consensus routes
 pub const ROUTE_INVITE: &str = "/invite";
 pub const ROUTE_CONFIG: &str = "/config";
 pub const ROUTE_SESSION_COUNT: &str = "/session-count";
