@@ -10,18 +10,20 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tss::{AggregatePublicKey, SecretKeyShare};
 
+use crate::NodeId;
+
 pub mod config;
 pub mod methods;
 
 /// Recovery material for sweeping the mint wallet after decommissioning:
-/// the aggregate public key and one node's secret key share, both tweaked
-/// for the current mint UTXO. Additive tweaks commute with Lagrange
-/// interpolation, so an offline tool interpolates a threshold of these
-/// into the UTXO's key, checks it against the aggregate and sweeps with a
-/// single-key taproot wallet. Travels as one base32 code, and is secret.
+/// one node's secret key share tweaked for the current mint UTXO, with the
+/// node id that is its evaluation point. Additive tweaks commute with
+/// Lagrange interpolation, so an offline tool interpolates a threshold of
+/// these into the UTXO's key, whose public key is the address to sweep.
+/// Travels as one base32 code, and is secret.
 #[derive(Clone, Debug, Eq, PartialEq, Encodable, Decodable)]
 pub struct SweepSecret {
-    pub agg_pk: AggregatePublicKey,
+    pub node: NodeId,
     pub sks: SecretKeyShare,
 }
 

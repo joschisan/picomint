@@ -1055,7 +1055,7 @@ pub fn sweep_secret(server: &Server, dbtx: &impl DbRead) -> Option<SweepSecret> 
     let wallet = mint_utxo(dbtx)?;
 
     Some(SweepSecret {
-        agg_pk: tweaked_agg_pk(server, &wallet.tweak),
+        node: server.cfg.private.identity,
         sks: tweaked_sks(server, &wallet.tweak),
     })
 }
