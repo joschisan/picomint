@@ -1,6 +1,6 @@
 # Picomint - Alpha
 
-Picomint is unfinished and unaudited, and currently refuses to run a mint on mainnet.
+Picomint is unfinished and unaudited, and currently refuses to run a mint on mainnet. Nothing is stable yet: a test deployment can break with any commit.
 
 A minimal implementation of a federated Chaumian ecash mint on Bitcoin.
 
