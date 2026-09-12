@@ -367,8 +367,6 @@ async fn dkg_phase(State(db): State<Database>) -> Result<Json<NodeStatus>, CliEr
                 .get(&params.identity)
                 .expect("our node id is always in the node map"),
         ),
-        mint_name: params.name,
-        nodes: params.nodes.into_values().map(|code| code.name).collect(),
     };
 
     Ok(Json(NodeStatus::Dkg(phase)))

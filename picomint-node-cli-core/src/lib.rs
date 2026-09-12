@@ -78,8 +78,6 @@ pub struct SetupPhase {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DkgPhase {
     pub setup_code: String,
-    pub mint_name: String,
-    pub nodes: Vec<String>,
 }
 
 /// Consensus phase: the mint is running. Everything here is public; the
