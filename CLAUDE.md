@@ -25,7 +25,7 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 - `picomint-core` — shared types, encoding, wire protocol, `ConsensusConfig`, and the per-module common types for `ecash`/`onchain`/`lightning`
 - `picomint-encoding` / `picomint-derive` — `Encodable`/`Decodable` traits and derive macros
 - `picomint-bft` — BFT atomic broadcast (DAG-based, own design — not Aleph-derived)
-- `picomint-node-daemon` — mint node binary (consensus via picomint-bft); owns the concrete ecash/onchain/lightning server-side module code under `src/consensus/{ecash,onchain,lightning}/`, the bitcoind JSON-RPC client (`src/bitcoind.rs`), and the setup/dashboard web UI
+- `picomint-node-daemon` — mint node binary (consensus via picomint-bft); owns the concrete ecash/onchain/lightning server-side module code under `src/consensus/{ecash,onchain,lightning}/`, and the bitcoind JSON-RPC client (`src/bitcoind.rs`); no web UI, the admin CLI is the only operator surface
 - `picomint-cli-client` / `picomint-cli-server` — the admin socket: the CLI side (`request`, `print_json`) and the daemon side (`serve`, `CliError`); independent of each other, each spells the socket filename
 - `picomint-node-cli` / `picomint-node-cli-core` — admin CLI for the node daemon (HTTP-over-Unix-socket) + shared route/request types
 - `picomint-gateway-daemon` — Lightning gateway binary with embedded LDK node
@@ -37,6 +37,7 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 - `picomint-rpc` — iroh RPC primitives shared by client and server (pooled connections, one request per bi stream)
 - `picomint-tbs` — threshold blind signatures (BLS12-381) for ecash issuance
 - `picomint-tss` — FROST threshold Schnorr (BIP 445, BIP340 output) for the mint's taproot wallet
+- `picomint-sweep` — standalone binary that drains a decommissioned mint's wallet from a threshold of nodes' sweep secrets through the operator's bitcoind; shipped as a release binary, not in any image
 - `picomint-tpe` — threshold point encryption (BLS12-381) for lightning contract preimages
 - `picomint-fountain` — fountain-code encoder/decoder (currently unused by any other crate)
 - `picomint-lnurl-daemon` — standalone LNURL proxy daemon for receiving Lightning payments
@@ -56,7 +57,7 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 - Shared request/response types also live in the `*-cli-core` crates; daemon handlers live in `picomint-node-daemon/src/cli.rs` and `picomint-gateway-daemon/src/cli.rs`.
 
 ### Env vars
-Env var names are unprefixed (puncture-style): `DATA_DIR`, `NETWORK`, `BITCOIND_URL`, etc. No `FM_*` prefix. `*_ADDR` is the convention for listen-address vars (`P2P_ADDR`, `UI_ADDR`, `API_ADDR`, `LDK_ADDR`). Defined inline via clap `#[arg(env = "...")]`.
+Env var names are unprefixed (puncture-style): `DATA_DIR`, `NETWORK`, `BITCOIND_URL`, etc. No `FM_*` prefix. `*_ADDR` is the convention for listen-address vars (`P2P_ADDR`, `API_ADDR`, `LDK_ADDR`). Defined inline via clap `#[arg(env = "...")]`.
 
 ## Conventions
 

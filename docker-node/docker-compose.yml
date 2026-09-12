@@ -2,8 +2,8 @@
 # share one iroh endpoint (UDP), and stacking Docker's NAT on top of the
 # router's would give iroh two layers to punch through instead of one. That
 # means each service binds its own address rather than being contained by a
-# published port, so the loopback binds below are what keep the Web UI and
-# the Bitcoin RPC off the LAN.
+# published port, so the loopback bind below is what keeps the Bitcoin RPC
+# off the LAN.
 services:
   picomint-node-daemon:
     image: ghcr.io/joschisan/picomint-node-daemon:main
@@ -23,10 +23,6 @@ services:
       # The iroh endpoint must be reachable from the internet for nodes and
       # clients to talk to your node.
       - P2P_ADDR=0.0.0.0:8080
-      # Web UI — loopback only, reachable from a browser on this machine and
-      # nowhere else. Do not change this to 0.0.0.0: on the host network that
-      # puts node administration on your LAN.
-      - UI_ADDR=127.0.0.1:3000
 
   bitcoind:
     image: bitcoin/bitcoin:latest
