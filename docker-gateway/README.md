@@ -13,6 +13,8 @@ docker exec picomint-gateway-daemon picomint-gateway-cli --help
 
 The walkthroughs below use the bare `picomint-gateway-cli …` form — prefix with `docker exec picomint-gateway-daemon` to run them.
 
+One command prints a secret, and whatever an agent reads ends up in a model context and a transcript: `mnemonic` prints the seed words every fund derives from. Run it once, to write them down, and tell your agent not to run it unprompted.
+
 A first call to confirm everything is wired up:
 
 ```bash

@@ -22,6 +22,8 @@ docker exec picomint-client-daemon picomint-client-cli --help
 
 The walkthroughs below use the bare `picomint-client-cli …` form — prefix with `docker exec picomint-client-daemon` to run them. Every command prints JSON.
 
+One command prints a secret, and whatever an agent reads ends up in a model context and a transcript: `mnemonic` prints the seed words every fund derives from. Run it once, to write them down, and tell your agent not to run it unprompted.
+
 Every command takes the mint id first and, where funds move, the account next, one of `primary`, `secondary`, `tertiary`, `quaternary` or `quinary`. Amounts carry their denomination, so quote them: `"1000 sat"` or `"0.001 BTC"`.
 
 ## Add Mints

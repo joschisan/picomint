@@ -44,6 +44,8 @@ docker exec picomint-node-daemon picomint-node-cli --help
 
 The walkthroughs below use the bare `picomint-node-cli …` form — prefix with `docker exec picomint-node-daemon` to run them. Every command prints JSON.
 
+Two commands print secrets, and whatever an agent reads ends up in a model context and a transcript. `config` prints the node's private keys: always pipe it into a file, never to the terminal. `module onchain sweep` prints a share of the wallet key: run it only once the mint has expired, and never before. Tell your agent not to run either unprompted.
+
 ## Status
 
 `status` is the first thing to run against any node. It reports which phase the node is in and what matters in that phase:
@@ -198,7 +200,7 @@ picomint-node-cli expiry set --timestamp <unix-seconds> [--successor <invite>]
 
 ## Sweep
 
-Once the mint has expired and its last onchain transaction has confirmed, the remaining funds are swept with `picomint-sweep`, a standalone Linux binary published with every release. It is not part of any image: it runs on an operator's machine, against that operator's bitcoind, with nothing but the secrets below.
+Only once the mint has expired and its last onchain transaction has confirmed are the remaining funds swept with `picomint-sweep`, a standalone Linux binary published with every release. It is not part of any image: it runs on an operator's machine, against that operator's bitcoind, with nothing but the secrets below.
 
 Every node exports its sweep secret, which is bound to the mint's current UTXO. Check first that `module onchain status` reports the same `tx_tip` and no `pending_txs` on every node, then:
 
