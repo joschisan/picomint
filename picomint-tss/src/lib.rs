@@ -105,7 +105,7 @@ pub fn sign_share(
 ) -> SignatureShare {
     let (binding, group_nonce, challenge) = session_values(&msg, nonces, pk);
 
-    let lambda = lagrange_multiplier(nonces, identity);
+    let lambda = lagrange_multiplier(nonces.keys().copied(), identity);
 
     // BIP340 verifies against the even-y points for the x-only aggregate
     // nonce and public key, so we sign for their negations if necessary.
@@ -157,7 +157,7 @@ pub fn verify_signature_share(
 
     let (binding, group_nonce, challenge) = session_values(&msg, nonces, pk);
 
-    let lambda = lagrange_multiplier(nonces, node);
+    let lambda = lagrange_multiplier(nonces.keys().copied(), node);
 
     let Ok(second) = nonce.1.mul_tweak(SECP256K1, &binding) else {
         return false;
@@ -378,13 +378,38 @@ fn scalar_mod_order(mut bytes: [u8; 32]) -> Scalar {
     Scalar::from_be_bytes(bytes).expect("The value is reduced below the curve order")
 }
 
+/// Reconstructs the secret key from a threshold of key shares keyed by the
+/// node ids they were dealt to. Fewer shares than the threshold yield some
+/// other key rather than an error, since the shares alone cannot tell.
+///
+/// # Panics
+/// If shares is empty
+pub fn interpolate_secret_key(shares: &BTreeMap<u64, SecretKeyShare>) -> SecretKey {
+    shares
+        .iter()
+        .map(|(node, share)| {
+            share
+                .0
+                .mul_tweak(&key_scalar(&lagrange_multiplier(
+                    shares.keys().copied(),
+                    *node,
+                )))
+                .expect("A product of nonzero scalars is nonzero")
+        })
+        .reduce(|sum, term| {
+            sum.add_tweak(&key_scalar(&term))
+                .expect("The reconstructed key is zero with negligible probability")
+        })
+        .expect("There is at least one share")
+}
+
 /// The Lagrange multiplier at zero for the node's evaluation point in the
-/// signing set given by the keys of the nonces.
-fn lagrange_multiplier(nonces: &BTreeMap<u64, PublicNonce>, identity: u64) -> SecretKey {
+/// set of nodes.
+fn lagrange_multiplier(nodes: impl Iterator<Item = u64>, identity: u64) -> SecretKey {
     let mut numerator = key_from_u64(1);
     let mut denominator = key_from_u64(1);
 
-    for node in nonces.keys().copied().filter(|node| *node != identity) {
+    for node in nodes.filter(|node| *node != identity) {
         numerator = numerator
             .mul_tweak(&scalar_from_u64(node + 1))
             .expect("A product of nonzero scalars is nonzero");
