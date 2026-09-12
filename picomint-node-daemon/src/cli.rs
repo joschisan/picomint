@@ -343,6 +343,7 @@ async fn consensus_phase(
         block_height: api.block_height(),
         total_value_sat: mint_utxo.as_ref().map_or(0, |utxo| utxo.value.to_sat()),
         mint_utxo,
+        pending_txs: onchain::pending_tx_chain(&dbtx),
         nodes: node_infos(&api),
         bitcoin: bitcoin_status(&api),
         expiry: dbtx.get(&crate::consensus::db::ExpiryStatusTable, &()),

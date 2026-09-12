@@ -32,7 +32,10 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
             let utxos = data_dirs
                 .iter()
                 .map(|data_dir| match cli::node_status(data_dir)? {
-                    NodeStatus::Consensus(phase) => Ok(phase.mint_utxo),
+                    NodeStatus::Consensus(phase) => {
+                        ensure!(phase.pending_txs.is_empty(), "mint txs still pending");
+                        Ok(phase.mint_utxo)
+                    }
                     phase => anyhow::bail!("node is not in consensus: {phase:?}"),
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
@@ -41,13 +44,6 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
                 utxos[0].is_some() && utxos.iter().all(|utxo| *utxo == utxos[0]),
                 "nodes disagree on the mint utxo: {utxos:?}"
             );
-
-            for data_dir in &data_dirs {
-                ensure!(
-                    cli::node_onchain_pending_txs(data_dir)?.txs.is_empty(),
-                    "mint txs still pending"
-                );
-            }
 
             Ok(())
         }

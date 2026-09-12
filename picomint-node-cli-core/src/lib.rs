@@ -97,6 +97,8 @@ pub struct ConsensusPhase {
     /// decommissioning needs alongside the backup, so record it before the
     /// last node goes down.
     pub mint_utxo: Option<MintUtxo>,
+    /// Mint transactions broadcast but not yet confirmed.
+    pub pending_txs: Vec<TxInfo>,
     pub nodes: Vec<NodeInfo>,
     pub bitcoin: Option<BitcoinConnectionResponse>,
     pub expiry: Option<ExpiryStatus>,

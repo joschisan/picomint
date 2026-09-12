@@ -9,9 +9,7 @@ use picomint_gateway_cli_core::{
     ClientBalanceResponse, ClientListResponse, InfoResponse, LdkChannelListResponse,
     LdkLightningReceiveResponse, LdkOnchainReceiveResponse,
 };
-use picomint_node_cli_core::{
-    InviteResponse, NodeStatus, PendingTxsResponse, SetupStatus, SweepResponse,
-};
+use picomint_node_cli_core::{InviteResponse, NodeStatus, SetupStatus, SweepResponse};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -211,14 +209,6 @@ pub fn node_session_count(data_dir: &Path) -> Result<u64> {
 
 pub fn node_status(data_dir: &Path) -> Result<NodeStatus> {
     node_cmd(data_dir).arg("status").run_cli::<NodeStatus>()
-}
-
-pub fn node_onchain_pending_txs(data_dir: &Path) -> Result<PendingTxsResponse> {
-    node_cmd(data_dir)
-        .arg("module")
-        .arg("onchain")
-        .arg("pending-txs")
-        .run_cli::<PendingTxsResponse>()
 }
 
 pub fn node_onchain_sweep(data_dir: &Path) -> Result<SweepResponse> {
