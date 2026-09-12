@@ -1,5 +1,5 @@
 //! Decommissioning: a threshold of nodes export their sweep secrets and
-//! `picomint-sweep` drains the mint wallet to a bitcoind address.
+//! `picomint-rugpull` drains the mint wallet to a bitcoind address.
 
 use anyhow::{Context, ensure};
 use bitcoincore_rpc::RpcApi;

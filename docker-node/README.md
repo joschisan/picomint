@@ -196,7 +196,7 @@ picomint-node-cli expiry set --timestamp <unix-seconds> [--successor <invite>]
 
 ## Sweep
 
-Only once the mint has expired and its last onchain transaction has confirmed are the remaining funds swept with `picomint-sweep`, a standalone Linux binary published with every release. It is not part of any image: it runs on an operator's machine, against that operator's bitcoind, with nothing but the secrets below.
+Only once the mint has expired and its last onchain transaction has confirmed are the remaining funds swept with `picomint-rugpull`, a standalone Linux binary published with every release. It is not part of any image: it runs on an operator's machine, against that operator's bitcoind, with nothing but the secrets below.
 
 Every node exports its sweep secret, which is bound to the mint's current UTXO. Check first that `onchain status` reports the same `tx_tip` on every node and `onchain pending` is empty everywhere, then:
 
@@ -207,7 +207,7 @@ picomint-node-cli onchain sweep
 A threshold of nodes send their secrets to whoever sweeps. That operator passes the mint size, the destination address and the secrets; the tool interpolates the key, finds the UTXO in bitcoind's UTXO set, drains it to the address and broadcasts:
 
 ```bash
-picomint-sweep <nodes> <address> --bitcoind-url http://user:pass@127.0.0.1:8332 --secret <secret> --secret <secret> ...
+picomint-rugpull <nodes> <address> --bitcoind-url http://user:pass@127.0.0.1:8332 --secret <secret> --secret <secret> ...
 ```
 
 The fee rate defaults to bitcoind's estimate; `--fee-rate-sat-per-vb` overrides it. The network is whatever bitcoind runs, and the address must be for it. If the tool reports no funds at the address the secrets reconstruct, a node exported before the last transaction confirmed, or a secret was copied wrong.
