@@ -3659,7 +3659,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "picomint-sweep"
+name = "picomint-rugpull"
 version = "0.1.0"
 dependencies = [
  "anyhow",

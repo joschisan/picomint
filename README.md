@@ -17,7 +17,7 @@ What ships:
 | `ghcr.io/joschisan/picomint-node-daemon:main` | The node, with `picomint-node-cli` on its `PATH` | [Node](docker-node/README.md) |
 | `ghcr.io/joschisan/picomint-gateway-daemon:main` | The gateway, with `picomint-gateway-cli` on its `PATH` | [Gateway](docker-gateway/README.md) |
 | `ghcr.io/joschisan/picomint-client-daemon:main` | The client daemon, with `picomint-client-cli` on its `PATH` | [Client](docker-client/README.md) |
-| `picomint-sweep` | A Linux binary on the release page that drains a decommissioned mint's wallet | [Sweep](docker-node/README.md#sweep) |
+| `picomint-rugpull` | A Linux binary on the [`main-latest`](https://github.com/joschisan/picomint/releases/tag/main-latest) pre-release that drains a decommissioned mint's wallet | [Sweep](docker-node/README.md#sweep) |
 
 ## License
 

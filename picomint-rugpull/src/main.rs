@@ -91,7 +91,7 @@ impl Bitcoind {
     async fn call<T: DeserializeOwned>(&self, method: &str, params: Value) -> anyhow::Result<T> {
         let request = json!({
             "jsonrpc": "1.0",
-            "id": "picomint-sweep",
+            "id": "picomint-rugpull",
             "method": method,
             "params": params,
         });

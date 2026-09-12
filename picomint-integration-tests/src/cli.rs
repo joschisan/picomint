@@ -230,7 +230,7 @@ pub fn node_onchain_sweep(data_dir: &Path) -> Result<SweepResponse> {
         .run_cli::<SweepResponse>()
 }
 
-/// Runs `picomint-sweep` against the test bitcoind with the given secrets
+/// Runs `picomint-rugpull` against the test bitcoind with the given secrets
 /// and returns its report. The fee rate is explicit because a regtest
 /// bitcoind never has an estimate.
 pub fn sweep(
@@ -239,7 +239,7 @@ pub fn sweep(
     bitcoind_url: &str,
     secrets: &[String],
 ) -> Result<Value> {
-    let mut cmd = Command::new("target/release/picomint-sweep");
+    let mut cmd = Command::new("target/release/picomint-rugpull");
     cmd.arg(nodes.to_string())
         .arg(destination.to_string())
         .arg("--bitcoind-url")
