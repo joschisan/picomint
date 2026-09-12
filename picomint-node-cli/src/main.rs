@@ -32,22 +32,22 @@ struct Cli {
 enum Commands {
     /// Which phase the node is in (setup, dkg, consensus) and what an operator needs at that point
     Status,
-    /// Setup commands (DKG)
+    /// The setup ceremony: init, exchange setup codes, confirm
     #[command(subcommand)]
     Setup(SetupCommands),
     /// Generate a mint invite code
     Invite(InviteRequest),
     /// The node config with its private keys, for `setup restore`; always pipe it into a file
     Backup,
-    /// Number of consensus sessions this node has finalized
+    /// Number of consensus sessions this node has finalized; also in `status`
     SessionCount,
-    /// Get the mint's consensus block height
+    /// The mint's consensus block height; also in `status`
     BlockHeight,
-    /// Per-node p2p connection status
+    /// Every peer's connection; also in `status`
     P2p,
-    /// Status of the local bitcoin backend
+    /// The local bitcoin backend; also in `status`
     BitcoinConnection,
-    /// Mint expiry announcement
+    /// The mint's expiry announcement
     #[command(subcommand)]
     Expiry(ExpiryCommands),
     /// Module admin commands
@@ -57,19 +57,19 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum ExpiryCommands {
-    /// Announce a mint expiry
+    /// Announce the mint's expiry; every node must enter the same values
     Set(ExpirySetRequest),
-    /// Clear the announced expiry
+    /// Withdraw this node's announcement
     Clear,
-    /// Show the announced expiry (this node's local view)
+    /// This node's announcement; clients trust it once a threshold of nodes agree
     Status,
 }
 
 #[derive(Subcommand)]
 enum SetupCommands {
-    /// Check setup status
+    /// Whether this node has run `init` yet; `status` has the full picture
     Status,
-    /// Initialize this node and print its setup code
+    /// Name this node and print its setup code for the other nodes
     Init(SetupInitRequest),
     /// Add a node's setup code
     AddNode(SetupAddNodeRequest),
@@ -95,32 +95,32 @@ enum ModuleCommands {
 enum OnchainCommands {
     /// The mint wallet at a glance: value, transaction tip and count, consensus fee rate, pending transactions
     Status,
-    /// Get total onchain value
+    /// The value in custody in sat; also in `module onchain status`
     TotalValue,
-    /// Get consensus fee rate
+    /// The consensus fee rate in sat/vB; also in `module onchain status`
     Feerate,
-    /// Get pending transactions
+    /// Mint transactions broadcast but not yet confirmed; also in `module onchain status`
     PendingTxs,
-    /// Get transactions
+    /// The mint's whole transaction history
     Txs,
-    /// Export the tweaked keys that sweep the mint wallet after decommissioning (secret)
+    /// This node's sweep secret; run only once the mint has expired (secret)
     Sweep,
 }
 
 #[derive(Subcommand)]
 enum LightningCommands {
-    /// Gateway management
+    /// The gateways this node recommends to clients
     #[command(subcommand)]
     Gateway(LightningGatewayCommands),
 }
 
 #[derive(Subcommand)]
 enum LightningGatewayCommands {
-    /// Add a vetted gateway
+    /// Recommend a gateway; clients use it once a threshold of nodes do
     Add(LightningGatewayAddRequest),
-    /// Remove a vetted gateway
+    /// Withdraw this node's recommendation
     Remove(LightningGatewayRemoveRequest),
-    /// List vetted gateways
+    /// The gateways this node recommends
     List,
 }
 

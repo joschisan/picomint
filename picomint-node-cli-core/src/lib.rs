@@ -106,12 +106,12 @@ pub struct ConsensusPhase {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct SetupInitRequest {
-    /// Node name
+    /// This node's name, shown to the other nodes and to clients
     pub name: String,
-    /// Mint name (leader only)
+    /// The mint's name; set by exactly one node
     #[arg(long)]
     pub mint_name: Option<String>,
-    /// Mint size (leader only)
+    /// Number of nodes in the mint: 4, 7, 10, 13, 16, 19 or 22; set by the same node
     #[arg(long)]
     pub mint_size: Option<u8>,
 }
@@ -125,7 +125,7 @@ pub struct SetupInitResponse {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct SetupAddNodeRequest {
-    /// Node's setup code
+    /// Another node's setup code, as printed by its `setup init`
     pub setup_code: String,
 }
 
@@ -256,15 +256,15 @@ pub struct SweepResponse {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct LightningGatewayAddRequest {
-    /// Gateway iroh public key (base32-encoded).
+    /// The gateway's `gateway_pk`, as printed by `picomint-gateway-cli info`
     pub pk: picomint_core::lightning::gateway::GatewayPk,
-    /// Display name to identify the gateway by.
+    /// Display name to identify the gateway by
     pub name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct LightningGatewayRemoveRequest {
-    /// Gateway iroh public key (base32-encoded).
+    /// The gateway's `gateway_pk`, as printed by `picomint-gateway-cli info`
     pub pk: picomint_core::lightning::gateway::GatewayPk,
 }
 
@@ -285,10 +285,10 @@ pub struct LightningGatewayInfo {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct ExpirySetRequest {
-    /// Expiry date as a unix timestamp in seconds (midnight UTC).
+    /// Expiry date as a unix timestamp in seconds, midnight UTC
     #[arg(long)]
     pub timestamp: u64,
-    /// Optional successor-mint invite code (base32-encoded).
+    /// Invite code of the successor mint for users to migrate to
     #[arg(long)]
     pub successor: Option<InviteCode>,
 }
