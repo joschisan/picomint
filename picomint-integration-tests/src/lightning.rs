@@ -255,7 +255,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
     // (`expired = false`), not a wait-for-CLTV unilateral refund.
     {
         let gateway_pk = gateway(client)?;
-        let (invoice, _) = client
+        let invoice = client
             .client
             .lightning_receive(
                 client.mint,
@@ -362,7 +362,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
 
     {
         let gateway_pk = gateway(client)?;
-        let (invoice, receive_op) = client
+        let invoice = client
             .client
             .lightning_receive(
                 client.mint,
@@ -377,7 +377,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
         let Some((op, LightningEvent::Receive(_))) = events.next().await else {
             panic!("Expected Receive event");
         };
-        assert_eq!(op, receive_op);
+        assert_eq!(op, OperationId::from_encodable(invoice.payment_hash()));
 
         // Verify the freestanding LDK node observes the payment as successful,
         // i.e. the gateway's trailer settled the HTLC back to it via `claim_for_hash`.

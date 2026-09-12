@@ -324,7 +324,7 @@ async fn lightning_receive(
     State(state): State<AppState>,
     Json(payload): Json<ClientLightningReceiveRequest>,
 ) -> Result<Json<ClientLightningReceiveResponse>, CliError> {
-    let (invoice, operation) = state
+    let invoice = state
         .client
         .lightning_receive(
             payload.mint,
@@ -335,7 +335,7 @@ async fn lightning_receive(
         .await
         .map_err(CliError::internal)?;
 
-    Ok(Json(ClientLightningReceiveResponse { invoice, operation }))
+    Ok(Json(ClientLightningReceiveResponse { invoice }))
 }
 
 #[instrument(skip_all, err)]

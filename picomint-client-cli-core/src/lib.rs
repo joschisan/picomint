@@ -288,7 +288,6 @@ pub struct ClientLightningReceiveRequest {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClientLightningReceiveResponse {
     pub invoice: Bolt11Invoice,
-    pub operation: OperationId,
 }
 
 // --- /lightning/lnurl ---

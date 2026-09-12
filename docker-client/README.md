@@ -145,7 +145,7 @@ picomint-client-cli lightning send <mint> <account> <gateway> <invoice>
 
 `lightning send-max <mint> <account> <gateway> <lnurl>` empties the account to an lnurl.
 
-**Create an invoice:** returns the invoice and the operation id. The payment lands in the analytics as `lightning_receive` once the gateway has funded it:
+**Create an invoice:** returns the invoice. The payment lands in the analytics as `lightning_receive` once the gateway has funded it, under the operation derived from the invoice's payment hash:
 
 ```bash
 picomint-client-cli lightning receive <mint> <account> <gateway> "<amount>"
@@ -153,8 +153,7 @@ picomint-client-cli lightning receive <mint> <account> <gateway> "<amount>"
 
 ```json
 {
-  "invoice": "lnbc10u1p5...",
-  "operation": "3f9c...4a5b"
+  "invoice": "lnbc10u1p5..."
 }
 ```
 
