@@ -270,7 +270,7 @@ fn main() -> anyhow::Result<()> {
     //    process exit aborts cleanly.
     runtime.spawn(public::run(state.clone(), endpoint.clone()));
 
-    runtime.spawn(cli::run(state.clone()));
+    runtime.spawn(cli::run(state.clone())?);
 
     runtime.spawn(process_ldk_events(state.clone()));
 

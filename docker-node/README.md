@@ -219,7 +219,7 @@ The fee rate defaults to bitcoind's estimate; `--fee-rate-sat-per-vb` overrides 
 | 8080 | Iroh endpoint                | Yes             |
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `docker exec picomint-node-daemon
+network exposure, and the daemon keeps it and the data directory owner-only. Reach it with `docker exec picomint-node-daemon
 picomint-node-cli …`.
 
 ## Configuration

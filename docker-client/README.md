@@ -227,7 +227,7 @@ A self-payment loop through a gateway is a shell loop over `lightning receive` a
 |------|------------------------------|-----------------|
 | 8080 | Iroh endpoint (QUIC over UDP) | Yes, not required |
 
-The daemon only dials out through its endpoint, to mints and gateways; nothing has to reach it. The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no network exposure. Reach it with `docker exec picomint-client-daemon picomint-client-cli …`.
+The daemon only dials out through its endpoint, to mints and gateways; nothing has to reach it. The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no network exposure, and the daemon keeps it and the data directory owner-only. Reach it with `docker exec picomint-client-daemon picomint-client-cli …`.
 
 ## Configuration
 

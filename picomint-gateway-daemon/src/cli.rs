@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -38,17 +39,12 @@ use picomint_gateway_cli_core::{
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
     ROUTE_MNEMONIC, ROUTE_QUERY,
 };
-use tower_http::cors::CorsLayer;
 use tracing::{info, instrument};
 
 use crate::AppState;
 
-pub async fn run(state: AppState) {
-    let data_dir = state.data_dir.clone();
-
-    let router = router().with_state(state).layer(CorsLayer::permissive());
-
-    serve(&data_dir, router).await;
+pub fn run(state: AppState) -> anyhow::Result<impl Future<Output = ()>> {
+    serve(&state.data_dir.clone(), router().with_state(state))
 }
 
 fn router() -> Router<AppState> {
