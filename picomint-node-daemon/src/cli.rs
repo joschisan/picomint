@@ -48,8 +48,9 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
         ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
         ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
-        ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE,
-        ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT, TxsResponse,
+        ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_SWEEP_KEYS,
+        ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
+        SweepKeysResponse, TxsResponse,
     };
 
     async fn config(
@@ -157,6 +158,22 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         }))
     }
 
+    async fn onchain_sweep_keys(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<SweepKeysResponse>, CliError> {
+        let keys =
+            onchain::restore_keys(&api.server, &api.server.db.begin_read()).ok_or(CliError {
+                code: StatusCode::SERVICE_UNAVAILABLE,
+                error: "The mint wallet has not received funds yet, so there is nothing to sweep"
+                    .to_string(),
+            })?;
+
+        Ok(Json(SweepKeysResponse {
+            aggregate_public_key: keys.0,
+            secret_key_share: keys.1,
+        }))
+    }
+
     async fn onchain_feerate(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<OnchainFeerateResponse>, CliError> {
@@ -246,6 +263,7 @@ pub fn router(api: Arc<crate::consensus::api::ConsensusApi>) -> Router {
         .route(ROUTE_MODULE_ONCHAIN_FEERATE, post(onchain_feerate))
         .route(ROUTE_MODULE_ONCHAIN_PENDING_TXS, post(onchain_pending_txs))
         .route(ROUTE_MODULE_ONCHAIN_TXS, post(onchain_txs))
+        .route(ROUTE_MODULE_ONCHAIN_SWEEP_KEYS, post(onchain_sweep_keys))
         .route(ROUTE_MODULE_LN_GATEWAY_ADD, post(lightning_gateway_add))
         .route(
             ROUTE_MODULE_LN_GATEWAY_REMOVE,

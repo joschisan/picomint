@@ -8,10 +8,10 @@ use picomint_node_cli_core::{
     ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
     ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
     ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
-    ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS,
-    ROUTE_P2P, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET,
-    ROUTE_SETUP_RESTORE, ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddNodeRequest,
-    SetupInitRequest,
+    ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_SWEEP_KEYS,
+    ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
+    ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE,
+    ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, SetupAddNodeRequest, SetupInitRequest,
 };
 use serde_json::Value;
 
@@ -102,6 +102,8 @@ enum OnchainCommands {
     PendingTxs,
     /// Get transactions
     Txs,
+    /// Export the tweaked keys that sweep the mint wallet after decommissioning (secret)
+    SweepKeys,
 }
 
 #[derive(Subcommand)]
@@ -163,6 +165,9 @@ async fn main() -> Result<()> {
                     request(d, ROUTE_MODULE_ONCHAIN_PENDING_TXS, ()).await?
                 }
                 OnchainCommands::Txs => request(d, ROUTE_MODULE_ONCHAIN_TXS, ()).await?,
+                OnchainCommands::SweepKeys => {
+                    request(d, ROUTE_MODULE_ONCHAIN_SWEEP_KEYS, ()).await?
+                }
             },
             ModuleCommands::Lightning(cmd) => match cmd {
                 LightningCommands::Gateway(cmd) => match cmd {
