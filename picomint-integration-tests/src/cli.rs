@@ -202,6 +202,13 @@ pub fn node_backup(data_dir: &Path) -> Result<Value> {
     node_cmd(data_dir).arg("backup").run_cli::<Value>()
 }
 
+pub fn node_query(data_dir: &Path, sql: &str) -> Result<Vec<serde_json::Map<String, Value>>> {
+    node_cmd(data_dir)
+        .arg("query")
+        .arg(sql)
+        .run_cli::<Vec<serde_json::Map<String, Value>>>()
+}
+
 pub fn node_session_count(data_dir: &Path) -> Result<u64> {
     match node_status(data_dir)? {
         NodeStatus::Consensus(phase) => Ok(u64::from(phase.session_count)),

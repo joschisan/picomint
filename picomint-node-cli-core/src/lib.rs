@@ -23,6 +23,7 @@ pub const ROUTE_BACKUP: &str = "/backup";
 pub const ROUTE_EXPIRY_SET: &str = "/expiry/set";
 pub const ROUTE_EXPIRY_CLEAR: &str = "/expiry/clear";
 pub const ROUTE_EXPIRY_STATUS: &str = "/expiry/status";
+pub const ROUTE_QUERY: &str = "/query";
 
 // Module routes
 pub const ROUTE_ONCHAIN_STATUS: &str = "/onchain/status";
@@ -244,3 +245,16 @@ pub struct ExpirySetRequest {
     #[arg(long)]
     pub successor: Option<InviteCode>,
 }
+
+// --- /query ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct QueryRequest {
+    /// Read-only SQL run against the analytics db, e.g.
+    /// "SELECT * FROM tx ORDER BY session DESC, idx DESC LIMIT 10"
+    pub query: String,
+}
+
+/// One JSON object per row, keyed by result column name — the same shape
+/// `sqlite3 --json` prints.
+pub type QueryResponse = Vec<serde_json::Map<String, serde_json::Value>>;

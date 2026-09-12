@@ -81,7 +81,7 @@ impl Server {
         }
     }
 
-    fn input_fee(&self, input: &wire::Input) -> Amount {
+    pub fn input_fee(&self, input: &wire::Input) -> Amount {
         match input {
             wire::Input::Ecash(..) => self.cfg.consensus.ecash.input_fee,
             wire::Input::Onchain(..) => self.cfg.consensus.onchain.input_fee,
@@ -89,7 +89,7 @@ impl Server {
         }
     }
 
-    fn output_fee(&self, output: &wire::Output) -> Amount {
+    pub fn output_fee(&self, output: &wire::Output) -> Amount {
         match output {
             wire::Output::Ecash(..) => self.cfg.consensus.ecash.output_fee,
             wire::Output::Onchain(..) => self.cfg.consensus.onchain.output_fee,

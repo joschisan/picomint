@@ -1,36 +1,33 @@
-//! SQLite mirror of a client's event log, one table per event.
+//! SQLite mirror of an append-only log, one table per row type.
 //!
-//! A trailer task reads the daemon-wide event log forward and inserts
-//! every entry into `{DATA_DIR}/analytics/analytics.sqlite`. Each event
-//! type registered in [`events!`] gets a table named after its source and
-//! kind — `gateway_send`, `core_tx_accept` — whose columns are the entry's
-//! common fields followed by the event's own, as derived by
+//! An embedder — the client daemon, the gateway daemon, the mint node —
+//! keeps an ordered log in its database that is the source of truth for
+//! what happened: the client's event log, the node's accepted consensus
+//! items. A trailer task reads that log forward and inserts every entry
+//! into `{DATA_DIR}/analytics/analytics.sqlite`, exploded into the rows
+//! the embedder's registry derives for it with
 //! [`picomint_core::sql::SqlRow`]. There are no views: the schema is a
 //! 1:1 translation of the log, and questions are asked of it in SQL.
 //!
 //! The file is **wiped on every startup**: analytics state is derived, not
-//! authoritative. The event log in the daemon's database is the source of
-//! truth, and the trailer replays it from position 0 on every boot, so
-//! adding or renaming an event needs no migration.
+//! authoritative. The trailer replays the log from its start on every boot,
+//! so adding or renaming a table needs no migration.
 //!
 //! Operators and agents read the db through [`query`], read-only SQL
-//! served by the daemon's admin CLI — the musl-static distroless image
-//! ships no `sqlite3` binary, so nothing outside the daemon ever opens
-//! the file.
+//! served by the embedder's admin CLI — the distroless image ships no
+//! `sqlite3` binary, so nothing outside the daemon ever opens the file.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Context as _;
 use hex::ToHex as _;
-use picomint_client::eventlog::{Event, EventLogEntry, EventLogId, EventSource};
-use picomint_client::{Client, ecash, gateway, lightning, onchain};
-use picomint_core::sql::{SqlRow, SqlValue};
+use picomint_core::sql::{Row, SqlValue};
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags, Transaction};
 use serde_json::{Map, Value};
-use tokio::sync::Mutex;
-use tracing::{debug, error};
+use tokio::sync::{Mutex, Notify};
+use tracing::error;
 
 const CHUNK_SIZE: u64 = 10_000;
 
@@ -45,61 +42,10 @@ pub const ANALYTICS_FILE: &str = "analytics.sqlite";
 /// `sqlite3 --json` prints.
 pub type Rows = Vec<Map<String, Value>>;
 
-/// Every event the trailer mirrors. An event type missing here is logged
-/// at debug level and skipped, so adding an event means adding it here.
-macro_rules! events {
-    ($($event:path),* $(,)?) => {
-        fn schema() -> String {
-            let mut sql = String::new();
-            $(sql.push_str(&table_sql::<$event>());)*
-            sql
-        }
-
-        fn insert(tx: &Transaction, id: EventLogId, entry: &EventLogEntry) -> anyhow::Result<bool> {
-            $(if let Some(event) = entry.to_event::<$event>() {
-                insert_row::<$event>(tx, id, entry, &event)?;
-
-                return Ok(true);
-            })*
-
-            Ok(false)
-        }
-    };
-}
-
-events! {
-    picomint_client::TxCreateEvent,
-    picomint_client::TxAcceptEvent,
-    picomint_client::TxRejectEvent,
-    ecash::SendEvent,
-    ecash::SendSuccessEvent,
-    ecash::SendFailureEvent,
-    ecash::ReissuanceEvent,
-    ecash::ReceiveEvent,
-    ecash::IssuanceSuccessEvent,
-    ecash::IssuanceFailureEvent,
-    onchain::events::SendEvent,
-    onchain::events::SendSuccessEvent,
-    onchain::events::SendFailureEvent,
-    onchain::events::ReceiveEvent,
-    lightning::events::SendEvent,
-    lightning::events::SendSuccessEvent,
-    lightning::events::SendRefundEvent,
-    lightning::events::SendFailureEvent,
-    lightning::events::ReceiveEvent,
-    gateway::events::SendEvent,
-    gateway::events::SendSuccessEvent,
-    gateway::events::SendCancelEvent,
-    gateway::events::ReceiveEvent,
-    gateway::events::ReceiveSuccessEvent,
-    gateway::events::ReceiveFailureEvent,
-    gateway::events::ReceiveRefundEvent,
-}
-
 /// Shared handle to the analytics SQLite writer connection, used by the
 /// trailer; readers (the `query` CLI) open their own read-only
 /// connections. Mutex-guarded — fine because our write volume is bounded
-/// by event-log throughput.
+/// by log throughput.
 #[derive(Clone)]
 pub struct Analytics {
     conn: Arc<Mutex<Connection>>,
@@ -107,10 +53,9 @@ pub struct Analytics {
 
 impl Analytics {
     /// Wipe `{DATA_DIR}/analytics/`, recreate it, and open a fresh SQLite
-    /// DB with one table per registered event. Analytics state is always
-    /// rebuilt from the daemon-db event log on startup, so nothing is
-    /// preserved across restarts.
-    pub fn wipe_and_init(data_dir: &Path) -> anyhow::Result<Self> {
+    /// DB with `schema` installed. Analytics state is always rebuilt from
+    /// the log on startup, so nothing is preserved across restarts.
+    pub fn wipe_and_init(data_dir: &Path, schema: &str) -> anyhow::Result<Self> {
         let dir: PathBuf = data_dir.join(ANALYTICS_DIR);
         // A full directory wipe handles the db file and its WAL/SHM sidecars
         // in one shot.
@@ -125,88 +70,13 @@ impl Analytics {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "OFF")?;
 
-        conn.execute_batch(&schema())
+        conn.execute_batch(schema)
             .context("failed to install analytics schema")?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
-}
-
-/// Table name for an event: its source and kind, joined the way SQL
-/// likes them — `gateway_send`, `core_tx_accept`.
-pub fn table_name<E: Event>() -> String {
-    let source = match E::SOURCE {
-        EventSource::Core => "core",
-        EventSource::Ecash => "ecash",
-        EventSource::Onchain => "onchain",
-        EventSource::Lightning => "lightning",
-        EventSource::Gateway => "gateway",
-    };
-
-    format!("{source}_{}", E::KIND.to_string().replace('-', "_"))
-}
-
-/// The entry fields every table starts with, ahead of the event's own.
-const COMMON_COLUMNS: [(&str, &str); 5] = [
-    ("id", "INTEGER PRIMARY KEY"),
-    ("ts", "INTEGER NOT NULL"),
-    ("mint", "TEXT NOT NULL"),
-    ("account", "TEXT NOT NULL"),
-    ("operation", "TEXT NOT NULL"),
-];
-
-fn table_sql<E: Event + SqlRow>() -> String {
-    let table = table_name::<E>();
-
-    let columns = COMMON_COLUMNS
-        .iter()
-        .map(|column| format!("{} {}", column.0, column.1))
-        .chain(
-            E::columns()
-                .iter()
-                .map(|column| format!("{} {} NOT NULL", column.0, column.1)),
-        )
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    format!(
-        "CREATE TABLE {table} ({columns});\n\
-         CREATE INDEX {table}_operation ON {table}(operation);\n\
-         CREATE INDEX {table}_ts ON {table}(ts);\n"
-    )
-}
-
-fn insert_row<E: Event + SqlRow>(
-    tx: &Transaction,
-    id: EventLogId,
-    entry: &EventLogEntry,
-    event: &E,
-) -> anyhow::Result<()> {
-    let placeholders = std::iter::repeat_n("?", COMMON_COLUMNS.len() + E::columns().len())
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let mut values: Vec<rusqlite::types::Value> = vec![
-        id.0.cast_signed().into(),
-        entry.timestamp.cast_signed().into(),
-        entry.mint.to_string().into(),
-        format!("{:?}", entry.account).into(),
-        entry.operation.to_string().into(),
-    ];
-
-    values.extend(event.values().into_iter().map(|value| match value {
-        SqlValue::Integer(n) => n.into(),
-        SqlValue::Text(s) => s.into(),
-    }));
-
-    tx.execute(
-        &format!("INSERT INTO {} VALUES ({placeholders})", table_name::<E>()),
-        rusqlite::params_from_iter(values),
-    )?;
-
-    Ok(())
 }
 
 /// Run read-only SQL against the analytics db and return one JSON object per
@@ -251,29 +121,36 @@ pub fn query(data_dir: &Path, sql: &str) -> anyhow::Result<Rows> {
     Ok(result)
 }
 
-/// Drain the event log forward in chunks and mirror every entry into the
-/// SQLite db. Blocks on the client's `event_notify` only when caught up
-/// with the head. Spawned daemon-wide at startup.
-pub async fn trailer(client: Arc<Client>, analytics: Analytics) {
-    let mut cursor = EventLogId::default();
-    let notify = client.event_notify();
-
+/// Drain a log forward in chunks and mirror every entry into the SQLite
+/// db. `next_chunk` returns up to the given number of entries past the
+/// ones it returned before, `rows` explodes an entry into the rows it
+/// lands as. Blocks on `notify` only when caught up with the head — the
+/// embedder passes the notify that fires on every commit to the log's
+/// table. Spawned daemon-wide at startup.
+pub async fn trailer<E: Send + 'static>(
+    analytics: Analytics,
+    notify: Arc<Notify>,
+    mut next_chunk: impl FnMut(u64) -> Vec<E>,
+    rows: impl Fn(&E) -> Vec<Row> + Clone + Send + 'static,
+) {
     loop {
         // Register interest in the next commit BEFORE reading, so we don't
         // miss a commit that lands between the read and `.await`.
         let notified = notify.notified();
 
-        let chunk = client.get_event_log(cursor, CHUNK_SIZE);
+        let chunk = next_chunk(CHUNK_SIZE);
 
-        if let Some((last_id, _)) = chunk.last() {
-            cursor = last_id.saturating_add(1);
-            let entries = chunk.clone();
+        let len = chunk.len() as u64;
+
+        if len > 0 {
             let analytics = analytics.clone();
+            let rows = rows.clone();
             // rusqlite is sync — hop off the tokio runtime's thread pool for
             // the insert batch so we don't block other async work.
-            if let Err(e) = tokio::task::spawn_blocking(move || insert_batch(&analytics, &entries))
-                .await
-                .expect("spawn_blocking join")
+            if let Err(e) =
+                tokio::task::spawn_blocking(move || insert_batch(&analytics, &chunk, &rows))
+                    .await
+                    .expect("spawn_blocking join")
             {
                 error!(error = %e, "analytics insert failed");
             }
@@ -282,22 +159,23 @@ pub async fn trailer(client: Arc<Client>, analytics: Analytics) {
         // Short chunk means we've caught up with the head; block until the
         // next commit. Full chunk means there might be more to drain — loop
         // without waiting.
-        if (chunk.len() as u64) < CHUNK_SIZE {
+        if len < CHUNK_SIZE {
             notified.await;
         }
     }
 }
 
-fn insert_batch(
+fn insert_batch<E>(
     analytics: &Analytics,
-    entries: &[(EventLogId, EventLogEntry)],
+    entries: &[E],
+    rows: &impl Fn(&E) -> Vec<Row>,
 ) -> anyhow::Result<()> {
     let mut guard = analytics.conn.blocking_lock();
     let tx = guard.transaction()?;
 
-    for (id, entry) in entries {
-        if !insert(&tx, *id, entry)? {
-            debug!(kind = %entry.kind, source = ?entry.source, "event not registered for analytics");
+    for entry in entries {
+        for row in rows(entry) {
+            insert_row(&tx, row)?;
         }
     }
 
@@ -306,20 +184,24 @@ fn insert_batch(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+fn insert_row(tx: &Transaction, row: Row) -> anyhow::Result<()> {
+    let placeholders = std::iter::repeat_n("?", row.values.len())
+        .collect::<Vec<_>>()
+        .join(", ");
 
-    /// Every registered event's table installs, which is what catches a
-    /// field type without a column mapping or two events sharing a name.
-    #[test]
-    fn schema_installs() {
-        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+    let values = row.values.into_iter().map(|value| match value {
+        SqlValue::Null => rusqlite::types::Value::Null,
+        SqlValue::Integer(n) => n.into(),
+        SqlValue::Text(s) => s.into(),
+    });
 
-        let sql = schema();
+    // Cached per statement text, so a rebuild of a long log prepares each
+    // table's insert once rather than once per row.
+    tx.prepare_cached(&format!(
+        "INSERT INTO {} VALUES ({placeholders})",
+        row.table
+    ))?
+    .execute(rusqlite::params_from_iter(values))?;
 
-        println!("{sql}");
-
-        conn.execute_batch(&sql).expect("schema installs");
-    }
+    Ok(())
 }

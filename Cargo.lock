@@ -3246,7 +3246,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "hex",
- "picomint-client",
  "picomint-core",
  "rusqlite",
  "serde_json",
@@ -3323,6 +3322,7 @@ dependencies = [
  "picomint-tbs",
  "picomint-tpe",
  "rand 0.8.6",
+ "rusqlite",
  "secp256k1",
  "serde",
  "serde_json",
@@ -3590,6 +3590,7 @@ dependencies = [
  "clap",
  "picomint-core",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3609,6 +3610,7 @@ dependencies = [
  "iroh",
  "iroh-base",
  "iroh-mdns-address-lookup",
+ "picomint-analytics",
  "picomint-base32",
  "picomint-bft",
  "picomint-cli-server",
@@ -3622,6 +3624,7 @@ dependencies = [
  "picomint-tss",
  "rand 0.8.6",
  "reqwest 0.13.3",
+ "rusqlite",
  "secp256k1",
  "serde",
  "serde_json",

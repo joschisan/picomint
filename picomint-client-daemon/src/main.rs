@@ -18,6 +18,7 @@ use clap::Parser;
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use picomint_analytics::Analytics;
+use picomint_client::analytics;
 use picomint_client::{Client, Mnemonic};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -100,14 +101,16 @@ fn main() -> anyhow::Result<()> {
         mnemonic,
         data_dir: opts.data_dir.clone(),
         network: opts.network,
-        analytics: Analytics::wipe_and_init(&opts.data_dir)?,
+        analytics: Analytics::wipe_and_init(&opts.data_dir, &analytics::schema())?,
     };
 
     runtime.spawn(cli::run(state.clone()));
 
     runtime.spawn(picomint_analytics::trailer(
-        state.client.clone(),
         state.analytics.clone(),
+        state.client.event_notify(),
+        analytics::reader(state.client.clone()),
+        analytics::rows,
     ));
 
     runtime.block_on(shutdown_signal());
