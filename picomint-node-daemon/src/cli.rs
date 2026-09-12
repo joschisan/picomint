@@ -46,7 +46,7 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
 pub async fn run_dkg_cli(data_dir: PathBuf, db: Database) {
     let router = Router::new()
         .route(ROUTE_STATUS, post(dkg_phase))
-        .fallback(wrong_phase("DKG"))
+        .fallback(wrong_phase("dkg"))
         .with_state(db);
 
     serve(&data_dir, router).await;
