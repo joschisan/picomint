@@ -196,7 +196,7 @@ picomint-node-cli expiry set --timestamp <unix-seconds> [--successor <invite>]
 
 ## Sweep
 
-Only once the mint has expired and its last onchain transaction has confirmed are the remaining funds swept with `picomint-rugpull`, a standalone x86_64 Linux binary. Like the images it is rebuilt on every push to main, attached to the [`main-latest`](https://github.com/joschisan/picomint/releases/tag/main-latest) pre-release; it runs on Ubuntu 24.04 or newer. It is not part of any image: it runs on an operator's machine, against that operator's bitcoind, with nothing but the secrets below.
+Only once the mint has expired and its last onchain transaction has confirmed are the remaining funds swept with `picomint-rugpull`, a standalone x86_64 Linux binary. Like the images it is rebuilt on every push to main, attached to the [`main-latest`](https://github.com/joschisan/picomint/releases/tag/main-latest) pre-release, and built in the same image as the containers, so it runs wherever they do: Debian 13 or Ubuntu 25.04 and newer. It is not part of any image: it runs on an operator's machine, against that operator's bitcoind, with nothing but the secrets below.
 
 Every node exports its sweep secret, which is bound to the mint's current UTXO. Check first that `onchain status` reports the same `tx_tip` on every node and `onchain pending` is empty everywhere, then:
 
