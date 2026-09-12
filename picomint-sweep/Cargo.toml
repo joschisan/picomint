@@ -1,0 +1,24 @@
+[package]
+description = "Sweeps a decommissioned mint's wallet with a threshold of its nodes' sweep secrets"
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+name = "picomint-sweep"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+anyhow = { workspace = true }
+bitcoin = { workspace = true }
+clap = { workspace = true }
+picomint-base32 = { workspace = true }
+picomint-core = { workspace = true }
+reqwest = { workspace = true }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-rustls = { workspace = true }
+tss = { workspace = true }

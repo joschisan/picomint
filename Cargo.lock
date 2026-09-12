@@ -3773,6 +3773,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-sweep"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "clap",
+ "picomint-base32",
+ "picomint-core",
+ "picomint-tss",
+ "reqwest 0.13.3",
+ "secp256k1",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+]
+
+[[package]]
 name = "picomint-tbs"
 version = "0.1.0"
 dependencies = [

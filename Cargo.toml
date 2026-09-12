@@ -25,6 +25,7 @@ members = [
     "picomint-node-daemon",
     "picomint-redb",
     "picomint-rpc",
+    "picomint-sweep",
     "picomint-tbs",
     "picomint-tpe",
     "picomint-tss",
