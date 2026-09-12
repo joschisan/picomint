@@ -21,28 +21,28 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     // A sweep secret is tweaked for the mint UTXO its node currently
     // holds, and the tool only finds a confirmed one. The restored nodes
     // are still catching up when the restore test ends, so wait until
-    // every exporting node holds the same UTXO and nothing is pending,
-    // mining a block per attempt since confirmations are the work.
+    // every exporting node holds the same transaction tip and nothing is
+    // pending, mining a block per attempt since confirmations are the work.
     info!("waiting for {threshold} nodes to agree on a confirmed mint utxo");
     retry("nodes agree on the mint utxo", || {
         let data_dirs = data_dirs.clone();
         async move {
             env.mine_blocks(1);
 
-            let utxos = data_dirs
+            let tips = data_dirs
                 .iter()
                 .map(|data_dir| match cli::node_status(data_dir)? {
                     NodeStatus::Consensus(phase) => {
                         ensure!(phase.pending_txs.is_empty(), "mint txs still pending");
-                        Ok(phase.mint_utxo)
+                        Ok(phase.tx_tip)
                     }
                     phase => anyhow::bail!("node is not in consensus: {phase:?}"),
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
 
             ensure!(
-                utxos[0].is_some() && utxos.iter().all(|utxo| *utxo == utxos[0]),
-                "nodes disagree on the mint utxo: {utxos:?}"
+                tips[0].is_some() && tips.iter().all(|tip| *tip == tips[0]),
+                "nodes disagree on the mint transaction tip: {tips:?}"
             );
 
             Ok(())

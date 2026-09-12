@@ -1,9 +1,10 @@
 use clap::Args;
 use picomint_core::NodeId;
+use picomint_core::bitcoin::Txid;
 use picomint_core::config::MintId;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
-use picomint_core::onchain::{MintUtxo, TxInfo};
+use picomint_core::onchain::TxInfo;
 use picomint_core::version::ConsensusVersion;
 use serde::{Deserialize, Serialize};
 
@@ -93,10 +94,10 @@ pub struct ConsensusPhase {
     pub session_count: u32,
     pub block_height: u32,
     pub total_value_sat: u64,
-    /// The mint's current wallet UTXO. Its tweak is what a sweep after
-    /// decommissioning needs alongside the backup, so record it before the
-    /// last node goes down.
-    pub mint_utxo: Option<MintUtxo>,
+    /// The transaction holding the mint's current wallet UTXO.
+    pub tx_tip: Option<Txid>,
+    pub tx_count: u64,
+    pub feerate_sat_per_vb: Option<u32>,
     /// Mint transactions broadcast but not yet confirmed.
     pub pending_txs: Vec<TxInfo>,
     pub nodes: Vec<NodeInfo>,
