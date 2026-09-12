@@ -56,7 +56,7 @@ picomint-node-cli status
 
 - `Setup`: the node's own setup code once `setup init` has run, the mint name and size once any setup code has carried them, and the nodes added so far.
 - `Dkg`: key generation is running; the setup code, for nodes that still need it.
-- `Consensus`: the mint is up. Mint name and id, network, this node's id and name, consensus version, session count, block height, every peer's connection and the bitcoind backend.
+- `Consensus`: the mint is up. Mint name and id, network, this node's id and name, consensus version, session count, block height, every node's connection and the bitcoind backend.
 
 On a running mint it looks like this:
 

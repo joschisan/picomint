@@ -158,7 +158,7 @@ pub struct OnchainStatusResponse {
     pub feerate_sat_per_vb: Option<u32>,
 }
 
-// --- status: peers ---
+// --- status: nodes ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NodeInfo {
@@ -197,7 +197,7 @@ pub struct HistoryResponse {
 // --- /onchain/sweep ---
 
 /// This node's base32 [`picomint_core::onchain::SweepSecret`] for the current
-/// mint UTXO. A threshold of nodes' codes sweeps the wallet after
+/// mint UTXO. A threshold of nodes' secrets sweeps the wallet after
 /// decommissioning. Secret.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SweepResponse {
