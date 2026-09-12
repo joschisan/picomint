@@ -220,7 +220,7 @@ picomint-gateway-cli query \
 | 9735 | LDK Lightning P2P (BOLT)     | Yes             |
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `docker exec picomint-gateway-daemon
+network exposure, and the daemon keeps it and the data directory owner-only. Reach it with `docker exec picomint-gateway-daemon
 picomint-gateway-cli …`.
 
 ## Configuration
