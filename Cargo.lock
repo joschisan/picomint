@@ -3246,7 +3246,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "hex",
- "picomint-client",
  "picomint-core",
  "rusqlite",
  "serde_json",
@@ -3340,6 +3339,7 @@ dependencies = [
  "picomint-tbs",
  "picomint-tpe",
  "rand 0.8.6",
+ "rusqlite",
  "schemars 1.2.1",
  "secp256k1",
  "serde",
@@ -3542,7 +3542,6 @@ dependencies = [
  "ldk-node",
  "lightning-invoice",
  "lightning-types",
- "picomint-analytics",
  "picomint-base32",
  "picomint-client",
  "picomint-client-cli-core",

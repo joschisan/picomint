@@ -24,6 +24,8 @@
 
 /// Downloading a mint's config and rebuilding what the seed owns there.
 mod add_mint;
+
+pub mod analytics;
 /// Mint API transport
 pub mod api;
 

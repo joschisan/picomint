@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, ensure};
 use lightning_invoice::Bolt11Invoice;
-use picomint_analytics::table_name;
+use picomint_client::analytics::table_name;
 use picomint_client::ecash::{Ecash, IssuanceSuccessEvent};
 use picomint_client::eventlog::Event;
 use picomint_client::{TxAcceptEvent, TxRejectEvent};
