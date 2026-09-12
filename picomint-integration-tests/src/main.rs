@@ -121,7 +121,7 @@ fn keep_alive(runtime: &tokio::runtime::Runtime, env: &env::TestEnv) -> anyhow::
         g0.display(),
     );
     println!(
-        "   target/release/picomint-node-cli --data-dir {} session-count",
+        "   target/release/picomint-node-cli --data-dir {} status",
         g0.display(),
     );
     println!(
