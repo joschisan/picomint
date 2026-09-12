@@ -184,10 +184,10 @@ pub fn node_setup_add_node(data_dir: &Path, setup_code: &str) -> Result<Value> {
         .run_cli::<Value>()
 }
 
-pub fn node_setup_start_dkg(data_dir: &Path) -> Result<Value> {
+pub fn node_setup_confirm(data_dir: &Path) -> Result<Value> {
     node_cmd(data_dir)
         .arg("setup")
-        .arg("start-dkg")
+        .arg("confirm")
         .run_cli::<Value>()
 }
 

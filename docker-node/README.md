@@ -119,13 +119,13 @@ picomint-node-cli setup init <name> [--mint-name X] [--mint-size N]
 picomint-node-cli setup add-node <setup-code>
 ```
 
-`status` shows which nodes have been added so far. If a code was pasted wrong, `setup reset` forgets every added code so you can start collecting them again. Once every node has added every node, everyone runs:
+`status` shows which nodes have been added so far. If a code was pasted wrong, `setup reset` forgets every added code so you can start collecting them again. Once every node has added every node, everyone confirms the node set:
 
 ```bash
-picomint-node-cli setup start-dkg
+picomint-node-cli setup confirm
 ```
 
-`status` reports `Dkg` while the keys are generated and `Consensus` once the mint is up.
+Key generation starts once every node has confirmed. `status` reports `Dkg` while the keys are generated and `Consensus` once the mint is up.
 
 ## Invite Users
 

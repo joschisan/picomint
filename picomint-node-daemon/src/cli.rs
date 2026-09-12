@@ -8,8 +8,8 @@ use axum::routing::post;
 use picomint_cli_server::{CliError, serve};
 use picomint_node_cli_core::{
     BitcoinConnectionResponse, ConsensusPhase, DkgPhase, NodeInfo, NodeStatus,
-    ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE,
-    ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, ROUTE_STATUS, SetupAddNodeRequest,
+    ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET,
+    ROUTE_SETUP_RESTORE, ROUTE_SETUP_STATUS, ROUTE_STATUS, SetupAddNodeRequest,
     SetupAddNodeResponse, SetupInitRequest, SetupInitResponse, SetupPhase, SetupStatus,
 };
 use picomint_redb::{Database, DbRead};
@@ -32,7 +32,7 @@ pub async fn run_cli(data_dir: PathBuf, setup_api: Arc<SetupApi>) {
         .route(ROUTE_SETUP_INIT, post(setup_init))
         .route(ROUTE_SETUP_ADD_NODE, post(setup_add_node))
         .route(ROUTE_SETUP_RESET, post(setup_reset))
-        .route(ROUTE_SETUP_START_DKG, post(setup_start_dkg))
+        .route(ROUTE_SETUP_CONFIRM, post(setup_confirm))
         .route(ROUTE_SETUP_RESTORE, post(setup_restore))
         .fallback(wrong_phase("setup"))
         .with_state(setup_api);
@@ -450,7 +450,7 @@ async fn setup_add_node(
     Ok(Json(SetupAddNodeResponse { name }))
 }
 
-async fn setup_start_dkg(State(setup_api): State<Arc<SetupApi>>) -> Result<Json<()>, CliError> {
+async fn setup_confirm(State(setup_api): State<Arc<SetupApi>>) -> Result<Json<()>, CliError> {
     setup_api.start_dkg().await.map_err(CliError::internal)?;
 
     Ok(Json(()))

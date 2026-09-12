@@ -431,7 +431,7 @@ async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
 
     // Start DKG on all nodes
     for data_dir in node_data_dirs {
-        cli::node_setup_start_dkg(data_dir)?;
+        cli::node_setup_confirm(data_dir)?;
     }
 
     info!("DKG started");
