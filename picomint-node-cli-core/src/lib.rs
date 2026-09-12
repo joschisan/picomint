@@ -1,57 +1,97 @@
 use clap::Args;
 use picomint_core::NodeId;
+use picomint_core::bitcoin::Txid;
+use picomint_core::config::MintId;
 use picomint_core::invite::InviteCode;
 use picomint_core::onchain::TxInfo;
+use picomint_core::version::ConsensusVersion;
 use serde::{Deserialize, Serialize};
 
-/// Filename of the node's admin CLI Unix socket, inside `DATA_DIR`.
-/// Status of the setup flow, as reported by `/setup/status`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SetupStatus {
-    AwaitingInit,
-    SharingSetupCodes,
-}
+/// Served in every phase of the node's life; everything else is phase-bound.
+pub const ROUTE_STATUS: &str = "/status";
 
 // Setup routes
-pub const ROUTE_SETUP_STATUS: &str = "/setup/status";
 pub const ROUTE_SETUP_INIT: &str = "/setup/init";
-pub const ROUTE_SETUP_ADD_NODE: &str = "/setup/add-node";
-pub const ROUTE_SETUP_START_DKG: &str = "/setup/start-dkg";
+pub const ROUTE_SETUP_ADD: &str = "/setup/add";
+pub const ROUTE_SETUP_RESET: &str = "/setup/reset";
+pub const ROUTE_SETUP_CONFIRM: &str = "/setup/confirm";
 pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
 
-// Dashboard routes
+// Consensus routes
 pub const ROUTE_INVITE: &str = "/invite";
-pub const ROUTE_CONFIG: &str = "/config";
-pub const ROUTE_SESSION_COUNT: &str = "/session-count";
-pub const ROUTE_BLOCK_HEIGHT: &str = "/block-height";
-pub const ROUTE_P2P: &str = "/p2p";
-pub const ROUTE_BITCOIN_CONNECTION: &str = "/bitcoin-connection";
+pub const ROUTE_BACKUP: &str = "/backup";
 pub const ROUTE_EXPIRY_SET: &str = "/expiry/set";
 pub const ROUTE_EXPIRY_CLEAR: &str = "/expiry/clear";
 pub const ROUTE_EXPIRY_STATUS: &str = "/expiry/status";
 
 // Module routes
-pub const ROUTE_MODULE_ONCHAIN_TOTAL_VALUE: &str = "/module/onchain/total-value";
-pub const ROUTE_MODULE_ONCHAIN_FEERATE: &str = "/module/onchain/feerate";
-pub const ROUTE_MODULE_ONCHAIN_PENDING_TXS: &str = "/module/onchain/pending-txs";
-pub const ROUTE_MODULE_ONCHAIN_TXS: &str = "/module/onchain/txs";
-pub const ROUTE_MODULE_LN_GATEWAY_ADD: &str = "/module/lightning/gateway/add";
-pub const ROUTE_MODULE_LN_GATEWAY_REMOVE: &str = "/module/lightning/gateway/remove";
-pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/lightning/gateway/list";
+pub const ROUTE_ONCHAIN_STATUS: &str = "/onchain/status";
+pub const ROUTE_ONCHAIN_PENDING: &str = "/onchain/pending";
+pub const ROUTE_ONCHAIN_HISTORY: &str = "/onchain/history";
+pub const ROUTE_ONCHAIN_SWEEP: &str = "/onchain/sweep";
+pub const ROUTE_GATEWAY_ADD: &str = "/gateway/add";
+pub const ROUTE_GATEWAY_REMOVE: &str = "/gateway/remove";
+pub const ROUTE_GATEWAY_LIST: &str = "/gateway/list";
 
-// --- /setup/status ---
-// Response: SetupStatus (defined above)
+// --- /status ---
+
+/// Which phase the node is in, with what an operator needs at that point.
+/// The variant is the first thing to look at: every other route is served
+/// by exactly one phase.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "phase")]
+pub enum NodeStatus {
+    Setup(SetupPhase),
+    Dkg(DkgPhase),
+    Consensus(Box<ConsensusPhase>),
+}
+
+/// Setup phase: the ceremony state as this node sees it. `setup_code` is
+/// `None` until `setup init` has run; `mint_name` and `mint_size` are set
+/// once any node's setup code has carried them.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SetupPhase {
+    pub setup_code: Option<String>,
+    pub node_name: Option<String>,
+    pub mint_name: Option<String>,
+    pub mint_size: Option<u8>,
+    /// Names of the other nodes whose setup codes have been added.
+    pub nodes: Vec<String>,
+}
+
+/// DKG phase: key generation is running; nothing else can be done until it
+/// completes and the node moves to consensus.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DkgPhase {
+    pub setup_code: String,
+}
+
+/// Consensus phase: the mint is running. Everything here is public; the
+/// private keys are only ever returned by `backup`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ConsensusPhase {
+    pub mint_name: String,
+    pub mint_id: MintId,
+    pub network: String,
+    pub node_id: NodeId,
+    pub node_name: String,
+    pub consensus_version: ConsensusVersion,
+    pub session_count: u32,
+    pub block_height: u32,
+    pub nodes: Vec<NodeInfo>,
+    pub bitcoin: Option<BitcoinConnectionResponse>,
+}
 
 // --- /setup/init ---
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct SetupInitRequest {
-    /// Node name
+    /// This node's name, shown to the other nodes and to clients
     pub name: String,
-    /// Mint name (leader only)
+    /// The mint's name; set by exactly one node
     #[arg(long)]
     pub mint_name: Option<String>,
-    /// Mint size (leader only)
+    /// Number of nodes in the mint: 4, 7, 10, 13, 16, 19 or 22; set by the same node
     #[arg(long)]
     pub mint_size: Option<u8>,
 }
@@ -61,20 +101,20 @@ pub struct SetupInitResponse {
     pub setup_code: String,
 }
 
-// --- /setup/add-node ---
+// --- /setup/add ---
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
-pub struct SetupAddNodeRequest {
-    /// Node's setup code
+pub struct SetupAddRequest {
+    /// Another node's setup code, as printed by its `setup init`
     pub setup_code: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SetupAddNodeResponse {
+pub struct SetupAddResponse {
     pub name: String,
 }
 
-// --- /setup/start-dkg ---
+// --- /setup/confirm ---
 // No request/response types (unit)
 
 // --- /invite ---
@@ -105,26 +145,20 @@ pub struct InviteResponse {
     pub invite: InviteCode,
 }
 
-// --- /module/onchain/total-value ---
+// --- /onchain/status ---
 
+/// The mint wallet at a glance. `tx_tip` is `None` until the first deposit
+/// has established the wallet; `onchain pending` lists what is in flight.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct OnchainTotalValueResponse {
-    pub total_value_sat: Option<u64>,
+pub struct OnchainStatusResponse {
+    pub total_value_sat: u64,
+    /// The transaction holding the mint's current wallet UTXO.
+    pub tx_tip: Option<Txid>,
+    pub tx_count: u64,
+    pub feerate_sat_per_vb: Option<u32>,
 }
 
-// --- /block-height ---
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BlockHeightResponse {
-    pub block_height: u32,
-}
-
-// --- /p2p ---
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct P2pResponse {
-    pub nodes: Vec<NodeInfo>,
-}
+// --- status: nodes ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NodeInfo {
@@ -136,7 +170,7 @@ pub struct NodeInfo {
     pub rtt_ms: Option<u64>,
 }
 
-// --- /bitcoin-connection ---
+// --- status: bitcoin backend ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BitcoinConnectionResponse {
@@ -146,40 +180,43 @@ pub struct BitcoinConnectionResponse {
     pub sync_progress: Option<f64>,
 }
 
-// --- /module/onchain/feerate ---
+// --- /onchain/pending ---
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct OnchainFeerateResponse {
-    pub sat_per_vbyte: Option<u32>,
-}
-
-// --- /module/onchain/pending-txs ---
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PendingTxsResponse {
+pub struct PendingResponse {
     pub txs: Vec<TxInfo>,
 }
 
-// --- /module/onchain/txs ---
+// --- /onchain/history ---
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TxsResponse {
+pub struct HistoryResponse {
     pub txs: Vec<TxInfo>,
 }
 
-// --- /module/lightning/gateway/* ---
+// --- /onchain/sweep ---
+
+/// This node's base32 [`picomint_core::onchain::SweepSecret`] for the current
+/// mint UTXO. A threshold of nodes' secrets sweeps the wallet after
+/// decommissioning. Secret.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SweepResponse {
+    pub secret: String,
+}
+
+// --- /gateway/* ---
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct LightningGatewayAddRequest {
-    /// Gateway iroh public key (base32-encoded).
+    /// The gateway's `gateway_pk`, as printed by `picomint-gateway-cli info`
     pub pk: picomint_core::lightning::gateway::GatewayPk,
-    /// Display name to identify the gateway by.
+    /// Display name to identify the gateway by
     pub name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct LightningGatewayRemoveRequest {
-    /// Gateway iroh public key (base32-encoded).
+    /// The gateway's `gateway_pk`, as printed by `picomint-gateway-cli info`
     pub pk: picomint_core::lightning::gateway::GatewayPk,
 }
 
@@ -200,10 +237,10 @@ pub struct LightningGatewayInfo {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct ExpirySetRequest {
-    /// Expiry date as a unix timestamp in seconds (midnight UTC).
+    /// Expiry date as a unix timestamp in seconds, midnight UTC
     #[arg(long)]
     pub timestamp: u64,
-    /// Optional successor-mint invite code (base32-encoded).
+    /// Invite code of the successor mint for users to migrate to
     #[arg(long)]
     pub successor: Option<InviteCode>,
 }

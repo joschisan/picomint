@@ -68,7 +68,7 @@ impl InitParams {
 /// Serves the setup API endpoints
 #[derive(Clone)]
 pub struct SetupApi {
-    /// Bitcoin backend; `start_dkg` reads the mint's network off it
+    /// Bitcoin backend; `confirm` reads the mint's network off it
     /// instead of trusting a locally-configured value.
     bitcoin: Arc<BitcoindClient>,
     /// In-memory state machine, mirroring the on-disk setup tables.
@@ -270,6 +270,11 @@ impl SetupApi {
             .network()
             .await
             .context("Failed to determine the network from the bitcoin backend")?;
+
+        ensure!(
+            network != bitcoin::Network::Bitcoin,
+            "Picomint is experimental software and refuses to run a mint on mainnet"
+        );
 
         let params = DkgParams {
             identity: NodeId::from(our_id as u8),

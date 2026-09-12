@@ -58,6 +58,11 @@ pub const CLIENT_FEE_PPM: u64 = 10_000;
 const BTC_RPC_USER: &str = "bitcoin";
 const BTC_RPC_PASS: &str = "bitcoin";
 
+/// The `BITCOIND_URL` every daemon under test is pointed at.
+pub fn bitcoind_url() -> String {
+    format!("http://{BTC_RPC_USER}:{BTC_RPC_PASS}@127.0.0.1:{BTC_RPC_PORT}")
+}
+
 fn dummy_address() -> bitcoin::Address {
     "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"
         .parse::<bitcoin::Address<bitcoin::address::NetworkUnchecked>>()
@@ -124,7 +129,7 @@ impl TestEnv {
         for node in NUM_ONLINE_NODES..NUM_NODES {
             let data_dir = &node_data_dirs[node];
             runtime.block_on(retry(&format!("node-{node} wrote its config"), || async {
-                cli::node_config(data_dir).map(|_| ())
+                cli::node_backup(data_dir).map(|_| ())
             }))?;
 
             let mut child = node_processes[node].take().expect("node was started");
@@ -312,7 +317,6 @@ async fn build_client(
 
 async fn start_node(base: &Path, node: usize) -> anyhow::Result<Child> {
     let p2p_port = NODE_BASE_PORT + (node as u16 * PORTS_PER_NODE);
-    let ui_port = p2p_port + 1;
 
     let data_dir = base.join(format!("node-{node}"));
     tokio::fs::create_dir_all(&data_dir).await?;
@@ -324,20 +328,15 @@ async fn start_node(base: &Path, node: usize) -> anyhow::Result<Child> {
 
     let child = Command::new("target/release/picomint-node-daemon")
         .env("DATA_DIR", data_dir.to_str().unwrap())
-        .env(
-            "BITCOIND_URL",
-            format!("http://{BTC_RPC_USER}:{BTC_RPC_PASS}@127.0.0.1:{BTC_RPC_PORT}"),
-        )
+        .env("BITCOIND_URL", bitcoind_url())
         .env("P2P_ADDR", format!("127.0.0.1:{p2p_port}"))
-        .env("UI_ADDR", format!("127.0.0.1:{ui_port}"))
-        .env("UI_PASSWORD", "test")
         .env("INTEGRATION_TEST", "true")
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
         .spawn()
         .context(format!("Failed to start node-{node}"))?;
 
-    info!("Started node-{node} on port {p2p_port} (UI: http://127.0.0.1:{ui_port})");
+    info!("Started node-{node} on port {p2p_port}");
     Ok(child)
 }
 
@@ -372,10 +371,7 @@ async fn start_gateway(
         .env("API_ADDR", format!("0.0.0.0:{gateway_port}"))
         .env("LDK_ADDR", format!("0.0.0.0:{lightning_port}"))
         .env("NETWORK", "regtest")
-        .env(
-            "BITCOIND_URL",
-            format!("http://{BTC_RPC_USER}:{BTC_RPC_PASS}@127.0.0.1:{BTC_RPC_PORT}"),
-        )
+        .env("BITCOIND_URL", bitcoind_url())
         .stdout(log_file.try_clone()?)
         .stderr(log_file)
         .spawn()
@@ -386,18 +382,19 @@ async fn start_gateway(
 }
 
 async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
-    use picomint_node_cli_core::SetupStatus;
+    use picomint_node_cli_core::NodeStatus;
 
-    // Wait for all nodes to be ready (the CLI `setup status` call
-    // returns once the daemon has bound its CLI socket).
+    // Wait for all nodes to be ready (the CLI `status` call returns once
+    // the daemon has bound its CLI socket).
     for (node, data_dir) in node_data_dirs.iter().enumerate() {
-        retry(&format!("node-{node} setup status"), || async {
-            let status = cli::node_setup_status(data_dir)?;
-            ensure!(
-                status == SetupStatus::AwaitingInit,
-                "Unexpected status: {status:?}"
-            );
-            Ok(())
+        retry(&format!("node-{node} awaiting init"), || async {
+            match cli::node_status(data_dir)? {
+                NodeStatus::Setup(phase) => {
+                    ensure!(phase.setup_code.is_none(), "node already initialised");
+                    Ok(())
+                }
+                status => anyhow::bail!("Unexpected status: {status:?}"),
+            }
         })
         .await?;
     }
@@ -428,14 +425,14 @@ async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
             if other_node == *node {
                 continue;
             }
-            cli::node_setup_add_node(data_dir, code)?;
+            cli::node_setup_add(data_dir, code)?;
         }
     }
     info!("Node info exchanged");
 
     // Start DKG on all nodes
     for data_dir in node_data_dirs {
-        cli::node_setup_start_dkg(data_dir)?;
+        cli::node_setup_confirm(data_dir)?;
     }
 
     info!("DKG started");

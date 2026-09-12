@@ -16,6 +16,7 @@ use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::ecash::Denomination;
 use picomint_core::invite::InviteCode;
+use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk};
 use serde::{Deserialize, Serialize};
 
 pub const ROUTE_MNEMONIC: &str = "/mnemonic";
@@ -36,11 +37,12 @@ pub const ROUTE_ONCHAIN_SEND: &str = "/onchain/send";
 pub const ROUTE_ONCHAIN_SEND_MAX: &str = "/onchain/send-max";
 pub const ROUTE_ONCHAIN_RECEIVE: &str = "/onchain/receive";
 
+pub const ROUTE_LIGHTNING_GATEWAY_LIST: &str = "/lightning/gateway/list";
 pub const ROUTE_LIGHTNING_SEND: &str = "/lightning/send";
 pub const ROUTE_LIGHTNING_SEND_MAX: &str = "/lightning/send-max";
 pub const ROUTE_LIGHTNING_RECEIVE: &str = "/lightning/receive";
 pub const ROUTE_LIGHTNING_LNURL: &str = "/lightning/lnurl";
-pub const ROUTE_LIGHTNING_REFRESH_GATEWAYS: &str = "/lightning/refresh-gateways";
+pub const ROUTE_LIGHTNING_GATEWAY_REFRESH: &str = "/lightning/gateway/refresh";
 
 // --- /mnemonic ---
 
@@ -226,12 +228,28 @@ pub struct ClientOnchainReceiveResponse {
     pub address: bitcoin::Address<NetworkUnchecked>,
 }
 
+// --- /lightning/gateway/list ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientLightningGatewayListRequest {
+    pub mint: MintId,
+}
+
+/// Every gateway the mint recommends that answered a probe, keyed by pk,
+/// with the fees it charges; the info only changes on `lightning gateway refresh`.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ClientLightningGatewayListResponse {
+    pub gateways: BTreeMap<GatewayPk, GatewayInfo>,
+}
+
 // --- /lightning/send ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientLightningSendRequest {
     pub mint: MintId,
     pub account: Account,
+    /// The gateway to pay through, from `lightning gateway list`
+    pub gateway: GatewayPk,
     pub invoice: Bolt11Invoice,
 }
 
@@ -246,6 +264,8 @@ pub struct ClientLightningSendResponse {
 pub struct ClientLightningSendMaxRequest {
     pub mint: MintId,
     pub account: Account,
+    /// The gateway to pay through, from `lightning gateway list`
+    pub gateway: GatewayPk,
     pub lnurl: String,
 }
 
@@ -260,12 +280,13 @@ pub struct ClientLightningSendMaxResponse {
 pub struct ClientLightningReceiveRequest {
     pub mint: MintId,
     pub account: Account,
+    /// The gateway to receive through, from `lightning gateway list`
+    pub gateway: GatewayPk,
     pub amount: bitcoin::Amount,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClientLightningReceiveResponse {
-    pub operation: OperationId,
     pub invoice: Bolt11Invoice,
 }
 
@@ -285,9 +306,9 @@ pub struct ClientLightningLnurlResponse {
     pub lnurl: String,
 }
 
-// --- /lightning/refresh-gateways ---
+// --- /lightning/gateway/refresh ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct ClientLightningRefreshGatewaysRequest {
+pub struct ClientLightningGatewayRefreshRequest {
     pub mint: MintId,
 }

@@ -33,7 +33,6 @@ use picomint_core::lightning::methods::{
     SendResponse,
 };
 use picomint_encoding::Decodable;
-use rand::seq::IteratorRandom;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio_util::task::AbortOnDropHandle;
@@ -141,15 +140,23 @@ impl Gateways {
         }
     }
 
-    /// Pick a member gateway that has info, at random for load distribution.
-    /// Returns `None` if no gateway currently has info.
-    pub fn select(&self) -> Option<(GatewayPk, GatewayInfo)> {
+    /// Every pooled gateway with a successful info probe, keyed by pk.
+    pub fn list(&self) -> BTreeMap<GatewayPk, GatewayInfo> {
         self.inner
             .read()
             .expect("gateways RwLock poisoned")
             .iter()
             .filter_map(|(pk, gateway)| gateway.info.clone().map(|info| (*pk, info)))
-            .choose(&mut rand::thread_rng())
+            .collect()
+    }
+
+    /// The latest probed info of `gateway_pk`, if it is pooled and probed.
+    pub fn info(&self, gateway_pk: GatewayPk) -> Option<GatewayInfo> {
+        self.inner
+            .read()
+            .expect("gateways RwLock poisoned")
+            .get(&gateway_pk)
+            .and_then(|gateway| gateway.info.clone())
     }
 
     /// Status watch for `gateway_pk`, if it is a current member.

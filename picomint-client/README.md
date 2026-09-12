@@ -101,9 +101,9 @@ SendEvent ── TxCreateEvent
 
 ## Lightning
 
-Both `lightning_send` and `lightning_receive` take a caller-selected gateway: a `gateway_pk: GatewayPk` (its identity in the mint's announced gateway set) and a `gateway_info: GatewayInfo` (its latest probed routing info, including all fees and the outgoing-contract expiry delta). Callers pick one via `lightning_select_gateway(mint)` and inspect the returned `gateway_info` to preview the cost before committing; `lightning_refresh_gateways(mint)` re-probes the announced set. Gateways are reached over pooled iroh connections, discovered from the mint's announced pk set — there are no gateway URLs on the client side. The library still enforces `PaymentFee::SEND_FEE_LIMIT` + `EXPIRY_DELTA_LIMIT` on sends and `PaymentFee::RECEIVE_FEE_LIMIT` on receives against the supplied `gateway_info` as a backstop against an abusive gateway.
+Both `lightning_send` and `lightning_receive` take the `gateway_pk: GatewayPk` of a gateway from `lightning_gateways(mint)`, which maps every probed gateway in the mint's announced set to its latest `GatewayInfo` (all fees and the outgoing-contract expiry delta). Callers pick one, preview the cost from its info, and pass the pk; the info only changes on `lightning_refresh_gateways(mint)`, which re-probes the announced set. Gateways are reached over pooled iroh connections, discovered from the mint's announced pk set — there are no gateway URLs on the client side. The library still enforces `PaymentFee::SEND_FEE_LIMIT` + `EXPIRY_DELTA_LIMIT` on sends and `PaymentFee::RECEIVE_FEE_LIMIT` on receives against the gateway's info as a backstop against an abusive gateway.
 
-### `lightning_receive(mint, account, gateway_pk, gateway_info, amount)` — receive over Lightning
+### `lightning_receive(mint, account, gateway_pk, amount)` — receive over Lightning
 
 Returns a BOLT11 invoice and emits no events. A background scanner polls the mint for incoming contracts; when an incoming contract decrypts to the recipient's key it submits the claim tx:
 
@@ -117,7 +117,7 @@ ReceiveEvent ── TxCreateEvent                  ← scanner saw paid contract
     └── TxRejectEvent
 ```
 
-### `lightning_send(mint, account, gateway_pk, gateway_info, invoice)` — pay a BOLT11 invoice
+### `lightning_send(mint, account, gateway_pk, invoice)` — pay a BOLT11 invoice
 
 Submits a funding tx that locks an `OutgoingContract`, then a `SendStateMachine` advances `Funding → Funded`. In `Funded` it races the gateway payment response (over its pooled iroh connection) against the mint's preimage stream; whichever finishes first decides between success and refund. If a refund is taken, a second tx is submitted under the same operation id to claim the contract back.
 

@@ -32,6 +32,7 @@ use crate::consensus::CONFIRMATIONS;
 use crate::consensus::db::consensus_block_height;
 use crate::consensus::server::Server;
 use crate::handler;
+use picomint_core::onchain::SweepSecret;
 use picomint_core::onchain::config::{OnchainConfig, OnchainConfigPrivate};
 use picomint_core::onchain::methods::OnchainMethod;
 use picomint_core::onchain::{
@@ -1048,24 +1049,15 @@ pub fn mint_utxo(dbtx: &impl DbRead) -> Option<MintUtxo> {
     dbtx.get(&MintOnchainTable, &())
 }
 
-/// Export recovery material for mint shutdown: the tweaked
-/// aggregate public key and this node's tweaked secret key share.
-/// Additive tweaks commute with Lagrange interpolation, so an offline
-/// tool can interpolate any threshold of tweaked key shares directly
-/// into the secret key of the current mint UTXO, verify it
-/// against the tweaked aggregate key and sweep the UTXO with a
-/// single-key taproot wallet. Returns None if the mint wallet has
-/// not been initialized yet.
-pub fn restore_keys(server: &Server, dbtx: &impl DbRead) -> Option<(String, String)> {
+/// This node's [`SweepSecret`] for the current mint UTXO, or None while the
+/// mint wallet has not been initialized yet.
+pub fn sweep_secret(server: &Server, dbtx: &impl DbRead) -> Option<SweepSecret> {
     let wallet = mint_utxo(dbtx)?;
 
-    Some((
-        tweaked_agg_pk(server, &wallet.tweak).0.to_string(),
-        tweaked_sks(server, &wallet.tweak)
-            .0
-            .display_secret()
-            .to_string(),
-    ))
+    Some(SweepSecret {
+        node: server.cfg.private.identity,
+        sks: tweaked_sks(server, &wallet.tweak),
+    })
 }
 
 /// The nonces of a signing session for a single tx input, keyed by the

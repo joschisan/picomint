@@ -9,6 +9,7 @@ mod send_sm;
 
 use anyhow::Context;
 use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::Notify;
 
@@ -69,7 +70,7 @@ pub type SendResult = Result<OperationId, SendPaymentError>;
 /// exactly once, at mint bring-up.
 ///
 /// The warmup runs concurrently: the info probe reads whatever pks the
-/// previous session persisted, so `select_gateway` becomes usable without
+/// previous session persisted, so `lightning_gateways` fills without
 /// waiting on the threshold-consensus pk query.
 pub(crate) fn resume(ctx: &ClientContext) {
     crate::executor::resume::<SendStateMachine, _>(ctx, SendStateMachineTable);
@@ -131,18 +132,6 @@ fn send_max_amount(ctx: &ClientContext, account: Account, gateway_info: &Gateway
     crate::ecash::largest_affordable_amount(ctx, account, |amount| {
         gateway_info.send_fee.fee(amount.msat) + ctx.config.lightning.output_fee
     })
-}
-
-/// Pick any gateway from the pool that has info, at random for load
-/// distribution. A gateway charges the same fee however a payment
-/// settles, so there is nothing about an invoice to match a gateway
-/// against — any of them prices any payment identically to itself.
-pub(crate) fn select_gateway(
-    ctx: &ClientContext,
-) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
-    ctx.gateways
-        .select()
-        .ok_or(SelectGatewayError::NoGatewaysAvailable)
 }
 
 /// Empty `account` to `lnurl` through a caller-selected gateway: resolve
@@ -437,14 +426,6 @@ async fn receive_scan(ctx: ClientContext) {
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
-pub enum SelectGatewayError {
-    #[error("No gateways are available")]
-    NoGatewaysAvailable,
-    #[error("Mint is not added")]
-    NotAdded,
-}
-
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
 pub enum SendPaymentError {
     #[error("Invoice is missing an amount")]
     InvoiceMissingAmount,
@@ -456,6 +437,8 @@ pub enum SendPaymentError {
     GatewayFeeExceedsLimit,
     #[error("Gateway expiry time exceeds the allowed limit")]
     GatewayExpiryExceedsLimit,
+    #[error("Gateway is not available")]
+    GatewayNotAvailable,
     #[error("Failed to request block height")]
     FailedToRequestBlockHeight,
     #[error("Failed to fund the payment")]
@@ -471,6 +454,8 @@ pub enum SendPaymentError {
 
 #[derive(Error, Debug, Clone, Eq, PartialEq)]
 pub enum ReceiveError {
+    #[error("Gateway is not available")]
+    GatewayNotAvailable,
     #[error("Failed to connect to gateway")]
     FailedToConnectToGateway(String),
     #[error("Gateway fee exceeds the allowed limit")]
@@ -519,90 +504,112 @@ pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
 // ─── Flat mint-keyed surface ───────────────────────────────────────
 
 impl Client {
-    /// Pick a gateway from the mint's pool, at random for load
-    /// distribution. The returned info prices any payment identically, so
-    /// callers preview it and pass both values back into the send/receive
-    /// calls.
-    pub fn lightning_select_gateway(
+    /// Every gateway the mint recommends that answered a probe, keyed by
+    /// pk, with the info that prices any payment through it. Callers pick
+    /// one and pass its pk into the send and receive calls. The info only
+    /// changes on [`lightning_refresh_gateways`], so a fee previewed from
+    /// this map is the fee a send between refreshes pays.
+    ///
+    /// [`lightning_refresh_gateways`]: Client::lightning_refresh_gateways
+    pub fn lightning_gateways(
         &self,
         mint: MintId,
-    ) -> Result<(GatewayPk, GatewayInfo), SelectGatewayError> {
-        let ctx = self.ctx(mint).map_err(|_| SelectGatewayError::NotAdded)?;
-
-        select_gateway(&ctx)
+    ) -> anyhow::Result<BTreeMap<GatewayPk, GatewayInfo>> {
+        Ok(self.ctx(mint)?.gateways.list())
     }
 
-    /// Pay an invoice from `account` through a caller-selected gateway
-    /// obtained via [`lightning_select_gateway`].
+    /// Pay an invoice from `account` through a gateway picked from
+    /// [`lightning_gateways`].
+    ///
+    /// [`lightning_gateways`]: Client::lightning_gateways
     pub async fn lightning_send(
         &self,
         mint: MintId,
         account: Account,
         gateway_pk: GatewayPk,
-        gateway_info: GatewayInfo,
         invoice: Bolt11Invoice,
     ) -> Result<OperationId, SendPaymentError> {
         let ctx = self.ctx(mint).map_err(|_| SendPaymentError::NotAdded)?;
+
+        let gateway_info = ctx
+            .gateways
+            .info(gateway_pk)
+            .ok_or(SendPaymentError::GatewayNotAvailable)?;
 
         send_inner(&ctx, account, gateway_pk, gateway_info, invoice, false).await
     }
 
     /// The largest whole-sat invoice amount a [`lightning_send_max`] from
     /// `account` through this gateway can pay.
+    ///
+    /// [`lightning_send_max`]: Client::lightning_send_max
     pub fn lightning_send_max_amount(
         &self,
         mint: MintId,
         account: Account,
-        gateway_info: &GatewayInfo,
+        gateway_pk: GatewayPk,
     ) -> anyhow::Result<Amount> {
         let ctx = self.ctx(mint)?;
 
-        Ok(send_max_amount(&ctx, account, gateway_info))
+        let gateway_info = ctx
+            .gateways
+            .info(gateway_pk)
+            .context("Gateway is not available")?;
+
+        Ok(send_max_amount(&ctx, account, &gateway_info))
     }
 
-    /// Empty `account` to `lnurl` through a caller-selected gateway: resolve
-    /// it, size the max, pay.
+    /// Empty `account` to `lnurl` through a gateway picked from
+    /// [`lightning_gateways`]: resolve it, size the max, pay.
+    ///
+    /// [`lightning_gateways`]: Client::lightning_gateways
     pub async fn lightning_send_max(
         &self,
         mint: MintId,
         account: Account,
         gateway_pk: GatewayPk,
-        gateway_info: GatewayInfo,
         lnurl: &str,
     ) -> anyhow::Result<OperationId> {
         let ctx = self.ctx(mint)?;
 
+        let gateway_info = ctx
+            .gateways
+            .info(gateway_pk)
+            .context("Gateway is not available")?;
+
         send_max(&ctx, account, gateway_pk, gateway_info, lnurl).await
     }
 
-    /// Request an invoice into `account` from a caller-selected gateway
-    /// obtained via [`lightning_select_gateway`]. Returns the operation the
-    /// eventual claim will log under, so the caller can subscribe to it
-    /// before the payment arrives. It is derived from the payment hash, as
-    /// a send's is, so a self-payment shares one operation across both
-    /// legs.
+    /// Request an invoice into `account` from a gateway picked from
+    /// [`lightning_gateways`]. The eventual claim logs under the operation
+    /// derived from the invoice's payment hash, as a send's does, so a
+    /// self-payment shares one operation across both legs.
+    ///
+    /// [`lightning_gateways`]: Client::lightning_gateways
     pub async fn lightning_receive(
         &self,
         mint: MintId,
         account: Account,
         gateway_pk: GatewayPk,
-        gateway_info: GatewayInfo,
         amount: Amount,
-    ) -> Result<(OperationId, Bolt11Invoice), ReceiveError> {
+    ) -> Result<Bolt11Invoice, ReceiveError> {
         let ctx = self.ctx(mint).map_err(|_| ReceiveError::NotAdded)?;
+
+        let gateway_info = ctx
+            .gateways
+            .info(gateway_pk)
+            .ok_or(ReceiveError::GatewayNotAvailable)?;
 
         let receive_keypair = ctx.secret.lightning_secret().receive_keypair(account);
 
-        let invoice = create_offer_and_fetch_invoice(
+        create_offer_and_fetch_invoice(
             &ctx,
             gateway_pk,
             gateway_info,
             receive_keypair.public_key(),
             amount,
         )
-        .await?;
-
-        Ok((OperationId::from_encodable(invoice.payment_hash()), invoice))
+        .await
     }
 
     /// A shareable lnurl for `account`, served by `lnurl_daemon`. Nothing
@@ -652,8 +659,10 @@ impl Client {
     }
 
     /// Re-run the threshold-consensus gateway query and re-probe every
-    /// announced gateway, so [`lightning_select_gateway`] reflects the
-    /// mint's current set.
+    /// announced gateway, so [`lightning_gateways`] reflects the mint's
+    /// current set.
+    ///
+    /// [`lightning_gateways`]: Client::lightning_gateways
     pub async fn lightning_refresh_gateways(&self, mint: MintId) -> anyhow::Result<()> {
         let ctx = self.ctx(mint)?;
 

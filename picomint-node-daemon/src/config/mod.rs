@@ -58,8 +58,6 @@ pub struct NodeConfigPrivate {
 pub struct DaemonSettings {
     /// Bind address for our P2P connection
     pub p2p_addr: SocketAddr,
-    /// Web UI bind address.
-    pub ui_addr: SocketAddr,
     /// Path to the folder holding the database and the admin CLI socket
     pub data_dir: PathBuf,
     /// Shortened polling intervals for the integration test.

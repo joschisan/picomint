@@ -61,7 +61,7 @@ pub struct InfoResponse {
     /// Lightning node public key (LDK node id).
     pub lightning_pk: secp256k1::PublicKey,
     /// Iroh public key the gateway accepts on for the picomint API.
-    /// Mint nodes register this via `module lightning gateway add`.
+    /// Mint nodes recommend it via `picomint-node-cli gateway add`.
     pub gateway_pk: picomint_core::lightning::gateway::GatewayPk,
     pub alias: String,
     pub network: String,

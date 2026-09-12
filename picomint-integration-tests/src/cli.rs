@@ -9,7 +9,9 @@ use picomint_gateway_cli_core::{
     ClientBalanceResponse, ClientListResponse, InfoResponse, LdkChannelListResponse,
     LdkLightningReceiveResponse, LdkOnchainReceiveResponse,
 };
-use picomint_node_cli_core::{InviteResponse, SetupStatus};
+use picomint_node_cli_core::{
+    InviteResponse, NodeStatus, OnchainStatusResponse, PendingResponse, SweepResponse,
+};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -152,11 +154,8 @@ pub fn node_invite(data_dir: &Path) -> Result<InviteResponse> {
     node_cmd(data_dir).arg("invite").run_cli::<InviteResponse>()
 }
 
-pub fn node_setup_status(data_dir: &Path) -> Result<SetupStatus> {
-    node_cmd(data_dir)
-        .arg("setup")
-        .arg("status")
-        .run_cli::<SetupStatus>()
+pub fn node_status(data_dir: &Path) -> Result<NodeStatus> {
+    node_cmd(data_dir).arg("status").run_cli::<NodeStatus>()
 }
 
 pub fn node_setup_init(
@@ -176,41 +175,85 @@ pub fn node_setup_init(
     cmd.run_cli::<Value>()
 }
 
-pub fn node_setup_add_node(data_dir: &Path, setup_code: &str) -> Result<Value> {
+pub fn node_setup_add(data_dir: &Path, setup_code: &str) -> Result<Value> {
     node_cmd(data_dir)
         .arg("setup")
-        .arg("add-node")
+        .arg("add")
         .arg(setup_code)
         .run_cli::<Value>()
 }
 
-pub fn node_setup_start_dkg(data_dir: &Path) -> Result<Value> {
+pub fn node_setup_confirm(data_dir: &Path) -> Result<Value> {
     node_cmd(data_dir)
         .arg("setup")
-        .arg("start-dkg")
+        .arg("confirm")
         .run_cli::<Value>()
 }
 
-pub fn node_setup_restore(data_dir: &Path, config_path: &Path) -> Result<Value> {
+pub fn node_setup_restore(data_dir: &Path, backup_path: &Path) -> Result<Value> {
     node_cmd(data_dir)
         .arg("setup")
         .arg("restore")
-        .arg(config_path)
+        .stdin(std::fs::File::open(backup_path)?)
         .run_cli::<Value>()
 }
 
-pub fn node_config(data_dir: &Path) -> Result<Value> {
-    node_cmd(data_dir).arg("config").run_cli::<Value>()
+pub fn node_backup(data_dir: &Path) -> Result<Value> {
+    node_cmd(data_dir).arg("backup").run_cli::<Value>()
 }
 
 pub fn node_session_count(data_dir: &Path) -> Result<u64> {
-    node_cmd(data_dir).arg("session-count").run_cli::<u64>()
+    match node_status(data_dir)? {
+        NodeStatus::Consensus(phase) => Ok(u64::from(phase.session_count)),
+        status => bail!("node is not in consensus: {status:?}"),
+    }
+}
+
+pub fn node_onchain_pending(data_dir: &Path) -> Result<PendingResponse> {
+    node_cmd(data_dir)
+        .arg("onchain")
+        .arg("pending")
+        .run_cli::<PendingResponse>()
+}
+
+pub fn node_onchain_status(data_dir: &Path) -> Result<OnchainStatusResponse> {
+    node_cmd(data_dir)
+        .arg("onchain")
+        .arg("status")
+        .run_cli::<OnchainStatusResponse>()
+}
+
+pub fn node_onchain_sweep(data_dir: &Path) -> Result<SweepResponse> {
+    node_cmd(data_dir)
+        .arg("onchain")
+        .arg("sweep")
+        .run_cli::<SweepResponse>()
+}
+
+/// Runs `picomint-sweep` against the test bitcoind with the given secrets
+/// and returns its report. The fee rate is explicit because a regtest
+/// bitcoind never has an estimate.
+pub fn sweep(
+    nodes: usize,
+    destination: &bitcoin::Address,
+    bitcoind_url: &str,
+    secrets: &[String],
+) -> Result<Value> {
+    let mut cmd = Command::new("target/release/picomint-sweep");
+    cmd.arg(nodes.to_string())
+        .arg(destination.to_string())
+        .arg("--bitcoind-url")
+        .arg(bitcoind_url)
+        .arg("--fee-rate-sat-per-vb")
+        .arg("2");
+    for secret in secrets {
+        cmd.arg("--secret").arg(secret);
+    }
+    cmd.run_cli::<Value>()
 }
 
 pub fn node_lightning_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
     node_cmd(data_dir)
-        .arg("module")
-        .arg("lightning")
         .arg("gateway")
         .arg("add")
         .arg(picomint_base32::encode(pk))
@@ -220,8 +263,6 @@ pub fn node_lightning_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<boo
 
 pub fn node_lightning_gateway_remove(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
     node_cmd(data_dir)
-        .arg("module")
-        .arg("lightning")
         .arg("gateway")
         .arg("remove")
         .arg(picomint_base32::encode(pk))

@@ -5,6 +5,7 @@ mod expiry;
 mod lightning;
 mod onchain;
 mod restore;
+mod sweep;
 
 use std::sync::Arc;
 
@@ -66,6 +67,9 @@ fn main() -> anyhow::Result<()> {
     info!("Running node backup/restore test...");
     runtime.block_on(restore::run_test(&env))?;
 
+    info!("Running sweep test...");
+    runtime.block_on(sweep::run_test(&env))?;
+
     info!(
         total_ms = t_total.elapsed().as_millis() as u64,
         "All integration tests passed!"
@@ -104,12 +108,8 @@ fn keep_alive(runtime: &tokio::runtime::Runtime, env: &env::TestEnv) -> anyhow::
     println!("   {}", picomint_base32::encode(&env.invite));
     println!();
     println!(" Nodes (picomint-node-cli --data-dir <dir> <cmd>):");
-    for i in 0..env::NUM_NODES as u16 {
-        let ui_port = env::NODE_BASE_PORT + i * env::PORTS_PER_NODE + 1;
-        println!(
-            "   node-{i}: {}   (UI http://127.0.0.1:{ui_port}, password: test)",
-            base.join(format!("node-{i}")).display(),
-        );
+    for i in 0..env::NUM_NODES {
+        println!("   node-{i}: {}", base.join(format!("node-{i}")).display());
     }
     println!();
     println!(" Gateway (picomint-gateway-cli --data-dir <dir> <cmd>):");

@@ -54,6 +54,11 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     cfg.validate_config()?;
 
+    anyhow::ensure!(
+        cfg.consensus.network != bitcoin::Network::Bitcoin,
+        "Picomint is experimental software and refuses to run a mint on mainnet"
+    );
+
     let btc_rpc = BitcoindRpcMonitor::new(
         btc_rpc,
         if settings.integration_test {
@@ -102,10 +107,6 @@ pub async fn run(
         submission_tx.clone(),
         proposal_interval,
     ));
-
-    let ui_router = crate::ui::dashboard::router(consensus_api.clone());
-
-    tokio::spawn(crate::ui::run(settings.ui_addr, ui_router));
 
     let cli_router = crate::cli::router(consensus_api.clone());
 
