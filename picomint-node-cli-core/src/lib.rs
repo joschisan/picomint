@@ -13,7 +13,7 @@ pub const ROUTE_STATUS: &str = "/status";
 
 // Setup routes
 pub const ROUTE_SETUP_INIT: &str = "/setup/init";
-pub const ROUTE_SETUP_ADD_NODE: &str = "/setup/add-node";
+pub const ROUTE_SETUP_ADD: &str = "/setup/add";
 pub const ROUTE_SETUP_RESET: &str = "/setup/reset";
 pub const ROUTE_SETUP_CONFIRM: &str = "/setup/confirm";
 pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
@@ -109,16 +109,16 @@ pub struct SetupInitResponse {
     pub setup_code: String,
 }
 
-// --- /setup/add-node ---
+// --- /setup/add ---
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
-pub struct SetupAddNodeRequest {
+pub struct SetupAddRequest {
     /// Another node's setup code, as printed by its `setup init`
     pub setup_code: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SetupAddNodeResponse {
+pub struct SetupAddResponse {
     pub name: String,
 }
 

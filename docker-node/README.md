@@ -115,10 +115,10 @@ Exactly one node sets the global mint config and passes `--mint-name` and `--min
 picomint-node-cli setup init <name> [--mint-name X] [--mint-size N]
 ```
 
-`init` returns a setup code. Every node then calls `add-node` once per node with that node's setup code:
+`init` returns a setup code. Every node then adds every other node's setup code:
 
 ```bash
-picomint-node-cli setup add-node <setup-code>
+picomint-node-cli setup add <setup-code>
 ```
 
 `status` shows which nodes have been added so far. If a code was pasted wrong, `setup reset` forgets every added code so you can start collecting them again. Once every node has added every node, everyone confirms the node set:

@@ -425,7 +425,7 @@ async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
             if other_node == *node {
                 continue;
             }
-            cli::node_setup_add_node(data_dir, code)?;
+            cli::node_setup_add(data_dir, code)?;
         }
     }
     info!("Node info exchanged");

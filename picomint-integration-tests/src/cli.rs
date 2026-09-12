@@ -173,10 +173,10 @@ pub fn node_setup_init(
     cmd.run_cli::<Value>()
 }
 
-pub fn node_setup_add_node(data_dir: &Path, setup_code: &str) -> Result<Value> {
+pub fn node_setup_add(data_dir: &Path, setup_code: &str) -> Result<Value> {
     node_cmd(data_dir)
         .arg("setup")
-        .arg("add-node")
+        .arg("add")
         .arg(setup_code)
         .run_cli::<Value>()
 }
