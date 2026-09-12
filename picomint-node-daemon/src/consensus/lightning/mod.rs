@@ -1,5 +1,6 @@
 pub use picomint_core::lightning as common;
 
+pub mod analytics;
 mod db;
 mod rpc;
 

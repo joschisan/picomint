@@ -212,6 +212,58 @@ picomint-rugpull <nodes> <address> --bitcoind-url http://user:pass@127.0.0.1:833
 
 The fee rate defaults to bitcoind's estimate; `--fee-rate-sat-per-vb` overrides it. The network is whatever bitcoind runs, and the address must be for it. If the tool reports no funds at the address the secrets reconstruct, a node exported before the last transaction confirmed, or a secret was copied wrong.
 
+## Analytics
+
+Every item consensus accepted — client transactions, block height and version votes, the wallet's block, feerate and signing items — is mirrored into a SQLite database next to the node's own, one table per item kind and one per input and output kind. Every row starts with the item's `session` and position `idx` in it and the `node` that submitted it. There is no wallclock: a restored node replays its whole history, so the session is the time axis and the block height votes are the clock. The mirror is rebuilt from the log on every start and is identical on every node.
+
+Query it with read-only SQL; the daemon runs the query and returns one JSON object per row, the same shape `sqlite3 --json` prints. Transactions per session, most recent first:
+
+```bash
+picomint-node-cli query \
+    "SELECT session, COUNT(*) AS txs, SUM(fee) AS fee_msat \
+     FROM tx GROUP BY session ORDER BY session DESC LIMIT 10"
+```
+
+The ecash in circulation, per denomination — notes issued minus notes spent — which is what the wallet's custody has to cover:
+
+```bash
+picomint-node-cli query \
+    "SELECT o.denomination, o.issued - COALESCE(i.spent, 0) AS outstanding \
+     FROM (SELECT denomination, COUNT(*) AS issued FROM ecash_output GROUP BY denomination) o \
+     LEFT JOIN (SELECT denomination, COUNT(*) AS spent FROM ecash_input GROUP BY denomination) i \
+     USING (denomination) ORDER BY o.denomination"
+```
+
+Which nodes take part, by the block height each last voted for. A node whose vote trails the others is behind on its bitcoin backend or down:
+
+```bash
+picomint-node-cli query \
+    "SELECT node, MAX(height) AS height FROM block_height_vote GROUP BY node"
+```
+
+Derived consensus values are not stored; they are the vote tables under the rule the daemon applies. The consensus block height is the threshold-th highest of each node's latest vote, where a mint of `3f + 1` nodes has a threshold of `2f + 1` — three of four, five of seven. The height the mint was at when a transaction was accepted is that rule over the votes before it:
+
+```bash
+picomint-node-cli query \
+    "WITH t AS (SELECT session, idx FROM tx WHERE txid = '<txid>'), \
+          latest AS (SELECT v.node, MAX(v.height) AS height FROM block_height_vote v, t \
+                     WHERE v.session < t.session OR (v.session = t.session AND v.idx < t.idx) \
+                     GROUP BY v.node) \
+     SELECT COALESCE((SELECT height FROM latest ORDER BY height DESC LIMIT 1 OFFSET 2), 0) AS height"
+```
+
+Lightning contracts join on the output that funded them: `lightning_input` names it by `contract_txid` and `contract_idx`, and `lightning_outgoing_output` and `lightning_incoming_output` hold the contracts by `txid` and `position`. Outgoing payments per gateway with how they settled, where `kind` is `outgoing_claim`, `outgoing_refund` or `outgoing_cancel`:
+
+```bash
+picomint-node-cli query \
+    "SELECT o.claim_pk AS gateway, i.kind, COUNT(*) AS contracts, SUM(o.amount) AS amount_msat \
+     FROM lightning_outgoing_output o \
+     INNER JOIN lightning_input i ON i.contract_txid = o.txid AND i.contract_idx = o.position \
+     GROUP BY o.claim_pk, i.kind"
+```
+
+The tables and their columns are the row structs under `consensus/analytics.rs` and each module's `analytics.rs` in `picomint-node-daemon`; `SELECT sql FROM sqlite_schema` prints the schema as installed.
+
 ## Interfaces
 
 | Port | Purpose                      | Safe to expose? |

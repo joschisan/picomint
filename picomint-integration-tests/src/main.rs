@@ -1,3 +1,4 @@
+mod analytics;
 mod cli;
 mod ecash;
 mod env;
@@ -46,6 +47,9 @@ fn main() -> anyhow::Result<()> {
             ecash::run_tests(&env, &client_send),
         )
     })?;
+
+    info!("Running node analytics test...");
+    runtime.block_on(analytics::run_test(&env))?;
 
     info!("Running expiry test...");
     runtime.block_on(expiry::run_test(&env))?;

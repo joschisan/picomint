@@ -1,3 +1,4 @@
+pub mod analytics;
 pub mod api;
 pub mod bft;
 pub mod db;
@@ -17,6 +18,7 @@ use crate::bitcoind::{BitcoindClient, BitcoindRpcMonitor};
 use anyhow::ensure;
 use bitcoin::Network;
 use futures::TryFutureExt;
+use picomint_analytics::Analytics;
 use picomint_core::methods::Method;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::CONSENSUS_VERSION;
@@ -28,7 +30,7 @@ use tracing::{info, warn};
 
 use crate::config::{DaemonSettings, NodeConfig};
 use crate::consensus::api::ConsensusApi;
-use crate::consensus::db::{BlockHeightVoteTable, ConsensusVersionVoteTable};
+use crate::consensus::db::{AcceptedItemTable, BlockHeightVoteTable, ConsensusVersionVoteTable};
 use crate::consensus::server::Server;
 use crate::p2p::{P2PStatusReceivers, ReconnectP2PConnections};
 
@@ -88,7 +90,21 @@ pub async fn run(
         server: server.clone(),
         submission_tx: submission_tx.clone(),
         p2p_status_receivers,
+        data_dir: settings.data_dir.clone(),
     });
+
+    info!("Starting Analytics...");
+
+    let analytics = Analytics::wipe_and_init(&settings.data_dir, &analytics::schema())?;
+
+    let rows_server = server.clone();
+
+    tokio::spawn(picomint_analytics::trailer(
+        analytics,
+        db.notify_for_table(&AcceptedItemTable),
+        analytics::reader(db.clone()),
+        move |entry| analytics::rows(&rows_server, entry),
+    ));
 
     info!("Starting Consensus Api...");
 

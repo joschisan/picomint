@@ -1,3 +1,4 @@
+pub mod analytics;
 mod db;
 mod rpc;
 

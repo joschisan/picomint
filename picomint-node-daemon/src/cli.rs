@@ -71,10 +71,11 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
     use picomint_node_cli_core::{
         ExpirySetRequest, HistoryResponse, INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse,
         LightningGatewayAddRequest, LightningGatewayInfo, LightningGatewayListResponse,
-        LightningGatewayRemoveRequest, OnchainStatusResponse, PendingResponse, ROUTE_BACKUP,
-        ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD,
-        ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY,
-        ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, SweepResponse,
+        LightningGatewayRemoveRequest, OnchainStatusResponse, PendingResponse, QueryRequest,
+        QueryResponse, ROUTE_BACKUP, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
+        ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
+        ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP,
+        ROUTE_QUERY, SweepResponse,
     };
 
     async fn backup(
@@ -135,6 +136,20 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         Ok(Json(SweepResponse {
             secret: picomint_base32::encode(&code),
         }))
+    }
+
+    async fn query(
+        State(api): State<Arc<ConsensusApi>>,
+        Json(request): Json<QueryRequest>,
+    ) -> Result<Json<QueryResponse>, CliError> {
+        let rows = tokio::task::spawn_blocking(move || {
+            picomint_analytics::query(&api.data_dir, &request.query)
+        })
+        .await
+        .map_err(CliError::internal)?
+        .map_err(CliError::bad_request)?;
+
+        Ok(Json(rows))
     }
 
     async fn onchain_pending(
@@ -210,6 +225,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         .route(ROUTE_STATUS, post(consensus_phase))
         .route(ROUTE_INVITE, post(invite))
         .route(ROUTE_BACKUP, post(backup))
+        .route(ROUTE_QUERY, post(query))
         .route(ROUTE_ONCHAIN_STATUS, post(onchain_status))
         .route(ROUTE_ONCHAIN_PENDING, post(onchain_pending))
         .route(ROUTE_ONCHAIN_HISTORY, post(onchain_history))

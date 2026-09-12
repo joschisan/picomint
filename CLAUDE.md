@@ -31,7 +31,7 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 - `picomint-gateway-daemon` — Lightning gateway binary with embedded LDK node
 - `picomint-gateway-cli` / `picomint-gateway-cli-core` — admin CLI for the gateway daemon + shared route/request types
 - `picomint-client-daemon` / `picomint-client-cli` / `picomint-client-cli-core` — headless client for machines: the client library behind an admin socket, with analytics; cli-core holds its routes and payloads; the gateway's `client` subcommand keeps its own copies of the overlapping types on purpose
-- `picomint-analytics` — SQLite mirror of a client's event log, one derived table per event (`SqlRow` derive from `picomint-derive`, column rules in `picomint_core::sql`); no views, read via the daemon's `query` command
+- `picomint-analytics` — SQLite mirror of a daemon's append-only log, generic over the log: the registry that explodes entries into rows lives with the log (`picomint_client::analytics` for the event log, `consensus/analytics.rs` in the node daemon for the accepted consensus items, plus one `analytics.rs` per server module); rows derive `SqlRow` from `picomint-derive`, column rules in `picomint_core::sql`; no views, no wallclock on the node side, read via each daemon's `query` command
 - `picomint-client` — multi-mint client library; owns the concrete per-module client state machines and the append-only event log (`src/eventlog.rs`)
 - `picomint-redb` — redb-backed typed database layer (`table!` macro; consensus-encoded keys/values)
 - `picomint-rpc` — iroh RPC primitives shared by client and server (pooled connections, one request per bi stream)

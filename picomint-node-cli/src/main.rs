@@ -5,11 +5,11 @@ use clap::{Parser, Subcommand};
 use picomint_cli_client::{print_json, request};
 use picomint_node_cli_core::{
     ExpirySetRequest, InviteRequest, LightningGatewayAddRequest, LightningGatewayRemoveRequest,
-    ROUTE_BACKUP, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD,
-    ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY,
-    ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, ROUTE_SETUP_ADD,
-    ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE, ROUTE_STATUS,
-    SetupAddRequest, SetupInitRequest,
+    QueryRequest, ROUTE_BACKUP, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
+    ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
+    ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP,
+    ROUTE_QUERY, ROUTE_SETUP_ADD, ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET,
+    ROUTE_SETUP_RESTORE, ROUTE_STATUS, SetupAddRequest, SetupInitRequest,
 };
 use serde_json::Value;
 
@@ -37,6 +37,8 @@ enum Commands {
     Invite(InviteRequest),
     /// The node config with its private keys, for `setup restore`; always pipe it into a file
     Backup,
+    /// Query the analytics db with read-only SQL; rows print as JSON objects
+    Query(QueryRequest),
     /// The mint's expiry announcement
     #[command(subcommand)]
     Expiry(ExpiryCommands),
@@ -103,6 +105,7 @@ async fn main() -> Result<()> {
         Commands::Status => request(d, ROUTE_STATUS, ()).await?,
         Commands::Invite(req) => request(d, ROUTE_INVITE, req).await?,
         Commands::Backup => request(d, ROUTE_BACKUP, ()).await?,
+        Commands::Query(req) => request(d, ROUTE_QUERY, req).await?,
 
         Commands::Expiry(cmd) => match cmd {
             ExpiryCommands::Set(req) => request(d, ROUTE_EXPIRY_SET, req).await?,
