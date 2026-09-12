@@ -5,12 +5,11 @@ use clap::{Parser, Subcommand};
 use picomint_cli_client::{print_json, request};
 use picomint_node_cli_core::{
     ExpirySetRequest, InviteRequest, LightningGatewayAddRequest, LightningGatewayRemoveRequest,
-    ROUTE_BACKUP, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_EXPIRY_CLEAR,
-    ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST,
-    ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_FEERATE, ROUTE_ONCHAIN_PENDING_TXS,
-    ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, ROUTE_ONCHAIN_TOTAL_VALUE, ROUTE_ONCHAIN_TXS,
-    ROUTE_P2P, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD, ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT,
-    ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE, ROUTE_STATUS, SetupAddRequest, SetupInitRequest,
+    ROUTE_BACKUP, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD,
+    ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_PENDING_TXS,
+    ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, ROUTE_ONCHAIN_TXS, ROUTE_SETUP_ADD,
+    ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE, ROUTE_STATUS,
+    SetupAddRequest, SetupInitRequest,
 };
 use serde_json::Value;
 
@@ -38,14 +37,6 @@ enum Commands {
     Invite(InviteRequest),
     /// The node config with its private keys, for `setup restore`; always pipe it into a file
     Backup,
-    /// Number of consensus sessions this node has finalized; also in `status`
-    SessionCount,
-    /// The mint's consensus block height; also in `status`
-    BlockHeight,
-    /// Every peer's connection; also in `status`
-    P2p,
-    /// The local bitcoin backend; also in `status`
-    BitcoinConnection,
     /// The mint's expiry announcement
     #[command(subcommand)]
     Expiry(ExpiryCommands),
@@ -83,13 +74,9 @@ enum SetupCommands {
 
 #[derive(Subcommand)]
 enum OnchainCommands {
-    /// The mint wallet at a glance: value, transaction tip and count, consensus fee rate, pending transactions
+    /// The mint wallet at a glance: value, transaction tip and count, consensus fee rate
     Status,
-    /// The value in custody in sat; also in `onchain status`
-    TotalValue,
-    /// The consensus fee rate in sat/vB; also in `onchain status`
-    Feerate,
-    /// Mint transactions broadcast but not yet confirmed; also in `onchain status`
+    /// Mint transactions broadcast but not yet confirmed
     PendingTxs,
     /// The mint's whole transaction history
     Txs,
@@ -116,10 +103,6 @@ async fn main() -> Result<()> {
         Commands::Status => request(d, ROUTE_STATUS, ()).await?,
         Commands::Invite(req) => request(d, ROUTE_INVITE, req).await?,
         Commands::Backup => request(d, ROUTE_BACKUP, ()).await?,
-        Commands::SessionCount => request(d, ROUTE_SESSION_COUNT, ()).await?,
-        Commands::BlockHeight => request(d, ROUTE_BLOCK_HEIGHT, ()).await?,
-        Commands::P2p => request(d, ROUTE_P2P, ()).await?,
-        Commands::BitcoinConnection => request(d, ROUTE_BITCOIN_CONNECTION, ()).await?,
 
         Commands::Expiry(cmd) => match cmd {
             ExpiryCommands::Set(req) => request(d, ROUTE_EXPIRY_SET, req).await?,
@@ -140,8 +123,6 @@ async fn main() -> Result<()> {
 
         Commands::Onchain(cmd) => match cmd {
             OnchainCommands::Status => request(d, ROUTE_ONCHAIN_STATUS, ()).await?,
-            OnchainCommands::TotalValue => request(d, ROUTE_ONCHAIN_TOTAL_VALUE, ()).await?,
-            OnchainCommands::Feerate => request(d, ROUTE_ONCHAIN_FEERATE, ()).await?,
             OnchainCommands::PendingTxs => request(d, ROUTE_ONCHAIN_PENDING_TXS, ()).await?,
             OnchainCommands::Txs => request(d, ROUTE_ONCHAIN_TXS, ()).await?,
             OnchainCommands::Sweep => request(d, ROUTE_ONCHAIN_SWEEP, ()).await?,

@@ -2,7 +2,6 @@ use clap::Args;
 use picomint_core::NodeId;
 use picomint_core::bitcoin::Txid;
 use picomint_core::config::MintId;
-use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::onchain::TxInfo;
 use picomint_core::version::ConsensusVersion;
@@ -21,18 +20,12 @@ pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
 // Consensus routes
 pub const ROUTE_INVITE: &str = "/invite";
 pub const ROUTE_BACKUP: &str = "/backup";
-pub const ROUTE_SESSION_COUNT: &str = "/session-count";
-pub const ROUTE_BLOCK_HEIGHT: &str = "/block-height";
-pub const ROUTE_P2P: &str = "/p2p";
-pub const ROUTE_BITCOIN_CONNECTION: &str = "/bitcoin-connection";
 pub const ROUTE_EXPIRY_SET: &str = "/expiry/set";
 pub const ROUTE_EXPIRY_CLEAR: &str = "/expiry/clear";
 pub const ROUTE_EXPIRY_STATUS: &str = "/expiry/status";
 
 // Module routes
 pub const ROUTE_ONCHAIN_STATUS: &str = "/onchain/status";
-pub const ROUTE_ONCHAIN_TOTAL_VALUE: &str = "/onchain/total-value";
-pub const ROUTE_ONCHAIN_FEERATE: &str = "/onchain/feerate";
 pub const ROUTE_ONCHAIN_PENDING_TXS: &str = "/onchain/pending-txs";
 pub const ROUTE_ONCHAIN_TXS: &str = "/onchain/txs";
 pub const ROUTE_ONCHAIN_SWEEP: &str = "/onchain/sweep";
@@ -87,7 +80,6 @@ pub struct ConsensusPhase {
     pub block_height: u32,
     pub nodes: Vec<NodeInfo>,
     pub bitcoin: Option<BitcoinConnectionResponse>,
-    pub expiry: Option<ExpiryStatus>,
 }
 
 // --- /setup/init ---
@@ -156,7 +148,7 @@ pub struct InviteResponse {
 // --- /onchain/status ---
 
 /// The mint wallet at a glance. `tx_tip` is `None` until the first deposit
-/// has established the wallet.
+/// has established the wallet; `onchain pending-txs` lists what is in flight.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OnchainStatusResponse {
     pub total_value_sat: u64,
@@ -164,30 +156,9 @@ pub struct OnchainStatusResponse {
     pub tx_tip: Option<Txid>,
     pub tx_count: u64,
     pub feerate_sat_per_vb: Option<u32>,
-    /// Mint transactions broadcast but not yet confirmed.
-    pub pending_txs: Vec<TxInfo>,
 }
 
-// --- /onchain/total-value ---
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct OnchainTotalValueResponse {
-    pub total_value_sat: Option<u64>,
-}
-
-// --- /block-height ---
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BlockHeightResponse {
-    pub block_height: u32,
-}
-
-// --- /p2p ---
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct P2pResponse {
-    pub nodes: Vec<NodeInfo>,
-}
+// --- status: peers ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NodeInfo {
@@ -199,7 +170,7 @@ pub struct NodeInfo {
     pub rtt_ms: Option<u64>,
 }
 
-// --- /bitcoin-connection ---
+// --- status: bitcoin backend ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BitcoinConnectionResponse {
@@ -207,13 +178,6 @@ pub struct BitcoinConnectionResponse {
     pub block_height: u32,
     pub fee_rate_sat_per_vb: Option<u32>,
     pub sync_progress: Option<f64>,
-}
-
-// --- /onchain/feerate ---
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct OnchainFeerateResponse {
-    pub sat_per_vbyte: Option<u32>,
 }
 
 // --- /onchain/pending-txs ---

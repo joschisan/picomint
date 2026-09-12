@@ -70,27 +70,18 @@ fn wrong_phase(phase: &'static str) -> impl Fn() -> std::future::Ready<CliError>
 pub fn router(api: Arc<ConsensusApi>) -> Router {
     use picomint_core::expiry::ExpiryStatus;
     use picomint_node_cli_core::{
-        BlockHeightResponse, ExpirySetRequest, INVITE_EXPIRY_DAYS_LIMIT, InviteRequest,
-        InviteResponse, LightningGatewayAddRequest, LightningGatewayInfo,
-        LightningGatewayListResponse, LightningGatewayRemoveRequest, OnchainFeerateResponse,
-        OnchainStatusResponse, OnchainTotalValueResponse, P2pResponse, PendingTxsResponse,
-        ROUTE_BACKUP, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_EXPIRY_CLEAR,
-        ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST,
-        ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_FEERATE, ROUTE_ONCHAIN_PENDING_TXS,
-        ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, ROUTE_ONCHAIN_TOTAL_VALUE, ROUTE_ONCHAIN_TXS,
-        ROUTE_P2P, ROUTE_SESSION_COUNT, SweepResponse, TxsResponse,
+        ExpirySetRequest, INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse,
+        LightningGatewayAddRequest, LightningGatewayInfo, LightningGatewayListResponse,
+        LightningGatewayRemoveRequest, OnchainStatusResponse, PendingTxsResponse, ROUTE_BACKUP,
+        ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD,
+        ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_PENDING_TXS,
+        ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, ROUTE_ONCHAIN_TXS, SweepResponse, TxsResponse,
     };
 
     async fn backup(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<NodeConfig>, CliError> {
         Ok(Json(api.server.cfg.clone()))
-    }
-
-    async fn session_count(
-        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<u32>, CliError> {
-        Ok(Json(api.session_count()))
     }
 
     async fn invite(
@@ -129,42 +120,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
             tx_tip: mint_utxo.map(|utxo| utxo.outpoint.txid),
             tx_count: onchain::total_txs(&dbtx),
             feerate_sat_per_vb: onchain::consensus_feerate(&api.server, &dbtx).map(|f| f / 1000),
-            pending_txs: onchain::pending_tx_chain(&dbtx),
         }))
-    }
-
-    async fn onchain_total_value(
-        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<OnchainTotalValueResponse>, CliError> {
-        Ok(Json(OnchainTotalValueResponse {
-            total_value_sat: onchain::mint_utxo(&api.server.db.begin_read())
-                .map(|w| w.value.to_sat()),
-        }))
-    }
-
-    async fn block_height(
-        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<BlockHeightResponse>, CliError> {
-        Ok(Json(BlockHeightResponse {
-            block_height: api.block_height(),
-        }))
-    }
-
-    async fn p2p(State(api): State<Arc<ConsensusApi>>) -> Result<Json<P2pResponse>, CliError> {
-        Ok(Json(P2pResponse {
-            nodes: node_infos(&api),
-        }))
-    }
-
-    async fn bitcoin_connection(
-        State(api): State<Arc<ConsensusApi>>,
-    ) -> Result<Json<BitcoinConnectionResponse>, CliError> {
-        let status = bitcoin_status(&api).ok_or(CliError {
-            code: StatusCode::SERVICE_UNAVAILABLE,
-            error: "Not connected to the bitcoin backend yet".to_string(),
-        })?;
-
-        Ok(Json(status))
     }
 
     async fn onchain_sweep(
@@ -179,15 +135,6 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
 
         Ok(Json(SweepResponse {
             secret: picomint_base32::encode(&code),
-        }))
-    }
-
-    async fn onchain_feerate(
-        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<OnchainFeerateResponse>, CliError> {
-        Ok(Json(OnchainFeerateResponse {
-            sat_per_vbyte: onchain::consensus_feerate(&api.server, &api.server.db.begin_read())
-                .map(|f| f / 1000),
         }))
     }
 
@@ -264,13 +211,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         .route(ROUTE_STATUS, post(consensus_phase))
         .route(ROUTE_INVITE, post(invite))
         .route(ROUTE_BACKUP, post(backup))
-        .route(ROUTE_SESSION_COUNT, post(session_count))
-        .route(ROUTE_BLOCK_HEIGHT, post(block_height))
-        .route(ROUTE_P2P, post(p2p))
-        .route(ROUTE_BITCOIN_CONNECTION, post(bitcoin_connection))
         .route(ROUTE_ONCHAIN_STATUS, post(onchain_status))
-        .route(ROUTE_ONCHAIN_TOTAL_VALUE, post(onchain_total_value))
-        .route(ROUTE_ONCHAIN_FEERATE, post(onchain_feerate))
         .route(ROUTE_ONCHAIN_PENDING_TXS, post(onchain_pending_txs))
         .route(ROUTE_ONCHAIN_TXS, post(onchain_txs))
         .route(ROUTE_ONCHAIN_SWEEP, post(onchain_sweep))
@@ -353,7 +294,6 @@ async fn consensus_phase(
         block_height: api.block_height(),
         nodes: node_infos(&api),
         bitcoin: bitcoin_status(&api),
-        expiry: dbtx.get(&crate::consensus::db::ExpiryStatusTable, &()),
     };
 
     Ok(Json(NodeStatus::Consensus(Box::new(phase))))

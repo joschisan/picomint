@@ -31,9 +31,11 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
             let tips = data_dirs
                 .iter()
                 .map(|data_dir| {
-                    let status = cli::node_onchain_status(data_dir)?;
-                    ensure!(status.pending_txs.is_empty(), "mint txs still pending");
-                    Ok(status.tx_tip)
+                    ensure!(
+                        cli::node_onchain_pending_txs(data_dir)?.txs.is_empty(),
+                        "mint txs still pending"
+                    );
+                    Ok(cli::node_onchain_status(data_dir)?.tx_tip)
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
 

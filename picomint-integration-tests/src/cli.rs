@@ -9,7 +9,9 @@ use picomint_gateway_cli_core::{
     ClientBalanceResponse, ClientListResponse, InfoResponse, LdkChannelListResponse,
     LdkLightningReceiveResponse, LdkOnchainReceiveResponse,
 };
-use picomint_node_cli_core::{InviteResponse, NodeStatus, OnchainStatusResponse, SweepResponse};
+use picomint_node_cli_core::{
+    InviteResponse, NodeStatus, OnchainStatusResponse, PendingTxsResponse, SweepResponse,
+};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -201,7 +203,17 @@ pub fn node_backup(data_dir: &Path) -> Result<Value> {
 }
 
 pub fn node_session_count(data_dir: &Path) -> Result<u64> {
-    node_cmd(data_dir).arg("session-count").run_cli::<u64>()
+    match node_status(data_dir)? {
+        NodeStatus::Consensus(phase) => Ok(u64::from(phase.session_count)),
+        status => bail!("node is not in consensus: {status:?}"),
+    }
+}
+
+pub fn node_onchain_pending_txs(data_dir: &Path) -> Result<PendingTxsResponse> {
+    node_cmd(data_dir)
+        .arg("onchain")
+        .arg("pending-txs")
+        .run_cli::<PendingTxsResponse>()
 }
 
 pub fn node_onchain_status(data_dir: &Path) -> Result<OnchainStatusResponse> {

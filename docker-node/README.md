@@ -56,7 +56,7 @@ picomint-node-cli status
 
 - `Setup`: the node's own setup code once `init` has run, the mint name and size once any setup code has carried them, and the nodes added so far.
 - `Dkg`: key generation is running; the setup code, for nodes that still need it.
-- `Consensus`: the mint is up. Mint name and id, network, this node's id and name, consensus version, session count, block height, every peer's connection, the bitcoind backend, and the announced expiry if any.
+- `Consensus`: the mint is up. Mint name and id, network, this node's id and name, consensus version, session count, block height, every peer's connection and the bitcoind backend.
 
 On a running mint it looks like this:
 
@@ -76,12 +76,11 @@ On a running mint it looks like this:
     { "id": 1, "name": "bob", "connected": true, "transport": "relay", "remote_addr": "relay.n0.iroh.network", "rtt_ms": 118 },
     { "id": 3, "name": "dave", "connected": false, "transport": null, "remote_addr": null, "rtt_ms": null }
   ],
-  "bitcoin": { "network": "bitcoin", "block_height": 912341, "fee_rate_sat_per_vb": 4, "sync_progress": 1.0 },
-  "expiry": null
+  "bitcoin": { "network": "bitcoin", "block_height": 912341, "fee_rate_sat_per_vb": 4, "sync_progress": 1.0 }
 }
 ```
 
-The mint wallet has its own status: the value in custody, the transaction holding the wallet and how many mint transactions preceded it, the consensus fee rate, and the mint transactions still waiting for confirmation.
+The mint wallet has its own status: the value in custody, the transaction holding the wallet and how many mint transactions preceded it, and the consensus fee rate.
 
 ```bash
 picomint-node-cli onchain status
@@ -92,14 +91,14 @@ picomint-node-cli onchain status
   "total_value_sat": 183500000,
   "tx_tip": "6f1e...c3a9",
   "tx_count": 1287,
-  "feerate_sat_per_vb": 4,
-  "pending_txs": []
+  "feerate_sat_per_vb": 4
 }
 ```
 
-The wallet's transaction history grows without bound, so it stays its own command:
+The mint transactions still waiting for confirmation, and the wallet's whole transaction history, are their own commands:
 
 ```bash
+picomint-node-cli onchain pending-txs
 picomint-node-cli onchain txs
 ```
 
@@ -197,7 +196,7 @@ picomint-node-cli expiry set --timestamp <unix-seconds> [--successor <invite>]
 
 Only once the mint has expired and its last onchain transaction has confirmed are the remaining funds swept with `picomint-sweep`, a standalone Linux binary published with every release. It is not part of any image: it runs on an operator's machine, against that operator's bitcoind, with nothing but the secrets below.
 
-Every node exports its sweep secret, which is bound to the mint's current UTXO. Check first that `onchain status` reports the same `tx_tip` and no `pending_txs` on every node, then:
+Every node exports its sweep secret, which is bound to the mint's current UTXO. Check first that `onchain status` reports the same `tx_tip` on every node and `onchain pending-txs` is empty everywhere, then:
 
 ```bash
 picomint-node-cli onchain sweep
