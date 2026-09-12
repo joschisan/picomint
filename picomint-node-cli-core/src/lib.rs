@@ -92,7 +92,7 @@ pub struct ConsensusPhase {
     pub consensus_version: ConsensusVersion,
     pub session_count: u32,
     pub block_height: u32,
-    pub value_in_custody_sat: Option<u64>,
+    pub total_value_sat: u64,
     /// The mint's current wallet UTXO. Its tweak is what a sweep after
     /// decommissioning needs alongside the backup, so record it before the
     /// last node goes down.
