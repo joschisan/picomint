@@ -34,6 +34,8 @@ A pruned node works, under one rule: the mint's block height, the one `status` s
 
 Initial block download pulls the full chain over the network either way, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth. The node will sit idle until bitcoind catches up.
 
+For now the node refuses to run a mint on mainnet: `setup confirm` fails with that error when bitcoind runs mainnet, so point it at signet or regtest until this is no longer experimental.
+
 ## Accessing the CLI
 
 The `picomint-node-cli` binary is included in the container and on the `PATH`. Run CLI commands from the host like:
