@@ -30,15 +30,15 @@ pub const ROUTE_EXPIRY_CLEAR: &str = "/expiry/clear";
 pub const ROUTE_EXPIRY_STATUS: &str = "/expiry/status";
 
 // Module routes
-pub const ROUTE_MODULE_ONCHAIN_STATUS: &str = "/module/onchain/status";
-pub const ROUTE_MODULE_ONCHAIN_TOTAL_VALUE: &str = "/module/onchain/total-value";
-pub const ROUTE_MODULE_ONCHAIN_FEERATE: &str = "/module/onchain/feerate";
-pub const ROUTE_MODULE_ONCHAIN_PENDING_TXS: &str = "/module/onchain/pending-txs";
-pub const ROUTE_MODULE_ONCHAIN_TXS: &str = "/module/onchain/txs";
-pub const ROUTE_MODULE_ONCHAIN_SWEEP: &str = "/module/onchain/sweep";
-pub const ROUTE_MODULE_LN_GATEWAY_ADD: &str = "/module/lightning/gateway/add";
-pub const ROUTE_MODULE_LN_GATEWAY_REMOVE: &str = "/module/lightning/gateway/remove";
-pub const ROUTE_MODULE_LN_GATEWAY_LIST: &str = "/module/lightning/gateway/list";
+pub const ROUTE_ONCHAIN_STATUS: &str = "/onchain/status";
+pub const ROUTE_ONCHAIN_TOTAL_VALUE: &str = "/onchain/total-value";
+pub const ROUTE_ONCHAIN_FEERATE: &str = "/onchain/feerate";
+pub const ROUTE_ONCHAIN_PENDING_TXS: &str = "/onchain/pending-txs";
+pub const ROUTE_ONCHAIN_TXS: &str = "/onchain/txs";
+pub const ROUTE_ONCHAIN_SWEEP: &str = "/onchain/sweep";
+pub const ROUTE_GATEWAY_ADD: &str = "/gateway/add";
+pub const ROUTE_GATEWAY_REMOVE: &str = "/gateway/remove";
+pub const ROUTE_GATEWAY_LIST: &str = "/gateway/list";
 
 // --- /status ---
 
@@ -153,7 +153,7 @@ pub struct InviteResponse {
     pub invite: InviteCode,
 }
 
-// --- /module/onchain/status ---
+// --- /onchain/status ---
 
 /// The mint wallet at a glance. `tx_tip` is `None` until the first deposit
 /// has established the wallet.
@@ -168,7 +168,7 @@ pub struct OnchainStatusResponse {
     pub pending_txs: Vec<TxInfo>,
 }
 
-// --- /module/onchain/total-value ---
+// --- /onchain/total-value ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OnchainTotalValueResponse {
@@ -209,28 +209,28 @@ pub struct BitcoinConnectionResponse {
     pub sync_progress: Option<f64>,
 }
 
-// --- /module/onchain/feerate ---
+// --- /onchain/feerate ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OnchainFeerateResponse {
     pub sat_per_vbyte: Option<u32>,
 }
 
-// --- /module/onchain/pending-txs ---
+// --- /onchain/pending-txs ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PendingTxsResponse {
     pub txs: Vec<TxInfo>,
 }
 
-// --- /module/onchain/txs ---
+// --- /onchain/txs ---
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TxsResponse {
     pub txs: Vec<TxInfo>,
 }
 
-// --- /module/onchain/sweep ---
+// --- /onchain/sweep ---
 
 /// This node's base32 [`picomint_core::onchain::SweepSecret`] for the current
 /// mint UTXO. A threshold of nodes' codes sweeps the wallet after
@@ -240,7 +240,7 @@ pub struct SweepResponse {
     pub secret: String,
 }
 
-// --- /module/lightning/gateway/* ---
+// --- /gateway/* ---
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct LightningGatewayAddRequest {

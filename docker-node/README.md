@@ -44,7 +44,7 @@ docker exec picomint-node-daemon picomint-node-cli --help
 
 The walkthroughs below use the bare `picomint-node-cli …` form — prefix with `docker exec picomint-node-daemon` to run them. Every command prints JSON.
 
-Two commands print secrets, and whatever an agent reads ends up in a model context and a transcript. `backup` prints the node's private keys: always pipe it into a file, never to the terminal. `module onchain sweep` prints a share of the wallet key: run it only once the mint has expired, and never before. Tell your agent not to run either unprompted.
+Two commands print secrets, and whatever an agent reads ends up in a model context and a transcript. `backup` prints the node's private keys: always pipe it into a file, never to the terminal. `onchain sweep` prints a share of the wallet key: run it only once the mint has expired, and never before. Tell your agent not to run either unprompted.
 
 ## Status
 
@@ -84,7 +84,7 @@ On a running mint it looks like this:
 The mint wallet has its own status: the value in custody, the transaction holding the wallet and how many mint transactions preceded it, the consensus fee rate, and the mint transactions still waiting for confirmation.
 
 ```bash
-picomint-node-cli module onchain status
+picomint-node-cli onchain status
 ```
 
 ```json
@@ -100,7 +100,7 @@ picomint-node-cli module onchain status
 The wallet's transaction history grows without bound, so it stays its own command:
 
 ```bash
-picomint-node-cli module onchain txs
+picomint-node-cli onchain txs
 ```
 
 Every other command belongs to exactly one phase; called in the wrong one it says so and points back here.
@@ -146,19 +146,19 @@ The mint maintains an explicit list of recommended Lightning gateways. Any node 
 Add a gateway:
 
 ```bash
-picomint-node-cli module lightning gateway add <pk> <name>
+picomint-node-cli gateway add <pk> <name>
 ```
 
 Remove one:
 
 ```bash
-picomint-node-cli module lightning gateway remove <pk>
+picomint-node-cli gateway remove <pk>
 ```
 
 List the current recommendations:
 
 ```bash
-picomint-node-cli module lightning gateway list
+picomint-node-cli gateway list
 ```
 
 ## Backup
@@ -197,10 +197,10 @@ picomint-node-cli expiry set --timestamp <unix-seconds> [--successor <invite>]
 
 Only once the mint has expired and its last onchain transaction has confirmed are the remaining funds swept with `picomint-sweep`, a standalone Linux binary published with every release. It is not part of any image: it runs on an operator's machine, against that operator's bitcoind, with nothing but the secrets below.
 
-Every node exports its sweep secret, which is bound to the mint's current UTXO. Check first that `module onchain status` reports the same `tx_tip` and no `pending_txs` on every node, then:
+Every node exports its sweep secret, which is bound to the mint's current UTXO. Check first that `onchain status` reports the same `tx_tip` and no `pending_txs` on every node, then:
 
 ```bash
-picomint-node-cli module onchain sweep
+picomint-node-cli onchain sweep
 ```
 
 A threshold of nodes send their secrets to whoever sweeps. That operator passes the mint size, the destination address and the secrets; the tool interpolates the key, finds the UTXO in bitcoind's UTXO set, drains it to the address and broadcasts:

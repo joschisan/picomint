@@ -75,11 +75,10 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         LightningGatewayListResponse, LightningGatewayRemoveRequest, OnchainFeerateResponse,
         OnchainStatusResponse, OnchainTotalValueResponse, P2pResponse, PendingTxsResponse,
         ROUTE_BACKUP, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_EXPIRY_CLEAR,
-        ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
-        ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
-        ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_STATUS, ROUTE_MODULE_ONCHAIN_SWEEP,
-        ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
-        SweepResponse, TxsResponse,
+        ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST,
+        ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_FEERATE, ROUTE_ONCHAIN_PENDING_TXS,
+        ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, ROUTE_ONCHAIN_TOTAL_VALUE, ROUTE_ONCHAIN_TXS,
+        ROUTE_P2P, ROUTE_SESSION_COUNT, SweepResponse, TxsResponse,
     };
 
     async fn backup(
@@ -269,18 +268,15 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         .route(ROUTE_BLOCK_HEIGHT, post(block_height))
         .route(ROUTE_P2P, post(p2p))
         .route(ROUTE_BITCOIN_CONNECTION, post(bitcoin_connection))
-        .route(ROUTE_MODULE_ONCHAIN_STATUS, post(onchain_status))
-        .route(ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, post(onchain_total_value))
-        .route(ROUTE_MODULE_ONCHAIN_FEERATE, post(onchain_feerate))
-        .route(ROUTE_MODULE_ONCHAIN_PENDING_TXS, post(onchain_pending_txs))
-        .route(ROUTE_MODULE_ONCHAIN_TXS, post(onchain_txs))
-        .route(ROUTE_MODULE_ONCHAIN_SWEEP, post(onchain_sweep))
-        .route(ROUTE_MODULE_LN_GATEWAY_ADD, post(lightning_gateway_add))
-        .route(
-            ROUTE_MODULE_LN_GATEWAY_REMOVE,
-            post(lightning_gateway_remove),
-        )
-        .route(ROUTE_MODULE_LN_GATEWAY_LIST, post(lightning_gateway_list))
+        .route(ROUTE_ONCHAIN_STATUS, post(onchain_status))
+        .route(ROUTE_ONCHAIN_TOTAL_VALUE, post(onchain_total_value))
+        .route(ROUTE_ONCHAIN_FEERATE, post(onchain_feerate))
+        .route(ROUTE_ONCHAIN_PENDING_TXS, post(onchain_pending_txs))
+        .route(ROUTE_ONCHAIN_TXS, post(onchain_txs))
+        .route(ROUTE_ONCHAIN_SWEEP, post(onchain_sweep))
+        .route(ROUTE_GATEWAY_ADD, post(lightning_gateway_add))
+        .route(ROUTE_GATEWAY_REMOVE, post(lightning_gateway_remove))
+        .route(ROUTE_GATEWAY_LIST, post(lightning_gateway_list))
         .route(ROUTE_EXPIRY_SET, post(expiry_set))
         .route(ROUTE_EXPIRY_CLEAR, post(expiry_clear))
         .route(ROUTE_EXPIRY_STATUS, post(expiry_status))

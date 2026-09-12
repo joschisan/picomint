@@ -206,7 +206,6 @@ pub fn node_session_count(data_dir: &Path) -> Result<u64> {
 
 pub fn node_onchain_status(data_dir: &Path) -> Result<OnchainStatusResponse> {
     node_cmd(data_dir)
-        .arg("module")
         .arg("onchain")
         .arg("status")
         .run_cli::<OnchainStatusResponse>()
@@ -214,7 +213,6 @@ pub fn node_onchain_status(data_dir: &Path) -> Result<OnchainStatusResponse> {
 
 pub fn node_onchain_sweep(data_dir: &Path) -> Result<SweepResponse> {
     node_cmd(data_dir)
-        .arg("module")
         .arg("onchain")
         .arg("sweep")
         .run_cli::<SweepResponse>()
@@ -244,8 +242,6 @@ pub fn sweep(
 
 pub fn node_lightning_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
     node_cmd(data_dir)
-        .arg("module")
-        .arg("lightning")
         .arg("gateway")
         .arg("add")
         .arg(picomint_base32::encode(pk))
@@ -255,8 +251,6 @@ pub fn node_lightning_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<boo
 
 pub fn node_lightning_gateway_remove(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
     node_cmd(data_dir)
-        .arg("module")
-        .arg("lightning")
         .arg("gateway")
         .arg("remove")
         .arg(picomint_base32::encode(pk))

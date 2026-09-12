@@ -6,12 +6,11 @@ use picomint_cli_client::{print_json, request};
 use picomint_node_cli_core::{
     ExpirySetRequest, InviteRequest, LightningGatewayAddRequest, LightningGatewayRemoveRequest,
     ROUTE_BACKUP, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_EXPIRY_CLEAR,
-    ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
-    ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
-    ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_STATUS, ROUTE_MODULE_ONCHAIN_SWEEP,
-    ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
-    ROUTE_SETUP_ADD, ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE,
-    ROUTE_STATUS, SetupAddRequest, SetupInitRequest,
+    ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST,
+    ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_FEERATE, ROUTE_ONCHAIN_PENDING_TXS,
+    ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, ROUTE_ONCHAIN_TOTAL_VALUE, ROUTE_ONCHAIN_TXS,
+    ROUTE_P2P, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD, ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT,
+    ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE, ROUTE_STATUS, SetupAddRequest, SetupInitRequest,
 };
 use serde_json::Value;
 
@@ -50,9 +49,12 @@ enum Commands {
     /// The mint's expiry announcement
     #[command(subcommand)]
     Expiry(ExpiryCommands),
-    /// Module admin commands
+    /// The mint wallet
     #[command(subcommand)]
-    Module(ModuleCommands),
+    Onchain(OnchainCommands),
+    /// The gateways this node recommends to clients
+    #[command(subcommand)]
+    Gateway(GatewayCommands),
 }
 
 #[derive(Subcommand)]
@@ -80,24 +82,14 @@ enum SetupCommands {
 }
 
 #[derive(Subcommand)]
-enum ModuleCommands {
-    /// Onchain module commands
-    #[command(subcommand)]
-    Onchain(OnchainCommands),
-    /// Lightning module commands
-    #[command(subcommand)]
-    Lightning(LightningCommands),
-}
-
-#[derive(Subcommand)]
 enum OnchainCommands {
     /// The mint wallet at a glance: value, transaction tip and count, consensus fee rate, pending transactions
     Status,
-    /// The value in custody in sat; also in `module onchain status`
+    /// The value in custody in sat; also in `onchain status`
     TotalValue,
-    /// The consensus fee rate in sat/vB; also in `module onchain status`
+    /// The consensus fee rate in sat/vB; also in `onchain status`
     Feerate,
-    /// Mint transactions broadcast but not yet confirmed; also in `module onchain status`
+    /// Mint transactions broadcast but not yet confirmed; also in `onchain status`
     PendingTxs,
     /// The mint's whole transaction history
     Txs,
@@ -106,14 +98,7 @@ enum OnchainCommands {
 }
 
 #[derive(Subcommand)]
-enum LightningCommands {
-    /// The gateways this node recommends to clients
-    #[command(subcommand)]
-    Gateway(LightningGatewayCommands),
-}
-
-#[derive(Subcommand)]
-enum LightningGatewayCommands {
+enum GatewayCommands {
     /// Recommend a gateway; clients use it once a threshold of nodes do
     Add(LightningGatewayAddRequest),
     /// Withdraw this node's recommendation
@@ -153,32 +138,19 @@ async fn main() -> Result<()> {
             }
         },
 
-        Commands::Module(cmd) => match cmd {
-            ModuleCommands::Onchain(cmd) => match cmd {
-                OnchainCommands::Status => request(d, ROUTE_MODULE_ONCHAIN_STATUS, ()).await?,
-                OnchainCommands::TotalValue => {
-                    request(d, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ()).await?
-                }
-                OnchainCommands::Feerate => request(d, ROUTE_MODULE_ONCHAIN_FEERATE, ()).await?,
-                OnchainCommands::PendingTxs => {
-                    request(d, ROUTE_MODULE_ONCHAIN_PENDING_TXS, ()).await?
-                }
-                OnchainCommands::Txs => request(d, ROUTE_MODULE_ONCHAIN_TXS, ()).await?,
-                OnchainCommands::Sweep => request(d, ROUTE_MODULE_ONCHAIN_SWEEP, ()).await?,
-            },
-            ModuleCommands::Lightning(cmd) => match cmd {
-                LightningCommands::Gateway(cmd) => match cmd {
-                    LightningGatewayCommands::Add(req) => {
-                        request(d, ROUTE_MODULE_LN_GATEWAY_ADD, req).await?
-                    }
-                    LightningGatewayCommands::Remove(req) => {
-                        request(d, ROUTE_MODULE_LN_GATEWAY_REMOVE, req).await?
-                    }
-                    LightningGatewayCommands::List => {
-                        request(d, ROUTE_MODULE_LN_GATEWAY_LIST, ()).await?
-                    }
-                },
-            },
+        Commands::Onchain(cmd) => match cmd {
+            OnchainCommands::Status => request(d, ROUTE_ONCHAIN_STATUS, ()).await?,
+            OnchainCommands::TotalValue => request(d, ROUTE_ONCHAIN_TOTAL_VALUE, ()).await?,
+            OnchainCommands::Feerate => request(d, ROUTE_ONCHAIN_FEERATE, ()).await?,
+            OnchainCommands::PendingTxs => request(d, ROUTE_ONCHAIN_PENDING_TXS, ()).await?,
+            OnchainCommands::Txs => request(d, ROUTE_ONCHAIN_TXS, ()).await?,
+            OnchainCommands::Sweep => request(d, ROUTE_ONCHAIN_SWEEP, ()).await?,
+        },
+
+        Commands::Gateway(cmd) => match cmd {
+            GatewayCommands::Add(req) => request(d, ROUTE_GATEWAY_ADD, req).await?,
+            GatewayCommands::Remove(req) => request(d, ROUTE_GATEWAY_REMOVE, req).await?,
+            GatewayCommands::List => request(d, ROUTE_GATEWAY_LIST, ()).await?,
         },
     };
 
