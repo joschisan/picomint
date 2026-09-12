@@ -4,7 +4,6 @@
 use anyhow::{Context, ensure};
 use bitcoincore_rpc::RpcApi;
 use picomint_core::NumNodes;
-use picomint_node_cli_core::NodeStatus;
 use tokio::task::block_in_place;
 use tracing::info;
 
@@ -31,12 +30,10 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
 
             let tips = data_dirs
                 .iter()
-                .map(|data_dir| match cli::node_status(data_dir)? {
-                    NodeStatus::Consensus(phase) => {
-                        ensure!(phase.pending_txs.is_empty(), "mint txs still pending");
-                        Ok(phase.tx_tip)
-                    }
-                    phase => anyhow::bail!("node is not in consensus: {phase:?}"),
+                .map(|data_dir| {
+                    let status = cli::node_onchain_status(data_dir)?;
+                    ensure!(status.pending_txs.is_empty(), "mint txs still pending");
+                    Ok(status.tx_tip)
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
 

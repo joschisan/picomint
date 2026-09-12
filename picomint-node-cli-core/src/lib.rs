@@ -39,6 +39,7 @@ pub const ROUTE_EXPIRY_CLEAR: &str = "/expiry/clear";
 pub const ROUTE_EXPIRY_STATUS: &str = "/expiry/status";
 
 // Module routes
+pub const ROUTE_MODULE_ONCHAIN_STATUS: &str = "/module/onchain/status";
 pub const ROUTE_MODULE_ONCHAIN_TOTAL_VALUE: &str = "/module/onchain/total-value";
 pub const ROUTE_MODULE_ONCHAIN_FEERATE: &str = "/module/onchain/feerate";
 pub const ROUTE_MODULE_ONCHAIN_PENDING_TXS: &str = "/module/onchain/pending-txs";
@@ -93,13 +94,6 @@ pub struct ConsensusPhase {
     pub consensus_version: ConsensusVersion,
     pub session_count: u32,
     pub block_height: u32,
-    pub total_value_sat: u64,
-    /// The transaction holding the mint's current wallet UTXO.
-    pub tx_tip: Option<Txid>,
-    pub tx_count: u64,
-    pub feerate_sat_per_vb: Option<u32>,
-    /// Mint transactions broadcast but not yet confirmed.
-    pub pending_txs: Vec<TxInfo>,
     pub nodes: Vec<NodeInfo>,
     pub bitcoin: Option<BitcoinConnectionResponse>,
     pub expiry: Option<ExpiryStatus>,
@@ -169,6 +163,21 @@ pub struct InviteRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InviteResponse {
     pub invite: InviteCode,
+}
+
+// --- /module/onchain/status ---
+
+/// The mint wallet at a glance. `tx_tip` is `None` until the first deposit
+/// has established the wallet.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OnchainStatusResponse {
+    pub total_value_sat: u64,
+    /// The transaction holding the mint's current wallet UTXO.
+    pub tx_tip: Option<Txid>,
+    pub tx_count: u64,
+    pub feerate_sat_per_vb: Option<u32>,
+    /// Mint transactions broadcast but not yet confirmed.
+    pub pending_txs: Vec<TxInfo>,
 }
 
 // --- /module/onchain/total-value ---

@@ -75,11 +75,11 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         BlockHeightResponse, ExpirySetRequest, INVITE_EXPIRY_DAYS_LIMIT, InviteRequest,
         InviteResponse, LightningGatewayAddRequest, LightningGatewayInfo,
         LightningGatewayListResponse, LightningGatewayRemoveRequest, OnchainFeerateResponse,
-        OnchainTotalValueResponse, P2pResponse, PendingTxsResponse, ROUTE_BITCOIN_CONNECTION,
-        ROUTE_BLOCK_HEIGHT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET,
-        ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
+        OnchainStatusResponse, OnchainTotalValueResponse, P2pResponse, PendingTxsResponse,
+        ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
+        ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
         ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
-        ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_SWEEP,
+        ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_STATUS, ROUTE_MODULE_ONCHAIN_SWEEP,
         ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
         SweepResponse, TxsResponse,
     };
@@ -116,6 +116,23 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
 
         Ok(Json(InviteResponse {
             invite: api.create_invite_code(req.expiry_days, req.user_limit).0,
+        }))
+    }
+
+    async fn onchain_status(
+        State(api): State<Arc<ConsensusApi>>,
+    ) -> Result<Json<OnchainStatusResponse>, CliError> {
+        // One read snapshot, so every value reflects the same database state.
+        let dbtx = api.server.db.begin_read();
+
+        let mint_utxo = onchain::mint_utxo(&dbtx);
+
+        Ok(Json(OnchainStatusResponse {
+            total_value_sat: mint_utxo.as_ref().map_or(0, |utxo| utxo.value.to_sat()),
+            tx_tip: mint_utxo.map(|utxo| utxo.outpoint.txid),
+            tx_count: onchain::total_txs(&dbtx),
+            feerate_sat_per_vb: onchain::consensus_feerate(&api.server, &dbtx).map(|f| f / 1000),
+            pending_txs: onchain::pending_tx_chain(&dbtx),
         }))
     }
 
@@ -254,6 +271,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         .route(ROUTE_BLOCK_HEIGHT, post(block_height))
         .route(ROUTE_P2P, post(p2p))
         .route(ROUTE_BITCOIN_CONNECTION, post(bitcoin_connection))
+        .route(ROUTE_MODULE_ONCHAIN_STATUS, post(onchain_status))
         .route(ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, post(onchain_total_value))
         .route(ROUTE_MODULE_ONCHAIN_FEERATE, post(onchain_feerate))
         .route(ROUTE_MODULE_ONCHAIN_PENDING_TXS, post(onchain_pending_txs))
@@ -324,8 +342,6 @@ async fn consensus_phase(
     // One read snapshot, so every value reflects the same database state.
     let dbtx = api.server.db.begin_read();
 
-    let mint_utxo = onchain::mint_utxo(&dbtx);
-
     let phase = ConsensusPhase {
         mint_name: cfg.consensus.name.clone(),
         mint_id: cfg.consensus.calculate_mint_id(),
@@ -341,11 +357,6 @@ async fn consensus_phase(
         consensus_version: consensus_version(&api.server, &dbtx),
         session_count: api.session_count(),
         block_height: api.block_height(),
-        total_value_sat: mint_utxo.as_ref().map_or(0, |utxo| utxo.value.to_sat()),
-        tx_tip: mint_utxo.map(|utxo| utxo.outpoint.txid),
-        tx_count: onchain::total_txs(&dbtx),
-        feerate_sat_per_vb: onchain::consensus_feerate(&api.server, &dbtx).map(|f| f / 1000),
-        pending_txs: onchain::pending_tx_chain(&dbtx),
         nodes: node_infos(&api),
         bitcoin: bitcoin_status(&api),
         expiry: dbtx.get(&crate::consensus::db::ExpiryStatusTable, &()),

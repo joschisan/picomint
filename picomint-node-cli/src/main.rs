@@ -8,10 +8,10 @@ use picomint_node_cli_core::{
     ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
     ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
     ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
-    ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_SWEEP, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE,
-    ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT, ROUTE_SETUP_ADD_NODE,
-    ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE, ROUTE_SETUP_START_DKG,
-    ROUTE_SETUP_STATUS, ROUTE_STATUS, SetupAddNodeRequest, SetupInitRequest,
+    ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_STATUS, ROUTE_MODULE_ONCHAIN_SWEEP,
+    ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ROUTE_MODULE_ONCHAIN_TXS, ROUTE_P2P, ROUTE_SESSION_COUNT,
+    ROUTE_SETUP_ADD_NODE, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE,
+    ROUTE_SETUP_START_DKG, ROUTE_SETUP_STATUS, ROUTE_STATUS, SetupAddNodeRequest, SetupInitRequest,
 };
 use serde_json::Value;
 
@@ -96,6 +96,8 @@ enum ModuleCommands {
 
 #[derive(Subcommand)]
 enum OnchainCommands {
+    /// The mint wallet at a glance: value, transaction tip and count, consensus fee rate, pending transactions
+    Status,
     /// Get total onchain value
     TotalValue,
     /// Get consensus fee rate
@@ -160,6 +162,7 @@ async fn main() -> Result<()> {
 
         Commands::Module(cmd) => match cmd {
             ModuleCommands::Onchain(cmd) => match cmd {
+                OnchainCommands::Status => request(d, ROUTE_MODULE_ONCHAIN_STATUS, ()).await?,
                 OnchainCommands::TotalValue => {
                     request(d, ROUTE_MODULE_ONCHAIN_TOTAL_VALUE, ()).await?
                 }
