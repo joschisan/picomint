@@ -140,8 +140,6 @@ impl Gateways {
         }
     }
 
-    /// Pick a member gateway that has info, at random for load distribution.
-    /// Returns `None` if no gateway currently has info.
     /// Every pooled gateway with a successful info probe, keyed by pk.
     pub fn list(&self) -> BTreeMap<GatewayPk, GatewayInfo> {
         self.inner

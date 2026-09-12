@@ -134,10 +134,6 @@ fn send_max_amount(ctx: &ClientContext, account: Account, gateway_info: &Gateway
     })
 }
 
-/// Pick any gateway from the pool that has info, at random for load
-/// distribution. A gateway charges the same fee however a payment
-/// settles, so there is nothing about an invoice to match a gateway
-/// against — any of them prices any payment identically to itself.
 /// Empty `account` to `lnurl` through a caller-selected gateway: resolve
 /// it, size the max, pay — the Lightning shape of
 /// [`crate::Client::onchain_send_max`]. The max needs no

@@ -12,8 +12,8 @@ table!(
 // The mint's announced gateway pks, mirrored to disk by
 // `update_gateway_pks`. On a cold start they are probed straight away by
 // `update_gateway_info` to repopulate the in-memory pool, so the client need
-// not wait on the threshold-consensus gateway query before `select_gateway`
-// can return. The probed `GatewayInfo` itself stays in memory, never persisted.
+// not wait on the threshold-consensus gateway query before
+// `lightning_gateways` fills. The probed `GatewayInfo` itself stays in memory, never persisted.
 table!(
     GatewayPkTable,
     (MintId, GatewayPk) => (),
