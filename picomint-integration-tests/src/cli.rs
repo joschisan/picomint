@@ -199,8 +199,8 @@ pub fn node_setup_restore(data_dir: &Path, config_path: &Path) -> Result<Value> 
         .run_cli::<Value>()
 }
 
-pub fn node_config(data_dir: &Path) -> Result<Value> {
-    node_cmd(data_dir).arg("config").run_cli::<Value>()
+pub fn node_backup(data_dir: &Path) -> Result<Value> {
+    node_cmd(data_dir).arg("backup").run_cli::<Value>()
 }
 
 pub fn node_session_count(data_dir: &Path) -> Result<u64> {

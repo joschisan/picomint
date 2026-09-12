@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use picomint_cli_client::{print_json, request};
 use picomint_node_cli_core::{
     ExpirySetRequest, InviteRequest, LightningGatewayAddRequest, LightningGatewayRemoveRequest,
-    ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
+    ROUTE_BACKUP, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_EXPIRY_CLEAR,
     ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
     ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
     ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_STATUS, ROUTE_MODULE_ONCHAIN_SWEEP,
@@ -37,8 +37,8 @@ enum Commands {
     Setup(SetupCommands),
     /// Generate a mint invite code
     Invite(InviteRequest),
-    /// Dump full node config as JSON (use `> config.json` to save)
-    Config,
+    /// The node config with its private keys, for `setup restore`; always pipe it into a file
+    Backup,
     /// Number of consensus sessions this node has finalized
     SessionCount,
     /// Get the mint's consensus block height
@@ -79,7 +79,7 @@ enum SetupCommands {
     Confirm,
     /// Restore node config from a config file (skips DKG)
     Restore {
-        /// Path to a `config.json` previously produced by `config`
+        /// Path to a `backup.json` previously produced by `backup`
         path: PathBuf,
     },
 }
@@ -135,7 +135,7 @@ async fn main() -> Result<()> {
     let result = match cli.command {
         Commands::Status => request(d, ROUTE_STATUS, ()).await?,
         Commands::Invite(req) => request(d, ROUTE_INVITE, req).await?,
-        Commands::Config => request(d, ROUTE_CONFIG, ()).await?,
+        Commands::Backup => request(d, ROUTE_BACKUP, ()).await?,
         Commands::SessionCount => request(d, ROUTE_SESSION_COUNT, ()).await?,
         Commands::BlockHeight => request(d, ROUTE_BLOCK_HEIGHT, ()).await?,
         Commands::P2p => request(d, ROUTE_P2P, ()).await?,

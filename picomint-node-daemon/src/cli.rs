@@ -76,7 +76,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         InviteResponse, LightningGatewayAddRequest, LightningGatewayInfo,
         LightningGatewayListResponse, LightningGatewayRemoveRequest, OnchainFeerateResponse,
         OnchainStatusResponse, OnchainTotalValueResponse, P2pResponse, PendingTxsResponse,
-        ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_CONFIG, ROUTE_EXPIRY_CLEAR,
+        ROUTE_BACKUP, ROUTE_BITCOIN_CONNECTION, ROUTE_BLOCK_HEIGHT, ROUTE_EXPIRY_CLEAR,
         ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_INVITE, ROUTE_MODULE_LN_GATEWAY_ADD,
         ROUTE_MODULE_LN_GATEWAY_LIST, ROUTE_MODULE_LN_GATEWAY_REMOVE, ROUTE_MODULE_ONCHAIN_FEERATE,
         ROUTE_MODULE_ONCHAIN_PENDING_TXS, ROUTE_MODULE_ONCHAIN_STATUS, ROUTE_MODULE_ONCHAIN_SWEEP,
@@ -84,7 +84,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         SweepResponse, TxsResponse,
     };
 
-    async fn config(
+    async fn backup(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
     ) -> Result<Json<NodeConfig>, CliError> {
         Ok(Json(api.server.cfg.clone()))
@@ -266,7 +266,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
     Router::new()
         .route(ROUTE_STATUS, post(consensus_phase))
         .route(ROUTE_INVITE, post(invite))
-        .route(ROUTE_CONFIG, post(config))
+        .route(ROUTE_BACKUP, post(backup))
         .route(ROUTE_SESSION_COUNT, post(session_count))
         .route(ROUTE_BLOCK_HEIGHT, post(block_height))
         .route(ROUTE_P2P, post(p2p))

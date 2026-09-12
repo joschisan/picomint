@@ -44,7 +44,7 @@ docker exec picomint-node-daemon picomint-node-cli --help
 
 The walkthroughs below use the bare `picomint-node-cli …` form — prefix with `docker exec picomint-node-daemon` to run them. Every command prints JSON.
 
-Two commands print secrets, and whatever an agent reads ends up in a model context and a transcript. `config` prints the node's private keys: always pipe it into a file, never to the terminal. `module onchain sweep` prints a share of the wallet key: run it only once the mint has expired, and never before. Tell your agent not to run either unprompted.
+Two commands print secrets, and whatever an agent reads ends up in a model context and a transcript. `backup` prints the node's private keys: always pipe it into a file, never to the terminal. `module onchain sweep` prints a share of the wallet key: run it only once the mint has expired, and never before. Tell your agent not to run either unprompted.
 
 ## Status
 
@@ -168,7 +168,7 @@ your local machine and stash it somewhere safe (encrypted backup, password
 manager, paper printout):
 
 ```bash
-picomint-node-cli config > config.json
+picomint-node-cli backup > backup.json
 ```
 
 This single file is the only state you need to keep. It contains your
@@ -179,13 +179,13 @@ reconstructed from nodes when a restored node rejoins.
 If your deployment is ever lost, copy the backup back into a fresh container:
 
 ```bash
-docker cp config.json picomint-node-daemon:/tmp/config.json
+docker cp backup.json picomint-node-daemon:/tmp/backup.json
 ```
 
 And run `setup restore`:
 
 ```bash
-picomint-node-cli setup restore /tmp/config.json
+picomint-node-cli setup restore /tmp/backup.json
 ```
 
 ## Announce Expiry

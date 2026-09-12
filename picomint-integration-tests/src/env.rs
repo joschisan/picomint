@@ -129,7 +129,7 @@ impl TestEnv {
         for node in NUM_ONLINE_NODES..NUM_NODES {
             let data_dir = &node_data_dirs[node];
             runtime.block_on(retry(&format!("node-{node} wrote its config"), || async {
-                cli::node_config(data_dir).map(|_| ())
+                cli::node_backup(data_dir).map(|_| ())
             }))?;
 
             let mut child = node_processes[node].take().expect("node was started");

@@ -66,8 +66,8 @@ pub async fn run_test(env: &TestEnv) -> Result<()> {
     let mut original_cfgs = Vec::with_capacity(nodes.len());
     let mut backup_paths = Vec::with_capacity(nodes.len());
     for (i, &node) in nodes.iter().enumerate() {
-        let cfg = cli::node_config(&data_dirs[i])?;
-        let backup_path = env.data_dir.join(format!("config-{node}.json"));
+        let cfg = cli::node_backup(&data_dirs[i])?;
+        let backup_path = env.data_dir.join(format!("backup-{node}.json"));
         std::fs::write(&backup_path, serde_json::to_vec_pretty(&cfg)?)?;
         original_cfgs.push(cfg);
         backup_paths.push(backup_path);
@@ -107,7 +107,7 @@ pub async fn run_test(env: &TestEnv) -> Result<()> {
 
     info!("verifying restored configs match originals");
     for (i, &node) in nodes.iter().enumerate() {
-        let restored_cfg = cli::node_config(&data_dirs[i])?;
+        let restored_cfg = cli::node_backup(&data_dirs[i])?;
         ensure!(
             restored_cfg == original_cfgs[i],
             "node-{node} restored config does not match original"

@@ -29,7 +29,7 @@ pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
 
 // Consensus routes
 pub const ROUTE_INVITE: &str = "/invite";
-pub const ROUTE_CONFIG: &str = "/config";
+pub const ROUTE_BACKUP: &str = "/backup";
 pub const ROUTE_SESSION_COUNT: &str = "/session-count";
 pub const ROUTE_BLOCK_HEIGHT: &str = "/block-height";
 pub const ROUTE_P2P: &str = "/p2p";
@@ -83,7 +83,7 @@ pub struct DkgPhase {
 }
 
 /// Consensus phase: the mint is running. Everything here is public; the
-/// private keys are only ever returned by `config`.
+/// private keys are only ever returned by `backup`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConsensusPhase {
     pub mint_name: String,
