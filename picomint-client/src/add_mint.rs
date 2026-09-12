@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::bail;
+use anyhow::{bail, ensure};
 use futures::future::try_join_all;
 use iroh::Endpoint;
 use picomint_core::config::ConsensusConfig;
@@ -41,6 +41,11 @@ pub(crate) async fn add_mint(
     network: Option<bitcoin::Network>,
 ) -> anyhow::Result<(ConsensusConfig, BTreeMap<Account, Restore>)> {
     let config = download(&client.endpoint, invite).await?;
+
+    ensure!(
+        config.network != bitcoin::Network::Bitcoin,
+        "Picomint is experimental software and refuses to add a mainnet mint"
+    );
 
     if network.is_some_and(|network| config.network != network) {
         bail!("Unsupported network {}", config.network);
