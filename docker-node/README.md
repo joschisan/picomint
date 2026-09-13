@@ -215,7 +215,7 @@ The fee rate defaults to bitcoind's estimate; `--fee-rate-sat-per-vb` overrides 
 No port forward is needed: iroh punches through NAT and falls back to a relay when it can't. Forwarding UDP 8080 on your router only helps a node behind a strict NAT reach the others directly instead of over the relay; `status` shows which transport each node ended up on.
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `docker exec picomint-node-daemon
+network exposure, and the daemon keeps it and the data directory owner-only. Reach it with `docker exec picomint-node-daemon
 picomint-node-cli …`.
 
 ## Configuration

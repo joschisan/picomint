@@ -3299,6 +3299,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "tempfile",
  "tokio",
 ]
 
@@ -3500,7 +3501,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-rustls",
- "tower-http 0.7.1",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -5265,11 +5265,9 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08a05a66a4fdd61cbbe0a1d755ffe0ca6aba159dd4820936a0ff8a8278245b9c"
 dependencies = [
- "base64 0.22.1",
  "bitflags",
  "bytes",
  "http",
- "mime",
  "percent-encoding",
  "pin-project-lite",
  "tower-layer",

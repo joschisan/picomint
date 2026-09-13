@@ -224,7 +224,7 @@ picomint-gateway-cli query \
 Iroh punches through NAT and falls back to a relay, so `8080` works without a port forward. `9735` only matters if Lightning peers should be able to connect to you rather than the other way round; every command in [Open Channels](#open-channels) connects outward.
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
-network exposure. Reach it with `docker exec picomint-gateway-daemon
+network exposure, and the daemon keeps it and the data directory owner-only. Reach it with `docker exec picomint-gateway-daemon
 picomint-gateway-cli …`.
 
 ## Configuration

@@ -78,7 +78,7 @@ pub async fn run_server(
 
     let setup_api = Arc::new(SetupApi::new(bitcoin.clone(), setup_tx, db.clone()));
 
-    let setup_cli_handle = tokio::spawn(cli::run_cli(settings.data_dir.clone(), setup_api.clone()));
+    let setup_cli_handle = tokio::spawn(cli::run_cli(&settings.data_dir, setup_api.clone())?);
 
     let setup_result = setup_rx
         .recv()
@@ -120,7 +120,7 @@ async fn run_dkg_then_consensus(
 
     let connections = ReconnectP2PConnections::new(params.identity, cnt, status_txs, conn_tx);
 
-    let dkg_cli_handle = tokio::spawn(cli::run_dkg_cli(settings.data_dir.clone(), db.clone()));
+    let dkg_cli_handle = tokio::spawn(cli::run_dkg_cli(&settings.data_dir, db.clone())?);
 
     let cfg = dkg::run(&params, connections.clone(), status_rxs.clone()).await?;
 

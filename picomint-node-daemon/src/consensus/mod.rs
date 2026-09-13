@@ -110,7 +110,7 @@ pub async fn run(
 
     let cli_router = crate::cli::router(consensus_api.clone());
 
-    tokio::spawn(crate::cli::run(settings.data_dir.clone(), cli_router));
+    tokio::spawn(picomint_cli_server::serve(&settings.data_dir, cli_router)?);
 
     await_bitcoin_sync(&btc_rpc, cfg.consensus.network).await?;
 
