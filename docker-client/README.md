@@ -22,7 +22,7 @@ docker exec picomint-client-daemon picomint-client-cli --help
 
 The walkthroughs below use the bare `picomint-client-cli …` form — prefix with `docker exec picomint-client-daemon` to run them. Every command prints JSON, and its `--help` ends with the JSON Schema of what it prints, every field explained.
 
-One command prints a secret: `mnemonic` prints the seed words every fund derives from. Whatever an agent reads ends up in a model context and a transcript, so the rules for an agent are: run it only when asked, always with the output piped into a file, never read the file, and open it for the operator if asked. Write the words down from that file yourself and delete it. The same rules end the CLI's `--help`.
+One command prints a secret: `mnemonic` prints the seed words every fund derives from. Whatever an agent reads ends up in a model context and a transcript, so the rules for an agent are: run it only when asked, always with the output piped into a file, never read the file, and open it for the operator if asked. Write the words down from that file yourself and delete it. The same rules end the CLI's `--help`. The shell creates that file with its umask, world-readable on most systems, so create it in a subshell with `umask 077` and it is readable by you alone from the first byte.
 
 Every command takes the mint id first and, where funds move, the account next, one of `primary`, `secondary`, `tertiary`, `quaternary` or `quinary`. Amounts carry their denomination, so quote them: `"1000 sat"` or `"0.001 BTC"`.
 
@@ -205,7 +205,7 @@ picomint-client-cli lightning lnurl <mint> <account> https://lnurl.example.com/
 The daemon generates a twelve word mnemonic on first start, and its funds in every mint derive from it:
 
 ```bash
-picomint-client-cli mnemonic > mnemonic.json
+(umask 077; picomint-client-cli mnemonic > mnemonic.json)
 ```
 
 If the deployment is ever lost, the mnemonic restores those funds in any Picomint wallet. The daemon itself cannot be seeded with a mnemonic: its state is the volume, so keep the volume.
