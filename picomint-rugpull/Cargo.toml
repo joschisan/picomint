@@ -1,5 +1,5 @@
 [package]
-description = "Sweeps a decommissioned mint's wallet with a threshold of its nodes' sweep secrets"
+description = "Drains a decommissioned mint's wallet with a threshold of its nodes' rugpull secrets"
 edition = { workspace = true }
 homepage = { workspace = true }
 keywords = { workspace = true }

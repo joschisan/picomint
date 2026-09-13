@@ -79,8 +79,8 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         LightningGatewayInfo, LightningGatewayListResponse, LightningGatewayRemoveRequest,
         OnchainStatusResponse, PendingResponse, ROUTE_BACKUP, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET,
         ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE,
-        ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_STATUS,
-        ROUTE_ONCHAIN_SWEEP, SweepResponse,
+        ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL,
+        ROUTE_ONCHAIN_STATUS, RugpullResponse,
     };
 
     async fn backup(
@@ -128,17 +128,17 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         }))
     }
 
-    async fn onchain_sweep(
+    async fn onchain_rugpull(
         State(api): State<Arc<ConsensusApi>>,
-    ) -> Result<Json<SweepResponse>, CliError> {
+    ) -> Result<Json<RugpullResponse>, CliError> {
         let code =
-            onchain::sweep_secret(&api.server, &api.server.db.begin_read()).ok_or(CliError {
+            onchain::rugpull_secret(&api.server, &api.server.db.begin_read()).ok_or(CliError {
                 code: StatusCode::SERVICE_UNAVAILABLE,
-                error: "The mint wallet has not received funds yet, so there is nothing to sweep"
+                error: "The mint wallet has not received funds yet, so there is nothing to drain"
                     .to_string(),
             })?;
 
-        Ok(Json(SweepResponse {
+        Ok(Json(RugpullResponse {
             secret: picomint_base32::encode(&code),
         }))
     }
@@ -251,7 +251,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         .route(ROUTE_ONCHAIN_STATUS, post(onchain_status))
         .route(ROUTE_ONCHAIN_PENDING, post(onchain_pending))
         .route(ROUTE_ONCHAIN_HISTORY, post(onchain_history))
-        .route(ROUTE_ONCHAIN_SWEEP, post(onchain_sweep))
+        .route(ROUTE_ONCHAIN_RUGPULL, post(onchain_rugpull))
         .route(ROUTE_GATEWAY_ADD, post(lightning_gateway_add))
         .route(ROUTE_GATEWAY_REMOVE, post(lightning_gateway_remove))
         .route(ROUTE_GATEWAY_LIST, post(lightning_gateway_list))

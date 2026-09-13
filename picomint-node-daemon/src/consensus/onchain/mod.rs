@@ -32,7 +32,7 @@ use crate::consensus::CONFIRMATIONS;
 use crate::consensus::db::consensus_block_height;
 use crate::consensus::server::Server;
 use crate::handler;
-use picomint_core::onchain::SweepSecret;
+use picomint_core::onchain::RugpullSecret;
 use picomint_core::onchain::config::{OnchainConfig, OnchainConfigPrivate};
 use picomint_core::onchain::methods::OnchainMethod;
 use picomint_core::onchain::{
@@ -1056,12 +1056,12 @@ pub fn mint_utxo(dbtx: &impl DbRead) -> Option<MintUtxo> {
     dbtx.get(&MintOnchainTable, &())
 }
 
-/// This node's [`SweepSecret`] for the current mint UTXO, or None while the
+/// This node's [`RugpullSecret`] for the current mint UTXO, or None while the
 /// mint wallet has not been initialized yet.
-pub fn sweep_secret(server: &Server, dbtx: &impl DbRead) -> Option<SweepSecret> {
+pub fn rugpull_secret(server: &Server, dbtx: &impl DbRead) -> Option<RugpullSecret> {
     let wallet = mint_utxo(dbtx)?;
 
-    Some(SweepSecret {
+    Some(RugpullSecret {
         node: server.cfg.private.identity,
         sks: tweaked_sks(server, &wallet.tweak),
     })

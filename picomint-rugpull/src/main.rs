@@ -1,7 +1,7 @@
-//! Sweeps a decommissioned mint's wallet.
+//! Drains a decommissioned mint's wallet.
 //!
-//! After the mint has stopped transacting, every node exports its sweep
-//! secret with `picomint-node-cli onchain sweep`. A threshold of
+//! After the mint has stopped transacting, every node exports its rugpull
+//! secret with `picomint-node-cli onchain rugpull`. A threshold of
 //! those secrets interpolates into the secret key of the mint's current
 //! UTXO, whose public key is the address holding the funds. The tool looks
 //! that address up in the UTXO set of the operator's bitcoind, drains it to
@@ -23,7 +23,7 @@ use bitcoin::{
     Witness, taproot,
 };
 use clap::Parser;
-use picomint_core::onchain::SweepSecret;
+use picomint_core::onchain::RugpullSecret;
 use picomint_core::{ALLOWED_MINT_SIZES, NumNodes};
 use secp256k1::{Keypair, Message, SECP256K1};
 use serde::Deserialize;
@@ -31,15 +31,15 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tss::interpolate_secret_key;
 
-/// Sweeps a decommissioned mint's wallet with a threshold of its nodes'
-/// sweep secrets. Looks the wallet up through bitcoind, drains it to the
+/// Drains a decommissioned mint's wallet with a threshold of its nodes'
+/// rugpull secrets. Looks the wallet up through bitcoind, drains it to the
 /// address and broadcasts; prints the txid.
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
     /// Number of nodes in the mint; a threshold of their secrets is required
     nodes: usize,
-    /// Address to sweep the funds to, on the network bitcoind runs
+    /// Address to drain the funds to, on the network bitcoind runs
     address: Address<NetworkUnchecked>,
     /// Bitcoin Core RPC URL with embedded credentials, e.g. http://user:pass@127.0.0.1:8332
     #[arg(long, env = "BITCOIND_URL")]
@@ -47,7 +47,7 @@ struct Cli {
     /// Defaults to bitcoind's estimate for the next three blocks
     #[arg(long)]
     fee_rate_sat_per_vb: Option<u64>,
-    /// A node's sweep secret from `picomint-node-cli onchain sweep`; repeat once per node
+    /// A node's rugpull secret from `picomint-node-cli onchain rugpull`; repeat once per node
     #[arg(long, required = true)]
     secret: Vec<String>,
 }
@@ -140,26 +140,26 @@ async fn main() -> anyhow::Result<()> {
     let mut shares = BTreeMap::new();
 
     for secret in &cli.secret {
-        let secret = picomint_base32::decode::<SweepSecret>(secret.trim())
-            .context("A sweep secret is malformed")?;
+        let secret = picomint_base32::decode::<RugpullSecret>(secret.trim())
+            .context("A rugpull secret is malformed")?;
 
         ensure!(
             secret.node.to_usize() < cli.nodes,
-            "A sweep secret names node {}, which a mint of {} nodes does not have",
+            "A rugpull secret names node {}, which a mint of {} nodes does not have",
             secret.node,
             cli.nodes
         );
 
         ensure!(
             shares.insert(secret.node.to_u64(), secret.sks).is_none(),
-            "Two sweep secrets are from node {}",
+            "Two rugpull secrets are from node {}",
             secret.node
         );
     }
 
     ensure!(
         shares.len() >= threshold,
-        "A mint of {} nodes needs {threshold} sweep secrets, got {}",
+        "A mint of {} nodes needs {threshold} rugpull secrets, got {}",
         cli.nodes,
         shares.len()
     );

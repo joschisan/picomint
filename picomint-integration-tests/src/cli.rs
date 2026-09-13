@@ -11,7 +11,7 @@ use picomint_gateway_cli_core::{
 };
 use picomint_node_cli_core::{
     ExpiryStatusResponse, InviteResponse, NodeStatus, OnchainStatusResponse, PendingResponse,
-    SweepResponse,
+    RugpullResponse,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -230,17 +230,17 @@ pub fn node_onchain_status(data_dir: &Path) -> Result<OnchainStatusResponse> {
         .run_cli::<OnchainStatusResponse>()
 }
 
-pub fn node_onchain_sweep(data_dir: &Path) -> Result<SweepResponse> {
+pub fn node_onchain_rugpull(data_dir: &Path) -> Result<RugpullResponse> {
     node_cmd(data_dir)
         .arg("onchain")
-        .arg("sweep")
-        .run_cli::<SweepResponse>()
+        .arg("rugpull")
+        .run_cli::<RugpullResponse>()
 }
 
 /// Runs `picomint-rugpull` against the test bitcoind with the given secrets
 /// and returns its report. The fee rate is explicit because a regtest
 /// bitcoind never has an estimate.
-pub fn sweep(
+pub fn rugpull(
     nodes: usize,
     destination: &bitcoin::Address,
     bitcoind_url: &str,
