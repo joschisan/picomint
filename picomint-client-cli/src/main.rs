@@ -27,8 +27,16 @@ use picomint_client_cli_core::{
     ROUTE_ONCHAIN_SEND_MAX_AMOUNT, ROUTE_QUERY, ROUTE_REMOVE,
 };
 
+/// Shown at the end of the top-level `--help`: the rules for an agent
+/// driving this CLI, stated where the agent reads them.
+const SECRETS: &str = "\
+Commands marked (secret) print key material, and whatever an agent reads \
+ends up in its context and transcript. Rules for an agent: run a (secret) \
+command only when the operator asks; run it with stdout redirected into a \
+file; never read that file; open it for the operator if asked.";
+
 #[derive(Parser)]
-#[command(version)]
+#[command(version, after_help = SECRETS)]
 struct Cli {
     /// Path to the daemon's data directory (must match its `DATA_DIR`).
     /// The CLI finds the admin Unix socket at `{DATA_DIR}/cli.sock`.
@@ -41,7 +49,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Display mnemonic seed words
+    /// Print the mnemonic seed words; pipe it into a file (secret)
     #[command(after_long_help = schema::<MnemonicResponse>())]
     Mnemonic,
     /// Query the analytics db with read-only SQL; rows print as JSON objects

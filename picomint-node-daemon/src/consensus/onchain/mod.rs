@@ -32,7 +32,6 @@ use crate::consensus::CONFIRMATIONS;
 use crate::consensus::db::consensus_block_height;
 use crate::consensus::server::Server;
 use crate::handler;
-use picomint_core::onchain::RugpullSecret;
 use picomint_core::onchain::config::{OnchainConfig, OnchainConfigPrivate};
 use picomint_core::onchain::methods::OnchainMethod;
 use picomint_core::onchain::{
@@ -868,7 +867,7 @@ fn tweak_scalar(tweak: &sha256::Hash) -> Scalar {
     Scalar::from_be_bytes(tweak.to_byte_array()).expect("Hash is within field order")
 }
 
-fn tweaked_sks(server: &Server, tweak: &sha256::Hash) -> SecretKeyShare {
+pub fn tweaked_sks(server: &Server, tweak: &sha256::Hash) -> SecretKeyShare {
     SecretKeyShare(
         server
             .cfg
@@ -1054,17 +1053,6 @@ pub fn next_block_height(dbtx: &impl DbRead) -> u32 {
 /// The current mint wallet, if a first receive has established one.
 pub fn mint_utxo(dbtx: &impl DbRead) -> Option<MintUtxo> {
     dbtx.get(&MintOnchainTable, &())
-}
-
-/// This node's [`RugpullSecret`] for the current mint UTXO, or None while the
-/// mint wallet has not been initialized yet.
-pub fn rugpull_secret(server: &Server, dbtx: &impl DbRead) -> Option<RugpullSecret> {
-    let wallet = mint_utxo(dbtx)?;
-
-    Some(RugpullSecret {
-        node: server.cfg.private.identity,
-        sks: tweaked_sks(server, &wallet.tweak),
-    })
 }
 
 /// The nonces of a signing session for a single tx input, keyed by the

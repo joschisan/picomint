@@ -3597,6 +3597,7 @@ dependencies = [
  "chrono",
  "clap",
  "picomint-core",
+ "picomint-tss",
  "schemars 1.2.1",
  "serde",
 ]
@@ -3674,8 +3675,8 @@ dependencies = [
  "anyhow",
  "bitcoin",
  "clap",
- "picomint-base32",
  "picomint-core",
+ "picomint-node-cli-core",
  "picomint-tss",
  "reqwest 0.13.3",
  "secp256k1",

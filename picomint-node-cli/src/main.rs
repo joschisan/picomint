@@ -15,8 +15,16 @@ use picomint_node_cli_core::{
 };
 use serde_json::Value;
 
+/// Shown at the end of the top-level `--help`: the rules for an agent
+/// driving this CLI, stated where the agent reads them.
+const SECRETS: &str = "\
+Commands marked (secret) print key material, and whatever an agent reads \
+ends up in its context and transcript. Rules for an agent: run a (secret) \
+command only when the operator asks; run it with stdout redirected into a \
+file; never read that file; open it for the operator if asked.";
+
 #[derive(Parser)]
-#[command(version)]
+#[command(version, after_help = SECRETS)]
 struct Cli {
     /// Path to the node's data directory (must match the daemon's
     /// `DATA_DIR`). The CLI finds the admin Unix socket at
@@ -39,7 +47,7 @@ enum Commands {
     /// Generate a mint invite code
     #[command(after_long_help = schema::<InviteResponse>())]
     Invite(InviteRequest),
-    /// The node config with its private keys, for `setup restore`; always pipe it into a file
+    /// Print the node's whole config with its private keys; pipe it into a file (secret)
     #[command(after_long_help = schema::<BackupResponse>())]
     Backup,
     /// The mint's expiry announcement
@@ -96,7 +104,7 @@ enum OnchainCommands {
     /// The mint's whole transaction history
     #[command(after_long_help = schema::<HistoryResponse>())]
     History,
-    /// This node's rugpull secret; run only once the mint has expired (secret)
+    /// Print this node's rugpull secret, only once the mint has expired; pipe it into a file (secret)
     #[command(after_long_help = schema::<RugpullResponse>())]
     Rugpull,
 }

@@ -52,7 +52,11 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     info!("exporting rugpull secrets from {threshold} nodes");
     let secrets = data_dirs
         .iter()
-        .map(|data_dir| cli::node_onchain_rugpull(data_dir).map(|response| response.secret))
+        .enumerate()
+        .map(|entry| {
+            let file = env.data_dir.join(format!("rugpull-{}.json", entry.0));
+            cli::node_onchain_rugpull(entry.1, &file).map(|()| file)
+        })
         .collect::<anyhow::Result<Vec<_>>>()?;
 
     let destination = block_in_place(|| env.bitcoind.get_new_address(None, None))?

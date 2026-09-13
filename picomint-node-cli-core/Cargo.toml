@@ -14,3 +14,4 @@ clap = { workspace = true }
 picomint-core = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
+tss = { workspace = true }
