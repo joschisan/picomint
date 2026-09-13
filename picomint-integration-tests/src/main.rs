@@ -1,4 +1,5 @@
 mod cli;
+mod client;
 mod ecash;
 mod env;
 mod expiry;
@@ -52,7 +53,7 @@ fn main() -> anyhow::Result<()> {
 
     info!("Shutting down the primary test client!");
 
-    runtime.block_on(client_send.client.shutdown());
+    runtime.block_on(client_send.shutdown());
 
     info!("Removing the mint from the gateway...");
     cli::gateway_mint_remove(&env.gateway_data_dir, &env.invite.mint.to_string())?;

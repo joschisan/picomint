@@ -14,6 +14,7 @@ cleanup() {
     echo "Cleaning up..."
     pkill -9 -f "picomint-node-daemon" 2>/dev/null || true
     pkill -9 -f "picomint-gateway-daemon" 2>/dev/null || true
+    pkill -9 -f "picomint-client-daemon" 2>/dev/null || true
     pkill -9 -f "picomint-lnurl-daemon" 2>/dev/null || true
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
@@ -59,7 +60,7 @@ docker exec "$CONTAINER_NAME" bitcoin-cli \
     -regtest -rpcuser=bitcoin -rpcpassword=bitcoin \
     createwallet default > /dev/null
 
-# The in-process test clients poll at the test cadence too.
+# The mock gateway's in-process client polls at the test cadence too.
 export INTEGRATION_TEST=true
 
 if [[ -n "$KEEP_ALIVE" ]]; then

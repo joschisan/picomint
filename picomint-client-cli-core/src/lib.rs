@@ -17,6 +17,7 @@ use picomint_core::Amount;
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::ecash::Denomination;
+use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk};
 use schemars::JsonSchema;
@@ -29,6 +30,7 @@ pub const ROUTE_ADD: &str = "/add";
 pub const ROUTE_REMOVE: &str = "/remove";
 pub const ROUTE_LIST: &str = "/list";
 pub const ROUTE_CONFIG: &str = "/config";
+pub const ROUTE_EXPIRY: &str = "/expiry";
 pub const ROUTE_BALANCE: &str = "/balance";
 
 pub const ROUTE_ECASH_COUNT: &str = "/ecash/count";
@@ -37,11 +39,13 @@ pub const ROUTE_ECASH_SEND_MAX: &str = "/ecash/send-max";
 pub const ROUTE_ECASH_RECEIVE: &str = "/ecash/receive";
 pub const ROUTE_ONCHAIN_SEND_FEE: &str = "/onchain/send-fee";
 pub const ROUTE_ONCHAIN_SEND: &str = "/onchain/send";
+pub const ROUTE_ONCHAIN_SEND_MAX_AMOUNT: &str = "/onchain/send-max-amount";
 pub const ROUTE_ONCHAIN_SEND_MAX: &str = "/onchain/send-max";
 pub const ROUTE_ONCHAIN_RECEIVE: &str = "/onchain/receive";
 
 pub const ROUTE_LIGHTNING_GATEWAY_LIST: &str = "/lightning/gateway/list";
 pub const ROUTE_LIGHTNING_SEND: &str = "/lightning/send";
+pub const ROUTE_LIGHTNING_SEND_MAX_AMOUNT: &str = "/lightning/send-max-amount";
 pub const ROUTE_LIGHTNING_SEND_MAX: &str = "/lightning/send-max";
 pub const ROUTE_LIGHTNING_RECEIVE: &str = "/lightning/receive";
 pub const ROUTE_LIGHTNING_LNURL: &str = "/lightning/lnurl";
@@ -89,6 +93,23 @@ pub struct ClientAddRequest {
 pub struct ClientRemoveRequest {
     /// The mint id, as printed by `list`
     pub mint: MintId,
+}
+
+// --- /expiry ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientExpiryRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+}
+
+/// The mint's expiry announcement, fetched fresh from its nodes.
+#[derive(Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct ClientExpiryResponse {
+    /// The date the mint winds down and the successor mint to move funds
+    /// to, once a threshold of nodes announce the same values; absent
+    /// while they announce nothing
+    pub expiry: Option<ExpiryStatus>,
 }
 
 // --- /balance ---
@@ -271,6 +292,28 @@ pub struct ClientOnchainSendResponse {
     pub operation: OperationId,
 }
 
+// --- /onchain/send-max-amount ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientOnchainSendMaxAmountRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+}
+
+/// What `onchain send-max` would move right now.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientOnchainSendMaxAmountResponse {
+    /// The amount the destination receives, in sat: the largest whole-sat
+    /// amount the account's notes cover when spent in full, once the miner
+    /// fee `send-fee` quotes, the mint's per-output fee and its per-input
+    /// fee on every note are paid; the sub-sat remainder stays with the
+    /// mint. 0 when the notes do not even cover the fees
+    #[schemars(with = "u64")]
+    pub amount_sat: bitcoin::Amount,
+}
+
 // --- /onchain/send-max ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
@@ -353,6 +396,29 @@ pub struct ClientLightningSendResponse {
     /// payment hash; the outcome is `lightning_send_success` with the
     /// preimage, or `lightning_send_refund` if the gateway could not route
     pub operation: OperationId,
+}
+
+// --- /lightning/send-max-amount ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientLightningSendMaxAmountRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+    /// The gateway to pay through, from `lightning gateway list`
+    pub gateway: GatewayPk,
+}
+
+/// What `lightning send-max` would pay right now.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientLightningSendMaxAmountResponse {
+    /// The invoice amount, in msat and always a whole sat: the largest
+    /// amount the account's notes cover when spent in full, once the
+    /// gateway's `send_fee` on it, the mint's per-output fee and its
+    /// per-input fee on every note are paid; the sub-sat remainder stays
+    /// with the mint. 0 when the notes do not even cover the fees
+    pub amount_msat: Amount,
 }
 
 // --- /lightning/send-max ---

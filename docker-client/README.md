@@ -48,7 +48,22 @@ picomint-client-cli list
 }
 ```
 
-`config <mint>` prints the mint's client config. Remove a mint and delete all of its data:
+`config <mint>` prints the mint's client config. A mint winds down by announcing an expiry date, optionally with a successor mint to move funds to; `expiry <mint>` fetches that announcement fresh from the nodes, so an agent holding funds in a mint should check it now and then:
+
+```bash
+picomint-client-cli expiry <mint>
+```
+
+```json
+{
+  "expiry": {
+    "timestamp": 1798761600,
+    "successor": "picominttekvo2jfmj51q1gmatg81ome1hod4fur..."
+  }
+}
+```
+
+The timestamp is the wind-down date in unix seconds and the successor is the invite code of the mint to move funds to, absent when there is none; `expiry` is `null` while the mint announces nothing. Remove a mint and delete all of its data:
 
 ```bash
 picomint-client-cli remove <mint>
@@ -94,7 +109,7 @@ picomint-client-cli ecash receive <mint> <account> <ecash>
 picomint-client-cli ecash send <mint> <account> "<amount>"
 ```
 
-`ecash send-max <mint> <account>` hands out the whole balance as one string.
+`ecash send-max <mint> <account>` hands out every note the account holds as one string. Nothing is spent at the mint, so the string is worth exactly `balance` and there is no separate amount to ask for.
 
 **Send Onchain:** burn ecash in exchange for an onchain transfer to the given address. The mint picks a feerate; check what it will charge first:
 
@@ -108,7 +123,19 @@ Then send:
 picomint-client-cli onchain send <mint> <account> <address> "<amount>"
 ```
 
-To empty the account instead, `onchain send-max <mint> <account> <address>` sends everything minus the fee. Passing `--fee <amount>` overrides the feerate with an exact value; otherwise whatever `send-fee` currently reports is used. The command returns the operation id; the onchain txid lands in the analytics as `onchain_send_success` once the mint has broadcast.
+Passing `--fee <amount>` overrides the feerate with an exact value; otherwise whatever `send-fee` currently reports is used. The command returns the operation id; the onchain txid lands in the analytics as `onchain_send_success` once the mint has broadcast.
+
+To empty the account instead, `onchain send-max <mint> <account> <address>` spends every note it holds in one transaction. Unlike `ecash send-max`, that goes through the mint, so fees come off: the destination receives the largest whole-sat amount that fits once the miner fee `send-fee` quotes, the mint's per-output fee and the mint's per-input fee on each note spent are covered, and the sub-sat remainder stays with the mint. `onchain send-max-amount <mint> <account>` computes that amount, in sat, without sending, so you can decide before you commit:
+
+```bash
+picomint-client-cli onchain send-max-amount <mint> <account>
+```
+
+```json
+{
+  "amount_sat": 149210
+}
+```
 
 ## Lightning
 
@@ -143,7 +170,17 @@ picomint-client-cli lightning gateway refresh <mint>
 picomint-client-cli lightning send <mint> <account> <gateway> <invoice>
 ```
 
-`lightning send-max <mint> <account> <gateway> <lnurl>` empties the account to an lnurl.
+`lightning send-max <mint> <account> <gateway> <lnurl>` empties the account to an lnurl: it resolves the lnurl, requests one invoice for the maximum and pays it. The maximum follows the same rule as `onchain send-max`, with the gateway's `send_fee` from `lightning gateway list` in place of the miner fee: the invoice is for the largest whole-sat amount that fits once that fee on it, the mint's per-output fee and the mint's per-input fee on each note spent are covered. It depends on the gateway, so `lightning send-max-amount <mint> <account> <gateway>` takes one and computes the invoice amount, in msat, without paying:
+
+```bash
+picomint-client-cli lightning send-max-amount <mint> <account> <gateway>
+```
+
+```json
+{
+  "amount_msat": 149210000
+}
+```
 
 **Create an invoice:** returns the invoice. The payment lands in the analytics as `lightning_receive` once the gateway has funded it, under the operation derived from the invoice's payment hash:
 

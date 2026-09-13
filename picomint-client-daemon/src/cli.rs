@@ -9,20 +9,23 @@ use picomint_client_cli_core::{
     ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
     ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
     ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
-    ClientLightningGatewayListRequest, ClientLightningGatewayListResponse,
-    ClientLightningGatewayRefreshRequest, ClientLightningLnurlRequest,
-    ClientLightningLnurlResponse, ClientLightningReceiveRequest, ClientLightningReceiveResponse,
-    ClientLightningSendMaxRequest, ClientLightningSendMaxResponse, ClientLightningSendRequest,
-    ClientLightningSendResponse, ClientListResponse, ClientOnchainReceiveRequest,
-    ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse,
-    ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse, ClientOnchainSendRequest,
-    ClientOnchainSendResponse, ClientRemoveRequest, MintInfo, MnemonicResponse, QueryRequest,
-    QueryResponse, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE,
-    ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_LIGHTNING_GATEWAY_LIST,
-    ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
-    ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST, ROUTE_MNEMONIC,
-    ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX,
-    ROUTE_QUERY, ROUTE_REMOVE,
+    ClientExpiryRequest, ClientExpiryResponse, ClientLightningGatewayListRequest,
+    ClientLightningGatewayListResponse, ClientLightningGatewayRefreshRequest,
+    ClientLightningLnurlRequest, ClientLightningLnurlResponse, ClientLightningReceiveRequest,
+    ClientLightningReceiveResponse, ClientLightningSendMaxAmountRequest,
+    ClientLightningSendMaxAmountResponse, ClientLightningSendMaxRequest,
+    ClientLightningSendMaxResponse, ClientLightningSendRequest, ClientLightningSendResponse,
+    ClientListResponse, ClientOnchainReceiveRequest, ClientOnchainReceiveResponse,
+    ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse, ClientOnchainSendMaxAmountRequest,
+    ClientOnchainSendMaxAmountResponse, ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse,
+    ClientOnchainSendRequest, ClientOnchainSendResponse, ClientRemoveRequest, MintInfo,
+    MnemonicResponse, QueryRequest, QueryResponse, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG,
+    ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_EXPIRY,
+    ROUTE_LIGHTNING_GATEWAY_LIST, ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_LNURL,
+    ROUTE_LIGHTNING_RECEIVE, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX,
+    ROUTE_LIGHTNING_SEND_MAX_AMOUNT, ROUTE_LIST, ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE,
+    ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX,
+    ROUTE_ONCHAIN_SEND_MAX_AMOUNT, ROUTE_QUERY, ROUTE_REMOVE,
 };
 use picomint_core::Amount;
 use tracing::instrument;
@@ -39,6 +42,7 @@ pub async fn run(state: AppState) {
         .route(ROUTE_REMOVE, post(remove))
         .route(ROUTE_LIST, post(list))
         .route(ROUTE_CONFIG, post(config))
+        .route(ROUTE_EXPIRY, post(expiry))
         .route(ROUTE_BALANCE, post(balance))
         .route(ROUTE_ECASH_COUNT, post(ecash_count))
         .route(ROUTE_ECASH_SEND, post(ecash_send))
@@ -46,10 +50,15 @@ pub async fn run(state: AppState) {
         .route(ROUTE_ECASH_RECEIVE, post(ecash_receive))
         .route(ROUTE_ONCHAIN_SEND_FEE, post(onchain_send_fee))
         .route(ROUTE_ONCHAIN_SEND, post(onchain_send))
+        .route(ROUTE_ONCHAIN_SEND_MAX_AMOUNT, post(onchain_send_max_amount))
         .route(ROUTE_ONCHAIN_SEND_MAX, post(onchain_send_max))
         .route(ROUTE_ONCHAIN_RECEIVE, post(onchain_receive))
         .route(ROUTE_LIGHTNING_GATEWAY_LIST, post(lightning_gateway_list))
         .route(ROUTE_LIGHTNING_SEND, post(lightning_send))
+        .route(
+            ROUTE_LIGHTNING_SEND_MAX_AMOUNT,
+            post(lightning_send_max_amount),
+        )
         .route(ROUTE_LIGHTNING_SEND_MAX, post(lightning_send_max))
         .route(ROUTE_LIGHTNING_RECEIVE, post(lightning_receive))
         .route(ROUTE_LIGHTNING_LNURL, post(lightning_lnurl))
@@ -138,6 +147,22 @@ async fn config(
 
     Ok(Json(ClientConfigResponse {
         config: serde_json::to_value(config).expect("ConsensusConfig is serializable"),
+    }))
+}
+
+#[instrument(skip_all, err)]
+async fn expiry(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientExpiryRequest>,
+) -> Result<Json<ClientExpiryResponse>, CliError> {
+    state
+        .client
+        .refresh_expiry_status(payload.mint)
+        .await
+        .map_err(CliError::internal)?;
+
+    Ok(Json(ClientExpiryResponse {
+        expiry: state.client.expiry_status(payload.mint),
     }))
 }
 
@@ -240,6 +265,20 @@ async fn onchain_send(
 }
 
 #[instrument(skip_all, err)]
+async fn onchain_send_max_amount(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientOnchainSendMaxAmountRequest>,
+) -> Result<Json<ClientOnchainSendMaxAmountResponse>, CliError> {
+    let amount_sat = state
+        .client
+        .onchain_send_max_amount(payload.mint, payload.account)
+        .await
+        .map_err(CliError::internal)?;
+
+    Ok(Json(ClientOnchainSendMaxAmountResponse { amount_sat }))
+}
+
+#[instrument(skip_all, err)]
 async fn onchain_send_max(
     State(state): State<AppState>,
     Json(payload): Json<ClientOnchainSendMaxRequest>,
@@ -298,6 +337,19 @@ async fn lightning_send(
         .map_err(CliError::internal)?;
 
     Ok(Json(ClientLightningSendResponse { operation }))
+}
+
+#[instrument(skip_all, err)]
+async fn lightning_send_max_amount(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientLightningSendMaxAmountRequest>,
+) -> Result<Json<ClientLightningSendMaxAmountResponse>, CliError> {
+    let amount_msat = state
+        .client
+        .lightning_send_max_amount(payload.mint, payload.account, payload.gateway)
+        .map_err(CliError::internal)?;
+
+    Ok(Json(ClientLightningSendMaxAmountResponse { amount_msat }))
 }
 
 #[instrument(skip_all, err)]

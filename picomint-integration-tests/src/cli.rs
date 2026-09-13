@@ -15,7 +15,7 @@ use picomint_node_cli_core::{
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-trait RunCli {
+pub trait RunCli {
     fn run_cli<T: DeserializeOwned>(&mut self) -> Result<T>;
 }
 
@@ -42,6 +42,12 @@ fn gateway_cmd(gateway_data_dir: &Path) -> Command {
 
 fn node_cmd(data_dir: &Path) -> Command {
     let mut cmd = Command::new("target/release/picomint-node-cli");
+    cmd.arg("--data-dir").arg(data_dir);
+    cmd
+}
+
+pub fn client_cmd(data_dir: &Path) -> Command {
+    let mut cmd = Command::new("target/release/picomint-client-cli");
     cmd.arg("--data-dir").arg(data_dir);
     cmd
 }
