@@ -1,7 +1,9 @@
 # Picomint Gateway Daemon
 
 
-The gateway is a single container image: `ghcr.io/joschisan/picomint-gateway-daemon:main`. Set it up with Docker however you prefer — persist `/data` in a volume, publish the public API port `8080` (iroh — QUIC over UDP) and the LDK Lightning P2P port `9735`, and configure it through the environment variables documented in [Configuration](#configuration) below.
+The gateway is a single container image: `ghcr.io/joschisan/picomint-gateway-daemon:main`. Set it up with Docker however you prefer — persist `/data` in a volume, publish the LDK Lightning P2P port `9735` if Lightning peers should be able to connect to you, and configure it through the environment variables documented in [Configuration](#configuration) below. The iroh endpoint on `8080` needs no port forward: it punches through NAT and falls back to a relay.
+
+`NETWORK` has to be the network of the mints the gateway serves: adding a mint on any other network fails. Mints refuse to run on mainnet for now, so until that changes a gateway only has signet or regtest mints to serve.
 
 ## Accessing the CLI
 
@@ -11,7 +13,7 @@ The `picomint-gateway-cli` binary is included in the container and on the `PATH`
 docker exec picomint-gateway-daemon picomint-gateway-cli --help
 ```
 
-The walkthroughs below use the bare `picomint-gateway-cli …` form — prefix with `docker exec picomint-gateway-daemon` to run them.
+The walkthroughs below use the bare `picomint-gateway-cli …` form — prefix with `docker exec picomint-gateway-daemon` to run them. Every command prints JSON.
 
 One command prints a secret, and whatever an agent reads ends up in a model context and a transcript: `mnemonic` prints the seed words every fund derives from. Run it once, to write them down, and tell your agent not to run it unprompted.
 
@@ -26,7 +28,7 @@ Your info will look like
 ```json
 {
   "lightning_pk": "02abfe4a99f1ed8f67c1f07e5d47f3ab3d2e9c5b8a1c8e7f2a6d4b7e9c1f5a3e8d",
-  "gateway_pk": "d2g4h6j8k0m1n3p5q7r9s0t2v4w6x8y1z3a5b7c9d1e3f5g7h9j1",
+  "gateway_pk": "picomintd2g4h6j8k0m1n3p5q7r9s0t2v4w6x8y1z3a5b7c9d1e3f5g7h9j1",
   "alias": "picomint-gateway-daemon",
   "network": "bitcoin",
   "block_height": 842195,
@@ -216,8 +218,10 @@ picomint-gateway-cli query \
 
 | Port | Purpose                      | Safe to expose? |
 |------|------------------------------|-----------------|
-| 8080 | Public API (iroh / QUIC over UDP) | Yes |
-| 9735 | LDK Lightning P2P (BOLT)     | Yes             |
+| 8080 | Public API (iroh / QUIC over UDP) | Yes, not required |
+| 9735 | LDK Lightning P2P (BOLT)     | Yes, needed for inbound peer connections |
+
+Iroh punches through NAT and falls back to a relay, so `8080` works without a port forward. `9735` only matters if Lightning peers should be able to connect to you rather than the other way round; every command in [Open Channels](#open-channels) connects outward.
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
 network exposure. Reach it with `docker exec picomint-gateway-daemon
@@ -228,7 +232,7 @@ picomint-gateway-cli …`.
 | Env                        | Required | Default           | Description                                 |
 |----------------------------|----------|-------------------|---------------------------------------------|
 | `DATA_DIR`                 | yes      |                   | Directory for the database + LDK node data  |
-| `NETWORK`                  | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`   |
+| `NETWORK`                  | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`; every added mint must run on it |
 | `ESPLORA_URL`              | one of   |                   | Esplora HTTP URL                            |
 | `BITCOIND_URL`             | one of   |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |
 | `API_ADDR`                 | no       | `0.0.0.0:8080`    | Public API listen address                   |
