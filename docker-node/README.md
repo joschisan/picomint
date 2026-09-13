@@ -39,7 +39,7 @@ docker exec picomint-node-daemon picomint-node-cli --help
 
 The walkthroughs below use the bare `picomint-node-cli …` form — prefix with `docker exec picomint-node-daemon` to run them. Every command prints JSON, and its `--help` ends with the JSON Schema of what it prints, every field explained. Help needs no running daemon, so an agent can read the whole reference before the first `up -d`.
 
-Two commands print secrets, and whatever an agent reads ends up in a model context and a transcript. `backup` prints the node's private keys: always pipe it into a file, never to the terminal. `onchain rugpull` prints a share of the wallet key: run it only once the mint has expired, and never before. Tell your agent not to run either unprompted.
+Two commands print secrets: `backup` prints the node's private keys and `onchain rugpull`, only for once the mint has expired, a share of the wallet key. Whatever an agent reads ends up in a model context and a transcript, so the rules for an agent are: run these only when asked, always with the output piped into a file, never read the file, and open it for the operator if asked. The same rules end every CLI's `--help`.
 
 ## Status
 

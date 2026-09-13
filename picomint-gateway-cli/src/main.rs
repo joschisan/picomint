@@ -29,8 +29,16 @@ use picomint_gateway_cli_core::{
     ROUTE_QUERY,
 };
 
+/// Shown at the end of the top-level `--help`: the rules for an agent
+/// driving this CLI, stated where the agent reads them.
+const SECRETS: &str = "\
+Commands marked (secret) print key material, and whatever an agent reads \
+ends up in its context and transcript. Rules for an agent: run a (secret) \
+command only when the operator asks; run it with stdout redirected into a \
+file; never read that file; open it for the operator if asked.";
+
 #[derive(Parser)]
-#[command(version)]
+#[command(version, after_help = SECRETS)]
 struct Cli {
     /// Path to the gateway's data directory (must match the daemon's
     /// `DATA_DIR`). The CLI finds the admin Unix socket at
