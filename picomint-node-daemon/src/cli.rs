@@ -7,6 +7,7 @@ use axum::Router;
 use axum::extract::{Json, State};
 use axum::http::StatusCode;
 use axum::routing::post;
+use chrono::{Days, Utc};
 use picomint_cli_server::{CliError, serve};
 use picomint_node_cli_core::{
     BitcoinConnectionResponse, ConsensusPhase, DkgPhase, NodeInfo, NodeStatus, ROUTE_SETUP_ADD,
@@ -73,13 +74,13 @@ fn wrong_phase(phase: &'static str) -> impl Fn() -> std::future::Ready<CliError>
 pub fn router(api: Arc<ConsensusApi>) -> Router {
     use picomint_core::expiry::ExpiryStatus;
     use picomint_node_cli_core::{
-        ExpirySetRequest, ExpiryStatusResponse, HistoryResponse, INVITE_EXPIRY_DAYS_LIMIT,
-        InviteRequest, InviteResponse, LightningGatewayAddRequest, LightningGatewayInfo,
-        LightningGatewayListResponse, LightningGatewayRemoveRequest, OnchainStatusResponse,
-        PendingResponse, ROUTE_BACKUP, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
-        ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
-        ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP,
-        SweepResponse,
+        EXPIRY_DAYS_LIMIT, ExpirySetRequest, ExpiryStatusResponse, HistoryResponse,
+        INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse, LightningGatewayAddRequest,
+        LightningGatewayInfo, LightningGatewayListResponse, LightningGatewayRemoveRequest,
+        OnchainStatusResponse, PendingResponse, ROUTE_BACKUP, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET,
+        ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE,
+        ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_STATUS,
+        ROUTE_ONCHAIN_SWEEP, SweepResponse,
     };
 
     async fn backup(
@@ -195,8 +196,34 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<ExpirySetRequest>,
     ) -> Result<Json<()>, CliError> {
+        let today = Utc::now().date_naive();
+
+        if payload.date <= today {
+            return Err(CliError::bad_request(
+                "The expiry date must be in the future",
+            ));
+        }
+
+        let horizon = today
+            .checked_add_days(Days::new(EXPIRY_DAYS_LIMIT))
+            .expect("two years from today is within chrono's range");
+
+        if payload.date > horizon {
+            return Err(CliError::bad_request(format!(
+                "The expiry date must be at most {EXPIRY_DAYS_LIMIT} days out"
+            )));
+        }
+
+        let timestamp = payload
+            .date
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight exists on every day")
+            .and_utc()
+            .timestamp()
+            .cast_unsigned();
+
         api.set_expiry_status(Some(ExpiryStatus {
-            timestamp: payload.timestamp,
+            timestamp,
             successor: payload.successor,
         }));
         Ok(Json(()))

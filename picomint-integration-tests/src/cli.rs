@@ -10,7 +10,8 @@ use picomint_gateway_cli_core::{
     LdkLightningReceiveResponse, LdkOnchainReceiveResponse,
 };
 use picomint_node_cli_core::{
-    InviteResponse, NodeStatus, OnchainStatusResponse, PendingResponse, SweepResponse,
+    ExpiryStatusResponse, InviteResponse, NodeStatus, OnchainStatusResponse, PendingResponse,
+    SweepResponse,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -277,14 +278,11 @@ pub fn node_lightning_gateway_remove(data_dir: &Path, pk: &GatewayPk) -> Result<
 
 pub fn node_expiry_set(
     data_dir: &Path,
-    timestamp: u64,
+    date: &str,
     successor: Option<&InviteCode>,
 ) -> Result<Value> {
     let mut cmd = node_cmd(data_dir);
-    cmd.arg("expiry")
-        .arg("set")
-        .arg("--timestamp")
-        .arg(timestamp.to_string());
+    cmd.arg("expiry").arg("set").arg(date);
     if let Some(invite) = successor {
         cmd.arg("--successor").arg(picomint_base32::encode(invite));
     }
@@ -302,8 +300,6 @@ pub fn node_expiry_status(data_dir: &Path) -> Result<Option<ExpiryStatus>> {
     node_cmd(data_dir)
         .arg("expiry")
         .arg("status")
-        .run_cli::<Value>()
-        .and_then(|mut response| {
-            serde_json::from_value(response["expiry"].take()).map_err(Into::into)
-        })
+        .run_cli::<ExpiryStatusResponse>()
+        .map(|response| response.expiry)
 }

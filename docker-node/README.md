@@ -180,13 +180,13 @@ docker exec -i picomint-node-daemon picomint-node-cli setup restore < backup.jso
 
 ## Announce Expiry
 
-A mint winds down by announcing an expiry date, optionally with the invite code of a successor mint for users to migrate to. Every node has to enter the exact same values; clients trust the announcement once a threshold of nodes agree on it byte for byte:
+A mint winds down by announcing a date, optionally with the invite code of a successor mint for users to migrate to. Every node enters the same date and, if there is one, the same successor; the daemon turns the date into midnight UTC of that day, so nodes that agree on the date announce byte-equal values, and clients trust the announcement once a threshold of nodes do. The date must lie in the future and at most two years out:
 
 ```bash
-picomint-node-cli expiry set --timestamp <unix-seconds> [--successor <invite>]
+picomint-node-cli expiry set 2027-06-30 [--successor <invite>]
 ```
 
-`expiry status` shows this node's announcement and `expiry clear` withdraws it.
+`expiry status` shows this node's announcement as the timestamp every node has to match, and `expiry clear` withdraws it.
 
 ## Sweep
 
