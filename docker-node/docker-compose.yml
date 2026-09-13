@@ -20,8 +20,9 @@ services:
     environment:
       - DATA_DIR=/data
       - BITCOIND_URL=http://bitcoin:bitcoin@127.0.0.1:8332
-      # The iroh endpoint must be reachable from the internet for nodes and
-      # clients to talk to your node.
+      # Iroh punches through NAT and falls back to a relay, so nothing has to
+      # be forwarded; forwarding UDP 8080 only helps a node behind a strict
+      # NAT connect directly.
       - P2P_ADDR=0.0.0.0:8080
 
   bitcoind:
