@@ -1,6 +1,8 @@
 //! The CLI side of the admin socket every picomint daemon serves: HTTP
 //! over a Unix socket at `{DATA_DIR}/cli.sock`, JSON in, JSON out.
-//! [`request`] posts a payload to a route and returns the reply. The
+//! [`request`] posts a payload to a route and returns the reply;
+//! [`schema`] renders a response type's JSON Schema for a command's
+//! `--help`. The
 //! daemon side is `picomint-cli-server`; routes and payload types are each
 //! daemon's own and live in its `*-cli-core` crate. The socket filename
 //! is spelled out on both sides — a mismatch fails the first command.
@@ -17,6 +19,7 @@ use hyper::Request;
 use hyper::body::Bytes;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use schemars::{JsonSchema, schema_for};
 use serde::Serialize;
 use serde_json::Value;
 use tokio::net::UnixStream;
@@ -31,6 +34,16 @@ pub fn print_json(value: &Value) {
         "{}",
         serde_json::to_string_pretty(value).expect("Cannot serialize")
     );
+}
+
+/// The JSON Schema of a command's response, rendered for the tail of its
+/// `--help`: every field explained, no daemon needed. Named on the
+/// command's variant as `#[command(after_long_help = schema::<Resp>())]`.
+pub fn schema<Resp: JsonSchema>() -> String {
+    format!(
+        "Prints, as JSON Schema:\n{}",
+        serde_json::to_string_pretty(&schema_for!(Resp)).expect("a schema serializes")
+    )
 }
 
 /// Tiny connector that dials a fixed Unix socket path, ignoring the URI

@@ -9,8 +9,6 @@ mod secret;
 
 use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 use std::collections::BTreeMap;
-use std::fmt;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Notify;
 
@@ -30,9 +28,7 @@ use picomint_core::ecash::{Denomination, EcashInput, Note};
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_core::tx::Transaction;
 use picomint_core::{Amount, TransactionId, wire};
-use picomint_encoding::{Decodable, Encodable, Undecoded};
-use serde::de::Error as _;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use picomint_encoding::{Base32, Decodable, Encodable, Undecoded};
 use tbs::aggregate_signature_shares;
 use thiserror::Error;
 
@@ -122,10 +118,11 @@ impl SpendableNote {
     }
 }
 
-/// Out-of-band Chaumian ecash bundle. The serde representation is the
-/// `picomint`-prefixed base32 string that callers hand off — so events
-/// carrying an `Ecash` log it the same way it travels on the wire.
-#[derive(Clone, Debug, Encodable, Decodable)]
+/// An out-of-band ecash bundle: the mint id and the signed notes, which
+/// belong to whoever holds the string. Any client of the same mint receives
+/// it with `ecash receive`, exactly once. Events carrying one log it the
+/// way it travels.
+#[derive(Clone, Debug, Encodable, Decodable, Base32)]
 pub struct Ecash {
     pub mint: MintId,
     pub notes: Vec<SpendableNote>,
@@ -138,32 +135,6 @@ impl Ecash {
 
     pub fn amount(&self) -> Amount {
         self.notes.iter().map(SpendableNote::amount).sum()
-    }
-}
-
-impl fmt::Display for Ecash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&picomint_base32::encode(self))
-    }
-}
-
-impl FromStr for Ecash {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        picomint_base32::decode(s)
-    }
-}
-
-impl Serialize for Ecash {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        picomint_base32::encode(self).serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Ecash {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        picomint_base32::decode(&String::deserialize(deserializer)?).map_err(D::Error::custom)
     }
 }
 

@@ -2,6 +2,7 @@
 
 use derive_more::Display;
 use picomint_encoding::{Decodable, Encodable};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Which revision of the consensus rules the mint runs.
@@ -31,12 +32,13 @@ use serde::{Deserialize, Serialize};
     Encodable,
     Decodable,
     Display,
+    JsonSchema,
 )]
 #[display("{major}.{minor}")]
 pub struct ConsensusVersion {
-    /// Incremented for changes clients must support.
+    /// Incremented for changes clients must support
     pub major: u8,
-    /// Incremented for changes clients can ignore.
+    /// Incremented for changes clients can ignore
     pub minor: u8,
 }
 

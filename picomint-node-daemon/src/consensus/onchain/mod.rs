@@ -1044,6 +1044,13 @@ pub fn total_txs(dbtx: &impl DbRead) -> u64 {
     dbtx.iter_rev(&TxInfoTable, |r| r.next().map_or(0, |entry| entry.0 + 1))
 }
 
+/// The next block the wallet votes on, or 0 before the first consensus
+/// block height set it: every block below has been processed for deposits
+/// and mint transaction confirmations.
+pub fn next_block_height(dbtx: &impl DbRead) -> u32 {
+    dbtx.get(&BlockHeightTable, &()).unwrap_or(0)
+}
+
 /// The current mint wallet, if a first receive has established one.
 pub fn mint_utxo(dbtx: &impl DbRead) -> Option<MintUtxo> {
     dbtx.get(&MintOnchainTable, &())

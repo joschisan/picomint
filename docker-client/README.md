@@ -20,7 +20,7 @@ The `picomint-client-cli` binary is included in the container and on the `PATH`.
 docker exec picomint-client-daemon picomint-client-cli --help
 ```
 
-The walkthroughs below use the bare `picomint-client-cli …` form — prefix with `docker exec picomint-client-daemon` to run them. Every command prints JSON.
+The walkthroughs below use the bare `picomint-client-cli …` form — prefix with `docker exec picomint-client-daemon` to run them. Every command prints JSON, and its `--help` ends with the JSON Schema of what it prints, every field explained.
 
 One command prints a secret, and whatever an agent reads ends up in a model context and a transcript: `mnemonic` prints the seed words every fund derives from. Run it once, to write them down, and tell your agent not to run it unprompted.
 

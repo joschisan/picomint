@@ -1,8 +1,10 @@
 //! Routes and request/response types of the client daemon's admin CLI:
 //! mint management, ecash, onchain, lightning, the analytics query and
-//! the mnemonic. The gateway exposes a subset of the same operations
-//! over its own admin socket and deliberately keeps its own copies of
-//! these types — the two surfaces are allowed to drift, and the
+//! the mnemonic. Every response type carries a JSON Schema, printed by the
+//! CLI under `--schema`, so its doc lines are the operator-facing
+//! description of each field. The gateway exposes a subset of the same
+//! operations over its own admin socket and deliberately keeps its own
+//! copies of these types — the two surfaces are allowed to drift, and the
 //! compiler polices each against the client library on its own.
 
 use std::collections::BTreeMap;
@@ -17,6 +19,7 @@ use picomint_core::core::{Account, OperationId};
 use picomint_core::ecash::Denomination;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const ROUTE_MNEMONIC: &str = "/mnemonic";
@@ -46,8 +49,11 @@ pub const ROUTE_LIGHTNING_GATEWAY_REFRESH: &str = "/lightning/gateway/refresh";
 
 // --- /mnemonic ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The seed. Secret.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct MnemonicResponse {
+    /// The twelve BIP39 words every mint balance derives from; the app
+    /// restores them from these words, this daemon cannot be seeded
     pub mnemonic: Vec<String>,
 }
 
@@ -60,14 +66,20 @@ pub struct QueryRequest {
     pub query: String,
 }
 
-/// One JSON object per row, keyed by result column name — the same shape
-/// `sqlite3 --json` prints.
-pub type QueryResponse = Vec<serde_json::Map<String, serde_json::Value>>;
+/// The rows the query returned: one JSON object per row, keyed by result
+/// column name, the same shape `sqlite3 --json` prints. Column types
+/// follow the analytics schema: amounts as integers, msat except in the
+/// onchain tables, which are sat; hashes, ids and keys as text.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct QueryResponse(pub Vec<serde_json::Map<String, serde_json::Value>>);
 
 // --- /add ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientAddRequest {
+    /// The mint's invite code, as printed by a node's `invite`; the mint has
+    /// to run on this daemon's `NETWORK`
     pub invite: InviteCode,
 }
 
@@ -75,6 +87,7 @@ pub struct ClientAddRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientRemoveRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
 }
 
@@ -82,25 +95,36 @@ pub struct ClientRemoveRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientBalanceRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
+    /// One of `primary`, `secondary`, `tertiary`, `quaternary`, `quinary`:
+    /// five independent balances under one seed, told apart by nothing but
+    /// their derivation path
     pub account: Account,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// An account's ecash balance in one mint.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientBalanceResponse {
+    /// The sum of the notes the account holds, in msat
     pub balance_msat: Amount,
 }
 
 // --- /list ---
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The mints the daemon has added.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientListResponse {
+    /// The mints, ordered by id
     pub mints: Vec<MintInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// One added mint.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct MintInfo {
+    /// The mint id, which every other command takes first
     pub mint: MintId,
+    /// The mint's name from its config
     pub mint_name: String,
 }
 
@@ -108,11 +132,15 @@ pub struct MintInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientConfigRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+/// The mint's consensus config as its nodes serve it.
+#[derive(Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct ClientConfigResponse {
+    /// The config: name, network, node set with iroh keys, module public
+    /// keys and fee parameters. Its shape is the mint's, not this CLI's
     pub config: serde_json::Value,
 }
 
@@ -120,13 +148,18 @@ pub struct ClientConfigResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientEcashCountRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
+    /// The account, as for `balance`
     pub account: Account,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The account's balance broken down into the notes that make it up, which
+/// is what a load test watches to see the note pool it draws from.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientEcashCountResponse {
-    /// Count of held ecash notes keyed by denomination.
+    /// Notes held per denomination, keyed by the denomination's exponent as
+    /// a string: key `"10"` counts the notes worth 2^10 msat
     pub counts: BTreeMap<Denomination, u64>,
 }
 
@@ -134,13 +167,21 @@ pub struct ClientEcashCountResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientEcashSendRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
+    /// The account, as for `balance`
     pub account: Account,
+    /// The amount with its denomination, e.g. "1000 sat"; rounded up to a
+    /// multiple of the smallest note, and reissued first when the notes on
+    /// hand cannot make it up exactly
     pub amount: bitcoin::Amount,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The bundle to hand over.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientEcashSendResponse {
+    /// The ecash; its notes have left the account's balance and belong to
+    /// whoever receives the string first
     pub ecash: Ecash,
 }
 
@@ -148,13 +189,16 @@ pub struct ClientEcashSendResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientEcashSendMaxRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
+    /// The account, as for `balance`
     pub account: Account,
 }
 
-/// `None` when the account holds no notes.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The account's whole balance as one bundle.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientEcashSendMaxResponse {
+    /// The ecash, every note the account held; absent when it held none
     pub ecash: Option<Ecash>,
 }
 
@@ -162,13 +206,20 @@ pub struct ClientEcashSendMaxResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientEcashReceiveRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
+    /// The account, as for `balance`
     pub account: Account,
+    /// A bundle from any client's `ecash send`; each bundle can be received
+    /// once per mint
     pub ecash: Ecash,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The reissue was submitted; it completes in the background.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientEcashReceiveResponse {
+    /// The operation the reissue logs under, derived from the bundle;
+    /// acceptance shows up in the analytics as `core_tx_accept`
     pub operation: OperationId,
 }
 
@@ -176,11 +227,19 @@ pub struct ClientEcashReceiveResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientOnchainSendFeeRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// What a send costs right now.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientOnchainSendFeeResponse {
+    /// The miner fee the mint requires for one send transaction, in sat:
+    /// the consensus fee rate times the 154 vbytes of a send, raised while
+    /// a stack of pending mint transactions has to be paid for. The mint's
+    /// own per-output fee from its config comes on top of this when the
+    /// send is charged
+    #[schemars(with = "u64")]
     pub fee: bitcoin::Amount,
 }
 
@@ -188,16 +247,27 @@ pub struct ClientOnchainSendFeeResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientOnchainSendRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
+    /// The account, as for `balance`
     pub account: Account,
+    /// The destination address, on the mint's network
     pub address: bitcoin::Address<NetworkUnchecked>,
+    /// The amount with its denomination, e.g. "100000 sat"; at least the
+    /// mint's dust limit
     pub amount: bitcoin::Amount,
+    /// A miner fee to attach instead of the one `send-fee` quotes; the mint
+    /// rejects the send if this is below what it requires at the time, so
+    /// only ever raise it
     #[arg(long)]
     pub fee: Option<bitcoin::Amount>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The send was submitted; it completes in the background.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientOnchainSendResponse {
+    /// The operation the send logs under; `onchain_send_success` carries
+    /// the txid once the mint has broadcast
     pub operation: OperationId,
 }
 
@@ -205,13 +275,19 @@ pub struct ClientOnchainSendResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientOnchainSendMaxRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
+    /// The account, as for `balance`
     pub account: Account,
+    /// The destination address, on the mint's network
     pub address: bitcoin::Address<NetworkUnchecked>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The send was submitted; it completes in the background.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientOnchainSendMaxResponse {
+    /// The operation the send logs under; `onchain_send_success` carries
+    /// the txid once the mint has broadcast
     pub operation: OperationId,
 }
 
@@ -219,12 +295,21 @@ pub struct ClientOnchainSendMaxResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientOnchainReceiveRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
+    /// The account, as for `balance`
     pub account: Account,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// Where to send bitcoin to have the mint issue ecash for it.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientOnchainReceiveResponse {
+    /// The account's next unused deposit address, a taproot address of the
+    /// mint's wallet key. A deposit is credited as ecash once a threshold
+    /// of nodes see it 6 confirmations deep, less the miner fee of the
+    /// transaction that sweeps it into the mint wallet and the mint's
+    /// per-input fee
+    #[schemars(with = "String")]
     pub address: bitcoin::Address<NetworkUnchecked>,
 }
 
@@ -232,13 +317,17 @@ pub struct ClientOnchainReceiveResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientLightningGatewayListRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
 }
 
 /// Every gateway the mint recommends that answered a probe, keyed by pk,
-/// with the fees it charges; the info only changes on `lightning gateway refresh`.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// with the fees it charges. The list only changes on `lightning gateway
+/// refresh`, so a fee read here is the fee a send between refreshes pays.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientLightningGatewayListResponse {
+    /// The gateways, keyed by `gateway_pk`; every send and receive names
+    /// one of these keys
     pub gateways: BTreeMap<GatewayPk, GatewayInfo>,
 }
 
@@ -246,15 +335,23 @@ pub struct ClientLightningGatewayListResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientLightningSendRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
+    /// The account, as for `balance`
     pub account: Account,
     /// The gateway to pay through, from `lightning gateway list`
     pub gateway: GatewayPk,
+    /// The bolt11 invoice to pay; the gateway's `send_fee` is charged on
+    /// top of its amount
     pub invoice: Bolt11Invoice,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The payment was submitted; it completes in the background.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientLightningSendResponse {
+    /// The operation the payment logs under, derived from the invoice's
+    /// payment hash; the outcome is `lightning_send_success` with the
+    /// preimage, or `lightning_send_refund` if the gateway could not route
     pub operation: OperationId,
 }
 
@@ -262,15 +359,23 @@ pub struct ClientLightningSendResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientLightningSendMaxRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
+    /// The account, as for `balance`
     pub account: Account,
     /// The gateway to pay through, from `lightning gateway list`
     pub gateway: GatewayPk,
+    /// The lnurl or lightning address to pay; the account's whole balance
+    /// less the gateway's fee goes to it
     pub lnurl: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The payment was submitted; it completes in the background.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientLightningSendMaxResponse {
+    /// The operation the payment logs under, derived from the invoice's
+    /// payment hash; the outcome is `lightning_send_success` with the
+    /// preimage, or `lightning_send_refund` if the gateway could not route
     pub operation: OperationId,
 }
 
@@ -278,15 +383,24 @@ pub struct ClientLightningSendMaxResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientLightningReceiveRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
+    /// The account, as for `balance`
     pub account: Account,
     /// The gateway to receive through, from `lightning gateway list`
     pub gateway: GatewayPk,
+    /// The amount with its denomination the payer pays, e.g. "1000 sat";
+    /// the gateway's `receive_fee` comes out of it
     pub amount: bitcoin::Amount,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// An invoice for the account, issued by the gateway.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientLightningReceiveResponse {
+    /// The bolt11 invoice; the payment lands in the analytics as
+    /// `lightning_receive` under the operation derived from its payment
+    /// hash, once the gateway has funded it
+    #[schemars(with = "String")]
     pub invoice: Bolt11Invoice,
 }
 
@@ -294,15 +408,20 @@ pub struct ClientLightningReceiveResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientLightningLnurlRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
+    /// The account, as for `balance`
     pub account: Account,
     /// Base URL of the lnurl daemon that serves the lnurl, e.g.
     /// `https://lnurl.example.com/`
     pub lnurl_daemon: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// A reusable way to be paid while this daemon is offline.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientLightningLnurlResponse {
+    /// The bech32 lnurl; valid for as long as the mint exists, since its
+    /// payload carries nothing that expires
     pub lnurl: String,
 }
 
@@ -310,5 +429,6 @@ pub struct ClientLightningLnurlResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct ClientLightningGatewayRefreshRequest {
+    /// The mint id, as printed by `list`
     pub mint: MintId,
 }

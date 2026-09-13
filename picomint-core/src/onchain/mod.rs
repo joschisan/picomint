@@ -4,7 +4,7 @@ use bitcoin::{
     Address, Network, PubkeyHash, ScriptBuf, ScriptHash, TxOut, Txid, WPubkeyHash, WScriptHash,
 };
 use picomint_encoding::{Decodable, Encodable};
-
+use schemars::JsonSchema;
 use secp256k1::{PublicKey, Scalar, XOnlyPublicKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -79,14 +79,38 @@ pub struct MintUtxo {
     pub tweak: sha256::Hash,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
+/// One transaction of the mint wallet. The wallet is a single UTXO and
+/// every transaction spends it into a fresh one, settling exactly one user
+/// operation on the way: a receive sweeps in one confirmed deposit, a send
+/// pays out one withdrawal. Amounts are in sat.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable, JsonSchema)]
 pub struct TxInfo {
+    /// Position in the wallet's transaction chain, 0-based; the chain's
+    /// length is `tx_count` in `onchain status`
     pub index: u64,
+    /// The transaction id, hex
+    #[schemars(with = "String")]
     pub txid: bitcoin::Txid,
+    /// Value of the wallet UTXO the transaction spends, in sat: the mint's
+    /// onchain holdings before it
+    #[schemars(with = "u64")]
     pub input: bitcoin::Amount,
+    /// Value of the wallet UTXO the transaction creates, in sat: the
+    /// holdings after it. Above `input` by the deposit less `fee` for a
+    /// receive, below it by the withdrawal plus `fee` for a send
+    #[schemars(with = "u64")]
     pub output: bitcoin::Amount,
+    /// Miner fee in sat, paid by the user whose deposit or withdrawal the
+    /// transaction settles, never by the mint: it comes out of the deposit
+    /// on a receive and on top of the amount on a send
+    #[schemars(with = "u64")]
     pub fee: bitcoin::Amount,
+    /// Size the mint budgets the transaction at, in vbytes: a fixed 169 for
+    /// a receive and 154 for a send, not a measurement. `fee / vbytes` is
+    /// the fee rate the transaction pays
     pub vbytes: u64,
+    /// The consensus block height at which the mint created the
+    /// transaction
     pub created: u32,
 }
 

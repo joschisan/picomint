@@ -23,7 +23,7 @@ docker compose -f ~/picomint/docker-compose.yml logs --tail 200 -f picomint-node
 
 The node runs as a lightweight daemon on top of a local Bitcoin Core node. The bundled compose starts one for you alongside the node. Any machine that can comfortably run Bitcoin Core can run the picomint node on top — picomint's own resource footprint is negligible compared to Core's.
 
-A pruned node works, under one rule: the mint's block height, the one `status` shows, has to stay inside the prune window. The mint reads blocks from that height onward and never anything older, so the prune window is what limits the longest outage the mint can recover from; a backend whose window has moved past the mint's height has to reindex. Be conservative and size the window for 30 days: `-prune=20000` keeps about that much of mainnet, and is what the bundled compose sets. Remove the line to run a full node.
+A pruned node works, under one rule: the block the mint wallet votes on next, `onchain_block_height` in `status`, has to stay inside the prune window. Nodes read blocks from that height onward and never anything older. A node that was down alone catches up from the consensus log and reads no old blocks, so the window only bites when the mint as a whole stops, with fewer than a threshold of nodes up: the wallet then resumes from the block it stopped at, which is what limits the longest such outage the mint can recover from. A backend whose window has moved past that height has to reindex. Be conservative and size the window for 30 days: `-prune=20000` keeps about that much of mainnet, and is what the bundled compose sets. Remove the line to run a full node.
 
 Initial block download pulls the full chain over the network either way, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth. The node will sit idle until bitcoind catches up.
 
@@ -37,7 +37,7 @@ The `picomint-node-cli` binary is included in the container and on the `PATH`. R
 docker exec picomint-node-daemon picomint-node-cli --help
 ```
 
-The walkthroughs below use the bare `picomint-node-cli …` form — prefix with `docker exec picomint-node-daemon` to run them. Every command prints JSON.
+The walkthroughs below use the bare `picomint-node-cli …` form — prefix with `docker exec picomint-node-daemon` to run them. Every command prints JSON, and its `--help` ends with the JSON Schema of what it prints, every field explained. Help needs no running daemon, so an agent can read the whole reference before the first `up -d`.
 
 Two commands print secrets, and whatever an agent reads ends up in a model context and a transcript. `backup` prints the node's private keys: always pipe it into a file, never to the terminal. `onchain sweep` prints a share of the wallet key: run it only once the mint has expired, and never before. Tell your agent not to run either unprompted.
 
@@ -51,7 +51,7 @@ picomint-node-cli status
 
 - `Setup`: the node's own setup code once `setup init` has run, the mint name and size once any setup code has carried them, and the nodes added so far.
 - `Dkg`: key generation is running; the setup code, for nodes that still need it.
-- `Consensus`: the mint is up. Mint name and id, network, this node's id and name, consensus version, session count, block height, every node's connection and the bitcoind backend.
+- `Consensus`: the mint is up. Mint name and id, network, this node's id and name, consensus version, session count, the block height the mint agrees on and the one its wallet reads next, every node's connection and this node's own bitcoind backend. The top-level height and the fee rate in `onchain status` are consensus values a threshold of nodes agree on; the ones under `bitcoin` are what this node's backend reports and votes with.
 
 On a running mint it looks like this:
 
@@ -66,6 +66,7 @@ On a running mint it looks like this:
   "consensus_version": { "major": 1, "minor": 0 },
   "session_count": 48213,
   "block_height": 912340,
+  "onchain_block_height": 912335,
   "nodes": [
     { "id": 0, "name": "alice", "connected": true, "transport": "direct", "remote_addr": "203.0.113.7:8080", "rtt_ms": 41 },
     { "id": 1, "name": "bob", "connected": true, "transport": "relay", "remote_addr": "relay.n0.iroh.network", "rtt_ms": 118 },

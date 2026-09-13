@@ -1,15 +1,13 @@
 use iroh_base::PublicKey;
-use serde::{Deserialize, Serialize};
 
 use crate::config::MintId;
-use picomint_encoding::{Decodable, Encodable};
+use picomint_encoding::{Base32, Decodable, Encodable};
 
-/// Everything a client needs to download the mint config and bootstrap.
-/// Carries the mint id (cross-checked against the downloaded config),
-/// the iroh public key of the issuing node, and the opaque invite id the
-/// issuer registered in its database. The issuer enforces the invite code's
-/// expiration date and user limit against that id when serving the config.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable)]
+/// An invite code: the mint id, the iroh public key of the node that issued
+/// it and the invite id that node enforces the code's expiry and user limit
+/// against when serving the mint config. A client hands it to `add` to join
+/// the mint; the config it downloads is checked against the mint id.
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Encodable, Decodable, Base32)]
 pub struct InviteCode {
     pub mint: MintId,
     pub iroh_pk: PublicKey,
@@ -23,32 +21,5 @@ impl InviteCode {
             iroh_pk,
             invite_id,
         }
-    }
-}
-
-impl Serialize for InviteCode {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        picomint_base32::encode(self).serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for InviteCode {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        picomint_base32::decode(&String::deserialize(deserializer)?)
-            .map_err(serde::de::Error::custom)
-    }
-}
-
-impl std::str::FromStr for InviteCode {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        picomint_base32::decode(s)
     }
 }

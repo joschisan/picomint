@@ -1,10 +1,20 @@
+//! Routes and request/response types of the node daemon's admin CLI. Every
+//! response type carries a JSON Schema, printed by the CLI under
+//! `--schema`, so its doc lines are the operator-facing description of each
+//! field.
+
+use std::borrow::Cow;
+
 use clap::Args;
 use picomint_core::NodeId;
 use picomint_core::bitcoin::Txid;
 use picomint_core::config::MintId;
+use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
+use picomint_core::lightning::gateway::GatewayPk;
 use picomint_core::onchain::TxInfo;
 use picomint_core::version::ConsensusVersion;
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 
 /// Served in every phase of the node's life; everything else is phase-bound.
@@ -36,68 +46,176 @@ pub const ROUTE_GATEWAY_LIST: &str = "/gateway/list";
 // --- /status ---
 
 /// Which phase the node is in, with what an operator needs at that point.
-/// The variant is the first thing to look at: every other route is served
-/// by exactly one phase.
-#[derive(Debug, Serialize, Deserialize)]
+/// `phase` is the first thing to look at: every other command is served by
+/// exactly one phase and fails in the others.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "phase")]
 pub enum NodeStatus {
+    /// The setup ceremony: this node collects the other nodes' setup codes
+    /// until every node has confirmed the node set
     Setup(SetupPhase),
+    /// Distributed key generation is running; nothing can be done until it
+    /// completes and the node moves to consensus
     Dkg(DkgPhase),
+    /// The mint is up and processing transactions
     Consensus(Box<ConsensusPhase>),
 }
 
-/// Setup phase: the ceremony state as this node sees it. `setup_code` is
-/// `None` until `setup init` has run; `mint_name` and `mint_size` are set
-/// once any node's setup code has carried them.
-#[derive(Debug, Serialize, Deserialize)]
+/// The ceremony state as this node sees it. Nothing here is shared with
+/// the other nodes except through the setup codes the operators exchange.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SetupPhase {
+    /// This node's setup code, to hand to every other node's operator: its
+    /// name and iroh public key, plus the mint name and size if this node
+    /// set them. Absent until `setup init` has run
     pub setup_code: Option<String>,
+    /// This node's name as given to `setup init`; absent until then
     pub node_name: Option<String>,
+    /// The mint's name, once any setup code carrying it has been added or
+    /// this node set it; absent until then
     pub mint_name: Option<String>,
+    /// The number of nodes in the mint, from the same source as
+    /// `mint_name`; absent until then
     pub mint_size: Option<u8>,
-    /// Names of the other nodes whose setup codes have been added.
+    /// Names of the other nodes whose setup codes have been added so far;
+    /// `setup confirm` needs `mint_size - 1` of them
     pub nodes: Vec<String>,
 }
 
-/// DKG phase: key generation is running; nothing else can be done until it
-/// completes and the node moves to consensus.
-#[derive(Debug, Serialize, Deserialize)]
+/// Key generation is running. It completes once every node has confirmed
+/// the same node set and come online, so a node sits here while it waits
+/// for the others.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DkgPhase {
+    /// This node's setup code, for any node whose operator still needs it
     pub setup_code: String,
 }
 
-/// Consensus phase: the mint is running. Everything here is public; the
-/// private keys are only ever returned by `backup`.
-#[derive(Debug, Serialize, Deserialize)]
+/// The mint is running. Everything here is public; the private keys are
+/// only ever returned by `backup`. Two block heights and two fee rates
+/// appear: the top-level ones are the mint's consensus values, agreed by a
+/// threshold of nodes, and the ones under `bitcoin` are what this node's
+/// own backend reports and votes with.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ConsensusPhase {
+    /// The mint's name, as set at the ceremony
     pub mint_name: String,
+    /// The mint's id, the hash of its consensus config
     pub mint_id: MintId,
+    /// The Bitcoin network the mint runs on, read off the backends at the
+    /// ceremony: `bitcoin`, `signet` or `regtest`
     pub network: String,
+    /// This node's index in the mint
     pub node_id: NodeId,
+    /// This node's name, as given to `setup init`
     pub node_name: String,
+    /// The revision of the consensus rules the mint runs: the highest
+    /// version a threshold of nodes' binaries support. Nodes on an older
+    /// binary halt once it advances past them
     pub consensus_version: ConsensusVersion,
+    /// Consensus sessions closed since the mint started. A session is one
+    /// batch of ordered items signed off by a threshold of nodes; the count
+    /// is the mint's own clock, and a node catching up replays sessions
+    /// towards it
     pub session_count: u32,
+    /// The Bitcoin block height the mint agrees on: every node votes the
+    /// tip of its own backend, and the vote a threshold of nodes have
+    /// reached wins, so one backend running ahead or behind the others
+    /// moves nothing. What `created` in the transaction history refers to
     pub block_height: u32,
+    /// The next block the mint wallet votes on: every block below it has
+    /// been processed for deposits and for the confirmations of the mint's
+    /// own transactions. Nodes read a block from their backends once it is
+    /// 6 confirmations deep and vote its relevant transactions into the
+    /// consensus log, so this trails `block_height` by about that. A node
+    /// that was down alone catches up from the log and reads no old
+    /// blocks; the wallet only falls further behind when the mint as a
+    /// whole stops voting, and then resumes from here, which makes this the
+    /// height a pruned backend must still serve
+    pub onchain_block_height: u32,
+    /// Every other node with the state of this node's connection to it
     pub nodes: Vec<NodeInfo>,
+    /// This node's Bitcoin Core backend as last polled, every 10 seconds;
+    /// absent while the backend is unreachable
     pub bitcoin: Option<BitcoinConnectionResponse>,
+}
+
+// --- status: nodes ---
+
+/// One other node of the mint, as seen from this node's p2p connection to
+/// it.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct NodeInfo {
+    /// The node's index in the mint
+    pub id: NodeId,
+    /// The node's name, as it gave it at the ceremony
+    pub name: String,
+    /// Whether this node currently holds a live connection to it
+    pub connected: bool,
+    /// How the connection currently runs: `direct` over a hole-punched UDP
+    /// path, or `relay` through an iroh relay server while no direct path
+    /// exists. Absent while disconnected
+    pub transport: Option<String>,
+    /// Where the connection goes: the node's socket address on a direct
+    /// path, the relay's URL on a relayed one. Absent while disconnected
+    pub remote_addr: Option<String>,
+    /// Round-trip time of the connection's current path in milliseconds,
+    /// as iroh measures it; over a relay this spans both legs. Absent while
+    /// disconnected
+    pub rtt_ms: Option<u64>,
+}
+
+// --- status: bitcoin backend ---
+
+/// This node's own Bitcoin Core backend, as opposed to the mint's
+/// consensus view of the chain. These are the values this node votes into
+/// consensus; the votes of a threshold of nodes make the top-level
+/// `block_height` and the fee rate in `onchain status`.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct BitcoinConnectionResponse {
+    /// The network the backend runs, from `getblockchaininfo`; the mint's
+    /// `network` was read from it at the ceremony and the two must agree
+    pub network: String,
+    /// The backend's chain tip, from `getblockcount`: this node's vote for
+    /// the consensus `block_height`, which trails it while the other nodes'
+    /// backends are behind
+    pub block_height: u32,
+    /// The backend's fee estimate in sat/vB, `estimatesmartfee` for the
+    /// next block in conservative mode, floored at 1: this node's vote for
+    /// the consensus fee rate. Fixed at 1 on regtest. Absent while the
+    /// backend has no estimate, as on a freshly synced node
+    pub fee_rate_sat_per_vb: Option<u32>,
+    /// The backend's initial block download progress from 0 to 1, from
+    /// `getblockchaininfo`; the node waits for it to reach the tip before
+    /// it joins consensus
+    pub sync_progress: Option<f64>,
 }
 
 // --- /setup/init ---
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct SetupInitRequest {
-    /// This node's name, shown to the other nodes and to clients
+    /// This node's name, shown to the other nodes and to clients; nodes are
+    /// numbered by the sort order of their setup codes, which starts with
+    /// the name
     pub name: String,
-    /// The mint's name; set by exactly one node
+    /// The mint's name; set by exactly one node, whose setup code carries it
+    /// to the others
     #[arg(long)]
     pub mint_name: Option<String>,
-    /// Number of nodes in the mint: 4, 7, 10, 13, 16, 19 or 22; set by the same node
+    /// Number of nodes in the mint: 4, 7, 10, 13, 16, 19 or 22, one more
+    /// than a multiple of three so a third can fail; set by the same node
     #[arg(long)]
     pub mint_size: Option<u8>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// The code the other nodes' operators need from this one.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SetupInitResponse {
+    /// This node's setup code: a `picomint`-prefixed base32 string carrying
+    /// its name, its iroh public key and, if this node set them, the mint
+    /// name and size. Running `setup init` again with the same arguments
+    /// prints the same code
     pub setup_code: String,
 }
 
@@ -105,12 +223,15 @@ pub struct SetupInitResponse {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct SetupAddRequest {
-    /// Another node's setup code, as printed by its `setup init`
+    /// Another node's setup code, as printed by its `setup init`; adding a
+    /// code twice is harmless
     pub setup_code: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// Confirms which node the code belonged to.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SetupAddResponse {
+    /// The name of the node whose setup code was added
     pub name: String,
 }
 
@@ -132,75 +253,127 @@ pub const DEFAULT_INVITE_USER_LIMIT: u32 = 50;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct InviteRequest {
-    /// Days until the invite code expires.
+    /// Days until the invite code expires, at most 365; this node stops
+    /// serving the mint config for it after that
     #[arg(long = "days", default_value_t = DEFAULT_INVITE_EXPIRY_DAYS)]
     pub expiry_days: u64,
-    /// Maximum number of users that may onboard with this invite code.
+    /// How many clients may join with this code; each config download
+    /// counts as one, and this node alone keeps the count, since it alone
+    /// serves the code
     #[arg(long = "users", default_value_t = DEFAULT_INVITE_USER_LIMIT)]
     pub user_limit: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// A code for users to join the mint with.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InviteResponse {
+    /// The invite code: it names the mint and this node, which serves the
+    /// mint config to whoever presents the code until it expires or its
+    /// user limit is reached
     pub invite: InviteCode,
+}
+
+// --- /backup ---
+
+/// The node's whole config as `backup` prints it: the mint's consensus
+/// config plus this node's private keys, which is why it is written to a
+/// file and never to a terminal. Opaque to everything but `setup restore`,
+/// which takes it back unchanged; the daemon serializes its own config
+/// type, this one only names the schema.
+pub struct BackupResponse;
+
+impl JsonSchema for BackupResponse {
+    fn schema_name() -> Cow<'static, str> {
+        "BackupResponse".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "type": "object",
+            "description": "The node's whole config: the mint's consensus config under `consensus` and this node's private keys under `private`. Secret. Pipe it into a file and feed that file to `setup restore` unchanged; nothing else reads it."
+        })
+    }
+}
+
+// --- /expiry/* ---
+
+#[derive(Clone, Debug, Serialize, Deserialize, Args)]
+pub struct ExpirySetRequest {
+    /// The expiry date as a unix timestamp in seconds, by convention
+    /// midnight UTC; every node must enter the exact same value
+    #[arg(long)]
+    pub timestamp: u64,
+    /// Invite code of the successor mint for users to migrate to; every
+    /// node must enter the exact same one, or none
+    #[arg(long)]
+    pub successor: Option<InviteCode>,
+}
+
+/// This node's own announcement, not the mint's: clients act on an expiry
+/// only once a threshold of nodes announce the same values.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ExpiryStatusResponse {
+    /// What this node announces; absent when it announces nothing
+    pub expiry: Option<ExpiryStatus>,
 }
 
 // --- /onchain/status ---
 
-/// The mint wallet at a glance. `tx_tip` is `None` until the first deposit
-/// has established the wallet; `onchain pending` lists what is in flight.
-#[derive(Debug, Serialize, Deserialize)]
+/// The mint wallet at a glance. The wallet is one UTXO that every mint
+/// transaction spends into its successor, so the wallet's history is a
+/// chain and `tx_tip` is its head.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct OnchainStatusResponse {
+    /// Value of the wallet UTXO in sat: everything the mint holds onchain,
+    /// which backs every user's ecash. 0 until the first deposit
     pub total_value_sat: u64,
-    /// The transaction holding the mint's current wallet UTXO.
+    /// Id of the transaction whose output is the wallet UTXO: the newest
+    /// mint transaction, confirmed or still pending. Absent until the first
+    /// deposit has established the wallet
+    #[schemars(with = "Option<String>")]
     pub tx_tip: Option<Txid>,
+    /// Mint transactions ever created, pending ones included; the next one
+    /// gets this as its `index`
     pub tx_count: u64,
+    /// The consensus fee rate in sat/vB: of the fee estimates the nodes'
+    /// backends report, the lowest one that a threshold of nodes still
+    /// consider sufficient, so no minority can push it. What the mint's
+    /// next transaction pays per vbyte and what the send fee quoted to
+    /// clients is sized from. Absent until a threshold of nodes have voted,
+    /// as right after setup or while backends are syncing
     pub feerate_sat_per_vb: Option<u32>,
-}
-
-// --- status: nodes ---
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct NodeInfo {
-    pub id: NodeId,
-    pub name: String,
-    pub connected: bool,
-    pub transport: Option<String>,
-    pub remote_addr: Option<String>,
-    pub rtt_ms: Option<u64>,
-}
-
-// --- status: bitcoin backend ---
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BitcoinConnectionResponse {
-    pub network: String,
-    pub block_height: u32,
-    pub fee_rate_sat_per_vb: Option<u32>,
-    pub sync_progress: Option<f64>,
 }
 
 // --- /onchain/pending ---
 
-#[derive(Debug, Serialize, Deserialize)]
+/// Mint transactions broadcast but not yet confirmed, newest first. A
+/// transaction is pending from the block it was created in until a
+/// threshold of nodes have seen it 6 confirmations deep.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PendingResponse {
+    /// The pending transactions, newest first
     pub txs: Vec<TxInfo>,
 }
 
 // --- /onchain/history ---
 
-#[derive(Debug, Serialize, Deserialize)]
+/// Every mint transaction ever created, oldest first.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct HistoryResponse {
+    /// The transactions in creation order; the last one is `tx_tip`
     pub txs: Vec<TxInfo>,
 }
 
 // --- /onchain/sweep ---
 
-/// This node's base32 [`picomint_core::onchain::SweepSecret`] for the current
-/// mint UTXO. A threshold of nodes' secrets sweeps the wallet after
-/// decommissioning. Secret.
-#[derive(Debug, Serialize, Deserialize)]
+/// This node's share of the key to the mint wallet, for draining it once
+/// the mint has expired. Secret.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SweepResponse {
+    /// This node's sweep secret as a `picomint`-prefixed base32 string: its
+    /// secret key share tweaked for the current wallet UTXO, so it is only
+    /// valid while `tx_tip` stays what it is now. `picomint-rugpull`
+    /// combines a threshold of nodes' secrets into the wallet key
     pub secret: String,
 }
 
@@ -209,38 +382,30 @@ pub struct SweepResponse {
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct LightningGatewayAddRequest {
     /// The gateway's `gateway_pk`, as printed by `picomint-gateway-cli info`
-    pub pk: picomint_core::lightning::gateway::GatewayPk,
-    /// Display name to identify the gateway by
+    pub pk: GatewayPk,
+    /// The name this node lists the gateway under
     pub name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct LightningGatewayRemoveRequest {
     /// The gateway's `gateway_pk`, as printed by `picomint-gateway-cli info`
-    pub pk: picomint_core::lightning::gateway::GatewayPk,
+    pub pk: GatewayPk,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// The gateways this node recommends. Clients of the mint use a gateway
+/// once a threshold of nodes recommend it, so this list is one vote.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LightningGatewayListResponse {
+    /// This node's recommendations
     pub gateways: Vec<LightningGatewayInfo>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// One recommended gateway.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LightningGatewayInfo {
-    /// Gateway iroh public key (base32-encoded).
-    pub pk: picomint_core::lightning::gateway::GatewayPk,
-    /// Display name to identify the gateway by.
+    /// The gateway's identity, its `gateway_pk`
+    pub pk: GatewayPk,
+    /// The name this node lists it under; local to this node
     pub name: String,
-}
-
-// --- /expiry/set ---
-
-#[derive(Clone, Debug, Serialize, Deserialize, Args)]
-pub struct ExpirySetRequest {
-    /// Expiry date as a unix timestamp in seconds, midnight UTC
-    #[arg(long)]
-    pub timestamp: u64,
-    /// Invite code of the successor mint for users to migrate to
-    #[arg(long)]
-    pub successor: Option<InviteCode>,
 }

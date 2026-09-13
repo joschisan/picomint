@@ -69,12 +69,13 @@ fn wrong_phase(phase: &'static str) -> impl Fn() -> std::future::Ready<CliError>
 pub fn router(api: Arc<ConsensusApi>) -> Router {
     use picomint_core::expiry::ExpiryStatus;
     use picomint_node_cli_core::{
-        ExpirySetRequest, HistoryResponse, INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse,
-        LightningGatewayAddRequest, LightningGatewayInfo, LightningGatewayListResponse,
-        LightningGatewayRemoveRequest, OnchainStatusResponse, PendingResponse, ROUTE_BACKUP,
-        ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD,
-        ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY,
-        ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, SweepResponse,
+        ExpirySetRequest, ExpiryStatusResponse, HistoryResponse, INVITE_EXPIRY_DAYS_LIMIT,
+        InviteRequest, InviteResponse, LightningGatewayAddRequest, LightningGatewayInfo,
+        LightningGatewayListResponse, LightningGatewayRemoveRequest, OnchainStatusResponse,
+        PendingResponse, ROUTE_BACKUP, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
+        ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
+        ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP,
+        SweepResponse,
     };
 
     async fn backup(
@@ -156,19 +157,23 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
     async fn lightning_gateway_add(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<LightningGatewayAddRequest>,
-    ) -> Result<Json<bool>, CliError> {
-        Ok(Json(lightning::add_gateway(
-            &api.server,
-            payload.pk,
-            payload.name,
-        )))
+    ) -> Result<Json<()>, CliError> {
+        if !lightning::add_gateway(&api.server, payload.pk, payload.name) {
+            return Err(CliError::bad_request("Gateway is already recommended"));
+        }
+
+        Ok(Json(()))
     }
 
     async fn lightning_gateway_remove(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<LightningGatewayRemoveRequest>,
-    ) -> Result<Json<bool>, CliError> {
-        Ok(Json(lightning::remove_gateway(&api.server, payload.pk)))
+    ) -> Result<Json<()>, CliError> {
+        if !lightning::remove_gateway(&api.server, payload.pk) {
+            return Err(CliError::bad_request("Gateway is not recommended"));
+        }
+
+        Ok(Json(()))
     }
 
     async fn lightning_gateway_list(
@@ -202,8 +207,10 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
 
     async fn expiry_status(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<Option<ExpiryStatus>>, CliError> {
-        Ok(Json(api.expiry_status()))
+    ) -> Result<Json<ExpiryStatusResponse>, CliError> {
+        Ok(Json(ExpiryStatusResponse {
+            expiry: api.expiry_status(),
+        }))
     }
 
     Router::new()
@@ -291,6 +298,7 @@ async fn consensus_phase(
         consensus_version: consensus_version(&api.server, &dbtx),
         session_count: api.session_count(),
         block_height: api.block_height(),
+        onchain_block_height: onchain::next_block_height(&dbtx),
         nodes: node_infos(&api),
         bitcoin: bitcoin_status(&api),
     };

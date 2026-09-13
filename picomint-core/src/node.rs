@@ -2,10 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 
 use derive_more::{Display, FromStr};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use picomint_encoding::{Decodable, Encodable};
 
+/// A node's index in the mint, 0-based and fixed at the setup ceremony,
+/// where nodes are numbered in the sort order of their setup codes.
 #[derive(
     Debug,
     Clone,
@@ -21,6 +24,7 @@ use picomint_encoding::{Decodable, Encodable};
     Decodable,
     Display,
     FromStr,
+    JsonSchema,
 )]
 pub struct NodeId(u8);
 
