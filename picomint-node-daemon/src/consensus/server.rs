@@ -12,7 +12,7 @@ use picomint_bitcoind::BitcoindClient;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
-use picomint_core::{Amount, NodeId, OutPoint, TransactionId};
+use picomint_core::{Amount, InPoint, NodeId, OutPoint, TransactionId};
 use picomint_redb::{Database, WriteTx};
 use tokio::sync::watch;
 use tracing::info;
@@ -51,17 +51,17 @@ impl Server {
         &self,
         dbtx: &WriteTx,
         input: &wire::Input,
+        in_point: InPoint,
     ) -> Result<(Amount, XOnlyPublicKey), wire::InputError> {
         match input {
             wire::Input::Ecash(i) => {
-                ecash::process_input(self, dbtx, i).map_err(wire::InputError::Ecash)
+                ecash::process_input(self, dbtx, i, in_point).map_err(wire::InputError::Ecash)
             }
             wire::Input::Onchain(i) => {
-                onchain::process_input(self, dbtx, i).map_err(wire::InputError::Onchain)
+                onchain::process_input(self, dbtx, i, in_point).map_err(wire::InputError::Onchain)
             }
-            wire::Input::Lightning(i) => {
-                lightning::process_input(self, dbtx, i).map_err(wire::InputError::Lightning)
-            }
+            wire::Input::Lightning(i) => lightning::process_input(self, dbtx, i, in_point)
+                .map_err(wire::InputError::Lightning),
         }
     }
 
@@ -131,8 +131,10 @@ impl Server {
 
         let txid = tx.compute_txid();
 
-        for input in &tx.inputs {
-            let (amount, pub_key) = self.process_input(dbtx, input).map_err(TxError::Input)?;
+        for (input, in_idx) in tx.inputs.iter().zip(0u16..) {
+            let (amount, pub_key) = self
+                .process_input(dbtx, input, InPoint { txid, in_idx })
+                .map_err(TxError::Input)?;
 
             funding_verifier.add_input(amount, self.input_fee(input))?;
             public_keys.push(pub_key);

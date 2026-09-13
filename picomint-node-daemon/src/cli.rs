@@ -79,11 +79,11 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         ExpiryStatusResponse, GatewayAddError, GatewayRemoveError, HistoryResponse,
         INVITE_EXPIRY_DAYS_LIMIT, InviteError, InviteRequest, InviteResponse,
         LightningGatewayAddRequest, LightningGatewayInfo, LightningGatewayListResponse,
-        LightningGatewayRemoveRequest, OnchainStatusResponse, PendingResponse, ROUTE_BACKUP,
-        ROUTE_BITCOIND, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
-        ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
-        ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL, ROUTE_ONCHAIN_STATUS,
-        RugpullError, RugpullResponse,
+        LightningGatewayRemoveRequest, OnchainStatusResponse, PendingResponse, QueryRequest,
+        QueryResponse, ROUTE_BACKUP, ROUTE_BITCOIND, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET,
+        ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE,
+        ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL,
+        ROUTE_ONCHAIN_STATUS, ROUTE_QUERY, RugpullError, RugpullResponse,
     };
 
     async fn bitcoind(
@@ -153,6 +153,20 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
             node: api.server.cfg.private.identity,
             sks: onchain::tweaked_sks(&api.server, &wallet.tweak),
         }))
+    }
+
+    async fn query(
+        State(api): State<Arc<ConsensusApi>>,
+        Json(request): Json<QueryRequest>,
+    ) -> Result<Json<QueryResponse>, CliError> {
+        let rows = tokio::task::spawn_blocking(move || {
+            picomint_analytics::query(&api.data_dir, &request.query)
+        })
+        .await
+        .expect("the query task is not cancelled")
+        .map_err(CliError::rejected)?;
+
+        Ok(Json(QueryResponse(rows)))
     }
 
     async fn onchain_pending(
@@ -257,6 +271,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         .route(ROUTE_BITCOIND, post(bitcoind))
         .route(ROUTE_INVITE, post(invite))
         .route(ROUTE_BACKUP, post(backup))
+        .route(ROUTE_QUERY, post(query))
         .route(ROUTE_ONCHAIN_STATUS, post(onchain_status))
         .route(ROUTE_ONCHAIN_PENDING, post(onchain_pending))
         .route(ROUTE_ONCHAIN_HISTORY, post(onchain_history))

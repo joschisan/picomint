@@ -222,6 +222,77 @@ picomint-rugpull <nodes> <address> --bitcoind-url http://user:pass@127.0.0.1:833
 
 The fee rate defaults to bitcoind's estimate; `--fee-rate-sat-per-vb` overrides it. The network is whatever bitcoind runs, and the address must be for it. If the tool reports no funds at the address the secrets reconstruct, a node exported before the last transaction confirmed, or a secret was copied wrong.
 
+## Analytics
+
+Everything consensus does is an event in an append-only log next to the accepted items: every input and output of an accepted transaction, one event per module variant, a deposit claimed with its value, a withdrawal requested, a contract funded and settled, a block tracked with its outputs, the wallet's own transactions from creation to confirmation, the consensus height, version and feerate moving, a session closing. Every event is written inside the write transaction of the item that caused it, by the deterministic processing of the ordered stream, so the log is byte-identical on every node and a restored node rewrites it as it replays. The log is mirrored into a SQLite database, one table per event kind, named after it the way the client's tables are — core events unprefixed, module events with the module as the first segment — and rebuilt from the log on every start.
+
+There is no wallclock. Every row carries the log `id`, and the consensus block height is the `height` table: a row happened at the height of the last `height` row before it. This interval is what every bucketed query starts from:
+
+```sql
+WITH heights AS (
+    SELECT height, id AS from_id,
+           LEAD(id, 1, 9223372036854775807) OVER (ORDER BY id) AS to_id
+    FROM height)
+```
+
+Query with read-only SQL; the daemon returns one JSON object per row, the same shape `sqlite3 --json` prints. Notes issued per day of blocks, count and value, most recent first — a note is `2^denomination` msat:
+
+```bash
+picomint-node-cli query \
+    "WITH heights AS (SELECT height, id AS from_id, \
+            LEAD(id, 1, 9223372036854775807) OVER (ORDER BY id) AS to_id FROM height) \
+     SELECT h.height / 144 * 144 AS day, COUNT(*) AS notes, SUM(1 << o.denomination) AS amount_msat \
+     FROM ecash_output o INNER JOIN heights h ON o.id >= h.from_id AND o.id < h.to_id \
+     GROUP BY day ORDER BY day DESC"
+```
+
+The same join buckets any table. Every input row carries its `inpoint` and every output row its `outpoint`, the transaction id and the index in it as `txid:idx`, so a transaction's inputs and outputs are the rows of `ecash_input`, `ecash_output`, `onchain_input`, `onchain_output` and the `lightning_input_*` and `lightning_output_*` tables whose point starts with its txid: `WHERE outpoint LIKE '<txid>:%'`.
+
+The ecash in circulation, per denomination, which is the liability the wallet's custody has to cover:
+
+```bash
+picomint-node-cli query \
+    "SELECT denomination, SUM(delta) AS outstanding \
+     FROM (SELECT denomination, 1 AS delta FROM ecash_output \
+           UNION ALL SELECT denomination, -1 FROM ecash_input) \
+     GROUP BY denomination ORDER BY denomination"
+```
+
+Custody is the wallet's single UTXO, which every wallet transaction spends into a fresh one, so the latest `onchain_tx` row's `output_sat` is what the mint holds. Against the liabilities:
+
+```bash
+picomint-node-cli query \
+    "SELECT (SELECT output_sat FROM onchain_tx ORDER BY tx_index DESC LIMIT 1) * 1000 AS custody_msat, \
+            (SELECT SUM(delta * (1 << denomination)) \
+             FROM (SELECT denomination, 1 AS delta FROM ecash_output \
+                   UNION ALL SELECT denomination, -1 FROM ecash_input)) AS ecash_msat"
+```
+
+A deposit is `onchain_tracked_output` when its block is tracked and `onchain_input` when a transaction claims it, naming the tracked output by `output_index` and the wallet transaction that sweeps it by `wallet_txid`; a withdrawal is `onchain_output` naming the wallet transaction that pays it. A wallet transaction is `onchain_tx` when it is created, `onchain_tx_signed` when a threshold of nodes signed and broadcast it and `onchain_tx_confirmed` when a tracked block holds it, all under `btc_txid`. Withdrawals still unconfirmed:
+
+```bash
+picomint-node-cli query \
+    "SELECT o.destination, o.value_sat, o.wallet_txid \
+     FROM onchain_output o \
+     LEFT JOIN onchain_tx_confirmed c ON c.btc_txid = o.wallet_txid \
+     WHERE c.btc_txid IS NULL"
+```
+
+A lightning contract is `lightning_output_outgoing` or `lightning_output_incoming` when a transaction funds it, and one of the input tables when one settles it, naming the funding output's `outpoint` as its `contract`: an outgoing contract is `lightning_input_outgoing_claim` when the gateway claims it with the preimage, `lightning_input_outgoing_refund` when the sender takes it back after expiry, or `lightning_input_outgoing_cancel` when the gateway's signature releases it early; an incoming contract is `lightning_input_incoming_claim` when the recipient takes it or `lightning_input_incoming_refund` when the decryption key yields no preimage and the gateway takes it back. Outgoing payments per gateway with how they settled, where no outcome means still open:
+
+```bash
+picomint-node-cli query \
+    "SELECT o.claim_pk AS gateway, s.outcome, COUNT(*) AS contracts, SUM(o.amount) AS amount_msat \
+     FROM lightning_output_outgoing o \
+     LEFT JOIN (SELECT contract, 'claim' AS outcome FROM lightning_input_outgoing_claim \
+                UNION ALL SELECT contract, 'refund' FROM lightning_input_outgoing_refund \
+                UNION ALL SELECT contract, 'cancel' FROM lightning_input_outgoing_cancel) s \
+     ON s.contract = o.outpoint \
+     GROUP BY o.claim_pk, s.outcome"
+```
+
+The tables and their columns are the event structs under `consensus/events.rs` and each module's `events.rs` in `picomint-node-daemon`; `SELECT sql FROM sqlite_schema` prints the schema as installed.
+
 ## Interfaces
 
 | Port | Purpose                      | Safe to expose? |

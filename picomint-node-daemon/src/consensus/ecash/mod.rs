@@ -1,4 +1,5 @@
 mod db;
+pub mod events;
 mod rpc;
 
 use std::collections::BTreeMap;
@@ -13,13 +14,14 @@ use picomint_core::ecash::{
     EcashInput, EcashInputError, EcashOutput, EcashOutputError, verify_note,
 };
 use picomint_core::secp256k1::XOnlyPublicKey;
-use picomint_core::{Amount, OutPoint};
+use picomint_core::{Amount, InPoint, OutPoint};
 use picomint_redb::WriteTx;
 use tbs::{AggregatePublicKey, PublicKeyShare, derive_pk_share};
 
 use crate::config::NodeConfig;
 use crate::config::dkg::DkgHandle;
 use crate::config::poly::eval_poly_g2;
+use crate::consensus::eventlog::log_event;
 use crate::consensus::server::Server;
 use crate::{handler, handler_async};
 
@@ -27,6 +29,7 @@ use self::db::{
     BlindedNonceTable, BlindedSignatureShareRestoreTable, BlindedSignatureShareTable,
     NoteNonceTable,
 };
+use self::events::{InputEvent, OutputEvent};
 
 /// Run DKG for the ecash module, producing a fresh `EcashConfig` for this node.
 pub async fn dkg(nodes: &DkgHandle<'_>) -> anyhow::Result<EcashConfig> {
@@ -80,6 +83,7 @@ pub fn process_input(
     server: &Server,
     dbtx: &WriteTx,
     input: &EcashInput,
+    inpoint: InPoint,
 ) -> Result<(Amount, XOnlyPublicKey), EcashInputError> {
     if dbtx
         .insert(&NoteNonceTable, &input.note.nonce, &())
@@ -99,6 +103,13 @@ pub fn process_input(
     if !verify_note(input.note, *pk) {
         return Err(EcashInputError::InvalidSignature);
     }
+
+    let event = InputEvent {
+        inpoint,
+        denomination: input.note.denomination,
+    };
+
+    log_event(dbtx, &event);
 
     Ok((input.note.amount(), input.note.nonce))
 }
@@ -138,6 +149,13 @@ pub fn process_output(
         &output.nonce,
         &signature,
     );
+
+    let event = OutputEvent {
+        outpoint,
+        denomination: output.denomination,
+    };
+
+    log_event(dbtx, &event);
 
     Ok(output.amount())
 }

@@ -32,6 +32,7 @@ group = { workspace = true }
 iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false, features = ["key"] }
 iroh-mdns-address-lookup = { workspace = true }
+picomint-analytics = { workspace = true }
 picomint-bft = { workspace = true }
 picomint-bitcoind = { workspace = true }
 picomint-cli-server = { workspace = true }
@@ -43,6 +44,7 @@ picomint-rpc = { workspace = true }
 rand = { workspace = true }
 secp256k1 = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tbs = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
@@ -53,4 +55,5 @@ tss = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+rusqlite = { workspace = true }
 test-log = { workspace = true }

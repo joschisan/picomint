@@ -18,7 +18,7 @@ use secp256k1::schnorr::Signature;
 
 use crate::ecash::Denomination;
 use crate::version::ConsensusVersion;
-use crate::{Amount, NodeId, OutPoint, TransactionId};
+use crate::{Amount, InPoint, NodeId, OutPoint, TransactionId};
 
 /// A value bound into an analytics row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,6 +161,7 @@ display!(
     TransactionId,
     Txid,
     OutPoint,
+    InPoint,
     Signature,
     ConsensusVersion,
     XOnlyPublicKey,

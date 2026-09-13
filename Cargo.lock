@@ -3604,8 +3604,10 @@ name = "picomint-node-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "picomint-analytics",
  "picomint-cli-client",
  "picomint-node-cli-core",
+ "picomint-node-daemon",
  "serde_json",
  "tokio",
 ]
@@ -3620,6 +3622,7 @@ dependencies = [
  "picomint-tss",
  "schemars 1.2.1",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -3640,6 +3643,7 @@ dependencies = [
  "iroh",
  "iroh-base",
  "iroh-mdns-address-lookup",
+ "picomint-analytics",
  "picomint-bft",
  "picomint-bitcoind",
  "picomint-cli-server",
@@ -3652,8 +3656,10 @@ dependencies = [
  "picomint-tpe",
  "picomint-tss",
  "rand 0.8.6",
+ "rusqlite",
  "secp256k1",
  "serde",
+ "serde_json",
  "test-log",
  "tokio",
  "tokio-rustls",

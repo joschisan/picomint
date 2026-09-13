@@ -1,4 +1,5 @@
 pub mod db;
+pub mod events;
 mod rpc;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,18 +11,24 @@ use self::db::{
     NonceLogTable, OutputTable, SignatureSharesTable, SpentOutputIndexTable, TxInfoIndexTable,
     TxInfoTable, UnconfirmedTxTable, UnsignedTxTable,
 };
+use self::events::{
+    BlockEvent, FeerateEvent, InputEvent, OutputEvent, TrackedOutputEvent, TxConfirmedEvent,
+    TxEvent, TxSignedEvent,
+};
 use anyhow::{Context, anyhow, ensure};
 use bitcoin::absolute::LockTime;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::Version;
-use bitcoin::{Amount, Network, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
+use bitcoin::{
+    Address, Amount, Network, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness,
+};
 use common::config::OnchainConfigConsensus;
 use common::{OnchainConsensusItem, OnchainInput, OnchainOutput, OutputInfo};
 use picomint_bitcoind::{BitcoindClient, MIN_FEERATE_SATS_PER_KVB};
 use picomint_core::onchain as common;
 use picomint_core::secp256k1::XOnlyPublicKey;
-use picomint_core::{NodeId, NumNodesExt, OutPoint};
+use picomint_core::{InPoint, NodeId, NumNodesExt, OutPoint};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 use tokio::time::sleep;
@@ -31,6 +38,7 @@ use crate::config::dkg::DkgHandle;
 use crate::config::dkg_secp::eval_poly;
 use crate::consensus::CONFIRMATIONS;
 use crate::consensus::db::consensus_block_height;
+use crate::consensus::eventlog::log_event;
 use crate::consensus::server::Server;
 use crate::handler;
 use picomint_core::onchain::config::{OnchainConfig, OnchainConfigPrivate};
@@ -357,10 +365,34 @@ pub fn process_consensus_item(
                 let mut index =
                     dbtx.iter_rev(&OutputTable, |r| r.next().map_or(0, |entry| entry.0 + 1));
 
+                let event = BlockEvent {
+                    height: vote.height,
+                    txs: vote.txs.len() as u64,
+                };
+
+                log_event(dbtx, &event);
+
                 for tx in vote.txs {
-                    dbtx.remove(&UnconfirmedTxTable, &tx.txid);
+                    if dbtx.remove(&UnconfirmedTxTable, &tx.txid).is_some() {
+                        let event = TxConfirmedEvent {
+                            btc_txid: tx.txid,
+                            height: vote.height,
+                        };
+
+                        log_event(dbtx, &event);
+                    }
 
                     for (vout, out) in tx.outputs {
+                        let event = TrackedOutputEvent {
+                            output_index: index,
+                            height: vote.height,
+                            btc_txid: tx.txid,
+                            vout,
+                            value_sat: out.value,
+                        };
+
+                        log_event(dbtx, &event);
+
                         let tracked = TrackedOutput {
                             outpoint: bitcoin::OutPoint {
                                 txid: tx.txid,
@@ -383,8 +415,20 @@ pub fn process_consensus_item(
             Ok(())
         }
         OnchainConsensusItem::Feerate(feerate) => {
+            let old_feerate = consensus_feerate(server, dbtx);
+
             if Some(feerate) == dbtx.insert(&FeeRateVoteTable, &node, &feerate) {
                 return Err(anyhow!("Fee rate vote is redundant"));
+            }
+
+            let new_feerate = consensus_feerate(server, dbtx);
+
+            if new_feerate != old_feerate {
+                let event = FeerateEvent {
+                    feerate: new_feerate,
+                };
+
+                log_event(dbtx, &event);
             }
 
             Ok(())
@@ -400,6 +444,7 @@ pub fn process_input(
     server: &Server,
     dbtx: &WriteTx,
     input: &OnchainInput,
+    inpoint: InPoint,
 ) -> Result<(picomint_core::Amount, XOnlyPublicKey), OnchainInputError> {
     if dbtx
         .insert(&SpentOutputIndexTable, &input.output_index, &())
@@ -435,7 +480,7 @@ pub fn process_input(
         .checked_sub(input.fee)
         .ok_or(OnchainInputError::ArithmeticOverflow)?;
 
-    if let Some(wallet) = dbtx.remove(&MintOnchainTable, &()) {
+    let wallet_txid = if let Some(wallet) = dbtx.remove(&MintOnchainTable, &()) {
         // Assuming the first receive into the mint is made through a
         // standard transaction, its output value is over the dust limit.
         // By induction so is this change value.
@@ -498,6 +543,16 @@ pub fn process_input(
             },
         );
 
+        let event = TxEvent {
+            tx_index,
+            btc_txid: tx.compute_txid(),
+            input_sat: wallet.value,
+            output_sat: change_value,
+            fee_sat: input.fee,
+        };
+
+        log_event(dbtx, &event);
+
         let unsigned_tx = MintTx {
             tx: tx.clone(),
             spent_tx_outs: vec![
@@ -517,6 +572,8 @@ pub fn process_input(
         if dbtx.insert(&UnsignedTxTable, &(), &unsigned_tx).is_some() {
             return Err(OnchainInputError::PendingTransaction);
         }
+
+        Some(tx.compute_txid())
     } else {
         dbtx.insert(
             &MintOnchainTable,
@@ -527,7 +584,21 @@ pub fn process_input(
                 tweak: input.tweak.consensus_hash(),
             },
         );
-    }
+
+        None
+    };
+
+    let event = InputEvent {
+        inpoint,
+        output_index: input.output_index,
+        btc_txid: tracked.outpoint.txid,
+        vout: tracked.outpoint.vout,
+        value_sat: tracked.out.value,
+        fee_sat: input.fee,
+        wallet_txid,
+    };
+
+    log_event(dbtx, &event);
 
     let amount = output_value
         .to_sat()
@@ -613,6 +684,21 @@ pub fn process_output(
         },
     );
 
+    let event = OutputEvent {
+        outpoint,
+        destination: Address::from_script(
+            &output.destination.script_pubkey(),
+            server.cfg.consensus.network,
+        )
+        .expect("A standard script has an address")
+        .to_string(),
+        value_sat: output.value,
+        fee_sat: output.fee,
+        wallet_txid: tx.compute_txid(),
+    };
+
+    log_event(dbtx, &event);
+
     let tx_index = total_txs(dbtx);
 
     let created = consensus_block_height(server, dbtx);
@@ -632,6 +718,16 @@ pub fn process_output(
     );
 
     dbtx.insert(&TxInfoIndexTable, &outpoint, &tx_index);
+
+    let event = TxEvent {
+        tx_index,
+        btc_txid: tx.compute_txid(),
+        input_sat: wallet.value,
+        output_sat: change_value,
+        fee_sat: output.fee,
+    };
+
+    log_event(dbtx, &event);
 
     let unsigned_tx = MintTx {
         tx: tx.clone(),
@@ -828,6 +924,8 @@ fn process_signature_shares(
         dbtx.clear_table(&SignatureSharesTable);
 
         dbtx.insert(&UnconfirmedTxTable, &txid, &unsigned);
+
+        log_event(dbtx, &TxSignedEvent { btc_txid: txid });
 
         // Off the ordering loop's write transaction: the broadcast is
         // fire-and-forget, and the row above has the rebroadcast task
