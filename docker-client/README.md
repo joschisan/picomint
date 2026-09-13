@@ -157,7 +157,7 @@ picomint-client-cli lightning receive <mint> <account> <gateway> "<amount>"
 }
 ```
 
-**A reusable lnurl:** an lnurl daemon (`ghcr.io/joschisan/picomint-lnurl-daemon:main`, built from [docker-lnurl](../docker-lnurl)) serves invoices on the account's behalf, so the account can be paid while this daemon is offline. It has one setting, `API_ADDR` (default `0.0.0.0:8080`), and paying wallets reach it there directly, so put it behind a public URL. Pass that base URL and share the lnurl it returns:
+**A reusable lnurl:** an lnurl daemon serves invoices on the account's behalf, so the account can be paid while this daemon is offline. It is a hosted service, not something you run: pass its base URL and share the lnurl it returns:
 
 ```bash
 picomint-client-cli lightning lnurl <mint> <account> https://lnurl.example.com/
