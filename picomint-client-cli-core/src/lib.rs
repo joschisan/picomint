@@ -53,7 +53,7 @@ pub const ROUTE_LIGHTNING_GATEWAY_REFRESH: &str = "/lightning/gateway/refresh";
 
 // --- /mnemonic ---
 
-/// The seed. Secret.
+/// The seed. Secret: pipe it into a file, never to a terminal.
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct MnemonicResponse {
     /// The twelve BIP39 words every mint balance derives from; the app

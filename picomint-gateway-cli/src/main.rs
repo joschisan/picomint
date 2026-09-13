@@ -47,7 +47,7 @@ enum Commands {
     /// Display gateway info
     #[command(after_long_help = schema::<InfoResponse>())]
     Info,
-    /// Display mnemonic seed words
+    /// Print the mnemonic seed words; pipe it into a file (secret)
     #[command(after_long_help = schema::<MnemonicResponse>())]
     Mnemonic,
     /// Query the analytics db with read-only SQL; rows print as JSON objects
