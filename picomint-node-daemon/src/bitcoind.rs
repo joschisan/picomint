@@ -175,12 +175,15 @@ impl BitcoindClient {
             "params": params,
         });
 
+        // The url carries the rpc credentials, and reqwest names it in
+        // every error; there is only the one backend, so it says nothing.
         let http_response = self
             .client
             .post(self.url.clone())
             .json(&request)
             .send()
-            .await?;
+            .await
+            .map_err(reqwest::Error::without_url)?;
 
         let status = http_response.status();
 
@@ -190,6 +193,7 @@ impl BitcoindClient {
         let response: RpcResponse<T> = http_response
             .json()
             .await
+            .map_err(reqwest::Error::without_url)
             .with_context(|| format!("bitcoind returned {status} with a non-JSON-RPC body"))?;
 
         match (response.result, response.error) {
