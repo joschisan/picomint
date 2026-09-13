@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::bitcoind::{BitcoindClient, BitcoindRpcMonitor};
+use crate::bitcoind::BitcoindClient;
 use anyhow::ensure;
 use bitcoin::Network;
 use futures::TryFutureExt;
@@ -57,15 +57,6 @@ pub async fn run(
     anyhow::ensure!(
         cfg.consensus.network != bitcoin::Network::Bitcoin,
         "Picomint is experimental software and refuses to run a mint on mainnet"
-    );
-
-    let btc_rpc = BitcoindRpcMonitor::new(
-        btc_rpc,
-        if settings.integration_test {
-            Duration::from_millis(100)
-        } else {
-            Duration::from_secs(10)
-        },
     );
 
     let server = Server {
@@ -121,38 +112,33 @@ pub async fn run(
     Ok(())
 }
 
-async fn await_bitcoin_sync(
-    bitcoin_rpc_connection: &BitcoindRpcMonitor,
-    network: Network,
-) -> anyhow::Result<()> {
+async fn await_bitcoin_sync(btc_rpc: &BitcoindClient, network: Network) -> anyhow::Result<()> {
     loop {
-        match bitcoin_rpc_connection.status() {
-            Some(status) => {
+        match backend_sync(btc_rpc).await {
+            Ok((backend_network, progress)) => {
                 ensure!(
-                    status.network == network,
+                    backend_network == network,
                     "Bitcoin backend network does not match",
                 );
 
-                if let Some(progress) = status.sync_progress {
-                    if progress >= 0.999 {
-                        return Ok(());
-                    }
-
-                    info!(
-                        "Waiting for bitcoin backend to sync... {:.1}%",
-                        progress * 100.0
-                    );
-                } else {
+                if progress >= 0.999 {
                     return Ok(());
                 }
+
+                info!(
+                    "Waiting for bitcoin backend to sync... {:.1}%",
+                    progress * 100.0
+                );
             }
-            None => {
-                info!("Waiting to connect to bitcoin backend...");
-            }
+            Err(error) => info!(%error, "Waiting to connect to bitcoin backend..."),
         }
 
         sleep(Duration::from_secs(1)).await;
     }
+}
+
+async fn backend_sync(btc_rpc: &BitcoindClient) -> anyhow::Result<(Network, f64)> {
+    Ok((btc_rpc.network().await?, btc_rpc.get_sync_progress().await?))
 }
 
 async fn submit_ci_proposals(
@@ -165,14 +151,19 @@ async fn submit_ci_proposals(
     loop {
         let dbtx = server.db.begin_read();
 
-        if let Some(status) = server.btc_rpc.status() {
+        if let Ok(block_height) = server
+            .btc_rpc
+            .get_block_height()
+            .await
+            .inspect_err(|error| warn!(%error, "Failed to fetch the block height to vote on"))
+        {
             let current_vote = dbtx
                 .get(&BlockHeightVoteTable, &server.cfg.private.identity)
                 .unwrap_or(0);
 
-            if status.block_height > current_vote {
+            if block_height > current_vote {
                 submission_tx
-                    .send(ConsensusItem::BlockHeight(status.block_height))
+                    .send(ConsensusItem::BlockHeight(block_height))
                     .await
                     .ok();
             }

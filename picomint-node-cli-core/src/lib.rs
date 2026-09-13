@@ -28,6 +28,7 @@ pub const ROUTE_SETUP_CONFIRM: &str = "/setup/confirm";
 pub const ROUTE_SETUP_RESTORE: &str = "/setup/restore";
 
 // Consensus routes
+pub const ROUTE_BITCOIND: &str = "/bitcoind";
 pub const ROUTE_INVITE: &str = "/invite";
 pub const ROUTE_BACKUP: &str = "/backup";
 pub const ROUTE_EXPIRY_SET: &str = "/expiry/set";
@@ -92,10 +93,9 @@ pub struct DkgPhase {
 }
 
 /// The mint is running. Everything here is public; the private keys are
-/// only ever returned by `backup`. Two block heights and two fee rates
-/// appear: the top-level ones are the mint's consensus values, agreed by a
-/// threshold of nodes, and the ones under `bitcoin` are what this node's
-/// own backend reports and votes with.
+/// only ever returned by `backup`. Every value is the mint's, agreed by a
+/// threshold of nodes, or this node's own; what this node's bitcoind
+/// backend reports is under `bitcoind`.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ConsensusPhase {
     /// The mint's name, as set at the ceremony
@@ -135,9 +135,6 @@ pub struct ConsensusPhase {
     pub onchain_block_height: u32,
     /// Every other node with the state of this node's connection to it
     pub nodes: Vec<NodeInfo>,
-    /// This node's Bitcoin Core backend as last polled, every 10 seconds;
-    /// absent while the backend is unreachable
-    pub bitcoin: Option<BitcoinConnectionResponse>,
 }
 
 // --- status: nodes ---
@@ -165,16 +162,18 @@ pub struct NodeInfo {
     pub rtt_ms: Option<u64>,
 }
 
-// --- status: bitcoin backend ---
+// --- /bitcoind ---
 
-/// This node's own Bitcoin Core backend, as opposed to the mint's
-/// consensus view of the chain. These are the values this node votes into
-/// consensus; the votes of a threshold of nodes make the top-level
-/// `block_height` and the fee rate in `onchain status`.
+/// This node's own Bitcoin Core backend, read live, as opposed to the
+/// mint's consensus view of the chain. These are the values this node votes
+/// into consensus; the votes of a threshold of nodes make `block_height`
+/// in `status` and the fee rate in `onchain status`. Fails while the
+/// backend is unreachable, with what went wrong.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct BitcoinConnectionResponse {
-    /// The network the backend runs, from `getblockchaininfo`; the mint's
-    /// `network` was read from it at the ceremony and the two must agree
+pub struct BitcoindResponse {
+    /// The network the backend runs, told by its block at height 1; the
+    /// mint's `network` was read from it at the ceremony and the two must
+    /// agree
     pub network: String,
     /// The backend's chain tip, from `getblockcount`: this node's vote for
     /// the consensus `block_height`, which trails it while the other nodes'
@@ -188,7 +187,7 @@ pub struct BitcoinConnectionResponse {
     /// The backend's initial block download progress from 0 to 1, from
     /// `getblockchaininfo`; the node waits for it to reach the tip before
     /// it joins consensus
-    pub sync_progress: Option<f64>,
+    pub sync_progress: f64,
 }
 
 // --- /setup/init ---

@@ -2,6 +2,7 @@ pub mod db;
 mod rpc;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use std::time::Duration;
 
 use self::db::{
@@ -9,13 +10,13 @@ use self::db::{
     NonceLogTable, OutputTable, SignatureSharesTable, SpentOutputIndexTable, TxInfoIndexTable,
     TxInfoTable, UnconfirmedTxTable, UnsignedTxTable,
 };
-use crate::bitcoind::BitcoindRpcMonitor;
+use crate::bitcoind::{BitcoindClient, MIN_FEERATE_SATS_PER_KVB};
 use anyhow::{Context, anyhow, ensure};
 use bitcoin::absolute::LockTime;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::Version;
-use bitcoin::{Amount, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
+use bitcoin::{Amount, Network, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
 use common::config::OnchainConfigConsensus;
 use common::{OnchainConsensusItem, OnchainInput, OnchainOutput, OutputInfo};
 use picomint_core::onchain as common;
@@ -131,7 +132,7 @@ pub fn validate_config(cfg: &NodeConfig) -> anyhow::Result<()> {
 pub async fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<OnchainConsensusItem> {
     [
         block_proposal(server, dbtx).await,
-        feerate_proposal(server, dbtx),
+        feerate_proposal(server, dbtx).await,
         signing_session_proposal(server, dbtx),
     ]
     .into_iter()
@@ -140,16 +141,33 @@ pub async fn consensus_proposal(server: &Server, dbtx: &ReadTx) -> Vec<OnchainCo
 }
 
 /// Our feerate vote whenever it differs from the one consensus holds for
-/// us. `None` retracts the vote while the bitcoin backend is down or
-/// still syncing and thus unable to estimate fees.
-fn feerate_proposal(server: &Server, dbtx: &ReadTx) -> Option<OnchainConsensusItem> {
-    let vote = server.btc_rpc.status().and_then(|status| status.fee_rate);
+/// us.
+async fn feerate_proposal(server: &Server, dbtx: &ReadTx) -> Option<OnchainConsensusItem> {
+    let vote = feerate_vote(server).await;
 
     if dbtx.get(&FeeRateVoteTable, &server.cfg.private.identity) == Some(vote) {
         return None;
     }
 
     Some(OnchainConsensusItem::Feerate(vote))
+}
+
+/// What this node votes for the fee rate, in sat/kvB: its backend's
+/// estimate, or the relay floor on regtest, where `estimatesmartfee` never
+/// has data. `None` retracts the vote while the backend is down or still
+/// syncing and thus unable to estimate fees.
+pub async fn feerate_vote(server: &Server) -> Option<u32> {
+    if server.cfg.consensus.network == Network::Regtest {
+        return Some(MIN_FEERATE_SATS_PER_KVB);
+    }
+
+    server
+        .btc_rpc
+        .get_feerate()
+        .await
+        .inspect_err(|error| warn!(%error, "Failed to fetch the fee rate to vote on"))
+        .ok()
+        .flatten()
 }
 
 /// Our vote on the block at the tracked height, once it has its
@@ -159,7 +177,14 @@ fn feerate_proposal(server: &Server, dbtx: &ReadTx) -> Option<OnchainConsensusIt
 async fn block_proposal(server: &Server, dbtx: &ReadTx) -> Option<OnchainConsensusItem> {
     let height = dbtx.get(&BlockHeightTable, &())?;
 
-    if server.btc_rpc.status()?.block_height + 1 < height + CONFIRMATIONS {
+    let backend_height = server
+        .btc_rpc
+        .get_block_height()
+        .await
+        .inspect_err(|error| warn!(height, %error, "Failed to fetch the next block to vote on"))
+        .ok()?;
+
+    if backend_height + 1 < height + CONFIRMATIONS {
         return None;
     }
 
@@ -643,7 +668,7 @@ pub async fn handle_api(server: &Server, method: OnchainMethod) -> Result<Vec<u8
 }
 
 pub fn spawn_broadcast_unconfirmed_txs_task(
-    btc_rpc: BitcoindRpcMonitor,
+    btc_rpc: Arc<BitcoindClient>,
     db: Database,
     integration_test: bool,
 ) {
