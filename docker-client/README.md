@@ -2,7 +2,7 @@
 
 A headless client for machines: the client library behind an admin socket, with the same analytics mirror the gateway keeps. It exists for load generation, latency measurement and agents, not for people — the app is the client for people. Every command is one client call and returns what the call returns; sends hand back an operation id, and the outcome is read from the analytics through `query`.
 
-The daemon is a single container image: `ghcr.io/joschisan/picomint-client-daemon:main`. Persist `/data` in a volume and set the network every added mint must run on:
+The daemon is a single container image: `ghcr.io/joschisan/picomint-client-daemon:main`. Persist `/data` in a volume and set the network every added mint must run on; mints refuse to run on mainnet for now, so that is signet or regtest:
 
 ```bash
 docker run -d --name picomint-client-daemon \
@@ -121,7 +121,7 @@ picomint-client-cli lightning gateway list <mint>
 ```json
 {
   "gateways": {
-    "picomint1d2g4...c9d1": {
+    "picomintd2g4...c9d1": {
       "module_public_key": "8f3a...b2e7",
       "send_fee": { "base": 10000, "ppm": 3000 },
       "receive_fee": { "base": 10000, "ppm": 1000 },
@@ -157,7 +157,7 @@ picomint-client-cli lightning receive <mint> <account> <gateway> "<amount>"
 }
 ```
 
-**A reusable lnurl:** an [lnurl daemon](../docker-lnurl) serves invoices on the account's behalf, so the account can be paid while this daemon is offline. Pass its base URL and share the lnurl it returns:
+**A reusable lnurl:** an lnurl daemon (`ghcr.io/joschisan/picomint-lnurl-daemon:main`, built from [docker-lnurl](../docker-lnurl)) serves invoices on the account's behalf, so the account can be paid while this daemon is offline. It has one setting, `API_ADDR` (default `0.0.0.0:8080`), and paying wallets reach it there directly, so put it behind a public URL. Pass that base URL and share the lnurl it returns:
 
 ```bash
 picomint-client-cli lightning lnurl <mint> <account> https://lnurl.example.com/

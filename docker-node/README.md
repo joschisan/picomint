@@ -1,18 +1,11 @@
 # Picomint Node Daemon
 
 
-Nodes run on a fresh **Ubuntu 26.04 LTS desktop** (amd64) with a screen and keyboard. The node has no web UI: everything from the setup ceremony on happens through the admin CLI, and this document is the complete manual for it, written so that an operator, or an agent working for one, can run every step.
+Nodes usually run at home, on any amd64 machine with Docker. The node has no web UI: everything from the setup ceremony on happens through the admin CLI, and this document is the complete manual for it, written so that an operator, or an agent working for one, can run every step.
 
 ## Install
 
-Install Docker and let your account use it, then log out and back in so the group takes effect:
-
-```bash
-sudo apt update && sudo apt install -y docker.io docker-compose-v2
-sudo usermod -aG docker $USER
-```
-
-Download [`docker-compose.yml`](docker-compose.yml), which runs the node and Bitcoin Core side by side, then pull and start:
+Requires Docker with the compose plugin. The bundled [`docker-compose.yml`](docker-compose.yml) is the reference deployment: the node with its own pruned Bitcoin Core on mainnet. The node refuses to run a mint on mainnet for now (see [Bitcoin Backend](#bitcoin-backend)), so until that changes a test deployment needs its own compose, with every node's `BITCOIND_URL` pointing at one shared regtest backend, or at signet. Once mainnet is allowed, download the reference, then pull and start:
 
 ```bash
 curl -fsSL --create-dirs -o ~/picomint/docker-compose.yml https://raw.githubusercontent.com/joschisan/picomint/main/docker-node/docker-compose.yml
@@ -34,7 +27,7 @@ A pruned node works, under one rule: the mint's block height, the one `status` s
 
 Initial block download pulls the full chain over the network either way, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth. The node will sit idle until bitcoind catches up.
 
-For now the node refuses to run a mint on mainnet: `setup confirm` fails with that error when bitcoind runs mainnet, so point it at signet or regtest until this is no longer experimental.
+For now the node refuses to run a mint on mainnet: `setup confirm` fails with that error when bitcoind runs mainnet. The mint's network is whatever the backend runs, so a test mint is a compose of your own that points every node at signet or at one shared regtest backend.
 
 ## Accessing the CLI
 
@@ -216,7 +209,9 @@ The fee rate defaults to bitcoind's estimate; `--fee-rate-sat-per-vb` overrides 
 
 | Port | Purpose                      | Safe to expose? |
 |------|------------------------------|-----------------|
-| 8080 | Iroh endpoint                | Yes             |
+| 8080 | Iroh endpoint (QUIC over UDP) | Yes            |
+
+No port forward is needed: iroh punches through NAT and falls back to a relay when it can't. Forwarding UDP 8080 on your router only helps a node behind a strict NAT reach the others directly instead of over the relay; `status` shows which transport each node ended up on.
 
 The admin CLI is a Unix socket at `{DATA_DIR}/cli.sock` — no port, no
 network exposure. Reach it with `docker exec picomint-node-daemon
