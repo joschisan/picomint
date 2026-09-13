@@ -2,14 +2,20 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use picomint_cli_client::{print_json, request};
+use picomint_cli_client::{print_json, request, schema};
 use picomint_client_cli_core::{
-    ClientAddRequest, ClientBalanceRequest, ClientConfigRequest, ClientEcashCountRequest,
-    ClientEcashReceiveRequest, ClientEcashSendMaxRequest, ClientEcashSendRequest,
-    ClientLightningGatewayListRequest, ClientLightningGatewayRefreshRequest,
-    ClientLightningLnurlRequest, ClientLightningReceiveRequest, ClientLightningSendMaxRequest,
-    ClientLightningSendRequest, ClientOnchainReceiveRequest, ClientOnchainSendFeeRequest,
-    ClientOnchainSendMaxRequest, ClientOnchainSendRequest, ClientRemoveRequest, QueryRequest,
+    ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse, ClientConfigRequest,
+    ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
+    ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
+    ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
+    ClientLightningGatewayListRequest, ClientLightningGatewayListResponse,
+    ClientLightningGatewayRefreshRequest, ClientLightningLnurlRequest,
+    ClientLightningLnurlResponse, ClientLightningReceiveRequest, ClientLightningReceiveResponse,
+    ClientLightningSendMaxRequest, ClientLightningSendMaxResponse, ClientLightningSendRequest,
+    ClientLightningSendResponse, ClientListResponse, ClientOnchainReceiveRequest,
+    ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse,
+    ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse, ClientOnchainSendRequest,
+    ClientOnchainSendResponse, ClientRemoveRequest, MnemonicResponse, QueryRequest, QueryResponse,
     ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE,
     ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_LIGHTNING_GATEWAY_LIST,
     ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
@@ -33,18 +39,25 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Display mnemonic seed words
+    #[command(after_long_help = schema::<MnemonicResponse>())]
     Mnemonic,
     /// Query the analytics db with read-only SQL; rows print as JSON objects
+    #[command(after_long_help = schema::<QueryResponse>())]
     Query(QueryRequest),
     /// Add a mint
+    #[command(after_long_help = schema::<()>())]
     Add(ClientAddRequest),
     /// Remove a mint and delete all of its data
+    #[command(after_long_help = schema::<()>())]
     Remove(ClientRemoveRequest),
     /// List added mints
+    #[command(after_long_help = schema::<ClientListResponse>())]
     List,
     /// Get a mint's JSON client config
+    #[command(after_long_help = schema::<ClientConfigResponse>())]
     Config(ClientConfigRequest),
     /// Get an account's ecash balance
+    #[command(after_long_help = schema::<ClientBalanceResponse>())]
     Balance(ClientBalanceRequest),
     /// Ecash module commands
     #[command(subcommand)]
@@ -60,24 +73,32 @@ enum Commands {
 #[derive(Subcommand)]
 enum EcashCommands {
     /// Count ecash notes by denomination
+    #[command(after_long_help = schema::<ClientEcashCountResponse>())]
     Count(ClientEcashCountRequest),
     /// Send ecash
+    #[command(after_long_help = schema::<ClientEcashSendResponse>())]
     Send(ClientEcashSendRequest),
     /// Send the account's entire ecash balance
+    #[command(after_long_help = schema::<ClientEcashSendMaxResponse>())]
     SendMax(ClientEcashSendMaxRequest),
     /// Receive ecash
+    #[command(after_long_help = schema::<ClientEcashReceiveResponse>())]
     Receive(ClientEcashReceiveRequest),
 }
 
 #[derive(Subcommand)]
 enum OnchainCommands {
     /// Get send fee estimate
+    #[command(after_long_help = schema::<ClientOnchainSendFeeResponse>())]
     SendFee(ClientOnchainSendFeeRequest),
     /// Send onchain
+    #[command(after_long_help = schema::<ClientOnchainSendResponse>())]
     Send(ClientOnchainSendRequest),
     /// Send the account's entire balance onchain, minus the fee
+    #[command(after_long_help = schema::<ClientOnchainSendMaxResponse>())]
     SendMax(ClientOnchainSendMaxRequest),
     /// Get receive address
+    #[command(after_long_help = schema::<ClientOnchainReceiveResponse>())]
     Receive(ClientOnchainReceiveRequest),
 }
 
@@ -87,20 +108,26 @@ enum LightningCommands {
     #[command(subcommand)]
     Gateway(LightningGatewayCommands),
     /// Pay a bolt11 invoice through a gateway
+    #[command(after_long_help = schema::<ClientLightningSendResponse>())]
     Send(ClientLightningSendRequest),
     /// Empty an account to an lnurl
+    #[command(after_long_help = schema::<ClientLightningSendMaxResponse>())]
     SendMax(ClientLightningSendMaxRequest),
     /// Create a bolt11 invoice
+    #[command(after_long_help = schema::<ClientLightningReceiveResponse>())]
     Receive(ClientLightningReceiveRequest),
     /// Generate a shareable lnurl served by an lnurl daemon
+    #[command(after_long_help = schema::<ClientLightningLnurlResponse>())]
     Lnurl(ClientLightningLnurlRequest),
 }
 
 #[derive(Subcommand)]
 enum LightningGatewayCommands {
     /// The gateways that answered a probe, keyed by pk, with their fees
+    #[command(after_long_help = schema::<ClientLightningGatewayListResponse>())]
     List(ClientLightningGatewayListRequest),
     /// Re-fetch the mint's gateway list and re-probe every gateway
+    #[command(after_long_help = schema::<()>())]
     Refresh(ClientLightningGatewayRefreshRequest),
 }
 

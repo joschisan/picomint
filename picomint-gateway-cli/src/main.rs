@@ -2,24 +2,31 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use picomint_cli_client::{print_json, request};
+use picomint_cli_client::{print_json, request, schema};
 use picomint_gateway_cli_core::{
-    ClientAddRequest, ClientBalanceRequest, ClientConfigRequest, ClientEcashCountRequest,
-    ClientEcashReceiveRequest, ClientEcashSendMaxRequest, ClientEcashSendRequest,
-    ClientOnchainReceiveRequest, ClientOnchainSendFeeRequest, ClientOnchainSendMaxRequest,
-    ClientOnchainSendRequest, ClientRemoveRequest, LdkChannelCloseRequest, LdkChannelOpenRequest,
-    LdkChannelSpliceInRequest, LdkChannelSpliceOutRequest, LdkLightningProbeRequest,
-    LdkLightningReceiveRequest, LdkLightningSendRequest, LdkOnchainSendRequest,
-    LdkPeerConnectRequest, LdkPeerDisconnectRequest, QueryRequest, ROUTE_CLIENT_ADD,
-    ROUTE_CLIENT_BALANCE, ROUTE_CLIENT_CONFIG, ROUTE_CLIENT_ECASH_COUNT,
-    ROUTE_CLIENT_ECASH_RECEIVE, ROUTE_CLIENT_ECASH_SEND, ROUTE_CLIENT_ECASH_SEND_MAX,
-    ROUTE_CLIENT_LIST, ROUTE_CLIENT_ONCHAIN_RECEIVE, ROUTE_CLIENT_ONCHAIN_SEND,
-    ROUTE_CLIENT_ONCHAIN_SEND_FEE, ROUTE_CLIENT_ONCHAIN_SEND_MAX, ROUTE_CLIENT_REMOVE, ROUTE_INFO,
-    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
-    ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE,
-    ROUTE_LDK_LIGHTNING_RECEIVE, ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE,
-    ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
-    ROUTE_MNEMONIC, ROUTE_QUERY,
+    ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse, ClientConfigRequest,
+    ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
+    ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
+    ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
+    ClientListResponse, ClientOnchainReceiveRequest, ClientOnchainReceiveResponse,
+    ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse, ClientOnchainSendMaxRequest,
+    ClientOnchainSendMaxResponse, ClientOnchainSendRequest, ClientOnchainSendResponse,
+    ClientRemoveRequest, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
+    LdkChannelListResponse, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
+    LdkChannelSpliceOutRequest, LdkLightningProbeRequest, LdkLightningReceiveRequest,
+    LdkLightningReceiveResponse, LdkLightningSendRequest, LdkLightningSendResponse,
+    LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
+    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
+    QueryRequest, QueryResponse, ROUTE_CLIENT_ADD, ROUTE_CLIENT_BALANCE, ROUTE_CLIENT_CONFIG,
+    ROUTE_CLIENT_ECASH_COUNT, ROUTE_CLIENT_ECASH_RECEIVE, ROUTE_CLIENT_ECASH_SEND,
+    ROUTE_CLIENT_ECASH_SEND_MAX, ROUTE_CLIENT_LIST, ROUTE_CLIENT_ONCHAIN_RECEIVE,
+    ROUTE_CLIENT_ONCHAIN_SEND, ROUTE_CLIENT_ONCHAIN_SEND_FEE, ROUTE_CLIENT_ONCHAIN_SEND_MAX,
+    ROUTE_CLIENT_REMOVE, ROUTE_INFO, ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE,
+    ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN, ROUTE_LDK_CHANNEL_SPLICE_IN,
+    ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE, ROUTE_LDK_LIGHTNING_RECEIVE,
+    ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE, ROUTE_LDK_ONCHAIN_SEND,
+    ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
+    ROUTE_QUERY,
 };
 
 #[derive(Parser)]
@@ -38,10 +45,13 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Display gateway info
+    #[command(after_long_help = schema::<InfoResponse>())]
     Info,
     /// Display mnemonic seed words
+    #[command(after_long_help = schema::<MnemonicResponse>())]
     Mnemonic,
     /// Query the analytics db with read-only SQL; rows print as JSON objects
+    #[command(after_long_help = schema::<QueryResponse>())]
     Query(QueryRequest),
     /// LDK lightning node management
     #[command(subcommand)]
@@ -54,6 +64,7 @@ enum Commands {
 #[derive(Subcommand)]
 enum LdkCommands {
     /// Get node balances
+    #[command(after_long_help = schema::<LdkBalancesResponse>())]
     Balances,
     /// On-chain operations
     #[command(subcommand)]
@@ -72,58 +83,76 @@ enum LdkCommands {
 #[derive(Subcommand)]
 enum LdkOnchainCommands {
     /// Get a receive address
+    #[command(after_long_help = schema::<LdkOnchainReceiveResponse>())]
     Receive,
     /// Send funds
+    #[command(after_long_help = schema::<LdkOnchainSendResponse>())]
     Send(LdkOnchainSendRequest),
 }
 
 #[derive(Subcommand)]
 enum LdkChannelCommands {
     /// Open a channel
+    #[command(after_long_help = schema::<()>())]
     Open(LdkChannelOpenRequest),
     /// Close a channel
+    #[command(after_long_help = schema::<()>())]
     Close(LdkChannelCloseRequest),
     /// List channels
+    #[command(after_long_help = schema::<LdkChannelListResponse>())]
     List,
     /// Splice on-chain funds into a channel (experimental)
+    #[command(after_long_help = schema::<()>())]
     SpliceIn(LdkChannelSpliceInRequest),
     /// Splice funds out of a channel to an on-chain address (experimental)
+    #[command(after_long_help = schema::<()>())]
     SpliceOut(LdkChannelSpliceOutRequest),
 }
 
 #[derive(Subcommand)]
 enum LdkLightningCommands {
     /// Create a bolt11 invoice to receive a payment
+    #[command(after_long_help = schema::<LdkLightningReceiveResponse>())]
     Receive(LdkLightningReceiveRequest),
     /// Pay a bolt11 invoice
+    #[command(after_long_help = schema::<LdkLightningSendResponse>())]
     Send(LdkLightningSendRequest),
     /// Probe routes towards a node to warm the pathfinding scorer
+    #[command(after_long_help = schema::<()>())]
     Probe(LdkLightningProbeRequest),
 }
 
 #[derive(Subcommand)]
 enum LdkPeerCommands {
     /// Connect to a peer
+    #[command(after_long_help = schema::<()>())]
     Connect(LdkPeerConnectRequest),
     /// Disconnect from a peer
+    #[command(after_long_help = schema::<()>())]
     Disconnect(LdkPeerDisconnectRequest),
     /// List peers
+    #[command(after_long_help = schema::<LdkPeerListResponse>())]
     List,
 }
 
 #[derive(Subcommand)]
 enum ClientCommands {
     /// Add a mint
+    #[command(after_long_help = schema::<()>())]
     Add(ClientAddRequest),
     /// Remove a mint and delete all of its data. Destructive:
     /// check for in-flight payments via `query` first — failing to
     /// check might result in loss of funds.
+    #[command(after_long_help = schema::<()>())]
     Remove(ClientRemoveRequest),
     /// List connected mints
+    #[command(after_long_help = schema::<ClientListResponse>())]
     List,
     /// Get a connected mint's JSON client config
+    #[command(after_long_help = schema::<ClientConfigResponse>())]
     Config(ClientConfigRequest),
     /// Get a mint's ecash balance
+    #[command(after_long_help = schema::<ClientBalanceResponse>())]
     Balance(ClientBalanceRequest),
     /// Ecash module commands
     #[command(subcommand)]
@@ -136,24 +165,32 @@ enum ClientCommands {
 #[derive(Subcommand)]
 enum EcashCommands {
     /// Count ecash notes by denomination
+    #[command(after_long_help = schema::<ClientEcashCountResponse>())]
     Count(ClientEcashCountRequest),
     /// Send ecash
+    #[command(after_long_help = schema::<ClientEcashSendResponse>())]
     Send(ClientEcashSendRequest),
     /// Send the account's entire ecash balance
+    #[command(after_long_help = schema::<ClientEcashSendMaxResponse>())]
     SendMax(ClientEcashSendMaxRequest),
     /// Receive ecash
+    #[command(after_long_help = schema::<ClientEcashReceiveResponse>())]
     Receive(ClientEcashReceiveRequest),
 }
 
 #[derive(Subcommand)]
 enum OnchainCommands {
     /// Get send fee estimate
+    #[command(after_long_help = schema::<ClientOnchainSendFeeResponse>())]
     SendFee(ClientOnchainSendFeeRequest),
     /// Send onchain from the mint
+    #[command(after_long_help = schema::<ClientOnchainSendResponse>())]
     Send(ClientOnchainSendRequest),
     /// Send the account's entire balance onchain, minus the fee
+    #[command(after_long_help = schema::<ClientOnchainSendMaxResponse>())]
     SendMax(ClientOnchainSendMaxRequest),
     /// Get receive address
+    #[command(after_long_help = schema::<ClientOnchainReceiveResponse>())]
     Receive(ClientOnchainReceiveRequest),
 }
 

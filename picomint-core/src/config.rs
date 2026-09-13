@@ -5,6 +5,7 @@ use std::hash::Hash;
 use bitcoin::Network;
 use bitcoin::hashes::{Hash as BitcoinHash, sha256};
 use derive_more::{Display, FromStr};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::NodeId;
@@ -31,6 +32,8 @@ pub struct NodeEndpoint {
     pub name: String,
 }
 
+/// The mint's identity: the sha256 hash of its consensus config, so two
+/// mints can only share an id by sharing every key and parameter. Hex.
 #[derive(
     Debug,
     Copy,
@@ -46,8 +49,9 @@ pub struct NodeEndpoint {
     Decodable,
     Display,
     FromStr,
+    JsonSchema,
 )]
-pub struct MintId(pub sha256::Hash);
+pub struct MintId(#[schemars(with = "String")] pub sha256::Hash);
 
 impl MintId {
     /// Random dummy id for testing

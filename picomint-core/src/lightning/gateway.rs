@@ -1,51 +1,29 @@
 //! Gateway identity and pricing types — shared between clients and the
 //! gateway daemon. Wire methods live in [`crate::lightning::methods`].
 
-use std::str::FromStr;
-
 use bitcoin::secp256k1::XOnlyPublicKey;
-use picomint_encoding::{Decodable, Encodable};
+use picomint_encoding::{Base32, Decodable, Encodable};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::Amount;
 
-/// A gateway's identity — its iroh public key. `Serialize`, `Deserialize`,
-/// and `FromStr` round-trip via [`picomint_base32`]; render with
-/// `picomint_base32::encode`.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, PartialOrd, Ord, Encodable, Decodable)]
+/// A gateway's identity, its iroh public key. Mint nodes recommend a
+/// gateway by it and clients dial it by it.
+#[derive(
+    Debug, Clone, Copy, Eq, PartialEq, Hash, PartialOrd, Ord, Encodable, Decodable, Base32,
+)]
 pub struct GatewayPk(pub iroh_base::PublicKey);
 
-impl Serialize for GatewayPk {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        picomint_base32::encode(self).serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for GatewayPk {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        picomint_base32::decode(&String::deserialize(deserializer)?)
-            .map_err(serde::de::Error::custom)
-    }
-}
-
-impl FromStr for GatewayPk {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        picomint_base32::decode(s)
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable)]
+/// What a client needs to price and settle payments through one gateway,
+/// as the gateway announces it when probed.
+#[derive(
+    Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable, JsonSchema,
+)]
 pub struct GatewayInfo {
-    /// The public key of the gateway's client module. Used to claim or
-    /// cancel outgoing contracts and refund incoming contracts.
+    /// The public key of the gateway's client module, hex x-only. Used to
+    /// claim or cancel outgoing contracts and refund incoming contracts.
+    #[schemars(with = "String")]
     pub module_public_key: XOnlyPublicKey,
     /// Fee the gateway charges on outgoing payments, the same whether it
     /// routes the payment over Lightning or settles it internally as the
@@ -63,9 +41,25 @@ pub struct GatewayInfo {
     pub expiry_delta: u16,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Encodable, Decodable, Copy)]
+/// A gateway's cut on one payment: `base` plus `ppm` millionths of the
+/// amount.
+#[derive(
+    Debug,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Encodable,
+    Decodable,
+    Copy,
+    JsonSchema,
+)]
 pub struct PaymentFee {
+    /// The flat part of the fee, in msat
     pub base: Amount,
+    /// The proportional part, in parts per million of the payment amount
     pub ppm: u16,
 }
 

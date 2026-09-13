@@ -27,6 +27,7 @@ picomint-derive = { workspace = true }
 picomint-encoding = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
+schemars = { workspace = true }
 secp256k1 = { workspace = true, features = ["global-context", "rand-std"] }
 serde = { workspace = true }
 tbs = { workspace = true }
@@ -36,3 +37,8 @@ tss = { workspace = true }
 
 [dev-dependencies]
 test-log = { workspace = true }
+
+# The `Base32` derive expands to `picomint_base32` calls, which is what the
+# crate depends on it for and what cargo-machete cannot see.
+[package.metadata.cargo-machete]
+ignored = ["picomint-base32"]

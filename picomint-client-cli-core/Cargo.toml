@@ -11,5 +11,6 @@ clap = { workspace = true }
 lightning-invoice = { workspace = true }
 picomint-client = { workspace = true }
 picomint-core = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

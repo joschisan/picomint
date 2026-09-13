@@ -1,9 +1,10 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use picomint_encoding::{Decodable, Encodable};
 
-/// Represents an amount of BTC. The base denomination is millisatoshis, which
-/// is why the `Amount` type from rust-bitcoin isn't used instead.
+/// An amount in millisatoshi, which is why the `Amount` type from
+/// rust-bitcoin isn't used instead. Serializes as the bare msat integer.
 #[derive(
     Debug,
     Clone,
@@ -18,6 +19,7 @@ use picomint_encoding::{Decodable, Encodable};
     Encodable,
     Decodable,
     Default,
+    JsonSchema,
 )]
 #[serde(transparent)]
 pub struct Amount {

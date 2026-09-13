@@ -135,7 +135,7 @@ async fn query(
     .map_err(CliError::internal)?
     .map_err(CliError::bad_request)?;
 
-    Ok(Json(rows))
+    Ok(Json(QueryResponse(rows)))
 }
 
 // ---------------------------------------------------------------------------
@@ -705,9 +705,8 @@ async fn client_onchain_send_fee(
     Ok(Json(ClientOnchainSendFeeResponse { fee }))
 }
 
-/// Withdraw onchain from a mint. Blocks until the send reaches a
-/// terminal state: confirmed broadcast, mint rejected the input tx, or
-/// the mint accepted but never produced a bitcoin txid.
+/// Withdraw onchain from a mint. Returns once the send is submitted; the
+/// outcome lands in the analytics.
 #[instrument(skip_all, err)]
 async fn client_onchain_send(
     State(state): State<AppState>,

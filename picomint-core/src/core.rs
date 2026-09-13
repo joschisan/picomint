@@ -6,9 +6,14 @@
 use bitcoin::hashes::sha256;
 use derive_more::Display;
 use picomint_encoding::{Decodable, Encodable};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Unique identifier for one semantic, correlatable operation.
+/// Unique identifier for one semantic, correlatable operation: a send, a
+/// receive, a claim. Every event the operation logs carries it, so its story
+/// in the analytics is a join on `operation`. Random for most operations;
+/// derived from the payload where a repeat must map to the same operation,
+/// as for an ecash bundle or a Lightning payment hash. Hex sha256.
 #[derive(
     Debug,
     Clone,
@@ -23,8 +28,9 @@ use serde::{Deserialize, Serialize};
     PartialOrd,
     Ord,
     Display,
+    JsonSchema,
 )]
-pub struct OperationId(pub sha256::Hash);
+pub struct OperationId(#[schemars(with = "String")] pub sha256::Hash);
 
 impl OperationId {
     /// Generate random [`OperationId`]
@@ -66,6 +72,7 @@ impl OperationId {
     Encodable,
     Decodable,
     Display,
+    JsonSchema,
 )]
 pub enum Account {
     Primary,

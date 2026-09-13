@@ -4,16 +4,20 @@
 //! their users.
 
 use picomint_encoding::{Decodable, Encodable};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::invite::InviteCode;
 
-/// Status indicating that a mint is expiring, with a target date and
-/// optional successor mint invite code for users to migrate to.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encodable, Decodable)]
+/// A mint's expiry announcement: the date it winds down and, optionally,
+/// where its users should go. Each node announces its own copy; clients
+/// act on it once a threshold of nodes announce byte-equal values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encodable, Decodable, JsonSchema)]
 pub struct ExpiryStatus {
-    /// Expiry date as a unix timestamp in seconds (midnight UTC).
+    /// The expiry date as a unix timestamp in seconds; by convention
+    /// midnight UTC of that day
     pub timestamp: u64,
-    /// Optional invite code for the successor mint.
+    /// Invite code of the successor mint for users to migrate their funds
+    /// to; absent when there is none
     pub successor: Option<InviteCode>,
 }

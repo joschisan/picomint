@@ -33,6 +33,7 @@ picomint-lnurl = { workspace = true }
 picomint-redb = { workspace = true }
 picomint-rpc = { workspace = true }
 rand = { workspace = true }
+schemars = { workspace = true }
 secp256k1 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -42,3 +43,8 @@ tokio = { workspace = true, features = ["time", "macros", "rt", "sync"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tpe = { workspace = true }
 tracing = { workspace = true }
+
+# The `Base32` derive on `Ecash` expands to `schemars` impls, which is what
+# the crate depends on it for and what cargo-machete cannot see.
+[package.metadata.cargo-machete]
+ignored = ["schemars"]

@@ -252,21 +252,21 @@ pub fn sweep(
     cmd.run_cli::<Value>()
 }
 
-pub fn node_lightning_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
+pub fn node_lightning_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<Value> {
     node_cmd(data_dir)
         .arg("gateway")
         .arg("add")
         .arg(picomint_base32::encode(pk))
         .arg("Test Gateway")
-        .run_cli::<bool>()
+        .run_cli::<Value>()
 }
 
-pub fn node_lightning_gateway_remove(data_dir: &Path, pk: &GatewayPk) -> Result<bool> {
+pub fn node_lightning_gateway_remove(data_dir: &Path, pk: &GatewayPk) -> Result<Value> {
     node_cmd(data_dir)
         .arg("gateway")
         .arg("remove")
         .arg(picomint_base32::encode(pk))
-        .run_cli::<bool>()
+        .run_cli::<Value>()
 }
 
 pub fn node_expiry_set(
@@ -296,5 +296,8 @@ pub fn node_expiry_status(data_dir: &Path) -> Result<Option<ExpiryStatus>> {
     node_cmd(data_dir)
         .arg("expiry")
         .arg("status")
-        .run_cli::<Option<ExpiryStatus>>()
+        .run_cli::<Value>()
+        .and_then(|mut response| {
+            serde_json::from_value(response["expiry"].take()).map_err(Into::into)
+        })
 }

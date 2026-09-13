@@ -85,7 +85,7 @@ async fn query(
     .map_err(CliError::internal)?
     .map_err(CliError::bad_request)?;
 
-    Ok(Json(rows))
+    Ok(Json(QueryResponse(rows)))
 }
 
 #[instrument(skip_all, err)]

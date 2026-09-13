@@ -1,6 +1,7 @@
 use std::hash::Hash;
 
 use picomint_encoding::{Decodable, Encodable};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tbs::{BlindedNonce, Nonce};
 use thiserror::Error;
@@ -11,8 +12,8 @@ use crate::secp256k1::XOnlyPublicKey;
 pub mod config;
 pub mod methods;
 
-/// Compact representation of a power-of-2 amount denomination
-/// Represents 2^denomination msat
+/// A note's denomination as the exponent of its value: a note of
+/// denomination `d` is worth 2^d msat. Serializes as the bare exponent.
 #[derive(
     Debug,
     Copy,
@@ -26,6 +27,7 @@ pub mod methods;
     Deserialize,
     Encodable,
     Decodable,
+    JsonSchema,
 )]
 pub struct Denomination(pub u8);
 

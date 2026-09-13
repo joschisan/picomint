@@ -32,7 +32,7 @@ use std::io::{self, Read, Write};
 
 use ::bitcoin::hashes::sha256;
 use hex::ToHex as _;
-pub use picomint_derive::{Decodable, Encodable};
+pub use picomint_derive::{Base32, Decodable, Encodable};
 pub use undecoded::Undecoded;
 
 /// Types that can encode themselves to a byte stream.

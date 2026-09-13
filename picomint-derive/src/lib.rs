@@ -34,6 +34,87 @@ pub fn derive_encodable(input: TokenStream) -> TokenStream {
     .into()
 }
 
+/// A type that travels as its `picomint`-prefixed base32 consensus
+/// encoding: `Serialize`, `Deserialize`, `FromStr` and `Display` all go
+/// through `picomint_base32`, and its JSON Schema is a string described by
+/// the type's own doc comment, so the wire form is explained once, where
+/// the type is.
+#[proc_macro_derive(Base32)]
+pub fn derive_base32(input: TokenStream) -> TokenStream {
+    let DeriveInput { ident, attrs, .. } = parse_macro_input!(input);
+
+    let description = format!(
+        "{} Travels as a `picomint`-prefixed base32 string.",
+        doc_comment(&attrs)
+    );
+
+    let name = ident.to_string();
+
+    quote! {
+        impl ::serde::Serialize for #ident {
+            fn serialize<S: ::serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                ::serde::Serialize::serialize(&::picomint_base32::encode(self), serializer)
+            }
+        }
+
+        impl<'de> ::serde::Deserialize<'de> for #ident {
+            fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let encoded: String = ::serde::Deserialize::deserialize(deserializer)?;
+
+                ::picomint_base32::decode(&encoded).map_err(::serde::de::Error::custom)
+            }
+        }
+
+        impl ::std::str::FromStr for #ident {
+            type Err = ::anyhow::Error;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                ::picomint_base32::decode(s)
+            }
+        }
+
+        impl ::std::fmt::Display for #ident {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                f.write_str(&::picomint_base32::encode(self))
+            }
+        }
+
+        impl ::schemars::JsonSchema for #ident {
+            fn schema_name() -> ::std::borrow::Cow<'static, str> {
+                #name.into()
+            }
+
+            fn json_schema(_: &mut ::schemars::SchemaGenerator) -> ::schemars::Schema {
+                ::schemars::json_schema!({
+                    "type": "string",
+                    "description": #description
+                })
+            }
+        }
+    }
+    .into()
+}
+
+/// The item's doc comment as one paragraph: the `///` lines joined by a
+/// space, each stripped of the leading space rustdoc keeps.
+fn doc_comment(attrs: &[Attribute]) -> String {
+    attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("doc"))
+        .filter_map(|attr| match &attr.meta {
+            syn::Meta::NameValue(pair) => match &pair.value {
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: Lit::Str(line),
+                    ..
+                }) => Some(line.value().trim().to_string()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// One analytics table row per struct: every named field becomes a
 /// column named after it (plus the field type's unit suffix), typed and
 /// rendered by its `SqlColumn` impl. Unit structs map to a table with no

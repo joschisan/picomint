@@ -115,7 +115,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 fn register_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()> {
     for node in 0..NUM_ONLINE_NODES {
         let data_dir = cli::node_data_dir(&env.data_dir, node);
-        assert!(cli::node_lightning_gateway_add(&data_dir, gateway_pk)?);
+        cli::node_lightning_gateway_add(&data_dir, gateway_pk)?;
     }
     Ok(())
 }
@@ -123,7 +123,7 @@ fn register_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()>
 fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<()> {
     for node in 0..NUM_ONLINE_NODES {
         let data_dir = cli::node_data_dir(&env.data_dir, node);
-        assert!(cli::node_lightning_gateway_remove(&data_dir, gateway_pk)?);
+        cli::node_lightning_gateway_remove(&data_dir, gateway_pk)?;
     }
     Ok(())
 }
