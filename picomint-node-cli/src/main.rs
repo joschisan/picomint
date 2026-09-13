@@ -9,9 +9,9 @@ use picomint_node_cli_core::{
     LightningGatewayRemoveRequest, NodeStatus, OnchainStatusResponse, PendingResponse,
     ROUTE_BACKUP, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD,
     ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY,
-    ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_STATUS, ROUTE_ONCHAIN_SWEEP, ROUTE_SETUP_ADD,
+    ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL, ROUTE_ONCHAIN_STATUS, ROUTE_SETUP_ADD,
     ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE, ROUTE_STATUS,
-    SetupAddRequest, SetupAddResponse, SetupInitRequest, SetupInitResponse, SweepResponse,
+    RugpullResponse, SetupAddRequest, SetupAddResponse, SetupInitRequest, SetupInitResponse,
 };
 use serde_json::Value;
 
@@ -96,9 +96,9 @@ enum OnchainCommands {
     /// The mint's whole transaction history
     #[command(after_long_help = schema::<HistoryResponse>())]
     History,
-    /// This node's sweep secret; run only once the mint has expired (secret)
-    #[command(after_long_help = schema::<SweepResponse>())]
-    Sweep,
+    /// This node's rugpull secret; run only once the mint has expired (secret)
+    #[command(after_long_help = schema::<RugpullResponse>())]
+    Rugpull,
 }
 
 #[derive(Subcommand)]
@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
             OnchainCommands::Status => request(d, ROUTE_ONCHAIN_STATUS, ()).await?,
             OnchainCommands::Pending => request(d, ROUTE_ONCHAIN_PENDING, ()).await?,
             OnchainCommands::History => request(d, ROUTE_ONCHAIN_HISTORY, ()).await?,
-            OnchainCommands::Sweep => request(d, ROUTE_ONCHAIN_SWEEP, ()).await?,
+            OnchainCommands::Rugpull => request(d, ROUTE_ONCHAIN_RUGPULL, ()).await?,
         },
 
         Commands::Gateway(cmd) => match cmd {

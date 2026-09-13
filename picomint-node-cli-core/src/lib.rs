@@ -39,7 +39,7 @@ pub const ROUTE_EXPIRY_STATUS: &str = "/expiry/status";
 pub const ROUTE_ONCHAIN_STATUS: &str = "/onchain/status";
 pub const ROUTE_ONCHAIN_PENDING: &str = "/onchain/pending";
 pub const ROUTE_ONCHAIN_HISTORY: &str = "/onchain/history";
-pub const ROUTE_ONCHAIN_SWEEP: &str = "/onchain/sweep";
+pub const ROUTE_ONCHAIN_RUGPULL: &str = "/onchain/rugpull";
 pub const ROUTE_GATEWAY_ADD: &str = "/gateway/add";
 pub const ROUTE_GATEWAY_REMOVE: &str = "/gateway/remove";
 pub const ROUTE_GATEWAY_LIST: &str = "/gateway/list";
@@ -369,13 +369,13 @@ pub struct HistoryResponse {
     pub txs: Vec<TxInfo>,
 }
 
-// --- /onchain/sweep ---
+// --- /onchain/rugpull ---
 
 /// This node's share of the key to the mint wallet, for draining it once
 /// the mint has expired. Secret.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct SweepResponse {
-    /// This node's sweep secret as a `picomint`-prefixed base32 string: its
+pub struct RugpullResponse {
+    /// This node's rugpull secret as a `picomint`-prefixed base32 string: its
     /// secret key share tweaked for the current wallet UTXO, so it is only
     /// valid while `tx_tip` stays what it is now. `picomint-rugpull`
     /// combines a threshold of nodes' secrets into the wallet key

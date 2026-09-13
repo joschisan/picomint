@@ -39,7 +39,7 @@ docker exec picomint-node-daemon picomint-node-cli --help
 
 The walkthroughs below use the bare `picomint-node-cli …` form — prefix with `docker exec picomint-node-daemon` to run them. Every command prints JSON, and its `--help` ends with the JSON Schema of what it prints, every field explained. Help needs no running daemon, so an agent can read the whole reference before the first `up -d`.
 
-Two commands print secrets, and whatever an agent reads ends up in a model context and a transcript. `backup` prints the node's private keys: always pipe it into a file, never to the terminal. `onchain sweep` prints a share of the wallet key: run it only once the mint has expired, and never before. Tell your agent not to run either unprompted.
+Two commands print secrets, and whatever an agent reads ends up in a model context and a transcript. `backup` prints the node's private keys: always pipe it into a file, never to the terminal. `onchain rugpull` prints a share of the wallet key: run it only once the mint has expired, and never before. Tell your agent not to run either unprompted.
 
 ## Status
 
@@ -188,17 +188,17 @@ picomint-node-cli expiry set 2027-06-30 [--successor <invite>]
 
 `expiry status` shows this node's announcement as the timestamp every node has to match, and `expiry clear` withdraws it.
 
-## Sweep
+## Rugpull
 
-Only once the mint has expired and its last onchain transaction has confirmed are the remaining funds swept with `picomint-rugpull`, a standalone x86_64 Linux binary. Like the images it is rebuilt on every push to main, attached to the [`main-latest`](https://github.com/joschisan/picomint/releases/tag/main-latest) pre-release; it runs on Ubuntu 24.04 or newer. It is not part of any image: it runs on an operator's machine, against that operator's bitcoind, with nothing but the secrets below.
+Only once the mint has expired and its last onchain transaction has confirmed are the remaining funds drained with `picomint-rugpull`, a standalone x86_64 Linux binary. Like the images it is rebuilt on every push to main, attached to the [`main-latest`](https://github.com/joschisan/picomint/releases/tag/main-latest) pre-release; it runs on Ubuntu 24.04 or newer. It is not part of any image: it runs on an operator's machine, against that operator's bitcoind, with nothing but the secrets below.
 
-Every node exports its sweep secret, which is bound to the mint's current UTXO. Check first that `onchain status` reports the same `tx_tip` on every node and `onchain pending` is empty everywhere, then:
+Every node exports its rugpull secret, which is bound to the mint's current UTXO. Check first that `onchain status` reports the same `tx_tip` on every node and `onchain pending` is empty everywhere, then:
 
 ```bash
-picomint-node-cli onchain sweep
+picomint-node-cli onchain rugpull
 ```
 
-A threshold of nodes send their secrets to whoever sweeps. That operator passes the mint size, the destination address and the secrets; the tool interpolates the key, finds the UTXO in bitcoind's UTXO set, drains it to the address and broadcasts:
+A threshold of nodes send their secrets to whoever pulls the rug. That operator passes the mint size, the destination address and the secrets; the tool interpolates the key, finds the UTXO in bitcoind's UTXO set, drains it to the address and broadcasts:
 
 ```bash
 picomint-rugpull <nodes> <address> --bitcoind-url http://user:pass@127.0.0.1:8332 --secret <secret> --secret <secret> ...

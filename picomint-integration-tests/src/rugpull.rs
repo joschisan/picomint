@@ -1,4 +1,4 @@
-//! Decommissioning: a threshold of nodes export their sweep secrets and
+//! Decommissioning: a threshold of nodes export their rugpull secrets and
 //! `picomint-rugpull` drains the mint wallet to a bitcoind address.
 
 use anyhow::{Context, ensure};
@@ -17,7 +17,7 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
         .map(|node| cli::node_data_dir(&env.data_dir, node))
         .collect();
 
-    // A sweep secret is tweaked for the mint UTXO its node currently
+    // A rugpull secret is tweaked for the mint UTXO its node currently
     // holds, and the tool only finds a confirmed one. The restored nodes
     // are still catching up when the restore test ends, so wait until
     // every exporting node holds the same transaction tip and nothing is
@@ -49,21 +49,21 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
     })
     .await?;
 
-    info!("exporting sweep secrets from {threshold} nodes");
+    info!("exporting rugpull secrets from {threshold} nodes");
     let secrets = data_dirs
         .iter()
-        .map(|data_dir| cli::node_onchain_sweep(data_dir).map(|response| response.secret))
+        .map(|data_dir| cli::node_onchain_rugpull(data_dir).map(|response| response.secret))
         .collect::<anyhow::Result<Vec<_>>>()?;
 
     let destination = block_in_place(|| env.bitcoind.get_new_address(None, None))?
         .require_network(bitcoin::Network::Regtest)?;
 
-    info!("sweeping the mint wallet to {destination}");
-    let report = cli::sweep(NUM_NODES, &destination, &bitcoind_url(), &secrets)?;
+    info!("draining the mint wallet to {destination}");
+    let report = cli::rugpull(NUM_NODES, &destination, &bitcoind_url(), &secrets)?;
 
     let value = report["value_sat"]
         .as_u64()
-        .context("sweep report carries no value")?;
+        .context("rugpull report carries no value")?;
 
     env.mine_blocks(1);
 
@@ -74,6 +74,6 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
         "swept {value} sat but {destination} received {received}"
     );
 
-    info!("sweep OK: {value} sat in {}", report["txid"]);
+    info!("rugpull OK: {value} sat in {}", report["txid"]);
     Ok(())
 }
