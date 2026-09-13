@@ -308,8 +308,7 @@ impl SetupApi {
     }
 
     pub async fn restore_config(&self, cfg: NodeConfig) -> anyhow::Result<()> {
-        cfg.validate_config()
-            .context("Restored config failed validation")?;
+        super::validate_config(&cfg).context("Restored config failed validation")?;
 
         store_node_config(&self.db, &cfg).await;
 

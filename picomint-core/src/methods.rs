@@ -7,7 +7,7 @@
 use picomint_encoding::{Decodable, Encodable};
 
 use crate::NodeId;
-use crate::config::ConsensusConfig;
+use crate::config::NodeConfigConsensus;
 use crate::config::{MintId, NodeEndpoint};
 use crate::ecash::methods::EcashMethod;
 use crate::expiry::ExpiryStatus;
@@ -40,7 +40,7 @@ pub struct ConfigRequest {
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct ConfigResponse {
-    pub config: ConsensusConfig,
+    pub config: NodeConfigConsensus,
 }
 
 // ── submit-transaction ──────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ pub struct MintInfoResponse {
 impl MintInfoResponse {
     /// Built on both sides — by a node to answer, and by a client to
     /// commit to the answer it expects — so the two hash the same bytes.
-    pub fn new(config: &ConsensusConfig) -> Self {
+    pub fn new(config: &NodeConfigConsensus) -> Self {
         Self {
             mint: config.calculate_mint_id(),
             nodes: config.nodes.clone(),

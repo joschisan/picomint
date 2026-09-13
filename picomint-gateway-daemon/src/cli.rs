@@ -604,7 +604,7 @@ async fn client_config(
         .ok_or_else(|| CliError::bad_request("Mint not added"))?;
 
     Ok(Json(ClientConfigResponse {
-        config: serde_json::to_value(config).expect("ConsensusConfig is serializable"),
+        config: serde_json::to_value(config).expect("NodeConfigConsensus is serializable"),
     }))
 }
 

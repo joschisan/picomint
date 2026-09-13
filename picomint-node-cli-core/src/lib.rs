@@ -3,13 +3,11 @@
 //! `--schema`, so its doc lines are the operator-facing description of each
 //! field.
 
-use std::borrow::Cow;
-
 use chrono::NaiveDate;
 use clap::Args;
 use picomint_core::NodeId;
 use picomint_core::bitcoin::Txid;
-use picomint_core::config::MintId;
+use picomint_core::config::{MintId, NodeConfig};
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
@@ -276,24 +274,23 @@ pub struct InviteResponse {
 
 // --- /backup ---
 
-/// The node's whole config as `backup` prints it: the mint's consensus
-/// config plus this node's private keys, which is why it is written to a
-/// file and never to a terminal. Opaque to everything but `setup restore`,
-/// which takes it back unchanged; the daemon serializes its own config
-/// type, this one only names the schema.
-pub struct BackupResponse;
+/// The node's whole config as `backup` prints it and `setup restore`
+/// takes back unchanged. Secret: pipe it into a file, never to a
+/// terminal.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct BackupResponse {
+    /// The mint's consensus config under `consensus` and this node's
+    /// private keys under `private`; its shape is the node's, not this
+    /// CLI's, and nothing but `setup restore` reads it
+    #[schemars(schema_with = "node_config_schema")]
+    pub config: NodeConfig,
+}
 
-impl JsonSchema for BackupResponse {
-    fn schema_name() -> Cow<'static, str> {
-        "BackupResponse".into()
-    }
-
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({
-            "type": "object",
-            "description": "The node's whole config: the mint's consensus config under `consensus` and this node's private keys under `private`. Secret. Pipe it into a file and feed that file to `setup restore` unchanged; nothing else reads it."
-        })
-    }
+fn node_config_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "type": "object",
+        "description": "The node's whole config: the mint's consensus config under `consensus` and this node's private keys under `private`. Opaque to everything but `setup restore`."
+    })
 }
 
 // --- /expiry/* ---

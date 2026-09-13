@@ -13,7 +13,7 @@ use tracing::{error, info, warn};
 use super::dkg_g1::run_dkg_g1;
 use super::dkg_g2::run_dkg_g2;
 use super::dkg_secp::run_dkg_secp;
-use crate::config::{DkgParams, NodeConfig};
+use crate::config::{DkgParams, NodeConfig, assemble_node_config};
 use crate::p2p::{P2PMessage, P2PStatusReceivers, Recipient, ReconnectP2PConnections};
 
 /// Runs the DKG: waits for all p2p connections, cross-checks the setup
@@ -92,7 +92,7 @@ pub async fn run(
 
     let onchain = crate::consensus::onchain::dkg(&handle).await?;
 
-    let cfg = NodeConfig::from(
+    let cfg = assemble_node_config(
         params.clone(),
         params.identity,
         broadcast_public_keys,

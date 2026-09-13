@@ -16,13 +16,13 @@ use picomint_node_cli_core::{
 };
 use picomint_redb::{Database, DbRead};
 
-use crate::config::NodeConfig;
 use crate::config::db::DkgParamsTable;
 use crate::config::setup::SetupApi;
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::consensus_version;
 use crate::consensus::{lightning, onchain};
 use crate::p2p::{P2PConnectionStatus, Transport};
+use picomint_node_cli_core::BackupResponse;
 
 /// Setup CLI server — runs during the setup phase and is torn down when
 /// DKG starts.
@@ -85,8 +85,10 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
 
     async fn backup(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
-    ) -> Result<Json<NodeConfig>, CliError> {
-        Ok(Json(api.server.cfg.clone()))
+    ) -> Result<Json<BackupResponse>, CliError> {
+        Ok(Json(BackupResponse {
+            config: api.server.cfg.clone(),
+        }))
     }
 
     async fn invite(
@@ -412,10 +414,10 @@ async fn setup_confirm(State(setup_api): State<Arc<SetupApi>>) -> Result<Json<()
 
 async fn setup_restore(
     State(setup_api): State<Arc<SetupApi>>,
-    Json(cfg): Json<NodeConfig>,
+    Json(backup): Json<BackupResponse>,
 ) -> Result<Json<()>, CliError> {
     setup_api
-        .restore_config(cfg)
+        .restore_config(backup.config)
         .await
         .map_err(CliError::internal)?;
 
