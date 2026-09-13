@@ -15,7 +15,7 @@ docker exec picomint-gateway-daemon picomint-gateway-cli --help
 
 The walkthroughs below use the bare `picomint-gateway-cli …` form — prefix with `docker exec picomint-gateway-daemon` to run them. Every command prints JSON, and its `--help` ends with the JSON Schema of what it prints, every field explained.
 
-One command prints a secret: `mnemonic` prints the seed words every fund derives from. Whatever an agent reads ends up in a model context and a transcript, so the rules for an agent are: run it only when asked, always with the output piped into a file, never read the file, and open it for the operator if asked. Write the words down from that file yourself and delete it. The same rules end the CLI's `--help`.
+One command prints a secret: `mnemonic` prints the seed words every fund derives from. Whatever an agent reads ends up in a model context and a transcript, so the rules for an agent are: run it only when asked, always with the output piped into a file, never read the file, and open it for the operator if asked. Write the words down from that file yourself and delete it. The same rules end the CLI's `--help`. The shell creates that file with its umask, world-readable on most systems, so create it in a subshell with `umask 077` and it is readable by you alone from the first byte.
 
 A first call to confirm everything is wired up:
 
@@ -145,7 +145,7 @@ picomint-gateway-cli client ecash receive <mint-id> <account> <ecash>
 If your gateway deployment is ever corrupted you can restore your onchain funds and ecash from your twelve word mnemonic:
 
 ```bash
-picomint-gateway-cli mnemonic > mnemonic.json
+(umask 077; picomint-gateway-cli mnemonic > mnemonic.json)
 ```
 
 The mnemonic can be used with any Bip 39 compatible wallet to restore the onchain funds and with any Picomint wallet to restore the funds in the mints.  **The balance in your open lightning channels is lost.**

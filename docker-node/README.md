@@ -39,7 +39,7 @@ docker exec picomint-node-daemon picomint-node-cli --help
 
 The walkthroughs below use the bare `picomint-node-cli …` form — prefix with `docker exec picomint-node-daemon` to run them. Every command prints JSON, and its `--help` ends with the JSON Schema of what it prints, every field explained. Help needs no running daemon, so an agent can read the whole reference before the first `up -d`.
 
-Two commands print secrets: `backup` prints the node's private keys and `onchain rugpull`, only for once the mint has expired, a share of the wallet key. Whatever an agent reads ends up in a model context and a transcript, so the rules for an agent are: run these only when asked, always with the output piped into a file, never read the file, and open it for the operator if asked. The same rules end every CLI's `--help`.
+Two commands print secrets: `backup` prints the node's private keys and `onchain rugpull`, only for once the mint has expired, a share of the wallet key. Whatever an agent reads ends up in a model context and a transcript, so the rules for an agent are: run these only when asked, always with the output piped into a file, never read the file, and open it for the operator if asked. The same rules end every CLI's `--help`. The shell creates that file with its umask, world-readable on most systems, so create it in a subshell with `umask 077` and it is readable by you alone from the first byte.
 
 ## Status
 
@@ -164,7 +164,7 @@ printout). The redirect happens on your machine, so the file lands there
 even though the command runs in the container:
 
 ```bash
-picomint-node-cli backup > backup.json
+(umask 077; picomint-node-cli backup > backup.json)
 ```
 
 This single file is the only state you need to keep. It contains your
@@ -195,7 +195,7 @@ Only once the mint has expired and its last onchain transaction has confirmed ar
 Every node exports its rugpull secret into a file, as with `backup`: pipe it, never print it. It is bound to the mint's current UTXO, so check first that `onchain status` reports the same `tx_tip` on every node and `onchain pending` is empty everywhere, then:
 
 ```bash
-picomint-node-cli onchain rugpull > rugpull-3.json
+(umask 077; picomint-node-cli onchain rugpull > rugpull-3.json)
 ```
 
 A threshold of nodes send their files to whoever pulls the rug. That operator passes the mint size, the destination address and the files; the tool interpolates the key, finds the UTXO in bitcoind's UTXO set, drains it to the address and broadcasts:
