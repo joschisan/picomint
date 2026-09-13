@@ -5,9 +5,10 @@
 //! directly — no trait indirection.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Instant;
 
-use crate::bitcoind::BitcoindRpcMonitor;
+use crate::bitcoind::BitcoindClient;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
@@ -24,7 +25,7 @@ use crate::consensus::{ecash, lightning, onchain};
 pub struct Server {
     pub cfg: NodeConfig,
     pub db: Database,
-    pub btc_rpc: BitcoindRpcMonitor,
+    pub btc_rpc: Arc<BitcoindClient>,
     /// The finally rejected txs of the running session, watched by their
     /// waiting submission RPCs and cleared at the session boundary.
     pub rejected: watch::Sender<BTreeMap<TransactionId, TxError>>,

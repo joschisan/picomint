@@ -10,9 +10,9 @@ use axum::routing::post;
 use chrono::{Days, Utc};
 use picomint_cli_server::{CliError, serve};
 use picomint_node_cli_core::{
-    BitcoinConnectionResponse, ConsensusPhase, DkgPhase, NodeInfo, NodeStatus, ROUTE_SETUP_ADD,
-    ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE, ROUTE_STATUS,
-    SetupAddRequest, SetupAddResponse, SetupInitRequest, SetupInitResponse, SetupPhase,
+    ConsensusPhase, DkgPhase, NodeInfo, NodeStatus, ROUTE_SETUP_ADD, ROUTE_SETUP_CONFIRM,
+    ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE, ROUTE_STATUS, SetupAddRequest,
+    SetupAddResponse, SetupInitRequest, SetupInitResponse, SetupPhase,
 };
 use picomint_redb::{Database, DbRead};
 
@@ -69,19 +69,33 @@ fn wrong_phase(phase: &'static str) -> impl Fn() -> std::future::Ready<CliError>
     }
 }
 
-/// The consensus-phase CLI router: status, invite, backup and expiry,
-/// plus the onchain and gateway routes.
+/// The consensus-phase CLI router: status, bitcoind, invite, backup and
+/// expiry, plus the onchain and gateway routes.
 pub fn router(api: Arc<ConsensusApi>) -> Router {
     use picomint_core::expiry::ExpiryStatus;
     use picomint_node_cli_core::{
-        EXPIRY_DAYS_LIMIT, ExpirySetRequest, ExpiryStatusResponse, HistoryResponse,
-        INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse, LightningGatewayAddRequest,
-        LightningGatewayInfo, LightningGatewayListResponse, LightningGatewayRemoveRequest,
-        OnchainStatusResponse, PendingResponse, ROUTE_BACKUP, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET,
-        ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE,
-        ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL,
-        ROUTE_ONCHAIN_STATUS, RugpullResponse,
+        BitcoindResponse, EXPIRY_DAYS_LIMIT, ExpirySetRequest, ExpiryStatusResponse,
+        HistoryResponse, INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse,
+        LightningGatewayAddRequest, LightningGatewayInfo, LightningGatewayListResponse,
+        LightningGatewayRemoveRequest, OnchainStatusResponse, PendingResponse, ROUTE_BACKUP,
+        ROUTE_BITCOIND, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
+        ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
+        ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL, ROUTE_ONCHAIN_STATUS,
+        RugpullResponse,
     };
+
+    async fn bitcoind(
+        State(api): State<Arc<ConsensusApi>>,
+    ) -> Result<Json<BitcoindResponse>, CliError> {
+        let btc_rpc = &api.server.btc_rpc;
+
+        Ok(Json(BitcoindResponse {
+            network: btc_rpc.network().await?.to_string(),
+            block_height: btc_rpc.get_block_height().await?,
+            fee_rate_sat_per_vb: onchain::feerate_vote(&api.server).await.map(|f| f / 1000),
+            sync_progress: btc_rpc.get_sync_progress().await?,
+        }))
+    }
 
     async fn backup(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
@@ -248,6 +262,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
 
     Router::new()
         .route(ROUTE_STATUS, post(consensus_phase))
+        .route(ROUTE_BITCOIND, post(bitcoind))
         .route(ROUTE_INVITE, post(invite))
         .route(ROUTE_BACKUP, post(backup))
         .route(ROUTE_ONCHAIN_STATUS, post(onchain_status))
@@ -296,18 +311,6 @@ fn node_infos(api: &ConsensusApi) -> Vec<NodeInfo> {
         .collect()
 }
 
-fn bitcoin_status(api: &ConsensusApi) -> Option<BitcoinConnectionResponse> {
-    api.server
-        .btc_rpc
-        .status()
-        .map(|status| BitcoinConnectionResponse {
-            network: status.network.to_string(),
-            block_height: status.block_height,
-            fee_rate_sat_per_vb: status.fee_rate.map(|fee_rate| fee_rate / 1000),
-            sync_progress: status.sync_progress,
-        })
-}
-
 async fn consensus_phase(
     State(api): State<Arc<ConsensusApi>>,
 ) -> Result<Json<NodeStatus>, CliError> {
@@ -333,7 +336,6 @@ async fn consensus_phase(
         block_height: api.block_height(),
         onchain_block_height: onchain::next_block_height(&dbtx),
         nodes: node_infos(&api),
-        bitcoin: bitcoin_status(&api),
     };
 
     Ok(Json(NodeStatus::Consensus(Box::new(phase))))

@@ -4,14 +4,15 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use picomint_cli_client::{print_json, request, schema};
 use picomint_node_cli_core::{
-    BackupResponse, ExpirySetRequest, ExpiryStatusResponse, HistoryResponse, InviteRequest,
-    InviteResponse, LightningGatewayAddRequest, LightningGatewayListResponse,
+    BackupResponse, BitcoindResponse, ExpirySetRequest, ExpiryStatusResponse, HistoryResponse,
+    InviteRequest, InviteResponse, LightningGatewayAddRequest, LightningGatewayListResponse,
     LightningGatewayRemoveRequest, NodeStatus, OnchainStatusResponse, PendingResponse,
-    ROUTE_BACKUP, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD,
-    ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY,
-    ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL, ROUTE_ONCHAIN_STATUS, ROUTE_SETUP_ADD,
-    ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE, ROUTE_STATUS,
-    RugpullResponse, SetupAddRequest, SetupAddResponse, SetupInitRequest, SetupInitResponse,
+    ROUTE_BACKUP, ROUTE_BITCOIND, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
+    ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
+    ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL, ROUTE_ONCHAIN_STATUS,
+    ROUTE_SETUP_ADD, ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE,
+    ROUTE_STATUS, RugpullResponse, SetupAddRequest, SetupAddResponse, SetupInitRequest,
+    SetupInitResponse,
 };
 use serde_json::Value;
 
@@ -41,6 +42,9 @@ enum Commands {
     /// Which phase the node is in (setup, dkg, consensus) and what an operator needs at that point
     #[command(after_long_help = schema::<NodeStatus>())]
     Status,
+    /// This node's own Bitcoin Core backend, read live: network, chain tip, fee estimate, sync progress
+    #[command(after_long_help = schema::<BitcoindResponse>())]
+    Bitcoind,
     /// The setup ceremony: init, exchange setup codes, confirm
     #[command(subcommand)]
     Setup(SetupCommands),
@@ -127,6 +131,7 @@ async fn main() -> Result<()> {
 
     let result = match cli.command {
         Commands::Status => request(d, ROUTE_STATUS, ()).await?,
+        Commands::Bitcoind => request(d, ROUTE_BITCOIND, ()).await?,
         Commands::Invite(req) => request(d, ROUTE_INVITE, req).await?,
         Commands::Backup => request(d, ROUTE_BACKUP, ()).await?,
 

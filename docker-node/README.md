@@ -25,7 +25,7 @@ The node runs as a lightweight daemon on top of a local Bitcoin Core node. The b
 
 A pruned node works, under one rule: the block the mint wallet votes on next, `onchain_block_height` in `status`, has to stay inside the prune window. Nodes read blocks from that height onward and never anything older. A node that was down alone catches up from the consensus log and reads no old blocks, so the window only bites when the mint as a whole stops, with fewer than a threshold of nodes up: the wallet then resumes from the block it stopped at, which is what limits the longest such outage the mint can recover from. A backend whose window has moved past that height has to reindex. Be conservative and size the window for 30 days: `-prune=20000` keeps about that much of mainnet, and is what the bundled compose sets. Remove the line to run a full node.
 
-Initial block download pulls the full chain over the network either way, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth. The node will sit idle until bitcoind catches up.
+Initial block download pulls the full chain over the network either way, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth. The node will sit idle until bitcoind catches up; `bitcoind` shows how far along it is.
 
 For now the node refuses to run a mint on mainnet: `setup confirm` fails with that error when bitcoind runs mainnet. The mint's network is whatever the backend runs, so a test mint is a compose of your own that points every node at signet or at one shared regtest backend.
 
@@ -51,7 +51,7 @@ picomint-node-cli status
 
 - `Setup`: the node's own setup code once `setup init` has run, the mint name and size once any setup code has carried them, and the nodes added so far.
 - `Dkg`: key generation is running; the setup code, for nodes that still need it.
-- `Consensus`: the mint is up. Mint name and id, network, this node's id and name, consensus version, session count, the block height the mint agrees on and the one its wallet reads next, every node's connection and this node's own bitcoind backend. The top-level height and the fee rate in `onchain status` are consensus values a threshold of nodes agree on; the ones under `bitcoin` are what this node's backend reports and votes with.
+- `Consensus`: the mint is up. Mint name and id, network, this node's id and name, consensus version, session count, the block height the mint agrees on and the one its wallet reads next, and every node's connection.
 
 On a running mint it looks like this:
 
@@ -71,8 +71,22 @@ On a running mint it looks like this:
     { "id": 0, "name": "alice", "connected": true, "transport": "direct", "remote_addr": "203.0.113.7:8080", "rtt_ms": 41 },
     { "id": 1, "name": "bob", "connected": true, "transport": "relay", "remote_addr": "relay.n0.iroh.network", "rtt_ms": 118 },
     { "id": 3, "name": "dave", "connected": false, "transport": null, "remote_addr": null, "rtt_ms": null }
-  ],
-  "bitcoin": { "network": "bitcoin", "block_height": 912341, "fee_rate_sat_per_vb": 4, "sync_progress": 1.0 }
+  ]
+}
+```
+
+This node's own bitcoind backend has its own command, which reads it live: the network it runs, its chain tip, its fee estimate and its sync progress. The height and the fee rate are what this node votes with; `block_height` in `status` and the fee rate in `onchain status` are what a threshold of nodes agreed on. It fails with the backend's error while bitcoind is unreachable, which is the first thing to check when a node is not voting.
+
+```bash
+picomint-node-cli bitcoind
+```
+
+```json
+{
+  "network": "bitcoin",
+  "block_height": 912341,
+  "fee_rate_sat_per_vb": 4,
+  "sync_progress": 1.0
 }
 ```
 

@@ -1,17 +1,14 @@
-//! Bitcoind RPC client + background status monitor.
+//! Bitcoind JSON-RPC client.
 
 use std::fmt;
-use std::sync::Arc;
-use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, bail};
 use picomint_core::bitcoin::consensus::encode::{deserialize_hex, serialize_hex};
 use picomint_core::bitcoin::{Block, BlockHash, Network, Transaction};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use tokio::sync::watch;
-use tracing::{info, warn};
+use tracing::info;
 use url::Url;
 
 // Well-known block-hash-at-height-1 values for the Bitcoin networks we
@@ -27,94 +24,7 @@ const MUTINYNET: &str = "000002855893a0a9b24eaffc5efc770558a326fee4fc10c9da22fc1
 
 /// The floor on the feerate estimate, 1 sat/vB: never propose a feerate
 /// below what Bitcoin Core will relay.
-const MIN_FEERATE_SATS_PER_KVB: u32 = 1000;
-
-/// Status of the bitcoind backend as reported by the monitor.
-#[derive(Debug, Clone)]
-pub struct BitcoindRpcStatus {
-    pub network: Network,
-    pub block_height: u32,
-    /// In sat/kvB, `None` while the backend is still syncing — fee
-    /// estimation has no data until the node is at the tip, and consensus
-    /// (the only consumer that needs a feerate) doesn't start until then
-    /// either.
-    pub fee_rate: Option<u32>,
-    pub sync_progress: Option<f64>,
-}
-
-#[derive(Debug, Clone)]
-pub struct BitcoindRpcMonitor {
-    rpc: Arc<BitcoindClient>,
-    status_rx: watch::Receiver<Option<BitcoindRpcStatus>>,
-}
-
-impl BitcoindRpcMonitor {
-    pub fn new(rpc: Arc<BitcoindClient>, update_interval: Duration) -> Self {
-        let (status_tx, status_rx) = watch::channel(None);
-
-        tokio::spawn(Self::update_status(rpc.clone(), update_interval, status_tx));
-
-        Self { rpc, status_rx }
-    }
-
-    async fn update_status(
-        rpc: Arc<BitcoindClient>,
-        update_interval: Duration,
-        status_tx: watch::Sender<Option<BitcoindRpcStatus>>,
-    ) {
-        let mut interval = tokio::time::interval(update_interval);
-
-        loop {
-            let status = Self::fetch_status(&rpc)
-                .await
-                .inspect_err(|e| warn!(?e, "Bitcoin status update failed"))
-                .ok();
-
-            status_tx.send_replace(status);
-
-            interval.tick().await;
-        }
-    }
-
-    async fn fetch_status(rpc: &BitcoindClient) -> Result<BitcoindRpcStatus> {
-        let network = rpc.network().await?;
-
-        let block_height = rpc.get_block_height().await?;
-
-        let sync_progress = rpc.get_sync_progress().await?;
-
-        let fee_rate = if network == Network::Regtest {
-            Some(MIN_FEERATE_SATS_PER_KVB)
-        } else {
-            rpc.get_feerate().await?
-        };
-
-        Ok(BitcoindRpcStatus {
-            network,
-            block_height,
-            fee_rate,
-            sync_progress,
-        })
-    }
-
-    pub fn status(&self) -> Option<BitcoindRpcStatus> {
-        self.status_rx.borrow().clone()
-    }
-
-    pub async fn get_block(&self, hash: &BlockHash) -> Result<Block> {
-        self.rpc.get_block(hash).await
-    }
-
-    pub async fn get_block_hash(&self, height: u32) -> Result<BlockHash> {
-        self.rpc.get_block_hash(height).await
-    }
-
-    pub async fn submit_tx(&self, tx: Transaction) {
-        if self.status_rx.borrow().is_some() {
-            self.rpc.submit_tx(tx).await;
-        }
-    }
-}
+pub const MIN_FEERATE_SATS_PER_KVB: u32 = 1000;
 
 #[derive(Deserialize)]
 struct RpcResponse<T> {
@@ -175,12 +85,15 @@ impl BitcoindClient {
             "params": params,
         });
 
+        // The url carries the rpc credentials, and reqwest names it in
+        // every error; there is only the one backend, so it says nothing.
         let http_response = self
             .client
             .post(self.url.clone())
             .json(&request)
             .send()
-            .await?;
+            .await
+            .map_err(reqwest::Error::without_url)?;
 
         let status = http_response.status();
 
@@ -190,6 +103,7 @@ impl BitcoindClient {
         let response: RpcResponse<T> = http_response
             .json()
             .await
+            .map_err(reqwest::Error::without_url)
             .with_context(|| format!("bitcoind returned {status} with a non-JSON-RPC body"))?;
 
         match (response.result, response.error) {
@@ -255,9 +169,10 @@ impl BitcoindClient {
         }
     }
 
-    pub async fn get_sync_progress(&self) -> anyhow::Result<Option<f64>> {
+    /// The backend's initial block download progress from 0 to 1.
+    pub async fn get_sync_progress(&self) -> anyhow::Result<f64> {
         self.call::<BlockchainInfo>("getblockchaininfo", json!([]))
             .await
-            .map(|info| Some(info.verificationprogress))
+            .map(|info| info.verificationprogress)
     }
 }
