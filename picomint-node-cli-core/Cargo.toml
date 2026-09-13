@@ -9,6 +9,7 @@ repository = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true }
 picomint-core = { workspace = true }
 schemars = { workspace = true }

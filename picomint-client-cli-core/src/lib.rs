@@ -106,9 +106,9 @@ pub struct ClientExpiryRequest {
 /// The mint's expiry announcement, fetched fresh from its nodes.
 #[derive(Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct ClientExpiryResponse {
-    /// The date the mint winds down and the successor mint to move funds
-    /// to, once a threshold of nodes announce the same values; absent
-    /// while they announce nothing
+    /// The date the mint winds down, as midnight UTC in unix seconds, and
+    /// the successor mint to move funds to, once a threshold of nodes
+    /// announce the same values; absent while they announce nothing
     pub expiry: Option<ExpiryStatus>,
 }
 

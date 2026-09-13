@@ -5,6 +5,7 @@
 
 use std::borrow::Cow;
 
+use chrono::NaiveDate;
 use clap::Args;
 use picomint_core::NodeId;
 use picomint_core::bitcoin::Txid;
@@ -297,12 +298,16 @@ impl JsonSchema for BackupResponse {
 
 // --- /expiry/* ---
 
+/// How far ahead a wind-down may be announced, in days. Far enough for any
+/// orderly migration, close enough that a mistyped year is refused.
+pub const EXPIRY_DAYS_LIMIT: u64 = 730;
+
 #[derive(Clone, Debug, Serialize, Deserialize, Args)]
 pub struct ExpirySetRequest {
-    /// The expiry date as a unix timestamp in seconds, by convention
-    /// midnight UTC; every node must enter the exact same value
-    #[arg(long)]
-    pub timestamp: u64,
+    /// The wind-down day as `YYYY-MM-DD`; the daemon announces midnight
+    /// UTC of that day, so nodes that enter the same date announce
+    /// byte-equal values. Must lie in the future and at most 730 days out
+    pub date: NaiveDate,
     /// Invite code of the successor mint for users to migrate to; every
     /// node must enter the exact same one, or none
     #[arg(long)]

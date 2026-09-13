@@ -15,6 +15,7 @@ path = "src/main.rs"
 anyhow = { workspace = true }
 bitcoin = { workspace = true }
 bitcoincore-rpc = { workspace = true }
+chrono = { workspace = true }
 hex = { workspace = true }
 iroh = { workspace = true, default-features = false }
 iroh-mdns-address-lookup = { workspace = true }

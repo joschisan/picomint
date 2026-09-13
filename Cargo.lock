@@ -3513,6 +3513,7 @@ dependencies = [
  "anyhow",
  "bitcoin",
  "bitcoincore-rpc",
+ "chrono",
  "hex",
  "iroh",
  "iroh-mdns-address-lookup",
@@ -3593,6 +3594,7 @@ dependencies = [
 name = "picomint-node-cli-core"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "clap",
  "picomint-core",
  "schemars 1.2.1",

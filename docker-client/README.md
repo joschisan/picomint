@@ -57,13 +57,13 @@ picomint-client-cli expiry <mint>
 ```json
 {
   "expiry": {
-    "timestamp": 1798761600,
+    "timestamp": 1814313600,
     "successor": "picominttekvo2jfmj51q1gmatg81ome1hod4fur..."
   }
 }
 ```
 
-The timestamp is the wind-down date in unix seconds and the successor is the invite code of the mint to move funds to, absent when there is none; `expiry` is `null` while the mint announces nothing. Remove a mint and delete all of its data:
+The timestamp is midnight UTC of the day the mint winds down, in unix seconds, and the successor is the invite code of the mint to move funds to, absent when there is none; `expiry` is `null` while the mint announces nothing. Remove a mint and delete all of its data:
 
 ```bash
 picomint-client-cli remove <mint>
