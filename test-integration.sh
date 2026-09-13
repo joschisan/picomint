@@ -12,10 +12,12 @@ CONTAINER_NAME="picomint-integration-bitcoind"
 
 cleanup() {
     echo "Cleaning up..."
-    pkill -9 -f "picomint-node-daemon" 2>/dev/null || true
-    pkill -9 -f "picomint-gateway-daemon" 2>/dev/null || true
-    pkill -9 -f "picomint-client-daemon" 2>/dev/null || true
-    pkill -9 -f "picomint-lnurl-daemon" 2>/dev/null || true
+    # Exact process names: a `-f` substring match also hits a rustc
+    # compiling one of these crates and kills a concurrent build.
+    pkill -9 -x "picomint-node-daemon" 2>/dev/null || true
+    pkill -9 -x "picomint-gateway-daemon" 2>/dev/null || true
+    pkill -9 -x "picomint-client-daemon" 2>/dev/null || true
+    pkill -9 -x "picomint-lnurl-daemon" 2>/dev/null || true
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
 }
