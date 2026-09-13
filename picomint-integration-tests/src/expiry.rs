@@ -1,7 +1,7 @@
 //! Integration test for the mint expiry announcement: each
 //! node sets the same `(date, successor)` pair via the admin CLI; a
 //! fresh client then fetches the announcement via threshold consensus
-//! and surfaces it through `Client::expiry_status`.
+//! and surfaces it through its `expiry` command.
 
 use anyhow::ensure;
 use picomint_core::expiry::ExpiryStatus;
@@ -34,25 +34,15 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
         );
     }
 
-    // Spin up a fresh client so the cache starts empty.
-    let client = env.new_client(None).await?;
+    // Spin up a fresh client so the cache starts empty; `expiry` refreshes
+    // it synchronously before answering.
+    let client = env.new_client().await?;
 
-    // The startup refresh task races with us; force a sync read so the
-    // cache is settled before we assert.
-    client
-        .client
-        .refresh_expiry_status(client.mint)
-        .await
-        .map_err(|e| anyhow::anyhow!("refresh_expiry_status: {e}"))?;
-
-    let cached = client
-        .client
-        .expiry_status(client.mint)
-        .ok_or_else(|| anyhow::anyhow!("expected client cache to hold the announcement"))?;
+    let announced = client.expiry()?;
 
     ensure!(
-        cached == expected,
-        "client expiry mismatch: got {cached:?}, want {expected:?}"
+        announced.as_ref() == Some(&expected),
+        "client expiry mismatch: got {announced:?}, want {expected:?}"
     );
 
     info!("Clearing expiry on all online nodes");
@@ -61,16 +51,12 @@ pub async fn run_test(env: &TestEnv) -> anyhow::Result<()> {
         cli::node_expiry_clear(&data_dir)?;
     }
 
-    client
-        .client
-        .refresh_expiry_status(client.mint)
-        .await
-        .map_err(|e| anyhow::anyhow!("refresh_expiry_status (clear): {e}"))?;
-
     ensure!(
-        client.client.expiry_status(client.mint).is_none(),
+        client.expiry()?.is_none(),
         "client cache should be empty after a mint-wide clear"
     );
+
+    client.shutdown().await;
 
     info!("expiry: passed");
     Ok(())

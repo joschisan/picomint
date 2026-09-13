@@ -1,6 +1,6 @@
 [package]
 authors = { workspace = true }
-description = "Standalone integration tests using in-process clients"
+description = "Standalone integration tests driving the daemons over their admin sockets"
 edition = { workspace = true }
 license = { workspace = true }
 name = "picomint-integration-tests"
@@ -13,17 +13,18 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-async-stream = { workspace = true }
 bitcoin = { workspace = true }
 bitcoincore-rpc = { workspace = true }
-futures = { workspace = true }
+hex = { workspace = true }
 iroh = { workspace = true, default-features = false }
 iroh-mdns-address-lookup = { workspace = true }
 ldk-node = { workspace = true }
 lightning-invoice = { workspace = true }
 lightning-types = { workspace = true }
+picomint-analytics = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-client = { workspace = true }
+picomint-client-cli-core = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
 picomint-gateway-cli-core = { workspace = true }

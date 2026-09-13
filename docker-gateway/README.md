@@ -28,7 +28,7 @@ Your info will look like
 ```json
 {
   "lightning_pk": "02abfe4a99f1ed8f67c1f07e5d47f3ab3d2e9c5b8a1c8e7f2a6d4b7e9c1f5a3e8d",
-  "gateway_pk": "picomintd2g4h6j8k0m1n3p5q7r9s0t2v4w6x8y1z3a5b7c9d1e3f5g7h9j1",
+  "gateway_pk": "picomintthk4cngg1f0rh1sq0mua88km3sht06p5ltviehc2onkocqqgcek0",
   "alias": "picomint-gateway-daemon",
   "network": "bitcoin",
   "block_height": 842195,

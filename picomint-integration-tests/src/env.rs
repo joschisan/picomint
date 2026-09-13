@@ -8,29 +8,15 @@ use std::time::Duration;
 use anyhow::{Context, ensure};
 use bitcoin::Network;
 use bitcoincore_rpc::RpcApi;
-use iroh::Endpoint;
-use iroh::endpoint::presets::N0;
-use iroh_mdns_address_lookup::MdnsAddressLookup;
-use picomint_client::{Client, Mnemonic};
-use picomint_core::config::MintId;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
-use picomint_redb::Database;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::block_in_place;
 use tracing::info;
 
 use crate::cli;
-
-/// One test wallet: the app-level [`Client`] plus the id of the single
-/// mint it joins — the two values every mint-keyed call takes.
-#[derive(Clone)]
-pub struct TestClient {
-    pub client: Arc<Client>,
-    pub mint: MintId,
-    pub db: Database,
-}
+use crate::client::TestClient;
 
 pub const BTC_RPC_PORT: u16 = 18443;
 pub const NODE_BASE_PORT: u16 = 17000;
@@ -133,11 +119,10 @@ impl TestEnv {
         }
 
         let client_counter = AtomicU64::new(0);
-        let client_send = runtime.block_on(build_client(
-            invite.clone(),
-            data_dir.clone(),
+        let client_send = runtime.block_on(start_client(
+            base,
             client_counter.fetch_add(1, Ordering::Relaxed),
-            None,
+            &invite,
         ))?;
 
         runtime.block_on(start_gateway(base, "gateway", GW_PORT, GW_LN_PORT))?;
@@ -248,12 +233,10 @@ impl TestEnv {
         Ok(client)
     }
 
-    /// Bring up a client. Passing a `mnemonic` a previous client used against
-    /// this mint restores it — the scan is part of joining, so there is
-    /// no second entry point for it.
-    pub async fn new_client(&self, mnemonic: Option<Mnemonic>) -> anyhow::Result<TestClient> {
+    /// Bring up a client daemon of its own, joined to the mint.
+    pub async fn new_client(&self) -> anyhow::Result<TestClient> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
-        build_client(self.invite.clone(), self.data_dir.clone(), n, mnemonic).await
+        start_client(&self.data_dir, n, &self.invite).await
     }
 
     pub fn mine_blocks(&self, n: u64) {
@@ -272,38 +255,36 @@ impl TestEnv {
     }
 }
 
-async fn build_client(
-    invite_code: InviteCode,
-    data_dir: std::path::PathBuf,
-    n: u64,
-    mnemonic: Option<Mnemonic>,
-) -> anyhow::Result<TestClient> {
-    let db_dir = data_dir.join(format!("client-{n}"));
-    tokio::fs::create_dir_all(&db_dir).await?;
+/// Spawn a client daemon against a fresh data dir, wait for its admin
+/// socket and join the mint. The daemon picks a free port for its iroh
+/// endpoint, as nothing dials a client.
+async fn start_client(base: &Path, n: u64, invite: &InviteCode) -> anyhow::Result<TestClient> {
+    let data_dir = base.join(format!("client-{n}"));
+    tokio::fs::create_dir_all(&data_dir).await?;
 
-    let db = Database::open(db_dir.join("database.sqlite"))?;
+    let log_file = std::fs::File::create(base.join(format!("client-{n}.log")))?;
 
-    let mnemonic = match mnemonic {
-        Some(m) => m,
-        None => Mnemonic::generate(12)?,
-    };
+    let child = Command::new("target/release/picomint-client-daemon")
+        .env("DATA_DIR", &data_dir)
+        .env("NETWORK", "regtest")
+        .env("API_ADDR", "0.0.0.0:0")
+        .env("INTEGRATION_TEST", "true")
+        .stdout(log_file.try_clone()?)
+        .stderr(log_file)
+        .spawn()
+        .context(format!("Failed to start client-{n}"))?;
 
-    // No secret key: a wallet's network identity is ephemeral — nothing
-    // dials it.
-    let endpoint = Endpoint::builder(N0)
-        .transport_config(picomint_rpc::transport_config())
-        .address_lookup(MdnsAddressLookup::builder())
-        .bind()
-        .await?;
+    let client = TestClient::new(data_dir, invite.mint, child);
 
-    let client = Arc::new(Client::new(endpoint, db.clone(), mnemonic));
+    retry(&format!("client-{n} admin socket"), || async {
+        client.list()
+    })
+    .await?;
 
-    let mint = client
-        .add_mint(&invite_code, Some(bitcoin::Network::Regtest))
-        .await?;
+    client.add(invite)?;
 
-    info!("Created client-{n}");
-    Ok(TestClient { client, mint, db })
+    info!("Started client-{n}");
+    Ok(client)
 }
 
 async fn start_node(base: &Path, node: usize) -> anyhow::Result<Child> {

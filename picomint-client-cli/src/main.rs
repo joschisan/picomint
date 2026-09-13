@@ -8,20 +8,23 @@ use picomint_client_cli_core::{
     ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
     ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
     ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
-    ClientLightningGatewayListRequest, ClientLightningGatewayListResponse,
-    ClientLightningGatewayRefreshRequest, ClientLightningLnurlRequest,
-    ClientLightningLnurlResponse, ClientLightningReceiveRequest, ClientLightningReceiveResponse,
-    ClientLightningSendMaxRequest, ClientLightningSendMaxResponse, ClientLightningSendRequest,
-    ClientLightningSendResponse, ClientListResponse, ClientOnchainReceiveRequest,
-    ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse,
-    ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse, ClientOnchainSendRequest,
-    ClientOnchainSendResponse, ClientRemoveRequest, MnemonicResponse, QueryRequest, QueryResponse,
-    ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE,
-    ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_LIGHTNING_GATEWAY_LIST,
-    ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
-    ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIST, ROUTE_MNEMONIC,
-    ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX,
-    ROUTE_QUERY, ROUTE_REMOVE,
+    ClientExpiryRequest, ClientExpiryResponse, ClientLightningGatewayListRequest,
+    ClientLightningGatewayListResponse, ClientLightningGatewayRefreshRequest,
+    ClientLightningLnurlRequest, ClientLightningLnurlResponse, ClientLightningReceiveRequest,
+    ClientLightningReceiveResponse, ClientLightningSendMaxAmountRequest,
+    ClientLightningSendMaxAmountResponse, ClientLightningSendMaxRequest,
+    ClientLightningSendMaxResponse, ClientLightningSendRequest, ClientLightningSendResponse,
+    ClientListResponse, ClientOnchainReceiveRequest, ClientOnchainReceiveResponse,
+    ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse, ClientOnchainSendMaxAmountRequest,
+    ClientOnchainSendMaxAmountResponse, ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse,
+    ClientOnchainSendRequest, ClientOnchainSendResponse, ClientRemoveRequest, MnemonicResponse,
+    QueryRequest, QueryResponse, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT,
+    ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_EXPIRY,
+    ROUTE_LIGHTNING_GATEWAY_LIST, ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_LNURL,
+    ROUTE_LIGHTNING_RECEIVE, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX,
+    ROUTE_LIGHTNING_SEND_MAX_AMOUNT, ROUTE_LIST, ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE,
+    ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX,
+    ROUTE_ONCHAIN_SEND_MAX_AMOUNT, ROUTE_QUERY, ROUTE_REMOVE,
 };
 
 #[derive(Parser)]
@@ -56,6 +59,9 @@ enum Commands {
     /// Get a mint's JSON client config
     #[command(after_long_help = schema::<ClientConfigResponse>())]
     Config(ClientConfigRequest),
+    /// Fetch the mint's expiry announcement from its nodes
+    #[command(after_long_help = schema::<ClientExpiryResponse>())]
+    Expiry(ClientExpiryRequest),
     /// Get an account's ecash balance
     #[command(after_long_help = schema::<ClientBalanceResponse>())]
     Balance(ClientBalanceRequest),
@@ -94,6 +100,9 @@ enum OnchainCommands {
     /// Send onchain
     #[command(after_long_help = schema::<ClientOnchainSendResponse>())]
     Send(ClientOnchainSendRequest),
+    /// What send-max would move right now
+    #[command(after_long_help = schema::<ClientOnchainSendMaxAmountResponse>())]
+    SendMaxAmount(ClientOnchainSendMaxAmountRequest),
     /// Send the account's entire balance onchain, minus the fee
     #[command(after_long_help = schema::<ClientOnchainSendMaxResponse>())]
     SendMax(ClientOnchainSendMaxRequest),
@@ -110,6 +119,9 @@ enum LightningCommands {
     /// Pay a bolt11 invoice through a gateway
     #[command(after_long_help = schema::<ClientLightningSendResponse>())]
     Send(ClientLightningSendRequest),
+    /// What send-max would pay right now
+    #[command(after_long_help = schema::<ClientLightningSendMaxAmountResponse>())]
+    SendMaxAmount(ClientLightningSendMaxAmountRequest),
     /// Empty an account to an lnurl
     #[command(after_long_help = schema::<ClientLightningSendMaxResponse>())]
     SendMax(ClientLightningSendMaxRequest),
@@ -143,6 +155,7 @@ async fn main() -> Result<()> {
         Commands::Remove(req) => request(d, ROUTE_REMOVE, req).await?,
         Commands::List => request(d, ROUTE_LIST, ()).await?,
         Commands::Config(req) => request(d, ROUTE_CONFIG, req).await?,
+        Commands::Expiry(req) => request(d, ROUTE_EXPIRY, req).await?,
         Commands::Balance(req) => request(d, ROUTE_BALANCE, req).await?,
         Commands::Ecash(cmd) => match cmd {
             EcashCommands::Count(req) => request(d, ROUTE_ECASH_COUNT, req).await?,
@@ -153,6 +166,9 @@ async fn main() -> Result<()> {
         Commands::Onchain(cmd) => match cmd {
             OnchainCommands::SendFee(req) => request(d, ROUTE_ONCHAIN_SEND_FEE, req).await?,
             OnchainCommands::Send(req) => request(d, ROUTE_ONCHAIN_SEND, req).await?,
+            OnchainCommands::SendMaxAmount(req) => {
+                request(d, ROUTE_ONCHAIN_SEND_MAX_AMOUNT, req).await?
+            }
             OnchainCommands::SendMax(req) => request(d, ROUTE_ONCHAIN_SEND_MAX, req).await?,
             OnchainCommands::Receive(req) => request(d, ROUTE_ONCHAIN_RECEIVE, req).await?,
         },
@@ -166,6 +182,9 @@ async fn main() -> Result<()> {
                 }
             },
             LightningCommands::Send(req) => request(d, ROUTE_LIGHTNING_SEND, req).await?,
+            LightningCommands::SendMaxAmount(req) => {
+                request(d, ROUTE_LIGHTNING_SEND_MAX_AMOUNT, req).await?
+            }
             LightningCommands::SendMax(req) => request(d, ROUTE_LIGHTNING_SEND_MAX, req).await?,
             LightningCommands::Receive(req) => request(d, ROUTE_LIGHTNING_RECEIVE, req).await?,
             LightningCommands::Lnurl(req) => request(d, ROUTE_LIGHTNING_LNURL, req).await?,

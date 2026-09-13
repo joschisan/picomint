@@ -1,150 +1,25 @@
-use std::pin::pin;
-
 use anyhow::ensure;
-use async_stream::stream;
-use futures::StreamExt;
-use picomint_client::ecash::{IssuanceSuccessEvent, ReceiveEvent, SendEvent};
-use picomint_client::eventlog::{EventLogEntry, EventLogId};
-use picomint_client::{Account, Mnemonic, TxAcceptEvent, TxRejectEvent};
 use picomint_core::Amount;
-use picomint_core::core::OperationId;
 use tracing::info;
 
-use crate::env::{TestClient, TestEnv};
-
-#[derive(Debug)]
-#[allow(dead_code)]
-enum EcashEvent {
-    Send(SendEvent),
-    Receive(ReceiveEvent),
-}
-
-fn ecash_event_stream(
-    client: &TestClient,
-) -> impl futures::Stream<Item = (OperationId, EcashEvent)> {
-    let client = client.clone();
-    let notify = client.client.event_notify();
-    let mut next_id = EventLogId::LOG_START;
-
-    stream! {
-        loop {
-            let notified = notify.notified();
-            let events = client.client.get_event_log(next_id, 100);
-
-            for (id, entry) in events {
-                next_id = id.saturating_add(1);
-
-                if let Some((op, event)) = try_parse_mint_event(&entry) {
-                    yield (op, event);
-                }
-            }
-
-            notified.await;
-        }
-    }
-}
-
-fn try_parse_mint_event(entry: &EventLogEntry) -> Option<(OperationId, EcashEvent)> {
-    let op = entry.operation;
-    if let Some(e) = entry.to_event() {
-        return Some((op, EcashEvent::Send(e)));
-    }
-    if let Some(e) = entry.to_event() {
-        return Some((op, EcashEvent::Receive(e)));
-    }
-    None
-}
-
-/// Consume `events` until one matches `predicate`, discarding the rest.
-/// The lightning and onchain suites fund their send_max clients with ecash from the
-/// shared `client_send`, so its stream carries Send events that are not this
-/// suite's — a strict next-event assertion would trip over them.
-async fn wait_mint_event<S>(
-    events: &mut std::pin::Pin<&mut S>,
-    predicate: impl Fn(OperationId, &EcashEvent) -> bool,
-) where
-    S: futures::Stream<Item = (OperationId, EcashEvent)>,
-{
-    loop {
-        let Some((op, event)) = events.next().await else {
-            panic!("event stream ended");
-        };
-
-        if predicate(op, &event) {
-            return;
-        }
-    }
-}
-
-/// Wait until a receive operation is fully settled. Returns:
-/// - `Ok` once both `TxAcceptEvent` AND `IssuanceSuccessEvent` have been
-///   observed — at that point the spendable notes have been written
-///   to the local NoteTable table and the balance reflects the receive.
-/// - `Err` on `TxRejectEvent` (mint rejected the tx).
-///
-/// Callers must wait for `IssuanceSuccessEvent`, not just `TxAcceptEvent`,
-/// because the issuance state machine still has to fetch threshold
-/// signatures after the tx is accepted before the notes land. Reading
-/// `ecash_balance` between TxAccept and IssuanceSuccessEvent returns a
-/// stale (lower) figure.
-pub(crate) async fn await_tx_outcome(
-    client: &TestClient,
-    operation: OperationId,
-) -> Result<(), String> {
-    let mut stream = client.client.subscribe_operation_events(operation);
-
-    let mut tx_accepted = false;
-
-    while let Some(entry) = stream.next().await {
-        if entry.to_event::<TxAcceptEvent>().is_some() {
-            tx_accepted = true;
-        }
-
-        if let Some(ev) = entry.to_event::<TxRejectEvent>() {
-            return Err(ev.error);
-        }
-
-        if tx_accepted && entry.to_event::<IssuanceSuccessEvent>().is_some() {
-            return Ok(());
-        }
-    }
-
-    unreachable!("stream only ends at client shutdown")
-}
+use crate::client::TestClient;
+use crate::env::TestEnv;
 
 pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Result<()> {
     info!("ecash: send_and_receive (10 iterations) + double_spend_is_rejected");
 
-    // Capture the receive client's mnemonic so we can restore it at
-    // the end of the suite, after it has accumulated a balance.
-    let receive_mnemonic = Mnemonic::generate(12)?;
-    let client_receive = env.new_client(Some(receive_mnemonic.clone())).await?;
-
-    let mut send_events = pin!(ecash_event_stream(client_send));
-    let mut receive_events = pin!(ecash_event_stream(&client_receive));
+    let client_receive = env.new_client().await?;
 
     for i in 0..10 {
         info!("Sending ecash payment {} of 10", i + 1);
 
-        let ecash = client_send
-            .client
-            .ecash_send(client_send.mint, Account::Primary, Amount::from_sat(1_000))
-            .await?;
+        let ecash = client_send.ecash_send(bitcoin::Amount::from_sat(1_000))?;
 
-        wait_mint_event(&mut send_events, |_, e| matches!(e, EcashEvent::Send(_))).await;
+        let operation = client_receive.ecash_receive(&ecash)?;
 
-        let operation =
-            client_receive
-                .client
-                .ecash_receive(client_receive.mint, Account::Primary, &ecash)?;
-
-        let Some((op, EcashEvent::Receive(_))) = receive_events.next().await else {
-            panic!("Expected Receive event");
-        };
-        assert_eq!(op, operation);
-
-        await_tx_outcome(&client_receive, operation)
-            .await
+        client_receive
+            .await_tx_outcome(operation)
+            .await?
             .expect("receive tx should be accepted");
     }
 
@@ -155,9 +30,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     // opportunistically pulls excess notes (>TARGET_PER_DENOMINATION) into
     // the IssuanceSM's `spendable_notes` and only recovers them once the SM
     // transitions on Err. Capturing here avoids racing that reclaim.
-    let expected = client_receive
-        .client
-        .ecash_balance(client_receive.mint, Account::Primary);
+    let expected = client_receive.balance()?;
 
     ensure!(
         expected != Amount::ZERO,
@@ -166,58 +39,35 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     info!("ecash: double_spend_is_rejected");
 
-    let ecash = client_send
-        .client
-        .ecash_send(client_send.mint, Account::Primary, Amount::from_sat(1_000))
-        .await?;
-
-    wait_mint_event(&mut send_events, |_, e| matches!(e, EcashEvent::Send(_))).await;
+    let ecash = client_send.ecash_send(bitcoin::Amount::from_sat(1_000))?;
 
     // First receive succeeds (sender receives own ecash back)
-    let operation = client_send
-        .client
-        .ecash_receive(client_send.mint, Account::Primary, &ecash)?;
+    let operation = client_send.ecash_receive(&ecash)?;
 
-    wait_mint_event(&mut send_events, |op, e| {
-        op == operation && matches!(e, EcashEvent::Receive(_))
-    })
-    .await;
-
-    await_tx_outcome(client_send, operation)
-        .await
+    client_send
+        .await_tx_outcome(operation)
+        .await?
         .expect("first receive should be accepted");
 
     // Second receive with same ecash is rejected
-    let operation =
-        client_receive
-            .client
-            .ecash_receive(client_receive.mint, Account::Primary, &ecash)?;
+    let operation = client_receive.ecash_receive(&ecash)?;
 
-    let Some((op, EcashEvent::Receive(_))) = receive_events.next().await else {
-        panic!("Expected Receive event");
-    };
-    assert_eq!(op, operation);
-
-    assert!(
-        await_tx_outcome(&client_receive, operation).await.is_err(),
+    ensure!(
+        client_receive.await_tx_outcome(operation).await?.is_err(),
         "double-spend receive should be rejected",
     );
 
     info!("ecash: double_spend_is_rejected passed");
 
-    client_receive.client.shutdown().await;
-
     info!("ecash: restore (expected balance {expected})");
 
-    let restored = env.new_client(Some(receive_mnemonic.clone())).await?;
-
-    // Restoring is not its own entry point and costs nothing: the scan ran
-    // inside the join and wrote its notes with the counter marks, so the
-    // wallet is whole the moment the client opens rather than once a
+    // Restoring is not its own entry point and costs nothing: the scan runs
+    // inside the join and writes its notes with the counter marks, so the
+    // wallet is whole the moment the mint is added rather than once a
     // reissuance settles.
-    let scanned = restored
-        .client
-        .ecash_balance(restored.mint, Account::Primary);
+    client_receive.rejoin(&env.invite)?;
+
+    let scanned = client_receive.balance()?;
 
     ensure!(
         scanned == expected,
@@ -230,22 +80,16 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     // issue past the mark before a second restore means anything. Sending a
     // bundle and receiving it back re-mints under counters above the mark,
     // which is the state the next scan has to cross to.
-    let ecash = restored
-        .client
-        .ecash_send(restored.mint, Account::Primary, Amount::from_sat(1_000))
-        .await?;
+    let ecash = client_receive.ecash_send(bitcoin::Amount::from_sat(1_000))?;
 
-    let operation = restored
-        .client
-        .ecash_receive(restored.mint, Account::Primary, &ecash)?;
+    let operation = client_receive.ecash_receive(&ecash)?;
 
-    await_tx_outcome(&restored, operation)
-        .await
+    client_receive
+        .await_tx_outcome(operation)
+        .await?
         .expect("self-reissue should be accepted");
 
-    let swept = restored
-        .client
-        .ecash_balance(restored.mint, Account::Primary);
+    let swept = client_receive.balance()?;
 
     ensure!(
         swept > Amount::ZERO && swept < expected,
@@ -261,8 +105,6 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
         "reissue lost more than expected to fees: {expected} -> {swept} (loss {loss})"
     );
 
-    restored.client.shutdown().await;
-
     // Restoring a second time is the only phase that exercises the counter
     // mark the first restore persisted. A mark one batch too high opens a gap
     // as wide as the one a scan refuses to cross, stranding every note the
@@ -270,18 +112,16 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     // merely short.
     info!("ecash: second restore (expected balance {swept})");
 
-    let restored = env.new_client(Some(receive_mnemonic)).await?;
+    client_receive.rejoin(&env.invite)?;
 
-    let scanned = restored
-        .client
-        .ecash_balance(restored.mint, Account::Primary);
+    let scanned = client_receive.balance()?;
 
     ensure!(
         scanned == swept,
         "second restore scanned {scanned}, expected {swept}"
     );
 
-    restored.client.shutdown().await;
+    client_receive.shutdown().await;
 
     info!("ecash: second restore passed");
 
@@ -289,44 +129,33 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     // A fresh client, so emptying the account cannot race the lightning suite
     // running in parallel on `client_send`.
-    let client = env.new_client(None).await?;
+    let client = env.new_client().await?;
 
-    let ecash = client_send
-        .client
-        .ecash_send(client_send.mint, Account::Primary, Amount::from_sat(5_000))
-        .await?;
+    let ecash = client_send.ecash_send(bitcoin::Amount::from_sat(5_000))?;
 
-    let operation = client
-        .client
-        .ecash_receive(client.mint, Account::Primary, &ecash)?;
+    let operation = client.ecash_receive(&ecash)?;
 
-    await_tx_outcome(&client, operation)
-        .await
+    client
+        .await_tx_outcome(operation)
+        .await?
         .expect("funding receive should be accepted");
 
-    let ecash = client
-        .client
-        .ecash_send_max(client.mint, Account::Primary)?
-        .expect("account holds notes");
+    let ecash = client.ecash_send_max()?.expect("account holds notes");
 
     ensure!(
-        client
-            .client
-            .ecash_count(client.mint, Account::Primary)
-            .is_empty(),
+        client.ecash_count()?.is_empty(),
         "send_max left notes behind"
     );
 
     // The bundle is real value, so hand it back rather than burning it.
-    let operation = client_send
-        .client
-        .ecash_receive(client_send.mint, Account::Primary, &ecash)?;
+    let operation = client_send.ecash_receive(&ecash)?;
 
-    await_tx_outcome(client_send, operation)
-        .await
+    client_send
+        .await_tx_outcome(operation)
+        .await?
         .expect("return receive should be accepted");
 
-    client.client.shutdown().await;
+    client.shutdown().await;
 
     info!("ecash: send_max passed");
 
