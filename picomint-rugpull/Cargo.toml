@@ -13,8 +13,8 @@ version = { workspace = true }
 anyhow = { workspace = true }
 bitcoin = { workspace = true }
 clap = { workspace = true }
-picomint-base32 = { workspace = true }
 picomint-core = { workspace = true }
+picomint-node-cli-core = { workspace = true }
 reqwest = { workspace = true }
 secp256k1 = { workspace = true, features = ["global-context", "rand-std"] }
 serde = { workspace = true }

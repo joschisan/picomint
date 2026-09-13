@@ -8,24 +8,10 @@ use schemars::JsonSchema;
 use secp256k1::{PublicKey, Scalar, XOnlyPublicKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tss::{AggregatePublicKey, SecretKeyShare};
-
-use crate::NodeId;
+use tss::AggregatePublicKey;
 
 pub mod config;
 pub mod methods;
-
-/// Recovery material for draining the mint wallet after decommissioning:
-/// one node's secret key share tweaked for the current mint UTXO, with the
-/// node id that is its evaluation point. Additive tweaks commute with
-/// Lagrange interpolation, so an offline tool interpolates a threshold of
-/// these into the UTXO's key, whose public key is the address to drain.
-/// Travels as one base32 code, and is secret.
-#[derive(Clone, Debug, Eq, PartialEq, Encodable, Decodable)]
-pub struct RugpullSecret {
-    pub node: NodeId,
-    pub sks: SecretKeyShare,
-}
 
 pub fn tweak_public_key(pk: &PublicKey, tweak: &sha256::Hash) -> PublicKey {
     pk.add_exp_tweak(

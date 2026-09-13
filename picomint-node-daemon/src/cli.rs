@@ -133,15 +133,15 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
     async fn onchain_rugpull(
         State(api): State<Arc<ConsensusApi>>,
     ) -> Result<Json<RugpullResponse>, CliError> {
-        let code =
-            onchain::rugpull_secret(&api.server, &api.server.db.begin_read()).ok_or(CliError {
-                code: StatusCode::SERVICE_UNAVAILABLE,
-                error: "The mint wallet has not received funds yet, so there is nothing to drain"
-                    .to_string(),
-            })?;
+        let wallet = onchain::mint_utxo(&api.server.db.begin_read()).ok_or(CliError {
+            code: StatusCode::SERVICE_UNAVAILABLE,
+            error: "The mint wallet has not received funds yet, so there is nothing to drain"
+                .to_string(),
+        })?;
 
         Ok(Json(RugpullResponse {
-            secret: picomint_base32::encode(&code),
+            node: api.server.cfg.private.identity,
+            sks: onchain::tweaked_sks(&api.server, &wallet.tweak),
         }))
     }
 

@@ -1,14 +1,15 @@
 //! Drains a decommissioned mint's wallet.
 //!
 //! After the mint has stopped transacting, every node exports its rugpull
-//! secret with `picomint-node-cli onchain rugpull`. A threshold of
-//! those secrets interpolates into the secret key of the mint's current
-//! UTXO, whose public key is the address holding the funds. The tool looks
-//! that address up in the UTXO set of the operator's bitcoind, drains it to
-//! the destination with a taproot key spend, and broadcasts through the
-//! same bitcoind. Secrets never leave the machine.
+//! secret with `picomint-node-cli onchain rugpull` into a file. A
+//! threshold of those files interpolates into the secret key of the mint's
+//! current UTXO, whose public key is the address holding the funds. The
+//! tool looks that address up in the UTXO set of the operator's bitcoind,
+//! drains it to the destination with a taproot key spend, and broadcasts
+//! through the same bitcoind. Secrets never leave the machine.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use anyhow::{Context, bail, ensure};
 use bitcoin::absolute::LockTime;
@@ -23,8 +24,8 @@ use bitcoin::{
     Witness, taproot,
 };
 use clap::Parser;
-use picomint_core::onchain::RugpullSecret;
 use picomint_core::{ALLOWED_MINT_SIZES, NumNodes};
+use picomint_node_cli_core::RugpullResponse;
 use secp256k1::{Keypair, Message, SECP256K1};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -47,9 +48,9 @@ struct Cli {
     /// Defaults to bitcoind's estimate for the next three blocks
     #[arg(long)]
     fee_rate_sat_per_vb: Option<u64>,
-    /// A node's rugpull secret from `picomint-node-cli onchain rugpull`; repeat once per node
+    /// A node's rugpull secret file from `picomint-node-cli onchain rugpull`; repeat once per node
     #[arg(long, required = true)]
-    secret: Vec<String>,
+    secret: Vec<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -139,9 +140,12 @@ async fn main() -> anyhow::Result<()> {
 
     let mut shares = BTreeMap::new();
 
-    for secret in &cli.secret {
-        let secret = picomint_base32::decode::<RugpullSecret>(secret.trim())
-            .context("A rugpull secret is malformed")?;
+    for path in &cli.secret {
+        let file =
+            std::fs::read(path).with_context(|| format!("Failed to read {}", path.display()))?;
+
+        let secret = serde_json::from_slice::<RugpullResponse>(&file)
+            .with_context(|| format!("{} is not a rugpull secret file", path.display()))?;
 
         ensure!(
             secret.node.to_usize() < cli.nodes,
@@ -197,7 +201,7 @@ async fn main() -> anyhow::Result<()> {
 
     ensure!(
         !utxos.is_empty(),
-        "No confirmed funds at {source}, the address these secrets reconstruct. Every node must export its secret after the mint's last onchain transaction has confirmed, and every secret must be copied exactly"
+        "No confirmed funds at {source}, the address these secrets reconstruct. Every node must export its secret after the mint's last onchain transaction has confirmed"
     );
 
     let fee_rate = match cli.fee_rate_sat_per_vb {

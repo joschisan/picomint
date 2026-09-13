@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
@@ -11,7 +11,6 @@ use picomint_gateway_cli_core::{
 };
 use picomint_node_cli_core::{
     ExpiryStatusResponse, InviteResponse, NodeStatus, OnchainStatusResponse, PendingResponse,
-    RugpullResponse,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -230,21 +229,29 @@ pub fn node_onchain_status(data_dir: &Path) -> Result<OnchainStatusResponse> {
         .run_cli::<OnchainStatusResponse>()
 }
 
-pub fn node_onchain_rugpull(data_dir: &Path) -> Result<RugpullResponse> {
-    node_cmd(data_dir)
+/// Exports the node's rugpull secret into `file`, the way the manual has
+/// the operator do it: the CLI's stdout redirected, never parsed.
+pub fn node_onchain_rugpull(data_dir: &Path, file: &Path) -> Result<()> {
+    let status = node_cmd(data_dir)
         .arg("onchain")
         .arg("rugpull")
-        .run_cli::<RugpullResponse>()
+        .stdout(std::fs::File::create(file)?)
+        .status()
+        .context("Failed to run CLI")?;
+
+    ensure!(status.success(), "onchain rugpull failed: {status}");
+
+    Ok(())
 }
 
-/// Runs `picomint-rugpull` against the test bitcoind with the given secrets
-/// and returns its report. The fee rate is explicit because a regtest
+/// Runs `picomint-rugpull` against the test bitcoind with the given secret
+/// files and returns its report. The fee rate is explicit because a regtest
 /// bitcoind never has an estimate.
 pub fn rugpull(
     nodes: usize,
     destination: &bitcoin::Address,
     bitcoind_url: &str,
-    secrets: &[String],
+    secrets: &[PathBuf],
 ) -> Result<Value> {
     let mut cmd = Command::new("target/release/picomint-rugpull");
     cmd.arg(nodes.to_string())

@@ -15,6 +15,7 @@ use picomint_core::onchain::TxInfo;
 use picomint_core::version::ConsensusVersion;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
+use tss::SecretKeyShare;
 
 /// Served in every phase of the node's life; everything else is phase-bound.
 pub const ROUTE_STATUS: &str = "/status";
@@ -369,14 +370,18 @@ pub struct HistoryResponse {
 // --- /onchain/rugpull ---
 
 /// This node's share of the key to the mint wallet, for draining it once
-/// the mint has expired. Secret.
+/// the mint has expired: the share is tweaked for the current wallet UTXO,
+/// and additive tweaks commute with Lagrange interpolation, so
+/// `picomint-rugpull` interpolates a threshold of nodes' shares into the
+/// UTXO's key. Secret: pipe it into a file, never to a terminal.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RugpullResponse {
-    /// This node's rugpull secret as a `picomint`-prefixed base32 string: its
-    /// secret key share tweaked for the current wallet UTXO, so it is only
-    /// valid while `tx_tip` stays what it is now. `picomint-rugpull`
-    /// combines a threshold of nodes' secrets into the wallet key
-    pub secret: String,
+    /// The node this share belongs to, its evaluation point
+    pub node: NodeId,
+    /// The share, tweaked for the wallet UTXO at the time of export, so it
+    /// is only valid while `tx_tip` stays what it is now
+    #[schemars(with = "String")]
+    pub sks: SecretKeyShare,
 }
 
 // --- /gateway/* ---

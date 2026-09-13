@@ -192,16 +192,16 @@ picomint-node-cli expiry set 2027-06-30 [--successor <invite>]
 
 Only once the mint has expired and its last onchain transaction has confirmed are the remaining funds drained with `picomint-rugpull`, a standalone x86_64 Linux binary. Like the images it is rebuilt on every push to main, attached to the [`main-latest`](https://github.com/joschisan/picomint/releases/tag/main-latest) pre-release; it runs on Ubuntu 24.04 or newer. It is not part of any image: it runs on an operator's machine, against that operator's bitcoind, with nothing but the secrets below.
 
-Every node exports its rugpull secret, which is bound to the mint's current UTXO. Check first that `onchain status` reports the same `tx_tip` on every node and `onchain pending` is empty everywhere, then:
+Every node exports its rugpull secret into a file, as with `backup`: pipe it, never print it. It is bound to the mint's current UTXO, so check first that `onchain status` reports the same `tx_tip` on every node and `onchain pending` is empty everywhere, then:
 
 ```bash
-picomint-node-cli onchain rugpull
+picomint-node-cli onchain rugpull > rugpull-3.json
 ```
 
-A threshold of nodes send their secrets to whoever pulls the rug. That operator passes the mint size, the destination address and the secrets; the tool interpolates the key, finds the UTXO in bitcoind's UTXO set, drains it to the address and broadcasts:
+A threshold of nodes send their files to whoever pulls the rug. That operator passes the mint size, the destination address and the files; the tool interpolates the key, finds the UTXO in bitcoind's UTXO set, drains it to the address and broadcasts:
 
 ```bash
-picomint-rugpull <nodes> <address> --bitcoind-url http://user:pass@127.0.0.1:8332 --secret <secret> --secret <secret> ...
+picomint-rugpull <nodes> <address> --bitcoind-url http://user:pass@127.0.0.1:8332 --secret rugpull-0.json --secret rugpull-1.json ...
 ```
 
 The fee rate defaults to bitcoind's estimate; `--fee-rate-sat-per-vb` overrides it. The network is whatever bitcoind runs, and the address must be for it. If the tool reports no funds at the address the secrets reconstruct, a node exported before the last transaction confirmed, or a secret was copied wrong.
