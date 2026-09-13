@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use anyhow::{bail, ensure};
 use futures::future::try_join_all;
 use iroh::Endpoint;
-use picomint_core::config::ConsensusConfig;
+use picomint_core::config::NodeConfigConsensus;
 use picomint_core::core::Account;
 use picomint_core::invite::InviteCode;
 use picomint_core::methods::{ConfigRequest, ConfigResponse, CoreMethod, Method};
@@ -39,7 +39,7 @@ pub(crate) async fn add_mint(
     client: &Client,
     invite: &InviteCode,
     network: Option<bitcoin::Network>,
-) -> anyhow::Result<(ConsensusConfig, BTreeMap<Account, Restore>)> {
+) -> anyhow::Result<(NodeConfigConsensus, BTreeMap<Account, Restore>)> {
     let config = download(&client.endpoint, invite).await?;
 
     ensure!(
@@ -67,11 +67,11 @@ pub(crate) async fn add_mint(
     Ok((config, restores))
 }
 
-/// Downloads the [`ConsensusConfig`] from the issuing node named in the
+/// Downloads the [`NodeConfigConsensus`] from the issuing node named in the
 /// invite code. The node enforces the invite's expiration and user limit
 /// before serving; integrity is guaranteed because the config's computed
 /// mint id must match the one committed in the invite code.
-async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<ConsensusConfig> {
+async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<NodeConfigConsensus> {
     debug!(
         invite = %picomint_base32::encode(invite),
         iroh_pk = %invite.iroh_pk,

@@ -22,7 +22,7 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 ## Architecture
 
 ### Crates
-- `picomint-core` — shared types, encoding, wire protocol, `ConsensusConfig`, and the per-module common types for `ecash`/`onchain`/`lightning`
+- `picomint-core` — shared types, encoding, wire protocol, `NodeConfigConsensus`, and the per-module common types for `ecash`/`onchain`/`lightning`
 - `picomint-encoding` / `picomint-derive` — `Encodable`/`Decodable` traits and derive macros
 - `picomint-bft` — BFT atomic broadcast (DAG-based, own design — not Aleph-derived)
 - `picomint-node-daemon` — mint node binary (consensus via picomint-bft); owns the concrete ecash/onchain/lightning server-side module code under `src/consensus/{ecash,onchain,lightning}/`, and the bitcoind JSON-RPC client (`src/bitcoind.rs`); no web UI, the admin CLI is the only operator surface

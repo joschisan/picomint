@@ -12,8 +12,8 @@ use anyhow::{Context as _, ensure};
 use futures::future::select_all;
 use futures::stream::BoxStream;
 use picomint_core::NodeId;
-use picomint_core::config::ConsensusConfig;
 use picomint_core::config::MintId;
+use picomint_core::config::NodeConfigConsensus;
 use picomint_core::core::OperationId;
 use picomint_core::invite::InviteCode;
 use picomint_redb::{Database, DbRead, WriteTx, table};
@@ -25,7 +25,7 @@ use tracing::debug;
 // atomically with the mint's other rows.
 table!(
     ClientConfigTable,
-    MintId => ConsensusConfig,
+    MintId => NodeConfigConsensus,
     "client-consensus-config",
 );
 
@@ -223,14 +223,14 @@ impl Client {
     }
 
     /// Every added mint's persisted config.
-    pub fn mint_configs(&self) -> BTreeMap<MintId, ConsensusConfig> {
+    pub fn mint_configs(&self) -> BTreeMap<MintId, NodeConfigConsensus> {
         self.db
             .begin_read()
             .iter(&ClientConfigTable, |r| r.collect())
     }
 
     /// The added mint's persisted config.
-    pub fn config(&self, mint: MintId) -> Option<ConsensusConfig> {
+    pub fn config(&self, mint: MintId) -> Option<NodeConfigConsensus> {
         self.db.begin_read().get(&ClientConfigTable, &mint)
     }
 
@@ -360,7 +360,7 @@ fn build_ctx(
     endpoint: &Endpoint,
     db: &Database,
     mnemonic: &Mnemonic,
-    config: ConsensusConfig,
+    config: NodeConfigConsensus,
     role: Role,
 ) -> ClientContext {
     let mint = config.calculate_mint_id();

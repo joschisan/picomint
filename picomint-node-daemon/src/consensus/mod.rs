@@ -52,7 +52,7 @@ pub async fn run(
     p2p_status_receivers: P2PStatusReceivers,
     foreign_conn_rx: async_channel::Receiver<iroh::endpoint::Connection>,
 ) -> anyhow::Result<()> {
-    cfg.validate_config()?;
+    crate::config::validate_config(&cfg)?;
 
     anyhow::ensure!(
         cfg.consensus.network != bitcoin::Network::Bitcoin,

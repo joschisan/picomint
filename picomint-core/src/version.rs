@@ -50,10 +50,10 @@ pub struct ConsensusVersion {
 /// cannot apply rules they do not have.
 ///
 /// Also what a mint created by this binary starts at, recorded as
-/// [`ConsensusConfig::default_version`], so a mint only ever votes to
+/// [`NodeConfigConsensus::default_version`], so a mint only ever votes to
 /// climb past the version it was born with. Bumping this therefore does two
 /// things at once: it makes running mints vote their way up, and it
 /// makes new ones start at the top with nothing to vote about.
 ///
-/// [`ConsensusConfig::default_version`]: crate::config::ConsensusConfig::default_version
+/// [`NodeConfigConsensus::default_version`]: crate::config::NodeConfigConsensus::default_version
 pub const CONSENSUS_VERSION: ConsensusVersion = ConsensusVersion { major: 1, minor: 0 };

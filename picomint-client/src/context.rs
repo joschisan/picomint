@@ -6,8 +6,8 @@ use crate::task::TaskGroup;
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
 use picomint_core::TransactionId;
-use picomint_core::config::ConsensusConfig;
 use picomint_core::config::MintId;
+use picomint_core::config::NodeConfigConsensus;
 use picomint_core::core::{Account, OperationId};
 use picomint_redb::{Database, WriteTx};
 
@@ -23,8 +23,8 @@ use crate::{TxAcceptEvent, TxRejectEvent};
 pub struct ClientContext {
     pub(crate) api: MintApi,
     pub(crate) db: Database,
-    pub(crate) config: ConsensusConfig,
-    /// Memoized [`ConsensusConfig::calculate_mint_id`] — a consensus
+    pub(crate) config: NodeConfigConsensus,
+    /// Memoized [`NodeConfigConsensus::calculate_mint_id`] — a consensus
     /// hash over the whole config, too hot to recompute per table key. Can
     /// never go stale: the config it is derived from is immutable beside it.
     pub(crate) mint: MintId,
@@ -37,7 +37,7 @@ impl ClientContext {
     pub(crate) fn new(
         api: MintApi,
         db: Database,
-        config: ConsensusConfig,
+        config: NodeConfigConsensus,
         secret: ClientSecret,
         gateways: Gateways,
         tg: TaskGroup,

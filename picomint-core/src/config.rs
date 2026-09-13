@@ -9,9 +9,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::NodeId;
-use crate::ecash::config::EcashConfigConsensus;
-use crate::lightning::config::LightningConfigConsensus;
-use crate::onchain::config::OnchainConfigConsensus;
+use crate::ecash::config::{EcashConfigConsensus, EcashConfigPrivate};
+use crate::invite::InviteCode;
+use crate::lightning::config::{LightningConfigConsensus, LightningConfigPrivate};
+use crate::onchain::config::{OnchainConfigConsensus, OnchainConfigPrivate};
 use crate::version::ConsensusVersion;
 use picomint_encoding::{Decodable, Encodable};
 
@@ -68,7 +69,7 @@ impl MintId {
 ///
 /// [`CoreMethod::Config`]: crate::methods::CoreMethod::Config
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Encodable, Decodable)]
-pub struct ConsensusConfig {
+pub struct NodeConfigConsensus {
     /// Per-node endpoint info (iroh pk, broadcast pk, name).
     pub nodes: BTreeMap<NodeId, NodeEndpoint>,
     /// Bitcoin network this mint operates on.
@@ -90,7 +91,47 @@ pub struct ConsensusConfig {
     pub lightning: LightningConfigConsensus,
 }
 
-impl ConsensusConfig {
+/// A node's whole config: the mint's consensus config plus this node's
+/// keys. Persisted in the node database, printed by `backup` and taken
+/// back unchanged by `setup restore`.
+#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
+pub struct NodeConfig {
+    /// Mint-wide config, identical across nodes
+    pub consensus: NodeConfigConsensus,
+    /// This node's secrets
+    pub private: NodeConfigPrivate,
+}
+
+/// This node's secrets: its identity and the keys DKG dealt it.
+#[derive(Debug, Clone, Serialize, Deserialize, Encodable, Decodable)]
+pub struct NodeConfigPrivate {
+    /// Our node id
+    pub identity: NodeId,
+    /// Secret key for our single iroh endpoint (p2p + api)
+    pub iroh_sk: iroh_base::SecretKey,
+    /// Secret key for the atomic broadcast to sign messages
+    pub broadcast_secret_key: secp256k1::SecretKey,
+    /// Private key material for the ecash module
+    pub ecash: EcashConfigPrivate,
+    /// Private key material for the onchain module
+    pub onchain: OnchainConfigPrivate,
+    /// Private key material for the lightning module
+    pub lightning: LightningConfigPrivate,
+}
+
+impl NodeConfig {
+    /// An invite code this node serves: its iroh key, the mint id and the
+    /// invite's id.
+    pub fn get_invite_code(&self, invite_id: [u8; 16]) -> InviteCode {
+        InviteCode::new(
+            self.private.iroh_sk.public(),
+            self.consensus.calculate_mint_id(),
+            invite_id,
+        )
+    }
+}
+
+impl NodeConfigConsensus {
     pub fn calculate_mint_id(&self) -> MintId {
         MintId(self.consensus_hash())
     }
