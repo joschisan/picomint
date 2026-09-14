@@ -126,23 +126,44 @@ pub fn derive_error_code(input: TokenStream) -> TokenStream {
         return error(&ident, "ErrorCode can only be derived for enums").into();
     };
 
-    let idents = variants.iter().map(|v| &v.ident).collect::<Vec<_>>();
-    let codes = variants
-        .iter()
-        .map(|v| snake_case(&v.ident.to_string()))
-        .collect::<Vec<_>>();
-    let messages = variants
-        .iter()
-        .map(|v| error_message(&v.attrs))
-        .collect::<Vec<_>>();
+    let code_arms = variants.iter().map(|v| {
+        let variant = &v.ident;
+
+        match error_message(&v.attrs) {
+            Some(_) => {
+                let code = snake_case(&variant.to_string());
+                quote! { Self::#variant { .. } => #code, }
+            }
+            None => quote! {
+                Self::#variant(inner) => ::picomint_core::error::ErrorCode::code(inner),
+            },
+        }
+    });
+
+    let codes = variants.iter().map(|v| match error_message(&v.attrs) {
+        Some(message) => {
+            let code = snake_case(&v.ident.to_string());
+            quote! { codes.push((#code, #message)); }
+        }
+        None => {
+            let inner = transparent_inner(v);
+            quote! {
+                codes.extend(<#inner as ::picomint_core::error::ErrorCode>::codes());
+            }
+        }
+    });
 
     quote! {
         impl ::picomint_core::error::ErrorCode for #ident {
-            const CODES: &'static [(&'static str, &'static str)] = &[#((#codes, #messages)),*];
+            fn codes() -> Vec<(&'static str, &'static str)> {
+                let mut codes = Vec::new();
+                #(#codes)*
+                codes
+            }
 
             fn code(&self) -> &'static str {
                 match self {
-                    #(Self::#idents { .. } => #codes,)*
+                    #(#code_arms)*
                 }
             }
         }
@@ -150,17 +171,26 @@ pub fn derive_error_code(input: TokenStream) -> TokenStream {
     .into()
 }
 
-/// The string literal of a variant's `#[error("...")]` attribute.
-fn error_message(attrs: &[Attribute]) -> String {
-    attrs
+/// The string literal of a variant's `#[error("...")]` attribute; `None`
+/// for `#[error(transparent)]`.
+fn error_message(attrs: &[Attribute]) -> Option<String> {
+    let attr = attrs
         .iter()
         .find(|attr| attr.path().is_ident("error"))
-        .and_then(|attr| attr.parse_args::<Lit>().ok())
-        .and_then(|lit| match lit {
-            Lit::Str(message) => Some(message.value()),
-            _ => None,
-        })
-        .expect("every variant of an ErrorCode enum carries an #[error(\"...\")] message")
+        .expect("every variant of an ErrorCode enum carries an #[error] attribute");
+
+    match attr.parse_args::<Lit>() {
+        Ok(Lit::Str(message)) => Some(message.value()),
+        _ => None,
+    }
+}
+
+/// The one field a transparent variant wraps, whose codes it contributes.
+fn transparent_inner(variant: &Variant) -> &syn::Type {
+    match &variant.fields {
+        Fields::Unnamed(fields) if fields.unnamed.len() == 1 => &fields.unnamed[0].ty,
+        _ => panic!("a transparent ErrorCode variant wraps exactly one unnamed field"),
+    }
 }
 
 /// `InsufficientBalance` to `insufficient_balance`.

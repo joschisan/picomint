@@ -103,7 +103,7 @@ pub fn schema<Resp: JsonSchema>() -> String {
 /// error enum the daemon's handler returns, so help and daemon cannot
 /// disagree.
 pub fn schema_fallible<Resp: JsonSchema, Err: ErrorCode>() -> String {
-    let codes = Err::CODES
+    let codes = Err::codes()
         .iter()
         .map(|entry| format!("{}: {}", entry.0, entry.1))
         .collect::<Vec<_>>()

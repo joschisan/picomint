@@ -408,32 +408,19 @@ pub enum SendFeeError {
     NotAdded,
 }
 
-impl From<SendFeeError> for SendError {
-    fn from(error: SendFeeError) -> Self {
-        match error {
-            SendFeeError::MintError => SendError::MintError,
-            SendFeeError::NoConsensusFeerateAvailable => SendError::NoConsensusFeerateAvailable,
-            SendFeeError::NotAdded => SendError::NotAdded,
-        }
-    }
-}
-
+/// Why an onchain send was not submitted.
 #[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum SendError {
     #[error("Address is from a different network than the mint.")]
     WrongNetwork,
     #[error("The value is too small")]
     DustValue,
-    #[error("Could not determine the send fee")]
-    MintError,
-    #[error("No consensus feerate is available at this time")]
-    NoConsensusFeerateAvailable,
     #[error("The client does not have sufficient funds to send the payment")]
     InsufficientFunds,
     #[error("Unsupported address type")]
     UnsupportedAddress,
-    #[error("Mint is not added")]
-    NotAdded,
+    #[error(transparent)]
+    Fee(#[from] SendFeeError),
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
@@ -467,7 +454,7 @@ impl Client {
         amount: bitcoin::Amount,
         fee: Option<bitcoin::Amount>,
     ) -> Result<OperationId, SendError> {
-        let ctx = self.ctx(mint).map_err(|_| SendError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| SendFeeError::NotAdded)?;
 
         let fee = match fee {
             Some(fee) => fee,
@@ -498,7 +485,7 @@ impl Client {
         account: Account,
         address: Address<NetworkUnchecked>,
     ) -> Result<OperationId, SendError> {
-        let ctx = self.ctx(mint).map_err(|_| SendError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| SendFeeError::NotAdded)?;
 
         let fee = send_fee(&ctx).await?;
 

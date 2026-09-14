@@ -467,54 +467,8 @@ pub enum SendMaxAmountError {
 pub enum SendMaxError {
     #[error("The lnurl endpoint failed: {0}")]
     Lnurl(String),
-    #[error("Invoice is missing an amount")]
-    InvoiceMissingAmount,
-    #[error("Invoice has expired")]
-    InvoiceExpired,
-    #[error("A payment for this invoice has already been attempted")]
-    InvoiceAlreadyAttempted,
-    #[error("Gateway fee exceeds the allowed limit")]
-    GatewayFeeExceedsLimit,
-    #[error("Gateway expiry time exceeds the allowed limit")]
-    GatewayExpiryExceedsLimit,
-    #[error("Gateway is not available")]
-    GatewayNotAvailable,
-    #[error("Failed to request block height")]
-    FailedToRequestBlockHeight,
-    #[error("The client's balance is insufficient")]
-    InsufficientBalance,
-    #[error("Invoice is for a different currency")]
-    WrongCurrency {
-        invoice_currency: Currency,
-        mint_currency: Currency,
-    },
-    #[error("Mint is not added")]
-    NotAdded,
-}
-
-impl From<SendPaymentError> for SendMaxError {
-    fn from(error: SendPaymentError) -> Self {
-        match error {
-            SendPaymentError::InvoiceMissingAmount => SendMaxError::InvoiceMissingAmount,
-            SendPaymentError::InvoiceExpired => SendMaxError::InvoiceExpired,
-            SendPaymentError::InvoiceAlreadyAttempted => SendMaxError::InvoiceAlreadyAttempted,
-            SendPaymentError::GatewayFeeExceedsLimit => SendMaxError::GatewayFeeExceedsLimit,
-            SendPaymentError::GatewayExpiryExceedsLimit => SendMaxError::GatewayExpiryExceedsLimit,
-            SendPaymentError::GatewayNotAvailable => SendMaxError::GatewayNotAvailable,
-            SendPaymentError::FailedToRequestBlockHeight => {
-                SendMaxError::FailedToRequestBlockHeight
-            }
-            SendPaymentError::InsufficientBalance => SendMaxError::InsufficientBalance,
-            SendPaymentError::WrongCurrency {
-                invoice_currency,
-                mint_currency,
-            } => SendMaxError::WrongCurrency {
-                invoice_currency,
-                mint_currency,
-            },
-            SendPaymentError::NotAdded => SendMaxError::NotAdded,
-        }
-    }
+    #[error(transparent)]
+    Payment(#[from] SendPaymentError),
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
@@ -637,12 +591,12 @@ impl Client {
         gateway_pk: GatewayPk,
         lnurl: &Lnurl,
     ) -> Result<OperationId, SendMaxError> {
-        let ctx = self.ctx(mint).map_err(|_| SendMaxError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| SendPaymentError::NotAdded)?;
 
         let gateway_info = ctx
             .gateways
             .info(gateway_pk)
-            .ok_or(SendMaxError::GatewayNotAvailable)?;
+            .ok_or(SendPaymentError::GatewayNotAvailable)?;
 
         send_max(&ctx, account, gateway_pk, gateway_info, lnurl).await
     }
