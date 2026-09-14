@@ -78,7 +78,7 @@ The gateway can serve multiple mints simultaneously. Add one with an invite code
 picomint-gateway-cli client add <invite>
 ```
 
-List added mints:
+It prints the mint's id; `list` prints every added mint with its name:
 
 ```bash
 picomint-gateway-cli client list

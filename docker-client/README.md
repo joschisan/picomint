@@ -36,7 +36,7 @@ The daemon can hold balances in multiple mints. Add one with an invite code (see
 picomint-client-cli add <invite>
 ```
 
-List added mints with their ids, which every other command takes as its first argument:
+It prints the mint's id, which every per-mint command takes first; `list` prints every added mint with its name:
 
 ```bash
 picomint-client-cli list

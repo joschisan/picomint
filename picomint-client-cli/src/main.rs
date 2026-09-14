@@ -10,8 +10,8 @@ use picomint_client::lightning::{
 };
 use picomint_client::{AddMintError, NotAddedError, lightning, onchain};
 use picomint_client_cli_core::{
-    ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse, ClientConfigRequest,
-    ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
+    ClientAddRequest, ClientAddResponse, ClientBalanceRequest, ClientBalanceResponse,
+    ClientConfigRequest, ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
     ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
     ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
     ClientExpiryRequest, ClientExpiryResponse, ClientLightningGatewayListRequest,
@@ -58,7 +58,7 @@ enum Commands {
     ))]
     Query(QueryRequest),
     /// Add a mint
-    #[command(after_long_help = schema_fallible::<(), AddMintError>())]
+    #[command(after_long_help = schema_fallible::<ClientAddResponse, AddMintError>())]
     Add(ClientAddRequest),
     /// Remove a mint and delete all of its data; destructive, so check for in-flight payments via `query` first
     #[command(after_long_help = schema_fallible::<(), NotAddedError>())]
@@ -149,7 +149,7 @@ enum LightningGatewayCommands {
     #[command(after_long_help = schema_fallible::<ClientLightningGatewayListResponse, NotAddedError>())]
     List(ClientLightningGatewayListRequest),
     /// Re-fetch the mint's gateway list and re-probe every gateway
-    #[command(after_long_help = schema_fallible::<(), RefreshGatewaysError>())]
+    #[command(after_long_help = schema_fallible::<ClientLightningGatewayListResponse, RefreshGatewaysError>())]
     Refresh(ClientLightningGatewayRefreshRequest),
 }
 

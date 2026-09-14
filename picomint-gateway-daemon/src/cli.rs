@@ -14,7 +14,7 @@ use picomint_cli_server::{CliError, serve};
 use picomint_client::NotAddedError;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
-    ChannelInfo, ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse,
+    ChannelInfo, ClientAddRequest, ClientAddResponse, ClientBalanceRequest, ClientBalanceResponse,
     ClientConfigRequest, ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
     ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
     ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
@@ -541,14 +541,14 @@ async fn ldk_peer_list(
 async fn client_add(
     State(state): State<AppState>,
     Json(payload): Json<ClientAddRequest>,
-) -> Result<Json<()>, CliError> {
-    state
+) -> Result<Json<ClientAddResponse>, CliError> {
+    let mint = state
         .client
         .add_mint(&payload.invite, Some(state.network))
         .await
         .map_err(CliError::rejected)?;
 
-    Ok(Json(()))
+    Ok(Json(ClientAddResponse { mint }))
 }
 
 /// Remove a mint: shut its client runtime down, then delete its

@@ -397,6 +397,13 @@ pub struct ClientAddRequest {
     pub invite: InviteCode,
 }
 
+/// The mint is added.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientAddResponse {
+    /// The mint's id, which every per-mint command takes first
+    pub mint: MintId,
+}
+
 // --- /client/remove ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]

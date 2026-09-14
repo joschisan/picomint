@@ -8,8 +8,8 @@ use axum::routing::post;
 use picomint_cli_server::{CliError, serve};
 use picomint_client::NotAddedError;
 use picomint_client_cli_core::{
-    ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse, ClientConfigRequest,
-    ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
+    ClientAddRequest, ClientAddResponse, ClientBalanceRequest, ClientBalanceResponse,
+    ClientConfigRequest, ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
     ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
     ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
     ClientExpiryRequest, ClientExpiryResponse, ClientLightningGatewayListRequest,
@@ -104,14 +104,14 @@ async fn query(
 async fn add(
     State(state): State<AppState>,
     Json(payload): Json<ClientAddRequest>,
-) -> Result<Json<()>, CliError> {
-    state
+) -> Result<Json<ClientAddResponse>, CliError> {
+    let mint = state
         .client
         .add_mint(&payload.invite, Some(state.network))
         .await
         .map_err(CliError::rejected)?;
 
-    Ok(Json(()))
+    Ok(Json(ClientAddResponse { mint }))
 }
 
 #[instrument(skip_all, err)]
@@ -416,12 +416,17 @@ async fn lightning_lnurl(
 async fn lightning_gateway_refresh(
     State(state): State<AppState>,
     Json(payload): Json<ClientLightningGatewayRefreshRequest>,
-) -> Result<Json<()>, CliError> {
+) -> Result<Json<ClientLightningGatewayListResponse>, CliError> {
     state
         .client
         .lightning_refresh_gateways(payload.mint)
         .await
         .map_err(CliError::rejected)?;
 
-    Ok(Json(()))
+    let gateways = state
+        .client
+        .lightning_gateways(payload.mint)
+        .expect("the mint was found a moment ago");
+
+    Ok(Json(ClientLightningGatewayListResponse { gateways }))
 }

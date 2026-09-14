@@ -6,8 +6,8 @@ use picomint_cli_client::{FOOTER, print_json, request, schema, schema_fallible};
 use picomint_client::ecash::{ReceiveEcashError, SendEcashError};
 use picomint_client::{AddMintError, NotAddedError, onchain};
 use picomint_gateway_cli_core::{
-    ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse, ClientConfigRequest,
-    ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
+    ClientAddRequest, ClientAddResponse, ClientBalanceRequest, ClientBalanceResponse,
+    ClientConfigRequest, ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
     ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
     ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
     ClientListResponse, ClientOnchainReceiveRequest, ClientOnchainReceiveResponse,
@@ -145,7 +145,7 @@ enum LdkPeerCommands {
 #[derive(Subcommand)]
 enum ClientCommands {
     /// Add a mint
-    #[command(after_long_help = schema_fallible::<(), AddMintError>())]
+    #[command(after_long_help = schema_fallible::<ClientAddResponse, AddMintError>())]
     Add(ClientAddRequest),
     /// Remove a mint and delete all of its data. Destructive:
     /// check for in-flight payments via `query` first — failing to

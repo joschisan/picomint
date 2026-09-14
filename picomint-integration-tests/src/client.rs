@@ -65,7 +65,8 @@ impl TestClient {
         client_cmd(&self.data_dir)
             .arg("add")
             .arg(picomint_base32::encode(invite))
-            .run_cli()
+            .run_cli::<Value>()
+            .map(|_| ())
     }
 
     /// Restore from the daemon's own mnemonic: removing the mint wipes its
@@ -208,7 +209,8 @@ impl TestClient {
             .arg("gateway")
             .arg("refresh")
             .arg(self.mint.to_string())
-            .run_cli()
+            .run_cli::<Value>()
+            .map(|_| ())
     }
 
     /// The one gateway the test mint recommends.
