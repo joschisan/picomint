@@ -3337,6 +3337,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -3360,9 +3361,11 @@ dependencies = [
  "lightning-invoice",
  "picomint-client",
  "picomint-core",
+ "picomint-lnurl",
  "schemars 1.2.1",
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]

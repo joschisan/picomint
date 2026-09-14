@@ -11,8 +11,9 @@ use picomint_node_cli_core::{
     ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
     ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL, ROUTE_ONCHAIN_STATUS,
     ROUTE_SETUP_ADD, ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE,
-    ROUTE_STATUS, RugpullError, RugpullResponse, SetupAddRequest, SetupAddResponse, SetupError,
-    SetupInitRequest, SetupInitResponse, StatusError,
+    ROUTE_STATUS, RugpullError, RugpullResponse, SetupAddError, SetupAddRequest, SetupAddResponse,
+    SetupConfirmError, SetupInitError, SetupInitRequest, SetupInitResponse, SetupRestoreError,
+    StatusError,
 };
 use serde_json::Value;
 
@@ -80,19 +81,19 @@ enum ExpiryCommands {
 #[derive(Subcommand)]
 enum SetupCommands {
     /// Name this node and print its setup code for the other nodes
-    #[command(after_long_help = schema_fallible::<SetupInitResponse, SetupError>())]
+    #[command(after_long_help = schema_fallible::<SetupInitResponse, SetupInitError>())]
     Init(SetupInitRequest),
     /// Add a node's setup code
-    #[command(after_long_help = schema_fallible::<SetupAddResponse, SetupError>())]
+    #[command(after_long_help = schema_fallible::<SetupAddResponse, SetupAddError>())]
     Add(SetupAddRequest),
     /// Forget every added setup code and start collecting them again
     #[command(after_long_help = schema::<()>())]
     Reset,
     /// Confirm the node set; once every node has, key generation starts
-    #[command(after_long_help = schema_fallible::<(), SetupError>())]
+    #[command(after_long_help = schema_fallible::<(), SetupConfirmError>())]
     Confirm,
     /// Restore the node from a `backup.json` on stdin, skipping the ceremony
-    #[command(after_long_help = schema_fallible::<(), SetupError>())]
+    #[command(after_long_help = schema_fallible::<(), SetupRestoreError>())]
     Restore,
 }
 

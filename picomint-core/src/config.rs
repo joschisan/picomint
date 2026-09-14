@@ -5,6 +5,7 @@ use std::hash::Hash;
 use bitcoin::Network;
 use bitcoin::hashes::{Hash as BitcoinHash, sha256};
 use derive_more::{Display, FromStr};
+use iroh_base::PublicKey;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +15,7 @@ use crate::invite::InviteCode;
 use crate::lightning::config::{LightningConfigConsensus, LightningConfigPrivate};
 use crate::onchain::config::{OnchainConfigConsensus, OnchainConfigPrivate};
 use crate::version::ConsensusVersion;
-use picomint_encoding::{Decodable, Encodable};
+use picomint_encoding::{Base32, Decodable, Encodable};
 
 // TODO: make configurable
 /// How large a BFT unit's payload is meant to get. A unit stops taking items
@@ -143,4 +144,15 @@ impl NodeConfigConsensus {
             .map(|entry| (*entry.0, entry.1.iroh_pk))
             .collect()
     }
+}
+
+/// A node's setup code: its name, its iroh public key and, if this node set
+/// them, the mint's name and size. Its operator hands it to every other
+/// node's operator during the setup ceremony, and `setup add` takes it.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable, Base32)]
+pub struct NodeSetupCode {
+    pub name: String,
+    pub pk: PublicKey,
+    pub mint_name: Option<String>,
+    pub mint_size: Option<u8>,
 }

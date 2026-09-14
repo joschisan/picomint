@@ -342,12 +342,11 @@ async fn dkg_phase(State(db): State<Database>) -> Result<Json<NodeStatus>, CliEr
         .ok_or_else(|| CliError::rejected(StatusError::DkgCompleting))?;
 
     let phase = DkgPhase {
-        setup_code: picomint_base32::encode(
-            params
-                .nodes
-                .get(&params.identity)
-                .expect("our node id is always in the node map"),
-        ),
+        setup_code: params
+            .nodes
+            .get(&params.identity)
+            .expect("our node id is always in the node map")
+            .clone(),
     };
 
     Ok(Json(NodeStatus::Dkg(phase)))
@@ -357,10 +356,7 @@ async fn dkg_phase(State(db): State<Database>) -> Result<Json<NodeStatus>, CliEr
 
 async fn setup_phase(State(setup_api): State<Arc<SetupApi>>) -> Result<Json<NodeStatus>, CliError> {
     let phase = SetupPhase {
-        setup_code: setup_api
-            .setup_code()
-            .await
-            .map(|code| picomint_base32::encode(&code)),
+        setup_code: setup_api.setup_code().await,
         node_name: setup_api.node_name().await,
         mint_name: setup_api.cfg_mint_name().await,
         mint_size: setup_api.mint_size().await,

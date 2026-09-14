@@ -49,11 +49,11 @@ pub(crate) fn resume(ctx: &ClientContext) {
 }
 
 /// Fetch the current fee required to send an onchain payment.
-pub(crate) async fn send_fee(ctx: &ClientContext) -> Result<bitcoin::Amount, SendError> {
+pub(crate) async fn send_fee(ctx: &ClientContext) -> Result<bitcoin::Amount, SendFeeError> {
     api::send_fee(&ctx.api)
         .await
-        .map_err(|_| SendError::MintError)?
-        .ok_or(SendError::NoConsensusFeerateAvailable)
+        .map_err(|_| SendFeeError::MintError)?
+        .ok_or(SendFeeError::NoConsensusFeerateAvailable)
 }
 
 fn max_amount_at(ctx: &ClientContext, account: Account, fee: bitcoin::Amount) -> bitcoin::Amount {
@@ -397,6 +397,27 @@ pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
     vec![db.notify_for_table(&SendStateMachineTable)]
 }
 
+/// Why the mint's send fee could not be read.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum SendFeeError {
+    #[error("Could not determine the send fee")]
+    MintError,
+    #[error("No consensus feerate is available at this time")]
+    NoConsensusFeerateAvailable,
+    #[error("Mint is not added")]
+    NotAdded,
+}
+
+impl From<SendFeeError> for SendError {
+    fn from(error: SendFeeError) -> Self {
+        match error {
+            SendFeeError::MintError => SendError::MintError,
+            SendFeeError::NoConsensusFeerateAvailable => SendError::NoConsensusFeerateAvailable,
+            SendFeeError::NotAdded => SendError::NotAdded,
+        }
+    }
+}
+
 #[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum SendError {
     #[error("Address is from a different network than the mint.")]
@@ -463,8 +484,8 @@ impl Client {
         &self,
         mint: MintId,
         account: Account,
-    ) -> Result<bitcoin::Amount, SendError> {
-        let ctx = self.ctx(mint).map_err(|_| SendError::NotAdded)?;
+    ) -> Result<bitcoin::Amount, SendFeeError> {
+        let ctx = self.ctx(mint).map_err(|_| SendFeeError::NotAdded)?;
 
         Ok(max_amount_at(&ctx, account, send_fee(&ctx).await?))
     }
@@ -487,8 +508,8 @@ impl Client {
     }
 
     /// The current fee required to send an onchain payment.
-    pub async fn onchain_send_fee(&self, mint: MintId) -> Result<bitcoin::Amount, SendError> {
-        let ctx = self.ctx(mint).map_err(|_| SendError::NotAdded)?;
+    pub async fn onchain_send_fee(&self, mint: MintId) -> Result<bitcoin::Amount, SendFeeError> {
+        let ctx = self.ctx(mint).map_err(|_| SendFeeError::NotAdded)?;
 
         send_fee(&ctx).await
     }

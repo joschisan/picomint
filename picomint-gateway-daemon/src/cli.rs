@@ -26,13 +26,13 @@ use picomint_gateway_cli_core::{
     LdkChannelSpliceOutRequest, LdkError, LdkLightningProbeRequest, LdkLightningReceiveRequest,
     LdkLightningReceiveResponse, LdkLightningSendRequest, LdkLightningSendResponse,
     LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
-    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
-    PeerInfo, QueryRequest, QueryResponse, ROUTE_CLIENT_ADD, ROUTE_CLIENT_BALANCE,
-    ROUTE_CLIENT_CONFIG, ROUTE_CLIENT_ECASH_COUNT, ROUTE_CLIENT_ECASH_RECEIVE,
-    ROUTE_CLIENT_ECASH_SEND, ROUTE_CLIENT_ECASH_SEND_MAX, ROUTE_CLIENT_LIST,
-    ROUTE_CLIENT_ONCHAIN_RECEIVE, ROUTE_CLIENT_ONCHAIN_SEND, ROUTE_CLIENT_ONCHAIN_SEND_FEE,
-    ROUTE_CLIENT_ONCHAIN_SEND_MAX, ROUTE_CLIENT_REMOVE, ROUTE_INFO, ROUTE_LDK_BALANCES,
-    ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
+    LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, LdkReceiveError,
+    LdkSendError, MnemonicResponse, PeerInfo, QueryRequest, QueryResponse, ROUTE_CLIENT_ADD,
+    ROUTE_CLIENT_BALANCE, ROUTE_CLIENT_CONFIG, ROUTE_CLIENT_ECASH_COUNT,
+    ROUTE_CLIENT_ECASH_RECEIVE, ROUTE_CLIENT_ECASH_SEND, ROUTE_CLIENT_ECASH_SEND_MAX,
+    ROUTE_CLIENT_LIST, ROUTE_CLIENT_ONCHAIN_RECEIVE, ROUTE_CLIENT_ONCHAIN_SEND,
+    ROUTE_CLIENT_ONCHAIN_SEND_FEE, ROUTE_CLIENT_ONCHAIN_SEND_MAX, ROUTE_CLIENT_REMOVE, ROUTE_INFO,
+    ROUTE_LDK_BALANCES, ROUTE_LDK_CHANNEL_CLOSE, ROUTE_LDK_CHANNEL_LIST, ROUTE_LDK_CHANNEL_OPEN,
     ROUTE_LDK_CHANNEL_SPLICE_IN, ROUTE_LDK_CHANNEL_SPLICE_OUT, ROUTE_LDK_LIGHTNING_PROBE,
     ROUTE_LDK_LIGHTNING_RECEIVE, ROUTE_LDK_LIGHTNING_SEND, ROUTE_LDK_ONCHAIN_RECEIVE,
     ROUTE_LDK_ONCHAIN_SEND, ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST,
@@ -414,7 +414,8 @@ async fn ldk_lightning_receive(
     let expiry_secs = payload.expiry_secs.unwrap_or(3600);
     let description = match payload.description {
         Some(desc) => LdkBolt11InvoiceDescription::Direct(
-            Description::new(desc).map_err(|_| CliError::rejected(LdkError::InvalidDescription))?,
+            Description::new(desc)
+                .map_err(|_| CliError::rejected(LdkReceiveError::InvalidDescription))?,
         ),
         None => LdkBolt11InvoiceDescription::Direct(Description::empty()),
     };
@@ -423,7 +424,7 @@ async fn ldk_lightning_receive(
         .node
         .bolt11_payment()
         .receive(payload.amount_msat, &description, expiry_secs)
-        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
+        .map_err(|e| CliError::rejected(LdkReceiveError::Ldk(e.to_string())))?;
 
     Ok(Json(LdkLightningReceiveResponse {
         invoice: invoice.to_string(),
@@ -440,7 +441,7 @@ async fn ldk_lightning_send(
         .node
         .bolt11_payment()
         .send(&payload.invoice, None)
-        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
+        .map_err(|e| CliError::rejected(LdkSendError::Ldk(e.to_string())))?;
 
     let preimage: [u8; 32] = loop {
         if let Some(payment_details) = state.node.payment(&payment_id) {
@@ -456,7 +457,7 @@ async fn ldk_lightning_send(
                     }
                 }
                 PaymentStatus::Failed => {
-                    return Err(CliError::rejected(LdkError::PaymentFailed));
+                    return Err(CliError::rejected(LdkSendError::PaymentFailed));
                 }
             }
         }

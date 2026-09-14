@@ -7,7 +7,7 @@ use chrono::NaiveDate;
 use clap::Args;
 use picomint_core::NodeId;
 use picomint_core::bitcoin::Txid;
-use picomint_core::config::{MintId, NodeConfig};
+use picomint_core::config::{MintId, NodeConfig, NodeSetupCode};
 use picomint_core::error::ErrorCode;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
@@ -71,7 +71,7 @@ pub struct SetupPhase {
     /// This node's setup code, to hand to every other node's operator: its
     /// name and iroh public key, plus the mint name and size if this node
     /// set them. Absent until `setup init` has run
-    pub setup_code: Option<String>,
+    pub setup_code: Option<NodeSetupCode>,
     /// This node's name as given to `setup init`; absent until then
     pub node_name: Option<String>,
     /// The mint's name, once any setup code carrying it has been added or
@@ -91,7 +91,7 @@ pub struct SetupPhase {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DkgPhase {
     /// This node's setup code, for any node whose operator still needs it
-    pub setup_code: String,
+    pub setup_code: NodeSetupCode,
 }
 
 /// The mint is running. Everything here is public; the private keys are
@@ -217,7 +217,7 @@ pub struct SetupInitResponse {
     /// its name, its iroh public key and, if this node set them, the mint
     /// name and size. Running `setup init` again with the same arguments
     /// prints the same code
-    pub setup_code: String,
+    pub setup_code: NodeSetupCode,
 }
 
 // --- /setup/add ---
@@ -226,7 +226,7 @@ pub struct SetupInitResponse {
 pub struct SetupAddRequest {
     /// Another node's setup code, as printed by its `setup init`; adding a
     /// code twice is harmless
-    pub setup_code: String,
+    pub setup_code: NodeSetupCode,
 }
 
 /// Confirms which node the code belonged to.
@@ -427,9 +427,9 @@ pub enum StatusError {
     DkgCompleting,
 }
 
-/// Why the setup ceremony refused a step.
+/// Why `setup init` refused.
 #[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
-pub enum SetupError {
+pub enum SetupInitError {
     #[error("The node name is empty")]
     EmptyNodeName,
     #[error("The mint name is empty")]
@@ -442,8 +442,11 @@ pub enum SetupError {
         "The node has already been initialized; `setup init` with the same arguments repeats its code"
     )]
     AlreadyInitialized,
-    #[error("Not a setup code: {0}")]
-    InvalidSetupCode(String),
+}
+
+/// Why `setup add` refused the code.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum SetupAddError {
     #[error("The node has not been initialized yet; run `setup init` first")]
     NotInitialized,
     #[error("This is the node's own setup code")]
@@ -452,6 +455,15 @@ pub enum SetupError {
     MintNameAlreadySet(String),
     #[error("The mint size has already been set to {0}")]
     MintSizeAlreadySet(u8),
+}
+
+/// Why `setup confirm` did not start key generation.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum SetupConfirmError {
+    #[error("The node has not been initialized yet; run `setup init` first")]
+    NotInitialized,
+    #[error("Mint size must be at least 4")]
+    MintSizeTooSmall,
     #[error("The mint size is {expected} but {got} setup codes are in, this node's included")]
     WrongNodeCount { expected: u8, got: usize },
     #[error("No setup code carries the mint name; one node has to set it")]
@@ -462,8 +474,15 @@ pub enum SetupError {
     Mainnet,
     #[error("The setup has already completed")]
     Completed,
+}
+
+/// Why `setup restore` refused the backup.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum SetupRestoreError {
     #[error("The restored config failed validation: {0}")]
     InvalidConfig(String),
+    #[error("The setup has already completed")]
+    Completed,
 }
 
 /// Why the backend could not be read.

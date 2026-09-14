@@ -3,31 +3,16 @@ use std::sync::Arc;
 
 use iroh::SecretKey;
 use picomint_core::NodeId;
+use picomint_core::config::NodeSetupCode;
 use picomint_encoding::{Decodable, Encodable};
-use picomint_node_cli_core::SetupError;
+use picomint_node_cli_core::{SetupAddError, SetupConfirmError, SetupInitError, SetupRestoreError};
 use picomint_redb::{Database, DbRead};
-use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
 use crate::bitcoind::BitcoindClient;
 use crate::config::db::{DkgParamsTable, InitParamsTable, store_node_config};
 use crate::config::{DkgParams, NodeConfig, SetupResult};
-
-/// The setup code shared between nodes during setup.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable, Serialize)]
-pub struct NodeSetupCode {
-    /// Name of the node
-    pub name: String,
-    /// Public key of the node's single iroh endpoint (serves both p2p and
-    /// client-API traffic, demuxed by node-id on accept).
-    pub pk: iroh_base::PublicKey,
-    /// Mint name set by the leader
-    pub mint_name: Option<String>,
-    /// Total number of nodes (including the one who sets this), set by the
-    /// leader
-    pub mint_size: Option<u8>,
-}
 
 /// In-memory state of the setup phase.
 #[derive(Debug, Clone, Default)]
@@ -134,35 +119,35 @@ impl SetupApi {
         name: String,
         mint_name: Option<String>,
         mint_size: Option<u8>,
-    ) -> Result<String, SetupError> {
+    ) -> Result<NodeSetupCode, SetupInitError> {
         if let Some(existing_init_params) = self.state.lock().await.init_params.clone()
             && existing_init_params.name == name
             && existing_init_params.mint_name == mint_name
             && existing_init_params.mint_size == mint_size
         {
-            return Ok(picomint_base32::encode(&existing_init_params.setup_code()));
+            return Ok(existing_init_params.setup_code());
         }
 
         if name.is_empty() {
-            return Err(SetupError::EmptyNodeName);
+            return Err(SetupInitError::EmptyNodeName);
         }
 
         if mint_name.as_ref().is_some_and(String::is_empty) {
-            return Err(SetupError::EmptyMintName);
+            return Err(SetupInitError::EmptyMintName);
         }
 
         if mint_name.is_some() && mint_size.is_none() {
-            return Err(SetupError::MintSizeMissing);
+            return Err(SetupInitError::MintSizeMissing);
         }
 
         if mint_size.is_some_and(|size| size < 4) {
-            return Err(SetupError::MintSizeTooSmall);
+            return Err(SetupInitError::MintSizeTooSmall);
         }
 
         let mut state = self.state.lock().await;
 
         if state.init_params.is_some() {
-            return Err(SetupError::AlreadyInitialized);
+            return Err(SetupInitError::AlreadyInitialized);
         }
 
         let iroh_sk = SecretKey::from_bytes(&rand::random());
@@ -182,13 +167,10 @@ impl SetupApi {
 
         state.init_params = Some(params.clone());
 
-        Ok(picomint_base32::encode(&params.setup_code()))
+        Ok(params.setup_code())
     }
 
-    pub async fn add_node_setup_code(&self, info: String) -> Result<String, SetupError> {
-        let info = picomint_base32::decode(&info)
-            .map_err(|e| SetupError::InvalidSetupCode(e.to_string()))?;
-
+    pub async fn add_node_setup_code(&self, info: NodeSetupCode) -> Result<String, SetupAddError> {
         let mut state = self.state.lock().await;
 
         if state.other_setup_codes.contains(&info) {
@@ -198,10 +180,10 @@ impl SetupApi {
         let init_params = state
             .init_params
             .clone()
-            .ok_or(SetupError::NotInitialized)?;
+            .ok_or(SetupAddError::NotInitialized)?;
 
         if info == init_params.setup_code() {
-            return Err(SetupError::OwnSetupCode);
+            return Err(SetupAddError::OwnSetupCode);
         }
 
         if let Some(mint_name) = state
@@ -211,7 +193,7 @@ impl SetupApi {
             .find_map(|info| info.mint_name.clone())
             && info.mint_name.is_some()
         {
-            return Err(SetupError::MintNameAlreadySet(mint_name));
+            return Err(SetupAddError::MintNameAlreadySet(mint_name));
         }
 
         if let Some(mint_size) = state
@@ -221,7 +203,7 @@ impl SetupApi {
             .find_map(|info| info.mint_size)
             && info.mint_size.is_some()
         {
-            return Err(SetupError::MintSizeAlreadySet(mint_size));
+            return Err(SetupAddError::MintSizeAlreadySet(mint_size));
         }
 
         state.other_setup_codes.insert(info.clone());
@@ -229,10 +211,10 @@ impl SetupApi {
         Ok(info.name)
     }
 
-    pub async fn start_dkg(&self) -> Result<(), SetupError> {
+    pub async fn start_dkg(&self) -> Result<(), SetupConfirmError> {
         let state = self.state.lock().await.clone();
 
-        let init_params = state.init_params.ok_or(SetupError::NotInitialized)?;
+        let init_params = state.init_params.ok_or(SetupConfirmError::NotInitialized)?;
 
         let our_setup_code = init_params.setup_code();
 
@@ -241,13 +223,13 @@ impl SetupApi {
         setup_codes.insert(our_setup_code.clone());
 
         if setup_codes.len() < 4 {
-            return Err(SetupError::MintSizeTooSmall);
+            return Err(SetupConfirmError::MintSizeTooSmall);
         }
 
         if let Some(mint_size) = setup_codes.iter().find_map(|info| info.mint_size)
             && setup_codes.len() != mint_size as usize
         {
-            return Err(SetupError::WrongNodeCount {
+            return Err(SetupConfirmError::WrongNodeCount {
                 expected: mint_size,
                 got: setup_codes.len(),
             });
@@ -256,7 +238,7 @@ impl SetupApi {
         let mint_name = setup_codes
             .iter()
             .find_map(|info| info.mint_name.clone())
-            .ok_or(SetupError::MintNameMissing)?;
+            .ok_or(SetupConfirmError::MintNameMissing)?;
 
         let our_id = setup_codes
             .iter()
@@ -267,10 +249,10 @@ impl SetupApi {
             .bitcoin
             .network()
             .await
-            .map_err(|e| SetupError::Bitcoind(e.to_string()))?;
+            .map_err(|e| SetupConfirmError::Bitcoind(e.to_string()))?;
 
         if network == bitcoin::Network::Bitcoin {
-            return Err(SetupError::Mainnet);
+            return Err(SetupConfirmError::Mainnet);
         }
 
         let params = DkgParams {
@@ -299,20 +281,21 @@ impl SetupApi {
         self.sender
             .send(SetupResult::Dkg(Box::new(params)))
             .await
-            .map_err(|_| SetupError::Completed)?;
+            .map_err(|_| SetupConfirmError::Completed)?;
 
         Ok(())
     }
 
-    pub async fn restore_config(&self, cfg: NodeConfig) -> Result<(), SetupError> {
-        super::validate_config(&cfg).map_err(|e| SetupError::InvalidConfig(e.to_string()))?;
+    pub async fn restore_config(&self, cfg: NodeConfig) -> Result<(), SetupRestoreError> {
+        super::validate_config(&cfg)
+            .map_err(|e| SetupRestoreError::InvalidConfig(e.to_string()))?;
 
         store_node_config(&self.db, &cfg).await;
 
         self.sender
             .send(SetupResult::Restored(Box::new(cfg)))
             .await
-            .map_err(|_| SetupError::Completed)?;
+            .map_err(|_| SetupRestoreError::Completed)?;
 
         Ok(())
     }

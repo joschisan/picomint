@@ -5,7 +5,6 @@ use picomint_analytics::QueryError;
 use picomint_cli_client::{FOOTER, print_json, request, schema, schema_fallible};
 use picomint_client::ecash::{ReceiveEcashError, SendEcashError};
 use picomint_client::{AddMintError, NotAddedError, onchain};
-use picomint_gateway_cli_core::LdkError;
 use picomint_gateway_cli_core::{
     ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse, ClientConfigRequest,
     ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
@@ -31,6 +30,7 @@ use picomint_gateway_cli_core::{
     ROUTE_LDK_PEER_CONNECT, ROUTE_LDK_PEER_DISCONNECT, ROUTE_LDK_PEER_LIST, ROUTE_MNEMONIC,
     ROUTE_QUERY,
 };
+use picomint_gateway_cli_core::{LdkError, LdkReceiveError, LdkSendError};
 
 #[derive(Parser)]
 #[command(version, after_help = FOOTER)]
@@ -55,7 +55,7 @@ enum Commands {
     Mnemonic,
     /// Query the analytics db with read-only SQL; rows print as JSON objects
     #[command(after_long_help = format!(
-        "Tables, as the SQL that creates them; every table is indexed on operation and ts:\n{}\n{}",
+        "{}\n{}",
         picomint_analytics::tables(),
         schema_fallible::<QueryResponse, QueryError>()
     ))]
@@ -119,10 +119,10 @@ enum LdkChannelCommands {
 #[derive(Subcommand)]
 enum LdkLightningCommands {
     /// Create a bolt11 invoice to receive a payment
-    #[command(after_long_help = schema_fallible::<LdkLightningReceiveResponse, LdkError>())]
+    #[command(after_long_help = schema_fallible::<LdkLightningReceiveResponse, LdkReceiveError>())]
     Receive(LdkLightningReceiveRequest),
     /// Pay a bolt11 invoice
-    #[command(after_long_help = schema_fallible::<LdkLightningSendResponse, LdkError>())]
+    #[command(after_long_help = schema_fallible::<LdkLightningSendResponse, LdkSendError>())]
     Send(LdkLightningSendRequest),
     /// Probe routes towards a node to warm the pathfinding scorer
     #[command(after_long_help = schema_fallible::<(), LdkError>())]
@@ -188,7 +188,7 @@ enum EcashCommands {
 #[derive(Subcommand)]
 enum OnchainCommands {
     /// Get send fee estimate
-    #[command(after_long_help = schema_fallible::<ClientOnchainSendFeeResponse, onchain::SendError>())]
+    #[command(after_long_help = schema_fallible::<ClientOnchainSendFeeResponse, onchain::SendFeeError>())]
     SendFee(ClientOnchainSendFeeRequest),
     /// Send onchain from the mint
     #[command(after_long_help = schema_fallible::<ClientOnchainSendResponse, onchain::SendError>())]

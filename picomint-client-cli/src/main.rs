@@ -5,7 +5,9 @@ use picomint_analytics::QueryError;
 use picomint_cli_client::{FOOTER, print_json, request, schema, schema_fallible};
 use picomint_client::ecash::{ReceiveEcashError, SendEcashError};
 use picomint_client::expiry::RefreshExpiryStatusError;
-use picomint_client::lightning::{RefreshGatewaysError, SendPaymentError};
+use picomint_client::lightning::{
+    RefreshGatewaysError, SendMaxAmountError, SendMaxError, SendPaymentError,
+};
 use picomint_client::{AddMintError, NotAddedError, lightning, onchain};
 use picomint_client_cli_core::{
     ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse, ClientConfigRequest,
@@ -50,7 +52,7 @@ enum Commands {
     Mnemonic,
     /// Query the analytics db with read-only SQL; rows print as JSON objects
     #[command(after_long_help = format!(
-        "Tables, as the SQL that creates them; every table is indexed on operation and ts:\n{}\n{}",
+        "{}\n{}",
         picomint_analytics::tables(),
         schema_fallible::<QueryResponse, QueryError>()
     ))]
@@ -103,13 +105,13 @@ enum EcashCommands {
 #[derive(Subcommand)]
 enum OnchainCommands {
     /// Get send fee estimate
-    #[command(after_long_help = schema_fallible::<ClientOnchainSendFeeResponse, onchain::SendError>())]
+    #[command(after_long_help = schema_fallible::<ClientOnchainSendFeeResponse, onchain::SendFeeError>())]
     SendFee(ClientOnchainSendFeeRequest),
     /// Send onchain
     #[command(after_long_help = schema_fallible::<ClientOnchainSendResponse, onchain::SendError>())]
     Send(ClientOnchainSendRequest),
     /// What send-max would move right now
-    #[command(after_long_help = schema_fallible::<ClientOnchainSendMaxAmountResponse, onchain::SendError>())]
+    #[command(after_long_help = schema_fallible::<ClientOnchainSendMaxAmountResponse, onchain::SendFeeError>())]
     SendMaxAmount(ClientOnchainSendMaxAmountRequest),
     /// Send the account's entire balance onchain, minus the fee
     #[command(after_long_help = schema_fallible::<ClientOnchainSendMaxResponse, onchain::SendError>())]
@@ -128,10 +130,10 @@ enum LightningCommands {
     #[command(after_long_help = schema_fallible::<ClientLightningSendResponse, SendPaymentError>())]
     Send(ClientLightningSendRequest),
     /// What send-max would pay right now
-    #[command(after_long_help = schema_fallible::<ClientLightningSendMaxAmountResponse, SendPaymentError>())]
+    #[command(after_long_help = schema_fallible::<ClientLightningSendMaxAmountResponse, SendMaxAmountError>())]
     SendMaxAmount(ClientLightningSendMaxAmountRequest),
     /// Empty an account to an lnurl
-    #[command(after_long_help = schema_fallible::<ClientLightningSendMaxResponse, SendPaymentError>())]
+    #[command(after_long_help = schema_fallible::<ClientLightningSendMaxResponse, SendMaxError>())]
     SendMax(ClientLightningSendMaxRequest),
     /// Create a bolt11 invoice
     #[command(after_long_help = schema_fallible::<ClientLightningReceiveResponse, lightning::ReceiveError>())]

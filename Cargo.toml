@@ -135,7 +135,7 @@ tpe = { package = "picomint-tpe", path = "./picomint-tpe", version = "=0.1.0" }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 tss = { package = "picomint-tss", path = "./picomint-tss", version = "=0.1.0" }
-url = "2.5.8"
+url = { version = "2.5.8", features = ["serde"] }
 
 # Thin LTO is a measurable perf win for the mint node's
 # crypto-heavy hot paths and worth the modest extra release-build time.

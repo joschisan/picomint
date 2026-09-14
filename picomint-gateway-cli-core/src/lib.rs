@@ -645,10 +645,24 @@ pub struct ClientOnchainReceiveResponse {
 /// Why an `ldk` command did nothing: LDK refused it, with its reason.
 #[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum LdkError {
-    #[error("The invoice description is too long")]
-    InvalidDescription,
-    #[error("The payment failed")]
-    PaymentFailed,
     #[error("LDK refused: {0}")]
     Ldk(String),
+}
+
+/// Why `ldk lightning receive` produced no invoice.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum LdkReceiveError {
+    #[error("The invoice description is too long")]
+    InvalidDescription,
+    #[error("LDK refused: {0}")]
+    Ldk(String),
+}
+
+/// Why `ldk lightning send` did not pay.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum LdkSendError {
+    #[error("LDK refused: {0}")]
+    Ldk(String),
+    #[error("The payment failed")]
+    PaymentFailed,
 }

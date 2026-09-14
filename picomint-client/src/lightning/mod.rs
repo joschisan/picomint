@@ -38,9 +38,11 @@ use picomint_core::wire;
 pub use self::secret::LightningSecret;
 use picomint_core::{Amount, OutPoint};
 use picomint_encoding::Encodable;
+use picomint_lnurl::Lnurl;
 use rand::seq::IteratorRandom;
 use secp256k1::{Keypair, PublicKey, SecretKey, ecdh};
 use thiserror::Error;
+use url::Url;
 
 use self::events::{ReceiveEvent, SendEvent};
 use self::send_sm::{SendSMCommon, SendSMState, SendStateMachine, SendStateMachineTable};
@@ -151,22 +153,20 @@ pub(crate) async fn send_max(
     account: Account,
     gateway_pk: GatewayPk,
     gateway_info: GatewayInfo,
-    lnurl: &str,
-) -> Result<OperationId, SendPaymentError> {
-    let url = picomint_lnurl::parse_lnurl(lnurl).ok_or(SendPaymentError::InvalidLnurl)?;
-
-    let info = picomint_lnurl::request(&url)
+    lnurl: &Lnurl,
+) -> Result<OperationId, SendMaxError> {
+    let info = picomint_lnurl::request(lnurl.url())
         .await
-        .map_err(SendPaymentError::Lnurl)?;
+        .map_err(SendMaxError::Lnurl)?;
 
     let max = send_max_amount(ctx, account, &gateway_info);
 
     let invoice = picomint_lnurl::get_invoice(&info, max.msat)
         .await
-        .map_err(SendPaymentError::Lnurl)?
+        .map_err(SendMaxError::Lnurl)?
         .pr;
 
-    send_inner(ctx, account, gateway_pk, gateway_info, invoice, true).await
+    Ok(send_inner(ctx, account, gateway_pk, gateway_info, invoice, true).await?)
 }
 
 async fn send_inner(
@@ -443,10 +443,6 @@ pub enum SendPaymentError {
     FailedToRequestBlockHeight,
     #[error("The client's balance is insufficient")]
     InsufficientBalance,
-    #[error("Not a valid lnurl")]
-    InvalidLnurl,
-    #[error("The lnurl endpoint failed: {0}")]
-    Lnurl(String),
     #[error("Invoice is for a different currency")]
     WrongCurrency {
         invoice_currency: Currency,
@@ -454,6 +450,71 @@ pub enum SendPaymentError {
     },
     #[error("Mint is not added")]
     NotAdded,
+}
+
+/// Why `lightning send-max-amount` has no figure.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum SendMaxAmountError {
+    #[error("Gateway is not available")]
+    GatewayNotAvailable,
+    #[error("Mint is not added")]
+    NotAdded,
+}
+
+/// Why `lightning send-max` paid nothing: the lnurl endpoint, or any of
+/// the reasons a send of the invoice it returned fails for.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum SendMaxError {
+    #[error("The lnurl endpoint failed: {0}")]
+    Lnurl(String),
+    #[error("Invoice is missing an amount")]
+    InvoiceMissingAmount,
+    #[error("Invoice has expired")]
+    InvoiceExpired,
+    #[error("A payment for this invoice has already been attempted")]
+    InvoiceAlreadyAttempted,
+    #[error("Gateway fee exceeds the allowed limit")]
+    GatewayFeeExceedsLimit,
+    #[error("Gateway expiry time exceeds the allowed limit")]
+    GatewayExpiryExceedsLimit,
+    #[error("Gateway is not available")]
+    GatewayNotAvailable,
+    #[error("Failed to request block height")]
+    FailedToRequestBlockHeight,
+    #[error("The client's balance is insufficient")]
+    InsufficientBalance,
+    #[error("Invoice is for a different currency")]
+    WrongCurrency {
+        invoice_currency: Currency,
+        mint_currency: Currency,
+    },
+    #[error("Mint is not added")]
+    NotAdded,
+}
+
+impl From<SendPaymentError> for SendMaxError {
+    fn from(error: SendPaymentError) -> Self {
+        match error {
+            SendPaymentError::InvoiceMissingAmount => SendMaxError::InvoiceMissingAmount,
+            SendPaymentError::InvoiceExpired => SendMaxError::InvoiceExpired,
+            SendPaymentError::InvoiceAlreadyAttempted => SendMaxError::InvoiceAlreadyAttempted,
+            SendPaymentError::GatewayFeeExceedsLimit => SendMaxError::GatewayFeeExceedsLimit,
+            SendPaymentError::GatewayExpiryExceedsLimit => SendMaxError::GatewayExpiryExceedsLimit,
+            SendPaymentError::GatewayNotAvailable => SendMaxError::GatewayNotAvailable,
+            SendPaymentError::FailedToRequestBlockHeight => {
+                SendMaxError::FailedToRequestBlockHeight
+            }
+            SendPaymentError::InsufficientBalance => SendMaxError::InsufficientBalance,
+            SendPaymentError::WrongCurrency {
+                invoice_currency,
+                mint_currency,
+            } => SendMaxError::WrongCurrency {
+                invoice_currency,
+                mint_currency,
+            },
+            SendPaymentError::NotAdded => SendMaxError::NotAdded,
+        }
+    }
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
@@ -554,13 +615,13 @@ impl Client {
         mint: MintId,
         account: Account,
         gateway_pk: GatewayPk,
-    ) -> Result<Amount, SendPaymentError> {
-        let ctx = self.ctx(mint).map_err(|_| SendPaymentError::NotAdded)?;
+    ) -> Result<Amount, SendMaxAmountError> {
+        let ctx = self.ctx(mint).map_err(|_| SendMaxAmountError::NotAdded)?;
 
         let gateway_info = ctx
             .gateways
             .info(gateway_pk)
-            .ok_or(SendPaymentError::GatewayNotAvailable)?;
+            .ok_or(SendMaxAmountError::GatewayNotAvailable)?;
 
         Ok(send_max_amount(&ctx, account, &gateway_info))
     }
@@ -574,14 +635,14 @@ impl Client {
         mint: MintId,
         account: Account,
         gateway_pk: GatewayPk,
-        lnurl: &str,
-    ) -> Result<OperationId, SendPaymentError> {
-        let ctx = self.ctx(mint).map_err(|_| SendPaymentError::NotAdded)?;
+        lnurl: &Lnurl,
+    ) -> Result<OperationId, SendMaxError> {
+        let ctx = self.ctx(mint).map_err(|_| SendMaxError::NotAdded)?;
 
         let gateway_info = ctx
             .gateways
             .info(gateway_pk)
-            .ok_or(SendPaymentError::GatewayNotAvailable)?;
+            .ok_or(SendMaxError::GatewayNotAvailable)?;
 
         send_max(&ctx, account, gateway_pk, gateway_info, lnurl).await
     }
@@ -625,7 +686,7 @@ impl Client {
         &self,
         mint: MintId,
         account: Account,
-        lnurl_daemon: String,
+        lnurl_daemon: Url,
     ) -> Result<String, NotAddedError> {
         let ctx = self.ctx(mint)?;
 

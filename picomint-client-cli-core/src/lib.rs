@@ -20,8 +20,10 @@ use picomint_core::ecash::Denomination;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk};
+use picomint_lnurl::Lnurl;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 pub const ROUTE_MNEMONIC: &str = "/mnemonic";
 pub const ROUTE_QUERY: &str = "/query";
@@ -433,7 +435,7 @@ pub struct ClientLightningSendMaxRequest {
     pub gateway: GatewayPk,
     /// The lnurl or lightning address to pay; the account's whole balance
     /// less the gateway's fee goes to it
-    pub lnurl: String,
+    pub lnurl: Lnurl,
 }
 
 /// The payment was submitted; it completes in the background.
@@ -480,7 +482,7 @@ pub struct ClientLightningLnurlRequest {
     pub account: Account,
     /// Base URL of the lnurl daemon that serves the lnurl, e.g.
     /// `https://lnurl.example.com/`
-    pub lnurl_daemon: String,
+    pub lnurl_daemon: Url,
 }
 
 /// A reusable way to be paid while this daemon is offline.
