@@ -32,7 +32,6 @@ group = { workspace = true }
 iroh = { workspace = true, default-features = false }
 iroh-base = { workspace = true, default-features = false, features = ["key"] }
 iroh-mdns-address-lookup = { workspace = true }
-picomint-base32 = { workspace = true }
 picomint-bft = { workspace = true }
 picomint-cli-server = { workspace = true }
 picomint-core = { workspace = true }

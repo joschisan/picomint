@@ -3283,7 +3283,6 @@ dependencies = [
 name = "picomint-cli-client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -3630,7 +3629,6 @@ dependencies = [
  "iroh",
  "iroh-base",
  "iroh-mdns-address-lookup",
- "picomint-base32",
  "picomint-bft",
  "picomint-cli-server",
  "picomint-core",
