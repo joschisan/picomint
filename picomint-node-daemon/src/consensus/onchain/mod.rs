@@ -10,7 +10,6 @@ use self::db::{
     NonceLogTable, OutputTable, SignatureSharesTable, SpentOutputIndexTable, TxInfoIndexTable,
     TxInfoTable, UnconfirmedTxTable, UnsignedTxTable,
 };
-use crate::bitcoind::{BitcoindClient, MIN_FEERATE_SATS_PER_KVB};
 use anyhow::{Context, anyhow, ensure};
 use bitcoin::absolute::LockTime;
 use bitcoin::hashes::{Hash, sha256};
@@ -19,6 +18,7 @@ use bitcoin::transaction::Version;
 use bitcoin::{Amount, Network, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
 use common::config::OnchainConfigConsensus;
 use common::{OnchainConsensusItem, OnchainInput, OnchainOutput, OutputInfo};
+use picomint_bitcoind::{BitcoindClient, MIN_FEERATE_SATS_PER_KVB};
 use picomint_core::onchain as common;
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{NodeId, NumNodesExt, OutPoint};
@@ -163,7 +163,7 @@ pub async fn feerate_vote(server: &Server) -> Option<u32> {
 
     server
         .btc_rpc
-        .get_feerate()
+        .get_feerate(1)
         .await
         .inspect_err(|error| warn!(%error, "Failed to fetch the fee rate to vote on"))
         .ok()
@@ -679,7 +679,7 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
                 .iter(&UnconfirmedTxTable, |r| r.map(|(_, v)| v).collect());
 
             for unconfirmed_tx in unconfirmed_txs {
-                btc_rpc.submit_tx(unconfirmed_tx.tx).await;
+                broadcast(&btc_rpc, &unconfirmed_tx.tx).await;
             }
 
             if integration_test {
@@ -689,6 +689,14 @@ pub fn spawn_broadcast_unconfirmed_txs_task(
             }
         }
     });
+}
+
+/// A failed broadcast is only logged: the tx stays in the unconfirmed
+/// table and the rebroadcast task retries it every minute.
+async fn broadcast(btc_rpc: &BitcoindClient, tx: &Transaction) {
+    if let Err(error) = btc_rpc.send_raw_transaction(tx).await {
+        info!(%error, "Error broadcasting transaction");
+    }
 }
 
 fn process_nonces(
@@ -826,7 +834,7 @@ fn process_signature_shares(
         // resend the tx if this send never happens.
         let btc_rpc = server.btc_rpc.clone();
 
-        tokio::spawn(async move { btc_rpc.submit_tx(unsigned.tx).await });
+        tokio::spawn(async move { broadcast(&btc_rpc, &unsigned.tx).await });
     }
 
     Ok(())

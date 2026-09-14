@@ -13,10 +13,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::bitcoind::BitcoindClient;
 use anyhow::ensure;
 use bitcoin::Network;
 use futures::TryFutureExt;
+use picomint_bitcoind::BitcoindClient;
 use picomint_core::methods::Method;
 use picomint_core::tx::ConsensusItem;
 use picomint_core::version::CONSENSUS_VERSION;

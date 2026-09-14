@@ -3280,6 +3280,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-bitcoind"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitcoin",
+ "reqwest 0.13.3",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
 name = "picomint-cli-client"
 version = "0.1.0"
 dependencies = [
@@ -3630,6 +3642,7 @@ dependencies = [
  "iroh-base",
  "iroh-mdns-address-lookup",
  "picomint-bft",
+ "picomint-bitcoind",
  "picomint-cli-server",
  "picomint-core",
  "picomint-encoding",
@@ -3640,10 +3653,8 @@ dependencies = [
  "picomint-tpe",
  "picomint-tss",
  "rand 0.8.6",
- "reqwest 0.13.3",
  "secp256k1",
  "serde",
- "serde_json",
  "test-log",
  "tokio",
  "tokio-rustls",
@@ -3684,15 +3695,15 @@ dependencies = [
  "anyhow",
  "bitcoin",
  "clap",
+ "picomint-bitcoind",
  "picomint-core",
  "picomint-node-cli-core",
  "picomint-tss",
- "reqwest 0.13.3",
  "secp256k1",
- "serde",
  "serde_json",
  "tokio",
  "tokio-rustls",
+ "url",
 ]
 
 [[package]]

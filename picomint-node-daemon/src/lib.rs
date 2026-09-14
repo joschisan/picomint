@@ -6,7 +6,6 @@
 
 extern crate picomint_core;
 
-pub mod bitcoind;
 pub mod cli;
 pub mod config;
 pub mod consensus;
@@ -17,8 +16,8 @@ use std::sync::Arc;
 /// Name of the server daemon's database file on disk.
 pub const DB_FILE: &str = "database.redb";
 
-use crate::bitcoind::BitcoindClient;
 use config::NodeConfig;
+use picomint_bitcoind::BitcoindClient;
 use picomint_redb::{Database, DbRead};
 use tracing::info;
 

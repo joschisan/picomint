@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use anyhow::ensure;
 use clap::Parser;
-use picomint_node_daemon::bitcoind::BitcoindClient;
+use picomint_bitcoind::BitcoindClient;
 use picomint_node_daemon::config::DaemonSettings;
 use picomint_node_daemon::{DB_FILE, run_server};
 use tracing::info;

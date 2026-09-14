@@ -25,7 +25,8 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 - `picomint-core` — shared types, encoding, wire protocol, `NodeConfigConsensus`, and the per-module common types for `ecash`/`onchain`/`lightning`
 - `picomint-encoding` / `picomint-derive` — `Encodable`/`Decodable` traits and derive macros
 - `picomint-bft` — BFT atomic broadcast (DAG-based, own design — not Aleph-derived)
-- `picomint-node-daemon` — mint node binary (consensus via picomint-bft); owns the concrete ecash/onchain/lightning server-side module code under `src/consensus/{ecash,onchain,lightning}/`, and the bitcoind JSON-RPC client (`src/bitcoind.rs`); no web UI, the admin CLI is the only operator surface
+- `picomint-node-daemon` — mint node binary (consensus via picomint-bft); owns the concrete ecash/onchain/lightning server-side module code under `src/consensus/{ecash,onchain,lightning}/`; no web UI, the admin CLI is the only operator surface
+- `picomint-bitcoind` — the bitcoind JSON-RPC client shared by the node daemon and the rugpull tool; every RPC picomint uses is a method on `BitcoindClient`
 - `picomint-cli-client` / `picomint-cli-server` — the admin socket: the CLI side (`request`, `print_json`) and the daemon side (`serve`, `CliError`); independent of each other, each spells the socket filename
 - `picomint-node-cli` / `picomint-node-cli-core` — admin CLI for the node daemon (HTTP-over-Unix-socket) + shared route/request types
 - `picomint-gateway-daemon` — Lightning gateway binary with embedded LDK node
