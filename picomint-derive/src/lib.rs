@@ -115,6 +115,69 @@ fn doc_comment(attrs: &[Attribute]) -> String {
         .join(" ")
 }
 
+/// The variants of a `thiserror` enum as stable codes: `code()` is the
+/// variant name in snake_case, `CODES` pairs every code with the
+/// variant's `#[error("...")]` message as written.
+#[proc_macro_derive(ErrorCode)]
+pub fn derive_error_code(input: TokenStream) -> TokenStream {
+    let DeriveInput { ident, data, .. } = parse_macro_input!(input);
+
+    let Data::Enum(DataEnum { variants, .. }) = data else {
+        return error(&ident, "ErrorCode can only be derived for enums").into();
+    };
+
+    let idents = variants.iter().map(|v| &v.ident).collect::<Vec<_>>();
+    let codes = variants
+        .iter()
+        .map(|v| snake_case(&v.ident.to_string()))
+        .collect::<Vec<_>>();
+    let messages = variants
+        .iter()
+        .map(|v| error_message(&v.attrs))
+        .collect::<Vec<_>>();
+
+    quote! {
+        impl ::picomint_core::error::ErrorCode for #ident {
+            const CODES: &'static [(&'static str, &'static str)] = &[#((#codes, #messages)),*];
+
+            fn code(&self) -> &'static str {
+                match self {
+                    #(Self::#idents { .. } => #codes,)*
+                }
+            }
+        }
+    }
+    .into()
+}
+
+/// The string literal of a variant's `#[error("...")]` attribute.
+fn error_message(attrs: &[Attribute]) -> String {
+    attrs
+        .iter()
+        .find(|attr| attr.path().is_ident("error"))
+        .and_then(|attr| attr.parse_args::<Lit>().ok())
+        .and_then(|lit| match lit {
+            Lit::Str(message) => Some(message.value()),
+            _ => None,
+        })
+        .expect("every variant of an ErrorCode enum carries an #[error(\"...\")] message")
+}
+
+/// `InsufficientBalance` to `insufficient_balance`.
+fn snake_case(ident: &str) -> String {
+    let mut out = String::new();
+
+    for (i, c) in ident.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push('_');
+        }
+
+        out.push(c.to_ascii_lowercase());
+    }
+
+    out
+}
+
 /// One analytics table row per struct: every named field becomes a
 /// column named after it (plus the field type's unit suffix), typed and
 /// rendered by its `SqlColumn` impl. Unit structs map to a table with no
