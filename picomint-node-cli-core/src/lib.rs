@@ -8,6 +8,7 @@ use clap::Args;
 use picomint_core::NodeId;
 use picomint_core::bitcoin::Txid;
 use picomint_core::config::{MintId, NodeConfig};
+use picomint_core::error::ErrorCode;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
@@ -15,6 +16,7 @@ use picomint_core::onchain::TxInfo;
 use picomint_core::version::ConsensusVersion;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tss::SecretKeyShare;
 
 /// Served in every phase of the node's life; everything else is phase-bound.
@@ -414,4 +416,98 @@ pub struct LightningGatewayInfo {
     pub pk: GatewayPk,
     /// The name this node lists it under; local to this node
     pub name: String,
+}
+
+// --- errors ---
+
+/// Why `status` has nothing to say for a moment.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum StatusError {
+    #[error("Key generation has just completed; the node is starting consensus")]
+    DkgCompleting,
+}
+
+/// Why the setup ceremony refused a step.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum SetupError {
+    #[error("The node name is empty")]
+    EmptyNodeName,
+    #[error("The mint name is empty")]
+    EmptyMintName,
+    #[error("The node that sets the mint name sets the mint size too")]
+    MintSizeMissing,
+    #[error("Mint size must be at least 4")]
+    MintSizeTooSmall,
+    #[error(
+        "The node has already been initialized; `setup init` with the same arguments repeats its code"
+    )]
+    AlreadyInitialized,
+    #[error("Not a setup code: {0}")]
+    InvalidSetupCode(String),
+    #[error("The node has not been initialized yet; run `setup init` first")]
+    NotInitialized,
+    #[error("This is the node's own setup code")]
+    OwnSetupCode,
+    #[error("The mint name has already been set to {0}")]
+    MintNameAlreadySet(String),
+    #[error("The mint size has already been set to {0}")]
+    MintSizeAlreadySet(u8),
+    #[error("The mint size is {expected} but {got} setup codes are in, this node's included")]
+    WrongNodeCount { expected: u8, got: usize },
+    #[error("No setup code carries the mint name; one node has to set it")]
+    MintNameMissing,
+    #[error("Failed to determine the network from the bitcoin backend: {0}")]
+    Bitcoind(String),
+    #[error("Picomint is experimental software and refuses to run a mint on mainnet")]
+    Mainnet,
+    #[error("The setup has already completed")]
+    Completed,
+    #[error("The restored config failed validation: {0}")]
+    InvalidConfig(String),
+}
+
+/// Why the backend could not be read.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum BitcoindError {
+    #[error("The bitcoin backend did not answer: {0}")]
+    Unreachable(String),
+}
+
+/// Why no invite code was issued.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum InviteError {
+    #[error("Invite codes are issued once the mint has reached consensus on a block height")]
+    NoBlockHeight,
+    #[error("The expiry must be at most {INVITE_EXPIRY_DAYS_LIMIT} days out")]
+    ExpiryTooFar,
+}
+
+/// Why the expiry announcement was refused.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum ExpirySetError {
+    #[error("The expiry date must be in the future")]
+    NotInFuture,
+    #[error("The expiry date must be at most {EXPIRY_DAYS_LIMIT} days out")]
+    TooFar,
+}
+
+/// Why the rugpull secret was not exported.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum RugpullError {
+    #[error("The mint wallet has not received funds yet, so there is nothing to drain")]
+    WalletEmpty,
+}
+
+/// Why the gateway was not added to this node's recommendations.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum GatewayAddError {
+    #[error("The gateway is already recommended")]
+    AlreadyRecommended,
+}
+
+/// Why the gateway was not removed from this node's recommendations.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum GatewayRemoveError {
+    #[error("The gateway is not recommended")]
+    NotRecommended,
 }

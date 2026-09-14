@@ -77,3 +77,4 @@ Env var names are unprefixed (puncture-style): `DATA_DIR`, `NETWORK`, `BITCOIND_
 - Use `?` plain. Add `.context("...")` only when the underlying error is too cryptic to be useful at the boundary.
 - Chain successive transformations on the same value rather than re-binding through multiple `let`s. Prefer `let x = data.iter().filter(...).map(...).collect();` over `let x = data.iter(); let x = x.filter(...); ...`.
 - `thiserror` types are reserved for errors returned to the client and errors serialized via `Encodable`/`Decodable`. Use `anyhow::Result` everywhere else (orchestration, internal helpers).
+- Every error a daemon returns over its admin socket is a `thiserror` enum deriving `ErrorCode`, mapped with `CliError::rejected`; an anyhow error reaching a handler is a bug and surfaces as the code `internal`.

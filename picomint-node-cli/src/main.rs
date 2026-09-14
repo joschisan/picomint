@@ -1,31 +1,30 @@
 use std::path::PathBuf;
 
-use anyhow::Result;
 use clap::{Parser, Subcommand};
-use picomint_cli_client::{print_json, request, schema};
+use picomint_cli_client::{FOOTER, RequestError, print_json, request, schema, schema_fallible};
 use picomint_node_cli_core::{
-    BackupResponse, BitcoindResponse, ExpirySetRequest, ExpiryStatusResponse, HistoryResponse,
+    BackupResponse, BitcoindError, BitcoindResponse, ExpirySetError, ExpirySetRequest,
+    ExpiryStatusResponse, GatewayAddError, GatewayRemoveError, HistoryResponse, InviteError,
     InviteRequest, InviteResponse, LightningGatewayAddRequest, LightningGatewayListResponse,
     LightningGatewayRemoveRequest, NodeStatus, OnchainStatusResponse, PendingResponse,
     ROUTE_BACKUP, ROUTE_BITCOIND, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
     ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
     ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL, ROUTE_ONCHAIN_STATUS,
     ROUTE_SETUP_ADD, ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE,
-    ROUTE_STATUS, RugpullResponse, SetupAddRequest, SetupAddResponse, SetupInitRequest,
-    SetupInitResponse,
+    ROUTE_STATUS, RugpullError, RugpullResponse, SetupAddRequest, SetupAddResponse, SetupError,
+    SetupInitRequest, SetupInitResponse, StatusError,
 };
 use serde_json::Value;
 
-/// Shown at the end of the top-level `--help`: the rules for an agent
-/// driving this CLI, stated where the agent reads them.
-const SECRETS: &str = "\
-Commands marked (secret) print key material, and whatever an agent reads \
-ends up in its context and transcript. Rules for an agent: run a (secret) \
-command only when the operator asks; run it with stdout redirected into a \
-file; never read that file; open it for the operator if asked.";
+/// Every route is served by exactly one phase, so an agent that gets this
+/// code has a stale picture of the node, not a wrong command.
+const PHASES: &str = "\
+Every command is served by exactly one of the node's phases, setup, dkg \
+and consensus; in any other phase it fails with the code wrong_phase, and \
+`status` names the phase.";
 
 #[derive(Parser)]
-#[command(version, after_help = SECRETS)]
+#[command(version, after_help = format!("{FOOTER}\n\n{PHASES}"))]
 struct Cli {
     /// Path to the node's data directory (must match the daemon's
     /// `DATA_DIR`). The CLI finds the admin Unix socket at
@@ -40,16 +39,16 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Which phase the node is in (setup, dkg, consensus) and what an operator needs at that point
-    #[command(after_long_help = schema::<NodeStatus>())]
+    #[command(after_long_help = schema_fallible::<NodeStatus, StatusError>())]
     Status,
     /// This node's own Bitcoin Core backend, read live: network, chain tip, fee estimate, sync progress
-    #[command(after_long_help = schema::<BitcoindResponse>())]
+    #[command(after_long_help = schema_fallible::<BitcoindResponse, BitcoindError>())]
     Bitcoind,
     /// The setup ceremony: init, exchange setup codes, confirm
     #[command(subcommand)]
     Setup(SetupCommands),
     /// Generate a mint invite code
-    #[command(after_long_help = schema::<InviteResponse>())]
+    #[command(after_long_help = schema_fallible::<InviteResponse, InviteError>())]
     Invite(InviteRequest),
     /// Print the node's whole config with its private keys; pipe it into a file (secret)
     #[command(after_long_help = schema::<BackupResponse>())]
@@ -68,7 +67,7 @@ enum Commands {
 #[derive(Subcommand)]
 enum ExpiryCommands {
     /// Announce the mint's expiry; every node must enter the same values
-    #[command(after_long_help = schema::<()>())]
+    #[command(after_long_help = schema_fallible::<(), ExpirySetError>())]
     Set(ExpirySetRequest),
     /// Withdraw this node's announcement
     #[command(after_long_help = schema::<()>())]
@@ -81,19 +80,19 @@ enum ExpiryCommands {
 #[derive(Subcommand)]
 enum SetupCommands {
     /// Name this node and print its setup code for the other nodes
-    #[command(after_long_help = schema::<SetupInitResponse>())]
+    #[command(after_long_help = schema_fallible::<SetupInitResponse, SetupError>())]
     Init(SetupInitRequest),
     /// Add a node's setup code
-    #[command(after_long_help = schema::<SetupAddResponse>())]
+    #[command(after_long_help = schema_fallible::<SetupAddResponse, SetupError>())]
     Add(SetupAddRequest),
     /// Forget every added setup code and start collecting them again
     #[command(after_long_help = schema::<()>())]
     Reset,
     /// Confirm the node set; once every node has, key generation starts
-    #[command(after_long_help = schema::<()>())]
+    #[command(after_long_help = schema_fallible::<(), SetupError>())]
     Confirm,
     /// Restore the node from a `backup.json` on stdin, skipping the ceremony
-    #[command(after_long_help = schema::<()>())]
+    #[command(after_long_help = schema_fallible::<(), SetupError>())]
     Restore,
 }
 
@@ -109,15 +108,17 @@ enum OnchainCommands {
     #[command(after_long_help = schema::<HistoryResponse>())]
     History,
     /// Print this node's rugpull secret, only once the mint has expired; pipe it into a file (secret)
-    #[command(after_long_help = schema::<RugpullResponse>())]
+    #[command(after_long_help = schema_fallible::<RugpullResponse, RugpullError>())]
     Rugpull,
 }
 
 #[derive(Subcommand)]
 enum GatewayCommands {
     /// Recommend a gateway; clients use it once a threshold of nodes do
+    #[command(after_long_help = schema_fallible::<(), GatewayAddError>())]
     Add(LightningGatewayAddRequest),
     /// Withdraw this node's recommendation
+    #[command(after_long_help = schema_fallible::<(), GatewayRemoveError>())]
     Remove(LightningGatewayRemoveRequest),
     /// The gateways this node recommends
     #[command(after_long_help = schema::<LightningGatewayListResponse>())]
@@ -125,47 +126,51 @@ enum GatewayCommands {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<()> {
+async fn main() {
     let cli = Cli::parse();
     let d = &cli.data_dir;
 
     let result = match cli.command {
-        Commands::Status => request(d, ROUTE_STATUS, ()).await?,
-        Commands::Bitcoind => request(d, ROUTE_BITCOIND, ()).await?,
-        Commands::Invite(req) => request(d, ROUTE_INVITE, req).await?,
-        Commands::Backup => request(d, ROUTE_BACKUP, ()).await?,
+        Commands::Status => request(d, ROUTE_STATUS, ()).await,
+        Commands::Bitcoind => request(d, ROUTE_BITCOIND, ()).await,
+        Commands::Invite(req) => request(d, ROUTE_INVITE, req).await,
+        Commands::Backup => request(d, ROUTE_BACKUP, ()).await,
 
         Commands::Expiry(cmd) => match cmd {
-            ExpiryCommands::Set(req) => request(d, ROUTE_EXPIRY_SET, req).await?,
-            ExpiryCommands::Clear => request(d, ROUTE_EXPIRY_CLEAR, ()).await?,
-            ExpiryCommands::Status => request(d, ROUTE_EXPIRY_STATUS, ()).await?,
+            ExpiryCommands::Set(req) => request(d, ROUTE_EXPIRY_SET, req).await,
+            ExpiryCommands::Clear => request(d, ROUTE_EXPIRY_CLEAR, ()).await,
+            ExpiryCommands::Status => request(d, ROUTE_EXPIRY_STATUS, ()).await,
         },
 
         Commands::Setup(cmd) => match cmd {
-            SetupCommands::Init(req) => request(d, ROUTE_SETUP_INIT, req).await?,
-            SetupCommands::Add(req) => request(d, ROUTE_SETUP_ADD, req).await?,
-            SetupCommands::Reset => request(d, ROUTE_SETUP_RESET, ()).await?,
-            SetupCommands::Confirm => request(d, ROUTE_SETUP_CONFIRM, ()).await?,
-            SetupCommands::Restore => {
-                let cfg: Value = serde_json::from_reader(std::io::stdin())?;
-                request(d, ROUTE_SETUP_RESTORE, cfg).await?
-            }
+            SetupCommands::Init(req) => request(d, ROUTE_SETUP_INIT, req).await,
+            SetupCommands::Add(req) => request(d, ROUTE_SETUP_ADD, req).await,
+            SetupCommands::Reset => request(d, ROUTE_SETUP_RESET, ()).await,
+            SetupCommands::Confirm => request(d, ROUTE_SETUP_CONFIRM, ()).await,
+            SetupCommands::Restore => match serde_json::from_reader::<_, Value>(std::io::stdin()) {
+                Ok(cfg) => request(d, ROUTE_SETUP_RESTORE, cfg).await,
+                Err(e) => Err(RequestError::Usage(format!(
+                    "stdin is not a JSON backup: {e}"
+                ))),
+            },
         },
 
         Commands::Onchain(cmd) => match cmd {
-            OnchainCommands::Status => request(d, ROUTE_ONCHAIN_STATUS, ()).await?,
-            OnchainCommands::Pending => request(d, ROUTE_ONCHAIN_PENDING, ()).await?,
-            OnchainCommands::History => request(d, ROUTE_ONCHAIN_HISTORY, ()).await?,
-            OnchainCommands::Rugpull => request(d, ROUTE_ONCHAIN_RUGPULL, ()).await?,
+            OnchainCommands::Status => request(d, ROUTE_ONCHAIN_STATUS, ()).await,
+            OnchainCommands::Pending => request(d, ROUTE_ONCHAIN_PENDING, ()).await,
+            OnchainCommands::History => request(d, ROUTE_ONCHAIN_HISTORY, ()).await,
+            OnchainCommands::Rugpull => request(d, ROUTE_ONCHAIN_RUGPULL, ()).await,
         },
 
         Commands::Gateway(cmd) => match cmd {
-            GatewayCommands::Add(req) => request(d, ROUTE_GATEWAY_ADD, req).await?,
-            GatewayCommands::Remove(req) => request(d, ROUTE_GATEWAY_REMOVE, req).await?,
-            GatewayCommands::List => request(d, ROUTE_GATEWAY_LIST, ()).await?,
+            GatewayCommands::Add(req) => request(d, ROUTE_GATEWAY_ADD, req).await,
+            GatewayCommands::Remove(req) => request(d, ROUTE_GATEWAY_REMOVE, req).await,
+            GatewayCommands::List => request(d, ROUTE_GATEWAY_LIST, ()).await,
         },
     };
 
-    print_json(&result);
-    Ok(())
+    match result {
+        Ok(value) => print_json(&value),
+        Err(error) => error.exit(),
+    }
 }

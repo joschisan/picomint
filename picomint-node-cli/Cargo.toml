@@ -13,7 +13,6 @@ name = "picomint-node-cli"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = { workspace = true }
 clap = { workspace = true }
 picomint-cli-client = { workspace = true }
 picomint-node-cli-core = { workspace = true }

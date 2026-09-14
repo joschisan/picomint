@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 
 use crate::api::MintApi;
-use crate::client::Client;
+use crate::client::{Client, NotAddedError};
 use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use crate::tx::{TxSubmissionStateMachine, TxSubmissionStateMachineTable};
@@ -25,6 +25,7 @@ use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::ecash::config::{EcashConfigConsensus, client_denominations};
 use picomint_core::ecash::{Denomination, EcashInput, Note};
+use picomint_core::error::ErrorCode;
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_core::tx::Transaction;
 use picomint_core::{Amount, TransactionId, wire};
@@ -756,11 +757,11 @@ pub(crate) fn resume(ctx: &ClientContext) {
     crate::executor::resume::<EcashStateMachine, _>(ctx, EcashStateMachineTable);
 }
 
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum SendEcashError {
     #[error("We need to reissue notes but the client is offline")]
     Offline,
-    #[error("The clients balance is insufficient")]
+    #[error("The client's balance is insufficient")]
     InsufficientBalance,
     #[error("A non-recoverable error has occurred")]
     Failure,
@@ -768,7 +769,7 @@ pub enum SendEcashError {
     NotAdded,
 }
 
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum ReceiveEcashError {
     #[error("The Ecash bundle contains no notes")]
     Empty,
@@ -968,7 +969,11 @@ impl Client {
 
     /// Send everything `account` holds as one [`Ecash`] bundle. `None` when
     /// it holds nothing.
-    pub fn ecash_send_max(&self, mint: MintId, account: Account) -> anyhow::Result<Option<Ecash>> {
+    pub fn ecash_send_max(
+        &self,
+        mint: MintId,
+        account: Account,
+    ) -> Result<Option<Ecash>, NotAddedError> {
         let ctx = self.ctx(mint)?;
 
         let operation = OperationId::new_random();

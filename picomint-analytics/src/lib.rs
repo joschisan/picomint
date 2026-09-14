@@ -25,10 +25,12 @@ use anyhow::Context as _;
 use hex::ToHex as _;
 use picomint_client::eventlog::{Event, EventLogEntry, EventLogId, EventSource};
 use picomint_client::{Client, ecash, gateway, lightning, onchain};
+use picomint_core::error::ErrorCode;
 use picomint_core::sql::{SqlRow, SqlValue};
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags, Transaction};
 use serde_json::{Map, Value};
+use thiserror::Error;
 use tokio::sync::Mutex;
 use tracing::{debug, error};
 
@@ -224,17 +226,27 @@ fn insert_row<E: Event + SqlRow>(
     Ok(())
 }
 
+/// Why a query returned no rows: SQLite refused it, which covers a write
+/// statement on the read-only connection as much as a typo.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum QueryError {
+    #[error("SQLite rejected the query: {0}")]
+    InvalidQuery(String),
+}
+
 /// Run read-only SQL against the analytics db and return one JSON object per
 /// row, keyed by result column name. Opens its own `SQLITE_OPEN_READ_ONLY`
 /// connection — WAL mode lets it read concurrently with the trailer's writer
 /// connection, and the flag rejects any write statement outright.
-pub fn query(data_dir: &Path, sql: &str) -> anyhow::Result<Rows> {
+pub fn query(data_dir: &Path, sql: &str) -> Result<Rows, QueryError> {
     let path = data_dir.join(ANALYTICS_DIR).join(ANALYTICS_FILE);
 
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .context("failed to open analytics.sqlite read-only")?;
+        .expect("the daemon created the analytics db at startup");
 
-    let mut statement = conn.prepare(sql)?;
+    let mut statement = conn
+        .prepare(sql)
+        .map_err(|e| QueryError::InvalidQuery(e.to_string()))?;
 
     let columns = statement
         .column_names()
@@ -242,14 +254,19 @@ pub fn query(data_dir: &Path, sql: &str) -> anyhow::Result<Rows> {
         .map(ToString::to_string)
         .collect::<Vec<_>>();
 
-    let mut rows = statement.query([])?;
+    let mut rows = statement
+        .query([])
+        .map_err(|e| QueryError::InvalidQuery(e.to_string()))?;
     let mut result = Vec::new();
 
-    while let Some(row) = rows.next()? {
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| QueryError::InvalidQuery(e.to_string()))?
+    {
         let mut object = Map::new();
 
         for (i, column) in columns.iter().enumerate() {
-            let value = match row.get_ref(i)? {
+            let value = match row.get_ref(i).expect("the column index is in range") {
                 ValueRef::Null => Value::Null,
                 ValueRef::Integer(n) => Value::from(n),
                 ValueRef::Real(f) => Value::from(f),

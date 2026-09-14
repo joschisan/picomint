@@ -8,6 +8,7 @@
 //! a re-sync).
 
 use picomint_core::config::MintId;
+use picomint_core::error::ErrorCode;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_redb::{DbRead, WriteTx, table};
 use thiserror::Error;
@@ -22,10 +23,12 @@ table!(
     "client-expiry-status",
 );
 
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum RefreshExpiryStatusError {
     #[error("Failed to request expiry status")]
     FailedToRequestExpiryStatus,
+    #[error("Mint is not added")]
+    NotAdded,
 }
 
 impl Client {
@@ -45,7 +48,7 @@ impl Client {
     ) -> Result<(), RefreshExpiryStatusError> {
         let ctx = self
             .ctx(mint)
-            .map_err(|_| RefreshExpiryStatusError::FailedToRequestExpiryStatus)?;
+            .map_err(|_| RefreshExpiryStatusError::NotAdded)?;
 
         refresh_once(&ctx).await
     }

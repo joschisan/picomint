@@ -3250,6 +3250,7 @@ dependencies = [
  "picomint-core",
  "rusqlite",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
@@ -3286,6 +3287,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "picomint-core",
  "schemars 1.2.1",
  "serde",
  "serde_json",
@@ -3299,6 +3301,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "picomint-core",
+ "serde",
  "tempfile",
  "tokio",
 ]
@@ -3339,10 +3343,10 @@ dependencies = [
 name = "picomint-client-cli"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "clap",
  "picomint-analytics",
  "picomint-cli-client",
+ "picomint-client",
  "picomint-client-cli-core",
  "tokio",
 ]
@@ -3452,10 +3456,10 @@ dependencies = [
 name = "picomint-gateway-cli"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "clap",
  "picomint-analytics",
  "picomint-cli-client",
+ "picomint-client",
  "picomint-gateway-cli-core",
  "tokio",
 ]
@@ -3466,6 +3470,7 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "clap",
+ "lightning",
  "lightning-invoice",
  "picomint-client",
  "picomint-core",
@@ -3473,6 +3478,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3584,7 +3590,6 @@ dependencies = [
 name = "picomint-node-cli"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "clap",
  "picomint-cli-client",
  "picomint-node-cli-core",
@@ -3602,6 +3607,7 @@ dependencies = [
  "picomint-tss",
  "schemars 1.2.1",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

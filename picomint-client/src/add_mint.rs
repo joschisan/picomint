@@ -10,19 +10,37 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{bail, ensure};
 use futures::future::try_join_all;
 use iroh::Endpoint;
 use picomint_core::config::NodeConfigConsensus;
 use picomint_core::core::Account;
+use picomint_core::error::ErrorCode;
 use picomint_core::invite::InviteCode;
 use picomint_core::methods::{ConfigRequest, ConfigResponse, CoreMethod, Method};
+use thiserror::Error;
 use tracing::debug;
 
 use crate::api::MintApi;
 use crate::client::Client;
 use crate::ecash::Restore;
 use crate::secret::ClientSecret;
+
+/// Why a mint could not be added; nothing was written for any of them.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum AddMintError {
+    #[error("Failed to download the mint config from the invite's node: {0}")]
+    Download(String),
+    #[error("The config the invite's node served is not the invited mint's")]
+    InviteMismatch,
+    #[error("Picomint is experimental software and refuses to add a mainnet mint")]
+    Mainnet,
+    #[error("The mint runs on {0}, not on this daemon's network")]
+    WrongNetwork(bitcoin::Network),
+    #[error("Failed to scan the mint for the seed's existing funds: {0}")]
+    Scan(String),
+    #[error("Mint is already added")]
+    AlreadyAdded,
+}
 
 /// Download a mint's config, check it against `network` if given, and
 /// rebuild whatever the seed already owns there.
@@ -39,16 +57,15 @@ pub(crate) async fn add_mint(
     client: &Client,
     invite: &InviteCode,
     network: Option<bitcoin::Network>,
-) -> anyhow::Result<(NodeConfigConsensus, BTreeMap<Account, Restore>)> {
+) -> Result<(NodeConfigConsensus, BTreeMap<Account, Restore>), AddMintError> {
     let config = download(&client.endpoint, invite).await?;
 
-    ensure!(
-        config.network != bitcoin::Network::Bitcoin,
-        "Picomint is experimental software and refuses to add a mainnet mint"
-    );
+    if config.network == bitcoin::Network::Bitcoin {
+        return Err(AddMintError::Mainnet);
+    }
 
     if network.is_some_and(|network| config.network != network) {
-        bail!("Unsupported network {}", config.network);
+        return Err(AddMintError::WrongNetwork(config.network));
     }
 
     let mint = config.calculate_mint_id();
@@ -60,7 +77,8 @@ pub(crate) async fn add_mint(
     let scans = try_join_all(
         Account::ALL.map(|account| crate::ecash::scan(&api, &secret, &config.ecash, mint, account)),
     )
-    .await?;
+    .await
+    .map_err(|e| AddMintError::Scan(e.to_string()))?;
 
     let restores = Account::ALL.into_iter().zip(scans).collect();
 
@@ -71,7 +89,10 @@ pub(crate) async fn add_mint(
 /// invite code. The node enforces the invite's expiration and user limit
 /// before serving; integrity is guaranteed because the config's computed
 /// mint id must match the one committed in the invite code.
-async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<NodeConfigConsensus> {
+async fn download(
+    endpoint: &Endpoint,
+    invite: &InviteCode,
+) -> Result<NodeConfigConsensus, AddMintError> {
     debug!(
         invite = %picomint_base32::encode(invite),
         iroh_pk = %invite.iroh_pk,
@@ -86,10 +107,10 @@ async fn download(endpoint: &Endpoint, invite: &InviteCode) -> anyhow::Result<No
         })),
     )
     .await
-    .map_err(|_| anyhow::anyhow!("Failed to download client config from invite node"))?;
+    .map_err(|e| AddMintError::Download(e.to_string()))?;
 
     if invite_resp.config.calculate_mint_id() != invite.mint {
-        bail!("MintId in invite code does not match client config");
+        return Err(AddMintError::InviteMismatch);
     }
 
     Ok(invite_resp.config)

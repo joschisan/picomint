@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::str::FromStr;
 use std::time::Duration;
 
 use axum::Router;
@@ -7,12 +6,12 @@ use axum::extract::{Json, State};
 use axum::routing::post;
 use bitcoin::FeeRate;
 use hex::ToHex;
-use ldk_node::lightning::ln::msgs::SocketAddress;
 use ldk_node::lightning::routing::gossip::NodeId;
 use ldk_node::payment::{PaymentKind, PaymentStatus};
 use ldk_node::{PendingSweepBalance, UserChannelId};
 use lightning_invoice::{Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description};
 use picomint_cli_server::{CliError, serve};
+use picomint_client::NotAddedError;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_gateway_cli_core::{
     ChannelInfo, ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse,
@@ -24,7 +23,7 @@ use picomint_gateway_cli_core::{
     ClientOnchainSendMaxResponse, ClientOnchainSendRequest, ClientOnchainSendResponse,
     ClientRemoveRequest, InfoResponse, LdkBalancesResponse, LdkChannelCloseRequest,
     LdkChannelListResponse, LdkChannelOpenRequest, LdkChannelSpliceInRequest,
-    LdkChannelSpliceOutRequest, LdkLightningProbeRequest, LdkLightningReceiveRequest,
+    LdkChannelSpliceOutRequest, LdkError, LdkLightningProbeRequest, LdkLightningReceiveRequest,
     LdkLightningReceiveResponse, LdkLightningSendRequest, LdkLightningSendResponse,
     LdkOnchainReceiveResponse, LdkOnchainSendRequest, LdkOnchainSendResponse,
     LdkPeerConnectRequest, LdkPeerDisconnectRequest, LdkPeerListResponse, MnemonicResponse,
@@ -128,8 +127,8 @@ async fn query(
         picomint_analytics::query(&state.data_dir, &request.query)
     })
     .await
-    .map_err(CliError::internal)?
-    .map_err(CliError::bad_request)?;
+    .expect("the query task is not cancelled")
+    .map_err(CliError::rejected)?;
 
     Ok(Json(QueryResponse(rows)))
 }
@@ -221,13 +220,12 @@ async fn ldk_channel_open(
     open_channel(
         &state.node,
         payload.pubkey,
-        SocketAddress::from_str(&payload.host)
-            .map_err(|e| CliError::internal(format!("Invalid address: {e}")))?,
+        payload.host,
         payload.channel_size_sat,
         push_amount_msat,
         None,
     )
-    .map_err(|e| CliError::internal(format!("Failed to open channel: {e}")))?;
+    .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     info!(pubkey = %payload.pubkey, announce = payload.announce, "Initiated channel open");
     Ok(Json(()))
@@ -251,12 +249,12 @@ async fn ldk_channel_close(
                 payload.pubkey,
                 Some("User initiated force close".to_string()),
             )
-            .map_err(|e| CliError::internal(format!("Failed to force close channel: {e}")))?;
+            .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
     } else {
         state
             .node
             .close_channel(&user_channel_id, payload.pubkey)
-            .map_err(|e| CliError::internal(format!("Failed to close channel: {e}")))?;
+            .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
     }
 
     info!(
@@ -283,7 +281,7 @@ async fn ldk_channel_splice_in(
             payload.pubkey,
             payload.amount_sat,
         )
-        .map_err(|e| CliError::internal(format!("Failed to splice in: {e}")))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     info!(
         user_channel_id = payload.user_channel_id,
@@ -311,7 +309,7 @@ async fn ldk_channel_splice_out(
             &payload.address.assume_checked(),
             payload.amount_sat,
         )
-        .map_err(|e| CliError::internal(format!("Failed to splice out: {e}")))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     info!(
         user_channel_id = payload.user_channel_id,
@@ -381,7 +379,7 @@ async fn ldk_onchain_receive(
         .node
         .onchain_payment()
         .new_address()
-        .map_err(|e| CliError::internal(format!("Failed to get onchain address: {e}")))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     Ok(Json(LdkOnchainReceiveResponse {
         address: address.as_unchecked().clone(),
@@ -402,7 +400,7 @@ async fn ldk_onchain_send(
             payload.amount.to_sat(),
             FeeRate::from_sat_per_vb(payload.sat_per_vbyte),
         )
-        .map_err(|e| CliError::internal(format!("Withdraw error: {e}")))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
     info!(txid = %txid, "Sent onchain transaction");
     Ok(Json(LdkOnchainSendResponse { txid }))
 }
@@ -416,8 +414,7 @@ async fn ldk_lightning_receive(
     let expiry_secs = payload.expiry_secs.unwrap_or(3600);
     let description = match payload.description {
         Some(desc) => LdkBolt11InvoiceDescription::Direct(
-            Description::new(desc)
-                .map_err(|_| CliError::internal("Invalid invoice description"))?,
+            Description::new(desc).map_err(|_| CliError::rejected(LdkError::InvalidDescription))?,
         ),
         None => LdkBolt11InvoiceDescription::Direct(Description::empty()),
     };
@@ -426,7 +423,7 @@ async fn ldk_lightning_receive(
         .node
         .bolt11_payment()
         .receive(payload.amount_msat, &description, expiry_secs)
-        .map_err(|e| CliError::internal(format!("Failed to get invoice: {e}")))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     Ok(Json(LdkLightningReceiveResponse {
         invoice: invoice.to_string(),
@@ -443,7 +440,7 @@ async fn ldk_lightning_send(
         .node
         .bolt11_payment()
         .send(&payload.invoice, None)
-        .map_err(|e| CliError::internal(format!("LDK payment failed to initialize: {e:?}")))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     let preimage: [u8; 32] = loop {
         if let Some(payment_details) = state.node.payment(&payment_id) {
@@ -459,7 +456,7 @@ async fn ldk_lightning_send(
                     }
                 }
                 PaymentStatus::Failed => {
-                    return Err(CliError::internal("LDK payment failed"));
+                    return Err(CliError::rejected(LdkError::PaymentFailed));
                 }
             }
         }
@@ -484,7 +481,7 @@ async fn ldk_lightning_probe(
         .node
         .spontaneous_payment()
         .send_probes(payload.amount_msat, payload.node_id)
-        .map_err(|e| CliError::internal(format!("Failed to send probes: {e}")))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     Ok(Json(()))
 }
@@ -495,15 +492,10 @@ async fn ldk_peer_connect(
     State(state): State<AppState>,
     Json(payload): Json<LdkPeerConnectRequest>,
 ) -> Result<Json<()>, CliError> {
-    let address: SocketAddress = payload
-        .host
-        .parse()
-        .map_err(|e| CliError::bad_request(format!("Invalid address: {e}")))?;
-
     state
         .node
-        .connect(payload.pubkey, address, true)
-        .map_err(|e| CliError::internal(format!("Failed to connect to peer: {e}")))?;
+        .connect(payload.pubkey, payload.host, true)
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     info!(pubkey = %payload.pubkey, "Connected to peer");
     Ok(Json(()))
@@ -518,7 +510,7 @@ async fn ldk_peer_disconnect(
     state
         .node
         .disconnect(payload.pubkey)
-        .map_err(|e| CliError::internal(format!("Failed to disconnect from peer: {e}")))?;
+        .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     info!(pubkey = %payload.pubkey, "Disconnected from peer");
     Ok(Json(()))
@@ -556,7 +548,8 @@ async fn client_add(
     state
         .client
         .add_mint(&payload.invite, Some(state.network))
-        .await?;
+        .await
+        .map_err(CliError::rejected)?;
 
     Ok(Json(()))
 }
@@ -571,7 +564,11 @@ async fn client_remove(
     State(state): State<AppState>,
     Json(payload): Json<ClientRemoveRequest>,
 ) -> Result<Json<()>, CliError> {
-    let dbtx = state.client.begin_remove_mint(payload.mint).await?;
+    let dbtx = state
+        .client
+        .begin_remove_mint(payload.mint)
+        .await
+        .map_err(CliError::rejected)?;
 
     crate::db::wipe_mint_rows(&dbtx, payload.mint);
 
@@ -601,7 +598,7 @@ async fn client_config(
     let config = state
         .client
         .config(mint)
-        .ok_or_else(|| CliError::bad_request("Mint not added"))?;
+        .ok_or_else(|| CliError::rejected(NotAddedError::NotAdded))?;
 
     Ok(Json(ClientConfigResponse {
         config: serde_json::to_value(config).expect("NodeConfigConsensus is serializable"),
@@ -652,7 +649,7 @@ async fn client_ecash_send(
             picomint_core::Amount::from_sat(payload.amount.to_sat()),
         )
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientEcashSendResponse { ecash }))
 }
@@ -666,7 +663,7 @@ async fn client_ecash_send_max(
     let ecash = state
         .client
         .ecash_send_max(payload.mint, payload.account)
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientEcashSendMaxResponse { ecash }))
 }
@@ -681,7 +678,7 @@ async fn client_ecash_receive(
     let operation = state
         .client
         .ecash_receive(payload.mint, payload.account, &payload.ecash)
-        .map_err(|e| CliError::internal(format!("Failed to submit reissue: {e}")))?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientEcashReceiveResponse { operation }))
 }
@@ -697,7 +694,7 @@ async fn client_onchain_send_fee(
         .client
         .onchain_send_fee(mint)
         .await
-        .map_err(|e| CliError::internal(format!("Failed to fetch send fee: {e}")))?;
+        .map_err(CliError::rejected)?;
     Ok(Json(ClientOnchainSendFeeResponse { fee }))
 }
 
@@ -719,7 +716,7 @@ async fn client_onchain_send(
             payload.fee,
         )
         .await
-        .map_err(|e| CliError::internal(format!("Failed to submit onchain send: {e}")))?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientOnchainSendResponse { operation }))
 }
@@ -734,7 +731,7 @@ async fn client_onchain_send_max(
         .client
         .onchain_send_max(payload.mint, payload.account, payload.address)
         .await
-        .map_err(|e| CliError::internal(format!("Failed to submit onchain send: {e}")))?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientOnchainSendMaxResponse { operation }))
 }
@@ -750,7 +747,7 @@ async fn client_onchain_receive(
     let address = state
         .client
         .onchain_receive(mint, payload.account)
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientOnchainReceiveResponse {
         address: address.as_unchecked().clone(),

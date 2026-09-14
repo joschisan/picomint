@@ -54,7 +54,8 @@ pub mod tx;
 
 pub use iroh::Endpoint;
 
-pub use client::Client;
+pub use add_mint::AddMintError;
+pub use client::{Client, NotAddedError};
 pub use picomint_core::core::{Account, OperationId};
 pub use picomint_rpc::connection::ConnStatus;
 pub use secret::{Mnemonic, random as random_mnemonic};

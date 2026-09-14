@@ -12,6 +12,7 @@ version = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true }
 picomint-core = { workspace = true }
+thiserror = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 tss = { workspace = true }

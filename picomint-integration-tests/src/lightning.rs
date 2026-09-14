@@ -635,8 +635,11 @@ async fn spawn_mock_gateway(env: &TestEnv) -> anyhow::Result<GatewayPk> {
     // A fresh endpoint finds the invite node over mDNS, and the ecash suite
     // may be loading the mint in parallel; a failed add writes nothing, so
     // a second attempt starts clean.
-    let mint = retry("mock gateway joins the mint", || {
-        client.add_mint(&env.invite, Some(bitcoin::Network::Regtest))
+    let mint = retry("mock gateway joins the mint", || async {
+        client
+            .add_mint(&env.invite, Some(bitcoin::Network::Regtest))
+            .await
+            .map_err(anyhow::Error::from)
     })
     .await?;
 

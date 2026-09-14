@@ -8,6 +8,8 @@ description = "The daemon side of the picomint admin socket"
 [dependencies]
 anyhow = { workspace = true }
 axum = { workspace = true }
+picomint-core = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 
 [dev-dependencies]

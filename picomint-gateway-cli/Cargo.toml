@@ -17,9 +17,9 @@ name = "picomint-gateway-cli"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = { workspace = true }
 clap = { workspace = true }
 picomint-analytics = { workspace = true }
 picomint-cli-client = { workspace = true }
+picomint-client = { workspace = true }
 picomint-gateway-cli-core = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }

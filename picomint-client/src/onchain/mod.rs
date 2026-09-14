@@ -19,6 +19,7 @@ use db::{NextOutputIndexTable, ValidAddressIndexTable};
 use events::{ReceiveEvent, SendEvent};
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
+use picomint_core::error::ErrorCode;
 use picomint_core::onchain::{
     OnchainInput, OnchainOutput, StandardScript, is_potential_receive, tweaked_address,
 };
@@ -396,7 +397,7 @@ pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
     vec![db.notify_for_table(&SendStateMachineTable)]
 }
 
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum SendError {
     #[error("Address is from a different network than the mint.")]
     WrongNetwork,
@@ -414,17 +415,25 @@ pub enum SendError {
     NotAdded,
 }
 
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum ReceiveError {
+    #[error("Deposit address derivation has not completed yet")]
+    DerivationPending,
+    #[error("Mint is not added")]
+    NotAdded,
+}
+
 // ─── Flat mint-keyed surface ───────────────────────────────────────
 
 impl Client {
     /// `account`'s next unused onchain deposit address. Errors while the
     /// initial address derivation has not completed yet.
-    pub fn onchain_receive(&self, mint: MintId, account: Account) -> anyhow::Result<Address> {
-        let ctx = self.ctx(mint)?;
+    pub fn onchain_receive(&self, mint: MintId, account: Account) -> Result<Address, ReceiveError> {
+        let ctx = self.ctx(mint).map_err(|_| ReceiveError::NotAdded)?;
 
         highest_valid_index(&ctx, account)
             .map(|index| derive_address(&ctx, account, index))
-            .context("Deposit address derivation has not completed yet")
+            .ok_or(ReceiveError::DerivationPending)
     }
 
     /// Send an onchain payment funded from `account`. `fee` defaults to the

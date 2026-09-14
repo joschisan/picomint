@@ -10,18 +10,21 @@ use std::collections::BTreeMap;
 
 use bitcoin::address::NetworkUnchecked;
 use clap::Args;
+use lightning::ln::msgs::SocketAddress;
 use lightning_invoice::Bolt11Invoice;
 use picomint_client::ecash::Ecash;
 use picomint_core::config::MintId;
 use picomint_core::core::Account;
 use picomint_core::core::OperationId;
 use picomint_core::ecash::Denomination;
+use picomint_core::error::ErrorCode;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_core::{Amount, secp256k1};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
+use thiserror::Error;
 
 // Top-level
 pub const ROUTE_INFO: &str = "/info";
@@ -137,12 +140,14 @@ pub struct LdkBalancesResponse {
 
 // --- /ldk/channel/open ---
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkChannelOpenRequest {
     /// The peer's node id, hex
     pub pubkey: secp256k1::PublicKey,
-    /// The peer's `host:port`
-    pub host: String,
+    /// The peer's `host:port`: an IP, a hostname or an onion address
+    #[serde_as(as = "DisplayFromStr")]
+    pub host: SocketAddress,
     /// The channel's capacity in sat, funded from the LDK onchain wallet
     pub channel_size_sat: u64,
     /// Sat handed to the peer as its starting balance in the channel
@@ -341,12 +346,14 @@ pub struct LdkLightningSendResponse {
 
 // --- /ldk/peer/connect ---
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkPeerConnectRequest {
     /// The peer's node id, hex
     pub pubkey: secp256k1::PublicKey,
-    /// The peer's `host:port`
-    pub host: String,
+    /// The peer's `host:port`: an IP, a hostname or an onion address
+    #[serde_as(as = "DisplayFromStr")]
+    pub host: SocketAddress,
 }
 
 // --- /ldk/peer/disconnect ---
@@ -631,4 +638,17 @@ pub struct ClientOnchainReceiveResponse {
     /// per-input fee
     #[schemars(with = "String")]
     pub address: bitcoin::Address<bitcoin::address::NetworkUnchecked>,
+}
+
+// --- errors ---
+
+/// Why an `ldk` command did nothing: LDK refused it, with its reason.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum LdkError {
+    #[error("The invoice description is too long")]
+    InvalidDescription,
+    #[error("The payment failed")]
+    PaymentFailed,
+    #[error("LDK refused: {0}")]
+    Ldk(String),
 }

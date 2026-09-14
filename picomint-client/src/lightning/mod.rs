@@ -7,13 +7,12 @@ mod gateway;
 mod secret;
 mod send_sm;
 
-use anyhow::Context;
 use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::Notify;
 
-use crate::client::Client;
+use crate::client::{Client, NotAddedError};
 use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use bitcoin::secp256k1;
@@ -23,6 +22,7 @@ use lightning_invoice::{Bolt11Invoice, Currency};
 use picomint_core::NumNodesExt;
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
+use picomint_core::error::ErrorCode;
 use picomint_core::lightning::contracts::{
     IncomingContractSummary, IncomingOffer, OutgoingContract,
 };
@@ -152,21 +152,21 @@ pub(crate) async fn send_max(
     gateway_pk: GatewayPk,
     gateway_info: GatewayInfo,
     lnurl: &str,
-) -> anyhow::Result<OperationId> {
-    let url = picomint_lnurl::parse_lnurl(lnurl).context("Not a valid lnurl")?;
+) -> Result<OperationId, SendPaymentError> {
+    let url = picomint_lnurl::parse_lnurl(lnurl).ok_or(SendPaymentError::InvalidLnurl)?;
 
     let info = picomint_lnurl::request(&url)
         .await
-        .map_err(anyhow::Error::msg)?;
+        .map_err(SendPaymentError::Lnurl)?;
 
     let max = send_max_amount(ctx, account, &gateway_info);
 
     let invoice = picomint_lnurl::get_invoice(&info, max.msat)
         .await
-        .map_err(anyhow::Error::msg)?
+        .map_err(SendPaymentError::Lnurl)?
         .pr;
 
-    Ok(send_inner(ctx, account, gateway_pk, gateway_info, invoice, true).await?)
+    send_inner(ctx, account, gateway_pk, gateway_info, invoice, true).await
 }
 
 async fn send_inner(
@@ -247,7 +247,7 @@ async fn send_inner(
         max,
         |txid| SendEvent { txid, amount, fee },
     )
-    .ok_or_else(|| SendPaymentError::FailedToFundPayment("Insufficient funds".into()))?;
+    .ok_or(SendPaymentError::InsufficientBalance)?;
 
     let sm = SendStateMachine {
         common: SendSMCommon {
@@ -425,7 +425,7 @@ async fn receive_scan(ctx: ClientContext) {
     }
 }
 
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum SendPaymentError {
     #[error("Invoice is missing an amount")]
     InvoiceMissingAmount,
@@ -441,8 +441,12 @@ pub enum SendPaymentError {
     GatewayNotAvailable,
     #[error("Failed to request block height")]
     FailedToRequestBlockHeight,
-    #[error("Failed to fund the payment")]
-    FailedToFundPayment(String),
+    #[error("The client's balance is insufficient")]
+    InsufficientBalance,
+    #[error("Not a valid lnurl")]
+    InvalidLnurl,
+    #[error("The lnurl endpoint failed: {0}")]
+    Lnurl(String),
     #[error("Invoice is for a different currency")]
     WrongCurrency {
         invoice_currency: Currency,
@@ -452,11 +456,11 @@ pub enum SendPaymentError {
     NotAdded,
 }
 
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum ReceiveError {
     #[error("Gateway is not available")]
     GatewayNotAvailable,
-    #[error("Failed to connect to gateway")]
+    #[error("Failed to connect to gateway: {0}")]
     FailedToConnectToGateway(String),
     #[error("Gateway fee exceeds the allowed limit")]
     GatewayFeeExceedsLimit,
@@ -470,10 +474,12 @@ pub enum ReceiveError {
     NotAdded,
 }
 
-#[derive(Error, Debug, Clone, Eq, PartialEq)]
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum RefreshGatewaysError {
     #[error("Failed to request gateways")]
     FailedToRequestGateways,
+    #[error("Mint is not added")]
+    NotAdded,
 }
 
 /// Remove every row this module owns under the caller's mint prefix.
@@ -514,7 +520,7 @@ impl Client {
     pub fn lightning_gateways(
         &self,
         mint: MintId,
-    ) -> anyhow::Result<BTreeMap<GatewayPk, GatewayInfo>> {
+    ) -> Result<BTreeMap<GatewayPk, GatewayInfo>, NotAddedError> {
         Ok(self.ctx(mint)?.gateways.list())
     }
 
@@ -548,13 +554,13 @@ impl Client {
         mint: MintId,
         account: Account,
         gateway_pk: GatewayPk,
-    ) -> anyhow::Result<Amount> {
-        let ctx = self.ctx(mint)?;
+    ) -> Result<Amount, SendPaymentError> {
+        let ctx = self.ctx(mint).map_err(|_| SendPaymentError::NotAdded)?;
 
         let gateway_info = ctx
             .gateways
             .info(gateway_pk)
-            .context("Gateway is not available")?;
+            .ok_or(SendPaymentError::GatewayNotAvailable)?;
 
         Ok(send_max_amount(&ctx, account, &gateway_info))
     }
@@ -569,13 +575,13 @@ impl Client {
         account: Account,
         gateway_pk: GatewayPk,
         lnurl: &str,
-    ) -> anyhow::Result<OperationId> {
-        let ctx = self.ctx(mint)?;
+    ) -> Result<OperationId, SendPaymentError> {
+        let ctx = self.ctx(mint).map_err(|_| SendPaymentError::NotAdded)?;
 
         let gateway_info = ctx
             .gateways
             .info(gateway_pk)
-            .context("Gateway is not available")?;
+            .ok_or(SendPaymentError::GatewayNotAvailable)?;
 
         send_max(&ctx, account, gateway_pk, gateway_info, lnurl).await
     }
@@ -620,7 +626,7 @@ impl Client {
         mint: MintId,
         account: Account,
         lnurl_daemon: String,
-    ) -> anyhow::Result<String> {
+    ) -> Result<String, NotAddedError> {
         let ctx = self.ctx(mint)?;
 
         let config = &ctx.config;
@@ -663,8 +669,11 @@ impl Client {
     /// current set.
     ///
     /// [`lightning_gateways`]: Client::lightning_gateways
-    pub async fn lightning_refresh_gateways(&self, mint: MintId) -> anyhow::Result<()> {
-        let ctx = self.ctx(mint)?;
+    pub async fn lightning_refresh_gateways(
+        &self,
+        mint: MintId,
+    ) -> Result<(), RefreshGatewaysError> {
+        let ctx = self.ctx(mint).map_err(|_| RefreshGatewaysError::NotAdded)?;
 
         update_gateway_pks(ctx.clone()).await?;
 
