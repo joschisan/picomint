@@ -1,6 +1,7 @@
 pub use picomint_core::lightning as common;
 
 mod db;
+pub mod events;
 mod rpc;
 
 use anyhow::{Context, ensure};
@@ -15,7 +16,7 @@ use picomint_core::lightning::{
     LightningInput, LightningInputError, LightningOutput, LightningOutputError, OutgoingWitness,
 };
 use picomint_core::secp256k1::XOnlyPublicKey;
-use picomint_core::{Amount, OutPoint};
+use picomint_core::{Amount, InPoint, OutPoint};
 use picomint_redb::{DbRead, WriteTx};
 use tpe::{PublicKeyShare, SecretKeyShare};
 
@@ -23,6 +24,7 @@ use crate::config::NodeConfig;
 use crate::config::dkg::DkgHandle;
 use crate::config::poly::eval_poly_g1;
 use crate::consensus::db::consensus_block_height;
+use crate::consensus::eventlog::log_event;
 use crate::consensus::server::Server;
 use crate::{handler, handler_async};
 
@@ -30,6 +32,10 @@ use self::db::{
     DecryptionKeyShareTable, GatewayTable, IncomingContractIndexTable,
     IncomingContractStreamNextIndexTable, IncomingContractStreamTable, IncomingContractTable,
     OutgoingContractTable, PreimageTable,
+};
+use self::events::{
+    InputIncomingClaimEvent, InputIncomingRefundEvent, InputOutgoingCancelEvent,
+    InputOutgoingClaimEvent, InputOutgoingRefundEvent, OutputIncomingEvent, OutputOutgoingEvent,
 };
 
 /// Run DKG for the lightning module, producing a fresh `LightningConfig` for
@@ -75,12 +81,18 @@ pub fn process_input(
     server: &Server,
     dbtx: &WriteTx,
     input: &LightningInput,
+    inpoint: InPoint,
 ) -> Result<(Amount, XOnlyPublicKey), LightningInputError> {
     match input {
         LightningInput::Outgoing(outpoint, outgoing_witness) => {
             let contract = dbtx
                 .remove(&OutgoingContractTable, outpoint)
                 .ok_or(LightningInputError::UnknownContract)?;
+
+            let amount = contract
+                .amount
+                .checked_add(contract.fee)
+                .ok_or(LightningInputError::ArithmeticOverflow)?;
 
             let pub_key = match outgoing_witness {
                 OutgoingWitness::Claim(preimage) => {
@@ -94,12 +106,28 @@ pub fn process_input(
 
                     dbtx.insert(&PreimageTable, outpoint, preimage);
 
+                    let event = InputOutgoingClaimEvent {
+                        inpoint,
+                        contract: *outpoint,
+                        amount,
+                    };
+
+                    log_event(dbtx, &event);
+
                     contract.claim_pk
                 }
                 OutgoingWitness::Refund => {
                     if contract.expiry > consensus_block_height(server, dbtx) {
                         return Err(LightningInputError::NotExpired);
                     }
+
+                    let event = InputOutgoingRefundEvent {
+                        inpoint,
+                        contract: *outpoint,
+                        amount,
+                    };
+
+                    log_event(dbtx, &event);
 
                     contract.refund_pk
                 }
@@ -108,14 +136,17 @@ pub fn process_input(
                         return Err(LightningInputError::InvalidForfeitSignature);
                     }
 
+                    let event = InputOutgoingCancelEvent {
+                        inpoint,
+                        contract: *outpoint,
+                        amount,
+                    };
+
+                    log_event(dbtx, &event);
+
                     contract.refund_pk
                 }
             };
-
-            let amount = contract
-                .amount
-                .checked_add(contract.fee)
-                .ok_or(LightningInputError::ArithmeticOverflow)?;
 
             Ok((amount, pub_key))
         }
@@ -137,17 +168,37 @@ pub fn process_input(
                 return Err(LightningInputError::InvalidDecryptionKey);
             }
 
-            let pub_key = match contract.offer.decrypt_preimage(agg_decryption_key) {
-                Some(..) => contract.offer.commitment.claim_pk,
-                None => contract.refund_pk,
-            };
-
             let amount = contract
                 .offer
                 .commitment
                 .amount
                 .checked_sub(contract.offer.commitment.fee)
                 .ok_or(LightningInputError::ArithmeticOverflow)?;
+
+            let pub_key = match contract.offer.decrypt_preimage(agg_decryption_key) {
+                Some(..) => {
+                    let event = InputIncomingClaimEvent {
+                        inpoint,
+                        contract: *outpoint,
+                        amount,
+                    };
+
+                    log_event(dbtx, &event);
+
+                    contract.offer.commitment.claim_pk
+                }
+                None => {
+                    let event = InputIncomingRefundEvent {
+                        inpoint,
+                        contract: *outpoint,
+                        amount,
+                    };
+
+                    log_event(dbtx, &event);
+
+                    contract.refund_pk
+                }
+            };
 
             Ok((amount, pub_key))
         }
@@ -168,6 +219,18 @@ pub fn process_output(
                 .ok_or(LightningOutputError::ArithmeticOverflow)?;
 
             dbtx.insert(&OutgoingContractTable, &outpoint, contract);
+
+            let event = OutputOutgoingEvent {
+                outpoint,
+                payment_hash: contract.payment_hash,
+                amount: contract.amount,
+                fee: contract.fee,
+                expiry: contract.expiry,
+                claim_pk: contract.claim_pk,
+                refund_pk: contract.refund_pk,
+            };
+
+            log_event(dbtx, &event);
 
             Ok(amount)
         }
@@ -201,6 +264,17 @@ pub fn process_output(
                 .create_decryption_key_share(&server.cfg.private.lightning.sk);
 
             dbtx.insert(&DecryptionKeyShareTable, &outpoint, &dk_share);
+
+            let event = OutputIncomingEvent {
+                outpoint,
+                payment_hash: contract.offer.commitment.payment_hash,
+                amount: contract.offer.commitment.amount,
+                fee: contract.offer.commitment.fee,
+                claim_pk: contract.offer.commitment.claim_pk,
+                refund_pk: contract.refund_pk,
+            };
+
+            log_event(dbtx, &event);
 
             contract
                 .offer

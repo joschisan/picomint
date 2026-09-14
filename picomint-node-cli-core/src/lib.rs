@@ -36,6 +36,7 @@ pub const ROUTE_BACKUP: &str = "/backup";
 pub const ROUTE_EXPIRY_SET: &str = "/expiry/set";
 pub const ROUTE_EXPIRY_CLEAR: &str = "/expiry/clear";
 pub const ROUTE_EXPIRY_STATUS: &str = "/expiry/status";
+pub const ROUTE_QUERY: &str = "/query";
 
 // Module routes
 pub const ROUTE_ONCHAIN_STATUS: &str = "/onchain/status";
@@ -530,3 +531,22 @@ pub enum GatewayRemoveError {
     #[error("The gateway is not recommended")]
     NotRecommended,
 }
+
+// --- /query ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct QueryRequest {
+    /// Read-only SQL run against the analytics db, e.g.
+    /// "SELECT * FROM ecash_output ORDER BY id DESC LIMIT 10"
+    pub query: String,
+}
+
+/// The rows the query returned: one JSON object per row, keyed by result
+/// column name, the same shape `sqlite3 --json` prints. Every table is
+/// one event kind and starts with the log `id`; there is no wallclock,
+/// the consensus height is the `height` table. Amounts are
+/// integers, msat except the `_sat` columns; hashes, ids and keys are
+/// text.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct QueryResponse(pub Vec<serde_json::Map<String, serde_json::Value>>);

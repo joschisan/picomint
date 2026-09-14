@@ -62,7 +62,7 @@ enum Commands {
     /// Query the analytics db with read-only SQL; rows print as JSON objects
     #[command(after_long_help = format!(
         "{}\n{}",
-        picomint_analytics::tables(),
+        picomint_client::analytics::tables(),
         schema_fallible::<QueryResponse, QueryError>()
     ))]
     Query(QueryRequest),

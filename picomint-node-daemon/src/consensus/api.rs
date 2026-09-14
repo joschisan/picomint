@@ -1,5 +1,7 @@
 //! Implements the client API through which users interact with the mint
 
+use std::path::PathBuf;
+
 use chrono::{Days, Utc};
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
@@ -21,6 +23,8 @@ pub struct ConsensusApi {
     /// For sending API events to consensus such as transactions
     pub submission_tx: async_channel::Sender<ConsensusItem>,
     pub p2p_status_receivers: P2PStatusReceivers,
+    /// Where the analytics db lives, for the `query` route.
+    pub data_dir: PathBuf,
 }
 
 impl ConsensusApi {

@@ -255,6 +255,7 @@ pub fn derive_sql_row(input: TokenStream) -> TokenStream {
                 ::picomint_core::sql::Column {
                     name: stringify!(#names),
                     ty: <#types as ::picomint_core::sql::SqlColumn>::TYPE,
+                    nullable: <#types as ::picomint_core::sql::SqlColumn>::NULLABLE,
                     doc: #docs,
                 }
             ),*];

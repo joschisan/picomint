@@ -1,22 +1,29 @@
-//! How an event field lands in an analytics row.
+//! How a field lands in an analytics row.
 //!
-//! [`SqlRow`] is derived on every event struct and turns it into its
+//! [`SqlRow`] is derived on every row struct and turns it into its
 //! table's payload columns; [`SqlColumn`] is what a field's type has to
 //! implement for that, and pins the flattening rules once — an amount is
 //! an integer column carrying its unit as a suffix, a hash or key is its
-//! text form, a byte array is hex. The derive is
-//! [`picomint_derive::SqlRow`], re-exported here.
+//! text form, a byte array is hex, an `Option` is a nullable column. The
+//! derive is [`picomint_derive::SqlRow`], re-exported here;
+//! [`create_table`] renders a row type's DDL and [`table_doc`] explains
+//! its columns for `query --help`.
 
 use bitcoin::address::NetworkUnchecked;
+use bitcoin::hashes::sha256;
 use bitcoin::{Address, Txid};
 pub use picomint_derive::SqlRow;
+use secp256k1::XOnlyPublicKey;
 use secp256k1::schnorr::Signature;
 
-use crate::{Amount, OutPoint, TransactionId};
+use crate::ecash::Denomination;
+use crate::version::ConsensusVersion;
+use crate::{Amount, InPoint, NodeId, OutPoint, TransactionId};
 
 /// A value bound into an analytics row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SqlValue {
+    Null,
     Integer(i64),
     Text(String),
 }
@@ -26,16 +33,38 @@ pub trait SqlColumn {
     /// SQLite storage class of the column: `INTEGER` or `TEXT`.
     const TYPE: &'static str;
 
+    /// Every column is `NOT NULL` except an `Option`'s.
+    const NULLABLE: bool = false;
+
     fn sql_value(&self) -> SqlValue;
 }
 
-/// One payload column of a table: the field's name, its storage class and
-/// the field's doc comment, which `query --help` prints beside it.
+/// One payload column of a table: the field's name, its storage class,
+/// whether it may be null and the field's doc comment, which
+/// `query --help` prints beside it.
 #[derive(Debug, Clone, Copy)]
 pub struct Column {
     pub name: &'static str,
     pub ty: &'static str,
+    pub nullable: bool,
     pub doc: &'static str,
+}
+
+impl Column {
+    /// The column as `query --help` names it: `feerate INTEGER NULL`.
+    fn signature(&self) -> String {
+        match self.nullable {
+            true => format!("{} {} NULL", self.name, self.ty),
+            false => format!("{} {}", self.name, self.ty),
+        }
+    }
+
+    fn ddl(&self) -> String {
+        match self.nullable {
+            true => format!("{} {}", self.name, self.ty),
+            false => format!("{} {} NOT NULL", self.name, self.ty),
+        }
+    }
 }
 
 /// A struct that maps to one table: its payload columns, in declaration
@@ -48,6 +77,57 @@ pub trait SqlRow {
     const COLUMNS: &'static [Column];
 
     fn values(&self) -> Vec<SqlValue>;
+}
+
+/// One row bound for insertion: the table it goes into and its values,
+/// the table's common columns first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    pub table: String,
+    pub values: Vec<SqlValue>,
+}
+
+/// The DDL for one table: `common` columns first, then the row type's
+/// own, plus one index per entry of `indexes`, each a column list.
+pub fn create_table<R: SqlRow>(table: &str, common: &[(&str, &str)], indexes: &[&str]) -> String {
+    let columns = common
+        .iter()
+        .map(|column| format!("{} {}", column.0, column.1))
+        .chain(R::COLUMNS.iter().map(Column::ddl))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let indexes = indexes
+        .iter()
+        .map(|columns| {
+            format!(
+                "CREATE INDEX {table}_{} ON {table}({columns});\n",
+                columns.replace(", ", "_")
+            )
+        })
+        .collect::<String>();
+
+    format!("CREATE TABLE {table} ({columns});\n{indexes}")
+}
+
+/// One table explained for `query --help`: its name and what a row
+/// records, then every payload column beside its doc comment.
+pub fn table_doc<R: SqlRow>(table: &str) -> String {
+    let signatures = R::COLUMNS.iter().map(Column::signature).collect::<Vec<_>>();
+
+    let width = signatures.iter().map(String::len).max().unwrap_or(0);
+
+    signatures
+        .iter()
+        .zip(R::COLUMNS)
+        .map(|entry| format!("  {:<width$}  {}\n", entry.0, entry.1.doc))
+        .fold(
+            format!("\n{table}: {}\n", R::DESCRIPTION),
+            |mut doc, line| {
+                doc.push_str(&line);
+                doc
+            },
+        )
 }
 
 macro_rules! integer {
@@ -76,7 +156,35 @@ macro_rules! display {
     };
 }
 
-display!(String, TransactionId, Txid, OutPoint, Signature);
+display!(
+    String,
+    TransactionId,
+    Txid,
+    OutPoint,
+    InPoint,
+    Signature,
+    ConsensusVersion,
+    XOnlyPublicKey,
+    sha256::Hash
+);
+
+impl<T: SqlColumn> SqlColumn for Option<T> {
+    const TYPE: &'static str = T::TYPE;
+
+    const NULLABLE: bool = true;
+
+    fn sql_value(&self) -> SqlValue {
+        self.as_ref().map_or(SqlValue::Null, SqlColumn::sql_value)
+    }
+}
+
+impl SqlColumn for NodeId {
+    const TYPE: &'static str = "INTEGER";
+
+    fn sql_value(&self) -> SqlValue {
+        SqlValue::Integer(self.to_usize() as i64)
+    }
+}
 
 impl SqlColumn for bool {
     const TYPE: &'static str = "INTEGER";
@@ -99,6 +207,14 @@ impl SqlColumn for bitcoin::Amount {
 
     fn sql_value(&self) -> SqlValue {
         SqlValue::Integer(self.to_sat() as i64)
+    }
+}
+
+impl SqlColumn for Denomination {
+    const TYPE: &'static str = "INTEGER";
+
+    fn sql_value(&self) -> SqlValue {
+        SqlValue::Integer(i64::from(self.0))
     }
 }
 

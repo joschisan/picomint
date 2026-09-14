@@ -15,4 +15,5 @@ picomint-core = { workspace = true }
 thiserror = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tss = { workspace = true }

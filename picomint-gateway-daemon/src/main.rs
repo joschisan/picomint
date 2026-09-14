@@ -19,6 +19,7 @@ use clap::{ArgGroup, Parser};
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning::types::payment::PaymentHash;
+use picomint_client::analytics;
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::lightning::gateway::PaymentFee;
@@ -262,7 +263,10 @@ fn main() -> anyhow::Result<()> {
         receive_fee,
         invoice_expiry_secs: opts.invoice_expiry_secs,
         cltv_expiry_delta: opts.cltv_expiry_delta,
-        analytics: picomint_analytics::Analytics::wipe_and_init(&opts.data_dir)?,
+        analytics: picomint_analytics::Analytics::wipe_and_init(
+            &opts.data_dir,
+            &analytics::schema(),
+        )?,
     };
 
     // 6. Fire-and-forget every long-running task. All work is persisted
@@ -275,8 +279,10 @@ fn main() -> anyhow::Result<()> {
     runtime.spawn(process_ldk_events(state.clone()));
 
     runtime.spawn(picomint_analytics::trailer(
-        state.client.clone(),
         state.analytics.clone(),
+        state.client.event_notify(),
+        analytics::reader(state.client.clone()),
+        analytics::rows,
     ));
 
     runtime.spawn(picomint_gateway_daemon::trailer::run(state));

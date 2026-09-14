@@ -22,6 +22,8 @@ use crate::consensus::db::{
     BlockHeightVoteTable, ConsensusVersionVoteTable, ResumeIndexTable, SessionSignaturesTable,
     consensus_block_height, consensus_version,
 };
+use crate::consensus::eventlog::log_event;
+use crate::consensus::events::{HeightEvent, SessionEvent, VersionEvent};
 use crate::consensus::onchain;
 use crate::consensus::server::Server;
 use crate::p2p::{P2PMessage, Recipient, ReconnectP2PConnections};
@@ -420,6 +422,8 @@ async fn finalize_session(server: &Server, session: u32, close: SessionClose) {
         }
     };
 
+    log_event(&dbtx, &SessionEvent { session });
+
     dbtx.insert_new(&SessionSignaturesTable, &session, &signatures);
 
     dbtx.clear_table(&ResumeIndexTable);
@@ -494,10 +498,18 @@ fn process_consensus_item(
                 );
 
                 onchain::initialize_block_height(dbtx, old_block_height, new_block_height);
+
+                let event = HeightEvent {
+                    height: new_block_height,
+                };
+
+                log_event(dbtx, &event);
             }
         }
         ConsensusItem::Version(vote) => {
             let default_version = server.cfg.consensus.default_version;
+
+            let old_version = consensus_version(server, dbtx);
 
             let current_vote = dbtx
                 .insert(&ConsensusVersionVoteTable, &node, vote)
@@ -505,13 +517,23 @@ fn process_consensus_item(
 
             ensure!(current_vote < *vote, "Consensus version vote is redundant");
 
+            let new_version = consensus_version(server, dbtx);
+
             // A threshold has moved past what we know how to apply, so
             // every rule we would run from here on is the wrong one.
             // Halting is the only correct move left.
             assert!(
-                consensus_version(server, dbtx) <= CONSENSUS_VERSION,
+                new_version <= CONSENSUS_VERSION,
                 "Node does not support the active consensus version, please upgrade"
             );
+
+            if new_version != old_version {
+                let event = VersionEvent {
+                    version: new_version,
+                };
+
+                log_event(dbtx, &event);
+            }
         }
     }
 

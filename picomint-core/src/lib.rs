@@ -112,3 +112,34 @@ impl std::fmt::Display for OutPoint {
         write!(f, "{}:{}", self.txid, self.out_idx)
     }
 }
+
+/// `InPoint` names an input of a transaction the way [`OutPoint`] names
+/// an output: the transaction ID and the input's index in it.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Deserialize,
+    Serialize,
+    Encodable,
+    Decodable,
+)]
+pub struct InPoint {
+    pub txid: TransactionId,
+    /// A `u16` covers every index a valid transaction can have, since a
+    /// transaction carries at most [`Transaction::MAX_INPUTS`] of them.
+    ///
+    /// [`Transaction::MAX_INPUTS`]: crate::tx::Transaction::MAX_INPUTS
+    pub in_idx: u16,
+}
+
+impl std::fmt::Display for InPoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.txid, self.in_idx)
+    }
+}

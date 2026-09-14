@@ -22,7 +22,6 @@ iroh-mdns-address-lookup = { workspace = true }
 ldk-node = { workspace = true }
 lightning-invoice = { workspace = true }
 lightning-types = { workspace = true }
-picomint-analytics = { workspace = true }
 picomint-base32 = { workspace = true }
 picomint-client = { workspace = true }
 picomint-client-cli-core = { workspace = true }

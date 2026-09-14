@@ -1,19 +1,20 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use picomint_analytics::QueryError;
 use picomint_cli_client::{FOOTER, RequestError, print_json, request, schema, schema_fallible};
 use picomint_node_cli_core::{
     BackupResponse, BitcoindError, BitcoindResponse, ExpirySetError, ExpirySetRequest,
     ExpiryStatusResponse, GatewayAddError, GatewayRemoveError, HistoryResponse, InviteError,
     InviteRequest, InviteResponse, LightningGatewayAddRequest, LightningGatewayListResponse,
     LightningGatewayRemoveRequest, NodeStatus, OnchainStatusResponse, PendingResponse,
-    ROUTE_BACKUP, ROUTE_BITCOIND, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
-    ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
-    ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL, ROUTE_ONCHAIN_STATUS,
-    ROUTE_SETUP_ADD, ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE,
-    ROUTE_STATUS, RugpullError, RugpullResponse, SetupAddError, SetupAddRequest, SetupAddResponse,
-    SetupConfirmError, SetupInitError, SetupInitRequest, SetupInitResponse, SetupRestoreError,
-    StatusError,
+    QueryRequest, QueryResponse, ROUTE_BACKUP, ROUTE_BITCOIND, ROUTE_EXPIRY_CLEAR,
+    ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS, ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST,
+    ROUTE_GATEWAY_REMOVE, ROUTE_INVITE, ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING,
+    ROUTE_ONCHAIN_RUGPULL, ROUTE_ONCHAIN_STATUS, ROUTE_QUERY, ROUTE_SETUP_ADD, ROUTE_SETUP_CONFIRM,
+    ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE, ROUTE_STATUS, RugpullError,
+    RugpullResponse, SetupAddError, SetupAddRequest, SetupAddResponse, SetupConfirmError,
+    SetupInitError, SetupInitRequest, SetupInitResponse, SetupRestoreError, StatusError,
 };
 use serde_json::Value;
 
@@ -56,6 +57,13 @@ enum Commands {
     /// Print the node's whole config with its private keys; pipe it into a file (secret)
     #[command(after_long_help = schema::<BackupResponse>())]
     Backup,
+    /// Query the analytics db with read-only SQL; rows print as JSON objects
+    #[command(after_long_help = format!(
+        "{}\n{}",
+        picomint_node_daemon::consensus::analytics::tables(),
+        schema_fallible::<QueryResponse, QueryError>()
+    ))]
+    Query(QueryRequest),
     /// The mint's expiry announcement
     #[command(subcommand)]
     Expiry(ExpiryCommands),
@@ -138,6 +146,7 @@ async fn main() {
         Commands::Bitcoind => request(d, ROUTE_BITCOIND, ()).await,
         Commands::Invite(req) => request(d, ROUTE_INVITE, req).await,
         Commands::Backup => request(d, ROUTE_BACKUP, ()).await,
+        Commands::Query(req) => request(d, ROUTE_QUERY, req).await,
 
         Commands::Expiry(cmd) => match cmd {
             ExpiryCommands::Set(req) => request(d, ROUTE_EXPIRY_SET, req).await,

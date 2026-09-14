@@ -45,6 +45,9 @@ tokio-util = { workspace = true, features = ["rt"] }
 tpe = { workspace = true }
 tracing = { workspace = true }
 
+[dev-dependencies]
+rusqlite = { workspace = true }
+
 # The `Base32` derive on `Ecash` expands to `schemars` impls, which is what
 # the crate depends on it for and what cargo-machete cannot see.
 [package.metadata.cargo-machete]
