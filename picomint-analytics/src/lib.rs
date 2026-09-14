@@ -2,8 +2,8 @@
 //!
 //! A trailer task reads the daemon-wide event log forward and inserts
 //! every entry into `{DATA_DIR}/analytics/analytics.sqlite`. Each event
-//! type registered in [`events!`] gets a table named after its source and
-//! kind — `gateway_send`, `core_tx_accept` — whose columns are the entry's
+//! type registered in [`events!`] gets a table named after its kind —
+//! `gateway_send`, `tx_accept` — whose columns are the entry's
 //! common fields followed by the event's own, as derived by
 //! [`picomint_core::sql::SqlRow`]. There are no views: the schema is a
 //! 1:1 translation of the log, and questions are asked of it in SQL.
@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use hex::ToHex as _;
-use picomint_client::eventlog::{Event, EventLogEntry, EventLogId, EventSource};
+use picomint_client::eventlog::{Event, EventLogEntry, EventLogId};
 use picomint_client::{Client, ecash, gateway, lightning, onchain};
 use picomint_core::error::ErrorCode;
 use picomint_core::sql::{SqlRow, SqlValue};
@@ -146,18 +146,10 @@ impl Analytics {
     }
 }
 
-/// Table name for an event: its source and kind, joined the way SQL
-/// likes them — `gateway_send`, `core_tx_accept`.
+/// Table name for an event: its kind, spelled the way SQL likes it —
+/// `gateway_send`, `tx_accept`.
 pub fn table_name<E: Event>() -> String {
-    let source = match E::SOURCE {
-        EventSource::Core => "core",
-        EventSource::Ecash => "ecash",
-        EventSource::Onchain => "onchain",
-        EventSource::Lightning => "lightning",
-        EventSource::Gateway => "gateway",
-    };
-
-    format!("{source}_{}", E::KIND.to_string().replace('-', "_"))
+    E::KIND.to_string().replace('-', "_")
 }
 
 /// The entry fields every table starts with, ahead of the event's own.
@@ -365,7 +357,7 @@ fn insert_batch(
 
     for (id, entry) in entries {
         if !insert(&tx, *id, entry)? {
-            debug!(kind = %entry.kind, source = ?entry.source, "event not registered for analytics");
+            debug!(kind = %entry.kind, "event not registered for analytics");
         }
     }
 

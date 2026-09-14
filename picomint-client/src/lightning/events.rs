@@ -1,4 +1,4 @@
-use crate::eventlog::{Event, EventKind, EventSource};
+use crate::eventlog::{Event, EventKind};
 use picomint_core::Amount;
 use picomint_core::TransactionId;
 use picomint_core::sql::SqlRow;
@@ -18,8 +18,7 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const SOURCE: EventSource = EventSource::Lightning;
-    const KIND: EventKind = EventKind::from_static("send");
+    const KIND: EventKind = EventKind::from_static("lightning-send");
 }
 
 /// The payment went through; `ts - lightning_send.ts` is the payment latency.
@@ -30,8 +29,7 @@ pub struct SendSuccessEvent {
 }
 
 impl Event for SendSuccessEvent {
-    const SOURCE: EventSource = EventSource::Lightning;
-    const KIND: EventKind = EventKind::from_static("send-success");
+    const KIND: EventKind = EventKind::from_static("lightning-send-success");
 }
 
 /// The payment did not happen and the contract was refunded to the account.
@@ -45,8 +43,7 @@ pub struct SendRefundEvent {
 }
 
 impl Event for SendRefundEvent {
-    const SOURCE: EventSource = EventSource::Lightning;
-    const KIND: EventKind = EventKind::from_static("send-refund");
+    const KIND: EventKind = EventKind::from_static("lightning-send-refund");
 }
 
 /// The send ended undetermined: the refund was rejected, so the gateway
@@ -55,8 +52,7 @@ impl Event for SendRefundEvent {
 pub struct SendFailureEvent;
 
 impl Event for SendFailureEvent {
-    const SOURCE: EventSource = EventSource::Lightning;
-    const KIND: EventKind = EventKind::from_static("send-failure");
+    const KIND: EventKind = EventKind::from_static("lightning-send-failure");
 }
 
 /// An invoice from `lightning receive` was paid and the client claimed the
@@ -72,6 +68,5 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const SOURCE: EventSource = EventSource::Lightning;
-    const KIND: EventKind = EventKind::from_static("receive");
+    const KIND: EventKind = EventKind::from_static("lightning-receive");
 }

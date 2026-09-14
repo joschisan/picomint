@@ -136,7 +136,7 @@ picomint-gateway-cli client ecash send <mint-id> <account> "<amount>"
 
 `client ecash send-max <mint-id> <account>` hands out the whole balance as one string.
 
-**Receive Ecash:** reissue an ecash string produced by `client ecash send` (on this gateway or any other client) into your balance. Returns the operation id; the reissuance's acceptance shows up in the analytics as `core_tx_accept`:
+**Receive Ecash:** reissue an ecash string produced by `client ecash send` (on this gateway or any other client) into your balance. Returns the operation id; the reissuance's acceptance shows up in the analytics as `tx_accept`:
 
 ```bash
 picomint-gateway-cli client ecash receive <mint-id> <account> <ecash>
@@ -160,8 +160,8 @@ startup** and rebuilt by replaying the event log — analytics are derived,
 not authoritative, so it's safe to delete and let it rebuild.
 
 The schema is a 1:1 translation of the log: one table per event, named
-after its source and kind (`gateway_send`, `gateway_send_success`,
-`core_tx_create`, `core_tx_accept`, `ecash_success`, ...). Every table
+after its kind (`gateway_send`, `gateway_send_success`, `tx_create`,
+`tx_accept`, `ecash_success`, ...). Every table
 starts with the same columns — `id` (position in the event log), `ts`
 (ms since epoch), `mint`, `account`, `operation` — followed by the
 event's own fields: amounts as integers, msat everywhere except the
@@ -202,7 +202,7 @@ submitting a transaction and consensus accepting it:
 ```bash
 picomint-gateway-cli query \
     "SELECT c.txid, a.ts - c.ts AS latency_ms \
-     FROM core_tx_create c INNER JOIN core_tx_accept a USING (operation, txid) \
+     FROM tx_create c INNER JOIN tx_accept a USING (operation, txid) \
      ORDER BY c.ts DESC LIMIT 10"
 ```
 

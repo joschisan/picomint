@@ -1,4 +1,4 @@
-use crate::eventlog::{Event, EventKind, EventSource};
+use crate::eventlog::{Event, EventKind};
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_core::sql::SqlRow;
 use picomint_core::{Amount, OutPoint, TransactionId};
@@ -20,8 +20,7 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const SOURCE: EventSource = EventSource::Gateway;
-    const KIND: EventKind = EventKind::from_static("send");
+    const KIND: EventKind = EventKind::from_static("gateway-send");
 }
 
 /// The payment went through and the gateway claimed the outgoing contract.
@@ -37,8 +36,7 @@ pub struct SendSuccessEvent {
 }
 
 impl Event for SendSuccessEvent {
-    const SOURCE: EventSource = EventSource::Gateway;
-    const KIND: EventKind = EventKind::from_static("send-success");
+    const KIND: EventKind = EventKind::from_static("gateway-send-success");
 }
 
 /// The gateway could not make the payment and cancelled it, so the sender
@@ -50,8 +48,7 @@ pub struct SendCancelEvent {
 }
 
 impl Event for SendCancelEvent {
-    const SOURCE: EventSource = EventSource::Gateway;
-    const KIND: EventKind = EventKind::from_static("send-cancel");
+    const KIND: EventKind = EventKind::from_static("gateway-send-cancel");
 }
 
 // --- Incoming payment ---
@@ -70,8 +67,7 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const SOURCE: EventSource = EventSource::Gateway;
-    const KIND: EventKind = EventKind::from_static("receive");
+    const KIND: EventKind = EventKind::from_static("gateway-receive");
 }
 
 /// The mint released the preimage and the gateway settled the payment.
@@ -82,8 +78,7 @@ pub struct ReceiveSuccessEvent {
 }
 
 impl Event for ReceiveSuccessEvent {
-    const SOURCE: EventSource = EventSource::Gateway;
-    const KIND: EventKind = EventKind::from_static("receive-success");
+    const KIND: EventKind = EventKind::from_static("gateway-receive-success");
 }
 
 /// The mint's nodes produced no usable preimage; the payment failed back
@@ -92,8 +87,7 @@ impl Event for ReceiveSuccessEvent {
 pub struct ReceiveFailureEvent;
 
 impl Event for ReceiveFailureEvent {
-    const SOURCE: EventSource = EventSource::Gateway;
-    const KIND: EventKind = EventKind::from_static("receive-failure");
+    const KIND: EventKind = EventKind::from_static("gateway-receive-failure");
 }
 
 /// The preimage the mint released was wrong; the gateway took its funding
@@ -105,6 +99,5 @@ pub struct ReceiveRefundEvent {
 }
 
 impl Event for ReceiveRefundEvent {
-    const SOURCE: EventSource = EventSource::Gateway;
-    const KIND: EventKind = EventKind::from_static("receive-refund");
+    const KIND: EventKind = EventKind::from_static("gateway-receive-refund");
 }

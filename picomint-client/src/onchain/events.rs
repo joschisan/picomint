@@ -1,4 +1,4 @@
-use crate::eventlog::{Event, EventKind, EventSource};
+use crate::eventlog::{Event, EventKind};
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, Txid};
 use picomint_core::TransactionId;
@@ -20,8 +20,7 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const SOURCE: EventSource = EventSource::Onchain;
-    const KIND: EventKind = EventKind::from_static("send");
+    const KIND: EventKind = EventKind::from_static("onchain-send");
 }
 
 /// The mint broadcast the withdrawal.
@@ -32,8 +31,7 @@ pub struct SendSuccessEvent {
 }
 
 impl Event for SendSuccessEvent {
-    const SOURCE: EventSource = EventSource::Onchain;
-    const KIND: EventKind = EventKind::from_static("send-success");
+    const KIND: EventKind = EventKind::from_static("onchain-send-success");
 }
 
 /// The mint rejected the withdrawal; the notes stayed in the account.
@@ -41,12 +39,11 @@ impl Event for SendSuccessEvent {
 pub struct SendFailureEvent;
 
 impl Event for SendFailureEvent {
-    const SOURCE: EventSource = EventSource::Onchain;
-    const KIND: EventKind = EventKind::from_static("send-failure");
+    const KIND: EventKind = EventKind::from_static("onchain-send-failure");
 }
 
 /// A deposit reached 6 confirmations and the client claimed it; the notes
-/// are issued once `core_tx_accept` follows under the same operation. Logged
+/// are issued once `tx_accept` follows under the same operation. Logged
 /// at the claim, not when the address was generated.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveEvent {
@@ -62,6 +59,5 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const SOURCE: EventSource = EventSource::Onchain;
-    const KIND: EventKind = EventKind::from_static("receive");
+    const KIND: EventKind = EventKind::from_static("onchain-receive");
 }

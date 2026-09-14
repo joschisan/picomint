@@ -556,7 +556,7 @@ pub struct ClientEcashReceiveRequest {
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientEcashReceiveResponse {
     /// The operation the reissue logs under, derived from the bundle;
-    /// acceptance shows up in the analytics as `core_tx_accept`
+    /// acceptance shows up in the analytics as `tx_accept`
     pub operation: OperationId,
 }
 

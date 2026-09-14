@@ -1,4 +1,4 @@
-use crate::eventlog::{Event, EventKind, EventSource};
+use crate::eventlog::{Event, EventKind};
 use picomint_core::Amount;
 use picomint_core::TransactionId;
 use picomint_core::sql::SqlRow;
@@ -14,8 +14,7 @@ pub struct SendEvent {
 }
 
 impl Event for SendEvent {
-    const SOURCE: EventSource = EventSource::Ecash;
-    const KIND: EventKind = EventKind::from_static("send");
+    const KIND: EventKind = EventKind::from_static("ecash-send");
 }
 
 /// `ecash send` produced its bundle; the notes left the account.
@@ -26,8 +25,7 @@ pub struct SendSuccessEvent {
 }
 
 impl Event for SendSuccessEvent {
-    const SOURCE: EventSource = EventSource::Ecash;
-    const KIND: EventKind = EventKind::from_static("send-success");
+    const KIND: EventKind = EventKind::from_static("ecash-send-success");
 }
 
 /// `ecash send` failed: the reissuance it needed was rejected or its
@@ -36,8 +34,7 @@ impl Event for SendSuccessEvent {
 pub struct SendFailureEvent;
 
 impl Event for SendFailureEvent {
-    const SOURCE: EventSource = EventSource::Ecash;
-    const KIND: EventKind = EventKind::from_static("send-failure");
+    const KIND: EventKind = EventKind::from_static("ecash-send-failure");
 }
 
 /// `ecash send` had to reissue notes first because the ones on hand could
@@ -49,12 +46,11 @@ pub struct ReissuanceEvent {
 }
 
 impl Event for ReissuanceEvent {
-    const SOURCE: EventSource = EventSource::Ecash;
-    const KIND: EventKind = EventKind::from_static("reissue");
+    const KIND: EventKind = EventKind::from_static("ecash-reissue");
 }
 
 /// `ecash receive` submitted the bundle's notes for reissuance;
-/// `core_tx_accept` and `ecash_success` follow under the same operation.
+/// `tx_accept` and `ecash_success` follow under the same operation.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveEvent {
     /// The reissuance transaction, hex
@@ -64,8 +60,7 @@ pub struct ReceiveEvent {
 }
 
 impl Event for ReceiveEvent {
-    const SOURCE: EventSource = EventSource::Ecash;
-    const KIND: EventKind = EventKind::from_static("receive");
+    const KIND: EventKind = EventKind::from_static("ecash-receive");
 }
 
 /// The mint's signatures on a transaction's new notes arrived and the notes
@@ -80,8 +75,7 @@ pub struct IssuanceSuccessEvent {
 }
 
 impl Event for IssuanceSuccessEvent {
-    const SOURCE: EventSource = EventSource::Ecash;
-    const KIND: EventKind = EventKind::from_static("success");
+    const KIND: EventKind = EventKind::from_static("ecash-success");
 }
 
 /// A transaction's new notes could not be finalized: the mint rejected the
@@ -90,6 +84,5 @@ impl Event for IssuanceSuccessEvent {
 pub struct IssuanceFailureEvent;
 
 impl Event for IssuanceFailureEvent {
-    const SOURCE: EventSource = EventSource::Ecash;
-    const KIND: EventKind = EventKind::from_static("failure");
+    const KIND: EventKind = EventKind::from_static("ecash-failure");
 }
