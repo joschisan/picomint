@@ -34,7 +34,7 @@ pub struct ClientOpts {
     pub data_dir: PathBuf,
 
     /// Bitcoin network every added mint must run on
-    #[arg(long = "network", env = "NETWORK", default_value = "bitcoin")]
+    #[arg(long = "network", env = "NETWORK")]
     pub network: Network,
 
     /// Listen address for the iroh endpoint the mint and gateway traffic
