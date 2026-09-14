@@ -94,7 +94,7 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
         Ok(n as u64)
     };
 
-    // One table per event, named after its source and kind
+    // One table per event, named after its kind
     assert_eq!(count("SELECT COUNT(*) FROM gateway_send")?, 4);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_send_success")?, 1);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_send_cancel")?, 3);
