@@ -135,13 +135,13 @@ pub fn gateway_ldk_channel_list(gateway_data_dir: &Path) -> Result<LdkChannelLis
 
 pub fn gateway_ldk_lightning_receive(
     gateway_data_dir: &Path,
-    amount_msat: u64,
+    amount: bitcoin::Amount,
 ) -> Result<LdkLightningReceiveResponse> {
     gateway_cmd(gateway_data_dir)
         .arg("ldk")
         .arg("lightning")
         .arg("receive")
-        .arg(amount_msat.to_string())
+        .arg(amount.to_string())
         .run_cli::<LdkLightningReceiveResponse>()
 }
 

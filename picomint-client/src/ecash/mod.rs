@@ -537,7 +537,7 @@ pub(crate) fn largest_affordable_amount(
     }
 
     let mut lo = 0;
-    let mut hi = spendable.msat / 1000;
+    let mut hi = spendable.0 / 1000;
 
     while lo < hi {
         let mid = (lo + hi).div_ceil(2);
@@ -788,7 +788,7 @@ pub enum ReceiveEcashError {
 }
 
 fn round_to_multiple(amount: Amount, min_denomiation: Amount) -> Amount {
-    Amount::from_msat(amount.msat.next_multiple_of(min_denomiation.msat))
+    Amount(amount.0.next_multiple_of(min_denomiation.0))
 }
 
 fn represent_amount(mut remaining_amount: Amount) -> Vec<Denomination> {

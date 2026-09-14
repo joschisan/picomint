@@ -129,10 +129,6 @@ fn dispatch_lightning_receive(
     state
         .node
         .bolt11_payment()
-        .claim_for_hash(
-            ph,
-            row.offer.commitment.amount.msat,
-            PaymentPreimage(preimage),
-        )
+        .claim_for_hash(ph, row.offer.commitment.amount.0, PaymentPreimage(preimage))
         .expect("LDK has this payment_hash (registered via receive_for_hash)");
 }

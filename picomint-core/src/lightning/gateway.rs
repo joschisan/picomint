@@ -87,21 +87,21 @@ impl PaymentFee {
     }
 
     pub fn add_to(&self, msat: u64) -> Amount {
-        Amount::from_msat(msat.saturating_add(self.absolute_fee(msat)))
+        Amount(msat.saturating_add(self.absolute_fee(msat)))
     }
 
     pub fn subtract_from(&self, msat: u64) -> Amount {
-        Amount::from_msat(msat.saturating_sub(self.absolute_fee(msat)))
+        Amount(msat.saturating_sub(self.absolute_fee(msat)))
     }
 
     pub fn fee(&self, msat: u64) -> Amount {
-        Amount::from_msat(self.absolute_fee(msat))
+        Amount(self.absolute_fee(msat))
     }
 
     fn absolute_fee(&self, msat: u64) -> u64 {
         msat.saturating_mul(u64::from(self.ppm))
             .saturating_div(1_000_000)
-            .checked_add(self.base.msat)
+            .checked_add(self.base.0)
             .expect("The division creates sufficient headroom to add the base fee")
     }
 }

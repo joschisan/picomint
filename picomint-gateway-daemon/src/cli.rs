@@ -203,11 +203,7 @@ async fn ldk_channel_open(
     State(state): State<AppState>,
     Json(payload): Json<LdkChannelOpenRequest>,
 ) -> Result<Json<()>, CliError> {
-    let push_amount_msat = if payload.push_amount_sat == 0 {
-        None
-    } else {
-        Some(payload.push_amount_sat * 1000)
-    };
+    let push_amount_msat = payload.push_amount.map(|amount| amount.to_sat() * 1000);
 
     // Unannounced by default, matching LDK; a gateway only needs its peers to
     // route to it, not the wider network.
@@ -221,7 +217,7 @@ async fn ldk_channel_open(
         &state.node,
         payload.pubkey,
         payload.host,
-        payload.channel_size_sat,
+        payload.channel_size.to_sat(),
         push_amount_msat,
         None,
     )
@@ -279,14 +275,14 @@ async fn ldk_channel_splice_in(
         .splice_in(
             &UserChannelId(payload.user_channel_id),
             payload.pubkey,
-            payload.amount_sat,
+            payload.amount.to_sat(),
         )
         .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     info!(
         user_channel_id = payload.user_channel_id,
         pubkey = %payload.pubkey,
-        amount_sat = payload.amount_sat,
+        amount_sat = payload.amount.to_sat(),
         "Initiated splice-in"
     );
 
@@ -307,14 +303,14 @@ async fn ldk_channel_splice_out(
             &UserChannelId(payload.user_channel_id),
             payload.pubkey,
             &payload.address.assume_checked(),
-            payload.amount_sat,
+            payload.amount.to_sat(),
         )
         .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     info!(
         user_channel_id = payload.user_channel_id,
         pubkey = %payload.pubkey,
-        amount_sat = payload.amount_sat,
+        amount_sat = payload.amount.to_sat(),
         "Initiated splice-out"
     );
 
@@ -423,7 +419,7 @@ async fn ldk_lightning_receive(
     let invoice = state
         .node
         .bolt11_payment()
-        .receive(payload.amount_msat, &description, expiry_secs)
+        .receive(payload.amount.to_sat() * 1000, &description, expiry_secs)
         .map_err(|e| CliError::rejected(LdkReceiveError::Ldk(e.to_string())))?;
 
     Ok(Json(LdkLightningReceiveResponse {
@@ -481,7 +477,7 @@ async fn ldk_lightning_probe(
     state
         .node
         .spontaneous_payment()
-        .send_probes(payload.amount_msat, payload.node_id)
+        .send_probes(payload.amount.to_sat() * 1000, payload.node_id)
         .map_err(|e| CliError::rejected(LdkError::Ldk(e.to_string())))?;
 
     Ok(Json(()))

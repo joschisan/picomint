@@ -124,7 +124,7 @@ fn main() -> anyhow::Result<()> {
     // configured above them would be rejected by every client; fail
     // fast at startup instead.
     let send_fee = PaymentFee {
-        base: Amount::from_msat(opts.send_fee_base_msat),
+        base: Amount(opts.send_fee_base_msat),
         ppm: opts.send_fee_ppm,
     };
 
@@ -135,7 +135,7 @@ fn main() -> anyhow::Result<()> {
     );
 
     let receive_fee = PaymentFee {
-        base: Amount::from_msat(opts.receive_fee_base_msat),
+        base: Amount(opts.receive_fee_base_msat),
         ppm: opts.receive_fee_ppm,
     };
 
@@ -333,7 +333,7 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
             &dbtx,
             payment_hash.0,
             preimage.0,
-            Amount::from_msat(fee_paid_msat.unwrap_or(0)),
+            Amount(fee_paid_msat.unwrap_or(0)),
         ),
         ldk_node::Event::PaymentFailed {
             payment_hash: Some(ph),
@@ -381,7 +381,7 @@ fn handle_payment_claimable(
         return;
     };
 
-    if row.offer.commitment.amount.msat != amount_msat {
+    if row.offer.commitment.amount.0 != amount_msat {
         state
             .node
             .bolt11_payment()

@@ -49,18 +49,18 @@ mod tests {
     fn sanity_test_funding_verifier() {
         let mut v = super::FundingVerifier::default();
 
-        v.add_input(Amount::from_msat(3), Amount::from_msat(1))
+        v.add_input(Amount(3), Amount(1))
             .unwrap()
-            .add_output(Amount::from_msat(1), Amount::from_msat(1))
+            .add_output(Amount(1), Amount(1))
             .unwrap();
 
         assert!(v.clone().verify_funding().is_ok());
 
-        v.add_output(Amount::from_msat(1), Amount::ZERO).unwrap();
+        v.add_output(Amount(1), Amount::ZERO).unwrap();
 
         assert!(v.clone().verify_funding().is_err());
 
-        v.add_input(Amount::from_msat(10), Amount::ZERO).unwrap();
+        v.add_input(Amount(10), Amount::ZERO).unwrap();
 
         // Overfunding is always allowed
         assert!(v.clone().verify_funding().is_ok());

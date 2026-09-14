@@ -136,7 +136,7 @@ impl AppState {
         // simply paid.
 
         ensure!(
-            payload.contract.amount == Amount::from_msat(amount),
+            payload.contract.amount == Amount(amount),
             "Contract amount does not match invoice amount"
         );
 
@@ -182,7 +182,7 @@ impl AppState {
             &dbtx,
             operation,
             payload.outpoint,
-            Amount::from_msat(amount),
+            Amount(amount),
             fee,
         )?;
 
@@ -192,7 +192,7 @@ impl AppState {
             // take is the gateway's margin, and an internal settlement keeps
             // all of it.
             let rpc = RouteParametersConfig::default()
-                .with_max_total_routing_fee_msat(fee.msat)
+                .with_max_total_routing_fee_msat(fee.0)
                 .with_max_total_cltv_expiry_delta(self.cltv_expiry_delta);
 
             let result = self
@@ -220,7 +220,7 @@ impl AppState {
                 .expect("Direct-swap target not registered for this payment hash");
 
             ensure!(
-                incoming_row.offer.commitment.amount.msat == amount,
+                incoming_row.offer.commitment.amount.0 == amount,
                 "Direct-swap amount mismatch"
             );
 
@@ -269,7 +269,7 @@ impl AppState {
             "Mint is not added"
         );
 
-        let receive_fee = self.receive_fee.fee(payload.offer.commitment.amount.msat);
+        let receive_fee = self.receive_fee.fee(payload.offer.commitment.amount.0);
 
         ensure!(
             payload.offer.commitment.fee == receive_fee,
@@ -280,7 +280,7 @@ impl AppState {
             .node
             .bolt11_payment()
             .receive_for_hash(
-                payload.offer.commitment.amount.msat,
+                payload.offer.commitment.amount.0,
                 &LdkBolt11InvoiceDescription::Direct(Description::empty()),
                 self.invoice_expiry_secs,
                 PaymentHash(payload.offer.commitment.payment_hash.to_byte_array()),

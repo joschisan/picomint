@@ -61,7 +61,7 @@ fn max_amount_at(ctx: &ClientContext, account: Account, fee: bitcoin::Amount) ->
         Amount::from_sat(fee.to_sat()) + ctx.config.onchain.output_fee
     });
 
-    bitcoin::Amount::from_sat(amount.msat / 1000)
+    bitcoin::Amount::from_sat(amount.0 / 1000)
 }
 
 fn submit_send(

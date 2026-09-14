@@ -90,7 +90,7 @@ impl SqlColumn for Amount {
     const TYPE: &'static str = "INTEGER";
 
     fn sql_value(&self) -> SqlValue {
-        SqlValue::Integer(self.msat as i64)
+        SqlValue::Integer(self.0 as i64)
     }
 }
 

@@ -532,7 +532,7 @@ pub fn process_input(
     let amount = output_value
         .to_sat()
         .checked_mul(1000)
-        .map(picomint_core::Amount::from_msat)
+        .map(picomint_core::Amount)
         .ok_or(OnchainInputError::ArithmeticOverflow)?;
 
     Ok((amount, input.tweak))
@@ -650,7 +650,7 @@ pub fn process_output(
     output_value
         .to_sat()
         .checked_mul(1000)
-        .map(picomint_core::Amount::from_msat)
+        .map(picomint_core::Amount)
         .ok_or(OnchainOutputError::ArithmeticOverflow)
 }
 

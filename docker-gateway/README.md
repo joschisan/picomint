@@ -61,7 +61,7 @@ picomint-gateway-cli ldk balances
 Once the onchain balance is available connect to a node and open a channel with
 
 ```bash
-picomint-gateway-cli ldk channel open <pubkey> <host> <channel-size-sat>
+picomint-gateway-cli ldk channel open <pubkey> <host> "<channel-size> sat"
 ```
 
 Running a second outbound channel alongside the LSP's inbound one is worthwhile: with only one channel, outgoing payments can fail once user balances drain toward the counterparty's channel reserve. Monitor channel state with:

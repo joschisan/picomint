@@ -148,11 +148,13 @@ pub struct LdkChannelOpenRequest {
     /// The peer's `host:port`: an IP, a hostname or an onion address
     #[serde_as(as = "DisplayFromStr")]
     pub host: SocketAddress,
-    /// The channel's capacity in sat, funded from the LDK onchain wallet
-    pub channel_size_sat: u64,
-    /// Sat handed to the peer as its starting balance in the channel
-    #[arg(long, default_value_t = 0)]
-    pub push_amount_sat: u64,
+    /// The channel's capacity with its denomination, e.g. "1000000 sat",
+    /// funded from the LDK onchain wallet
+    pub channel_size: bitcoin::Amount,
+    /// An amount with its denomination handed to the peer as its starting
+    /// balance in the channel; nothing if omitted
+    #[arg(long)]
+    pub push_amount: Option<bitcoin::Amount>,
     /// Announce the channel to the network so other nodes can route through
     /// it. Requires the node to be configured with a listening address and an
     /// alias
@@ -241,8 +243,9 @@ pub struct LdkChannelSpliceInRequest {
     pub user_channel_id: u128,
     /// Peer the channel is with
     pub pubkey: secp256k1::PublicKey,
-    /// On-chain funds to add to the channel, in sat
-    pub amount_sat: u64,
+    /// The on-chain funds to add to the channel, with their denomination,
+    /// e.g. "100000 sat"
+    pub amount: bitcoin::Amount,
 }
 
 // --- /ldk/channel/splice-out ---
@@ -259,9 +262,9 @@ pub struct LdkChannelSpliceOutRequest {
     pub pubkey: secp256k1::PublicKey,
     /// Destination on-chain address for the spliced-out funds
     pub address: bitcoin::Address<NetworkUnchecked>,
-    /// Amount to remove from the channel, in sat (must not exceed the
-    /// channel's outbound capacity)
-    pub amount_sat: u64,
+    /// The amount to remove from the channel, with its denomination, e.g.
+    /// "100000 sat"; at most the channel's outbound capacity
+    pub amount: bitcoin::Amount,
 }
 
 // --- /ldk/lightning/probe ---
@@ -270,8 +273,8 @@ pub struct LdkChannelSpliceOutRequest {
 pub struct LdkLightningProbeRequest {
     /// The node to probe a route towards, hex
     pub node_id: secp256k1::PublicKey,
-    /// The amount to find paths for, in msat
-    pub amount_msat: u64,
+    /// The amount to find paths for, with its denomination, e.g. "10000 sat"
+    pub amount: bitcoin::Amount,
 }
 
 // --- /ldk/onchain/receive ---
@@ -310,8 +313,8 @@ pub struct LdkOnchainSendResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkLightningReceiveRequest {
-    /// The invoice amount in msat
-    pub amount_msat: u64,
+    /// The invoice amount with its denomination, e.g. "10000 sat"
+    pub amount: bitcoin::Amount,
     /// Seconds until the invoice expires; 3600 if omitted
     #[arg(long)]
     pub expiry_secs: Option<u32>,

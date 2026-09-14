@@ -158,8 +158,11 @@ async fn test_direct_lightning_payments(env: &TestEnv) -> anyhow::Result<()> {
 
     info!("LDK node pays gateway invoice...");
     {
-        let invoice_str =
-            cli::gateway_ldk_lightning_receive(&env.gateway_data_dir, 1_000_000)?.invoice;
+        let invoice_str = cli::gateway_ldk_lightning_receive(
+            &env.gateway_data_dir,
+            bitcoin::Amount::from_sat(1_000),
+        )?
+        .invoice;
         let invoice: lightning_invoice::Bolt11Invoice = invoice_str.parse()?;
 
         // The freestanding node may need a moment to consider the channel ready
@@ -255,7 +258,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
         let mint = mint.clone();
         async move {
             let balance = cli::gateway_mint_balance(&env.gateway_data_dir, &mint)?.balance_msat;
-            ensure!(balance.msat > 0, "gateway mint balance is zero");
+            ensure!(balance.0 > 0, "gateway mint balance is zero");
             Ok(())
         }
     })

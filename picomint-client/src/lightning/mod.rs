@@ -132,7 +132,7 @@ async fn update_gateway_info(ctx: ClientContext) {
 /// with the sub-sat remainder donated.
 fn send_max_amount(ctx: &ClientContext, account: Account, gateway_info: &GatewayInfo) -> Amount {
     crate::ecash::largest_affordable_amount(ctx, account, |amount| {
-        gateway_info.send_fee.fee(amount.msat) + ctx.config.lightning.output_fee
+        gateway_info.send_fee.fee(amount.0) + ctx.config.lightning.output_fee
     })
 }
 
@@ -161,7 +161,7 @@ pub(crate) async fn send_max(
 
     let max = send_max_amount(ctx, account, &gateway_info);
 
-    let invoice = picomint_lnurl::get_invoice(&info, max.msat)
+    let invoice = picomint_lnurl::get_invoice(&info, max.0)
         .await
         .map_err(SendMaxError::Lnurl)?
         .pr;
@@ -205,7 +205,7 @@ async fn send_inner(
     }
 
     let fee = gateway_info.send_fee.fee(amount);
-    let amount = Amount::from_msat(amount);
+    let amount = Amount(amount);
 
     let consensus_block_height = crate::api::block_height(&ctx.api)
         .await
@@ -296,7 +296,7 @@ async fn create_offer_and_fetch_invoice(
         return Err(ReceiveError::GatewayFeeExceedsLimit);
     }
 
-    let fee = gateway_info.receive_fee.fee(amount.msat);
+    let fee = gateway_info.receive_fee.fee(amount.0);
 
     if amount
         .checked_sub(fee)
@@ -332,7 +332,7 @@ async fn create_offer_and_fetch_invoice(
         return Err(ReceiveError::InvalidInvoice);
     }
 
-    if invoice.amount_milli_satoshis() != Some(amount.msat) {
+    if invoice.amount_milli_satoshis() != Some(amount.0) {
         return Err(ReceiveError::IncorrectInvoiceAmount);
     }
 
