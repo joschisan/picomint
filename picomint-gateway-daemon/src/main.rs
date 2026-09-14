@@ -337,8 +337,13 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
         ),
         ldk_node::Event::PaymentFailed {
             payment_hash: Some(ph),
+            reason,
             ..
-        } => handle_payment_failed(state, &dbtx, ph.0),
+        } => {
+            warn!(?reason, payment_hash = ?ph, "The outgoing payment failed; cancelling it");
+
+            handle_payment_failed(state, &dbtx, ph.0)
+        }
         _ => return,
     }
 

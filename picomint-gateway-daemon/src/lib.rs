@@ -31,6 +31,7 @@ use picomint_gateway_cli_core::MintInfo;
 use picomint_redb::{Database, DbRead};
 
 use crate::db::{IncomingOfferRow, IncomingOfferTable, OutgoingContractRow, OutgoingContractTable};
+use tracing::warn;
 
 /// Name of the gateway's database.
 pub const DB_FILE: &str = "database.redb";
@@ -204,7 +205,11 @@ impl AppState {
             // kicked off the payment (its transaction failed to commit after
             // the LDK send); the LDK events drive its terminal, so treat it as
             // a successful kick-off instead of cancelling an in-flight send.
-            if !matches!(result, Ok(_) | Err(ldk_node::NodeError::DuplicatePayment)) {
+            if let Err(error) = &result
+                && !matches!(error, ldk_node::NodeError::DuplicatePayment)
+            {
+                warn!(%error, %operation, "LDK refused the outgoing payment; cancelling it");
+
                 self.client.gateway_finalize_send(
                     payload.mint,
                     &dbtx,
@@ -224,11 +229,14 @@ impl AppState {
                 "Direct-swap amount mismatch"
             );
 
-            if self
-                .client
-                .gateway_start_receive(incoming_row.mint, &dbtx, operation, incoming_row.offer)
-                .is_err()
-            {
+            if let Err(error) = self.client.gateway_start_receive(
+                incoming_row.mint,
+                &dbtx,
+                operation,
+                incoming_row.offer,
+            ) {
+                warn!(%error, %operation, "Could not fund the direct swap's receive; cancelling the send");
+
                 self.client.gateway_finalize_send(
                     payload.mint,
                     &dbtx,
