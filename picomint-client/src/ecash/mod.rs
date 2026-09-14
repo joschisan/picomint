@@ -763,8 +763,8 @@ pub enum SendEcashError {
     Offline,
     #[error("The client's balance is insufficient")]
     InsufficientBalance,
-    #[error("A non-recoverable error has occurred")]
-    Failure,
+    #[error("The reissuance the send needed failed; nothing left the account")]
+    ReissuanceFailed,
     #[error("Mint is not added")]
     NotAdded,
 }
@@ -961,7 +961,7 @@ impl Client {
                     .expect("logged ecash is its own to_string, which from_str reverses");
             }
             if entry.to_event::<SendFailureEvent>().is_some() {
-                return Err(SendEcashError::Failure);
+                return Err(SendEcashError::ReissuanceFailed);
             }
         }
         unreachable!("subscribe_operation_events only ends at client shutdown")

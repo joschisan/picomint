@@ -62,7 +62,7 @@ impl RequestError {
     /// Print the error on stderr and exit with its class's code.
     pub fn exit(self) -> ! {
         let (code, error, exit) = match self {
-            RequestError::Unreachable(error) => ("unreachable".to_string(), error, 3),
+            RequestError::Unreachable(error) => ("daemon_unreachable".to_string(), error, 3),
             RequestError::Rejected { code, error } => (code, error, 1),
             RequestError::Malformed(error) => ("malformed".to_string(), error, 1),
             RequestError::Usage(error) => ("usage".to_string(), error, 2),

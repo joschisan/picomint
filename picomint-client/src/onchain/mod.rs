@@ -52,7 +52,7 @@ pub(crate) fn resume(ctx: &ClientContext) {
 pub(crate) async fn send_fee(ctx: &ClientContext) -> Result<bitcoin::Amount, SendFeeError> {
     api::send_fee(&ctx.api)
         .await
-        .map_err(|_| SendFeeError::MintError)?
+        .map_err(|_| SendFeeError::FeeRequestFailed)?
         .ok_or(SendFeeError::NoConsensusFeerateAvailable)
 }
 
@@ -400,8 +400,8 @@ pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
 /// Why the mint's send fee could not be read.
 #[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
 pub enum SendFeeError {
-    #[error("Could not determine the send fee")]
-    MintError,
+    #[error("The mint did not answer the fee request")]
+    FeeRequestFailed,
     #[error("No consensus feerate is available at this time")]
     NoConsensusFeerateAvailable,
     #[error("Mint is not added")]

@@ -147,9 +147,7 @@ enum ClientCommands {
     /// Add a mint
     #[command(after_long_help = schema_fallible::<ClientAddResponse, AddMintError>())]
     Add(ClientAddRequest),
-    /// Remove a mint and delete all of its data. Destructive:
-    /// check for in-flight payments via `query` first — failing to
-    /// check might result in loss of funds.
+    /// Remove a mint and delete all of its data; destructive, so check for in-flight payments via `query` first
     #[command(after_long_help = schema_fallible::<(), NotAddedError>())]
     Remove(ClientRemoveRequest),
     /// List connected mints

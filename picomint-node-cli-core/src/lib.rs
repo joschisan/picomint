@@ -497,7 +497,7 @@ pub enum BitcoindError {
 pub enum InviteError {
     #[error("Invite codes are issued once the mint has reached consensus on a block height")]
     NoBlockHeight,
-    #[error("The expiry must be at most {INVITE_EXPIRY_DAYS_LIMIT} days out")]
+    #[error("The expiry must be at most 365 days out")]
     ExpiryTooFar,
 }
 
@@ -506,7 +506,7 @@ pub enum InviteError {
 pub enum ExpirySetError {
     #[error("The expiry date must be in the future")]
     NotInFuture,
-    #[error("The expiry date must be at most {EXPIRY_DAYS_LIMIT} days out")]
+    #[error("The expiry date must be at most 730 days out")]
     TooFar,
 }
 
