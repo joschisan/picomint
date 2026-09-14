@@ -167,7 +167,8 @@ onchain tables, which are sat,
 hashes, ids and keys as hex or bech32 text. There are no views; an
 operation's story is a join on `operation`, and the tables of one
 operation carry the txids that tie its transactions to their outcome.
-List them with `SELECT name FROM sqlite_master WHERE type='table'`.
+`query --help` prints every table as the SQL that creates it, with no
+daemon running.
 
 Query it with read-only SQL through the admin CLI — the daemon runs the
 query against the live db and returns one JSON object per row, the same
