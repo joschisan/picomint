@@ -110,8 +110,8 @@ pub fn gateway_ldk_channel_open(
     gateway_data_dir: &Path,
     node_id: &str,
     lightning_addr: &str,
-    channel_sat: u64,
-    push_sat: u64,
+    channel_size: bitcoin::Amount,
+    push_amount: bitcoin::Amount,
 ) -> Result<Value> {
     gateway_cmd(gateway_data_dir)
         .arg("ldk")
@@ -119,9 +119,9 @@ pub fn gateway_ldk_channel_open(
         .arg("open")
         .arg(node_id)
         .arg(lightning_addr)
-        .arg(channel_sat.to_string())
-        .arg("--push-amount-sat")
-        .arg(push_sat.to_string())
+        .arg(channel_size.to_string())
+        .arg("--push-amount")
+        .arg(push_amount.to_string())
         .run_cli::<Value>()
 }
 

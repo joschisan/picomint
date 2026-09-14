@@ -473,8 +473,8 @@ async fn open_channel(
         gateway_data_dir,
         &ldk_pubkey,
         &ldk_lightning_addr,
-        10_000_000,
-        5_000_000,
+        bitcoin::Amount::from_sat(10_000_000),
+        bitcoin::Amount::from_sat(5_000_000),
     )?;
 
     // Wait for the funding tx to be negotiated
