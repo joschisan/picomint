@@ -27,7 +27,7 @@ A pruned node works, under one rule: the block the mint wallet votes on next, `o
 
 Initial block download pulls the full chain over the network either way, so expect the first boot on mainnet to take a long time and several hundred GB of bandwidth. The node will sit idle until bitcoind catches up; `bitcoind` shows how far along it is.
 
-For now the node refuses to run a mint on mainnet: `setup confirm` fails with that error when bitcoind runs mainnet. The mint's network is whatever the backend runs, so a test mint is a compose of your own that points every node at signet or at one shared regtest backend.
+For now the node refuses to run a mint on mainnet: `setup confirm` fails with that error when bitcoind runs mainnet, and a node whose config names mainnet fails the same way at consensus start. The mint's network is whatever the backend runs, so a test mint is a compose of your own that points every node at signet or at one shared regtest backend.
 
 ## Accessing the CLI
 
