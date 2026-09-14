@@ -2,23 +2,32 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use crate::Endpoint;
+use crate::add_mint::AddMintError;
 use crate::api::MintApi;
 use crate::context::ClientContext;
 use crate::eventlog::{EventLogEntry, EventLogId};
 use crate::lightning::Gateways;
 use crate::secret::{ClientSecret, Mnemonic};
 use crate::task::TaskGroup;
-use anyhow::{Context as _, ensure};
 use futures::future::select_all;
 use futures::stream::BoxStream;
 use picomint_core::NodeId;
 use picomint_core::config::MintId;
 use picomint_core::config::NodeConfigConsensus;
 use picomint_core::core::OperationId;
+use picomint_core::error::ErrorCode;
 use picomint_core::invite::InviteCode;
 use picomint_redb::{Database, DbRead, WriteTx, table};
 use picomint_rpc::connection::ConnStatus;
+use thiserror::Error;
 use tracing::debug;
+
+/// The one way a call keyed by mint fails before it touches anything.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum NotAddedError {
+    #[error("Mint is not added")]
+    NotAdded,
+}
 
 // The config of every added mint. The row is what makes a mint
 // added: [`Client::add_mint`] inserts it and [`Client::begin_remove_mint`] removes it,
@@ -123,17 +132,16 @@ impl Client {
         &self,
         invite: &InviteCode,
         network: Option<bitcoin::Network>,
-    ) -> anyhow::Result<MintId> {
+    ) -> Result<MintId, AddMintError> {
         let (config, restores) = crate::add_mint::add_mint(self, invite, network).await?;
 
         let mint = config.calculate_mint_id();
 
         let dbtx = self.db.begin_write();
 
-        ensure!(
-            dbtx.get(&ClientConfigTable, &mint).is_none(),
-            "Mint is already added"
-        );
+        if dbtx.get(&ClientConfigTable, &mint).is_some() {
+            return Err(AddMintError::AlreadyAdded);
+        }
 
         dbtx.insert(&ClientConfigTable, &mint, &config);
 
@@ -165,7 +173,7 @@ impl Client {
     /// `begin_write` cannot observe cancellation — which is why this method
     /// owns the ordering and hands back the open tx rather than accepting
     /// one.
-    pub async fn begin_remove_mint(&self, mint: MintId) -> anyhow::Result<WriteTx> {
+    pub async fn begin_remove_mint(&self, mint: MintId) -> Result<WriteTx, NotAddedError> {
         let ctx = self
             .mints
             .write()
@@ -180,10 +188,9 @@ impl Client {
 
         let dbtx = self.db.begin_write();
 
-        ensure!(
-            dbtx.remove(&ClientConfigTable, &mint).is_some(),
-            "Mint is not added"
-        );
+        if dbtx.remove(&ClientConfigTable, &mint).is_none() {
+            return Err(NotAddedError::NotAdded);
+        }
 
         crate::ecash::wipe_tables(&dbtx, mint);
         crate::onchain::wipe_tables(&dbtx, mint);
@@ -197,13 +204,13 @@ impl Client {
 
     /// The added mint's context. Errors for a mint that is not
     /// added.
-    pub(crate) fn ctx(&self, mint: MintId) -> anyhow::Result<ClientContext> {
+    pub(crate) fn ctx(&self, mint: MintId) -> Result<ClientContext, NotAddedError> {
         self.mints
             .read()
             .expect("mints lock poisoned")
             .get(&mint)
             .cloned()
-            .context("Mint is not added")
+            .ok_or(NotAddedError::NotAdded)
     }
 
     /// Whether `mint` is added — the membership check without

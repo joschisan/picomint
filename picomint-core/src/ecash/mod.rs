@@ -34,7 +34,7 @@ pub struct Denomination(pub u8);
 impl Denomination {
     /// Convert to Amount (only call at boundaries)
     pub fn amount(self) -> Amount {
-        Amount::from_msat(1 << self.0 as usize)
+        Amount(1 << self.0 as usize)
     }
 }
 

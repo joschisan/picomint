@@ -22,6 +22,8 @@ docker exec picomint-client-daemon picomint-client-cli --help
 
 The walkthroughs below use the bare `picomint-client-cli …` form — prefix with `docker exec picomint-client-daemon` to run them. Every command prints JSON, and its `--help` ends with the JSON Schema of what it prints, every field explained.
 
+A refused request prints one JSON object on stderr, `{"code": ..., "error": ...}`: the code is a stable name to branch on, the error the message to show the operator. The exit code is 1 for a request the daemon refused, 2 for a usage error and 3 when the daemon is unreachable. Every command's `--help` lists the codes it fails with.
+
 One command prints a secret: `mnemonic` prints the seed words every fund derives from. Whatever an agent reads ends up in a model context and a transcript, so the rules for an agent are: run it only when asked, always with the output piped into a file, never read the file, and open it for the operator if asked. Write the words down from that file yourself and delete it. The same rules end the CLI's `--help`. The shell creates that file with its umask, world-readable on most systems, so create it in a subshell with `umask 077` and it is readable by you alone from the first byte.
 
 Every command that acts on one mint takes the mint id first and, where funds move, the account next, one of `primary`, `secondary`, `tertiary`, `quaternary` or `quinary`. Amounts carry their denomination, so quote them: `"1000 sat"` or `"0.001 BTC"`.
@@ -34,7 +36,7 @@ The daemon can hold balances in multiple mints. Add one with an invite code (see
 picomint-client-cli add <invite>
 ```
 
-List added mints with their ids, which every other command takes as its first argument:
+It prints the mint's id, which every per-mint command takes first; `list` prints every added mint with its name:
 
 ```bash
 picomint-client-cli list
@@ -89,7 +91,7 @@ picomint-client-cli balance <mint> <account>
 
 ## Fund an Account
 
-**Receive Onchain:** generate a mint deposit address and send bitcoin to it. When the transaction confirms the mint issues ecash to the account. The address lands in the analytics as `onchain_receive` when generated, and the claim as `core_tx_accept` under the same operation once the deposit has confirmed:
+**Receive Onchain:** generate a mint deposit address and send bitcoin to it. When the transaction confirms the mint issues ecash to the account. Nothing is logged for the address itself; once the deposit has six confirmations the claim lands in the analytics as `onchain_receive`, and its acceptance as `core_tx_accept` under the same operation:
 
 ```bash
 picomint-client-cli onchain receive <mint> <account>

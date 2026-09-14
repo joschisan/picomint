@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use bech32::{Bech32, Hrp};
 use lightning_invoice::Bolt11Invoice;
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,30 @@ impl<T> LnurlResponse<T> {
             Self::Ok(data) => Ok(data),
             Self::Error { reason, .. } => Err(reason),
         }
+    }
+}
+
+/// An lnurl-pay endpoint as it is handed around: a bech32 `lnurl…` string
+/// or a lightning address `user@domain`, resolved to the URL it names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Lnurl(String);
+
+impl Lnurl {
+    /// The lnurl-pay endpoint URL.
+    pub fn url(&self) -> &str {
+        &self.0
+    }
+}
+
+impl FromStr for Lnurl {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        parse_lnurl(s)
+            .or_else(|| parse_address(s))
+            .map(Lnurl)
+            .ok_or_else(|| "neither a bech32 lnurl nor a lightning address".to_string())
     }
 }
 

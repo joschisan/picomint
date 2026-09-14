@@ -214,8 +214,8 @@ async fn resolve_and_fetch_invoice(
 
     ensure!(
         amount
-            .checked_sub(fee.msat)
-            .is_some_and(|net| Amount::from_msat(net) >= MINIMUM_INCOMING_CONTRACT_AMOUNT),
+            .checked_sub(fee.0)
+            .is_some_and(|net| Amount(net) >= MINIMUM_INCOMING_CONTRACT_AMOUNT),
         "Amount too small"
     );
 
@@ -242,7 +242,7 @@ async fn resolve_and_fetch_invoice(
         encryption_seed,
         preimage,
         preimage.consensus_hash(),
-        Amount::from_msat(amount),
+        Amount(amount),
         fee,
         claim_pk,
         ephemeral_keypair.public_key(),

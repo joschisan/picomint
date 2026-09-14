@@ -20,8 +20,10 @@ use picomint_core::ecash::Denomination;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk};
+use picomint_lnurl::Lnurl;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 pub const ROUTE_MNEMONIC: &str = "/mnemonic";
 pub const ROUTE_QUERY: &str = "/query";
@@ -87,6 +89,13 @@ pub struct ClientAddRequest {
     pub invite: InviteCode,
 }
 
+/// The mint is added.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientAddResponse {
+    /// The mint's id, which every per-mint command takes first
+    pub mint: MintId,
+}
+
 // --- /remove ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
@@ -143,7 +152,7 @@ pub struct ClientListResponse {
 /// One added mint.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct MintInfo {
-    /// The mint id, which every other command takes first
+    /// The mint id, which every per-mint command takes first
     pub mint: MintId,
     /// The mint's name from its config
     pub mint_name: String,
@@ -277,9 +286,9 @@ pub struct ClientOnchainSendRequest {
     /// The amount with its denomination, e.g. "100000 sat"; at least the
     /// mint's dust limit
     pub amount: bitcoin::Amount,
-    /// A miner fee to attach instead of the one `send-fee` quotes; the mint
-    /// rejects the send if this is below what it requires at the time, so
-    /// only ever raise it
+    /// A miner fee with its denomination, e.g. "154 sat", to attach instead
+    /// of the one `send-fee` quotes; the mint rejects the send if this is
+    /// below what it requires at the time, so only ever raise it
     #[arg(long)]
     pub fee: Option<bitcoin::Amount>,
 }
@@ -433,7 +442,7 @@ pub struct ClientLightningSendMaxRequest {
     pub gateway: GatewayPk,
     /// The lnurl or lightning address to pay; the account's whole balance
     /// less the gateway's fee goes to it
-    pub lnurl: String,
+    pub lnurl: Lnurl,
 }
 
 /// The payment was submitted; it completes in the background.
@@ -478,9 +487,9 @@ pub struct ClientLightningLnurlRequest {
     pub mint: MintId,
     /// The account, as for `balance`
     pub account: Account,
-    /// Base URL of the lnurl daemon that serves the lnurl, e.g.
-    /// `https://lnurl.example.com/`
-    pub lnurl_daemon: String,
+    /// Base URL of the hosted picomint-lnurl-daemon that serves the lnurl
+    /// on the account's behalf, e.g. `https://lnurl.example.com/`
+    pub lnurl_daemon: Url,
 }
 
 /// A reusable way to be paid while this daemon is offline.

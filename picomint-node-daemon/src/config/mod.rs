@@ -12,7 +12,7 @@ use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::{NodeId, secp256k1};
 use secp256k1::{Secp256k1, SecretKey, XOnlyPublicKey};
 
-use crate::config::setup::NodeSetupCode;
+use picomint_core::config::NodeSetupCode;
 use picomint_encoding::{Decodable, Encodable};
 
 pub mod db;

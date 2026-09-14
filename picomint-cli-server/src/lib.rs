@@ -1,6 +1,7 @@
 //! The daemon side of the admin socket: [`serve`] binds
 //! `{DATA_DIR}/cli.sock` and returns the future that runs an axum router
-//! on it, and [`CliError`] is what its handlers fail with. The CLI side is
+//! on it, and [`CliError`] is what its handlers fail with: a code from a
+//! [`ErrorCode`] enum and a message, as JSON. The CLI side is
 //! `picomint-cli-client`, which spells the socket filename out too — a
 //! mismatch fails the first command.
 
@@ -11,41 +12,54 @@ use std::os::unix::net::UnixListener as StdUnixListener;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use axum::Router;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use axum::{Json, Router};
+use picomint_core::error::ErrorCode;
+use serde::Serialize;
 use tokio::net::UnixListener;
 
 /// The daemon binds and the CLI connects at `{DATA_DIR}/{CLI_SOCKET_FILENAME}`.
 pub const CLI_SOCKET_FILENAME: &str = "cli.sock";
 
-/// What an admin handler fails with: a status code and the message the
-/// CLI prints.
-#[derive(Debug)]
+/// What an admin handler fails with, and what the CLI prints: a status,
+/// a stable `code` the caller branches on and the `error` message it
+/// shows the operator. The body is `{"code": ..., "error": ...}`.
+#[derive(Debug, Serialize)]
 pub struct CliError {
-    pub code: StatusCode,
+    #[serde(skip)]
+    pub status: StatusCode,
+    pub code: &'static str,
     pub error: String,
 }
 
 impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.error)
+        write!(f, "{}: {}", self.code, self.error)
     }
 }
 
 impl std::error::Error for CliError {}
 
 impl CliError {
-    pub fn bad_request(error: impl std::fmt::Display) -> Self {
+    /// A request the daemon refuses for a reason the caller can act on:
+    /// the enum's variant is the code, its message the error. Every
+    /// error a handler returns on purpose goes through here, so the CLI's
+    /// `--help` can list the codes from the same enum.
+    pub fn rejected(error: impl ErrorCode + std::fmt::Display) -> Self {
         Self {
-            code: StatusCode::BAD_REQUEST,
+            status: StatusCode::BAD_REQUEST,
+            code: error.code(),
             error: error.to_string(),
         }
     }
 
+    /// A failure nothing typed: an anyhow error reaching a handler, which
+    /// is a bug in the daemon rather than a rejection of the request.
     pub fn internal(error: impl std::fmt::Display) -> Self {
         Self {
-            code: StatusCode::INTERNAL_SERVER_ERROR,
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "internal",
             error: error.to_string(),
         }
     }
@@ -53,7 +67,7 @@ impl CliError {
 
 impl IntoResponse for CliError {
     fn into_response(self) -> axum::response::Response {
-        (self.code, self.error).into_response()
+        (self.status, Json(&self)).into_response()
     }
 }
 

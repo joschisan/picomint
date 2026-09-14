@@ -25,10 +25,12 @@ use anyhow::Context as _;
 use hex::ToHex as _;
 use picomint_client::eventlog::{Event, EventLogEntry, EventLogId, EventSource};
 use picomint_client::{Client, ecash, gateway, lightning, onchain};
+use picomint_core::error::ErrorCode;
 use picomint_core::sql::{SqlRow, SqlValue};
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags, Transaction};
 use serde_json::{Map, Value};
+use thiserror::Error;
 use tokio::sync::Mutex;
 use tracing::{debug, error};
 
@@ -49,13 +51,13 @@ pub type Rows = Vec<Map<String, Value>>;
 /// at debug level and skipped, so adding an event means adding it here.
 macro_rules! events {
     ($($event:path),* $(,)?) => {
-        /// Every table as the SQL that creates it: what the CLI's
-        /// `query --help` prints so an agent knows the tables and columns
-        /// without a running daemon.
+        /// Every table with its columns explained: what the CLI's
+        /// `query --help` prints so an agent knows the schema without a
+        /// running daemon.
         pub fn tables() -> String {
-            let mut sql = String::new();
-            $(sql.push_str(&table_sql::<$event>());)*
-            sql
+            let mut text = COMMON_COLUMNS_DOC.to_string();
+            $(text.push_str(&table_doc::<$event>());)*
+            text
         }
 
         fn schema() -> String {
@@ -167,6 +169,17 @@ const COMMON_COLUMNS: [(&str, &str); 5] = [
     ("operation", "TEXT NOT NULL"),
 ];
 
+/// How `query --help` explains the common columns, ahead of the tables.
+const COMMON_COLUMNS_DOC: &str = "\
+Tables, one per event. Every table starts with the same columns:
+  id INTEGER         The row's position in the event log
+  ts INTEGER         When the event was logged, in ms since the unix epoch
+  mint TEXT          The mint id, hex
+  account TEXT       primary, secondary, tertiary, quaternary or quinary
+  operation TEXT     The operation the event belongs to, hex; the events of one send or receive share it across tables
+Every table is indexed on operation and ts. Amounts are integers, msat except in the onchain tables, which are sat; hashes, ids and keys are text. The table's own columns follow its name.
+";
+
 fn table_sql<E: Event + SqlRow>() -> String {
     let table = table_name::<E>();
 
@@ -174,14 +187,39 @@ fn table_sql<E: Event + SqlRow>() -> String {
         .iter()
         .map(|column| format!("{} {}", column.0, column.1))
         .chain(
-            E::columns()
+            E::COLUMNS
                 .iter()
-                .map(|column| format!("{} {} NOT NULL", column.0, column.1)),
+                .map(|column| format!("{} {} NOT NULL", column.name, column.ty)),
         )
         .collect::<Vec<_>>()
         .join(", ");
 
     format!("CREATE TABLE {table} ({columns});\n")
+}
+
+fn table_doc<E: Event + SqlRow>() -> String {
+    let width = E::COLUMNS
+        .iter()
+        .map(|column| column.name.len() + column.ty.len() + 1)
+        .max()
+        .unwrap_or(0);
+
+    E::COLUMNS
+        .iter()
+        .map(|column| {
+            format!(
+                "  {:<width$}  {}\n",
+                format!("{} {}", column.name, column.ty),
+                column.doc
+            )
+        })
+        .fold(
+            format!("\n{}: {}\n", table_name::<E>(), E::DESCRIPTION),
+            |mut doc, line| {
+                doc.push_str(&line);
+                doc
+            },
+        )
 }
 
 fn index_sql<E: Event>() -> String {
@@ -199,7 +237,7 @@ fn insert_row<E: Event + SqlRow>(
     entry: &EventLogEntry,
     event: &E,
 ) -> anyhow::Result<()> {
-    let placeholders = std::iter::repeat_n("?", COMMON_COLUMNS.len() + E::columns().len())
+    let placeholders = std::iter::repeat_n("?", COMMON_COLUMNS.len() + E::COLUMNS.len())
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -207,7 +245,7 @@ fn insert_row<E: Event + SqlRow>(
         id.0.cast_signed().into(),
         entry.timestamp.cast_signed().into(),
         entry.mint.to_string().into(),
-        format!("{:?}", entry.account).into(),
+        entry.account.to_string().to_lowercase().into(),
         entry.operation.to_string().into(),
     ];
 
@@ -224,17 +262,27 @@ fn insert_row<E: Event + SqlRow>(
     Ok(())
 }
 
+/// Why a query returned no rows: SQLite refused it, which covers a write
+/// statement on the read-only connection as much as a typo.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum QueryError {
+    #[error("SQLite rejected the query: {0}")]
+    InvalidQuery(String),
+}
+
 /// Run read-only SQL against the analytics db and return one JSON object per
 /// row, keyed by result column name. Opens its own `SQLITE_OPEN_READ_ONLY`
 /// connection — WAL mode lets it read concurrently with the trailer's writer
 /// connection, and the flag rejects any write statement outright.
-pub fn query(data_dir: &Path, sql: &str) -> anyhow::Result<Rows> {
+pub fn query(data_dir: &Path, sql: &str) -> Result<Rows, QueryError> {
     let path = data_dir.join(ANALYTICS_DIR).join(ANALYTICS_FILE);
 
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .context("failed to open analytics.sqlite read-only")?;
+        .expect("the daemon created the analytics db at startup");
 
-    let mut statement = conn.prepare(sql)?;
+    let mut statement = conn
+        .prepare(sql)
+        .map_err(|e| QueryError::InvalidQuery(e.to_string()))?;
 
     let columns = statement
         .column_names()
@@ -242,14 +290,19 @@ pub fn query(data_dir: &Path, sql: &str) -> anyhow::Result<Rows> {
         .map(ToString::to_string)
         .collect::<Vec<_>>();
 
-    let mut rows = statement.query([])?;
+    let mut rows = statement
+        .query([])
+        .map_err(|e| QueryError::InvalidQuery(e.to_string()))?;
     let mut result = Vec::new();
 
-    while let Some(row) = rows.next()? {
+    while let Some(row) = rows
+        .next()
+        .map_err(|e| QueryError::InvalidQuery(e.to_string()))?
+    {
         let mut object = Map::new();
 
         for (i, column) in columns.iter().enumerate() {
-            let value = match row.get_ref(i)? {
+            let value = match row.get_ref(i).expect("the column index is in range") {
                 ValueRef::Null => Value::Null,
                 ValueRef::Integer(n) => Value::from(n),
                 ValueRef::Real(f) => Value::from(f),

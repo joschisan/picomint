@@ -10,18 +10,21 @@ use std::collections::BTreeMap;
 
 use bitcoin::address::NetworkUnchecked;
 use clap::Args;
+use lightning::ln::msgs::SocketAddress;
 use lightning_invoice::Bolt11Invoice;
 use picomint_client::ecash::Ecash;
 use picomint_core::config::MintId;
 use picomint_core::core::Account;
 use picomint_core::core::OperationId;
 use picomint_core::ecash::Denomination;
+use picomint_core::error::ErrorCode;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_core::{Amount, secp256k1};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
+use thiserror::Error;
 
 // Top-level
 pub const ROUTE_INFO: &str = "/info";
@@ -137,17 +140,21 @@ pub struct LdkBalancesResponse {
 
 // --- /ldk/channel/open ---
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkChannelOpenRequest {
     /// The peer's node id, hex
     pub pubkey: secp256k1::PublicKey,
-    /// The peer's `host:port`
-    pub host: String,
-    /// The channel's capacity in sat, funded from the LDK onchain wallet
-    pub channel_size_sat: u64,
-    /// Sat handed to the peer as its starting balance in the channel
-    #[arg(long, default_value_t = 0)]
-    pub push_amount_sat: u64,
+    /// The peer's `host:port`: an IP, a hostname or an onion address
+    #[serde_as(as = "DisplayFromStr")]
+    pub host: SocketAddress,
+    /// The channel's capacity with its denomination, e.g. "1000000 sat",
+    /// funded from the LDK onchain wallet
+    pub channel_size: bitcoin::Amount,
+    /// An amount with its denomination handed to the peer as its starting
+    /// balance in the channel; nothing if omitted
+    #[arg(long)]
+    pub push_amount: Option<bitcoin::Amount>,
     /// Announce the channel to the network so other nodes can route through
     /// it. Requires the node to be configured with a listening address and an
     /// alias
@@ -236,8 +243,9 @@ pub struct LdkChannelSpliceInRequest {
     pub user_channel_id: u128,
     /// Peer the channel is with
     pub pubkey: secp256k1::PublicKey,
-    /// On-chain funds to add to the channel, in sat
-    pub amount_sat: u64,
+    /// The on-chain funds to add to the channel, with their denomination,
+    /// e.g. "100000 sat"
+    pub amount: bitcoin::Amount,
 }
 
 // --- /ldk/channel/splice-out ---
@@ -254,9 +262,9 @@ pub struct LdkChannelSpliceOutRequest {
     pub pubkey: secp256k1::PublicKey,
     /// Destination on-chain address for the spliced-out funds
     pub address: bitcoin::Address<NetworkUnchecked>,
-    /// Amount to remove from the channel, in sat (must not exceed the
-    /// channel's outbound capacity)
-    pub amount_sat: u64,
+    /// The amount to remove from the channel, with its denomination, e.g.
+    /// "100000 sat"; at most the channel's outbound capacity
+    pub amount: bitcoin::Amount,
 }
 
 // --- /ldk/lightning/probe ---
@@ -265,8 +273,8 @@ pub struct LdkChannelSpliceOutRequest {
 pub struct LdkLightningProbeRequest {
     /// The node to probe a route towards, hex
     pub node_id: secp256k1::PublicKey,
-    /// The amount to find paths for, in msat
-    pub amount_msat: u64,
+    /// The amount to find paths for, with its denomination, e.g. "10000 sat"
+    pub amount: bitcoin::Amount,
 }
 
 // --- /ldk/onchain/receive ---
@@ -305,8 +313,8 @@ pub struct LdkOnchainSendResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkLightningReceiveRequest {
-    /// The invoice amount in msat
-    pub amount_msat: u64,
+    /// The invoice amount with its denomination, e.g. "10000 sat"
+    pub amount: bitcoin::Amount,
     /// Seconds until the invoice expires; 3600 if omitted
     #[arg(long)]
     pub expiry_secs: Option<u32>,
@@ -332,7 +340,7 @@ pub struct LdkLightningSendRequest {
 }
 
 /// Proof that the invoice was paid. The command waits for the payment to
-/// settle and fails if it does.
+/// settle and fails if it does not.
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct LdkLightningSendResponse {
     /// The payment preimage, hex
@@ -341,12 +349,14 @@ pub struct LdkLightningSendResponse {
 
 // --- /ldk/peer/connect ---
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct LdkPeerConnectRequest {
     /// The peer's node id, hex
     pub pubkey: secp256k1::PublicKey,
-    /// The peer's `host:port`
-    pub host: String,
+    /// The peer's `host:port`: an IP, a hostname or an onion address
+    #[serde_as(as = "DisplayFromStr")]
+    pub host: SocketAddress,
 }
 
 // --- /ldk/peer/disconnect ---
@@ -385,6 +395,13 @@ pub struct ClientAddRequest {
     /// The mint's invite code, as printed by a node's `invite`; the mint has
     /// to run on this gateway's `NETWORK`
     pub invite: InviteCode,
+}
+
+/// The mint is added.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientAddResponse {
+    /// The mint's id, which every per-mint command takes first
+    pub mint: MintId,
 }
 
 // --- /client/remove ---
@@ -576,9 +593,9 @@ pub struct ClientOnchainSendRequest {
     /// The amount with its denomination, e.g. "100000 sat"; at least the
     /// mint's dust limit
     pub amount: bitcoin::Amount,
-    /// A miner fee to attach instead of the one `send-fee` quotes; the mint
-    /// rejects the send if this is below what it requires at the time, so
-    /// only ever raise it
+    /// A miner fee with its denomination, e.g. "154 sat", to attach instead
+    /// of the one `send-fee` quotes; the mint rejects the send if this is
+    /// below what it requires at the time, so only ever raise it
     #[arg(long)]
     pub fee: Option<bitcoin::Amount>,
 }
@@ -631,4 +648,31 @@ pub struct ClientOnchainReceiveResponse {
     /// per-input fee
     #[schemars(with = "String")]
     pub address: bitcoin::Address<bitcoin::address::NetworkUnchecked>,
+}
+
+// --- errors ---
+
+/// Why an `ldk` command did nothing: LDK refused it, with its reason.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum LdkError {
+    #[error("LDK refused: {0}")]
+    Ldk(String),
+}
+
+/// Why `ldk lightning receive` produced no invoice.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum LdkReceiveError {
+    #[error("The invoice description is too long")]
+    InvalidDescription,
+    #[error("LDK refused: {0}")]
+    Ldk(String),
+}
+
+/// Why `ldk lightning send` did not pay.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum LdkSendError {
+    #[error("LDK refused: {0}")]
+    Ldk(String),
+    #[error("The payment failed")]
+    PaymentFailed,
 }

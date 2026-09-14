@@ -7,7 +7,8 @@ use chrono::NaiveDate;
 use clap::Args;
 use picomint_core::NodeId;
 use picomint_core::bitcoin::Txid;
-use picomint_core::config::{MintId, NodeConfig};
+use picomint_core::config::{MintId, NodeConfig, NodeSetupCode};
+use picomint_core::error::ErrorCode;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
@@ -15,6 +16,7 @@ use picomint_core::onchain::TxInfo;
 use picomint_core::version::ConsensusVersion;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tss::SecretKeyShare;
 
 /// Served in every phase of the node's life; everything else is phase-bound.
@@ -69,7 +71,7 @@ pub struct SetupPhase {
     /// This node's setup code, to hand to every other node's operator: its
     /// name and iroh public key, plus the mint name and size if this node
     /// set them. Absent until `setup init` has run
-    pub setup_code: Option<String>,
+    pub setup_code: Option<NodeSetupCode>,
     /// This node's name as given to `setup init`; absent until then
     pub node_name: Option<String>,
     /// The mint's name, once any setup code carrying it has been added or
@@ -89,7 +91,7 @@ pub struct SetupPhase {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DkgPhase {
     /// This node's setup code, for any node whose operator still needs it
-    pub setup_code: String,
+    pub setup_code: NodeSetupCode,
 }
 
 /// The mint is running. Everything here is public; the private keys are
@@ -215,7 +217,7 @@ pub struct SetupInitResponse {
     /// its name, its iroh public key and, if this node set them, the mint
     /// name and size. Running `setup init` again with the same arguments
     /// prints the same code
-    pub setup_code: String,
+    pub setup_code: NodeSetupCode,
 }
 
 // --- /setup/add ---
@@ -224,7 +226,7 @@ pub struct SetupInitResponse {
 pub struct SetupAddRequest {
     /// Another node's setup code, as printed by its `setup init`; adding a
     /// code twice is harmless
-    pub setup_code: String,
+    pub setup_code: NodeSetupCode,
 }
 
 /// Confirms which node the code belonged to.
@@ -414,4 +416,117 @@ pub struct LightningGatewayInfo {
     pub pk: GatewayPk,
     /// The name this node lists it under; local to this node
     pub name: String,
+}
+
+// --- errors ---
+
+/// Why `status` has nothing to say for a moment.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum StatusError {
+    #[error("Key generation has just completed; the node is starting consensus")]
+    DkgCompleting,
+}
+
+/// Why `setup init` refused.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum SetupInitError {
+    #[error("The node name is empty")]
+    EmptyNodeName,
+    #[error("The mint name is empty")]
+    EmptyMintName,
+    #[error("The node that sets the mint name sets the mint size too")]
+    MintSizeMissing,
+    #[error("Mint size must be at least 4")]
+    MintSizeTooSmall,
+    #[error(
+        "The node has already been initialized; `setup init` with the same arguments repeats its code"
+    )]
+    AlreadyInitialized,
+}
+
+/// Why `setup add` refused the code.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum SetupAddError {
+    #[error("The node has not been initialized yet; run `setup init` first")]
+    NotInitialized,
+    #[error("This is the node's own setup code")]
+    OwnSetupCode,
+    #[error("The mint name has already been set to {0}")]
+    MintNameAlreadySet(String),
+    #[error("The mint size has already been set to {0}")]
+    MintSizeAlreadySet(u8),
+}
+
+/// Why `setup confirm` did not start key generation.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum SetupConfirmError {
+    #[error("The node has not been initialized yet; run `setup init` first")]
+    NotInitialized,
+    #[error("Mint size must be at least 4")]
+    MintSizeTooSmall,
+    #[error("The mint size is {expected} but {got} setup codes are in, this node's included")]
+    WrongNodeCount { expected: u8, got: usize },
+    #[error("No setup code carries the mint name; one node has to set it")]
+    MintNameMissing,
+    #[error("Failed to determine the network from the bitcoin backend: {0}")]
+    Bitcoind(String),
+    #[error("Picomint is experimental software and refuses to run a mint on mainnet")]
+    Mainnet,
+    #[error("The setup has already completed")]
+    Completed,
+}
+
+/// Why `setup restore` refused the backup.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum SetupRestoreError {
+    #[error("The restored config failed validation: {0}")]
+    InvalidConfig(String),
+    #[error("The setup has already completed")]
+    Completed,
+}
+
+/// Why the backend could not be read.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum BitcoindError {
+    #[error("The bitcoin backend did not answer: {0}")]
+    Unreachable(String),
+}
+
+/// Why no invite code was issued.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum InviteError {
+    #[error("Invite codes are issued once the mint has reached consensus on a block height")]
+    NoBlockHeight,
+    #[error("The expiry must be at most 365 days out")]
+    ExpiryTooFar,
+}
+
+/// Why the expiry announcement was refused.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum ExpirySetError {
+    #[error("The expiry date must be in the future")]
+    NotInFuture,
+    #[error("The expiry date must be at most 730 days out")]
+    TooFar,
+}
+
+/// Why the rugpull secret was not exported.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum RugpullError {
+    #[error("The mint wallet has not received funds yet, so there is nothing to drain")]
+    WalletEmpty,
+}
+
+/// Why the gateway was not added to this node's recommendations.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum GatewayAddError {
+    #[error("The gateway is already recommended")]
+    AlreadyRecommended,
+}
+
+/// Why the gateway was not removed from this node's recommendations.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum GatewayRemoveError {
+    #[error("The gateway is not recommended")]
+    NotRecommended,
 }

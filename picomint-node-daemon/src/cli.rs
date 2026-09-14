@@ -12,7 +12,7 @@ use picomint_cli_server::{CliError, serve};
 use picomint_node_cli_core::{
     ConsensusPhase, DkgPhase, NodeInfo, NodeStatus, ROUTE_SETUP_ADD, ROUTE_SETUP_CONFIRM,
     ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE, ROUTE_STATUS, SetupAddRequest,
-    SetupAddResponse, SetupInitRequest, SetupInitResponse, SetupPhase,
+    SetupAddResponse, SetupInitRequest, SetupInitResponse, SetupPhase, StatusError,
 };
 use picomint_redb::{Database, DbRead};
 
@@ -61,7 +61,8 @@ pub fn run_dkg_cli(data_dir: &Path, db: Database) -> Result<impl Future<Output =
 fn wrong_phase(phase: &'static str) -> impl Fn() -> std::future::Ready<CliError> + Clone {
     move || {
         std::future::ready(CliError {
-            code: StatusCode::NOT_FOUND,
+            status: StatusCode::NOT_FOUND,
+            code: "wrong_phase",
             error: format!(
                 "The node is in the {phase} phase and does not serve this route; run `status`"
             ),
@@ -74,14 +75,15 @@ fn wrong_phase(phase: &'static str) -> impl Fn() -> std::future::Ready<CliError>
 pub fn router(api: Arc<ConsensusApi>) -> Router {
     use picomint_core::expiry::ExpiryStatus;
     use picomint_node_cli_core::{
-        BitcoindResponse, EXPIRY_DAYS_LIMIT, ExpirySetRequest, ExpiryStatusResponse,
-        HistoryResponse, INVITE_EXPIRY_DAYS_LIMIT, InviteRequest, InviteResponse,
+        BitcoindError, BitcoindResponse, EXPIRY_DAYS_LIMIT, ExpirySetError, ExpirySetRequest,
+        ExpiryStatusResponse, GatewayAddError, GatewayRemoveError, HistoryResponse,
+        INVITE_EXPIRY_DAYS_LIMIT, InviteError, InviteRequest, InviteResponse,
         LightningGatewayAddRequest, LightningGatewayInfo, LightningGatewayListResponse,
         LightningGatewayRemoveRequest, OnchainStatusResponse, PendingResponse, ROUTE_BACKUP,
         ROUTE_BITCOIND, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
         ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
         ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL, ROUTE_ONCHAIN_STATUS,
-        RugpullResponse,
+        RugpullError, RugpullResponse,
     };
 
     async fn bitcoind(
@@ -89,11 +91,14 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
     ) -> Result<Json<BitcoindResponse>, CliError> {
         let btc_rpc = &api.server.btc_rpc;
 
+        let unreachable =
+            |e: anyhow::Error| CliError::rejected(BitcoindError::Unreachable(e.to_string()));
+
         Ok(Json(BitcoindResponse {
-            network: btc_rpc.network().await?.to_string(),
-            block_height: btc_rpc.get_block_height().await?,
+            network: btc_rpc.network().await.map_err(unreachable)?.to_string(),
+            block_height: btc_rpc.get_block_height().await.map_err(unreachable)?,
             fee_rate_sat_per_vb: onchain::feerate_vote(&api.server).await.map(|f| f / 1000),
-            sync_progress: btc_rpc.get_sync_progress().await?,
+            sync_progress: btc_rpc.get_sync_progress().await.map_err(unreachable)?,
         }))
     }
 
@@ -110,17 +115,11 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         Json(req): Json<InviteRequest>,
     ) -> Result<Json<InviteResponse>, CliError> {
         if api.block_height() == 0 {
-            return Err(CliError {
-                code: StatusCode::SERVICE_UNAVAILABLE,
-                error: "Invite codes will be available once the mint has reached consensus on a block height".to_string(),
-            });
+            return Err(CliError::rejected(InviteError::NoBlockHeight));
         }
 
         if req.expiry_days > INVITE_EXPIRY_DAYS_LIMIT {
-            return Err(CliError {
-                code: StatusCode::BAD_REQUEST,
-                error: format!("Expiration must be at most {INVITE_EXPIRY_DAYS_LIMIT} days"),
-            });
+            return Err(CliError::rejected(InviteError::ExpiryTooFar));
         }
 
         Ok(Json(InviteResponse {
@@ -147,11 +146,8 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
     async fn onchain_rugpull(
         State(api): State<Arc<ConsensusApi>>,
     ) -> Result<Json<RugpullResponse>, CliError> {
-        let wallet = onchain::mint_utxo(&api.server.db.begin_read()).ok_or(CliError {
-            code: StatusCode::SERVICE_UNAVAILABLE,
-            error: "The mint wallet has not received funds yet, so there is nothing to drain"
-                .to_string(),
-        })?;
+        let wallet = onchain::mint_utxo(&api.server.db.begin_read())
+            .ok_or_else(|| CliError::rejected(RugpullError::WalletEmpty))?;
 
         Ok(Json(RugpullResponse {
             node: api.server.cfg.private.identity,
@@ -180,7 +176,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         Json(payload): Json<LightningGatewayAddRequest>,
     ) -> Result<Json<()>, CliError> {
         if !lightning::add_gateway(&api.server, payload.pk, payload.name) {
-            return Err(CliError::bad_request("Gateway is already recommended"));
+            return Err(CliError::rejected(GatewayAddError::AlreadyRecommended));
         }
 
         Ok(Json(()))
@@ -191,7 +187,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         Json(payload): Json<LightningGatewayRemoveRequest>,
     ) -> Result<Json<()>, CliError> {
         if !lightning::remove_gateway(&api.server, payload.pk) {
-            return Err(CliError::bad_request("Gateway is not recommended"));
+            return Err(CliError::rejected(GatewayRemoveError::NotRecommended));
         }
 
         Ok(Json(()))
@@ -215,9 +211,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         let today = Utc::now().date_naive();
 
         if payload.date <= today {
-            return Err(CliError::bad_request(
-                "The expiry date must be in the future",
-            ));
+            return Err(CliError::rejected(ExpirySetError::NotInFuture));
         }
 
         let horizon = today
@@ -225,9 +219,7 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
             .expect("two years from today is within chrono's range");
 
         if payload.date > horizon {
-            return Err(CliError::bad_request(format!(
-                "The expiry date must be at most {EXPIRY_DAYS_LIMIT} days out"
-            )));
+            return Err(CliError::rejected(ExpirySetError::TooFar));
         }
 
         let timestamp = payload
@@ -344,18 +336,17 @@ async fn consensus_phase(
 async fn dkg_phase(State(db): State<Database>) -> Result<Json<NodeStatus>, CliError> {
     // `store_node_config` clears the table moments before this server is
     // aborted, so a request can land after DKG has completed.
-    let params = db.begin_read().get(&DkgParamsTable, &()).ok_or(CliError {
-        code: StatusCode::SERVICE_UNAVAILABLE,
-        error: "DKG has just completed; the node is starting consensus".to_string(),
-    })?;
+    let params = db
+        .begin_read()
+        .get(&DkgParamsTable, &())
+        .ok_or_else(|| CliError::rejected(StatusError::DkgCompleting))?;
 
     let phase = DkgPhase {
-        setup_code: picomint_base32::encode(
-            params
-                .nodes
-                .get(&params.identity)
-                .expect("our node id is always in the node map"),
-        ),
+        setup_code: params
+            .nodes
+            .get(&params.identity)
+            .expect("our node id is always in the node map")
+            .clone(),
     };
 
     Ok(Json(NodeStatus::Dkg(phase)))
@@ -365,10 +356,7 @@ async fn dkg_phase(State(db): State<Database>) -> Result<Json<NodeStatus>, CliEr
 
 async fn setup_phase(State(setup_api): State<Arc<SetupApi>>) -> Result<Json<NodeStatus>, CliError> {
     let phase = SetupPhase {
-        setup_code: setup_api
-            .setup_code()
-            .await
-            .map(|code| picomint_base32::encode(&code)),
+        setup_code: setup_api.setup_code().await,
         node_name: setup_api.node_name().await,
         mint_name: setup_api.cfg_mint_name().await,
         mint_size: setup_api.mint_size().await,
@@ -391,7 +379,7 @@ async fn setup_init(
     let setup_code = setup_api
         .init(payload.name, payload.mint_name, payload.mint_size)
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(SetupInitResponse { setup_code }))
 }
@@ -403,13 +391,13 @@ async fn setup_add(
     let name = setup_api
         .add_node_setup_code(payload.setup_code)
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(SetupAddResponse { name }))
 }
 
 async fn setup_confirm(State(setup_api): State<Arc<SetupApi>>) -> Result<Json<()>, CliError> {
-    setup_api.start_dkg().await.map_err(CliError::internal)?;
+    setup_api.start_dkg().await.map_err(CliError::rejected)?;
 
     Ok(Json(()))
 }
@@ -421,7 +409,7 @@ async fn setup_restore(
     setup_api
         .restore_config(backup.config)
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(()))
 }

@@ -12,5 +12,6 @@ picomint-client = { workspace = true }
 picomint-core = { workspace = true }
 rusqlite = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync"] }
 tracing = { workspace = true }

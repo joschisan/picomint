@@ -30,6 +30,8 @@ pub mod config;
 pub mod core;
 /// Ecash module wire types / helpers (shared between client and server).
 pub mod ecash;
+/// The code an error crosses the admin socket with.
+pub mod error;
 /// Node-announced mint expiry date.
 pub mod expiry;
 /// Mint invite code

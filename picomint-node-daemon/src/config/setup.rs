@@ -1,33 +1,18 @@
 use std::iter::once;
 use std::sync::Arc;
 
-use anyhow::{Context, ensure};
 use iroh::SecretKey;
 use picomint_core::NodeId;
+use picomint_core::config::NodeSetupCode;
 use picomint_encoding::{Decodable, Encodable};
+use picomint_node_cli_core::{SetupAddError, SetupConfirmError, SetupInitError, SetupRestoreError};
 use picomint_redb::{Database, DbRead};
-use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
 use crate::bitcoind::BitcoindClient;
 use crate::config::db::{DkgParamsTable, InitParamsTable, store_node_config};
 use crate::config::{DkgParams, NodeConfig, SetupResult};
-
-/// The setup code shared between nodes during setup.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable, Serialize)]
-pub struct NodeSetupCode {
-    /// Name of the node
-    pub name: String,
-    /// Public key of the node's single iroh endpoint (serves both p2p and
-    /// client-API traffic, demuxed by node-id on accept).
-    pub pk: iroh_base::PublicKey,
-    /// Mint name set by the leader
-    pub mint_name: Option<String>,
-    /// Total number of nodes (including the one who sets this), set by the
-    /// leader
-    pub mint_size: Option<u8>,
-}
 
 /// In-memory state of the setup phase.
 #[derive(Debug, Clone, Default)]
@@ -134,35 +119,36 @@ impl SetupApi {
         name: String,
         mint_name: Option<String>,
         mint_size: Option<u8>,
-    ) -> anyhow::Result<String> {
+    ) -> Result<NodeSetupCode, SetupInitError> {
         if let Some(existing_init_params) = self.state.lock().await.init_params.clone()
             && existing_init_params.name == name
             && existing_init_params.mint_name == mint_name
             && existing_init_params.mint_size == mint_size
         {
-            return Ok(picomint_base32::encode(&existing_init_params.setup_code()));
+            return Ok(existing_init_params.setup_code());
         }
 
-        ensure!(!name.is_empty(), "The node name is empty");
-
-        if let Some(mint_name) = mint_name.as_ref() {
-            ensure!(!mint_name.is_empty(), "The mint name is empty");
+        if name.is_empty() {
+            return Err(SetupInitError::EmptyNodeName);
         }
 
-        if mint_name.is_some() {
-            ensure!(mint_size.is_some(), "The leader must set the mint size");
+        if mint_name.as_ref().is_some_and(String::is_empty) {
+            return Err(SetupInitError::EmptyMintName);
         }
 
-        if let Some(size) = mint_size {
-            ensure!(size >= 4, "Mint size must be at least 4");
+        if mint_name.is_some() && mint_size.is_none() {
+            return Err(SetupInitError::MintSizeMissing);
+        }
+
+        if mint_size.is_some_and(|size| size < 4) {
+            return Err(SetupInitError::MintSizeTooSmall);
         }
 
         let mut state = self.state.lock().await;
 
-        ensure!(
-            state.init_params.is_none(),
-            "The node has already been initialized"
-        );
+        if state.init_params.is_some() {
+            return Err(SetupInitError::AlreadyInitialized);
+        }
 
         let iroh_sk = SecretKey::from_bytes(&rand::random());
 
@@ -181,12 +167,10 @@ impl SetupApi {
 
         state.init_params = Some(params.clone());
 
-        Ok(picomint_base32::encode(&params.setup_code()))
+        Ok(params.setup_code())
     }
 
-    pub async fn add_node_setup_code(&self, info: String) -> anyhow::Result<String> {
-        let info = picomint_base32::decode(&info)?;
-
+    pub async fn add_node_setup_code(&self, info: NodeSetupCode) -> Result<String, SetupAddError> {
         let mut state = self.state.lock().await;
 
         if state.other_setup_codes.contains(&info) {
@@ -196,23 +180,20 @@ impl SetupApi {
         let init_params = state
             .init_params
             .clone()
-            .context("The node has not been initialized yet")?;
+            .ok_or(SetupAddError::NotInitialized)?;
 
-        ensure!(
-            info != init_params.setup_code(),
-            "You cannot add your own setup code"
-        );
+        if info == init_params.setup_code() {
+            return Err(SetupAddError::OwnSetupCode);
+        }
 
         if let Some(mint_name) = state
             .other_setup_codes
             .iter()
             .chain(once(&init_params.setup_code()))
             .find_map(|info| info.mint_name.clone())
+            && info.mint_name.is_some()
         {
-            ensure!(
-                info.mint_name.is_none(),
-                "Mint name has already been set to {mint_name}"
-            );
+            return Err(SetupAddError::MintNameAlreadySet(mint_name));
         }
 
         if let Some(mint_size) = state
@@ -220,11 +201,9 @@ impl SetupApi {
             .iter()
             .chain(once(&init_params.setup_code()))
             .find_map(|info| info.mint_size)
+            && info.mint_size.is_some()
         {
-            ensure!(
-                info.mint_size.is_none(),
-                "Mint size has already been set to {mint_size}"
-            );
+            return Err(SetupAddError::MintSizeAlreadySet(mint_size));
         }
 
         state.other_setup_codes.insert(info.clone());
@@ -232,12 +211,10 @@ impl SetupApi {
         Ok(info.name)
     }
 
-    pub async fn start_dkg(&self) -> anyhow::Result<()> {
+    pub async fn start_dkg(&self) -> Result<(), SetupConfirmError> {
         let state = self.state.lock().await.clone();
 
-        let init_params = state
-            .init_params
-            .context("The node has not been initialized yet")?;
+        let init_params = state.init_params.ok_or(SetupConfirmError::NotInitialized)?;
 
         let our_setup_code = init_params.setup_code();
 
@@ -245,20 +222,23 @@ impl SetupApi {
 
         setup_codes.insert(our_setup_code.clone());
 
-        ensure!(setup_codes.len() >= 4, "Mint size must be at least 4");
+        if setup_codes.len() < 4 {
+            return Err(SetupConfirmError::MintSizeTooSmall);
+        }
 
-        if let Some(mint_size) = setup_codes.iter().find_map(|info| info.mint_size) {
-            ensure!(
-                setup_codes.len() == mint_size as usize,
-                "Expected {mint_size} nodes but got {}",
-                setup_codes.len()
-            );
+        if let Some(mint_size) = setup_codes.iter().find_map(|info| info.mint_size)
+            && setup_codes.len() != mint_size as usize
+        {
+            return Err(SetupConfirmError::WrongNodeCount {
+                expected: mint_size,
+                got: setup_codes.len(),
+            });
         }
 
         let mint_name = setup_codes
             .iter()
             .find_map(|info| info.mint_name.clone())
-            .context("We need one node to configure the mints name")?;
+            .ok_or(SetupConfirmError::MintNameMissing)?;
 
         let our_id = setup_codes
             .iter()
@@ -269,12 +249,11 @@ impl SetupApi {
             .bitcoin
             .network()
             .await
-            .context("Failed to determine the network from the bitcoin backend")?;
+            .map_err(|e| SetupConfirmError::Bitcoind(e.to_string()))?;
 
-        ensure!(
-            network != bitcoin::Network::Bitcoin,
-            "Picomint is experimental software and refuses to run a mint on mainnet"
-        );
+        if network == bitcoin::Network::Bitcoin {
+            return Err(SetupConfirmError::Mainnet);
+        }
 
         let params = DkgParams {
             identity: NodeId::from(our_id as u8),
@@ -302,20 +281,21 @@ impl SetupApi {
         self.sender
             .send(SetupResult::Dkg(Box::new(params)))
             .await
-            .context("Failed to send DKG params")?;
+            .map_err(|_| SetupConfirmError::Completed)?;
 
         Ok(())
     }
 
-    pub async fn restore_config(&self, cfg: NodeConfig) -> anyhow::Result<()> {
-        super::validate_config(&cfg).context("Restored config failed validation")?;
+    pub async fn restore_config(&self, cfg: NodeConfig) -> Result<(), SetupRestoreError> {
+        super::validate_config(&cfg)
+            .map_err(|e| SetupRestoreError::InvalidConfig(e.to_string()))?;
 
         store_node_config(&self.db, &cfg).await;
 
         self.sender
             .send(SetupResult::Restored(Box::new(cfg)))
             .await
-            .context("Failed to send restored config")?;
+            .map_err(|_| SetupRestoreError::Completed)?;
 
         Ok(())
     }

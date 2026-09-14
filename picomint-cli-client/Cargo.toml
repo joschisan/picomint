@@ -6,9 +6,9 @@ license = "MIT"
 description = "The CLI side of the picomint admin socket"
 
 [dependencies]
-anyhow = { workspace = true }
 http-body-util = "0.1"
 hyper = { workspace = true, features = ["client", "http1"] }
+picomint-core = { workspace = true }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
 schemars = { workspace = true }
 serde = { workspace = true }

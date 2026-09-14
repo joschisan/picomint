@@ -15,6 +15,8 @@ docker exec picomint-gateway-daemon picomint-gateway-cli --help
 
 The walkthroughs below use the bare `picomint-gateway-cli …` form — prefix with `docker exec picomint-gateway-daemon` to run them. Every command prints JSON, and its `--help` ends with the JSON Schema of what it prints, every field explained.
 
+A refused request prints one JSON object on stderr, `{"code": ..., "error": ...}`: the code is a stable name to branch on, the error the message to show the operator. The exit code is 1 for a request the daemon refused, 2 for a usage error and 3 when the daemon is unreachable. Every command's `--help` lists the codes it fails with.
+
 One command prints a secret: `mnemonic` prints the seed words every fund derives from. Whatever an agent reads ends up in a model context and a transcript, so the rules for an agent are: run it only when asked, always with the output piped into a file, never read the file, and open it for the operator if asked. Write the words down from that file yourself and delete it. The same rules end the CLI's `--help`. The shell creates that file with its umask, world-readable on most systems, so create it in a subshell with `umask 077` and it is readable by you alone from the first byte.
 
 A first call to confirm everything is wired up:
@@ -59,7 +61,7 @@ picomint-gateway-cli ldk balances
 Once the onchain balance is available connect to a node and open a channel with
 
 ```bash
-picomint-gateway-cli ldk channel open <pubkey> <host> <channel-size-sat>
+picomint-gateway-cli ldk channel open <pubkey> <host> "<channel-size> sat"
 ```
 
 Running a second outbound channel alongside the LSP's inbound one is worthwhile: with only one channel, outgoing payments can fail once user balances drain toward the counterparty's channel reserve. Monitor channel state with:
@@ -76,7 +78,7 @@ The gateway can serve multiple mints simultaneously. Add one with an invite code
 picomint-gateway-cli client add <invite>
 ```
 
-List added mints:
+It prints the mint's id; `list` prints every added mint with its name:
 
 ```bash
 picomint-gateway-cli client list

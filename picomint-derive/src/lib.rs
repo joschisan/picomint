@@ -115,13 +115,108 @@ fn doc_comment(attrs: &[Attribute]) -> String {
         .join(" ")
 }
 
+/// The variants of a `thiserror` enum as stable codes: `code()` is the
+/// variant name in snake_case, `CODES` pairs every code with the
+/// variant's `#[error("...")]` message as written.
+#[proc_macro_derive(ErrorCode)]
+pub fn derive_error_code(input: TokenStream) -> TokenStream {
+    let DeriveInput { ident, data, .. } = parse_macro_input!(input);
+
+    let Data::Enum(DataEnum { variants, .. }) = data else {
+        return error(&ident, "ErrorCode can only be derived for enums").into();
+    };
+
+    let code_arms = variants.iter().map(|v| {
+        let variant = &v.ident;
+
+        match error_message(&v.attrs) {
+            Some(_) => {
+                let code = snake_case(&variant.to_string());
+                quote! { Self::#variant { .. } => #code, }
+            }
+            None => quote! {
+                Self::#variant(inner) => ::picomint_core::error::ErrorCode::code(inner),
+            },
+        }
+    });
+
+    let codes = variants.iter().map(|v| match error_message(&v.attrs) {
+        Some(message) => {
+            let code = snake_case(&v.ident.to_string());
+            quote! { codes.push((#code, #message)); }
+        }
+        None => {
+            let inner = transparent_inner(v);
+            quote! {
+                codes.extend(<#inner as ::picomint_core::error::ErrorCode>::codes());
+            }
+        }
+    });
+
+    quote! {
+        impl ::picomint_core::error::ErrorCode for #ident {
+            fn codes() -> Vec<(&'static str, &'static str)> {
+                let mut codes = Vec::new();
+                #(#codes)*
+                codes
+            }
+
+            fn code(&self) -> &'static str {
+                match self {
+                    #(#code_arms)*
+                }
+            }
+        }
+    }
+    .into()
+}
+
+/// The string literal of a variant's `#[error("...")]` attribute; `None`
+/// for `#[error(transparent)]`.
+fn error_message(attrs: &[Attribute]) -> Option<String> {
+    let attr = attrs
+        .iter()
+        .find(|attr| attr.path().is_ident("error"))
+        .expect("every variant of an ErrorCode enum carries an #[error] attribute");
+
+    match attr.parse_args::<Lit>() {
+        Ok(Lit::Str(message)) => Some(message.value()),
+        _ => None,
+    }
+}
+
+/// The one field a transparent variant wraps, whose codes it contributes.
+fn transparent_inner(variant: &Variant) -> &syn::Type {
+    match &variant.fields {
+        Fields::Unnamed(fields) if fields.unnamed.len() == 1 => &fields.unnamed[0].ty,
+        _ => panic!("a transparent ErrorCode variant wraps exactly one unnamed field"),
+    }
+}
+
+/// `InsufficientBalance` to `insufficient_balance`.
+fn snake_case(ident: &str) -> String {
+    let mut out = String::new();
+
+    for (i, c) in ident.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push('_');
+        }
+
+        out.push(c.to_ascii_lowercase());
+    }
+
+    out
+}
+
 /// One analytics table row per struct: every named field becomes a
 /// column named after it (plus the field type's unit suffix), typed and
 /// rendered by its `SqlColumn` impl. Unit structs map to a table with no
 /// payload columns.
 #[proc_macro_derive(SqlRow)]
 pub fn derive_sql_row(input: TokenStream) -> TokenStream {
-    let DeriveInput { ident, data, .. } = parse_macro_input!(input);
+    let DeriveInput {
+        ident, data, attrs, ..
+    } = parse_macro_input!(input);
 
     let fields = match data {
         Data::Struct(DataStruct {
@@ -146,15 +241,23 @@ pub fn derive_sql_row(input: TokenStream) -> TokenStream {
         .map(|f| f.ident.clone().unwrap())
         .collect::<Vec<_>>();
     let types = fields.iter().map(|f| f.ty.clone()).collect::<Vec<_>>();
+    let docs = fields
+        .iter()
+        .map(|f| doc_comment(&f.attrs))
+        .collect::<Vec<_>>();
+    let description = doc_comment(&attrs);
 
     quote! {
         impl ::picomint_core::sql::SqlRow for #ident {
-            fn columns() -> Vec<(String, &'static str)> {
-                vec![#((
-                    stringify!(#names).to_string(),
-                    <#types as ::picomint_core::sql::SqlColumn>::TYPE,
-                )),*]
-            }
+            const DESCRIPTION: &'static str = #description;
+
+            const COLUMNS: &'static [::picomint_core::sql::Column] = &[#(
+                ::picomint_core::sql::Column {
+                    name: stringify!(#names),
+                    ty: <#types as ::picomint_core::sql::SqlColumn>::TYPE,
+                    doc: #docs,
+                }
+            ),*];
 
             fn values(&self) -> Vec<::picomint_core::sql::SqlValue> {
                 vec![#(::picomint_core::sql::SqlColumn::sql_value(&self.#names)),*]

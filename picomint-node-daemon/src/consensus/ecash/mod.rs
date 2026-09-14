@@ -55,8 +55,8 @@ pub async fn dkg(nodes: &DkgHandle<'_>) -> anyhow::Result<EcashConfig> {
         consensus: EcashConfigConsensus {
             tbs_agg_pks,
             tbs_pks,
-            input_fee: Amount::from_msat(100),
-            output_fee: Amount::from_msat(100),
+            input_fee: Amount(100),
+            output_fee: Amount(100),
         },
     })
 }

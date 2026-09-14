@@ -6,9 +6,10 @@ use axum::Router;
 use axum::extract::{Json, State};
 use axum::routing::post;
 use picomint_cli_server::{CliError, serve};
+use picomint_client::NotAddedError;
 use picomint_client_cli_core::{
-    ClientAddRequest, ClientBalanceRequest, ClientBalanceResponse, ClientConfigRequest,
-    ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
+    ClientAddRequest, ClientAddResponse, ClientBalanceRequest, ClientBalanceResponse,
+    ClientConfigRequest, ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
     ClientEcashReceiveRequest, ClientEcashReceiveResponse, ClientEcashSendMaxRequest,
     ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
     ClientExpiryRequest, ClientExpiryResponse, ClientLightningGatewayListRequest,
@@ -93,8 +94,8 @@ async fn query(
         picomint_analytics::query(&state.data_dir, &request.query)
     })
     .await
-    .map_err(CliError::internal)?
-    .map_err(CliError::bad_request)?;
+    .expect("the query task is not cancelled")
+    .map_err(CliError::rejected)?;
 
     Ok(Json(QueryResponse(rows)))
 }
@@ -103,13 +104,14 @@ async fn query(
 async fn add(
     State(state): State<AppState>,
     Json(payload): Json<ClientAddRequest>,
-) -> Result<Json<()>, CliError> {
-    state
+) -> Result<Json<ClientAddResponse>, CliError> {
+    let mint = state
         .client
         .add_mint(&payload.invite, Some(state.network))
-        .await?;
+        .await
+        .map_err(CliError::rejected)?;
 
-    Ok(Json(()))
+    Ok(Json(ClientAddResponse { mint }))
 }
 
 #[instrument(skip_all, err)]
@@ -117,7 +119,12 @@ async fn remove(
     State(state): State<AppState>,
     Json(payload): Json<ClientRemoveRequest>,
 ) -> Result<Json<()>, CliError> {
-    state.client.begin_remove_mint(payload.mint).await?.commit();
+    state
+        .client
+        .begin_remove_mint(payload.mint)
+        .await
+        .map_err(CliError::rejected)?
+        .commit();
 
     Ok(Json(()))
 }
@@ -145,7 +152,7 @@ async fn config(
     let config = state
         .client
         .config(payload.mint)
-        .ok_or_else(|| CliError::bad_request("Mint not added"))?;
+        .ok_or_else(|| CliError::rejected(NotAddedError::NotAdded))?;
 
     Ok(Json(ClientConfigResponse {
         config: serde_json::to_value(config).expect("NodeConfigConsensus is serializable"),
@@ -161,7 +168,7 @@ async fn expiry(
         .client
         .refresh_expiry_status(payload.mint)
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientExpiryResponse {
         expiry: state.client.expiry_status(payload.mint),
@@ -201,7 +208,7 @@ async fn ecash_send(
             Amount::from_sat(payload.amount.to_sat()),
         )
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientEcashSendResponse { ecash }))
 }
@@ -214,7 +221,7 @@ async fn ecash_send_max(
     let ecash = state
         .client
         .ecash_send_max(payload.mint, payload.account)
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientEcashSendMaxResponse { ecash }))
 }
@@ -227,7 +234,7 @@ async fn ecash_receive(
     let operation = state
         .client
         .ecash_receive(payload.mint, payload.account, &payload.ecash)
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientEcashReceiveResponse { operation }))
 }
@@ -241,7 +248,7 @@ async fn onchain_send_fee(
         .client
         .onchain_send_fee(payload.mint)
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientOnchainSendFeeResponse { fee }))
 }
@@ -261,7 +268,7 @@ async fn onchain_send(
             payload.fee,
         )
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientOnchainSendResponse { operation }))
 }
@@ -275,7 +282,7 @@ async fn onchain_send_max_amount(
         .client
         .onchain_send_max_amount(payload.mint, payload.account)
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientOnchainSendMaxAmountResponse { amount_sat }))
 }
@@ -289,7 +296,7 @@ async fn onchain_send_max(
         .client
         .onchain_send_max(payload.mint, payload.account, payload.address)
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientOnchainSendMaxResponse { operation }))
 }
@@ -302,7 +309,7 @@ async fn onchain_receive(
     let address = state
         .client
         .onchain_receive(payload.mint, payload.account)
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientOnchainReceiveResponse {
         address: address.as_unchecked().clone(),
@@ -317,7 +324,7 @@ async fn lightning_gateway_list(
     let gateways = state
         .client
         .lightning_gateways(payload.mint)
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientLightningGatewayListResponse { gateways }))
 }
@@ -336,7 +343,7 @@ async fn lightning_send(
             payload.invoice,
         )
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientLightningSendResponse { operation }))
 }
@@ -349,7 +356,7 @@ async fn lightning_send_max_amount(
     let amount_msat = state
         .client
         .lightning_send_max_amount(payload.mint, payload.account, payload.gateway)
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientLightningSendMaxAmountResponse { amount_msat }))
 }
@@ -368,7 +375,7 @@ async fn lightning_send_max(
             &payload.lnurl,
         )
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientLightningSendMaxResponse { operation }))
 }
@@ -387,7 +394,7 @@ async fn lightning_receive(
             Amount::from_sat(payload.amount.to_sat()),
         )
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientLightningReceiveResponse { invoice }))
 }
@@ -400,7 +407,7 @@ async fn lightning_lnurl(
     let lnurl = state
         .client
         .lightning_generate_lnurl(payload.mint, payload.account, payload.lnurl_daemon)
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
     Ok(Json(ClientLightningLnurlResponse { lnurl }))
 }
@@ -409,12 +416,17 @@ async fn lightning_lnurl(
 async fn lightning_gateway_refresh(
     State(state): State<AppState>,
     Json(payload): Json<ClientLightningGatewayRefreshRequest>,
-) -> Result<Json<()>, CliError> {
+) -> Result<Json<ClientLightningGatewayListResponse>, CliError> {
     state
         .client
         .lightning_refresh_gateways(payload.mint)
         .await
-        .map_err(CliError::internal)?;
+        .map_err(CliError::rejected)?;
 
-    Ok(Json(()))
+    let gateways = state
+        .client
+        .lightning_gateways(payload.mint)
+        .expect("the mint was found a moment ago");
+
+    Ok(Json(ClientLightningGatewayListResponse { gateways }))
 }
