@@ -91,7 +91,7 @@ picomint-client-cli balance <mint> <account>
 
 ## Fund an Account
 
-**Receive Onchain:** generate a mint deposit address and send bitcoin to it. When the transaction confirms the mint issues ecash to the account. The address lands in the analytics as `onchain_receive` when generated, and the claim as `core_tx_accept` under the same operation once the deposit has confirmed:
+**Receive Onchain:** generate a mint deposit address and send bitcoin to it. When the transaction confirms the mint issues ecash to the account. Nothing is logged for the address itself; once the deposit has six confirmations the claim lands in the analytics as `onchain_receive`, and its acceptance as `core_tx_accept` under the same operation:
 
 ```bash
 picomint-client-cli onchain receive <mint> <account>
