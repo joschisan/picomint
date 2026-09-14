@@ -41,7 +41,7 @@ The walkthroughs below use the bare `picomint-node-cli …` form — prefix with
 
 A refused request prints one JSON object on stderr, `{"code": ..., "error": ...}`: the code is a stable name to branch on, the error the message to show the operator. The exit code is 1 for a request the daemon refused, 2 for a usage error and 3 when the daemon is unreachable. Every command's `--help` lists the codes it fails with. Every command is served by exactly one phase; in any other it fails with the code `wrong_phase`, and `status` names the phase.
 
-Two commands print secrets: `backup` prints the node's private keys and `onchain rugpull`, only for once the mint has expired, a share of the wallet key. Whatever an agent reads ends up in a model context and a transcript, so the rules for an agent are: run these only when asked, always with the output piped into a file, never read the file, and open it for the operator if asked. The same rules end every CLI's `--help`. The shell creates that file with its umask, world-readable on most systems, so create it in a subshell with `umask 077` and it is readable by you alone from the first byte.
+Two commands print secrets: `backup` prints the node's private keys and `onchain rugpull`, for draining the wallet once the mint has wound down, a share of the wallet key. Whatever an agent reads ends up in a model context and a transcript, so the rules for an agent are: run these only when asked, always with the output piped into a file, never read the file, and open it for the operator if asked. The same rules end every CLI's `--help`. The shell creates that file with its umask, world-readable on most systems, so create it in a subshell with `umask 077` and it is readable by you alone from the first byte.
 
 ## Status
 

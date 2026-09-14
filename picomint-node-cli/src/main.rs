@@ -108,7 +108,7 @@ enum OnchainCommands {
     /// The mint's whole transaction history
     #[command(after_long_help = schema::<HistoryResponse>())]
     History,
-    /// Print this node's rugpull secret, only once the mint has expired; pipe it into a file (secret)
+    /// Print this node's rugpull secret, for draining the wallet once the mint has wound down; pipe it into a file (secret)
     #[command(after_long_help = schema_fallible::<RugpullResponse, RugpullError>())]
     Rugpull,
 }

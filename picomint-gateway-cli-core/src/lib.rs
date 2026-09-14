@@ -340,7 +340,7 @@ pub struct LdkLightningSendRequest {
 }
 
 /// Proof that the invoice was paid. The command waits for the payment to
-/// settle and fails if it does.
+/// settle and fails if it does not.
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct LdkLightningSendResponse {
     /// The payment preimage, hex
@@ -586,9 +586,9 @@ pub struct ClientOnchainSendRequest {
     /// The amount with its denomination, e.g. "100000 sat"; at least the
     /// mint's dust limit
     pub amount: bitcoin::Amount,
-    /// A miner fee to attach instead of the one `send-fee` quotes; the mint
-    /// rejects the send if this is below what it requires at the time, so
-    /// only ever raise it
+    /// A miner fee with its denomination, e.g. "154 sat", to attach instead
+    /// of the one `send-fee` quotes; the mint rejects the send if this is
+    /// below what it requires at the time, so only ever raise it
     #[arg(long)]
     pub fee: Option<bitcoin::Amount>,
 }

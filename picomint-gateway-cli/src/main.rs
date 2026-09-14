@@ -171,7 +171,7 @@ enum ClientCommands {
 
 #[derive(Subcommand)]
 enum EcashCommands {
-    /// Count ecash notes by denomination
+    /// Count ecash notes per denomination, keyed by the denomination's exponent
     #[command(after_long_help = schema::<ClientEcashCountResponse>())]
     Count(ClientEcashCountRequest),
     /// Send ecash

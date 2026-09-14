@@ -60,7 +60,7 @@ enum Commands {
     /// Add a mint
     #[command(after_long_help = schema_fallible::<(), AddMintError>())]
     Add(ClientAddRequest),
-    /// Remove a mint and delete all of its data
+    /// Remove a mint and delete all of its data; destructive, so check for in-flight payments via `query` first
     #[command(after_long_help = schema_fallible::<(), NotAddedError>())]
     Remove(ClientRemoveRequest),
     /// List added mints
@@ -88,7 +88,7 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum EcashCommands {
-    /// Count ecash notes by denomination
+    /// Count ecash notes per denomination, keyed by the denomination's exponent
     #[command(after_long_help = schema::<ClientEcashCountResponse>())]
     Count(ClientEcashCountRequest),
     /// Send ecash
