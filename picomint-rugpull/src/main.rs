@@ -11,26 +11,24 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use anyhow::{Context, bail, ensure};
+use anyhow::{Context, ensure};
 use bitcoin::absolute::LockTime;
 use bitcoin::address::NetworkUnchecked;
-use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::hashes::Hash;
 use bitcoin::key::TapTweak;
 use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
 use bitcoin::transaction::Version;
 use bitcoin::{
-    Address, Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid,
-    Witness, taproot,
+    Address, Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness, taproot,
 };
 use clap::Parser;
+use picomint_bitcoind::BitcoindClient;
 use picomint_core::{ALLOWED_MINT_SIZES, NumNodes};
 use picomint_node_cli_core::RugpullResponse;
 use secp256k1::{Keypair, Message, SECP256K1};
-use serde::Deserialize;
-use serde::de::DeserializeOwned;
-use serde_json::{Value, json};
+use serde_json::json;
 use tss::interpolate_secret_key;
+use url::Url;
 
 /// Drains a decommissioned mint's wallet with a threshold of its nodes'
 /// rugpull secrets. Looks the wallet up through bitcoind, drains it to the
@@ -44,77 +42,13 @@ struct Cli {
     address: Address<NetworkUnchecked>,
     /// Bitcoin Core RPC URL with embedded credentials, e.g. http://user:pass@127.0.0.1:8332
     #[arg(long, env = "BITCOIND_URL")]
-    bitcoind_url: String,
+    bitcoind_url: Url,
     /// Defaults to bitcoind's estimate for the next three blocks
     #[arg(long)]
     fee_rate_sat_per_vb: Option<u64>,
     /// A node's rugpull secret file from `picomint-node-cli onchain rugpull`; repeat once per node
     #[arg(long, required = true)]
     secret: Vec<PathBuf>,
-}
-
-#[derive(Deserialize)]
-struct BlockchainInfo {
-    chain: String,
-}
-
-#[derive(Deserialize)]
-struct ScanTxOutSet {
-    unspents: Vec<Unspent>,
-}
-
-#[derive(Deserialize)]
-struct Unspent {
-    txid: Txid,
-    vout: u32,
-    #[serde(with = "bitcoin::amount::serde::as_btc")]
-    amount: Amount,
-}
-
-/// `feerate` is in BTC/kvB and absent while bitcoind has no estimate.
-#[derive(Deserialize)]
-struct EstimateSmartFee {
-    feerate: Option<f64>,
-}
-
-#[derive(Deserialize)]
-struct RpcResponse<T> {
-    result: Option<T>,
-    error: Option<Value>,
-}
-
-struct Bitcoind {
-    client: reqwest::Client,
-    url: String,
-}
-
-impl Bitcoind {
-    async fn call<T: DeserializeOwned>(&self, method: &str, params: Value) -> anyhow::Result<T> {
-        let request = json!({
-            "jsonrpc": "1.0",
-            "id": "picomint-rugpull",
-            "method": method,
-            "params": params,
-        });
-
-        // Bitcoind signals RPC errors with a non-success status but still
-        // sends the JSON-RPC error envelope, so decode before checking the
-        // status and only surface it when there is no envelope to blame.
-        let http_response = self.client.post(&self.url).json(&request).send().await?;
-
-        let status = http_response.status();
-
-        let response: RpcResponse<T> = http_response
-            .json()
-            .await
-            .with_context(|| format!("bitcoind returned {status} with a non-JSON-RPC body"))?;
-
-        match (response.result, response.error) {
-            (Some(result), None) => Ok(result),
-            (_, Some(error)) => bail!("bitcoind {method} failed: {error}"),
-            _ => bail!("JSON-RPC response carries neither result nor error"),
-        }
-    }
 }
 
 #[tokio::main]
@@ -174,15 +108,9 @@ async fn main() -> anyhow::Result<()> {
     // directly, without a BIP341 taptweak, so neither do we.
     let output_key = keypair.x_only_public_key().0.dangerous_assume_tweaked();
 
-    let bitcoind = Bitcoind {
-        client: reqwest::Client::new(),
-        url: cli.bitcoind_url,
-    };
+    let bitcoind = BitcoindClient::new(cli.bitcoind_url);
 
-    let info: BlockchainInfo = bitcoind.call("getblockchaininfo", json!([])).await?;
-
-    let network = Network::from_core_arg(&info.chain)
-        .with_context(|| format!("bitcoind runs an unknown chain {}", info.chain))?;
+    let network = bitcoind.network().await?;
 
     let destination = cli.address.require_network(network).with_context(|| {
         format!("The destination address is not for {network}, which bitcoind runs")
@@ -190,14 +118,7 @@ async fn main() -> anyhow::Result<()> {
 
     let source = Address::p2tr_tweaked(output_key, network);
 
-    let scan: ScanTxOutSet = bitcoind
-        .call(
-            "scantxoutset",
-            json!(["start", [format!("addr({source})")]]),
-        )
-        .await?;
-
-    let utxos = scan.unspents;
+    let utxos = bitcoind.scan_tx_out_set(&source).await?;
 
     ensure!(
         !utxos.is_empty(),
@@ -206,17 +127,11 @@ async fn main() -> anyhow::Result<()> {
 
     let fee_rate = match cli.fee_rate_sat_per_vb {
         Some(fee_rate) => fee_rate,
-        None => {
-            let estimate: EstimateSmartFee = bitcoind
-                .call("estimatesmartfee", json!([3, "CONSERVATIVE"]))
-                .await?;
-
-            estimate
-                .feerate
-                .map(|btc_per_kvb| (btc_per_kvb * 100_000.0).ceil() as u64)
-                .context("bitcoind has no fee estimate yet; pass --fee-rate-sat-per-vb")?
-                .max(1)
-        }
+        None => bitcoind
+            .get_feerate(3)
+            .await?
+            .map(|sat_per_kvb| u64::from(sat_per_kvb).div_ceil(1000))
+            .context("bitcoind has no fee estimate yet; pass --fee-rate-sat-per-vb")?,
     };
 
     let total = utxos.iter().map(|utxo| utxo.amount).sum::<Amount>();
@@ -286,9 +201,7 @@ async fn main() -> anyhow::Result<()> {
         input.witness = Witness::p2tr_key_spend(&signature);
     }
 
-    let txid: Txid = bitcoind
-        .call("sendrawtransaction", json!([serialize_hex(&tx)]))
-        .await?;
+    let txid = bitcoind.send_raw_transaction(&tx).await?;
 
     println!(
         "{}",

@@ -2,6 +2,7 @@ use std::iter::once;
 use std::sync::Arc;
 
 use iroh::SecretKey;
+use picomint_bitcoind::BitcoindClient;
 use picomint_core::NodeId;
 use picomint_core::config::NodeSetupCode;
 use picomint_encoding::{Decodable, Encodable};
@@ -10,7 +11,6 @@ use picomint_redb::{Database, DbRead};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
-use crate::bitcoind::BitcoindClient;
 use crate::config::db::{DkgParamsTable, InitParamsTable, store_node_config};
 use crate::config::{DkgParams, NodeConfig, SetupResult};
 

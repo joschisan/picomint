@@ -1,0 +1,21 @@
+[package]
+authors = { workspace = true }
+description = "The bitcoind JSON-RPC client shared by the picomint node daemon and the rugpull tool."
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-bitcoind"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[lib]
+name = "picomint_bitcoind"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+bitcoin = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+url = { workspace = true }

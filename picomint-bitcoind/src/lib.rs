@@ -1,14 +1,18 @@
 //! Bitcoind JSON-RPC client.
+//!
+//! Every RPC picomint asks of Bitcoin Core is a method here, so the node
+//! daemon and the rugpull tool talk to the backend the same way: the rpc
+//! credentials embedded in the url never appear in an error, and the
+//! network is identified by the chain itself rather than a config string.
 
 use std::fmt;
 
 use anyhow::{Context, bail};
-use picomint_core::bitcoin::consensus::encode::{deserialize_hex, serialize_hex};
-use picomint_core::bitcoin::{Block, BlockHash, Network, Transaction};
+use bitcoin::consensus::encode::{deserialize_hex, serialize_hex};
+use bitcoin::{Address, Amount, Block, BlockHash, Network, Transaction, Txid};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use tracing::info;
 use url::Url;
 
 // Well-known block-hash-at-height-1 values for the Bitcoin networks we
@@ -21,6 +25,10 @@ const TESTNET: &str = "00000000b873e79784647a6c82962c70d228557d24a747ea4d1b8bbe8
 const SIGNET_4: &str = "00000086d6b2636cb2a392d45edc4ec544a10024d30141c9adf4bfd9de533b53";
 // <https://mutinynet.com/api/block-height/1>
 const MUTINYNET: &str = "000002855893a0a9b24eaffc5efc770558a326fee4fc10c9da22fc19cd2954f9";
+
+/// Bitcoin Core's error code for a transaction that is already in a block.
+/// <https://github.com/bitcoin/bitcoin/blob/daa56f7f665183bcce3df146f143be37f33c123e/src/rpc/protocol.h#L48>
+const RPC_VERIFY_ALREADY_IN_UTXO_SET: i64 = -27;
 
 /// The floor on the feerate estimate, 1 sat/vB: never propose a feerate
 /// below what Bitcoin Core will relay.
@@ -61,6 +69,26 @@ struct BlockchainInfo {
     verificationprogress: f64,
 }
 
+/// Subset of the `scantxoutset` response.
+#[derive(Deserialize)]
+struct ScanTxOutSet {
+    unspents: Vec<Unspent>,
+}
+
+/// A confirmed output found by [`BitcoindClient::scan_tx_out_set`].
+#[derive(Debug, Deserialize)]
+pub struct Unspent {
+    /// The transaction holding the output.
+    pub txid: Txid,
+    /// The output's index in that transaction.
+    pub vout: u32,
+    /// The output's value.
+    #[serde(with = "bitcoin::amount::serde::as_btc")]
+    pub amount: Amount,
+}
+
+/// A connection to one bitcoind, authenticated by the credentials
+/// embedded in its url.
 #[derive(Debug)]
 pub struct BitcoindClient {
     client: reqwest::Client,
@@ -70,6 +98,9 @@ pub struct BitcoindClient {
 }
 
 impl BitcoindClient {
+    /// Connect to the bitcoind at `url`. Requires an installed rustls
+    /// crypto provider, which the embedded reqwest client picks up at
+    /// construction time.
     pub fn new(url: Url) -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -108,7 +139,9 @@ impl BitcoindClient {
 
         match (response.result, response.error) {
             (Some(result), None) => Ok(result),
-            (_, Some(error)) => Err(anyhow::Error::new(error)),
+            (_, Some(error)) => {
+                Err(anyhow::Error::new(error).context(format!("bitcoind {method}")))
+            }
             _ => bail!("JSON-RPC response carries neither result nor error"),
         }
     }
@@ -119,6 +152,7 @@ impl BitcoindClient {
         self.call("getblockcount", json!([])).await
     }
 
+    /// The hash of the block at `height` on the backend's active chain.
     pub async fn get_block_hash(&self, height: u32) -> anyhow::Result<BlockHash> {
         self.call("getblockhash", json!([height])).await
     }
@@ -134,17 +168,19 @@ impl BitcoindClient {
         })
     }
 
+    /// The full block with the given hash.
     pub async fn get_block(&self, hash: &BlockHash) -> anyhow::Result<Block> {
         let hex: String = self.call("getblock", json!([hash, 0])).await?;
 
         Ok(deserialize_hex(&hex)?)
     }
 
-    /// The backend's feerate estimate in sat/kvB, floored at what it
-    /// will relay.
-    pub async fn get_feerate(&self) -> anyhow::Result<Option<u32>> {
+    /// The backend's feerate estimate for confirmation within
+    /// `target_blocks`, in sat/kvB, floored at what it will relay. `None`
+    /// while the backend has no estimate yet.
+    pub async fn get_feerate(&self, target_blocks: u16) -> anyhow::Result<Option<u32>> {
         let response: EstimateSmartFee = self
-            .call("estimatesmartfee", json!([1, "CONSERVATIVE"]))
+            .call("estimatesmartfee", json!([target_blocks, "CONSERVATIVE"]))
             .await?;
 
         Ok(response.feerate.map(|btc_per_kvb| {
@@ -154,18 +190,24 @@ impl BitcoindClient {
         }))
     }
 
-    pub async fn submit_tx(&self, tx: Transaction) {
+    /// Broadcast `tx`; a transaction that is already in a block counts as
+    /// broadcast.
+    pub async fn send_raw_transaction(&self, tx: &Transaction) -> anyhow::Result<Txid> {
         match self
-            .call::<String>("sendrawtransaction", json!([serialize_hex(&tx)]))
+            .call("sendrawtransaction", json!([serialize_hex(tx)]))
             .await
         {
-            // Bitcoin core's RPC will return error code -27 if a transaction is already in a block.
-            // This is considered a success case, so we don't surface the error log.
-            //
-            // https://github.com/bitcoin/bitcoin/blob/daa56f7f665183bcce3df146f143be37f33c123e/src/rpc/protocol.h#L48
-            Err(e) if e.downcast_ref::<RpcError>().is_some_and(|e| e.code == -27) => (),
-            Err(e) => info!(e = %e, "Error broadcasting transaction"),
-            Ok(_) => (),
+            Ok(txid) => Ok(txid),
+            Err(error) => {
+                if error
+                    .downcast_ref::<RpcError>()
+                    .is_some_and(|error| error.code == RPC_VERIFY_ALREADY_IN_UTXO_SET)
+                {
+                    return Ok(tx.compute_txid());
+                }
+
+                Err(error)
+            }
         }
     }
 
@@ -174,5 +216,16 @@ impl BitcoindClient {
         self.call::<BlockchainInfo>("getblockchaininfo", json!([]))
             .await
             .map(|info| info.verificationprogress)
+    }
+
+    /// The confirmed outputs paying `address`, from the backend's UTXO set
+    /// rather than any wallet, so nothing has to be imported first.
+    pub async fn scan_tx_out_set(&self, address: &Address) -> anyhow::Result<Vec<Unspent>> {
+        self.call::<ScanTxOutSet>(
+            "scantxoutset",
+            json!(["start", [format!("addr({address})")]]),
+        )
+        .await
+        .map(|scan| scan.unspents)
     }
 }
