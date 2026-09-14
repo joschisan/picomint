@@ -51,13 +51,13 @@ pub type Rows = Vec<Map<String, Value>>;
 /// at debug level and skipped, so adding an event means adding it here.
 macro_rules! events {
     ($($event:path),* $(,)?) => {
-        /// Every table as the SQL that creates it: what the CLI's
-        /// `query --help` prints so an agent knows the tables and columns
-        /// without a running daemon.
+        /// Every table with its columns explained: what the CLI's
+        /// `query --help` prints so an agent knows the schema without a
+        /// running daemon.
         pub fn tables() -> String {
-            let mut sql = String::new();
-            $(sql.push_str(&table_sql::<$event>());)*
-            sql
+            let mut text = COMMON_COLUMNS_DOC.to_string();
+            $(text.push_str(&table_doc::<$event>());)*
+            text
         }
 
         fn schema() -> String {
@@ -169,6 +169,17 @@ const COMMON_COLUMNS: [(&str, &str); 5] = [
     ("operation", "TEXT NOT NULL"),
 ];
 
+/// How `query --help` explains the common columns, ahead of the tables.
+const COMMON_COLUMNS_DOC: &str = "\
+Tables, one per event. Every table starts with the same columns:
+  id INTEGER         The row's position in the event log
+  ts INTEGER         When the event was logged, in ms since the unix epoch
+  mint TEXT          The mint id, hex
+  account TEXT       primary, secondary, tertiary, quaternary or quinary
+  operation TEXT     The operation the event belongs to, hex; the events of one send or receive share it across tables
+Every table is indexed on operation and ts. Amounts are integers, msat except in the onchain tables, which are sat; hashes, ids and keys are text. The table's own columns follow its name.
+";
+
 fn table_sql<E: Event + SqlRow>() -> String {
     let table = table_name::<E>();
 
@@ -176,14 +187,39 @@ fn table_sql<E: Event + SqlRow>() -> String {
         .iter()
         .map(|column| format!("{} {}", column.0, column.1))
         .chain(
-            E::columns()
+            E::COLUMNS
                 .iter()
-                .map(|column| format!("{} {} NOT NULL", column.0, column.1)),
+                .map(|column| format!("{} {} NOT NULL", column.name, column.ty)),
         )
         .collect::<Vec<_>>()
         .join(", ");
 
     format!("CREATE TABLE {table} ({columns});\n")
+}
+
+fn table_doc<E: Event + SqlRow>() -> String {
+    let width = E::COLUMNS
+        .iter()
+        .map(|column| column.name.len() + column.ty.len() + 1)
+        .max()
+        .unwrap_or(0);
+
+    E::COLUMNS
+        .iter()
+        .map(|column| {
+            format!(
+                "  {:<width$}  {}\n",
+                format!("{} {}", column.name, column.ty),
+                column.doc
+            )
+        })
+        .fold(
+            format!("\n{}: {}\n", table_name::<E>(), E::DESCRIPTION),
+            |mut doc, line| {
+                doc.push_str(&line);
+                doc
+            },
+        )
 }
 
 fn index_sql<E: Event>() -> String {
@@ -201,7 +237,7 @@ fn insert_row<E: Event + SqlRow>(
     entry: &EventLogEntry,
     event: &E,
 ) -> anyhow::Result<()> {
-    let placeholders = std::iter::repeat_n("?", COMMON_COLUMNS.len() + E::columns().len())
+    let placeholders = std::iter::repeat_n("?", COMMON_COLUMNS.len() + E::COLUMNS.len())
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -209,7 +245,7 @@ fn insert_row<E: Event + SqlRow>(
         id.0.cast_signed().into(),
         entry.timestamp.cast_signed().into(),
         entry.mint.to_string().into(),
-        format!("{:?}", entry.account).into(),
+        entry.account.to_string().to_lowercase().into(),
         entry.operation.to_string().into(),
     ];
 

@@ -6,14 +6,16 @@ use serde::{Deserialize, Serialize};
 
 // --- Outgoing payment ---
 
-/// Emitted when the gateway accepts a send-payment request and spawns the
-/// state machine to relay the outgoing HTLC. `fee` is the gateway's flat
-/// cut, the same whatever the settlement; on an external send the LN
-/// routing cost comes out of it.
+/// The gateway took on a client's outgoing payment; `gateway_send_success`
+/// or `gateway_send_cancel` follows under the same operation.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendEvent {
+    /// The outgoing contract's outpoint in the mint, `txid:index`
     pub outpoint: OutPoint,
+    /// The invoice amount, in msat
     pub amount: Amount,
+    /// The gateway's fee, in msat; on a Lightning send the routing cost
+    /// comes out of it
     pub fee: Amount,
 }
 
@@ -22,15 +24,15 @@ impl Event for SendEvent {
     const KIND: EventKind = EventKind::from_static("send");
 }
 
-/// Emitted when the outgoing HTLC is claimed with a preimage.
-///
-/// `lightning_fee` is the routing cost reported by LDK's `PaymentSuccessful` event
-/// — `0` for direct swaps between picomint mints (no LN hop) and for
-/// LDK builds that omit fee tracking.
+/// The payment went through and the gateway claimed the outgoing contract.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendSuccessEvent {
+    /// The preimage that proves the payment, hex
     pub preimage: [u8; 32],
+    /// The mint transaction that claims the contract, hex
     pub txid: TransactionId,
+    /// The Lightning routing fee paid, in msat; 0 for a payment settled
+    /// between two mints of this gateway
     pub lightning_fee: Amount,
 }
 
@@ -39,9 +41,11 @@ impl Event for SendSuccessEvent {
     const KIND: EventKind = EventKind::from_static("send-success");
 }
 
-/// Emitted when the outgoing payment is cancelled via a forfeit signature.
+/// The gateway could not make the payment and cancelled it, so the sender
+/// gets refunded at once instead of at expiry.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendCancelEvent {
+    /// The gateway's forfeit signature the sender refunds with, hex
     pub signature: Signature,
 }
 
@@ -52,11 +56,16 @@ impl Event for SendCancelEvent {
 
 // --- Incoming payment ---
 
-/// Emitted when the gateway relays an incoming HTLC into the mint.
+/// A payment for a client's invoice arrived and the gateway funded the
+/// incoming contract; `gateway_receive_success`, `gateway_receive_refund`
+/// or `gateway_receive_failure` follows under the same operation.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveEvent {
+    /// The mint transaction that funds the contract, hex
     pub txid: TransactionId,
+    /// The invoice amount, in msat
     pub amount: Amount,
+    /// The gateway's fee kept from it, in msat
     pub fee: Amount,
 }
 
@@ -65,9 +74,10 @@ impl Event for ReceiveEvent {
     const KIND: EventKind = EventKind::from_static("receive");
 }
 
-/// Emitted when the incoming contract decrypts to the correct preimage.
+/// The mint released the preimage and the gateway settled the payment.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveSuccessEvent {
+    /// The preimage the gateway settled with, hex
     pub preimage: [u8; 32],
 }
 
@@ -76,7 +86,8 @@ impl Event for ReceiveSuccessEvent {
     const KIND: EventKind = EventKind::from_static("receive-success");
 }
 
-/// Emitted when node decryption shares are inconsistent or invalid.
+/// The mint's nodes produced no usable preimage; the payment failed back
+/// to its sender.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveFailureEvent;
 
@@ -85,10 +96,11 @@ impl Event for ReceiveFailureEvent {
     const KIND: EventKind = EventKind::from_static("receive-failure");
 }
 
-/// Emitted when the incoming contract decrypts but the preimage is invalid,
-/// triggering a refund via a new claim tx.
+/// The preimage the mint released was wrong; the gateway took its funding
+/// back.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveRefundEvent {
+    /// The mint transaction that refunds the gateway, hex
     pub txid: TransactionId,
 }
 

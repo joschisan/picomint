@@ -4,15 +4,12 @@ use picomint_core::TransactionId;
 use picomint_core::sql::SqlRow;
 use serde::{Deserialize, Serialize};
 
-/// Emitted immediately when a send operation is initiated, before the
-/// wallet has assembled the actual ecash. On the fast path
-/// `SendSuccessEvent` lands atomically in the same dbtx; on the slow
-/// path it lands later, after the reissuance tx runs through consensus
-/// and the ecash state machine finalises notes. Slow-path observers can
-/// recover the reissuance txid from the immediately-following
-/// `ReissuanceEvent` / `TxCreateEvent` under the same operation id.
+/// `ecash send` started; `ecash_send_success` follows under the same
+/// operation, at once when the notes on hand made the amount up, after
+/// a reissuance otherwise.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendEvent {
+    /// The amount asked for, in msat
     pub amount: Amount,
 }
 
@@ -21,15 +18,10 @@ impl Event for SendEvent {
     const KIND: EventKind = EventKind::from_static("send");
 }
 
-/// Terminal success event for [`crate::Client::ecash_send`].
-/// `ecash` is the assembled bundle as its `picomint`-prefixed base32
-/// string — the exact form callers hand off and `Ecash::from_str`
-/// reverses. Kept encoded so a client replaying history does not decode
-/// every bundle it scrolls past. The logged bytes are unchanged from
-/// when this field was typed: `Ecash`'s serde impl serialises as this
-/// same string.
+/// `ecash send` produced its bundle; the notes left the account.
 #[derive(Serialize, Deserialize, Debug, Clone, SqlRow)]
 pub struct SendSuccessEvent {
+    /// The bundle handed out, as the base32 string `ecash receive` takes
     pub ecash: String,
 }
 
@@ -38,8 +30,8 @@ impl Event for SendSuccessEvent {
     const KIND: EventKind = EventKind::from_static("send-success");
 }
 
-/// Terminal failure event for [`crate::Client::ecash_send`]: the
-/// reissuance was rejected or its notes failed to finalize.
+/// `ecash send` failed: the reissuance it needed was rejected or its
+/// notes did not finalize; nothing left the account.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendFailureEvent;
 
@@ -48,10 +40,11 @@ impl Event for SendFailureEvent {
     const KIND: EventKind = EventKind::from_static("send-failure");
 }
 
-/// Emitted when a send operation requires reissuing notes before the sender
-/// has enough of the right denominations to send.
+/// `ecash send` had to reissue notes first because the ones on hand could
+/// not make the amount up exactly.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReissuanceEvent {
+    /// The reissuance transaction, hex
     pub txid: TransactionId,
 }
 
@@ -60,10 +53,13 @@ impl Event for ReissuanceEvent {
     const KIND: EventKind = EventKind::from_static("reissue");
 }
 
-/// Emitted when a receive (reissuance) operation is initiated.
+/// `ecash receive` submitted the bundle's notes for reissuance;
+/// `core_tx_accept` and `ecash_success` follow under the same operation.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveEvent {
+    /// The reissuance transaction, hex
     pub txid: TransactionId,
+    /// The bundle's value, in msat, before the mint's fees
     pub amount: Amount,
 }
 
@@ -72,12 +68,14 @@ impl Event for ReceiveEvent {
     const KIND: EventKind = EventKind::from_static("receive");
 }
 
-/// Emitted when an ecash state machine successfully finalises new notes.
+/// The mint's signatures on a transaction's new notes arrived and the notes
+/// are spendable; the balance moved here.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct IssuanceSuccessEvent {
+    /// The transaction the notes came out of, hex
     pub txid: TransactionId,
-    /// Total amount of notes this state machine finalized for the account,
-    /// a send's bundle included.
+    /// The value of the notes issued to the account, in msat, a send's
+    /// bundle included
     pub amount: Amount,
 }
 
@@ -86,7 +84,8 @@ impl Event for IssuanceSuccessEvent {
     const KIND: EventKind = EventKind::from_static("success");
 }
 
-/// Emitted when an ecash state machine fails to finalise notes.
+/// A transaction's new notes could not be finalized: the mint rejected the
+/// transaction or its signatures did not verify.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct IssuanceFailureEvent;
 

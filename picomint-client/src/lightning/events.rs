@@ -4,13 +4,16 @@ use picomint_core::TransactionId;
 use picomint_core::sql::SqlRow;
 use serde::{Deserialize, Serialize};
 
-/// Emitted when a send operation is created. `amount` is the invoice
-/// amount; `fee` is the gateway's combined cut (LN routing + tx fee).
-/// The client funded the underlying contract with `amount + fee`.
+/// `lightning send` funded the outgoing contract with `amount + fee`;
+/// `lightning_send_success` or `lightning_send_refund` follows under the same
+/// operation.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendEvent {
+    /// The mint transaction that funds the contract, hex
     pub txid: TransactionId,
+    /// The invoice amount, in msat
     pub amount: Amount,
+    /// The gateway's fee on top, in msat
     pub fee: Amount,
 }
 
@@ -19,9 +22,10 @@ impl Event for SendEvent {
     const KIND: EventKind = EventKind::from_static("send");
 }
 
-/// Emitted when the payment successfully resolves and the preimage is known.
+/// The payment went through; `ts - lightning_send.ts` is the payment latency.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendSuccessEvent {
+    /// The preimage that proves the payment, hex
     pub preimage: [u8; 32],
 }
 
@@ -30,13 +34,13 @@ impl Event for SendSuccessEvent {
     const KIND: EventKind = EventKind::from_static("send-success");
 }
 
-/// Emitted when the payment fails and funds are refunded via a new claim tx.
-/// `expired` is `true` when the contract expired without the mint
-/// observing a preimage, `false` when the gateway returned a signed cancel
-/// (payment definitively did not happen).
+/// The payment did not happen and the contract was refunded to the account.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendRefundEvent {
+    /// The mint transaction that refunds the contract, hex
     pub txid: TransactionId,
+    /// 1 when the contract expired without the mint seeing a preimage, 0
+    /// when the gateway cancelled the payment outright
     pub expired: bool,
 }
 
@@ -45,9 +49,8 @@ impl Event for SendRefundEvent {
     const KIND: EventKind = EventKind::from_static("send-refund");
 }
 
-/// Emitted when a send is in an unrecoverable indeterminate state: the
-/// refund tx was rejected (so the contract was claimed by the gateway),
-/// but the mint hasn't surfaced a preimage we can verify either.
+/// The send ended undetermined: the refund was rejected, so the gateway
+/// claimed the contract, but no preimage surfaced.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendFailureEvent;
 
@@ -56,13 +59,15 @@ impl Event for SendFailureEvent {
     const KIND: EventKind = EventKind::from_static("send-failure");
 }
 
-/// Emitted when a receive operation successfully claims the incoming
-/// contract. `amount` is the invoice amount; `fee` is the gateway's
-/// combined cut. The client received `amount - fee` ecash.
+/// An invoice from `lightning receive` was paid and the client claimed the
+/// incoming contract; `amount - fee` lands in the account.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveEvent {
+    /// The mint transaction that claims the contract, hex
     pub txid: TransactionId,
+    /// The invoice amount, in msat
     pub amount: Amount,
+    /// The gateway's fee taken off it, in msat
     pub fee: Amount,
 }
 

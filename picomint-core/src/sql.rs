@@ -29,11 +29,23 @@ pub trait SqlColumn {
     fn sql_value(&self) -> SqlValue;
 }
 
+/// One payload column of a table: the field's name, its storage class and
+/// the field's doc comment, which `query --help` prints beside it.
+#[derive(Debug, Clone, Copy)]
+pub struct Column {
+    pub name: &'static str,
+    pub ty: &'static str,
+    pub doc: &'static str,
+}
+
 /// A struct that maps to one table: its payload columns, in declaration
 /// order, and its values in the same order.
 pub trait SqlRow {
-    /// `(name, storage class)` per column.
-    fn columns() -> Vec<(String, &'static str)>;
+    /// The struct's doc comment: what a row of the table records.
+    const DESCRIPTION: &'static str;
+
+    /// The payload columns, in declaration order.
+    const COLUMNS: &'static [Column];
 
     fn values(&self) -> Vec<SqlValue>;
 }

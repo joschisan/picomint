@@ -184,7 +184,9 @@ fn snake_case(ident: &str) -> String {
 /// payload columns.
 #[proc_macro_derive(SqlRow)]
 pub fn derive_sql_row(input: TokenStream) -> TokenStream {
-    let DeriveInput { ident, data, .. } = parse_macro_input!(input);
+    let DeriveInput {
+        ident, data, attrs, ..
+    } = parse_macro_input!(input);
 
     let fields = match data {
         Data::Struct(DataStruct {
@@ -209,15 +211,23 @@ pub fn derive_sql_row(input: TokenStream) -> TokenStream {
         .map(|f| f.ident.clone().unwrap())
         .collect::<Vec<_>>();
     let types = fields.iter().map(|f| f.ty.clone()).collect::<Vec<_>>();
+    let docs = fields
+        .iter()
+        .map(|f| doc_comment(&f.attrs))
+        .collect::<Vec<_>>();
+    let description = doc_comment(&attrs);
 
     quote! {
         impl ::picomint_core::sql::SqlRow for #ident {
-            fn columns() -> Vec<(String, &'static str)> {
-                vec![#((
-                    stringify!(#names).to_string(),
-                    <#types as ::picomint_core::sql::SqlColumn>::TYPE,
-                )),*]
-            }
+            const DESCRIPTION: &'static str = #description;
+
+            const COLUMNS: &'static [::picomint_core::sql::Column] = &[#(
+                ::picomint_core::sql::Column {
+                    name: stringify!(#names),
+                    ty: <#types as ::picomint_core::sql::SqlColumn>::TYPE,
+                    doc: #docs,
+                }
+            ),*];
 
             fn values(&self) -> Vec<::picomint_core::sql::SqlValue> {
                 vec![#(::picomint_core::sql::SqlColumn::sql_value(&self.#names)),*]

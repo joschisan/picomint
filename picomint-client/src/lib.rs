@@ -65,16 +65,17 @@ use picomint_core::sql::SqlRow;
 use picomint_core::{Amount, TransactionId};
 use serde::{Deserialize, Serialize};
 
+/// The client submitted a transaction to the mint; `core_tx_accept` or
+/// `core_tx_reject` follows under the same operation.
 #[derive(Serialize, Deserialize, Debug, Clone, SqlRow)]
 pub struct TxCreateEvent {
+    /// The transaction id, hex
     pub txid: TransactionId,
-    /// Amount the mint over-funded by when balancing the caller's
-    /// builder: `sum(funding_notes) - deficit`. Reissued back to the
-    /// wallet (minus mint fees on the change outputs) as fresh
-    /// notes once the tx is accepted.
+    /// What the notes spent exceeded the amount needed by, in msat: change
+    /// the mint reissues to the account as fresh notes once accepted
     pub reissue: Amount,
-    /// Mint fee paid by this transaction (sum of per-input and
-    /// per-output fees the mint deducts).
+    /// The mint's fee on the transaction, in msat: its per-input and
+    /// per-output fees summed
     pub fee: Amount,
 }
 
@@ -83,8 +84,11 @@ impl Event for TxCreateEvent {
     const KIND: EventKind = EventKind::from_static("tx-create");
 }
 
+/// The mint accepted the transaction into consensus; `ts - core_tx_create.ts`
+/// is the acceptance latency.
 #[derive(Serialize, Deserialize, Debug, Clone, SqlRow)]
 pub struct TxAcceptEvent {
+    /// The transaction id, hex
     pub txid: TransactionId,
 }
 
@@ -93,9 +97,12 @@ impl Event for TxAcceptEvent {
     const KIND: EventKind = EventKind::from_static("tx-accept");
 }
 
+/// The mint rejected the transaction; nothing was spent.
 #[derive(Serialize, Deserialize, Debug, Clone, SqlRow)]
 pub struct TxRejectEvent {
+    /// The transaction id, hex
     pub txid: TransactionId,
+    /// The mint's reason
     pub error: String,
 }
 impl Event for TxRejectEvent {
