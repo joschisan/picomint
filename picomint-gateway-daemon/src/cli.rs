@@ -666,7 +666,7 @@ async fn client_ecash_send_max(
 }
 
 /// Reissue an ecash string into the named account. Returns the operation
-/// id; acceptance shows up in the analytics as `core_tx_accept`.
+/// id; acceptance shows up in the analytics as `tx_accept`.
 #[instrument(skip_all, err)]
 async fn client_ecash_receive(
     State(state): State<AppState>,

@@ -60,13 +60,13 @@ pub use picomint_core::core::{Account, OperationId};
 pub use picomint_rpc::connection::ConnStatus;
 pub use secret::{Mnemonic, random as random_mnemonic};
 
-use crate::eventlog::{Event, EventKind, EventSource};
+use crate::eventlog::{Event, EventKind};
 use picomint_core::sql::SqlRow;
 use picomint_core::{Amount, TransactionId};
 use serde::{Deserialize, Serialize};
 
-/// The client submitted a transaction to the mint; `core_tx_accept` or
-/// `core_tx_reject` follows under the same operation.
+/// The client submitted a transaction to the mint; `tx_accept` or
+/// `tx_reject` follows under the same operation.
 #[derive(Serialize, Deserialize, Debug, Clone, SqlRow)]
 pub struct TxCreateEvent {
     /// The transaction id, hex
@@ -80,11 +80,10 @@ pub struct TxCreateEvent {
 }
 
 impl Event for TxCreateEvent {
-    const SOURCE: EventSource = EventSource::Core;
     const KIND: EventKind = EventKind::from_static("tx-create");
 }
 
-/// The mint accepted the transaction into consensus; `ts - core_tx_create.ts`
+/// The mint accepted the transaction into consensus; `ts - tx_create.ts`
 /// is the acceptance latency.
 #[derive(Serialize, Deserialize, Debug, Clone, SqlRow)]
 pub struct TxAcceptEvent {
@@ -93,7 +92,6 @@ pub struct TxAcceptEvent {
 }
 
 impl Event for TxAcceptEvent {
-    const SOURCE: EventSource = EventSource::Core;
     const KIND: EventKind = EventKind::from_static("tx-accept");
 }
 
@@ -106,6 +104,5 @@ pub struct TxRejectEvent {
     pub error: String,
 }
 impl Event for TxRejectEvent {
-    const SOURCE: EventSource = EventSource::Core;
     const KIND: EventKind = EventKind::from_static("tx-reject");
 }

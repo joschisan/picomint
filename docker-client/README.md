@@ -91,13 +91,13 @@ picomint-client-cli balance <mint> <account>
 
 ## Fund an Account
 
-**Receive Onchain:** generate a mint deposit address and send bitcoin to it. When the transaction confirms the mint issues ecash to the account. Nothing is logged for the address itself; once the deposit has six confirmations the claim lands in the analytics as `onchain_receive`, and its acceptance as `core_tx_accept` under the same operation:
+**Receive Onchain:** generate a mint deposit address and send bitcoin to it. When the transaction confirms the mint issues ecash to the account. Nothing is logged for the address itself; once the deposit has six confirmations the claim lands in the analytics as `onchain_receive`, and its acceptance as `tx_accept` under the same operation:
 
 ```bash
 picomint-client-cli onchain receive <mint> <account>
 ```
 
-**Receive Ecash:** reissue an ecash string produced by any client's `ecash send` into the account. Returns the operation id; the reissuance's acceptance shows up in the analytics as `core_tx_accept`:
+**Receive Ecash:** reissue an ecash string produced by any client's `ecash send` into the account. Returns the operation id; the reissuance's acceptance shows up in the analytics as `tx_accept`:
 
 ```bash
 picomint-client-cli ecash receive <mint> <account> <ecash>
@@ -220,8 +220,8 @@ startup** and rebuilt by replaying the event log — analytics are derived,
 not authoritative, so it's safe to delete and let it rebuild.
 
 The schema is a 1:1 translation of the log: one table per event, named
-after its source and kind (`core_tx_create`, `core_tx_accept`,
-`core_tx_reject`, `ecash_send`, `ecash_receive`, `ecash_success`,
+after its kind (`tx_create`, `tx_accept`, `tx_reject`, `ecash_send`,
+`ecash_receive`, `ecash_success`,
 `onchain_send`, `onchain_send_success`, `onchain_receive`,
 `lightning_send`, `lightning_send_success`, `lightning_send_refund`,
 `lightning_receive`, ...). Every table starts with the same columns — `id`
@@ -242,7 +242,7 @@ it, which is what a latency measurement is after:
 ```bash
 picomint-client-cli query \
     "SELECT c.txid, a.ts - c.ts AS latency_ms \
-     FROM core_tx_create c INNER JOIN core_tx_accept a USING (operation, txid) \
+     FROM tx_create c INNER JOIN tx_accept a USING (operation, txid) \
      ORDER BY c.ts DESC LIMIT 10"
 ```
 

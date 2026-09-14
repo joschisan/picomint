@@ -20,30 +20,11 @@ use picomint_redb::{Database, DbRead, WriteTx, table};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    Encodable,
-    Decodable,
-)]
-pub enum EventSource {
-    Core,
-    Ecash,
-    Onchain,
-    Lightning,
-    Gateway,
-}
-
+/// A typed event log payload. The kind is the log-wide name of the event:
+/// core events are unprefixed (`tx-accept`) and module events carry their
+/// module (`ecash-send`, `gateway-receive`), the same rule the database
+/// tables follow.
 pub trait Event: serde::Serialize + serde::de::DeserializeOwned {
-    const SOURCE: EventSource;
     const KIND: EventKind;
 }
 
@@ -102,9 +83,6 @@ impl From<String> for EventKind {
 pub struct EventLogEntry {
     pub kind: EventKind,
 
-    /// Where the event came from. See [`EventSource`].
-    pub source: EventSource,
-
     /// Mint this event belongs to. Every event is mint-scoped
     /// — there are no global events. For events that span two clients in
     /// the same daemon (e.g. a gateway-internal direct swap), each side
@@ -130,7 +108,7 @@ pub struct EventLogEntry {
 
 impl EventLogEntry {
     pub fn to_event<E: Event>(&self) -> Option<E> {
-        (self.source == E::SOURCE && self.kind == E::KIND)
+        (self.kind == E::KIND)
             .then(|| serde_json::from_slice(&self.payload).ok())
             .flatten()
     }
@@ -156,7 +134,6 @@ table!(
 pub fn log_event_raw(
     dbtx: &WriteTx,
     kind: EventKind,
-    source: EventSource,
     mint: MintId,
     account: Account,
     operation: OperationId,
@@ -164,7 +141,6 @@ pub fn log_event_raw(
 ) {
     tracing::info!(
         kind = %kind,
-        source = ?source,
         %mint,
         %account,
         operation = %operation,
@@ -179,7 +155,6 @@ pub fn log_event_raw(
         .as_millis() as u64;
     let entry = EventLogEntry {
         kind,
-        source,
         mint,
         account,
         operation,
@@ -203,7 +178,6 @@ pub fn log_event<E: Event>(
     log_event_raw(
         dbtx,
         E::KIND,
-        E::SOURCE,
         mint,
         account,
         operation,

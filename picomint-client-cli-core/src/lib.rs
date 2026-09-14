@@ -68,7 +68,7 @@ pub struct MnemonicResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
 pub struct QueryRequest {
     /// Read-only SQL run against the analytics db, e.g.
-    /// "SELECT * FROM core_tx_accept ORDER BY ts DESC LIMIT 10"
+    /// "SELECT * FROM tx_accept ORDER BY ts DESC LIMIT 10"
     pub query: String,
 }
 
@@ -249,7 +249,7 @@ pub struct ClientEcashReceiveRequest {
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientEcashReceiveResponse {
     /// The operation the reissue logs under, derived from the bundle;
-    /// acceptance shows up in the analytics as `core_tx_accept`
+    /// acceptance shows up in the analytics as `tx_accept`
     pub operation: OperationId,
 }
 
