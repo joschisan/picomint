@@ -24,7 +24,7 @@ The walkthroughs below use the bare `picomint-client-cli …` form — prefix wi
 
 One command prints a secret: `mnemonic` prints the seed words every fund derives from. Whatever an agent reads ends up in a model context and a transcript, so the rules for an agent are: run it only when asked, always with the output piped into a file, never read the file, and open it for the operator if asked. Write the words down from that file yourself and delete it. The same rules end the CLI's `--help`. The shell creates that file with its umask, world-readable on most systems, so create it in a subshell with `umask 077` and it is readable by you alone from the first byte.
 
-Every command takes the mint id first and, where funds move, the account next, one of `primary`, `secondary`, `tertiary`, `quaternary` or `quinary`. Amounts carry their denomination, so quote them: `"1000 sat"` or `"0.001 BTC"`.
+Every command that acts on one mint takes the mint id first and, where funds move, the account next, one of `primary`, `secondary`, `tertiary`, `quaternary` or `quinary`. Amounts carry their denomination, so quote them: `"1000 sat"` or `"0.001 BTC"`.
 
 ## Add Mints
 
@@ -85,7 +85,7 @@ picomint-client-cli balance <mint> <account>
 }
 ```
 
-`ecash count <mint> <account>` breaks the balance down into the notes that make it up, keyed by denomination, which is what a load test watches to see the note pool it is drawing from.
+`ecash count <mint> <account>` breaks the balance down into the notes that make it up, keyed by the denomination's exponent, which is what a load test watches to see the note pool it is drawing from.
 
 ## Fund an Account
 
@@ -271,5 +271,5 @@ The daemon only dials out through its endpoint, to mints and gateways; nothing h
 | Env                        | Required | Default           | Description                                 |
 |----------------------------|----------|-------------------|---------------------------------------------|
 | `DATA_DIR`                 | yes      |                   | Directory for the database and analytics    |
-| `NETWORK`                  | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`; every added mint must run on it |
+| `NETWORK`                  | yes      |                   | `testnet`, `signet` or `regtest`; every added mint must run on it, and mainnet mints are refused |
 | `API_ADDR`                 | no       | `0.0.0.0:8080`    | Iroh endpoint listen address                |

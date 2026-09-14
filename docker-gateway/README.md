@@ -232,7 +232,7 @@ picomint-gateway-cli …`.
 | Env                        | Required | Default           | Description                                 |
 |----------------------------|----------|-------------------|---------------------------------------------|
 | `DATA_DIR`                 | yes      |                   | Directory for the database + LDK node data  |
-| `NETWORK`                  | no       | `bitcoin`         | `bitcoin`, `testnet`, `signet`, `regtest`; every added mint must run on it |
+| `NETWORK`                  | yes      |                   | `testnet`, `signet` or `regtest`; every added mint must run on it, and mainnet mints are refused |
 | `ESPLORA_URL`              | one of   |                   | Esplora HTTP URL                            |
 | `BITCOIND_URL`             | one of   |                   | Bitcoin Core RPC URL with embedded credentials, e.g. `http://user:pass@127.0.0.1:8332` |
 | `API_ADDR`                 | no       | `0.0.0.0:8080`    | Public API listen address                   |
