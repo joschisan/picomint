@@ -59,7 +59,11 @@ enum Commands {
     #[command(after_long_help = schema::<MnemonicResponse>())]
     Mnemonic,
     /// Query the analytics db with read-only SQL; rows print as JSON objects
-    #[command(after_long_help = schema::<QueryResponse>())]
+    #[command(after_long_help = format!(
+        "Tables, as the SQL that creates them; every table is indexed on operation and ts:\n{}\n{}",
+        picomint_analytics::tables(),
+        schema::<QueryResponse>()
+    ))]
     Query(QueryRequest),
     /// LDK lightning node management
     #[command(subcommand)]

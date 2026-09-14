@@ -49,9 +49,19 @@ pub type Rows = Vec<Map<String, Value>>;
 /// at debug level and skipped, so adding an event means adding it here.
 macro_rules! events {
     ($($event:path),* $(,)?) => {
+        /// Every table as the SQL that creates it: what the CLI's
+        /// `query --help` prints so an agent knows the tables and columns
+        /// without a running daemon.
+        pub fn tables() -> String {
+            let mut sql = String::new();
+            $(sql.push_str(&table_sql::<$event>());)*
+            sql
+        }
+
         fn schema() -> String {
             let mut sql = String::new();
             $(sql.push_str(&table_sql::<$event>());)*
+            $(sql.push_str(&index_sql::<$event>());)*
             sql
         }
 
@@ -171,9 +181,14 @@ fn table_sql<E: Event + SqlRow>() -> String {
         .collect::<Vec<_>>()
         .join(", ");
 
+    format!("CREATE TABLE {table} ({columns});\n")
+}
+
+fn index_sql<E: Event>() -> String {
+    let table = table_name::<E>();
+
     format!(
-        "CREATE TABLE {table} ({columns});\n\
-         CREATE INDEX {table}_operation ON {table}(operation);\n\
+        "CREATE INDEX {table}_operation ON {table}(operation);\n\
          CREATE INDEX {table}_ts ON {table}(ts);\n"
     )
 }

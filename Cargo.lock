@@ -3341,6 +3341,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "picomint-analytics",
  "picomint-cli-client",
  "picomint-client-cli-core",
  "tokio",
@@ -3453,6 +3454,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "picomint-analytics",
  "picomint-cli-client",
  "picomint-gateway-cli-core",
  "tokio",
