@@ -487,8 +487,8 @@ pub struct ClientLightningLnurlRequest {
     pub mint: MintId,
     /// The account, as for `balance`
     pub account: Account,
-    /// Base URL of the lnurl daemon that serves the lnurl, e.g.
-    /// `https://lnurl.example.com/`
+    /// Base URL of the hosted picomint-lnurl-daemon that serves the lnurl
+    /// on the account's behalf, e.g. `https://lnurl.example.com/`
     pub lnurl_daemon: Url,
 }
 

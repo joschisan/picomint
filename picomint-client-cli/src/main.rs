@@ -33,6 +33,15 @@ use picomint_client_cli_core::{
     ROUTE_ONCHAIN_SEND_MAX_AMOUNT, ROUTE_QUERY, ROUTE_REMOVE,
 };
 
+/// The admin CLI of a picomint client daemon: a headless wallet holding
+/// ecash in one or more mints.
+///
+/// Add a mint with an invite code; every per-mint command then takes the
+/// mint id `add` printed and, where funds move, one of five accounts.
+/// Commands that move funds return at once with an operation id; their
+/// outcome lands in the analytics, read with `query`. Every command prints
+/// JSON, and its --help ends with the schema of what it prints and the
+/// codes it fails with.
 #[derive(Parser)]
 #[command(version, after_help = FOOTER)]
 struct Cli {
@@ -145,7 +154,7 @@ enum LightningCommands {
 
 #[derive(Subcommand)]
 enum LightningGatewayCommands {
-    /// The gateways that answered a probe, keyed by pk, with their fees
+    /// The gateways that answered a probe, keyed by pk, with their fees; filled when the mint is added
     #[command(after_long_help = schema_fallible::<ClientLightningGatewayListResponse, NotAddedError>())]
     List(ClientLightningGatewayListRequest),
     /// Re-fetch the mint's gateway list and re-probe every gateway

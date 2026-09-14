@@ -17,15 +17,17 @@ use picomint_node_cli_core::{
 };
 use serde_json::Value;
 
-/// Every route is served by exactly one phase, so an agent that gets this
-/// code has a stale picture of the node, not a wrong command.
-const PHASES: &str = "\
-Every command is served by exactly one of the node's phases, setup, dkg \
-and consensus; in any other phase it fails with the code wrong_phase, and \
-`status` names the phase.";
-
+/// The admin CLI of a picomint mint node.
+///
+/// A node passes through three phases: setup, the ceremony in which the
+/// nodes' operators exchange setup codes; dkg, the key generation that
+/// follows; and consensus, the running mint. Run `status` first: it names
+/// the phase, and every other command is served by exactly one of them,
+/// failing with the code wrong_phase in the others. Every command prints
+/// JSON, and its --help ends with the schema of what it prints and the
+/// codes it fails with.
 #[derive(Parser)]
-#[command(version, after_help = format!("{FOOTER}\n\n{PHASES}"))]
+#[command(version, after_help = FOOTER)]
 struct Cli {
     /// Path to the node's data directory (must match the daemon's
     /// `DATA_DIR`). The CLI finds the admin Unix socket at

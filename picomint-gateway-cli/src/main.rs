@@ -32,6 +32,14 @@ use picomint_gateway_cli_core::{
 };
 use picomint_gateway_cli_core::{LdkError, LdkReceiveError, LdkSendError};
 
+/// The admin CLI of a picomint gateway: one LDK Lightning node that is
+/// also a client of every mint it serves.
+///
+/// `ldk` manages the Lightning node, `client` the gateway's balances in
+/// its mints. Run `info` first for its two identities: a mint's nodes
+/// recommend the gateway by its `gateway_pk`, and `client add` joins it to
+/// a mint. Every command prints JSON, and its --help ends with the schema
+/// of what it prints and the codes it fails with.
 #[derive(Parser)]
 #[command(version, after_help = FOOTER)]
 struct Cli {

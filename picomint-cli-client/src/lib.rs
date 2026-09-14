@@ -40,7 +40,7 @@ Errors print one JSON object on stderr, {\"code\": ..., \"error\": ...}: the \
 code is what to branch on, the error what to tell the operator. The exit \
 code is 1 for a request the daemon refused, 2 for a usage error and 3 when \
 the daemon is unreachable. A command's --help lists every code it fails \
-with.";
+with; the one code no help lists, internal, means the daemon hit a bug.";
 
 /// Why a command failed, and how the CLI exits on it: one JSON object on
 /// stderr, `{"code": ..., "error": ...}`, and an exit code by class.
