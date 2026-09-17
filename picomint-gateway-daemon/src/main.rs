@@ -37,6 +37,11 @@ use url::Url;
 /// The LDK project's Rapid Gossip Sync server; serves mainnet snapshots only.
 const RGS_SERVER_URL: &str = "https://rapidsync.lightningdevkit.org/snapshot";
 
+/// Blocks the gateway needs between an inbound HTLC's arrival and LDK's
+/// fail-back deadline to fund the incoming contract and get the mint's
+/// decryption back.
+const MIN_CLAIM_HEADROOM_BLOCKS: u32 = 48;
+
 /// Command line parameters for starting the gateway.
 #[derive(Parser)]
 #[command(version)]
@@ -321,8 +326,15 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
         ldk_node::Event::PaymentClaimable {
             payment_hash,
             claimable_amount_msat,
+            claim_deadline,
             ..
-        } => handle_payment_claimable(state, &dbtx, payment_hash.0, claimable_amount_msat),
+        } => handle_payment_claimable(
+            state,
+            &dbtx,
+            payment_hash.0,
+            claimable_amount_msat,
+            claim_deadline,
+        ),
         ldk_node::Event::PaymentSuccessful {
             payment_hash,
             payment_preimage: Some(preimage),
@@ -359,6 +371,7 @@ fn handle_payment_claimable(
     dbtx: &WriteTx,
     payment_hash: [u8; 32],
     amount_msat: u64,
+    claim_deadline: Option<u32>,
 ) {
     let operation = OperationId::from_encodable(&payment_hash);
 
@@ -386,24 +399,43 @@ fn handle_payment_claimable(
         return;
     };
 
+    // LDK fails the HTLC back at `claim_deadline` on its own, and the default
+    // invoice leaves only 2-3 blocks before that. ldk-node does not expose
+    // `min_final_cltv_expiry_delta` yet (lightningdevkit/ldk-node#1085), so the
+    // invoice cannot ask senders for more. Refuse the short ones up front
+    // rather than fund a contract whose decryption then has to beat LDK's
+    // fail-back.
+    let headroom = claim_deadline
+        .map(|deadline| deadline.saturating_sub(state.node.status().current_best_block.height))
+        .unwrap_or(0);
+
     if row.offer.commitment.amount.0 != amount_msat {
         state
             .node
             .bolt11_payment()
             .fail_for_hash(PaymentHash(payment_hash))
             .expect("LDK has this payment_hash (registered via receive_for_hash)");
-    } else {
-        if state
-            .client
-            .gateway_start_receive(row.mint, dbtx, operation, row.offer)
-            .is_err()
-        {
-            state
-                .node
-                .bolt11_payment()
-                .fail_for_hash(PaymentHash(payment_hash))
-                .expect("LDK has this payment_hash (registered via receive_for_hash)");
-        }
+    } else if headroom < MIN_CLAIM_HEADROOM_BLOCKS {
+        warn!(
+            headroom,
+            "Failing inbound HTLC that leaves too few blocks before LDK fails it back"
+        );
+
+        state
+            .node
+            .bolt11_payment()
+            .fail_for_hash(PaymentHash(payment_hash))
+            .expect("LDK has this payment_hash (registered via receive_for_hash)");
+    } else if state
+        .client
+        .gateway_start_receive(row.mint, dbtx, operation, row.offer)
+        .is_err()
+    {
+        state
+            .node
+            .bolt11_payment()
+            .fail_for_hash(PaymentHash(payment_hash))
+            .expect("LDK has this payment_hash (registered via receive_for_hash)");
     }
 }
 
