@@ -117,6 +117,7 @@ async fn run_session(
         network,
         DataProvider::new(submission_rx.clone()),
         ordered_tx,
+        server.unordered.clone(),
         BftUnitTable,
         BftUnitDataTable,
         BftUnitSignatureTable,

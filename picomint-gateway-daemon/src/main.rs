@@ -12,6 +12,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, ensure};
 use bitcoin::Network;
@@ -19,6 +20,7 @@ use clap::{ArgGroup, Parser};
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning::types::payment::PaymentHash;
+use picomint_client::api;
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::lightning::gateway::PaymentFee;
@@ -27,6 +29,7 @@ use picomint_gateway_daemon::db::{
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
 use picomint_redb::{DbRead, WriteTx};
+use tokio::time::timeout;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
@@ -41,6 +44,10 @@ const RGS_SERVER_URL: &str = "https://rapidsync.lightningdevkit.org/snapshot";
 /// fail-back deadline to fund the incoming contract and get the mint's
 /// decryption back.
 const MIN_CLAIM_HEADROOM_BLOCKS: u32 = 48;
+
+/// How long the gateway waits for the offer's mint to report idle consensus
+/// before it gives an inbound HTLC back to the sender.
+const MINT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Command line parameters for starting the gateway.
 #[derive(Parser)]
@@ -310,7 +317,7 @@ async fn process_ldk_events(state: AppState) {
     loop {
         let event = state.node.next_event_async().await;
 
-        process_ldk_event(&state, event);
+        process_ldk_event(&state, event).await;
 
         state
             .node
@@ -319,7 +326,16 @@ async fn process_ldk_events(state: AppState) {
     }
 }
 
-fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
+async fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
+    // Resolved before the write tx opens: the poll can take up to
+    // `MINT_IDLE_TIMEOUT`, and redb has a single writer.
+    let mint_idle = match &event {
+        ldk_node::Event::PaymentClaimable { payment_hash, .. } => {
+            await_offer_mint_idle(state, payment_hash.0).await
+        }
+        _ => false,
+    };
+
     let dbtx = state.gateway_db.begin_write();
 
     match event {
@@ -334,6 +350,7 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
             payment_hash.0,
             claimable_amount_msat,
             claim_deadline,
+            mint_idle,
         ),
         ldk_node::Event::PaymentSuccessful {
             payment_hash,
@@ -362,16 +379,39 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
     dbtx.commit();
 }
 
+/// Long-poll the offer's mint until a threshold of nodes hold no unordered
+/// items, so the funding tx is ordered promptly instead of queueing behind
+/// a backlog while the HTLC's deadline runs. Gives up after
+/// [`MINT_IDLE_TIMEOUT`]; an offer whose mint was removed never polls.
+async fn await_offer_mint_idle(state: &AppState, payment_hash: [u8; 32]) -> bool {
+    let Some(row) = state.gateway_db.begin_read().get(
+        &IncomingOfferTable,
+        &OperationId::from_encodable(&payment_hash),
+    ) else {
+        return false;
+    };
+
+    let Ok(mint_api) = state.client.api(row.mint) else {
+        return false;
+    };
+
+    timeout(MINT_IDLE_TIMEOUT, api::await_idle(&mint_api))
+        .await
+        .is_ok()
+}
+
 /// Inbound HTLC arrived. Fund the registered offer via `start_receive`.
-/// On amount mismatch or `start_receive` failure (e.g. insufficient
-/// gateway liquidity to fund the contract), log the reason and fail the
-/// HTLC so the LN sender gets a refund.
+/// On amount mismatch, too little headroom before LDK's fail-back
+/// deadline, a mint that stayed backlogged, or `start_receive` failure
+/// (e.g. insufficient gateway liquidity to fund the contract), log the
+/// reason and fail the HTLC so the LN sender gets a refund.
 fn handle_payment_claimable(
     state: &AppState,
     dbtx: &WriteTx,
     payment_hash: [u8; 32],
     amount_msat: u64,
     claim_deadline: Option<u32>,
+    mint_idle: bool,
 ) {
     let operation = OperationId::from_encodable(&payment_hash);
 
@@ -420,6 +460,14 @@ fn handle_payment_claimable(
             headroom,
             "Failing inbound HTLC that leaves too few blocks before LDK fails it back"
         );
+
+        state
+            .node
+            .bolt11_payment()
+            .fail_for_hash(PaymentHash(payment_hash))
+            .expect("LDK has this payment_hash (registered via receive_for_hash)");
+    } else if !mint_idle {
+        warn!("Failing inbound HTLC: the mint did not report idle consensus in time");
 
         state
             .node

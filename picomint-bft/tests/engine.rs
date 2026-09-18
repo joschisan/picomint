@@ -30,6 +30,7 @@ use picomint_core::{NodeId, NumNodes};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, table};
 use rand::Rng;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -240,6 +241,7 @@ fn spawn_engines(
             channel,
             TimestampDataProvider,
             ordered_tx,
+            watch::Sender::new(false),
             BftUnit,
             BftUnitData,
             BftUnitSignature,
@@ -716,6 +718,7 @@ async fn replay_reproduces_order_under_forks() {
         NullNetwork,
         TimestampDataProvider,
         ordered_tx,
+        watch::Sender::new(false),
         BftUnit,
         BftUnitData,
         BftUnitSignature,
