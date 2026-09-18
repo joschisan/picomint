@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 use std::time::Duration;
 
 use anyhow::{Result, ensure};
@@ -7,6 +8,7 @@ use picomint_core::secp256k1::schnorr;
 use picomint_core::{NodeId, NumNodes};
 use picomint_encoding::Encodable;
 use picomint_redb::{Database, DbRead, Table, WriteTx};
+use tokio::sync::watch;
 use tokio::task::yield_now;
 use tokio::time::{Instant, sleep_until};
 use tracing::{debug, warn};
@@ -98,6 +100,10 @@ where
     /// yet in `emitted`. Seeded from disk on startup; drained by the
     /// extender as units emit.
     pub(crate) unordered_own_data: BTreeSet<Round>,
+    /// [`Self::has_unordered_own_data`] as of the last engine loop
+    /// iteration, for the embedder to watch without reaching into the
+    /// task. Sent only on a flip, so a watcher sleeps through a busy loop.
+    unordered_tx: watch::Sender<bool>,
     /// Round and hash of our own highest unit; the base for next-round
     /// creation and the anti-entropy push. Seeded from disk on
     /// startup; advanced in `insert_unit`.
@@ -127,6 +133,7 @@ where
         network: N,
         data_provider: P,
         ordered_tx: Sender<(Round, NodeId, D)>,
+        unordered_tx: watch::Sender<bool>,
         unit_table: T,
         unit_data_table: U,
         unit_signature_table: S,
@@ -140,6 +147,7 @@ where
             network,
             data_provider,
             ordered_tx,
+            unordered_tx,
             unit_table,
             unit_data_table,
             unit_signature_table,
@@ -159,6 +167,8 @@ where
         self.replay();
 
         self.create_units();
+
+        self.publish_unordered();
 
         let mut next_anti_entropy_at = Instant::now();
 
@@ -185,6 +195,8 @@ where
                     next_anti_entropy_at = Instant::now() + ANTI_ENTROPY_INTERVAL;
                 }
             }
+
+            self.publish_unordered();
 
             // The inbox is an `async_channel`, outside tokio's cooperative
             // budget, and nothing above returns Pending while a message is
@@ -546,6 +558,13 @@ where
     /// been emitted through `ordered_tx`.
     pub fn has_unordered_own_data(&self) -> bool {
         !self.unordered_own_data.is_empty()
+    }
+
+    fn publish_unordered(&self) {
+        let unordered = self.has_unordered_own_data();
+
+        self.unordered_tx
+            .send_if_modified(|current| mem::replace(current, unordered) != unordered);
     }
 
     /// Body present *and* every parent is extended.

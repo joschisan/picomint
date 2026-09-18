@@ -10,8 +10,9 @@ pub use picomint_rpc::api::MintApi;
 use picomint_core::NodeId;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::methods::{
-    BlockHeightRequest, BlockHeightResponse, CoreMethod, ExpiryStatusRequest, ExpiryStatusResponse,
-    LivenessRequest, LivenessResponse, Method, SubmitTxRequest, SubmitTxResponse,
+    AwaitIdleRequest, AwaitIdleResponse, BlockHeightRequest, BlockHeightResponse, CoreMethod,
+    ExpiryStatusRequest, ExpiryStatusResponse, LivenessRequest, LivenessResponse, Method,
+    SubmitTxRequest, SubmitTxResponse,
 };
 use picomint_core::tx::{Transaction, TxError};
 
@@ -48,6 +49,17 @@ pub async fn liveness(api: &MintApi) -> anyhow::Result<LivenessResponse> {
 pub async fn liveness_node(api: &MintApi, node: NodeId) -> anyhow::Result<LivenessResponse> {
     api.request_single_node(Method::Core(CoreMethod::Liveness(LivenessRequest)), node)
         .await
+}
+
+/// Long-poll until a threshold of nodes hold no unordered items, so a
+/// transaction submitted now is ordered without queueing behind a backlog.
+/// Never gives up on its own — a lost connection is awaited — so the
+/// caller bounds the wait.
+pub async fn await_idle(api: &MintApi) {
+    api.request_current_consensus_retry::<AwaitIdleResponse>(Method::Core(CoreMethod::AwaitIdle(
+        AwaitIdleRequest,
+    )))
+    .await;
 }
 
 /// Fetch the mint's announced expiry status, threshold-

@@ -3,9 +3,9 @@
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use picomint_core::methods::{
-    BlockHeightRequest, BlockHeightResponse, ConfigRequest, ConfigResponse, ExpiryStatusRequest,
-    ExpiryStatusResponse, LivenessRequest, LivenessResponse, MintInfoRequest, MintInfoResponse,
-    SubmitTxRequest, SubmitTxResponse,
+    AwaitIdleRequest, AwaitIdleResponse, BlockHeightRequest, BlockHeightResponse, ConfigRequest,
+    ConfigResponse, ExpiryStatusRequest, ExpiryStatusResponse, LivenessRequest, LivenessResponse,
+    MintInfoRequest, MintInfoResponse, SubmitTxRequest, SubmitTxResponse,
 };
 use picomint_core::tx::{ConsensusItem, Transaction, TxError};
 use picomint_redb::DbRead;
@@ -28,6 +28,7 @@ pub async fn handle_api(api: &ConsensusApi, method: CoreMethod) -> Result<Vec<u8
         CoreMethod::Liveness(req) => handler!(liveness, api, req).await,
         CoreMethod::ExpiryStatus(req) => handler!(expiry_status, api, req).await,
         CoreMethod::MintInfo(req) => handler!(mint_info, api, req).await,
+        CoreMethod::AwaitIdle(req) => handler_async!(await_idle, api, req).await,
     }
 }
 
@@ -183,6 +184,29 @@ pub fn block_height(
 
 pub fn liveness(_: &ConsensusApi, _: LivenessRequest) -> Result<LivenessResponse, String> {
     Ok(LivenessResponse)
+}
+
+/// Long-poll until the node holds no unordered items. They live in two
+/// places: the submission channel the engine drains into its next unit, and
+/// the engine's own units awaiting ordering. Only the latter is watched: an
+/// item sitting in the channel becomes a unit, and so a flip of the watch,
+/// as soon as the engine can build one.
+pub async fn await_idle(
+    api: &ConsensusApi,
+    _: AwaitIdleRequest,
+) -> Result<AwaitIdleResponse, String> {
+    let mut unordered = api.server.unordered.subscribe();
+
+    loop {
+        if !*unordered.borrow_and_update() && api.submission_tx.is_empty() {
+            return Ok(AwaitIdleResponse);
+        }
+
+        unordered
+            .changed()
+            .await
+            .expect("The server holds the unordered watch for the daemon's lifetime");
+    }
 }
 
 pub fn expiry_status(
