@@ -5,6 +5,9 @@ members = [
     "picomint-base32",
     "picomint-bft",
     "picomint-bitcoind",
+    "picomint-broker-cli",
+    "picomint-broker-cli-core",
+    "picomint-broker-daemon",
     "picomint-cli-client",
     "picomint-cli-server",
     "picomint-client",
@@ -88,6 +91,7 @@ picomint-analytics = { path = "./picomint-analytics", version = "=0.1.0" }
 picomint-base32 = { path = "./picomint-base32", version = "=0.1.0" }
 picomint-bft = { path = "./picomint-bft", version = "=0.1.0" }
 picomint-bitcoind = { path = "./picomint-bitcoind", version = "=0.1.0" }
+picomint-broker-cli-core = { path = "./picomint-broker-cli-core", version = "=0.1.0" }
 picomint-cli-client = { path = "./picomint-cli-client", version = "=0.1.0" }
 picomint-cli-server = { path = "./picomint-cli-server", version = "=0.1.0" }
 picomint-client = { path = "./picomint-client", version = "=0.1.0" }

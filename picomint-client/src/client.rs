@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
+use crate::context::Mints;
+
 use crate::Endpoint;
 use crate::add_mint::AddMintError;
 use crate::api::MintApi;
@@ -8,6 +10,7 @@ use crate::context::ClientContext;
 use crate::eventlog::{EventLogEntry, EventLogId};
 use crate::lightning::Gateways;
 use crate::secret::{ClientSecret, Mnemonic};
+use crate::swap::Brokers;
 use crate::task::TaskGroup;
 use futures::future::select_all;
 use futures::stream::BoxStream;
@@ -58,19 +61,24 @@ pub struct Client {
     pub(crate) db: Database,
     pub(crate) mnemonic: Mnemonic,
     role: Role,
-    mints: RwLock<BTreeMap<MintId, ClientContext>>,
+    /// Shared with every context as a weak handle, so a state machine in
+    /// one mint can reach a sibling mint's context without the contexts
+    /// owning the map that owns them.
+    mints: Arc<Mints>,
 }
 
-/// Which side of a lightning payment this client sits on. A user pays and
-/// receives through gateways, so its mint contexts pool the announced
-/// gateways and run the lightning module's state machines and scans. A
-/// gateway daemon embeds the client to hold its own ecash and settle
-/// contracts, so its contexts run the gateway module instead — and never
-/// pool gateways, which would include dialing its own key.
+/// Which side of a payment this client sits on. A user pays and receives
+/// through gateways and brokers, so its mint contexts pool the announced
+/// ones and run the lightning and swap modules' state machines and scans.
+/// A gateway daemon embeds the client to hold its own ecash and settle
+/// lightning contracts, a broker daemon to settle swap contracts, so their
+/// contexts run only their own side of the module — and never pool their
+/// kind, which would include dialing their own key.
 #[derive(Debug, Clone, Copy)]
 enum Role {
     User,
     Gateway,
+    Broker,
 }
 
 impl Client {
@@ -96,6 +104,13 @@ impl Client {
         Self::build(endpoint, db, mnemonic, Role::Gateway)
     }
 
+    /// Broker-flavor counterpart of [`Client::new`] for the broker daemon:
+    /// its mint contexts run the broker's side of the swap module and skip
+    /// everything a user needs to pay through brokers, including the pool.
+    pub fn new_broker(endpoint: Endpoint, db: Database, mnemonic: Mnemonic) -> Client {
+        Self::build(endpoint, db, mnemonic, Role::Broker)
+    }
+
     fn build(endpoint: Endpoint, db: Database, mnemonic: Mnemonic, role: Role) -> Client {
         debug!(
             version = %env!("CARGO_PKG_VERSION"),
@@ -103,19 +118,27 @@ impl Client {
             "Building picomint client",
         );
 
-        let mints = db
+        let mints = Arc::new(RwLock::new(BTreeMap::new()));
+
+        let configs = db
             .begin_read()
-            .iter(&ClientConfigTable, |r| r.collect::<Vec<_>>())
-            .into_iter()
-            .map(|entry| (entry.0, build_ctx(&endpoint, &db, &mnemonic, entry.1, role)))
-            .collect();
+            .iter(&ClientConfigTable, |r| r.collect::<Vec<_>>());
+
+        for (mint, config) in configs {
+            let ctx = build_ctx(&endpoint, &db, &mnemonic, config, role, &mints);
+
+            mints
+                .write()
+                .expect("mints lock poisoned")
+                .insert(mint, ctx);
+        }
 
         Client {
             endpoint,
             db,
             mnemonic,
             role,
-            mints: RwLock::new(mints),
+            mints,
         }
     }
 
@@ -151,7 +174,14 @@ impl Client {
 
         dbtx.commit();
 
-        let ctx = build_ctx(&self.endpoint, &self.db, &self.mnemonic, config, self.role);
+        let ctx = build_ctx(
+            &self.endpoint,
+            &self.db,
+            &self.mnemonic,
+            config,
+            self.role,
+            &self.mints,
+        );
 
         self.mints
             .write()
@@ -195,6 +225,7 @@ impl Client {
         crate::ecash::wipe_tables(&dbtx, mint);
         crate::onchain::wipe_tables(&dbtx, mint);
         crate::lightning::wipe_tables(&dbtx, mint);
+        crate::swap::wipe_tables(&dbtx, mint);
         crate::gateway::wipe_tables(&dbtx, mint);
         crate::tx::wipe_tables(&dbtx, mint);
         crate::expiry::wipe_tables(&dbtx, mint);
@@ -299,6 +330,7 @@ impl Client {
         crate::tx::operation_is_active(&dbtx, operation)
             || crate::ecash::operation_is_active(&dbtx, operation)
             || crate::lightning::operation_is_active(&dbtx, operation)
+            || crate::swap::operation_is_active(&dbtx, operation)
             || crate::onchain::operation_is_active(&dbtx, operation)
             || crate::gateway::operation_is_active(&dbtx, operation)
     }
@@ -321,6 +353,7 @@ impl Client {
             crate::tx::sm_notifies(&self.db),
             crate::ecash::sm_notifies(&self.db),
             crate::lightning::sm_notifies(&self.db),
+            crate::swap::sm_notifies(&self.db),
             crate::onchain::sm_notifies(&self.db),
             crate::gateway::sm_notifies(&self.db),
         ]
@@ -369,6 +402,7 @@ fn build_ctx(
     mnemonic: &Mnemonic,
     config: NodeConfigConsensus,
     role: Role,
+    mints: &Arc<Mints>,
 ) -> ClientContext {
     let mint = config.calculate_mint_id();
 
@@ -378,7 +412,9 @@ fn build_ctx(
         config,
         ClientSecret::new(mnemonic, mint),
         Gateways::new(endpoint.clone()),
+        Brokers::new(endpoint.clone()),
         TaskGroup::new(),
+        Arc::downgrade(mints),
     );
 
     crate::ecash::resume(&ctx);
@@ -386,8 +422,12 @@ fn build_ctx(
     crate::onchain::resume(&ctx);
 
     match role {
-        Role::User => crate::lightning::resume(&ctx),
+        Role::User => {
+            crate::lightning::resume(&ctx);
+            crate::swap::resume(&ctx);
+        }
         Role::Gateway => crate::gateway::resume(&ctx),
+        Role::Broker => crate::swap::resume_broker(&ctx),
     }
 
     ctx.tg.spawn(crate::expiry::refresh(ctx.clone()));

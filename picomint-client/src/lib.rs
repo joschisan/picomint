@@ -7,15 +7,15 @@
 //! in between. Every operation takes the
 //! [`picomint_core::config::MintId`] it acts on
 //! and is named for the module that serves it — `ecash_send`,
-//! `onchain_receive`, `lightning_receive`, `gateway_finalize_send` — so there is
-//! no per-mint handle to hold or leak.
+//! `onchain_receive`, `lightning_receive`, `swap_send`, `gateway_finalize_send`
+//! — so there is no per-mint handle to hold or leak.
 //!
 //! Every table is shared across mints with a
 //! [`picomint_core::config::MintId`]-prefixed key, so adds, removes,
 //! and all module writes commit through one database.
 //!
-//! Per-module logic lives in [`mod@ecash`], [`mod@onchain`], [`mod@lightning`], and
-//! [`mod@gateway`]. Each module owns its own state machines and contributes its
+//! Per-module logic lives in [`mod@ecash`], [`mod@onchain`], [`mod@lightning`],
+//! [`mod@swap`] and [`mod@gateway`]. Each module owns its own state machines and contributes its
 //! slice of the flat [`Client`] surface. Submission ownership lives
 //! entirely in the ecash module — non-ecash modules build a
 //! [`crate::tx::TxBuilder`] and call its `finalize_and_submit_tx`, which
@@ -45,8 +45,12 @@ pub mod gateway;
 pub mod lightning;
 /// Onchain module client.
 pub mod onchain;
+/// Kept-alive connection pool to a mint's announced counterparties.
+mod pool;
 /// Secret handling & derivation
 pub mod secret;
+/// Swap module client.
+pub mod swap;
 /// Local `(TaskTracker, CancellationToken)` wrapper for client background tasks.
 mod task;
 /// Structs and interfaces to construct Picomint transactions

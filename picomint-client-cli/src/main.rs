@@ -8,7 +8,8 @@ use picomint_client::expiry::RefreshExpiryStatusError;
 use picomint_client::lightning::{
     RefreshGatewaysError, SendMaxAmountError, SendMaxError, SendPaymentError,
 };
-use picomint_client::{AddMintError, NotAddedError, lightning, onchain};
+use picomint_client::swap::RefreshBrokersError;
+use picomint_client::{AddMintError, NotAddedError, lightning, onchain, swap};
 use picomint_client_cli_core::{
     ClientAddRequest, ClientAddResponse, ClientBalanceRequest, ClientBalanceResponse,
     ClientConfigRequest, ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
@@ -20,17 +21,25 @@ use picomint_client_cli_core::{
     ClientLightningReceiveResponse, ClientLightningSendMaxAmountRequest,
     ClientLightningSendMaxAmountResponse, ClientLightningSendMaxRequest,
     ClientLightningSendMaxResponse, ClientLightningSendRequest, ClientLightningSendResponse,
-    ClientListResponse, ClientOnchainReceiveRequest, ClientOnchainReceiveResponse,
-    ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse, ClientOnchainSendMaxAmountRequest,
+    ClientListResponse, ClientOnchainReceiveFeeRequest, ClientOnchainReceiveFeeResponse,
+    ClientOnchainReceiveRequest, ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest,
+    ClientOnchainSendFeeResponse, ClientOnchainSendMaxAmountRequest,
     ClientOnchainSendMaxAmountResponse, ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse,
-    ClientOnchainSendRequest, ClientOnchainSendResponse, ClientRemoveRequest, MnemonicResponse,
-    QueryRequest, QueryResponse, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT,
-    ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_EXPIRY,
-    ROUTE_LIGHTNING_GATEWAY_LIST, ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_LNURL,
-    ROUTE_LIGHTNING_RECEIVE, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX,
-    ROUTE_LIGHTNING_SEND_MAX_AMOUNT, ROUTE_LIST, ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE,
-    ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX,
-    ROUTE_ONCHAIN_SEND_MAX_AMOUNT, ROUTE_QUERY, ROUTE_REMOVE,
+    ClientOnchainSendRequest, ClientOnchainSendResponse, ClientRemoveRequest,
+    ClientSwapBrokerListRequest, ClientSwapBrokerListResponse, ClientSwapBrokerRefreshRequest,
+    ClientSwapReceiveRequest, ClientSwapReceiveResponse, ClientSwapSendDirectRequest,
+    ClientSwapSendMaxAmountDirectRequest, ClientSwapSendMaxAmountRequest,
+    ClientSwapSendMaxAmountResponse, ClientSwapSendMaxDirectRequest, ClientSwapSendMaxRequest,
+    ClientSwapSendRequest, ClientSwapSendResponse, MnemonicResponse, QueryRequest, QueryResponse,
+    ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE,
+    ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_EXPIRY, ROUTE_LIGHTNING_GATEWAY_LIST,
+    ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
+    ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIGHTNING_SEND_MAX_AMOUNT, ROUTE_LIST,
+    ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_RECEIVE_FEE, ROUTE_ONCHAIN_SEND,
+    ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX, ROUTE_ONCHAIN_SEND_MAX_AMOUNT, ROUTE_QUERY,
+    ROUTE_REMOVE, ROUTE_SWAP_BROKER_LIST, ROUTE_SWAP_BROKER_REFRESH, ROUTE_SWAP_RECEIVE,
+    ROUTE_SWAP_SEND, ROUTE_SWAP_SEND_DIRECT, ROUTE_SWAP_SEND_MAX, ROUTE_SWAP_SEND_MAX_AMOUNT,
+    ROUTE_SWAP_SEND_MAX_AMOUNT_DIRECT, ROUTE_SWAP_SEND_MAX_DIRECT,
 };
 
 /// The admin CLI of a picomint client daemon: a headless wallet holding
@@ -93,6 +102,9 @@ enum Commands {
     /// Lightning module commands
     #[command(subcommand)]
     Lightning(LightningCommands),
+    /// Swap module commands: pay swap addresses, in this mint or in another
+    #[command(subcommand)]
+    Swap(SwapCommands),
 }
 
 #[derive(Subcommand)]
@@ -114,17 +126,20 @@ enum EcashCommands {
 #[derive(Subcommand)]
 enum OnchainCommands {
     /// Get send fee estimate
-    #[command(after_long_help = schema_fallible::<ClientOnchainSendFeeResponse, onchain::SendFeeError>())]
+    #[command(after_long_help = schema_fallible::<ClientOnchainSendFeeResponse, onchain::FeeError>())]
     SendFee(ClientOnchainSendFeeRequest),
     /// Send onchain
     #[command(after_long_help = schema_fallible::<ClientOnchainSendResponse, onchain::SendError>())]
     Send(ClientOnchainSendRequest),
     /// What send-max would move right now
-    #[command(after_long_help = schema_fallible::<ClientOnchainSendMaxAmountResponse, onchain::SendFeeError>())]
+    #[command(after_long_help = schema_fallible::<ClientOnchainSendMaxAmountResponse, onchain::FeeError>())]
     SendMaxAmount(ClientOnchainSendMaxAmountRequest),
     /// Send the account's entire balance onchain, minus the fee
     #[command(after_long_help = schema_fallible::<ClientOnchainSendMaxResponse, onchain::SendError>())]
     SendMax(ClientOnchainSendMaxRequest),
+    /// What the mint takes out of a deposit to sweep it
+    #[command(after_long_help = schema_fallible::<ClientOnchainReceiveFeeResponse, onchain::FeeError>())]
+    ReceiveFee(ClientOnchainReceiveFeeRequest),
     /// Get receive address
     #[command(after_long_help = schema_fallible::<ClientOnchainReceiveResponse, onchain::ReceiveError>())]
     Receive(ClientOnchainReceiveRequest),
@@ -162,6 +177,45 @@ enum LightningGatewayCommands {
     Refresh(ClientLightningGatewayRefreshRequest),
 }
 
+#[allow(clippy::large_enum_variant)]
+#[derive(Subcommand)]
+enum SwapCommands {
+    /// The account's swap address to receive at
+    #[command(after_long_help = schema_fallible::<ClientSwapReceiveResponse, NotAddedError>())]
+    Receive(ClientSwapReceiveRequest),
+    /// Pay a swap address of this mint as one transaction
+    #[command(after_long_help = schema_fallible::<ClientSwapSendResponse, swap::SendDirectError>())]
+    SendDirect(ClientSwapSendDirectRequest),
+    /// What send-max-direct would move right now
+    #[command(after_long_help = schema_fallible::<ClientSwapSendMaxAmountResponse, NotAddedError>())]
+    SendMaxAmountDirect(ClientSwapSendMaxAmountDirectRequest),
+    /// Empty the account to a swap address of this mint
+    #[command(after_long_help = schema_fallible::<ClientSwapSendResponse, swap::SendDirectError>())]
+    SendMaxDirect(ClientSwapSendMaxDirectRequest),
+    /// The brokers the mint recommends, probed for their fees
+    #[command(subcommand)]
+    Broker(SwapBrokerCommands),
+    /// Pay a swap address through a broker, whichever mint it lives in
+    #[command(after_long_help = schema_fallible::<ClientSwapSendResponse, swap::SendError>())]
+    Send(ClientSwapSendRequest),
+    /// What send-max would move right now through a broker
+    #[command(after_long_help = schema_fallible::<ClientSwapSendMaxAmountResponse, swap::SendMaxAmountError>())]
+    SendMaxAmount(ClientSwapSendMaxAmountRequest),
+    /// Empty the account to a swap address through a broker
+    #[command(after_long_help = schema_fallible::<ClientSwapSendResponse, swap::SendError>())]
+    SendMax(ClientSwapSendMaxRequest),
+}
+
+#[derive(Subcommand)]
+enum SwapBrokerCommands {
+    /// The brokers that answered a probe, keyed by pk, with their fees; filled when the mint is added
+    #[command(after_long_help = schema_fallible::<ClientSwapBrokerListResponse, NotAddedError>())]
+    List(ClientSwapBrokerListRequest),
+    /// Re-fetch the mint's broker list and re-probe every broker
+    #[command(after_long_help = schema_fallible::<ClientSwapBrokerListResponse, RefreshBrokersError>())]
+    Refresh(ClientSwapBrokerRefreshRequest),
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let cli = Cli::parse();
@@ -189,6 +243,7 @@ async fn main() {
                 request(d, ROUTE_ONCHAIN_SEND_MAX_AMOUNT, req).await
             }
             OnchainCommands::SendMax(req) => request(d, ROUTE_ONCHAIN_SEND_MAX, req).await,
+            OnchainCommands::ReceiveFee(req) => request(d, ROUTE_ONCHAIN_RECEIVE_FEE, req).await,
             OnchainCommands::Receive(req) => request(d, ROUTE_ONCHAIN_RECEIVE, req).await,
         },
         Commands::Lightning(cmd) => match cmd {
@@ -207,6 +262,23 @@ async fn main() {
             LightningCommands::SendMax(req) => request(d, ROUTE_LIGHTNING_SEND_MAX, req).await,
             LightningCommands::Receive(req) => request(d, ROUTE_LIGHTNING_RECEIVE, req).await,
             LightningCommands::Lnurl(req) => request(d, ROUTE_LIGHTNING_LNURL, req).await,
+        },
+        Commands::Swap(cmd) => match cmd {
+            SwapCommands::Receive(req) => request(d, ROUTE_SWAP_RECEIVE, req).await,
+            SwapCommands::SendDirect(req) => request(d, ROUTE_SWAP_SEND_DIRECT, req).await,
+            SwapCommands::SendMaxAmountDirect(req) => {
+                request(d, ROUTE_SWAP_SEND_MAX_AMOUNT_DIRECT, req).await
+            }
+            SwapCommands::SendMaxDirect(req) => request(d, ROUTE_SWAP_SEND_MAX_DIRECT, req).await,
+            SwapCommands::Broker(cmd) => match cmd {
+                SwapBrokerCommands::List(req) => request(d, ROUTE_SWAP_BROKER_LIST, req).await,
+                SwapBrokerCommands::Refresh(req) => {
+                    request(d, ROUTE_SWAP_BROKER_REFRESH, req).await
+                }
+            },
+            SwapCommands::Send(req) => request(d, ROUTE_SWAP_SEND, req).await,
+            SwapCommands::SendMaxAmount(req) => request(d, ROUTE_SWAP_SEND_MAX_AMOUNT, req).await,
+            SwapCommands::SendMax(req) => request(d, ROUTE_SWAP_SEND_MAX, req).await,
         },
     };
 

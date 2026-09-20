@@ -1,27 +1,12 @@
-//! Client-side gateway pool: each announced gateway's kept-alive iroh
-//! connection and its latest probed info, managed together.
-//!
-//! Gateways are discovered dynamically via the mint's announced pk set,
-//! so [`Gateways`] keys one entry per gateway holding both its pooled
-//! connection (a [`connection_task`] published on a `watch`) and its latest
-//! [`GatewayInfo`]. The two share one lifecycle: [`Gateways::reconcile`] spawns
-//! an entry when a gateway joins the announced set and drops it — aborting the
-//! connection task — when it leaves, so [`Gateways::select`] never returns a
-//! gateway the mint no longer recognises. Surviving gateways keep their
-//! warm connection across refreshes; the QUIC handshake and hole-punched path
-//! are paid once, then reused by info probes, sends, and receives.
+//! The lightning module's [`Pool`]: the mint's announced gateways, and the
+//! gateway methods the module calls over it.
 //!
 //! The wire types ([`GatewayMethod`] + per-method `*Request`/`*Response`
-//! structs) live in [`picomint_core::lightning::methods`] because the gateway daemon
-//! must agree on them. The wire envelope is `Result<Vec<u8>, String>` — same
-//! shape as the mint API.
+//! structs) live in [`picomint_core::lightning::methods`] because the gateway
+//! daemon must agree on them.
 
-use std::collections::BTreeMap;
-use std::sync::{Arc, RwLock};
-
-use anyhow::Context;
 use bitcoin::secp256k1::schnorr::Signature;
-use iroh::Endpoint;
+use iroh::PublicKey;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::OutPoint;
 use picomint_core::config::MintId;
@@ -32,152 +17,26 @@ use picomint_core::lightning::methods::{
     GatewayMethod, InfoRequest, InfoResponse, ReceiveRequest, ReceiveResponse, SendRequest,
     SendResponse,
 };
-use picomint_encoding::Decodable;
-use tokio::sync::watch;
-use tokio::task::JoinSet;
-use tokio_util::task::AbortOnDropHandle;
 
-use picomint_rpc::connection::{
-    ConnState, connection_task, request_on_state, request_on_state_retry,
-};
+use crate::pool::{Peer, Pool};
 
-/// One announced gateway: its pooled connection and the latest info probe,
-/// dropped together when the gateway leaves the announced set.
-struct Gateway {
-    /// `None` until the first successful info probe. A gateway without info is
-    /// not selectable but keeps its warm connection.
-    info: Option<GatewayInfo>,
-    conn: watch::Receiver<Option<ConnState>>,
-    /// Aborts the gateway's [`connection_task`] when this entry is dropped.
-    _task: AbortOnDropHandle<()>,
+impl Peer for GatewayPk {
+    fn iroh_pk(&self) -> PublicKey {
+        self.0
+    }
 }
 
-/// Pool of announced gateways keyed by node id, each with a kept-alive
-/// connection and its latest info. Cloneable; one instance is shared by the
-/// lightning module and its send state machine.
-#[derive(Clone)]
-pub struct Gateways {
-    endpoint: Endpoint,
-    inner: Arc<RwLock<BTreeMap<GatewayPk, Gateway>>>,
-}
+pub(crate) type Gateways = Pool<GatewayPk, GatewayInfo>;
 
 impl Gateways {
-    pub fn new(endpoint: Endpoint) -> Self {
-        Self {
-            endpoint,
-            inner: Arc::new(RwLock::new(BTreeMap::new())),
-        }
-    }
-
-    /// Bring the connection pool in line with the announced gateway set `pks`:
-    /// spawn a kept-alive [`connection_task`] for each pk not already pooled,
-    /// leaving surviving gateways' warm connections untouched.
-    ///
-    /// `prune` distinguishes the two callers. The authoritative
-    /// `update_gateway_pks` passes `true`: gateways no longer announced are
-    /// dropped (their connection task aborted). The cold-start
-    /// `update_gateway_info` passes `false`: it only adds connections for the
-    /// previous session's persisted pks, so it can run concurrently with the
-    /// authoritative refresh without racing it for membership.
-    pub fn reconcile(&self, pks: &[GatewayPk], prune: bool) {
-        let mut map = self.inner.write().expect("gateways RwLock poisoned");
-
-        if prune {
-            map.retain(|pk, _| pks.contains(pk));
-        }
-
-        for pk in pks {
-            map.entry(*pk).or_insert_with(|| {
-                let (tx, rx) = watch::channel(None);
-                let task = tokio::spawn(connection_task(pk.0, self.endpoint.clone(), tx));
-                Gateway {
-                    info: None,
-                    conn: rx,
-                    _task: AbortOnDropHandle::new(task),
-                }
-            });
-        }
-    }
-
-    /// Probe `info` for each gateway in `pks` concurrently over its pooled
-    /// connection, writing each result back as it arrives. A failed probe
-    /// clears that gateway's info (unselectable) without dropping its
-    /// connection; a slow probe never blocks the others' updates.
-    pub async fn probe(&self, pks: &[GatewayPk], mint: MintId) {
-        let connections: Vec<_> = self
-            .inner
-            .read()
-            .expect("gateways RwLock poisoned")
-            .iter()
-            .filter(|entry| pks.contains(entry.0))
-            .map(|entry| (*entry.0, entry.1.conn.clone()))
-            .collect();
-
-        let mut probes: JoinSet<(GatewayPk, Option<GatewayInfo>)> = JoinSet::new();
-
-        for (pk, mut rx) in connections {
-            probes.spawn(async move {
-                let method = GatewayMethod::Info(InfoRequest { mint });
-
-                let info = request_on_state::<InfoResponse>(&mut rx, method)
-                    .await
-                    .ok()
-                    .and_then(|r| r.info);
-
-                (pk, info)
-            });
-        }
-
-        while let Some(Ok((pk, info))) = probes.join_next().await {
-            if let Some(gateway) = self
-                .inner
-                .write()
-                .expect("gateways RwLock poisoned")
-                .get_mut(&pk)
-            {
-                gateway.info = info;
-            }
-        }
-    }
-
-    /// Every pooled gateway with a successful info probe, keyed by pk.
-    pub fn list(&self) -> BTreeMap<GatewayPk, GatewayInfo> {
-        self.inner
-            .read()
-            .expect("gateways RwLock poisoned")
-            .iter()
-            .filter_map(|(pk, gateway)| gateway.info.clone().map(|info| (*pk, info)))
-            .collect()
-    }
-
-    /// The latest probed info of `gateway_pk`, if it is pooled and probed.
-    pub fn info(&self, gateway_pk: GatewayPk) -> Option<GatewayInfo> {
-        self.inner
-            .read()
-            .expect("gateways RwLock poisoned")
-            .get(&gateway_pk)
-            .and_then(|gateway| gateway.info.clone())
-    }
-
-    /// Status watch for `gateway_pk`, if it is a current member.
-    fn connection(&self, gateway_pk: GatewayPk) -> Option<watch::Receiver<Option<ConnState>>> {
-        self.inner
-            .read()
-            .expect("gateways RwLock poisoned")
-            .get(&gateway_pk)
-            .map(|gateway| gateway.conn.clone())
-    }
-
-    async fn request<R: Decodable>(
-        &self,
-        gateway_pk: GatewayPk,
-        method: GatewayMethod,
-    ) -> anyhow::Result<R> {
-        let mut rx = self
-            .connection(gateway_pk)
-            .context("Gateway is not a current member")?;
-
-        request_on_state(&mut rx, method).await
+    /// Probe `info` for each gateway in `pks` for `mint`.
+    pub async fn probe_info(&self, pks: &[GatewayPk], mint: MintId) {
+        self.probe(
+            pks,
+            GatewayMethod::Info(InfoRequest { mint }),
+            |response: InfoResponse| response.info,
+        )
+        .await
     }
 
     pub async fn receive(
@@ -207,10 +66,6 @@ impl Gateways {
         invoice: LightningInvoice,
         auth: Signature,
     ) -> anyhow::Result<Result<[u8; 32], Signature>> {
-        let mut rx = self
-            .connection(gateway_pk)
-            .context("Gateway is not a current member")?;
-
         let method = GatewayMethod::Send(SendRequest {
             mint,
             outpoint,
@@ -219,7 +74,7 @@ impl Gateways {
             auth,
         });
 
-        request_on_state_retry::<SendResponse>(&mut rx, method)
+        self.request_retry::<SendResponse>(gateway_pk, method)
             .await
             .map(|r| r.result)
     }

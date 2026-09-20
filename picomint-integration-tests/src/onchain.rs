@@ -28,10 +28,13 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let pegin_txid = env.send_to_address(&pegin_addr, bitcoin::Amount::from_sat(100_000_000))?;
 
-    retry("pegin tx in mempool", || async {
-        block_in_place(|| env.bitcoind.get_mempool_entry(&pegin_txid))
+    // The background miner may confirm the pegin between the send and
+    // the first poll, so the check goes through bitcoind's wallet, which
+    // knows the transaction either way.
+    retry("pegin tx known", || async {
+        block_in_place(|| env.bitcoind.get_transaction(&pegin_txid, None))
             .map(|_| ())
-            .context("pegin tx not in mempool yet")
+            .context("pegin tx not known yet")
     })
     .await?;
 
@@ -151,10 +154,10 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
 
     let pegin_txid = env.send_to_address(&pegin_addr, bitcoin::Amount::from_sat(100_000_000))?;
 
-    retry("second pegin tx in mempool", || async {
-        block_in_place(|| env.bitcoind.get_mempool_entry(&pegin_txid))
+    retry("second pegin tx known", || async {
+        block_in_place(|| env.bitcoind.get_transaction(&pegin_txid, None))
             .map(|_| ())
-            .context("second pegin tx not in mempool yet")
+            .context("second pegin tx not known yet")
     })
     .await?;
 

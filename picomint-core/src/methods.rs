@@ -13,6 +13,7 @@ use crate::ecash::methods::EcashMethod;
 use crate::expiry::ExpiryStatus;
 use crate::lightning::methods::LightningMethod;
 use crate::onchain::methods::OnchainMethod;
+use crate::swap::methods::SwapMethod;
 use crate::tx::{Transaction, TxError};
 use std::collections::BTreeMap;
 
@@ -25,6 +26,7 @@ pub enum Method {
     Ecash(EcashMethod),
     Onchain(OnchainMethod),
     Lightning(LightningMethod),
+    Swap(SwapMethod),
 }
 
 // ── config ──────────────────────────────────────────────────────────────────

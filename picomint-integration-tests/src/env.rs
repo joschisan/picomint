@@ -10,6 +10,7 @@ use bitcoin::Network;
 use bitcoincore_rpc::RpcApi;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
+use picomint_core::swap::broker::BrokerPk;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task::block_in_place;
@@ -28,6 +29,7 @@ pub const NUM_NODES: usize = 7;
 /// (5 of 7). The restore test brings them back online.
 pub const NUM_ONLINE_NODES: usize = 5;
 pub const GW_PORT: u16 = 28175;
+pub const BROKER_PORT: u16 = 28177;
 pub const GW_LN_PORT: u16 = 9735;
 pub const TEST_LDK_PORT: u16 = 9736;
 pub const LNURL_DAEMON_PORT: u16 = 28176;
@@ -55,6 +57,8 @@ pub struct TestEnv {
     pub invite: InviteCode,
     pub gateway_data_dir: std::path::PathBuf,
     pub gateway_pk: GatewayPk,
+    pub broker_data_dir: std::path::PathBuf,
+    pub broker_pk: BrokerPk,
     pub lnurl_daemon_url: String,
     pub client_counter: AtomicU64,
     /// One per node, indexed by node id. `None` once we've killed it.
@@ -88,7 +92,7 @@ impl TestEnv {
         let node_data_dirs: Vec<_> = (0..NUM_NODES)
             .map(|i| base.join(format!("node-{i}")))
             .collect();
-        runtime.block_on(run_dkg(&node_data_dirs))?;
+        runtime.block_on(run_dkg(&node_data_dirs, "Test Mint"))?;
 
         let node0_data_dir = node_data_dirs[0].clone();
         let invite = runtime
@@ -146,6 +150,30 @@ impl TestEnv {
         cli::gateway_mint_add(&gateway_data_dir, &invite)?;
         info!("Gateway connected");
 
+        runtime.block_on(start_broker(base, "broker", BROKER_PORT))?;
+
+        let broker_data_dir = base.join("broker");
+
+        info!("Waiting for broker...");
+        let broker_pk = runtime.block_on(retry("broker ready", || async {
+            Ok(cli::broker_info(&broker_data_dir)?.broker_pk)
+        }))?;
+        info!(
+            "Broker ready, broker_pk={}",
+            picomint_base32::encode(&broker_pk)
+        );
+
+        info!("Connecting broker to the mint...");
+        cli::broker_mint_add(&broker_data_dir, &invite)?;
+
+        // The broker funds every swap out of its own balance in the mint,
+        // so it gets one deposit before any test runs. Every swap in the
+        // suite goes back into the mint it left, which exercises the
+        // whole broker path on one mint.
+        info!("Funding the broker...");
+        runtime.block_on(fund_broker(&bitcoind, &broker_data_dir, invite.mint))?;
+        info!("Broker funded");
+
         info!("Building freestanding LDK node...");
         let ldk_node = build_ldk_node(base, runtime.clone())?;
         info!("LDK node built: {}", ldk_node.node_id());
@@ -162,6 +190,8 @@ impl TestEnv {
                 invite,
                 gateway_data_dir,
                 gateway_pk,
+                broker_data_dir,
+                broker_pk,
                 lnurl_daemon_url,
                 client_counter,
                 node_processes: Mutex::new(node_processes),
@@ -235,8 +265,14 @@ impl TestEnv {
 
     /// Bring up a client daemon of its own, joined to the mint.
     pub async fn new_client(&self) -> anyhow::Result<TestClient> {
+        self.new_client_at(&self.invite).await
+    }
+
+    /// Bring up a client daemon of its own, joined to the mint behind
+    /// `invite`.
+    pub async fn new_client_at(&self, invite: &InviteCode) -> anyhow::Result<TestClient> {
         let n = self.client_counter.fetch_add(1, Ordering::Relaxed);
-        start_client(&self.data_dir, n, &self.invite).await
+        start_client(&self.data_dir, n, invite).await
     }
 
     pub fn mine_blocks(&self, n: u64) {
@@ -353,7 +389,67 @@ async fn start_gateway(
     Ok(())
 }
 
-async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
+/// Spawn a broker daemon against a fresh data dir; the caller waits for
+/// its admin socket.
+async fn start_broker(base: &Path, name: &str, port: u16) -> anyhow::Result<()> {
+    let data_dir = base.join(name);
+
+    tokio::fs::create_dir_all(&data_dir).await?;
+
+    let log_file = std::fs::File::create(base.join(format!("{name}.log")))?;
+
+    Command::new("target/release/picomint-broker-daemon")
+        .env("INTEGRATION_TEST", "true")
+        .env("DATA_DIR", data_dir.to_str().unwrap())
+        .env("API_ADDR", format!("0.0.0.0:{port}"))
+        .env("NETWORK", "regtest")
+        .stdout(log_file.try_clone()?)
+        .stderr(log_file)
+        .spawn()
+        .context(format!("Failed to start {name}"))?;
+
+    info!("Started {name} on port {port}");
+    Ok(())
+}
+
+/// Deposit into the broker's balance in `mint` and wait for the mint to
+/// credit it.
+async fn fund_broker(
+    bitcoind: &bitcoincore_rpc::Client,
+    broker_data_dir: &Path,
+    mint: picomint_core::config::MintId,
+) -> anyhow::Result<()> {
+    let address = retry("broker deposit address", || async {
+        cli::broker_onchain_receive(broker_data_dir, &mint.to_string())
+    })
+    .await?
+    .address
+    .assume_checked();
+
+    block_in_place(|| {
+        bitcoind.send_to_address(
+            &address,
+            bitcoin::Amount::from_sat(100_000_000),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+    })?;
+
+    block_in_place(|| bitcoind.generate_to_address(10, &dummy_address()))?;
+
+    retry("broker balance", || async {
+        let balance = cli::broker_mint_balance(broker_data_dir, &mint.to_string())?.balance_msat;
+        ensure!(balance > picomint_core::Amount::ZERO, "Balance is zero");
+        Ok(())
+    })
+    .await
+}
+
+async fn run_dkg(node_data_dirs: &[std::path::PathBuf], mint_name: &str) -> anyhow::Result<()> {
     use picomint_node_cli_core::NodeStatus;
 
     // Wait for all nodes to be ready (the CLI `status` call returns once
@@ -377,7 +473,7 @@ async fn run_dkg(node_data_dirs: &[std::path::PathBuf]) -> anyhow::Result<()> {
     for (node, data_dir) in node_data_dirs.iter().enumerate() {
         let name = format!("Node {node}");
         let (mint_name, mint_size) = if node == 0 {
-            (Some("Test Mint"), Some(NUM_NODES as u8))
+            (Some(mint_name), Some(node_data_dirs.len() as u8))
         } else {
             (None, None)
         };

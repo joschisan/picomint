@@ -1,5 +1,5 @@
 //! Routes and request/response types of the client daemon's admin CLI:
-//! mint management, ecash, onchain, lightning, the analytics query and
+//! mint management, ecash, onchain, lightning, swap, the analytics query and
 //! the mnemonic. Every response type carries a JSON Schema, printed by the
 //! CLI under `--schema`, so its doc lines are the operator-facing
 //! description of each field. The gateway exposes a subset of the same
@@ -20,6 +20,8 @@ use picomint_core::ecash::Denomination;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk};
+use picomint_core::swap::SwapAddress;
+use picomint_core::swap::broker::{BrokerInfo, BrokerPk};
 use picomint_lnurl::Lnurl;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -40,6 +42,7 @@ pub const ROUTE_ECASH_SEND: &str = "/ecash/send";
 pub const ROUTE_ECASH_SEND_MAX: &str = "/ecash/send-max";
 pub const ROUTE_ECASH_RECEIVE: &str = "/ecash/receive";
 pub const ROUTE_ONCHAIN_SEND_FEE: &str = "/onchain/send-fee";
+pub const ROUTE_ONCHAIN_RECEIVE_FEE: &str = "/onchain/receive-fee";
 pub const ROUTE_ONCHAIN_SEND: &str = "/onchain/send";
 pub const ROUTE_ONCHAIN_SEND_MAX_AMOUNT: &str = "/onchain/send-max-amount";
 pub const ROUTE_ONCHAIN_SEND_MAX: &str = "/onchain/send-max";
@@ -52,6 +55,16 @@ pub const ROUTE_LIGHTNING_SEND_MAX: &str = "/lightning/send-max";
 pub const ROUTE_LIGHTNING_RECEIVE: &str = "/lightning/receive";
 pub const ROUTE_LIGHTNING_LNURL: &str = "/lightning/lnurl";
 pub const ROUTE_LIGHTNING_GATEWAY_REFRESH: &str = "/lightning/gateway/refresh";
+
+pub const ROUTE_SWAP_RECEIVE: &str = "/swap/receive";
+pub const ROUTE_SWAP_SEND_DIRECT: &str = "/swap/send-direct";
+pub const ROUTE_SWAP_SEND_MAX_AMOUNT_DIRECT: &str = "/swap/send-max-amount-direct";
+pub const ROUTE_SWAP_SEND_MAX_DIRECT: &str = "/swap/send-max-direct";
+pub const ROUTE_SWAP_BROKER_LIST: &str = "/swap/broker/list";
+pub const ROUTE_SWAP_BROKER_REFRESH: &str = "/swap/broker/refresh";
+pub const ROUTE_SWAP_SEND: &str = "/swap/send";
+pub const ROUTE_SWAP_SEND_MAX_AMOUNT: &str = "/swap/send-max-amount";
+pub const ROUTE_SWAP_SEND_MAX: &str = "/swap/send-max";
 
 // --- /mnemonic ---
 
@@ -269,6 +282,24 @@ pub struct ClientOnchainSendFeeResponse {
     /// a stack of pending mint transactions has to be paid for. The mint's
     /// own per-output fee from its config comes on top of this when the
     /// send is charged
+    #[schemars(with = "u64")]
+    pub fee: bitcoin::Amount,
+}
+
+// --- /onchain/receive-fee ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientOnchainReceiveFeeRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+}
+
+/// What a deposit is credited less right now.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientOnchainReceiveFeeResponse {
+    /// The miner fee the mint takes out of a deposit to sweep it into its
+    /// wallet, in sat: the consensus fee rate times the vbytes of the
+    /// sweep. A deposit worth no more than this is not claimed
     #[schemars(with = "u64")]
     pub fee: bitcoin::Amount,
 }
@@ -506,4 +537,156 @@ pub struct ClientLightningLnurlResponse {
 pub struct ClientLightningGatewayRefreshRequest {
     /// The mint id, as printed by `list`
     pub mint: MintId,
+}
+
+// --- /swap/receive ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientSwapReceiveRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+}
+
+/// The account's swap address: static, and valid for as long as the mint
+/// exists.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientSwapReceiveResponse {
+    /// The address to hand to a payer: it names the mint, carries its swap
+    /// key and names the account by a static key, so nothing in it expires.
+    /// A payer in this mint pays it directly, any other payer through a
+    /// broker
+    pub address: SwapAddress,
+}
+
+// --- /swap/broker/list ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientSwapBrokerListRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+}
+
+/// Every broker the mint recommends that answered a probe, keyed by pk,
+/// with the fee it charges. The list only changes on `swap broker
+/// refresh`, so a fee read here is the fee a send between refreshes pays.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientSwapBrokerListResponse {
+    /// The brokers, keyed by `broker_pk`; a send to another mint names one
+    /// of these keys
+    pub brokers: BTreeMap<BrokerPk, BrokerInfo>,
+}
+
+// --- /swap/broker/refresh ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientSwapBrokerRefreshRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+}
+
+// --- /swap/send-direct ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientSwapSendDirectRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+    /// The swap address to pay, as printed by the recipient's `swap receive`;
+    /// it must live in this mint
+    pub address: SwapAddress,
+    /// The amount with its denomination the recipient receives, e.g.
+    /// "1000 sat"
+    pub amount: bitcoin::Amount,
+}
+
+/// The payment was submitted; it completes in the background.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientSwapSendResponse {
+    /// The operation the payment logs under, derived from the receive
+    /// contract's id; a swap through a broker logs `swap_send` and then
+    /// `swap_send_success` with the destination mint's attestation, a
+    /// direct payment logs `swap_send_direct` and completes with `tx_accept`
+    pub operation: OperationId,
+}
+
+// --- /swap/send-max-amount-direct ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientSwapSendMaxAmountDirectRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+}
+
+/// What a max send would pay right now.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientSwapSendMaxAmountResponse {
+    /// The amount, in msat and always a whole sat: the largest amount the
+    /// account's notes cover when spent in full, once the broker's fee on
+    /// it if any, the mint's per-output fee and its per-input fee on every
+    /// note are paid; the sub-sat remainder stays with the mint. 0 when
+    /// the notes do not even cover the fees
+    pub amount_msat: Amount,
+}
+
+// --- /swap/send-max-direct ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientSwapSendMaxDirectRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+    /// The swap address to pay, as printed by the recipient's `swap receive`;
+    /// it must live in this mint, and the account's whole balance less the
+    /// mint's fees goes to it
+    pub address: SwapAddress,
+}
+
+// --- /swap/send ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientSwapSendRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+    /// The broker to swap through, from `swap broker list`
+    pub broker: BrokerPk,
+    /// The swap address to pay, as printed by the recipient's `swap receive`
+    pub address: SwapAddress,
+    /// The amount with its denomination the recipient receives, e.g.
+    /// "1000 sat"; the broker's fee is charged on top
+    pub amount: bitcoin::Amount,
+}
+
+// --- /swap/send-max-amount ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientSwapSendMaxAmountRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+    /// The broker to swap through, from `swap broker list`
+    pub broker: BrokerPk,
+}
+
+// --- /swap/send-max ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientSwapSendMaxRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+    /// The broker to swap through, from `swap broker list`
+    pub broker: BrokerPk,
+    /// The swap address to pay, as printed by the recipient's `swap receive`;
+    /// the account's whole balance less the fees goes to it
+    pub address: SwapAddress,
 }

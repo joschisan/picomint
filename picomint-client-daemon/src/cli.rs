@@ -18,17 +18,25 @@ use picomint_client_cli_core::{
     ClientLightningReceiveResponse, ClientLightningSendMaxAmountRequest,
     ClientLightningSendMaxAmountResponse, ClientLightningSendMaxRequest,
     ClientLightningSendMaxResponse, ClientLightningSendRequest, ClientLightningSendResponse,
-    ClientListResponse, ClientOnchainReceiveRequest, ClientOnchainReceiveResponse,
-    ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse, ClientOnchainSendMaxAmountRequest,
+    ClientListResponse, ClientOnchainReceiveFeeRequest, ClientOnchainReceiveFeeResponse,
+    ClientOnchainReceiveRequest, ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest,
+    ClientOnchainSendFeeResponse, ClientOnchainSendMaxAmountRequest,
     ClientOnchainSendMaxAmountResponse, ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse,
-    ClientOnchainSendRequest, ClientOnchainSendResponse, ClientRemoveRequest, MintInfo,
-    MnemonicResponse, QueryRequest, QueryResponse, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG,
-    ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_EXPIRY,
-    ROUTE_LIGHTNING_GATEWAY_LIST, ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_LNURL,
-    ROUTE_LIGHTNING_RECEIVE, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX,
-    ROUTE_LIGHTNING_SEND_MAX_AMOUNT, ROUTE_LIST, ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE,
-    ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX,
-    ROUTE_ONCHAIN_SEND_MAX_AMOUNT, ROUTE_QUERY, ROUTE_REMOVE,
+    ClientOnchainSendRequest, ClientOnchainSendResponse, ClientRemoveRequest,
+    ClientSwapBrokerListRequest, ClientSwapBrokerListResponse, ClientSwapBrokerRefreshRequest,
+    ClientSwapReceiveRequest, ClientSwapReceiveResponse, ClientSwapSendDirectRequest,
+    ClientSwapSendMaxAmountDirectRequest, ClientSwapSendMaxAmountRequest,
+    ClientSwapSendMaxAmountResponse, ClientSwapSendMaxDirectRequest, ClientSwapSendMaxRequest,
+    ClientSwapSendRequest, ClientSwapSendResponse, MintInfo, MnemonicResponse, QueryRequest,
+    QueryResponse, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE,
+    ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_EXPIRY, ROUTE_LIGHTNING_GATEWAY_LIST,
+    ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_LNURL, ROUTE_LIGHTNING_RECEIVE,
+    ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX, ROUTE_LIGHTNING_SEND_MAX_AMOUNT, ROUTE_LIST,
+    ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE, ROUTE_ONCHAIN_RECEIVE_FEE, ROUTE_ONCHAIN_SEND,
+    ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX, ROUTE_ONCHAIN_SEND_MAX_AMOUNT, ROUTE_QUERY,
+    ROUTE_REMOVE, ROUTE_SWAP_BROKER_LIST, ROUTE_SWAP_BROKER_REFRESH, ROUTE_SWAP_RECEIVE,
+    ROUTE_SWAP_SEND, ROUTE_SWAP_SEND_DIRECT, ROUTE_SWAP_SEND_MAX, ROUTE_SWAP_SEND_MAX_AMOUNT,
+    ROUTE_SWAP_SEND_MAX_AMOUNT_DIRECT, ROUTE_SWAP_SEND_MAX_DIRECT,
 };
 use picomint_core::Amount;
 use tracing::instrument;
@@ -52,6 +60,7 @@ pub fn run(state: AppState) -> anyhow::Result<impl Future<Output = ()>> {
         .route(ROUTE_ECASH_SEND_MAX, post(ecash_send_max))
         .route(ROUTE_ECASH_RECEIVE, post(ecash_receive))
         .route(ROUTE_ONCHAIN_SEND_FEE, post(onchain_send_fee))
+        .route(ROUTE_ONCHAIN_RECEIVE_FEE, post(onchain_receive_fee))
         .route(ROUTE_ONCHAIN_SEND, post(onchain_send))
         .route(ROUTE_ONCHAIN_SEND_MAX_AMOUNT, post(onchain_send_max_amount))
         .route(ROUTE_ONCHAIN_SEND_MAX, post(onchain_send_max))
@@ -69,6 +78,18 @@ pub fn run(state: AppState) -> anyhow::Result<impl Future<Output = ()>> {
             ROUTE_LIGHTNING_GATEWAY_REFRESH,
             post(lightning_gateway_refresh),
         )
+        .route(ROUTE_SWAP_RECEIVE, post(swap_receive))
+        .route(ROUTE_SWAP_SEND_DIRECT, post(swap_send_direct))
+        .route(
+            ROUTE_SWAP_SEND_MAX_AMOUNT_DIRECT,
+            post(swap_send_max_amount_direct),
+        )
+        .route(ROUTE_SWAP_SEND_MAX_DIRECT, post(swap_send_max_direct))
+        .route(ROUTE_SWAP_BROKER_LIST, post(swap_broker_list))
+        .route(ROUTE_SWAP_BROKER_REFRESH, post(swap_broker_refresh))
+        .route(ROUTE_SWAP_SEND, post(swap_send))
+        .route(ROUTE_SWAP_SEND_MAX_AMOUNT, post(swap_send_max_amount))
+        .route(ROUTE_SWAP_SEND_MAX, post(swap_send_max))
         .with_state(state);
 
     serve(&data_dir, router)
@@ -254,6 +275,20 @@ async fn onchain_send_fee(
 }
 
 #[instrument(skip_all, err)]
+async fn onchain_receive_fee(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientOnchainReceiveFeeRequest>,
+) -> Result<Json<ClientOnchainReceiveFeeResponse>, CliError> {
+    let fee = state
+        .client
+        .onchain_receive_fee(payload.mint)
+        .await
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientOnchainReceiveFeeResponse { fee }))
+}
+
+#[instrument(skip_all, err)]
 async fn onchain_send(
     State(state): State<AppState>,
     Json(payload): Json<ClientOnchainSendRequest>,
@@ -429,4 +464,147 @@ async fn lightning_gateway_refresh(
         .expect("the mint was found a moment ago");
 
     Ok(Json(ClientLightningGatewayListResponse { gateways }))
+}
+
+#[instrument(skip_all, err)]
+async fn swap_receive(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientSwapReceiveRequest>,
+) -> Result<Json<ClientSwapReceiveResponse>, CliError> {
+    let address = state
+        .client
+        .swap_receive(payload.mint, payload.account)
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientSwapReceiveResponse { address }))
+}
+
+#[instrument(skip_all, err)]
+async fn swap_broker_list(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientSwapBrokerListRequest>,
+) -> Result<Json<ClientSwapBrokerListResponse>, CliError> {
+    let brokers = state
+        .client
+        .swap_brokers(payload.mint)
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientSwapBrokerListResponse { brokers }))
+}
+
+#[instrument(skip_all, err)]
+async fn swap_broker_refresh(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientSwapBrokerRefreshRequest>,
+) -> Result<Json<ClientSwapBrokerListResponse>, CliError> {
+    state
+        .client
+        .swap_refresh_brokers(payload.mint)
+        .await
+        .map_err(CliError::rejected)?;
+
+    let brokers = state
+        .client
+        .swap_brokers(payload.mint)
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientSwapBrokerListResponse { brokers }))
+}
+
+#[instrument(skip_all, err)]
+async fn swap_send_direct(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientSwapSendDirectRequest>,
+) -> Result<Json<ClientSwapSendResponse>, CliError> {
+    let operation = state
+        .client
+        .swap_send_direct(
+            payload.mint,
+            payload.account,
+            payload.address,
+            Amount::from_sat(payload.amount.to_sat()),
+        )
+        .await
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientSwapSendResponse { operation }))
+}
+
+#[instrument(skip_all, err)]
+async fn swap_send_max_amount_direct(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientSwapSendMaxAmountDirectRequest>,
+) -> Result<Json<ClientSwapSendMaxAmountResponse>, CliError> {
+    let amount_msat = state
+        .client
+        .swap_send_max_amount_direct(payload.mint, payload.account)
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientSwapSendMaxAmountResponse { amount_msat }))
+}
+
+#[instrument(skip_all, err)]
+async fn swap_send_max_direct(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientSwapSendMaxDirectRequest>,
+) -> Result<Json<ClientSwapSendResponse>, CliError> {
+    let operation = state
+        .client
+        .swap_send_max_direct(payload.mint, payload.account, payload.address)
+        .await
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientSwapSendResponse { operation }))
+}
+
+#[instrument(skip_all, err)]
+async fn swap_send(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientSwapSendRequest>,
+) -> Result<Json<ClientSwapSendResponse>, CliError> {
+    let operation = state
+        .client
+        .swap_send(
+            payload.mint,
+            payload.account,
+            payload.broker,
+            payload.address,
+            Amount::from_sat(payload.amount.to_sat()),
+        )
+        .await
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientSwapSendResponse { operation }))
+}
+
+#[instrument(skip_all, err)]
+async fn swap_send_max_amount(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientSwapSendMaxAmountRequest>,
+) -> Result<Json<ClientSwapSendMaxAmountResponse>, CliError> {
+    let amount_msat = state
+        .client
+        .swap_send_max_amount(payload.mint, payload.account, payload.broker)
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientSwapSendMaxAmountResponse { amount_msat }))
+}
+
+#[instrument(skip_all, err)]
+async fn swap_send_max(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientSwapSendMaxRequest>,
+) -> Result<Json<ClientSwapSendResponse>, CliError> {
+    let operation = state
+        .client
+        .swap_send_max(
+            payload.mint,
+            payload.account,
+            payload.broker,
+            payload.address,
+        )
+        .await
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientSwapSendResponse { operation }))
 }

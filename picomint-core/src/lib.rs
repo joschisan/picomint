@@ -53,6 +53,8 @@ pub mod session;
 
 /// Analytics column mapping for event fields.
 pub mod sql;
+/// Swap module wire types / helpers (shared between client and server).
+pub mod swap;
 /// Wire-level Transaction and ConsensusItem types.
 pub mod tx;
 /// Consensus version of the mint and the vote that advances it.

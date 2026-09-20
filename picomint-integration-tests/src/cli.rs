@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail, ensure};
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
+use picomint_core::swap::broker::BrokerPk;
 use picomint_gateway_cli_core::{
     ClientBalanceResponse, ClientListResponse, InfoResponse, LdkChannelListResponse,
     LdkLightningReceiveResponse, LdkOnchainReceiveResponse,
@@ -13,6 +14,7 @@ use picomint_node_cli_core::{
     ExpiryStatusResponse, InviteResponse, NodeStatus, OnchainStatusResponse, PendingResponse,
 };
 use serde::de::DeserializeOwned;
+use serde_json::Map;
 use serde_json::Value;
 
 pub trait RunCli {
@@ -37,6 +39,12 @@ impl RunCli for Command {
 fn gateway_cmd(gateway_data_dir: &Path) -> Command {
     let mut cmd = Command::new("target/release/picomint-gateway-cli");
     cmd.arg("--data-dir").arg(gateway_data_dir);
+    cmd
+}
+
+fn broker_cmd(broker_data_dir: &Path) -> Command {
+    let mut cmd = Command::new("target/release/picomint-broker-cli");
+    cmd.arg("--data-dir").arg(broker_data_dir);
     cmd
 }
 
@@ -264,6 +272,76 @@ pub fn rugpull(
         cmd.arg("--secret").arg(secret);
     }
     cmd.run_cli::<Value>()
+}
+
+// ── Broker CLI wrappers ─────────────────────────────────────────────────────
+
+pub fn broker_info(broker_data_dir: &Path) -> Result<picomint_broker_cli_core::InfoResponse> {
+    broker_cmd(broker_data_dir).arg("info").run_cli()
+}
+
+pub fn broker_mint_add(broker_data_dir: &Path, invite: &InviteCode) -> Result<Value> {
+    broker_cmd(broker_data_dir)
+        .arg("client")
+        .arg("add")
+        .arg(picomint_base32::encode(invite))
+        .run_cli::<Value>()
+}
+
+pub fn broker_mint_balance(
+    broker_data_dir: &Path,
+    mint: &str,
+) -> Result<picomint_broker_cli_core::ClientBalanceResponse> {
+    broker_cmd(broker_data_dir)
+        .arg("client")
+        .arg("balance")
+        .arg(mint)
+        .arg("primary")
+        .run_cli()
+}
+
+pub fn broker_onchain_receive(
+    broker_data_dir: &Path,
+    mint: &str,
+) -> Result<picomint_broker_cli_core::ClientOnchainReceiveResponse> {
+    broker_cmd(broker_data_dir)
+        .arg("client")
+        .arg("onchain")
+        .arg("receive")
+        .arg(mint)
+        .arg("primary")
+        .run_cli()
+}
+
+pub fn broker_rebalance(
+    broker_data_dir: &Path,
+) -> Result<Option<picomint_broker_cli_core::RebalanceResponse>> {
+    broker_cmd(broker_data_dir).arg("rebalance").run_cli()
+}
+
+pub fn broker_query(broker_data_dir: &Path, query: &str) -> Result<Vec<Map<String, Value>>> {
+    broker_cmd(broker_data_dir)
+        .arg("query")
+        .arg(query)
+        .run_cli::<picomint_broker_cli_core::QueryResponse>()
+        .map(|response| response.0)
+}
+
+pub fn node_swap_broker_add(data_dir: &Path, pk: &BrokerPk) -> Result<Value> {
+    node_cmd(data_dir)
+        .arg("broker")
+        .arg("add")
+        .arg(picomint_base32::encode(pk))
+        .arg("Test Broker")
+        .run_cli::<Value>()
+}
+
+pub fn node_swap_broker_remove(data_dir: &Path, pk: &BrokerPk) -> Result<Value> {
+    node_cmd(data_dir)
+        .arg("broker")
+        .arg("remove")
+        .arg(picomint_base32::encode(pk))
+        .run_cli::<Value>()
 }
 
 pub fn node_lightning_gateway_add(data_dir: &Path, pk: &GatewayPk) -> Result<Value> {

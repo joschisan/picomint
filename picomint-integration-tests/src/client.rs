@@ -19,7 +19,8 @@ use picomint_client_cli_core::{
     ClientLightningReceiveResponse, ClientLightningSendMaxAmountResponse,
     ClientLightningSendResponse, ClientListResponse, ClientOnchainReceiveResponse,
     ClientOnchainSendMaxAmountResponse, ClientOnchainSendMaxResponse, ClientOnchainSendResponse,
-    QueryResponse,
+    ClientSwapBrokerListResponse, ClientSwapReceiveResponse, ClientSwapSendMaxAmountResponse,
+    ClientSwapSendResponse, QueryResponse,
 };
 use picomint_core::Amount;
 use picomint_core::config::MintId;
@@ -28,6 +29,8 @@ use picomint_core::ecash::Denomination;
 use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
+use picomint_core::swap::SwapAddress;
+use picomint_core::swap::broker::BrokerPk;
 use serde_json::{Map, Value};
 use tokio::process::Child;
 use tokio::sync::Mutex;
@@ -279,6 +282,122 @@ impl TestClient {
             .arg(lnurl_daemon)
             .run_cli::<ClientLightningLnurlResponse>()
             .map(|response| response.lnurl)
+    }
+
+    pub fn swap_receive(&self) -> anyhow::Result<SwapAddress> {
+        client_cmd(&self.data_dir)
+            .arg("swap")
+            .arg("receive")
+            .arg(self.mint.to_string())
+            .arg("primary")
+            .run_cli::<ClientSwapReceiveResponse>()
+            .map(|response| response.address)
+    }
+
+    pub fn swap_broker_refresh(&self) -> anyhow::Result<()> {
+        client_cmd(&self.data_dir)
+            .arg("swap")
+            .arg("broker")
+            .arg("refresh")
+            .arg(self.mint.to_string())
+            .run_cli::<Value>()
+            .map(|_| ())
+    }
+
+    /// The one broker the test mint recommends.
+    pub fn swap_broker(&self) -> anyhow::Result<BrokerPk> {
+        client_cmd(&self.data_dir)
+            .arg("swap")
+            .arg("broker")
+            .arg("list")
+            .arg(self.mint.to_string())
+            .run_cli::<ClientSwapBrokerListResponse>()?
+            .brokers
+            .into_keys()
+            .next()
+            .context("no broker has answered a probe")
+    }
+
+    pub fn swap_send_direct(
+        &self,
+        address: &SwapAddress,
+        amount: bitcoin::Amount,
+    ) -> anyhow::Result<OperationId> {
+        client_cmd(&self.data_dir)
+            .arg("swap")
+            .arg("send-direct")
+            .arg(self.mint.to_string())
+            .arg("primary")
+            .arg(picomint_base32::encode(address))
+            .arg(sat(amount))
+            .run_cli::<ClientSwapSendResponse>()
+            .map(|response| response.operation)
+    }
+
+    pub fn swap_send_max_amount_direct(&self) -> anyhow::Result<Amount> {
+        client_cmd(&self.data_dir)
+            .arg("swap")
+            .arg("send-max-amount-direct")
+            .arg(self.mint.to_string())
+            .arg("primary")
+            .run_cli::<ClientSwapSendMaxAmountResponse>()
+            .map(|response| response.amount_msat)
+    }
+
+    pub fn swap_send_max_direct(&self, address: &SwapAddress) -> anyhow::Result<OperationId> {
+        client_cmd(&self.data_dir)
+            .arg("swap")
+            .arg("send-max-direct")
+            .arg(self.mint.to_string())
+            .arg("primary")
+            .arg(picomint_base32::encode(address))
+            .run_cli::<ClientSwapSendResponse>()
+            .map(|response| response.operation)
+    }
+
+    pub fn swap_send(
+        &self,
+        broker: BrokerPk,
+        address: &SwapAddress,
+        amount: bitcoin::Amount,
+    ) -> anyhow::Result<OperationId> {
+        client_cmd(&self.data_dir)
+            .arg("swap")
+            .arg("send")
+            .arg(self.mint.to_string())
+            .arg("primary")
+            .arg(picomint_base32::encode(&broker))
+            .arg(picomint_base32::encode(address))
+            .arg(sat(amount))
+            .run_cli::<ClientSwapSendResponse>()
+            .map(|response| response.operation)
+    }
+
+    pub fn swap_send_max_amount(&self, broker: BrokerPk) -> anyhow::Result<Amount> {
+        client_cmd(&self.data_dir)
+            .arg("swap")
+            .arg("send-max-amount")
+            .arg(self.mint.to_string())
+            .arg("primary")
+            .arg(picomint_base32::encode(&broker))
+            .run_cli::<ClientSwapSendMaxAmountResponse>()
+            .map(|response| response.amount_msat)
+    }
+
+    pub fn swap_send_max(
+        &self,
+        broker: BrokerPk,
+        address: &SwapAddress,
+    ) -> anyhow::Result<OperationId> {
+        client_cmd(&self.data_dir)
+            .arg("swap")
+            .arg("send-max")
+            .arg(self.mint.to_string())
+            .arg("primary")
+            .arg(picomint_base32::encode(&broker))
+            .arg(picomint_base32::encode(address))
+            .run_cli::<ClientSwapSendResponse>()
+            .map(|response| response.operation)
     }
 
     pub fn query(&self, query: &str) -> anyhow::Result<Vec<Map<String, Value>>> {

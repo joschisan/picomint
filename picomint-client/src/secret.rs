@@ -1,7 +1,7 @@
 //! Mnemonic-driven client-tree derivation on top of [`Secret`].
 //!
 //! [`ClientSecret`] is the per-mint root. Its typed accessors descend
-//! into the four per-module subtrees (each owned by its own `<module>/secret.rs`
+//! into the five per-module subtrees (each owned by its own `<module>/secret.rs`
 //! file); [`Path`] labels the module hop and is kept private so that tree can
 //! only be traversed via the typed entry points below.
 
@@ -15,6 +15,7 @@ use crate::ecash::EcashSecret;
 use crate::gateway::GatewaySecret;
 use crate::lightning::LightningSecret;
 use crate::onchain::OnchainSecret;
+use crate::swap::SwapSecret;
 
 const WORD_COUNT: usize = 12;
 
@@ -33,6 +34,7 @@ enum Path {
     Onchain,
     Lightning,
     Gateway,
+    Swap,
 }
 
 /// Per-mint client root secret, derived from `mnemonic → mint`.
@@ -59,6 +61,10 @@ impl ClientSecret {
 
     pub fn gateway_secret(&self) -> GatewaySecret {
         GatewaySecret::new(self.0.child(&Path::Gateway))
+    }
+
+    pub fn swap_secret(&self) -> SwapSecret {
+        SwapSecret::new(self.0.child(&Path::Swap))
     }
 }
 

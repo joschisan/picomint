@@ -49,11 +49,19 @@ pub(crate) fn resume(ctx: &ClientContext) {
 }
 
 /// Fetch the current fee required to send an onchain payment.
-pub(crate) async fn send_fee(ctx: &ClientContext) -> Result<bitcoin::Amount, SendFeeError> {
+pub(crate) async fn send_fee(ctx: &ClientContext) -> Result<bitcoin::Amount, FeeError> {
     api::send_fee(&ctx.api)
         .await
-        .map_err(|_| SendFeeError::FeeRequestFailed)?
-        .ok_or(SendFeeError::NoConsensusFeerateAvailable)
+        .map_err(|_| FeeError::FeeRequestFailed)?
+        .ok_or(FeeError::NoConsensusFeerateAvailable)
+}
+
+/// Fetch the current fee the mint takes out of a deposit to sweep it.
+async fn receive_fee(ctx: &ClientContext) -> Result<bitcoin::Amount, FeeError> {
+    api::receive_fee(&ctx.api)
+        .await
+        .map_err(|_| FeeError::FeeRequestFailed)?
+        .ok_or(FeeError::NoConsensusFeerateAvailable)
 }
 
 fn max_amount_at(ctx: &ClientContext, account: Account, fee: bitcoin::Amount) -> bitcoin::Amount {
@@ -399,7 +407,7 @@ pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
 
 /// Why the mint's send fee could not be read.
 #[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
-pub enum SendFeeError {
+pub enum FeeError {
     #[error("The mint did not answer the fee request")]
     FeeRequestFailed,
     #[error("No consensus feerate is available at this time")]
@@ -420,7 +428,7 @@ pub enum SendError {
     #[error("Unsupported address type")]
     UnsupportedAddress,
     #[error(transparent)]
-    Fee(#[from] SendFeeError),
+    Fee(#[from] FeeError),
 }
 
 #[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
@@ -454,7 +462,7 @@ impl Client {
         amount: bitcoin::Amount,
         fee: Option<bitcoin::Amount>,
     ) -> Result<OperationId, SendError> {
-        let ctx = self.ctx(mint).map_err(|_| SendFeeError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| FeeError::NotAdded)?;
 
         let fee = match fee {
             Some(fee) => fee,
@@ -471,8 +479,8 @@ impl Client {
         &self,
         mint: MintId,
         account: Account,
-    ) -> Result<bitcoin::Amount, SendFeeError> {
-        let ctx = self.ctx(mint).map_err(|_| SendFeeError::NotAdded)?;
+    ) -> Result<bitcoin::Amount, FeeError> {
+        let ctx = self.ctx(mint).map_err(|_| FeeError::NotAdded)?;
 
         Ok(max_amount_at(&ctx, account, send_fee(&ctx).await?))
     }
@@ -485,7 +493,7 @@ impl Client {
         account: Account,
         address: Address<NetworkUnchecked>,
     ) -> Result<OperationId, SendError> {
-        let ctx = self.ctx(mint).map_err(|_| SendFeeError::NotAdded)?;
+        let ctx = self.ctx(mint).map_err(|_| FeeError::NotAdded)?;
 
         let fee = send_fee(&ctx).await?;
 
@@ -495,10 +503,18 @@ impl Client {
     }
 
     /// The current fee required to send an onchain payment.
-    pub async fn onchain_send_fee(&self, mint: MintId) -> Result<bitcoin::Amount, SendFeeError> {
-        let ctx = self.ctx(mint).map_err(|_| SendFeeError::NotAdded)?;
+    pub async fn onchain_send_fee(&self, mint: MintId) -> Result<bitcoin::Amount, FeeError> {
+        let ctx = self.ctx(mint).map_err(|_| FeeError::NotAdded)?;
 
         send_fee(&ctx).await
+    }
+
+    /// The current fee the mint takes out of a deposit to sweep it into
+    /// its wallet: what a deposit is credited less.
+    pub async fn onchain_receive_fee(&self, mint: MintId) -> Result<bitcoin::Amount, FeeError> {
+        let ctx = self.ctx(mint).map_err(|_| FeeError::NotAdded)?;
+
+        receive_fee(&ctx).await
     }
 
     /// The total value of bitcoin controlled by the mint.

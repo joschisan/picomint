@@ -20,7 +20,7 @@ use crate::config::db::DkgParamsTable;
 use crate::config::setup::SetupApi;
 use crate::consensus::api::ConsensusApi;
 use crate::consensus::db::consensus_version;
-use crate::consensus::{lightning, onchain};
+use crate::consensus::{lightning, onchain, swap};
 use crate::p2p::{P2PConnectionStatus, Transport};
 use picomint_node_cli_core::BackupResponse;
 
@@ -75,15 +75,17 @@ fn wrong_phase(phase: &'static str) -> impl Fn() -> std::future::Ready<CliError>
 pub fn router(api: Arc<ConsensusApi>) -> Router {
     use picomint_core::expiry::ExpiryStatus;
     use picomint_node_cli_core::{
-        BitcoindError, BitcoindResponse, EXPIRY_DAYS_LIMIT, ExpirySetError, ExpirySetRequest,
-        ExpiryStatusResponse, GatewayAddError, GatewayRemoveError, HistoryResponse,
-        INVITE_EXPIRY_DAYS_LIMIT, InviteError, InviteRequest, InviteResponse,
-        LightningGatewayAddRequest, LightningGatewayInfo, LightningGatewayListResponse,
-        LightningGatewayRemoveRequest, OnchainStatusResponse, PendingResponse, ROUTE_BACKUP,
-        ROUTE_BITCOIND, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
+        BitcoindError, BitcoindResponse, BrokerAddError, BrokerRemoveError, EXPIRY_DAYS_LIMIT,
+        ExpirySetError, ExpirySetRequest, ExpiryStatusResponse, GatewayAddError,
+        GatewayRemoveError, HistoryResponse, INVITE_EXPIRY_DAYS_LIMIT, InviteError, InviteRequest,
+        InviteResponse, LightningGatewayAddRequest, LightningGatewayInfo,
+        LightningGatewayListResponse, LightningGatewayRemoveRequest, OnchainStatusResponse,
+        PendingResponse, ROUTE_BACKUP, ROUTE_BITCOIND, ROUTE_BROKER_ADD, ROUTE_BROKER_LIST,
+        ROUTE_BROKER_REMOVE, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
         ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
         ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL, ROUTE_ONCHAIN_STATUS,
-        RugpullError, RugpullResponse,
+        RugpullError, RugpullResponse, SwapBrokerAddRequest, SwapBrokerInfo,
+        SwapBrokerListResponse, SwapBrokerRemoveRequest,
     };
 
     async fn bitcoind(
@@ -204,6 +206,39 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         }))
     }
 
+    async fn swap_broker_add(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+        Json(payload): Json<SwapBrokerAddRequest>,
+    ) -> Result<Json<()>, CliError> {
+        if !swap::add_broker(&api.server, payload.pk, payload.name) {
+            return Err(CliError::rejected(BrokerAddError::AlreadyRecommended));
+        }
+
+        Ok(Json(()))
+    }
+
+    async fn swap_broker_remove(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+        Json(payload): Json<SwapBrokerRemoveRequest>,
+    ) -> Result<Json<()>, CliError> {
+        if !swap::remove_broker(&api.server, payload.pk) {
+            return Err(CliError::rejected(BrokerRemoveError::NotRecommended));
+        }
+
+        Ok(Json(()))
+    }
+
+    async fn swap_broker_list(
+        State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
+    ) -> Result<Json<SwapBrokerListResponse>, CliError> {
+        Ok(Json(SwapBrokerListResponse {
+            brokers: swap::brokers(&api.server.db.begin_read())
+                .into_iter()
+                .map(|(pk, name)| SwapBrokerInfo { pk, name })
+                .collect(),
+        }))
+    }
+
     async fn expiry_set(
         State(api): State<Arc<crate::consensus::api::ConsensusApi>>,
         Json(payload): Json<ExpirySetRequest>,
@@ -264,6 +299,9 @@ pub fn router(api: Arc<ConsensusApi>) -> Router {
         .route(ROUTE_GATEWAY_ADD, post(lightning_gateway_add))
         .route(ROUTE_GATEWAY_REMOVE, post(lightning_gateway_remove))
         .route(ROUTE_GATEWAY_LIST, post(lightning_gateway_list))
+        .route(ROUTE_BROKER_ADD, post(swap_broker_add))
+        .route(ROUTE_BROKER_REMOVE, post(swap_broker_remove))
+        .route(ROUTE_BROKER_LIST, post(swap_broker_list))
         .route(ROUTE_EXPIRY_SET, post(expiry_set))
         .route(ROUTE_EXPIRY_CLEAR, post(expiry_clear))
         .route(ROUTE_EXPIRY_STATUS, post(expiry_status))

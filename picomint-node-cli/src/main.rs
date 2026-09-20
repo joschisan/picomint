@@ -3,17 +3,18 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use picomint_cli_client::{FOOTER, RequestError, print_json, request, schema, schema_fallible};
 use picomint_node_cli_core::{
-    BackupResponse, BitcoindError, BitcoindResponse, ExpirySetError, ExpirySetRequest,
-    ExpiryStatusResponse, GatewayAddError, GatewayRemoveError, HistoryResponse, InviteError,
-    InviteRequest, InviteResponse, LightningGatewayAddRequest, LightningGatewayListResponse,
-    LightningGatewayRemoveRequest, NodeStatus, OnchainStatusResponse, PendingResponse,
-    ROUTE_BACKUP, ROUTE_BITCOIND, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
+    BackupResponse, BitcoindError, BitcoindResponse, BrokerAddError, BrokerRemoveError,
+    ExpirySetError, ExpirySetRequest, ExpiryStatusResponse, GatewayAddError, GatewayRemoveError,
+    HistoryResponse, InviteError, InviteRequest, InviteResponse, LightningGatewayAddRequest,
+    LightningGatewayListResponse, LightningGatewayRemoveRequest, NodeStatus, OnchainStatusResponse,
+    PendingResponse, ROUTE_BACKUP, ROUTE_BITCOIND, ROUTE_BROKER_ADD, ROUTE_BROKER_LIST,
+    ROUTE_BROKER_REMOVE, ROUTE_EXPIRY_CLEAR, ROUTE_EXPIRY_SET, ROUTE_EXPIRY_STATUS,
     ROUTE_GATEWAY_ADD, ROUTE_GATEWAY_LIST, ROUTE_GATEWAY_REMOVE, ROUTE_INVITE,
     ROUTE_ONCHAIN_HISTORY, ROUTE_ONCHAIN_PENDING, ROUTE_ONCHAIN_RUGPULL, ROUTE_ONCHAIN_STATUS,
     ROUTE_SETUP_ADD, ROUTE_SETUP_CONFIRM, ROUTE_SETUP_INIT, ROUTE_SETUP_RESET, ROUTE_SETUP_RESTORE,
     ROUTE_STATUS, RugpullError, RugpullResponse, SetupAddError, SetupAddRequest, SetupAddResponse,
     SetupConfirmError, SetupInitError, SetupInitRequest, SetupInitResponse, SetupRestoreError,
-    StatusError,
+    StatusError, SwapBrokerAddRequest, SwapBrokerListResponse, SwapBrokerRemoveRequest,
 };
 use serde_json::Value;
 
@@ -65,6 +66,9 @@ enum Commands {
     /// The gateways this node recommends to clients
     #[command(subcommand)]
     Gateway(GatewayCommands),
+    /// The swap brokers this node recommends to clients
+    #[command(subcommand)]
+    Broker(BrokerCommands),
 }
 
 #[derive(Subcommand)]
@@ -113,6 +117,19 @@ enum OnchainCommands {
     /// Print this node's rugpull secret, for draining the wallet once the mint has wound down; pipe it into a file (secret)
     #[command(after_long_help = schema_fallible::<RugpullResponse, RugpullError>())]
     Rugpull,
+}
+
+#[derive(Subcommand)]
+enum BrokerCommands {
+    /// Recommend a broker; clients use it once a threshold of nodes do
+    #[command(after_long_help = schema_fallible::<(), BrokerAddError>())]
+    Add(SwapBrokerAddRequest),
+    /// Withdraw this node's recommendation
+    #[command(after_long_help = schema_fallible::<(), BrokerRemoveError>())]
+    Remove(SwapBrokerRemoveRequest),
+    /// The brokers this node recommends
+    #[command(after_long_help = schema::<SwapBrokerListResponse>())]
+    List,
 }
 
 #[derive(Subcommand)]
@@ -169,6 +186,12 @@ async fn main() {
             GatewayCommands::Add(req) => request(d, ROUTE_GATEWAY_ADD, req).await,
             GatewayCommands::Remove(req) => request(d, ROUTE_GATEWAY_REMOVE, req).await,
             GatewayCommands::List => request(d, ROUTE_GATEWAY_LIST, ()).await,
+        },
+
+        Commands::Broker(cmd) => match cmd {
+            BrokerCommands::Add(req) => request(d, ROUTE_BROKER_ADD, req).await,
+            BrokerCommands::Remove(req) => request(d, ROUTE_BROKER_REMOVE, req).await,
+            BrokerCommands::List => request(d, ROUTE_BROKER_LIST, ()).await,
         },
     };
 

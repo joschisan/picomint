@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitcoin — two binaries (mint node + Lightning gateway) plus a headless client daemon for load and latency work, Iroh networking, redb storage, static module set (ecash, onchain, lightning). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. Each daemon's operator manual lives next to its Dockerfile: `docker-node/README.md`, `docker-gateway/README.md`, `docker-client/README.md`.
+Picomint is a minimal implementation of a federated Chaumian ecash mint on Bitcoin — three binaries (mint node, Lightning gateway, swap broker) plus a headless client daemon for load and latency work, Iroh networking, redb storage, static module set (ecash, onchain, lightning, swap). No dyn modules, no migrations, no backup/recovery, no version negotiation, no legacy v1 modules. Each daemon's operator manual lives next to its Dockerfile: `docker-node/README.md`, `docker-gateway/README.md`, `docker-broker/README.md`, `docker-client/README.md`.
 
 ### Naming
 
-One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by **nodes** (consensus members, `NodeId`), bridged to Lightning by **gateways**, with **ecash** / **onchain** / **lightning** modules. Never reintroduce federation/guardian/peer/ln/gw/wallet-module. Exceptions: LDK's Lightning *peers* keep their name (channel counterparties), "LN" may refer to the Lightning Network in prose, and iroh transport identities are `PublicKey`/`iroh_pk` — "node id" always means the consensus index. "Wallet" means an actual wallet (the client's, bitcoind's, LDK's).
+One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by **nodes** (consensus members, `NodeId`), bridged to Lightning by **gateways** and to each other by **brokers**, with **ecash** / **onchain** / **lightning** / **swap** modules. Never reintroduce federation/guardian/peer/ln/gw/wallet-module. Exceptions: LDK's Lightning *peers* keep their name (channel counterparties), "LN" may refer to the Lightning Network in prose, and iroh transport identities are `PublicKey`/`iroh_pk` — "node id" always means the consensus index. "Wallet" means an actual wallet (the client's, bitcoind's, LDK's).
 
 ## Build and development
 
@@ -22,15 +22,17 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 ## Architecture
 
 ### Crates
-- `picomint-core` — shared types, encoding, wire protocol, `NodeConfigConsensus`, and the per-module common types for `ecash`/`onchain`/`lightning`
+- `picomint-core` — shared types, encoding, wire protocol, `NodeConfigConsensus`, and the per-module common types for `ecash`/`onchain`/`lightning`/`swap`
 - `picomint-encoding` / `picomint-derive` — `Encodable`/`Decodable` traits and derive macros
 - `picomint-bft` — BFT atomic broadcast (DAG-based, own design — not Aleph-derived)
-- `picomint-node-daemon` — mint node binary (consensus via picomint-bft); owns the concrete ecash/onchain/lightning server-side module code under `src/consensus/{ecash,onchain,lightning}/`; no web UI, the admin CLI is the only operator surface
+- `picomint-node-daemon` — mint node binary (consensus via picomint-bft); owns the concrete ecash/onchain/lightning/swap server-side module code under `src/consensus/{ecash,onchain,lightning,swap}/`; no web UI, the admin CLI is the only operator surface
 - `picomint-bitcoind` — the bitcoind JSON-RPC client shared by the node daemon and the rugpull tool; every RPC picomint uses is a method on `BitcoindClient`
 - `picomint-cli-client` / `picomint-cli-server` — the admin socket: the CLI side (`request`, `print_json`) and the daemon side (`serve`, `CliError`); independent of each other, each spells the socket filename
 - `picomint-node-cli` / `picomint-node-cli-core` — admin CLI for the node daemon (HTTP-over-Unix-socket) + shared route/request types
 - `picomint-gateway-daemon` — Lightning gateway binary with embedded LDK node
 - `picomint-gateway-cli` / `picomint-gateway-cli-core` — admin CLI for the gateway daemon + shared route/request types
+- `picomint-broker-daemon` — swap broker binary: a client of several mints that funds a receive contract in one against a send contract in another, keyed by the destination mint's threshold attestation; no timeouts anywhere
+- `picomint-broker-cli` / `picomint-broker-cli-core` — admin CLI for the broker daemon + shared route/request types; the `client` subcommand keeps its own copies of the client types like the gateway's does
 - `picomint-client-daemon` / `picomint-client-cli` / `picomint-client-cli-core` — headless client for machines: the client library behind an admin socket, with analytics; cli-core holds its routes and payloads; the gateway's `client` subcommand keeps its own copies of the overlapping types on purpose
 - `picomint-analytics` — SQLite mirror of a client's event log, one derived table per event (`SqlRow` derive from `picomint-derive`, column rules in `picomint_core::sql`); no views, read via the daemon's `query` command
 - `picomint-client` — multi-mint client library; owns the concrete per-module client state machines and the append-only event log (`src/eventlog.rs`)
@@ -48,14 +50,14 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 ### Wire + storage
 - Wire: client↔server uses the `Encodable`/`Decodable` traits from `picomint-encoding`
 - Storage: redb only. No migrations (tables are declared via the `table!` macro in `picomint-redb`; keys/values use consensus encoding). The one exception is the analytics database (`picomint-analytics`) — a separate SQLite file (rusqlite), wiped and rebuilt from the event log on every start, queried via the `query` CLI command
-- Table name strings are kebab-case. Library tables carry their domain as the first segment: module tables `ecash-`/`onchain-`/`lightning-`/`gateway-`, client-core tables `client-`, `bft-unit`/`bft-unit-data`/`bft-unit-signature` from picomint-bft. The embedder that owns a database file names its own tables unprefixed — the node daemon, the gateway daemon, the client daemon and the app alike — so an embedder table can never collide with a library one.
+- Table name strings are kebab-case. Library tables carry their domain as the first segment: module tables `ecash-`/`onchain-`/`lightning-`/`swap-`/`gateway-`, client-core tables `client-`, `bft-unit`/`bft-unit-data`/`bft-unit-signature` from picomint-bft. The embedder that owns a database file names its own tables unprefixed — the node daemon, the gateway daemon, the client daemon and the app alike — so an embedder table can never collide with a library one.
 - Transport: Iroh-only (QUIC + hole-punching). No TLS/websocket/DNS announcements
 - Each node binds exactly one iroh `Endpoint` (one secret key, one node id) for both mint p2p and the public client API; the accept loop demuxes by remote node-id (node set → P2P path, otherwise → public API path).
 
 ### Admin CLIs
 - Both CLIs are thin HTTP-over-Unix-socket clients. They POST JSON to the daemon's admin socket at `{DATA_DIR}/cli.sock` (`CLI_SOCKET_FILENAME` in both `picomint-cli-client` and `picomint-cli-server`). No network exposure; `docker exec` is how you reach them in a container deployment.
-- Route constants live in `picomint-node-cli-core` / `picomint-gateway-cli-core`.
-- Shared request/response types also live in the `*-cli-core` crates; daemon handlers live in `picomint-node-daemon/src/cli.rs` and `picomint-gateway-daemon/src/cli.rs`.
+- Route constants live in `picomint-node-cli-core` / `picomint-gateway-cli-core` / `picomint-broker-cli-core`.
+- Shared request/response types also live in the `*-cli-core` crates; daemon handlers live in `picomint-node-daemon/src/cli.rs`, `picomint-gateway-daemon/src/cli.rs` and `picomint-broker-daemon/src/cli.rs`.
 
 ### Env vars
 Env var names are unprefixed (puncture-style): `DATA_DIR`, `NETWORK`, `BITCOIND_URL`, etc. No `FM_*` prefix. `*_ADDR` is the convention for listen-address vars (`P2P_ADDR`, `API_ADDR`, `LDK_ADDR`). Defined inline via clap `#[arg(env = "...")]`.
