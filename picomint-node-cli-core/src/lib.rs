@@ -13,6 +13,7 @@ use picomint_core::expiry::ExpiryStatus;
 use picomint_core::invite::InviteCode;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_core::onchain::TxInfo;
+use picomint_core::swap::broker::BrokerPk;
 use picomint_core::version::ConsensusVersion;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
@@ -45,6 +46,9 @@ pub const ROUTE_ONCHAIN_RUGPULL: &str = "/onchain/rugpull";
 pub const ROUTE_GATEWAY_ADD: &str = "/gateway/add";
 pub const ROUTE_GATEWAY_REMOVE: &str = "/gateway/remove";
 pub const ROUTE_GATEWAY_LIST: &str = "/gateway/list";
+pub const ROUTE_BROKER_ADD: &str = "/broker/add";
+pub const ROUTE_BROKER_REMOVE: &str = "/broker/remove";
+pub const ROUTE_BROKER_LIST: &str = "/broker/list";
 
 // --- /status ---
 
@@ -515,6 +519,53 @@ pub enum ExpirySetError {
 pub enum RugpullError {
     #[error("The mint wallet has not received funds yet, so there is nothing to drain")]
     WalletEmpty,
+}
+
+// --- /broker/* ---
+
+#[derive(Clone, Debug, Serialize, Deserialize, Args)]
+pub struct SwapBrokerAddRequest {
+    /// The broker's `broker_pk`, as printed by `picomint-broker-cli info`
+    pub pk: BrokerPk,
+    /// The name this node lists the broker under
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Args)]
+pub struct SwapBrokerRemoveRequest {
+    /// The broker's `broker_pk`, as printed by `picomint-broker-cli info`
+    pub pk: BrokerPk,
+}
+
+/// The brokers this node recommends. Clients of the mint use a broker
+/// once a threshold of nodes recommend it, so this list is one vote.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SwapBrokerListResponse {
+    /// This node's recommendations
+    pub brokers: Vec<SwapBrokerInfo>,
+}
+
+/// One recommended broker.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SwapBrokerInfo {
+    /// The broker's identity, its `broker_pk`
+    pub pk: BrokerPk,
+    /// The name this node lists it under; local to this node
+    pub name: String,
+}
+
+/// Why the broker was not added to this node's recommendations.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum BrokerAddError {
+    #[error("The broker is already recommended")]
+    AlreadyRecommended,
+}
+
+/// Why the broker was not removed from this node's recommendations.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum BrokerRemoveError {
+    #[error("The broker is not recommended")]
+    NotRecommended,
 }
 
 /// Why the gateway was not added to this node's recommendations.

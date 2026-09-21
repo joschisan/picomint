@@ -9,6 +9,7 @@ cleanup() {
     # compiling one of these crates and kills a concurrent build.
     pkill -9 -x "picomint-node-daemon" 2>/dev/null || true
     pkill -9 -x "picomint-gateway-daemon" 2>/dev/null || true
+    pkill -9 -x "picomint-broker-daemon" 2>/dev/null || true
     pkill -9 -x "picomint-client-daemon" 2>/dev/null || true
     pkill -9 -x "picomint-lnurl-daemon" 2>/dev/null || true
     docker stop "$CONTAINER_NAME" 2>/dev/null || true

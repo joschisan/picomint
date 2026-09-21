@@ -24,7 +24,7 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use hex::ToHex as _;
 use picomint_client::eventlog::{Event, EventLogEntry, EventLogId};
-use picomint_client::{Client, ecash, gateway, lightning, onchain};
+use picomint_client::{Client, ecash, gateway, lightning, onchain, swap};
 use picomint_core::error::ErrorCode;
 use picomint_core::sql::{SqlRow, SqlValue};
 use rusqlite::types::ValueRef;
@@ -99,6 +99,13 @@ events! {
     lightning::events::SendRefundEvent,
     lightning::events::SendFailureEvent,
     lightning::events::ReceiveEvent,
+    swap::events::SendEvent,
+    swap::events::SendSuccessEvent,
+    swap::events::SendDirectEvent,
+    swap::events::ReceiveEvent,
+    swap::events::BrokerSwapEvent,
+    swap::events::BrokerSuccessEvent,
+    swap::events::BrokerFailureEvent,
     gateway::events::SendEvent,
     gateway::events::SendSuccessEvent,
     gateway::events::SendCancelEvent,

@@ -8,6 +8,7 @@ pub use picomint_core::config::{MintId, NodeConfig, NodeEndpoint};
 use picomint_core::config::{NodeConfigConsensus, NodeConfigPrivate};
 use picomint_core::ecash::config::EcashConfig;
 use picomint_core::onchain::config::OnchainConfig;
+use picomint_core::swap::config::SwapConfig;
 use picomint_core::version::CONSENSUS_VERSION;
 use picomint_core::{NodeId, secp256k1};
 use secp256k1::{Secp256k1, SecretKey, XOnlyPublicKey};
@@ -62,6 +63,7 @@ pub struct DkgParams {
 /// Assemble a fresh `NodeConfig` from the DKG parameters, the
 /// threshold-signing key pair we generated locally, and the per-module
 /// DKG outputs.
+#[allow(clippy::too_many_arguments)]
 pub fn assemble_node_config(
     params: DkgParams,
     identity: NodeId,
@@ -70,6 +72,7 @@ pub fn assemble_node_config(
     ecash: EcashConfig,
     lightning: picomint_core::lightning::config::LightningConfig,
     onchain: OnchainConfig,
+    swap: SwapConfig,
 ) -> NodeConfig {
     let nodes = params
         .nodes
@@ -94,6 +97,7 @@ pub fn assemble_node_config(
         ecash: ecash.consensus,
         onchain: onchain.consensus,
         lightning: lightning.consensus,
+        swap: swap.consensus,
     };
 
     let private = NodeConfigPrivate {
@@ -103,6 +107,7 @@ pub fn assemble_node_config(
         ecash: ecash.private,
         onchain: onchain.private,
         lightning: lightning.private,
+        swap: swap.private,
     };
 
     NodeConfig { consensus, private }
@@ -133,6 +138,7 @@ pub fn validate_config(cfg: &NodeConfig) -> anyhow::Result<()> {
     crate::consensus::ecash::validate_config(cfg)?;
     crate::consensus::lightning::validate_config(cfg)?;
     crate::consensus::onchain::validate_config(cfg)?;
+    crate::consensus::swap::validate_config(cfg)?;
 
     Ok(())
 }

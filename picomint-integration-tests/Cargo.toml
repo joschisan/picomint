@@ -24,6 +24,7 @@ lightning-invoice = { workspace = true }
 lightning-types = { workspace = true }
 picomint-analytics = { workspace = true }
 picomint-base32 = { workspace = true }
+picomint-broker-cli-core = { workspace = true }
 picomint-client = { workspace = true }
 picomint-client-cli-core = { workspace = true }
 picomint-core = { workspace = true }

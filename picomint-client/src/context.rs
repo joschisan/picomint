@@ -2,6 +2,7 @@ use crate::api::MintApi;
 use crate::eventlog::{Event, EventLogEntry};
 use crate::lightning::Gateways;
 use crate::secret::ClientSecret;
+use crate::swap::Brokers;
 use crate::task::TaskGroup;
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
@@ -10,10 +11,16 @@ use picomint_core::config::MintId;
 use picomint_core::config::NodeConfigConsensus;
 use picomint_core::core::{Account, OperationId};
 use picomint_redb::{Database, WriteTx};
+use std::collections::BTreeMap;
+use std::sync::{RwLock, Weak};
 
 use crate::{TxAcceptEvent, TxRejectEvent};
 
-/// The one per-mint context: API and gateway pools, the shared client
+/// Every added mint's context, keyed by mint: the client's map, shared
+/// with the contexts as a weak handle.
+pub(crate) type Mints = RwLock<BTreeMap<MintId, ClientContext>>;
+
+/// The one per-mint context: API, gateway and broker pools, the shared client
 /// db, the mint config, the root secret, and the task group. Every
 /// state machine runs against a clone of this, and every module operation
 /// is a function over it — module configs, public key sets and per-module
@@ -30,17 +37,24 @@ pub struct ClientContext {
     pub(crate) mint: MintId,
     pub(crate) secret: ClientSecret,
     pub(crate) gateways: Gateways,
+    pub(crate) brokers: Brokers,
     pub(crate) tg: TaskGroup,
+    /// The client's mint map, for [`Self::sibling`]. Weak, since the map
+    /// holds this context.
+    mints: Weak<Mints>,
 }
 
 impl ClientContext {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         api: MintApi,
         db: Database,
         config: NodeConfigConsensus,
         secret: ClientSecret,
         gateways: Gateways,
+        brokers: Brokers,
         tg: TaskGroup,
+        mints: Weak<Mints>,
     ) -> Self {
         Self {
             api,
@@ -49,8 +63,22 @@ impl ClientContext {
             config,
             secret,
             gateways,
+            brokers,
             tg,
+            mints,
         }
+    }
+
+    /// The context of another added mint, for the one operation that spans
+    /// two: a broker's swap, funded in one mint and claimed in another.
+    /// `None` once the mint is removed, or the client is gone.
+    pub(crate) fn sibling(&self, mint: MintId) -> Option<ClientContext> {
+        self.mints
+            .upgrade()?
+            .read()
+            .expect("mints lock poisoned")
+            .get(&mint)
+            .cloned()
     }
 
     pub async fn await_tx_accepted(

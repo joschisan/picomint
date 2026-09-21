@@ -14,6 +14,7 @@ use crate::ecash::config::{EcashConfigConsensus, EcashConfigPrivate};
 use crate::invite::InviteCode;
 use crate::lightning::config::{LightningConfigConsensus, LightningConfigPrivate};
 use crate::onchain::config::{OnchainConfigConsensus, OnchainConfigPrivate};
+use crate::swap::config::{SwapConfigConsensus, SwapConfigPrivate};
 use crate::version::ConsensusVersion;
 use picomint_encoding::{Base32, Decodable, Encodable};
 
@@ -90,6 +91,8 @@ pub struct NodeConfigConsensus {
     pub onchain: OnchainConfigConsensus,
     /// Lightning module config
     pub lightning: LightningConfigConsensus,
+    /// Swap module config
+    pub swap: SwapConfigConsensus,
 }
 
 /// A node's whole config: the mint's consensus config plus this node's
@@ -118,6 +121,8 @@ pub struct NodeConfigPrivate {
     pub onchain: OnchainConfigPrivate,
     /// Private key material for the lightning module
     pub lightning: LightningConfigPrivate,
+    /// Private key material for the swap module
+    pub swap: SwapConfigPrivate,
 }
 
 impl NodeConfig {

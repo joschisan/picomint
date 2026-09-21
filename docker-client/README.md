@@ -97,6 +97,12 @@ picomint-client-cli balance <mint> <account>
 picomint-client-cli onchain receive <mint> <account>
 ```
 
+The mint sweeps a deposit into its wallet before it credits it, and the miner fee of that sweep comes off the deposit; a deposit worth no more than the fee is not claimed. Check it before sending small amounts:
+
+```bash
+picomint-client-cli onchain receive-fee <mint>
+```
+
 **Receive Ecash:** reissue an ecash string produced by any client's `ecash send` into the account. Returns the operation id; the reissuance's acceptance shows up in the analytics as `tx_accept`:
 
 ```bash
@@ -200,6 +206,71 @@ picomint-client-cli lightning receive <mint> <account> <gateway> "<amount>"
 
 ```bash
 picomint-client-cli lightning lnurl <mint> <account> https://lnurl.example.com/
+```
+
+## Swap
+
+A swap address receives ecash from any mint: the sender's own mint pays it directly, any other mint pays it through a broker the sender's mint recommends. The address is static, so hand it out once:
+
+```bash
+picomint-client-cli swap receive <mint> <account>
+```
+
+```json
+{
+  "address": "picomint3g8k...q2mz"
+}
+```
+
+Payments to it land in the analytics as `swap_receive` and need no action here: the daemon scans the mint's receive contracts and claims its own.
+
+**Pay an address in this mint:** the address names its mint, so compare it with the one you pay from. An address of the same mint is paid as one transaction, and `tx_accept` is its outcome:
+
+```bash
+picomint-client-cli swap send-direct <mint> <account> <address> "<amount>"
+```
+
+`swap send-max-direct <mint> <account> <address>` empties the account to it: the largest whole-sat amount that fits once the mint's per-output fee and its per-input fee on each note spent are covered, which `swap send-max-amount-direct <mint> <account>` computes, in msat, without sending.
+
+**Pay an address through a broker:** the way to reach another mint, though a broker will also route back into the mint you pay from. The outcome lands as `swap_send_success` with the destination mint's attestation once the broker has funded the receive contract there:
+
+```bash
+picomint-client-cli swap send <mint> <account> <broker> <address> "<amount>"
+```
+
+`swap send-max <mint> <account> <broker> <address>` empties the account through the broker, with the broker's fee on the amount covered as well as the mint's fees; `swap send-max-amount <mint> <account> <broker>` computes that amount, in msat, without sending:
+
+```bash
+picomint-client-cli swap send-max-amount <mint> <account> <broker>
+```
+
+```json
+{
+  "amount_msat": 99000000
+}
+```
+
+The broker's fee is charged on top of the amount, and there is no refund path: the funds are locked to the broker until the destination mint attests the receive contract, so pick a broker you trust to fund it. The brokers the mint recommends, probed for their fees, keyed by their `broker_pk`:
+
+```bash
+picomint-client-cli swap broker list <mint>
+```
+
+```json
+{
+  "brokers": {
+    "picomintd2g4...c9d1": {
+      "claim_pk": "8f3a...b2e7",
+      "fee": { "base": 10000, "ppm": 3000 }
+    }
+  }
+}
+```
+
+The list only changes when you refresh it, which re-fetches the mint's recommendations and re-probes every broker:
+
+```bash
+picomint-client-cli swap broker refresh <mint>
 ```
 
 ## Restore

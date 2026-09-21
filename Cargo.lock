@@ -3292,6 +3292,60 @@ dependencies = [
 ]
 
 [[package]]
+name = "picomint-broker-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "picomint-analytics",
+ "picomint-broker-cli-core",
+ "picomint-cli-client",
+ "picomint-client",
+ "tokio",
+]
+
+[[package]]
+name = "picomint-broker-cli-core"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "clap",
+ "picomint-client",
+ "picomint-core",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "picomint-broker-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "bitcoin",
+ "clap",
+ "iroh",
+ "iroh-base",
+ "iroh-mdns-address-lookup",
+ "picomint-analytics",
+ "picomint-broker-cli-core",
+ "picomint-cli-server",
+ "picomint-client",
+ "picomint-core",
+ "picomint-encoding",
+ "picomint-redb",
+ "picomint-rpc",
+ "picomint-tbs",
+ "rand 0.8.6",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "picomint-cli-client"
 version = "0.1.0"
 dependencies = [
@@ -3544,6 +3598,7 @@ dependencies = [
  "lightning-types",
  "picomint-analytics",
  "picomint-base32",
+ "picomint-broker-cli-core",
  "picomint-client",
  "picomint-client-cli-core",
  "picomint-core",

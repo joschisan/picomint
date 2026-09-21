@@ -1,0 +1,37 @@
+[package]
+authors = { workspace = true }
+description = "Picomint broker daemon"
+edition = { workspace = true }
+license = { workspace = true }
+name = "picomint-broker-daemon"
+readme = { workspace = true }
+repository = { workspace = true }
+version = { workspace = true }
+
+[lib]
+name = "picomint_broker_daemon"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true, features = ["json"] }
+bitcoin = { workspace = true }
+clap = { workspace = true }
+iroh = { workspace = true, default-features = false }
+iroh-base = { workspace = true, default-features = false }
+iroh-mdns-address-lookup = { workspace = true }
+picomint-analytics = { workspace = true }
+picomint-broker-cli-core = { workspace = true }
+picomint-client = { workspace = true }
+picomint-cli-server = { workspace = true }
+picomint-core = { workspace = true }
+picomint-encoding = { workspace = true }
+picomint-redb = { workspace = true }
+picomint-rpc = { workspace = true }
+rand = { workspace = true }
+serde_json = { workspace = true }
+tbs = { workspace = true }
+tokio = { workspace = true, features = ["signal"] }
+tokio-rustls = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

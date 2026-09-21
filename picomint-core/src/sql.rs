@@ -102,6 +102,14 @@ impl SqlColumn for bitcoin::Amount {
     }
 }
 
+impl SqlColumn for tbs::Signature {
+    const TYPE: &'static str = "TEXT";
+
+    fn sql_value(&self) -> SqlValue {
+        SqlValue::Text(hex::encode(self.0.to_compressed()))
+    }
+}
+
 impl SqlColumn for [u8; 32] {
     const TYPE: &'static str = "TEXT";
 

@@ -194,7 +194,7 @@ enum EcashCommands {
 #[derive(Subcommand)]
 enum OnchainCommands {
     /// Get send fee estimate
-    #[command(after_long_help = schema_fallible::<ClientOnchainSendFeeResponse, onchain::SendFeeError>())]
+    #[command(after_long_help = schema_fallible::<ClientOnchainSendFeeResponse, onchain::FeeError>())]
     SendFee(ClientOnchainSendFeeRequest),
     /// Send onchain from the mint
     #[command(after_long_help = schema_fallible::<ClientOnchainSendResponse, onchain::SendError>())]

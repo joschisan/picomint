@@ -25,6 +25,8 @@ jobs:
             dockerfile: docker-lnurl/Dockerfile
           - image: picomint-client-daemon
             dockerfile: docker-client/Dockerfile
+          - image: picomint-broker-daemon
+            dockerfile: docker-broker/Dockerfile
 
     steps:
     - uses: actions/checkout@v4

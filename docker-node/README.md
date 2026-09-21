@@ -172,6 +172,28 @@ List the current recommendations:
 picomint-node-cli gateway list
 ```
 
+## Configure Brokers
+
+The mint keeps the same kind of list for swap brokers, the daemons that move ecash out of this mint into another. A client swapping out of the mint locks its funds to a broker the mint recommends; nothing needs recommending on the mint a swap lands in. Any node can add a broker; clients accept one once a threshold of nodes recommends it.
+
+Add a broker:
+
+```bash
+picomint-node-cli broker add <pk> <name>
+```
+
+Remove one:
+
+```bash
+picomint-node-cli broker remove <pk>
+```
+
+List the current recommendations:
+
+```bash
+picomint-node-cli broker list
+```
+
 ## Backup
 
 Once the setup ceremony completes, save your node's config to a file and

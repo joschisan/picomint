@@ -19,7 +19,7 @@ use tracing::info;
 
 use crate::config::NodeConfig;
 use crate::consensus::tx::FundingVerifier;
-use crate::consensus::{ecash, lightning, onchain};
+use crate::consensus::{ecash, lightning, onchain, swap};
 
 #[derive(Clone)]
 pub struct Server {
@@ -65,6 +65,9 @@ impl Server {
             wire::Input::Lightning(i) => {
                 lightning::process_input(self, dbtx, i).map_err(wire::InputError::Lightning)
             }
+            wire::Input::Swap(i) => {
+                swap::process_input(self, dbtx, i).map_err(wire::InputError::Swap)
+            }
         }
     }
 
@@ -82,6 +85,9 @@ impl Server {
                 .map_err(wire::OutputError::Onchain),
             wire::Output::Lightning(o) => lightning::process_output(self, dbtx, o, out_point)
                 .map_err(wire::OutputError::Lightning),
+            wire::Output::Swap(o) => {
+                swap::process_output(self, dbtx, o, out_point).map_err(wire::OutputError::Swap)
+            }
         }
     }
 
@@ -90,6 +96,7 @@ impl Server {
             wire::Input::Ecash(..) => self.cfg.consensus.ecash.input_fee,
             wire::Input::Onchain(..) => self.cfg.consensus.onchain.input_fee,
             wire::Input::Lightning(..) => self.cfg.consensus.lightning.input_fee,
+            wire::Input::Swap(..) => self.cfg.consensus.swap.input_fee,
         }
     }
 
@@ -98,6 +105,7 @@ impl Server {
             wire::Output::Ecash(..) => self.cfg.consensus.ecash.output_fee,
             wire::Output::Onchain(..) => self.cfg.consensus.onchain.output_fee,
             wire::Output::Lightning(..) => self.cfg.consensus.lightning.output_fee,
+            wire::Output::Swap(..) => self.cfg.consensus.swap.output_fee,
         }
     }
 

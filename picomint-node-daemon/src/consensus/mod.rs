@@ -7,6 +7,7 @@ pub mod lightning;
 pub mod onchain;
 pub mod rpc;
 pub mod server;
+pub mod swap;
 pub mod tx;
 
 use std::collections::BTreeMap;
@@ -221,5 +222,6 @@ async fn dispatch(consensus_api: Arc<ConsensusApi>, method: Method) -> Result<Ve
         Method::Ecash(m) => ecash::handle_api(&consensus_api.server, m).await,
         Method::Onchain(m) => onchain::handle_api(&consensus_api.server, m).await,
         Method::Lightning(m) => lightning::handle_api(&consensus_api.server, m).await,
+        Method::Swap(m) => swap::handle_api(&consensus_api.server, m).await,
     }
 }

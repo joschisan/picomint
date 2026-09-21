@@ -123,7 +123,7 @@ async fn update_gateway_info(ctx: ClientContext) {
 
     ctx.gateways.reconcile(&list, false);
 
-    ctx.gateways.probe(&list, ctx.mint).await;
+    ctx.gateways.probe_info(&list, ctx.mint).await;
 }
 
 /// The largest whole-sat invoice amount a max send from `account`

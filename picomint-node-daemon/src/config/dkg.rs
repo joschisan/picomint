@@ -92,6 +92,10 @@ pub async fn run(
 
     let onchain = crate::consensus::onchain::dkg(&handle).await?;
 
+    info!("Running DKG for the swap module...");
+
+    let swap = crate::consensus::swap::dkg(&handle).await?;
+
     let cfg = assemble_node_config(
         params.clone(),
         params.identity,
@@ -100,6 +104,7 @@ pub async fn run(
         ecash,
         lightning,
         onchain,
+        swap,
     );
 
     let checksum = cfg.consensus.consensus_hash_sha256();

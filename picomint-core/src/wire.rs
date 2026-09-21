@@ -1,4 +1,4 @@
-//! Static wire enums for the fixed module set: ecash + onchain + lightning.
+//! Static wire enums for the fixed module set: ecash + onchain + lightning + swap.
 
 use crate::ecash::{EcashInput, EcashInputError, EcashOutput, EcashOutputError};
 use crate::lightning::{
@@ -7,6 +7,7 @@ use crate::lightning::{
 use crate::onchain::{
     OnchainConsensusItem, OnchainInput, OnchainInputError, OnchainOutput, OnchainOutputError,
 };
+use crate::swap::{SwapInput, SwapInputError, SwapOutput, SwapOutputError};
 use picomint_encoding::{Decodable, Encodable};
 use thiserror::Error;
 
@@ -15,6 +16,7 @@ pub enum Input {
     Ecash(EcashInput),
     Onchain(OnchainInput),
     Lightning(LightningInput),
+    Swap(SwapInput),
 }
 
 impl From<EcashInput> for Input {
@@ -35,11 +37,18 @@ impl From<OnchainInput> for Input {
     }
 }
 
+impl From<SwapInput> for Input {
+    fn from(v: SwapInput) -> Self {
+        Self::Swap(v)
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable)]
 pub enum Output {
     Ecash(EcashOutput),
     Onchain(OnchainOutput),
     Lightning(Box<LightningOutput>),
+    Swap(SwapOutput),
 }
 
 impl From<EcashOutput> for Output {
@@ -57,6 +66,12 @@ impl From<LightningOutput> for Output {
 impl From<OnchainOutput> for Output {
     fn from(v: OnchainOutput) -> Self {
         Self::Onchain(v)
+    }
+}
+
+impl From<SwapOutput> for Output {
+    fn from(v: SwapOutput) -> Self {
+        Self::Swap(v)
     }
 }
 
@@ -79,6 +94,8 @@ pub enum InputError {
     Onchain(OnchainInputError),
     #[error("Lightning input error: {0}")]
     Lightning(LightningInputError),
+    #[error("Swap input error: {0}")]
+    Swap(SwapInputError),
 }
 
 impl From<EcashInputError> for InputError {
@@ -99,6 +116,12 @@ impl From<OnchainInputError> for InputError {
     }
 }
 
+impl From<SwapInputError> for InputError {
+    fn from(v: SwapInputError) -> Self {
+        Self::Swap(v)
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Encodable, Decodable, Error)]
 pub enum OutputError {
     #[error("Ecash output error: {0}")]
@@ -107,6 +130,8 @@ pub enum OutputError {
     Onchain(OnchainOutputError),
     #[error("Lightning output error: {0}")]
     Lightning(LightningOutputError),
+    #[error("Swap output error: {0}")]
+    Swap(SwapOutputError),
 }
 
 impl From<EcashOutputError> for OutputError {
@@ -124,5 +149,11 @@ impl From<LightningOutputError> for OutputError {
 impl From<OnchainOutputError> for OutputError {
     fn from(v: OnchainOutputError) -> Self {
         Self::Onchain(v)
+    }
+}
+
+impl From<SwapOutputError> for OutputError {
+    fn from(v: SwapOutputError) -> Self {
+        Self::Swap(v)
     }
 }
