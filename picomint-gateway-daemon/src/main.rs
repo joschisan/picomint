@@ -12,24 +12,21 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, ensure};
 use bitcoin::Network;
 use clap::{ArgGroup, Parser};
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
-use lightning::types::payment::PaymentHash;
-use picomint_client::api;
+use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::lightning::gateway::PaymentFee;
 use picomint_gateway_daemon::db::{
-    IncomingOfferTable, LdkEventPaymentHashTable, OutgoingContractTable,
+    IncomingContractTable, LdkEventPaymentHashTable, OutgoingContractTable,
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
 use picomint_redb::{DbRead, WriteTx};
-use tokio::time::timeout;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
@@ -39,15 +36,6 @@ use url::Url;
 
 /// The LDK project's Rapid Gossip Sync server; serves mainnet snapshots only.
 const RGS_SERVER_URL: &str = "https://rapidsync.lightningdevkit.org/snapshot";
-
-/// Blocks the gateway needs between an inbound HTLC's arrival and LDK's
-/// fail-back deadline to fund the incoming contract and get the mint's
-/// decryption back.
-const MIN_CLAIM_HEADROOM_BLOCKS: u32 = 48;
-
-/// How long the gateway waits for the offer's mint to report idle consensus
-/// before it gives an inbound HTLC back to the sender.
-const MINT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Command line parameters for starting the gateway.
 #[derive(Parser)]
@@ -108,9 +96,7 @@ pub struct GatewayOpts {
     pub invoice_expiry_secs: u32,
 
     /// Maximum total CLTV expiry delta, in blocks, the gateway will accept
-    /// across the outgoing route. Used as LDK's `max_total_cltv_expiry_delta`
-    /// and (with a +144-block safety slack) as the contract lock the gateway
-    /// announces to clients.
+    /// across the outgoing route, as LDK's `max_total_cltv_expiry_delta`.
     #[arg(long, env = "CLTV_EXPIRY_DELTA", default_value_t = 500)]
     pub cltv_expiry_delta: u32,
 }
@@ -317,7 +303,7 @@ async fn process_ldk_events(state: AppState) {
     loop {
         let event = state.node.next_event_async().await;
 
-        process_ldk_event(&state, event).await;
+        process_ldk_event(&state, event);
 
         state
             .node
@@ -326,32 +312,15 @@ async fn process_ldk_events(state: AppState) {
     }
 }
 
-async fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
-    // Resolved before the write tx opens: the poll can take up to
-    // `MINT_IDLE_TIMEOUT`, and redb has a single writer.
-    let mint_idle = match &event {
-        ldk_node::Event::PaymentClaimable { payment_hash, .. } => {
-            await_offer_mint_idle(state, payment_hash.0).await
-        }
-        _ => false,
-    };
-
+fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
     let dbtx = state.gateway_db.begin_write();
 
     match event {
         ldk_node::Event::PaymentClaimable {
             payment_hash,
             claimable_amount_msat,
-            claim_deadline,
             ..
-        } => handle_payment_claimable(
-            state,
-            &dbtx,
-            payment_hash.0,
-            claimable_amount_msat,
-            claim_deadline,
-            mint_idle,
-        ),
+        } => handle_payment_claimable(state, &dbtx, payment_hash.0, claimable_amount_msat),
         ldk_node::Event::PaymentSuccessful {
             payment_hash,
             payment_preimage: Some(preimage),
@@ -379,39 +348,16 @@ async fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
     dbtx.commit();
 }
 
-/// Long-poll the offer's mint until a threshold of nodes hold no unordered
-/// items, so the funding tx is ordered promptly instead of queueing behind
-/// a backlog while the HTLC's deadline runs. Gives up after
-/// [`MINT_IDLE_TIMEOUT`]; an offer whose mint was removed never polls.
-async fn await_offer_mint_idle(state: &AppState, payment_hash: [u8; 32]) -> bool {
-    let Some(row) = state.gateway_db.begin_read().get(
-        &IncomingOfferTable,
-        &OperationId::from_encodable(&payment_hash),
-    ) else {
-        return false;
-    };
-
-    let Ok(mint_api) = state.client.api(row.mint) else {
-        return false;
-    };
-
-    timeout(MINT_IDLE_TIMEOUT, api::await_idle(&mint_api))
-        .await
-        .is_ok()
-}
-
-/// Inbound HTLC arrived. Fund the registered offer via `start_receive`.
-/// On amount mismatch, too little headroom before LDK's fail-back
-/// deadline, a mint that stayed backlogged, or `start_receive` failure
-/// (e.g. insufficient gateway liquidity to fund the contract), log the
-/// reason and fail the HTLC so the LN sender gets a refund.
+/// Inbound HTLC arrived. Fund the registered contract via `start_receive`
+/// and settle the HTLC with the preimage in the same step. On amount
+/// mismatch or `start_receive` failure (e.g. insufficient gateway
+/// liquidity to fund the contract), log the reason and fail the HTLC so
+/// the LN sender gets a refund.
 fn handle_payment_claimable(
     state: &AppState,
     dbtx: &WriteTx,
     payment_hash: [u8; 32],
     amount_msat: u64,
-    claim_deadline: Option<u32>,
-    mint_idle: bool,
 ) {
     let operation = OperationId::from_encodable(&payment_hash);
 
@@ -424,10 +370,10 @@ fn handle_payment_claimable(
 
     // LDK only fires PaymentClaimable for hashes we registered via
     // `receive_for_hash` in `AppState::receive`, which commits the
-    // offer row before returning the invoice — but removing the offer's
-    // mint wipes the row while LDK still holds the hash, so fail
-    // the HTLC and refund the LN sender.
-    let Some(row) = dbtx.get(&IncomingOfferTable, &operation) else {
+    // contract row before returning the invoice — but removing the
+    // contract's mint wipes the row while LDK still holds the hash, so
+    // fail the HTLC and refund the LN sender.
+    let Some(row) = dbtx.get(&IncomingContractTable, &operation) else {
         error!("Failing inbound HTLC for a removed mint");
 
         state
@@ -439,51 +385,32 @@ fn handle_payment_claimable(
         return;
     };
 
-    // LDK fails the HTLC back at `claim_deadline` on its own, and the default
-    // invoice leaves only 2-3 blocks before that. ldk-node does not expose
-    // `min_final_cltv_expiry_delta` yet (lightningdevkit/ldk-node#1085), so the
-    // invoice cannot ask senders for more. Refuse the short ones up front
-    // rather than fund a contract whose decryption then has to beat LDK's
-    // fail-back.
-    let headroom = claim_deadline
-        .map(|deadline| deadline.saturating_sub(state.node.status().current_best_block.height))
-        .unwrap_or(0);
-
-    if row.offer.commitment.amount.0 != amount_msat {
-        state
-            .node
-            .bolt11_payment()
-            .fail_for_hash(PaymentHash(payment_hash))
-            .expect("LDK has this payment_hash (registered via receive_for_hash)");
-    } else if headroom < MIN_CLAIM_HEADROOM_BLOCKS {
-        warn!(
-            headroom,
-            "Failing inbound HTLC that leaves too few blocks before LDK fails it back"
-        );
-
-        state
-            .node
-            .bolt11_payment()
-            .fail_for_hash(PaymentHash(payment_hash))
-            .expect("LDK has this payment_hash (registered via receive_for_hash)");
-    } else if !mint_idle {
-        warn!("Failing inbound HTLC: the mint did not report idle consensus in time");
-
-        state
-            .node
-            .bolt11_payment()
-            .fail_for_hash(PaymentHash(payment_hash))
-            .expect("LDK has this payment_hash (registered via receive_for_hash)");
-    } else if state
-        .client
-        .gateway_start_receive(row.mint, dbtx, operation, row.offer)
-        .is_err()
+    if row.contract.amount.0 != amount_msat
+        || state
+            .client
+            .gateway_start_receive(row.mint, dbtx, operation, row.contract, row.preimage)
+            .is_err()
     {
         state
             .node
             .bolt11_payment()
             .fail_for_hash(PaymentHash(payment_hash))
             .expect("LDK has this payment_hash (registered via receive_for_hash)");
+
+        return;
+    }
+
+    // The preimage is the gateway's own, so the HTLC settles now rather
+    // than once the mint accepts the funding, and LDK's fail-back deadline
+    // constrains nothing. The funding leaves for the mint on the commit
+    // below; a crash before it replays this event, whose repeated claim
+    // LDK refuses, which is why a refusal is not fatal.
+    if let Err(error) = state.node.bolt11_payment().claim_for_hash(
+        PaymentHash(payment_hash),
+        amount_msat,
+        PaymentPreimage(row.preimage),
+    ) {
+        warn!(%error, "LDK refused the claim of an inbound HTLC");
     }
 }
 

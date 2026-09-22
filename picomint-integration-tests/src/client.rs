@@ -15,11 +15,12 @@ use picomint_client::{TxAcceptEvent, TxRejectEvent};
 use picomint_client_cli_core::{
     ClientBalanceResponse, ClientEcashCountResponse, ClientEcashReceiveResponse,
     ClientEcashSendMaxResponse, ClientEcashSendResponse, ClientExpiryResponse,
-    ClientLightningGatewayListResponse, ClientLightningLnurlResponse,
-    ClientLightningReceiveResponse, ClientLightningSendMaxAmountResponse,
-    ClientLightningSendResponse, ClientListResponse, ClientOnchainReceiveResponse,
-    ClientOnchainSendMaxAmountResponse, ClientOnchainSendMaxResponse, ClientOnchainSendResponse,
-    QueryResponse,
+    ClientLightningGatewayListResponse, ClientLightningInvoiceReceiveResponse,
+    ClientLightningInvoiceSendResponse, ClientLightningLnurlMintResponse,
+    ClientLightningLnurlReceiveResponse, ClientLightningLnurlSendDirectMaxAmountResponse,
+    ClientLightningLnurlSendDirectResponse, ClientLightningLnurlSendMaxAmountResponse,
+    ClientListResponse, ClientOnchainReceiveResponse, ClientOnchainSendMaxAmountResponse,
+    ClientOnchainSendMaxResponse, ClientOnchainSendResponse, QueryResponse,
 };
 use picomint_core::Amount;
 use picomint_core::config::MintId;
@@ -227,58 +228,100 @@ impl TestClient {
             .context("no gateway has answered a probe")
     }
 
-    pub fn lightning_send(
+    pub fn lightning_invoice_send(
         &self,
         gateway: GatewayPk,
         invoice: Bolt11Invoice,
     ) -> anyhow::Result<OperationId> {
         client_cmd(&self.data_dir)
             .arg("lightning")
+            .arg("invoice")
             .arg("send")
             .arg(self.mint.to_string())
             .arg("primary")
             .arg(picomint_base32::encode(&gateway))
             .arg(invoice.to_string())
-            .run_cli::<ClientLightningSendResponse>()
+            .run_cli::<ClientLightningInvoiceSendResponse>()
             .map(|response| response.operation)
     }
 
-    pub fn lightning_send_max_amount(&self, gateway: GatewayPk) -> anyhow::Result<Amount> {
-        client_cmd(&self.data_dir)
-            .arg("lightning")
-            .arg("send-max-amount")
-            .arg(self.mint.to_string())
-            .arg("primary")
-            .arg(picomint_base32::encode(&gateway))
-            .run_cli::<ClientLightningSendMaxAmountResponse>()
-            .map(|response| response.amount_msat)
-    }
-
-    pub fn lightning_receive(
+    pub fn lightning_invoice_receive(
         &self,
         gateway: GatewayPk,
         amount: bitcoin::Amount,
     ) -> anyhow::Result<Bolt11Invoice> {
         client_cmd(&self.data_dir)
             .arg("lightning")
+            .arg("invoice")
             .arg("receive")
             .arg(self.mint.to_string())
             .arg("primary")
             .arg(picomint_base32::encode(&gateway))
             .arg(sat(amount))
-            .run_cli::<ClientLightningReceiveResponse>()
+            .run_cli::<ClientLightningInvoiceReceiveResponse>()
             .map(|response| response.invoice)
     }
 
-    pub fn lightning_lnurl(&self, lnurl_daemon: &str) -> anyhow::Result<String> {
+    pub fn lightning_lnurl_send_max_amount(&self, gateway: GatewayPk) -> anyhow::Result<Amount> {
         client_cmd(&self.data_dir)
             .arg("lightning")
             .arg("lnurl")
+            .arg("send-max-amount")
+            .arg(self.mint.to_string())
+            .arg("primary")
+            .arg(picomint_base32::encode(&gateway))
+            .run_cli::<ClientLightningLnurlSendMaxAmountResponse>()
+            .map(|response| response.amount_msat)
+    }
+
+    pub fn lightning_lnurl_send_direct(
+        &self,
+        lnurl: &str,
+        amount: bitcoin::Amount,
+    ) -> anyhow::Result<OperationId> {
+        client_cmd(&self.data_dir)
+            .arg("lightning")
+            .arg("lnurl")
+            .arg("send-direct")
+            .arg(self.mint.to_string())
+            .arg("primary")
+            .arg(lnurl)
+            .arg(sat(amount))
+            .run_cli::<ClientLightningLnurlSendDirectResponse>()
+            .map(|response| response.operation)
+    }
+
+    pub fn lightning_lnurl_send_direct_max_amount(&self) -> anyhow::Result<Amount> {
+        client_cmd(&self.data_dir)
+            .arg("lightning")
+            .arg("lnurl")
+            .arg("send-direct-max-amount")
+            .arg(self.mint.to_string())
+            .arg("primary")
+            .run_cli::<ClientLightningLnurlSendDirectMaxAmountResponse>()
+            .map(|response| response.amount_msat)
+    }
+
+    pub fn lightning_lnurl_receive(&self, lnurl_daemon: &str) -> anyhow::Result<String> {
+        client_cmd(&self.data_dir)
+            .arg("lightning")
+            .arg("lnurl")
+            .arg("receive")
             .arg(self.mint.to_string())
             .arg("primary")
             .arg(lnurl_daemon)
-            .run_cli::<ClientLightningLnurlResponse>()
+            .run_cli::<ClientLightningLnurlReceiveResponse>()
             .map(|response| response.lnurl)
+    }
+
+    pub fn lightning_lnurl_mint(&self, lnurl: &str) -> anyhow::Result<Option<MintId>> {
+        client_cmd(&self.data_dir)
+            .arg("lightning")
+            .arg("lnurl")
+            .arg("mint")
+            .arg(lnurl)
+            .run_cli::<ClientLightningLnurlMintResponse>()
+            .map(|response| response.mint)
     }
 
     pub fn query(&self, query: &str) -> anyhow::Result<Vec<Map<String, Value>>> {

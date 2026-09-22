@@ -39,8 +39,8 @@ impl Event for SendSuccessEvent {
     const KIND: EventKind = EventKind::from_static("gateway-send-success");
 }
 
-/// The gateway could not make the payment and cancelled it, so the sender
-/// gets refunded at once instead of at expiry.
+/// The gateway could not make the payment and cancelled it; the forfeit
+/// signature is the only way the sender's contract comes back to it.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct SendCancelEvent {
     /// The gateway's forfeit signature the sender refunds with, hex
@@ -53,9 +53,11 @@ impl Event for SendCancelEvent {
 
 // --- Incoming payment ---
 
-/// A payment for a client's invoice arrived and the gateway funded the
-/// incoming contract; `gateway_receive_success`, `gateway_receive_refund`
-/// or `gateway_receive_failure` follows under the same operation.
+/// A payment for a client's invoice arrived, the gateway funded the
+/// incoming contract it authored and settled the payment with the
+/// preimage;
+/// `gateway_receive_success` or `gateway_receive_failure` follows under
+/// the same operation.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveEvent {
     /// The mint transaction that funds the contract, hex
@@ -70,7 +72,8 @@ impl Event for ReceiveEvent {
     const KIND: EventKind = EventKind::from_static("gateway-receive");
 }
 
-/// The mint released the preimage and the gateway settled the payment.
+/// The mint accepted the funding; a direct swap's sender is handed the
+/// preimage the gateway made with the invoice.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveSuccessEvent {
     /// The preimage the gateway settled with, hex
@@ -81,23 +84,12 @@ impl Event for ReceiveSuccessEvent {
     const KIND: EventKind = EventKind::from_static("gateway-receive-success");
 }
 
-/// The mint's nodes produced no usable preimage; the payment failed back
-/// to its sender.
+/// The mint rejected the funding transaction. A direct swap's sender is
+/// refunded; an inbound HTLC was already settled, so its recipient is
+/// owed the amount.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveFailureEvent;
 
 impl Event for ReceiveFailureEvent {
     const KIND: EventKind = EventKind::from_static("gateway-receive-failure");
-}
-
-/// The preimage the mint released was wrong; the gateway took its funding
-/// back.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
-pub struct ReceiveRefundEvent {
-    /// The mint transaction that refunds the gateway, hex
-    pub txid: TransactionId,
-}
-
-impl Event for ReceiveRefundEvent {
-    const KIND: EventKind = EventKind::from_static("gateway-receive-refund");
 }

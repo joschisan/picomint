@@ -19,7 +19,7 @@ use secp256k1::schnorr::Signature;
 use tracing::{error, instrument, warn};
 
 use super::LightningInvoice;
-use super::events::{SendFailureEvent, SendRefundEvent, SendSuccessEvent};
+use super::events::{SendRefundEvent, SendSuccessEvent};
 use crate::context::ClientContext;
 
 table!(
@@ -64,16 +64,13 @@ pub enum SendSMState {
 /// Outcome produced by [`SendStateMachine::trigger`]. Which variant is
 /// yielded depends on the current [`SendSMState`]:
 /// - `Funding`     → [`SendOutcome::Rejected`] / [`SendOutcome::GatewayResponse`]
-///   / [`SendOutcome::PreimageTable`] / [`SendOutcome::Expired`]
+///   / [`SendOutcome::PreimageTable`]
 /// - `Refunding{}` → [`SendOutcome::Refunded`] / [`SendOutcome::PreimageTable`]
-///   / [`SendOutcome::Failure`]
 pub enum SendOutcome {
     Rejected,
     GatewayResponse(Result<[u8; 32], Signature>),
     PreimageTable([u8; 32]),
-    Expired,
     Refunded,
-    Failure,
 }
 
 /// State machine that requests the lightning gateway to pay an invoice on
@@ -87,7 +84,10 @@ impl StateMachine for SendStateMachine {
                 // The gateway and the mint both wait for the contract
                 // themselves, so the request and the preimage poll go out
                 // before the funding transaction is accepted; acceptance
-                // is only awaited for its rejection.
+                // is only awaited for its rejection. The contract settles
+                // only through the gateway, by preimage or by forfeit
+                // signature, so both branches wait for as long as that
+                // takes.
                 tokio::select! {
                     _ = await_rejected_sm(
                         ctx,
@@ -107,10 +107,7 @@ impl StateMachine for SendStateMachine {
                         self.common.outpoint,
                         self.common.contract.clone(),
                         ctx.api.clone(),
-                    ) => match preimage {
-                        Some(p) => SendOutcome::PreimageTable(p),
-                        None => SendOutcome::Expired,
-                    },
+                    ) => SendOutcome::PreimageTable(preimage),
                 }
             }
             SendSMState::Refunding(refund_txid) => {
@@ -119,23 +116,17 @@ impl StateMachine for SendStateMachine {
                     .await
                 {
                     Ok(()) => SendOutcome::Refunded,
-                    Err(_) => {
-                        // Refund tx was rejected, which means the contract input
-                        // is gone — the gateway must have claimed it. Re-poll the
-                        // mint for the preimage one more time before giving
-                        // up.
-                        let p = super::api::await_preimage(
-                            &ctx.api,
+                    // The refund was rejected, so the contract is gone and
+                    // the only other way it goes is a claim: the preimage
+                    // is in the mint's table.
+                    Err(_) => SendOutcome::PreimageTable(
+                        await_preimage_sm(
                             self.common.outpoint,
-                            self.common.contract.expiry,
+                            self.common.contract.clone(),
+                            ctx.api.clone(),
                         )
-                        .await
-                        .filter(|p| self.common.contract.verify_preimage(p));
-                        match p {
-                            Some(p) => SendOutcome::PreimageTable(p),
-                            None => SendOutcome::Failure,
-                        }
-                    }
+                        .await,
+                    ),
                 }
             }
         }
@@ -167,47 +158,28 @@ impl StateMachine for SendStateMachine {
                 );
                 None
             }
-            SendOutcome::GatewayResponse(Err(signature)) => {
-                Some(self.update(SendSMState::Refunding(submit_refund(
-                    ctx,
-                    dbtx,
-                    self,
-                    OutgoingWitness::Cancel(signature),
-                    false,
-                ))))
-            }
-            SendOutcome::Expired => Some(self.update(SendSMState::Refunding(submit_refund(
-                ctx,
-                dbtx,
-                self,
-                OutgoingWitness::Refund,
-                true,
-            )))),
+            SendOutcome::GatewayResponse(Err(signature)) => Some(self.update(
+                SendSMState::Refunding(submit_refund(ctx, dbtx, self, signature)),
+            )),
             SendOutcome::Refunded => None,
-            SendOutcome::Failure => {
-                ctx.log_event(
-                    dbtx,
-                    self.common.account,
-                    self.common.operation,
-                    SendFailureEvent,
-                );
-                None
-            }
         }
     }
 }
 
-/// Build and submit the refund-claim tx, log `SendRefundEvent`, return its
-/// txid for the SM to advance into the `Refunding` state with.
+/// Build and submit the refund tx spending the contract with the gateway's
+/// forfeit signature, log `SendRefundEvent`, return its txid for the SM to
+/// advance into the `Refunding` state with.
 fn submit_refund(
     ctx: &ClientContext,
     dbtx: &WriteTx,
     old_state: &SendStateMachine,
-    witness: OutgoingWitness,
-    expired: bool,
+    signature: Signature,
 ) -> TransactionId {
     let tx_builder = TxBuilder::from_input(Input {
-        input: wire::Input::Lightning(LightningInput::Outgoing(old_state.common.outpoint, witness)),
+        input: wire::Input::Lightning(LightningInput::Outgoing(
+            old_state.common.outpoint,
+            OutgoingWitness::Cancel(signature),
+        )),
         keypair: old_state.common.refund_keypair,
         amount: old_state.common.contract.amount + old_state.common.contract.fee,
         fee: ctx.config.lightning.input_fee,
@@ -223,7 +195,7 @@ fn submit_refund(
         tx_builder,
         Vec::new(),
         false,
-        |txid| SendRefundEvent { txid, expired },
+        |txid| SendRefundEvent { txid },
     )
     .expect("Cannot claim input, additional funding needed")
 }
@@ -231,7 +203,7 @@ fn submit_refund(
 /// Resolves only with a response the contract accepts. An invalid
 /// response or a gateway that left the announced set is terminal for this
 /// branch — no retry changes either — so it parks and leaves the outcome
-/// to the preimage poll, which expires the contract and refunds.
+/// to the preimage poll.
 #[instrument(skip(refund_keypair, gateways))]
 async fn gateway_send_sm(
     gateways: Gateways,
@@ -276,11 +248,11 @@ async fn await_preimage_sm(
     outpoint: OutPoint,
     contract: OutgoingContract,
     api: MintApi,
-) -> Option<[u8; 32]> {
-    let preimage = super::api::await_preimage(&api, outpoint, contract.expiry).await?;
+) -> [u8; 32] {
+    let preimage = super::api::await_preimage(&api, outpoint).await;
 
     if contract.verify_preimage(&preimage) {
-        return Some(preimage);
+        return preimage;
     }
 
     error!("Mint returned invalid preimage {:?}", preimage);

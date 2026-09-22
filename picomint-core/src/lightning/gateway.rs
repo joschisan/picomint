@@ -22,7 +22,7 @@ pub struct GatewayPk(pub iroh_base::PublicKey);
 )]
 pub struct GatewayInfo {
     /// The public key of the gateway's client module, hex x-only. Used to
-    /// claim or cancel outgoing contracts and refund incoming contracts.
+    /// claim or cancel outgoing contracts.
     #[schemars(with = "String")]
     pub module_public_key: XOnlyPublicKey,
     /// Fee the gateway charges on outgoing payments, the same whether it
@@ -35,10 +35,6 @@ pub struct GatewayInfo {
     /// Fee the gateway charges on incoming payments. Enforced exactly —
     /// the incoming contract amount must equal `amount - receive_fee`.
     pub receive_fee: PaymentFee,
-    /// Expiry delta in blocks for outgoing contracts. Sized for
-    /// external LN sends (accounts for intermediate LN hops) and used for
-    /// direct swaps as well.
-    pub expiry_delta: u16,
 }
 
 /// A gateway's cut on one payment: `base` plus `ppm` millionths of the

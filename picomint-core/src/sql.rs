@@ -8,6 +8,7 @@
 //! [`picomint_derive::SqlRow`], re-exported here.
 
 use bitcoin::address::NetworkUnchecked;
+use bitcoin::hashes::sha256;
 use bitcoin::{Address, Txid};
 pub use picomint_derive::SqlRow;
 use secp256k1::schnorr::Signature;
@@ -76,7 +77,14 @@ macro_rules! display {
     };
 }
 
-display!(String, TransactionId, Txid, OutPoint, Signature);
+display!(
+    String,
+    TransactionId,
+    Txid,
+    OutPoint,
+    Signature,
+    sha256::Hash
+);
 
 impl SqlColumn for bool {
     const TYPE: &'static str = "INTEGER";

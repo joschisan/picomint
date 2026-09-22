@@ -42,7 +42,6 @@ tbs = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time", "macros", "rt", "sync"] }
 tokio-util = { workspace = true, features = ["rt"] }
-tpe = { workspace = true }
 tracing = { workspace = true }
 
 # The `Base32` derive on `Ecash` expands to `schemars` impls, which is what

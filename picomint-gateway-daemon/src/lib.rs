@@ -6,7 +6,7 @@ pub mod trailer;
 
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, ensure};
+use anyhow::{anyhow, ensure};
 use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
 use futures::StreamExt as _;
@@ -22,15 +22,18 @@ use picomint_client::{Client, Mnemonic};
 use picomint_core::Amount;
 use picomint_core::config::MintId;
 use picomint_core::core::OperationId;
-use picomint_core::lightning::LightningInvoice;
+use picomint_core::lightning::contracts::IncomingContract;
 use picomint_core::lightning::gateway::{GatewayInfo, PaymentFee};
 use picomint_core::lightning::methods::{ReceiveRequest, SendRequest, VerifyResponse};
+use picomint_core::lightning::{LightningInvoice, MINIMUM_INCOMING_CONTRACT_AMOUNT};
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::MintInfo;
 use picomint_redb::{Database, DbRead};
 
-use crate::db::{IncomingOfferRow, IncomingOfferTable, OutgoingContractRow, OutgoingContractTable};
+use crate::db::{
+    IncomingContractRow, IncomingContractTable, OutgoingContractRow, OutgoingContractTable,
+};
 use tracing::warn;
 
 /// Name of the gateway's database.
@@ -77,8 +80,6 @@ impl AppState {
             module_public_key: self.client.gateway_pk(*mint)?,
             send_fee: self.send_fee,
             receive_fee: self.receive_fee,
-            expiry_delta: u16::try_from(self.cltv_expiry_delta + 144)
-                .expect("the configured cltv expiry delta fits the LN protocol's u16"),
         })
     }
 
@@ -108,7 +109,7 @@ impl AppState {
 
         let api = self.client.api(payload.mint)?;
 
-        let (contract_id, expiry) = api::outgoing_contract_expiry(&api, payload.outpoint)
+        let contract_id = api::await_outgoing_contract(&api, payload.outpoint)
             .await
             .map_err(|_| anyhow!("The gateway cannot reach the mint"))?;
 
@@ -146,11 +147,6 @@ impl AppState {
         ensure!(
             payload.contract.fee == fee,
             "Contract fee does not match the advertised send fee"
-        );
-
-        ensure!(
-            expiry >= self.cltv_expiry_delta + 144,
-            "Contract expiry does not leave enough room for routing"
         );
 
         // --- Insert outgoing_contract row + log SendEvent on the source mint (one tx) ---
@@ -221,11 +217,11 @@ impl AppState {
             }
         } else {
             let incoming_row = dbtx
-                .get(&IncomingOfferTable, &operation)
+                .get(&IncomingContractTable, &operation)
                 .expect("Direct-swap target not registered for this payment hash");
 
             ensure!(
-                incoming_row.offer.commitment.amount.0 == amount,
+                incoming_row.contract.amount.0 == amount,
                 "Direct-swap amount mismatch"
             );
 
@@ -233,7 +229,8 @@ impl AppState {
                 incoming_row.mint,
                 &dbtx,
                 operation,
-                incoming_row.offer,
+                incoming_row.contract,
+                incoming_row.preimage,
             ) {
                 warn!(%error, %operation, "Could not fund the direct swap's receive; cancelling the send");
 
@@ -256,61 +253,53 @@ impl AppState {
             .await
     }
 
-    /// Creates a Bolt11 invoice for an incoming payment. Registers the
-    /// `IncomingOffer` + the generated invoice in the daemon-global
-    /// `incoming-offer` table. A duplicate offer is rejected — both the offer
-    /// table insert and LDK's `receive_for_hash` refuse a repeated payment
-    /// hash.
+    /// Creates a Bolt11 invoice for an incoming payment: authors the
+    /// `IncomingContract` the payment will fund from the recipient's key,
+    /// and registers it with its preimage and the generated invoice in the
+    /// daemon-global `incoming-contract` table. The ephemeral key is fresh
+    /// per contract, so the payment hash never repeats.
     pub async fn receive(&self, payload: ReceiveRequest) -> anyhow::Result<Bolt11Invoice> {
-        // Two pairings; keep them off the worker serving the request.
-        let offer = payload.offer.clone();
-
-        ensure!(
-            tokio::task::spawn_blocking(move || offer.verify())
-                .await
-                .expect("Offer verification cannot panic"),
-            "The offer is invalid"
-        );
-
         ensure!(
             self.client.config(payload.mint).is_some(),
             "Mint is not added"
         );
 
-        let receive_fee = self.receive_fee.fee(payload.offer.commitment.amount.0);
+        let fee = self.receive_fee.fee(payload.amount.0);
 
         ensure!(
-            payload.offer.commitment.fee == receive_fee,
-            "Offer fee does not match the gateway receive fee"
+            payload
+                .amount
+                .checked_sub(fee)
+                .is_some_and(|net| net >= MINIMUM_INCOMING_CONTRACT_AMOUNT),
+            "Amount is too small to be claimed"
         );
+
+        let (contract, preimage) =
+            IncomingContract::author(&payload.recipient, payload.amount, fee);
 
         let invoice = self
             .node
             .bolt11_payment()
             .receive_for_hash(
-                payload.offer.commitment.amount.0,
+                contract.amount.0,
                 &LdkBolt11InvoiceDescription::Direct(Description::empty()),
                 self.invoice_expiry_secs,
-                PaymentHash(payload.offer.commitment.payment_hash.to_byte_array()),
+                PaymentHash(contract.payment_hash.to_byte_array()),
             )
             .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))?;
 
         let dbtx = self.gateway_db.begin_write();
 
-        if dbtx
-            .insert(
-                &IncomingOfferTable,
-                &OperationId::from_encodable(&payload.offer.commitment.payment_hash),
-                &IncomingOfferRow {
-                    mint: payload.mint,
-                    offer: payload.offer,
-                    invoice: LightningInvoice::Bolt11(invoice.clone()),
-                },
-            )
-            .is_some()
-        {
-            bail!("A contract for this hash has already been registered")
-        }
+        dbtx.insert_new(
+            &IncomingContractTable,
+            &OperationId::from_encodable(&contract.payment_hash),
+            &IncomingContractRow {
+                mint: payload.mint,
+                contract,
+                preimage,
+                invoice: LightningInvoice::Bolt11(invoice.clone()),
+            },
+        );
 
         dbtx.commit();
 
@@ -326,7 +315,7 @@ impl AppState {
 
         self.gateway_db
             .begin_read()
-            .get(&IncomingOfferTable, &operation)
+            .get(&IncomingContractTable, &operation)
             .ok_or_else(|| anyhow!("Unknown payment hash"))?;
 
         if !wait {

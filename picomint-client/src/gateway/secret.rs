@@ -25,9 +25,8 @@ impl GatewaySecret {
     /// sends — both places a sender has to name the gateway in advance, so
     /// both have to be static and public.
     ///
-    /// Incoming contracts do not use it: their refund key is fresh per
-    /// contract, since the gateway picks it at funding time and nobody else
-    /// needs to predict it.
+    /// Incoming contracts do not use it: they name no gateway key at all,
+    /// since a gateway holding the preimage can always settle them.
     pub fn contract_keypair(&self) -> Keypair {
         self.0.child(&Path::Contract).to_secp_keypair()
     }

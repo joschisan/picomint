@@ -46,12 +46,18 @@ pub const ROUTE_ONCHAIN_SEND_MAX: &str = "/onchain/send-max";
 pub const ROUTE_ONCHAIN_RECEIVE: &str = "/onchain/receive";
 
 pub const ROUTE_LIGHTNING_GATEWAY_LIST: &str = "/lightning/gateway/list";
-pub const ROUTE_LIGHTNING_SEND: &str = "/lightning/send";
-pub const ROUTE_LIGHTNING_SEND_MAX_AMOUNT: &str = "/lightning/send-max-amount";
-pub const ROUTE_LIGHTNING_SEND_MAX: &str = "/lightning/send-max";
-pub const ROUTE_LIGHTNING_RECEIVE: &str = "/lightning/receive";
-pub const ROUTE_LIGHTNING_LNURL: &str = "/lightning/lnurl";
 pub const ROUTE_LIGHTNING_GATEWAY_REFRESH: &str = "/lightning/gateway/refresh";
+pub const ROUTE_LIGHTNING_INVOICE_SEND: &str = "/lightning/invoice/send";
+pub const ROUTE_LIGHTNING_INVOICE_RECEIVE: &str = "/lightning/invoice/receive";
+pub const ROUTE_LIGHTNING_LNURL_SEND: &str = "/lightning/lnurl/send";
+pub const ROUTE_LIGHTNING_LNURL_SEND_MAX: &str = "/lightning/lnurl/send-max";
+pub const ROUTE_LIGHTNING_LNURL_SEND_MAX_AMOUNT: &str = "/lightning/lnurl/send-max-amount";
+pub const ROUTE_LIGHTNING_LNURL_SEND_DIRECT: &str = "/lightning/lnurl/send-direct";
+pub const ROUTE_LIGHTNING_LNURL_SEND_DIRECT_MAX: &str = "/lightning/lnurl/send-direct-max";
+pub const ROUTE_LIGHTNING_LNURL_SEND_DIRECT_MAX_AMOUNT: &str =
+    "/lightning/lnurl/send-direct-max-amount";
+pub const ROUTE_LIGHTNING_LNURL_RECEIVE: &str = "/lightning/lnurl/receive";
+pub const ROUTE_LIGHTNING_LNURL_MINT: &str = "/lightning/lnurl/mint";
 
 // --- /mnemonic ---
 
@@ -383,10 +389,10 @@ pub struct ClientLightningGatewayListResponse {
     pub gateways: BTreeMap<GatewayPk, GatewayInfo>,
 }
 
-// --- /lightning/send ---
+// --- /lightning/invoice/send ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct ClientLightningSendRequest {
+pub struct ClientLightningInvoiceSendRequest {
     /// The mint id, as printed by `list`
     pub mint: MintId,
     /// The account, as for `balance`
@@ -400,64 +406,17 @@ pub struct ClientLightningSendRequest {
 
 /// The payment was submitted; it completes in the background.
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
-pub struct ClientLightningSendResponse {
+pub struct ClientLightningInvoiceSendResponse {
     /// The operation the payment logs under, derived from the invoice's
     /// payment hash; the outcome is `lightning_send_success` with the
     /// preimage, or `lightning_send_refund` if the gateway could not route
     pub operation: OperationId,
 }
 
-// --- /lightning/send-max-amount ---
+// --- /lightning/invoice/receive ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct ClientLightningSendMaxAmountRequest {
-    /// The mint id, as printed by `list`
-    pub mint: MintId,
-    /// The account, as for `balance`
-    pub account: Account,
-    /// The gateway to pay through, from `lightning gateway list`
-    pub gateway: GatewayPk,
-}
-
-/// What `lightning send-max` would pay right now.
-#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
-pub struct ClientLightningSendMaxAmountResponse {
-    /// The invoice amount, in msat and always a whole sat: the largest
-    /// amount the account's notes cover when spent in full, once the
-    /// gateway's `send_fee` on it, the mint's per-output fee and its
-    /// per-input fee on every note are paid; the sub-sat remainder stays
-    /// with the mint. 0 when the notes do not even cover the fees
-    pub amount_msat: Amount,
-}
-
-// --- /lightning/send-max ---
-
-#[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct ClientLightningSendMaxRequest {
-    /// The mint id, as printed by `list`
-    pub mint: MintId,
-    /// The account, as for `balance`
-    pub account: Account,
-    /// The gateway to pay through, from `lightning gateway list`
-    pub gateway: GatewayPk,
-    /// The lnurl or lightning address to pay; the account's whole balance
-    /// less the gateway's fee goes to it
-    pub lnurl: Lnurl,
-}
-
-/// The payment was submitted; it completes in the background.
-#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
-pub struct ClientLightningSendMaxResponse {
-    /// The operation the payment logs under, derived from the invoice's
-    /// payment hash; the outcome is `lightning_send_success` with the
-    /// preimage, or `lightning_send_refund` if the gateway could not route
-    pub operation: OperationId,
-}
-
-// --- /lightning/receive ---
-
-#[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct ClientLightningReceiveRequest {
+pub struct ClientLightningInvoiceReceiveRequest {
     /// The mint id, as printed by `list`
     pub mint: MintId,
     /// The account, as for `balance`
@@ -471,7 +430,7 @@ pub struct ClientLightningReceiveRequest {
 
 /// An invoice for the account, issued by the gateway.
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
-pub struct ClientLightningReceiveResponse {
+pub struct ClientLightningInvoiceReceiveResponse {
     /// The bolt11 invoice; the payment lands in the analytics as
     /// `lightning_receive` under the operation derived from its payment
     /// hash, once the gateway has funded it
@@ -479,10 +438,156 @@ pub struct ClientLightningReceiveResponse {
     pub invoice: Bolt11Invoice,
 }
 
-// --- /lightning/lnurl ---
+// --- /lightning/lnurl/send ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Args)]
-pub struct ClientLightningLnurlRequest {
+pub struct ClientLightningLnurlSendRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+    /// The gateway to pay through, from `lightning gateway list`
+    pub gateway: GatewayPk,
+    /// The lnurl or lightning address to pay
+    pub lnurl: Lnurl,
+    /// The amount with its denomination the recipient gets, e.g. "1000
+    /// sat"; the gateway's `send_fee` is charged on top
+    pub amount: bitcoin::Amount,
+}
+
+/// The payment was submitted; it completes in the background.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientLightningLnurlSendResponse {
+    /// The operation the payment logs under, derived from the resolved
+    /// invoice's payment hash; the outcome is `lightning_send_success`
+    /// with the preimage, or `lightning_send_refund` if the gateway could
+    /// not route
+    pub operation: OperationId,
+}
+
+// --- /lightning/lnurl/send-max ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientLightningLnurlSendMaxRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+    /// The gateway to pay through, from `lightning gateway list`
+    pub gateway: GatewayPk,
+    /// The lnurl or lightning address to pay; the account's whole balance
+    /// less the fees goes to it
+    pub lnurl: Lnurl,
+}
+
+/// The payment was submitted; it completes in the background.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientLightningLnurlSendMaxResponse {
+    /// The operation the payment logs under, derived from the resolved
+    /// invoice's payment hash; the outcome is `lightning_send_success`
+    /// with the preimage, or `lightning_send_refund` if the gateway could
+    /// not route
+    pub operation: OperationId,
+}
+
+// --- /lightning/lnurl/send-max-amount ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientLightningLnurlSendMaxAmountRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+    /// The gateway to pay through, from `lightning gateway list`
+    pub gateway: GatewayPk,
+}
+
+/// What `lightning lnurl send-max` would pay right now.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientLightningLnurlSendMaxAmountResponse {
+    /// The invoice amount, in msat and always a whole sat: the largest
+    /// amount the account's notes cover when spent in full, once the
+    /// gateway's `send_fee` on it, the mint's per-output fee and its
+    /// per-input fee on every note are paid; the sub-sat remainder stays
+    /// with the mint. 0 when the notes do not even cover the fees
+    pub amount_msat: Amount,
+}
+
+// --- /lightning/lnurl/send-direct ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientLightningLnurlSendDirectRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+    /// The lnurl to pay; it has to belong to this mint, as `lightning
+    /// lnurl mint` tells
+    pub lnurl: Lnurl,
+    /// The amount with its denomination the recipient gets, e.g. "1000
+    /// sat"; no gateway fee applies
+    pub amount: bitcoin::Amount,
+}
+
+/// The payment was submitted; it completes in the background.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientLightningLnurlSendDirectResponse {
+    /// The operation the payment logs under, derived from the payment
+    /// hash; the `tx_accept` or `tx_reject` of its `lightning_send` is the
+    /// outcome, since the recipient's contract is funded straight from
+    /// the account
+    pub operation: OperationId,
+}
+
+// --- /lightning/lnurl/send-direct-max ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientLightningLnurlSendDirectMaxRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+    /// The lnurl to pay; it has to belong to this mint, as `lightning
+    /// lnurl mint` tells. The account's whole balance less the mint's
+    /// fees goes to it
+    pub lnurl: Lnurl,
+}
+
+/// The payment was submitted; it completes in the background.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientLightningLnurlSendDirectMaxResponse {
+    /// The operation the payment logs under, derived from the payment
+    /// hash; the `tx_accept` or `tx_reject` of its `lightning_send` is the
+    /// outcome, since the recipient's contract is funded straight from
+    /// the account
+    pub operation: OperationId,
+}
+
+// --- /lightning/lnurl/send-direct-max-amount ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientLightningLnurlSendDirectMaxAmountRequest {
+    /// The mint id, as printed by `list`
+    pub mint: MintId,
+    /// The account, as for `balance`
+    pub account: Account,
+}
+
+/// What `lightning lnurl send-direct-max` would pay right now.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientLightningLnurlSendDirectMaxAmountResponse {
+    /// The amount, in msat and always a whole sat: the largest amount the
+    /// account's notes cover when spent in full, once the mint's
+    /// per-output fee and its per-input fee on every note are paid; the
+    /// sub-sat remainder stays with the mint. 0 when the notes do not
+    /// even cover the fees
+    pub amount_msat: Amount,
+}
+
+// --- /lightning/lnurl/receive ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientLightningLnurlReceiveRequest {
     /// The mint id, as printed by `list`
     pub mint: MintId,
     /// The account, as for `balance`
@@ -494,10 +599,27 @@ pub struct ClientLightningLnurlRequest {
 
 /// A reusable way to be paid while this daemon is offline.
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
-pub struct ClientLightningLnurlResponse {
+pub struct ClientLightningLnurlReceiveResponse {
     /// The bech32 lnurl; valid for as long as the mint exists, since its
     /// payload carries nothing that expires
     pub lnurl: String,
+}
+
+// --- /lightning/lnurl/mint ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Args)]
+pub struct ClientLightningLnurlMintRequest {
+    /// The lnurl or lightning address to look at
+    pub lnurl: Lnurl,
+}
+
+/// Which added mint an lnurl belongs to, and so whether `lightning lnurl
+/// send-direct` from that mint can pay it.
+#[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
+pub struct ClientLightningLnurlMintResponse {
+    /// The mint id the lnurl commits to, null when it is not an lnurl of
+    /// any added mint
+    pub mint: Option<MintId>,
 }
 
 // --- /lightning/gateway/refresh ---

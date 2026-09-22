@@ -206,15 +206,14 @@ picomint-gateway-cli query \
      ORDER BY c.ts DESC LIMIT 10"
 ```
 
-Incoming payments still waiting on their claim:
+Incoming payments whose funding the mint has not accepted yet:
 
 ```bash
 picomint-gateway-cli query \
     "SELECT r.operation, r.ts, r.amount FROM gateway_receive r \
      LEFT JOIN gateway_receive_success rs USING (operation) \
-     LEFT JOIN gateway_receive_refund rr USING (operation) \
      LEFT JOIN gateway_receive_failure rf USING (operation) \
-     WHERE rs.id IS NULL AND rr.id IS NULL AND rf.id IS NULL"
+     WHERE rs.id IS NULL AND rf.id IS NULL"
 ```
 
 ## Interfaces

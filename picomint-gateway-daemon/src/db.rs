@@ -36,9 +36,9 @@ table!(
 );
 
 table!(
-    IncomingOfferTable,
-    OperationId => IncomingOfferRow,
-    "incoming-offer",
+    IncomingContractTable,
+    OperationId => IncomingContractRow,
+    "incoming-contract",
 );
 
 // The `payment_hash`es of LDK events the event loop has fully processed
@@ -71,14 +71,15 @@ pub struct OutgoingContractRow {
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct IncomingOfferRow {
+pub struct IncomingContractRow {
     pub mint: MintId,
-    pub offer: contracts::IncomingOffer,
+    pub contract: contracts::IncomingContract,
+    pub preimage: [u8; 32],
     pub invoice: LightningInvoice,
 }
 
 /// Delete the daemon's rows scoped to `mint` — its outgoing-contract
-/// and incoming-offer rows. Runs inside the dbtx that removes the mint
+/// and incoming-contract rows. Runs inside the dbtx that removes the mint
 /// from the client, so a surviving contract row always implies its
 /// mint is added.
 pub fn wipe_mint_rows(dbtx: &WriteTx, mint: MintId) {
@@ -92,14 +93,14 @@ pub fn wipe_mint_rows(dbtx: &WriteTx, mint: MintId) {
         dbtx.remove(&OutgoingContractTable, &operation);
     }
 
-    let incoming = dbtx.iter(&IncomingOfferTable, |rows| {
+    let incoming = dbtx.iter(&IncomingContractTable, |rows| {
         rows.filter(|entry| entry.1.mint == mint)
             .map(|entry| entry.0)
             .collect::<Vec<_>>()
     });
 
     for operation in incoming {
-        dbtx.remove(&IncomingOfferTable, &operation);
+        dbtx.remove(&IncomingContractTable, &operation);
     }
 }
 

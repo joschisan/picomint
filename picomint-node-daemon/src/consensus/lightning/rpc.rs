@@ -1,92 +1,53 @@
 //! Freestanding API handlers for the lightning module.
 
-use std::time::Duration;
-
 use picomint_core::lightning::methods::{
-    AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitPreimageRequest,
-    AwaitPreimageResponse, DecryptionKeyShareRequest, DecryptionKeyShareResponse, GatewaysRequest,
-    GatewaysResponse, OutgoingContractExpiryRequest, OutgoingContractExpiryResponse,
-    TpeAggregatePkRequest, TpeAggregatePkResponse,
+    AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitOutgoingContractRequest,
+    AwaitOutgoingContractResponse, AwaitPreimageRequest, AwaitPreimageResponse, GatewaysRequest,
+    GatewaysResponse,
 };
-use tokio::time::timeout;
 
 use picomint_redb::DbRead;
 
-use crate::consensus::db::consensus_block_height;
 use crate::consensus::server::Server;
 
 use super::db::{
-    DecryptionKeyShareTable, GatewayTable, IncomingContractStreamNextIndexTable,
-    IncomingContractStreamTable, OutgoingContractTable, PreimageTable,
+    GatewayTable, IncomingContractStreamNextIndexTable, IncomingContractStreamTable,
+    OutgoingContractTable, PreimageTable,
 };
 
+/// Waits for the preimage rather than reporting its absence: an outgoing
+/// contract settles only through the gateway, by claim or by forfeit, so
+/// there is no block height at which waiting stops being worthwhile.
 pub async fn await_preimage(
     server: &Server,
     req: AwaitPreimageRequest,
 ) -> Result<AwaitPreimageResponse, String> {
-    loop {
-        let wait = server.db.wait_table_check(&PreimageTable, |dbtx| {
-            dbtx.get(&PreimageTable, &req.outpoint)
-        });
-
-        if let Ok((preimage, _dbtx)) = timeout(Duration::from_secs(10), wait).await {
-            return Ok(AwaitPreimageResponse {
-                preimage: Some(preimage),
-            });
-        }
-
-        let dbtx = server.db.begin_read();
-
-        if let Some(preimage) = dbtx.get(&PreimageTable, &req.outpoint) {
-            return Ok(AwaitPreimageResponse {
-                preimage: Some(preimage),
-            });
-        }
-
-        if req.expiry <= consensus_block_height(server, &dbtx) {
-            return Ok(AwaitPreimageResponse { preimage: None });
-        }
-    }
-}
-
-/// Waits for the share rather than reporting its absence, so a gateway
-/// can ask for it while its funding transaction is still in flight and
-/// have it the moment the contract is processed.
-pub async fn decryption_key_share(
-    server: &Server,
-    req: DecryptionKeyShareRequest,
-) -> Result<DecryptionKeyShareResponse, String> {
-    let (share, _dbtx) = server
+    let (preimage, _dbtx) = server
         .db
-        .wait_table_check(&DecryptionKeyShareTable, |dbtx| {
-            dbtx.get(&DecryptionKeyShareTable, &req.outpoint)
+        .wait_table_check(&PreimageTable, |dbtx| {
+            dbtx.get(&PreimageTable, &req.outpoint)
         })
         .await;
 
-    Ok(DecryptionKeyShareResponse { share })
+    Ok(AwaitPreimageResponse { preimage })
 }
 
 /// Waits for the contract rather than reporting its absence, so a
 /// gateway can be asked to pay while the funding transaction is still
 /// in flight.
-pub async fn outgoing_contract_expiry(
+pub async fn await_outgoing_contract(
     server: &Server,
-    req: OutgoingContractExpiryRequest,
-) -> Result<OutgoingContractExpiryResponse, String> {
-    let (contract, dbtx) = server
+    req: AwaitOutgoingContractRequest,
+) -> Result<AwaitOutgoingContractResponse, String> {
+    let (contract, _dbtx) = server
         .db
         .wait_table_check(&OutgoingContractTable, |dbtx| {
             dbtx.get(&OutgoingContractTable, &req.outpoint)
         })
         .await;
 
-    let expiry = contract
-        .expiry
-        .saturating_sub(consensus_block_height(server, &dbtx));
-
-    Ok(OutgoingContractExpiryResponse {
+    Ok(AwaitOutgoingContractResponse {
         contract: contract.contract_id(),
-        expiry,
     })
 }
 
@@ -129,17 +90,5 @@ pub fn gateways(server: &Server, _: GatewaysRequest) -> Result<GatewaysResponse,
             .db
             .begin_read()
             .iter(&GatewayTable, |r| r.map(|(pk, _)| pk).collect()),
-    })
-}
-
-/// The mint's tpe aggregate key. Ungated for the same reason as
-/// `mint_info`: it is public to every client, and a caller holding a
-/// hash of it out of band can check what it gets.
-pub fn tpe_aggregate_pk(
-    server: &Server,
-    _: TpeAggregatePkRequest,
-) -> Result<TpeAggregatePkResponse, String> {
-    Ok(TpeAggregatePkResponse {
-        tpe_agg_pk: server.cfg.consensus.lightning.tpe_agg_pk,
     })
 }

@@ -7,7 +7,7 @@
 //! in between. Every operation takes the
 //! [`picomint_core::config::MintId`] it acts on
 //! and is named for the module that serves it — `ecash_send`,
-//! `onchain_receive`, `lightning_receive`, `gateway_finalize_send` — so there is
+//! `onchain_receive`, `lightning_invoice_receive`, `gateway_finalize_send` — so there is
 //! no per-mint handle to hold or leak.
 //!
 //! Every table is shared across mints with a

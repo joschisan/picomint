@@ -6,9 +6,10 @@ use picomint_cli_client::{FOOTER, print_json, request, schema, schema_fallible};
 use picomint_client::ecash::{ReceiveEcashError, SendEcashError};
 use picomint_client::expiry::RefreshExpiryStatusError;
 use picomint_client::lightning::{
-    RefreshGatewaysError, SendMaxAmountError, SendMaxError, SendPaymentError,
+    InvoiceReceiveError, InvoiceSendError, LnurlSendDirectError, LnurlSendError,
+    LnurlSendMaxAmountError, RefreshGatewaysError,
 };
-use picomint_client::{AddMintError, NotAddedError, lightning, onchain};
+use picomint_client::{AddMintError, NotAddedError, onchain};
 use picomint_client_cli_core::{
     ClientAddRequest, ClientAddResponse, ClientBalanceRequest, ClientBalanceResponse,
     ClientConfigRequest, ClientConfigResponse, ClientEcashCountRequest, ClientEcashCountResponse,
@@ -16,19 +17,28 @@ use picomint_client_cli_core::{
     ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
     ClientExpiryRequest, ClientExpiryResponse, ClientLightningGatewayListRequest,
     ClientLightningGatewayListResponse, ClientLightningGatewayRefreshRequest,
-    ClientLightningLnurlRequest, ClientLightningLnurlResponse, ClientLightningReceiveRequest,
-    ClientLightningReceiveResponse, ClientLightningSendMaxAmountRequest,
-    ClientLightningSendMaxAmountResponse, ClientLightningSendMaxRequest,
-    ClientLightningSendMaxResponse, ClientLightningSendRequest, ClientLightningSendResponse,
-    ClientListResponse, ClientOnchainReceiveRequest, ClientOnchainReceiveResponse,
-    ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse, ClientOnchainSendMaxAmountRequest,
-    ClientOnchainSendMaxAmountResponse, ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse,
-    ClientOnchainSendRequest, ClientOnchainSendResponse, ClientRemoveRequest, MnemonicResponse,
-    QueryRequest, QueryResponse, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT,
-    ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_EXPIRY,
-    ROUTE_LIGHTNING_GATEWAY_LIST, ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_LNURL,
-    ROUTE_LIGHTNING_RECEIVE, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX,
-    ROUTE_LIGHTNING_SEND_MAX_AMOUNT, ROUTE_LIST, ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE,
+    ClientLightningInvoiceReceiveRequest, ClientLightningInvoiceReceiveResponse,
+    ClientLightningInvoiceSendRequest, ClientLightningInvoiceSendResponse,
+    ClientLightningLnurlMintRequest, ClientLightningLnurlMintResponse,
+    ClientLightningLnurlReceiveRequest, ClientLightningLnurlReceiveResponse,
+    ClientLightningLnurlSendDirectMaxAmountRequest,
+    ClientLightningLnurlSendDirectMaxAmountResponse, ClientLightningLnurlSendDirectMaxRequest,
+    ClientLightningLnurlSendDirectMaxResponse, ClientLightningLnurlSendDirectRequest,
+    ClientLightningLnurlSendDirectResponse, ClientLightningLnurlSendMaxAmountRequest,
+    ClientLightningLnurlSendMaxAmountResponse, ClientLightningLnurlSendMaxRequest,
+    ClientLightningLnurlSendMaxResponse, ClientLightningLnurlSendRequest,
+    ClientLightningLnurlSendResponse, ClientListResponse, ClientOnchainReceiveRequest,
+    ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse,
+    ClientOnchainSendMaxAmountRequest, ClientOnchainSendMaxAmountResponse,
+    ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse, ClientOnchainSendRequest,
+    ClientOnchainSendResponse, ClientRemoveRequest, MnemonicResponse, QueryRequest, QueryResponse,
+    ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE,
+    ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_EXPIRY, ROUTE_LIGHTNING_GATEWAY_LIST,
+    ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_INVOICE_RECEIVE, ROUTE_LIGHTNING_INVOICE_SEND,
+    ROUTE_LIGHTNING_LNURL_MINT, ROUTE_LIGHTNING_LNURL_RECEIVE, ROUTE_LIGHTNING_LNURL_SEND,
+    ROUTE_LIGHTNING_LNURL_SEND_DIRECT, ROUTE_LIGHTNING_LNURL_SEND_DIRECT_MAX,
+    ROUTE_LIGHTNING_LNURL_SEND_DIRECT_MAX_AMOUNT, ROUTE_LIGHTNING_LNURL_SEND_MAX,
+    ROUTE_LIGHTNING_LNURL_SEND_MAX_AMOUNT, ROUTE_LIST, ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE,
     ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX,
     ROUTE_ONCHAIN_SEND_MAX_AMOUNT, ROUTE_QUERY, ROUTE_REMOVE,
 };
@@ -135,21 +145,12 @@ enum LightningCommands {
     /// The gateways the mint recommends, probed for their fees
     #[command(subcommand)]
     Gateway(LightningGatewayCommands),
-    /// Pay a bolt11 invoice through a gateway
-    #[command(after_long_help = schema_fallible::<ClientLightningSendResponse, SendPaymentError>())]
-    Send(ClientLightningSendRequest),
-    /// What send-max would pay right now
-    #[command(after_long_help = schema_fallible::<ClientLightningSendMaxAmountResponse, SendMaxAmountError>())]
-    SendMaxAmount(ClientLightningSendMaxAmountRequest),
-    /// Empty an account to an lnurl
-    #[command(after_long_help = schema_fallible::<ClientLightningSendMaxResponse, SendMaxError>())]
-    SendMax(ClientLightningSendMaxRequest),
-    /// Create a bolt11 invoice
-    #[command(after_long_help = schema_fallible::<ClientLightningReceiveResponse, lightning::ReceiveError>())]
-    Receive(ClientLightningReceiveRequest),
-    /// Generate a shareable lnurl served by an lnurl daemon
-    #[command(after_long_help = schema_fallible::<ClientLightningLnurlResponse, NotAddedError>())]
-    Lnurl(ClientLightningLnurlRequest),
+    /// Pay and create bolt11 invoices through a gateway
+    #[command(subcommand)]
+    Invoice(LightningInvoiceCommands),
+    /// Pay and hand out lnurls; one of this mint is paid without a gateway
+    #[command(subcommand)]
+    Lnurl(LightningLnurlCommands),
 }
 
 #[derive(Subcommand)]
@@ -160,6 +161,44 @@ enum LightningGatewayCommands {
     /// Re-fetch the mint's gateway list and re-probe every gateway
     #[command(after_long_help = schema_fallible::<ClientLightningGatewayListResponse, RefreshGatewaysError>())]
     Refresh(ClientLightningGatewayRefreshRequest),
+}
+
+#[derive(Subcommand)]
+enum LightningInvoiceCommands {
+    /// Pay a bolt11 invoice through a gateway
+    #[command(after_long_help = schema_fallible::<ClientLightningInvoiceSendResponse, InvoiceSendError>())]
+    Send(ClientLightningInvoiceSendRequest),
+    /// Create a bolt11 invoice, issued by a gateway
+    #[command(after_long_help = schema_fallible::<ClientLightningInvoiceReceiveResponse, InvoiceReceiveError>())]
+    Receive(ClientLightningInvoiceReceiveRequest),
+}
+
+#[derive(Subcommand)]
+enum LightningLnurlCommands {
+    /// Resolve an lnurl to an invoice for the amount and pay it through a gateway
+    #[command(after_long_help = schema_fallible::<ClientLightningLnurlSendResponse, LnurlSendError>())]
+    Send(ClientLightningLnurlSendRequest),
+    /// Empty an account to an lnurl through a gateway
+    #[command(after_long_help = schema_fallible::<ClientLightningLnurlSendMaxResponse, LnurlSendError>())]
+    SendMax(ClientLightningLnurlSendMaxRequest),
+    /// What send-max would pay right now
+    #[command(after_long_help = schema_fallible::<ClientLightningLnurlSendMaxAmountResponse, LnurlSendMaxAmountError>())]
+    SendMaxAmount(ClientLightningLnurlSendMaxAmountRequest),
+    /// Pay an lnurl of this mint straight from the account, with no gateway and no fee
+    #[command(after_long_help = schema_fallible::<ClientLightningLnurlSendDirectResponse, LnurlSendDirectError>())]
+    SendDirect(ClientLightningLnurlSendDirectRequest),
+    /// Empty an account to an lnurl of this mint, with no gateway
+    #[command(after_long_help = schema_fallible::<ClientLightningLnurlSendDirectMaxResponse, LnurlSendDirectError>())]
+    SendDirectMax(ClientLightningLnurlSendDirectMaxRequest),
+    /// What send-direct-max would pay right now
+    #[command(after_long_help = schema_fallible::<ClientLightningLnurlSendDirectMaxAmountResponse, NotAddedError>())]
+    SendDirectMaxAmount(ClientLightningLnurlSendDirectMaxAmountRequest),
+    /// Generate a shareable lnurl served by an lnurl daemon
+    #[command(after_long_help = schema_fallible::<ClientLightningLnurlReceiveResponse, NotAddedError>())]
+    Receive(ClientLightningLnurlReceiveRequest),
+    /// Which added mint an lnurl belongs to, and so whether send-direct can pay it
+    #[command(after_long_help = schema::<ClientLightningLnurlMintResponse>())]
+    Mint(ClientLightningLnurlMintRequest),
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -200,13 +239,40 @@ async fn main() {
                     request(d, ROUTE_LIGHTNING_GATEWAY_REFRESH, req).await
                 }
             },
-            LightningCommands::Send(req) => request(d, ROUTE_LIGHTNING_SEND, req).await,
-            LightningCommands::SendMaxAmount(req) => {
-                request(d, ROUTE_LIGHTNING_SEND_MAX_AMOUNT, req).await
-            }
-            LightningCommands::SendMax(req) => request(d, ROUTE_LIGHTNING_SEND_MAX, req).await,
-            LightningCommands::Receive(req) => request(d, ROUTE_LIGHTNING_RECEIVE, req).await,
-            LightningCommands::Lnurl(req) => request(d, ROUTE_LIGHTNING_LNURL, req).await,
+            LightningCommands::Invoice(cmd) => match cmd {
+                LightningInvoiceCommands::Send(req) => {
+                    request(d, ROUTE_LIGHTNING_INVOICE_SEND, req).await
+                }
+                LightningInvoiceCommands::Receive(req) => {
+                    request(d, ROUTE_LIGHTNING_INVOICE_RECEIVE, req).await
+                }
+            },
+            LightningCommands::Lnurl(cmd) => match cmd {
+                LightningLnurlCommands::Send(req) => {
+                    request(d, ROUTE_LIGHTNING_LNURL_SEND, req).await
+                }
+                LightningLnurlCommands::SendMax(req) => {
+                    request(d, ROUTE_LIGHTNING_LNURL_SEND_MAX, req).await
+                }
+                LightningLnurlCommands::SendMaxAmount(req) => {
+                    request(d, ROUTE_LIGHTNING_LNURL_SEND_MAX_AMOUNT, req).await
+                }
+                LightningLnurlCommands::SendDirect(req) => {
+                    request(d, ROUTE_LIGHTNING_LNURL_SEND_DIRECT, req).await
+                }
+                LightningLnurlCommands::SendDirectMax(req) => {
+                    request(d, ROUTE_LIGHTNING_LNURL_SEND_DIRECT_MAX, req).await
+                }
+                LightningLnurlCommands::SendDirectMaxAmount(req) => {
+                    request(d, ROUTE_LIGHTNING_LNURL_SEND_DIRECT_MAX_AMOUNT, req).await
+                }
+                LightningLnurlCommands::Receive(req) => {
+                    request(d, ROUTE_LIGHTNING_LNURL_RECEIVE, req).await
+                }
+                LightningLnurlCommands::Mint(req) => {
+                    request(d, ROUTE_LIGHTNING_LNURL_MINT, req).await
+                }
+            },
         },
     };
 

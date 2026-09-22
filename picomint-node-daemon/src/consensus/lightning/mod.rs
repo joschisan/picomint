@@ -3,12 +3,7 @@ pub use picomint_core::lightning as common;
 mod db;
 mod rpc;
 
-use anyhow::{Context, ensure};
-use group::Curve;
-use picomint_core::lightning::config::{
-    LightningConfig, LightningConfigConsensus, LightningConfigPrivate,
-};
-use picomint_core::lightning::contracts::IncomingContractSummary;
+use picomint_core::lightning::config::LightningConfigConsensus;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_core::lightning::methods::LightningMethod;
 use picomint_core::lightning::{
@@ -17,62 +12,27 @@ use picomint_core::lightning::{
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::{Amount, OutPoint};
 use picomint_redb::{DbRead, WriteTx};
-use tpe::{PublicKeyShare, SecretKeyShare};
 
-use crate::config::NodeConfig;
-use crate::config::dkg::DkgHandle;
-use crate::config::poly::eval_poly_g1;
-use crate::consensus::db::consensus_block_height;
 use crate::consensus::server::Server;
 use crate::{handler, handler_async};
 
 use self::db::{
-    DecryptionKeyShareTable, GatewayTable, IncomingContractIndexTable,
-    IncomingContractStreamNextIndexTable, IncomingContractStreamTable, IncomingContractTable,
-    OutgoingContractTable, PreimageTable,
+    GatewayTable, IncomingContractIndexTable, IncomingContractStreamNextIndexTable,
+    IncomingContractStreamTable, IncomingContractTable, OutgoingContractTable, PreimageTable,
 };
 
-/// Run DKG for the lightning module, producing a fresh `LightningConfig` for
-/// this node.
-pub async fn dkg(nodes: &DkgHandle<'_>) -> anyhow::Result<LightningConfig> {
-    let (polynomial, sks) = nodes.run_dkg_g1().await?;
-
-    Ok(LightningConfig {
-        consensus: LightningConfigConsensus {
-            tpe_agg_pk: tpe::AggregatePublicKey(polynomial[0].to_affine()),
-            tpe_pks: nodes
-                .num_nodes()
-                .node_ids()
-                .map(|node| (node, PublicKeyShare(eval_poly_g1(&polynomial, &node))))
-                .collect(),
-            input_fee: Amount::from_sat(1),
-            output_fee: Amount::from_sat(1),
-        },
-        private: LightningConfigPrivate {
-            sk: SecretKeyShare(sks),
-        },
-    })
-}
-
-/// Verify our private tpe share matches the public share in the consensus
-/// config.
-pub fn validate_config(cfg: &NodeConfig) -> anyhow::Result<()> {
-    ensure!(
-        tpe::derive_pk_share(&cfg.private.lightning.sk)
-            == *cfg
-                .consensus
-                .lightning
-                .tpe_pks
-                .get(&cfg.private.identity)
-                .context("Public key set has no key for our identity")?,
-        "Preimage encryption secret key share does not match our public key share"
-    );
-
-    Ok(())
+/// The lightning module's consensus config. The module holds no keys: an
+/// incoming contract is spent by the recipient's own claim key and an
+/// outgoing one by the gateway's, so there is nothing for the nodes to
+/// share.
+pub fn config() -> LightningConfigConsensus {
+    LightningConfigConsensus {
+        input_fee: Amount::from_sat(1),
+        output_fee: Amount::from_sat(1),
+    }
 }
 
 pub fn process_input(
-    server: &Server,
     dbtx: &WriteTx,
     input: &LightningInput,
 ) -> Result<(Amount, XOnlyPublicKey), LightningInputError> {
@@ -84,10 +44,6 @@ pub fn process_input(
 
             let pub_key = match outgoing_witness {
                 OutgoingWitness::Claim(preimage) => {
-                    if contract.expiry <= consensus_block_height(server, dbtx) {
-                        return Err(LightningInputError::Expired);
-                    }
-
                     if !contract.verify_preimage(preimage) {
                         return Err(LightningInputError::InvalidPreimage);
                     }
@@ -95,13 +51,6 @@ pub fn process_input(
                     dbtx.insert(&PreimageTable, outpoint, preimage);
 
                     contract.claim_pk
-                }
-                OutgoingWitness::Refund => {
-                    if contract.expiry > consensus_block_height(server, dbtx) {
-                        return Err(LightningInputError::NotExpired);
-                    }
-
-                    contract.refund_pk
                 }
                 OutgoingWitness::Cancel(forfeit_signature) => {
                     if !contract.verify_forfeit_signature(forfeit_signature) {
@@ -119,7 +68,7 @@ pub fn process_input(
 
             Ok((amount, pub_key))
         }
-        LightningInput::Incoming(outpoint, agg_decryption_key) => {
+        LightningInput::Incoming(outpoint) => {
             let contract = dbtx
                 .remove(&IncomingContractTable, outpoint)
                 .ok_or(LightningInputError::UnknownContract)?;
@@ -130,32 +79,16 @@ pub fn process_input(
 
             dbtx.remove(&IncomingContractStreamTable, &index);
 
-            if !contract.offer.verify_agg_decryption_key(
-                &server.cfg.consensus.lightning.tpe_agg_pk,
-                agg_decryption_key,
-            ) {
-                return Err(LightningInputError::InvalidDecryptionKey);
-            }
-
-            let pub_key = match contract.offer.decrypt_preimage(agg_decryption_key) {
-                Some(..) => contract.offer.commitment.claim_pk,
-                None => contract.refund_pk,
-            };
-
             let amount = contract
-                .offer
-                .commitment
-                .amount
-                .checked_sub(contract.offer.commitment.fee)
+                .claim_amount()
                 .ok_or(LightningInputError::ArithmeticOverflow)?;
 
-            Ok((amount, pub_key))
+            Ok((amount, contract.claim_pk))
         }
     }
 }
 
 pub fn process_output(
-    server: &Server,
     dbtx: &WriteTx,
     output: &LightningOutput,
     outpoint: OutPoint,
@@ -172,9 +105,9 @@ pub fn process_output(
             Ok(amount)
         }
         LightningOutput::Incoming(contract) => {
-            if !contract.offer.verify() {
-                return Err(LightningOutputError::InvalidContract);
-            }
+            let amount = contract
+                .claim_amount()
+                .ok_or(LightningOutputError::ArithmeticOverflow)?;
 
             dbtx.insert(&IncomingContractTable, &outpoint, contract);
 
@@ -185,7 +118,7 @@ pub fn process_output(
             dbtx.insert(
                 &IncomingContractStreamTable,
                 &stream_index,
-                &IncomingContractSummary::new(outpoint, &contract.offer),
+                &(outpoint, contract.clone()),
             );
 
             dbtx.insert(&IncomingContractIndexTable, &outpoint, &stream_index);
@@ -196,18 +129,7 @@ pub fn process_output(
                 &(stream_index + 1),
             );
 
-            let dk_share = contract
-                .offer
-                .create_decryption_key_share(&server.cfg.private.lightning.sk);
-
-            dbtx.insert(&DecryptionKeyShareTable, &outpoint, &dk_share);
-
-            contract
-                .offer
-                .commitment
-                .amount
-                .checked_sub(contract.offer.commitment.fee)
-                .ok_or(LightningOutputError::ArithmeticOverflow)
+            Ok(amount)
         }
     }
 }
@@ -215,17 +137,13 @@ pub fn process_output(
 pub async fn handle_api(server: &Server, method: LightningMethod) -> Result<Vec<u8>, String> {
     match method {
         LightningMethod::AwaitPreimage(req) => handler_async!(await_preimage, server, req).await,
-        LightningMethod::DecryptionKeyShare(req) => {
-            handler_async!(decryption_key_share, server, req).await
-        }
-        LightningMethod::OutgoingContractExpiry(req) => {
-            handler_async!(outgoing_contract_expiry, server, req).await
+        LightningMethod::AwaitOutgoingContract(req) => {
+            handler_async!(await_outgoing_contract, server, req).await
         }
         LightningMethod::AwaitIncomingContracts(req) => {
             handler_async!(await_incoming_contracts, server, req).await
         }
         LightningMethod::Gateways(req) => handler!(gateways, server, req).await,
-        LightningMethod::TpeAggregatePk(req) => handler!(tpe_aggregate_pk, server, req).await,
     }
 }
 

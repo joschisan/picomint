@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use bls12_381::{G1Projective, G2Projective, Scalar};
+use bls12_381::{G2Projective, Scalar};
 use picomint_core::{NodeId, NumNodes, NumNodesExt, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
 use rand::rngs::OsRng;
@@ -10,7 +10,6 @@ use secp256k1::{PublicKey, SecretKey};
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 
-use super::dkg_g1::run_dkg_g1;
 use super::dkg_g2::run_dkg_g2;
 use super::dkg_secp::run_dkg_secp;
 use crate::config::{DkgParams, NodeConfig, assemble_node_config};
@@ -84,9 +83,7 @@ pub async fn run(
 
     let ecash = crate::consensus::ecash::dkg(&handle).await?;
 
-    info!("Running DKG for the lightning module...");
-
-    let lightning = crate::consensus::lightning::dkg(&handle).await?;
+    let lightning = crate::consensus::lightning::config();
 
     info!("Running DKG for the onchain module...");
 
@@ -165,12 +162,6 @@ impl<'a> DkgHandle<'a> {
 
     pub fn num_nodes(&self) -> NumNodes {
         self.num_nodes
-    }
-
-    pub async fn run_dkg_g1(&self) -> anyhow::Result<(Vec<G1Projective>, Scalar)> {
-        info!("Running distributed key generation for group G1...");
-
-        run_dkg_g1(self.num_nodes, self.identity, self.connections).await
     }
 
     pub async fn run_dkg_g2(&self) -> anyhow::Result<(Vec<G2Projective>, Scalar)> {

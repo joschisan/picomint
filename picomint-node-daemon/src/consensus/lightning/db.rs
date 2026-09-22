@@ -2,7 +2,6 @@ use picomint_core::OutPoint;
 use picomint_core::lightning::contracts;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_redb::table;
-use tpe;
 
 table!(
     IncomingContractTable,
@@ -14,12 +13,6 @@ table!(
     OutgoingContractTable,
     OutPoint => contracts::OutgoingContract,
     "lightning-outgoing-contract",
-);
-
-table!(
-    DecryptionKeyShareTable,
-    OutPoint => tpe::DecryptionKeyShare,
-    "lightning-decryption-key-share",
 );
 
 table!(
@@ -37,12 +30,10 @@ table!(
 );
 
 // Incoming contracts are indexed in three ways:
-// 1) A sequential stream: `stream_index (u64)` -> `IncomingContractSummary`
-//    (the summary, not the contract — the full contract lives in
-//    `IncomingContractTable`, which is what claim-time validation reads;
-//    the stream is only ever read by clients hunting for their own)
+// 1) A sequential stream: `stream_index (u64)` -> `(OutPoint, IncomingContract)`
 //    for efficient streaming reads via range queries on
-//    `IncomingContractStreamTable`.
+//    `IncomingContractStreamTable`; the stream is only ever read by clients
+//    hunting for their own contracts.
 // 2) A monotonically-increasing index (`IncomingContractStreamNextIndexTable` -> u64)
 //    that stores the next stream index to assign, used to wait for new incoming
 //    contracts.
@@ -57,7 +48,7 @@ table!(
 
 table!(
     IncomingContractStreamTable,
-    u64 => contracts::IncomingContractSummary,
+    u64 => (OutPoint, contracts::IncomingContract),
     "lightning-incoming-contract-stream",
 );
 

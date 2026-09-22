@@ -5,54 +5,40 @@
 //! consensus-encoded.
 
 use bitcoin::hashes::sha256;
+use bitcoin::secp256k1::PublicKey;
 use bitcoin::secp256k1::schnorr::Signature;
 use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
-use tpe::{AggregatePublicKey, DecryptionKeyShare};
 
-use crate::OutPoint;
 use crate::config::MintId;
 use crate::lightning::ContractId;
 use crate::lightning::LightningInvoice;
-use crate::lightning::contracts::{IncomingContractSummary, IncomingOffer, OutgoingContract};
+use crate::lightning::contracts::{IncomingContract, OutgoingContract};
 use crate::lightning::gateway::{GatewayInfo, GatewayPk};
+use crate::{Amount, OutPoint};
 
 // ── await-preimage ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct AwaitPreimageRequest {
     pub outpoint: OutPoint,
-    pub expiry: u32,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct AwaitPreimageResponse {
-    pub preimage: Option<[u8; 32]>,
+    pub preimage: [u8; 32],
 }
 
-// ── decryption-key-share ────────────────────────────────────────────────────
+// ── await-outgoing-contract ─────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct DecryptionKeyShareRequest {
+pub struct AwaitOutgoingContractRequest {
     pub outpoint: OutPoint,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct DecryptionKeyShareResponse {
-    pub share: DecryptionKeyShare,
-}
-
-// ── outgoing-contract-expiry ────────────────────────────────────────────
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct OutgoingContractExpiryRequest {
-    pub outpoint: OutPoint,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct OutgoingContractExpiryResponse {
+pub struct AwaitOutgoingContractResponse {
     pub contract: ContractId,
-    pub expiry: u32,
 }
 
 // ── await-incoming-contracts ────────────────────────────────────────────────
@@ -65,7 +51,7 @@ pub struct AwaitIncomingContractsRequest {
 
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct AwaitIncomingContractsResponse {
-    pub contracts: Vec<IncomingContractSummary>,
+    pub contracts: Vec<(OutPoint, IncomingContract)>,
     pub next_index: u64,
 }
 
@@ -79,26 +65,14 @@ pub struct GatewaysResponse {
     pub gateways: Vec<GatewayPk>,
 }
 
-// ── tpe-aggregate-pk ────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct TpeAggregatePkRequest;
-
-#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct TpeAggregatePkResponse {
-    pub tpe_agg_pk: AggregatePublicKey,
-}
-
 // ── dispatch enum ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum LightningMethod {
     AwaitPreimage(AwaitPreimageRequest),
-    DecryptionKeyShare(DecryptionKeyShareRequest),
-    OutgoingContractExpiry(OutgoingContractExpiryRequest),
+    AwaitOutgoingContract(AwaitOutgoingContractRequest),
     AwaitIncomingContracts(AwaitIncomingContractsRequest),
     Gateways(GatewaysRequest),
-    TpeAggregatePk(TpeAggregatePkRequest),
 }
 
 // ── info ────────────────────────────────────────────────────────────────────
@@ -131,10 +105,15 @@ pub struct SendResponse {
 
 // ── receive ─────────────────────────────────────────────────────────────────
 
+/// What a recipient needs to say to be paid: the mint, its receive key
+/// and the amount. The gateway authors the contract, preimage included,
+/// from the key; the recipient sees the contract once it is funded, in
+/// the mint's stream, and recovers it from the same key.
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct ReceiveRequest {
     pub mint: MintId,
-    pub offer: IncomingOffer,
+    pub recipient: PublicKey,
+    pub amount: Amount,
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]
@@ -161,6 +140,7 @@ pub struct VerifyResponse {
 
 // ── gateway dispatch enum ───────────────────────────────────────────────────
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub enum GatewayMethod {
     Info(InfoRequest),

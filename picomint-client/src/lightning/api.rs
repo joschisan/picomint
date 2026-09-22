@@ -1,6 +1,6 @@
 use crate::api::MintApi;
 use picomint_core::OutPoint;
-use picomint_core::lightning::contracts::IncomingContractSummary;
+use picomint_core::lightning::contracts::IncomingContract;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_core::lightning::methods::{
     AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitPreimageRequest,
@@ -8,9 +8,9 @@ use picomint_core::lightning::methods::{
 };
 use picomint_core::methods::Method;
 
-pub async fn await_preimage(api: &MintApi, outpoint: OutPoint, expiry: u32) -> Option<[u8; 32]> {
+pub async fn await_preimage(api: &MintApi, outpoint: OutPoint) -> [u8; 32] {
     api.request_current_consensus_retry::<AwaitPreimageResponse>(Method::Lightning(
-        LightningMethod::AwaitPreimage(AwaitPreimageRequest { outpoint, expiry }),
+        LightningMethod::AwaitPreimage(AwaitPreimageRequest { outpoint }),
     ))
     .await
     .preimage
@@ -20,7 +20,7 @@ pub async fn await_incoming_contracts(
     api: &MintApi,
     start: u64,
     batch: u64,
-) -> (Vec<IncomingContractSummary>, u64) {
+) -> (Vec<(OutPoint, IncomingContract)>, u64) {
     let resp = api
         .request_current_consensus_retry::<AwaitIncomingContractsResponse>(Method::Lightning(
             LightningMethod::AwaitIncomingContracts(AwaitIncomingContractsRequest { start, batch }),

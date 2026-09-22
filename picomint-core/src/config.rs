@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::NodeId;
 use crate::ecash::config::{EcashConfigConsensus, EcashConfigPrivate};
 use crate::invite::InviteCode;
-use crate::lightning::config::{LightningConfigConsensus, LightningConfigPrivate};
+use crate::lightning::config::LightningConfigConsensus;
 use crate::onchain::config::{OnchainConfigConsensus, OnchainConfigPrivate};
 use crate::version::ConsensusVersion;
 use picomint_encoding::{Base32, Decodable, Encodable};
@@ -116,8 +116,6 @@ pub struct NodeConfigPrivate {
     pub ecash: EcashConfigPrivate,
     /// Private key material for the onchain module
     pub onchain: OnchainConfigPrivate,
-    /// Private key material for the lightning module
-    pub lightning: LightningConfigPrivate,
 }
 
 impl NodeConfig {

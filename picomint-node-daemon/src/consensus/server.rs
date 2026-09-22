@@ -29,9 +29,6 @@ pub struct Server {
     /// The finally rejected txs of the running session, watched by their
     /// waiting submission RPCs and cleared at the session boundary.
     pub rejected: watch::Sender<BTreeMap<TransactionId, TxError>>,
-    /// Whether the running bft engine holds own units awaiting ordering;
-    /// published by the engine, awaited by the await-idle RPC.
-    pub unordered: watch::Sender<bool>,
     /// Shortened polling intervals for the integration test.
     pub integration_test: bool,
 }
@@ -63,7 +60,7 @@ impl Server {
                 onchain::process_input(self, dbtx, i).map_err(wire::InputError::Onchain)
             }
             wire::Input::Lightning(i) => {
-                lightning::process_input(self, dbtx, i).map_err(wire::InputError::Lightning)
+                lightning::process_input(dbtx, i).map_err(wire::InputError::Lightning)
             }
         }
     }
@@ -80,8 +77,9 @@ impl Server {
             }
             wire::Output::Onchain(o) => onchain::process_output(self, dbtx, o, out_point)
                 .map_err(wire::OutputError::Onchain),
-            wire::Output::Lightning(o) => lightning::process_output(self, dbtx, o, out_point)
-                .map_err(wire::OutputError::Lightning),
+            wire::Output::Lightning(o) => {
+                lightning::process_output(dbtx, o, out_point).map_err(wire::OutputError::Lightning)
+            }
         }
     }
 
