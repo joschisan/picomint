@@ -171,7 +171,7 @@ picomint-client-cli lightning gateway refresh <mint>
 picomint-client-cli lightning invoice send <mint> <account> <gateway> <invoice>
 ```
 
-**Create an invoice:** returns the invoice. The payment lands in the analytics as `lightning_receive` once the gateway has funded it, under the operation derived from the invoice's payment hash and with that hash in its `payment_hash` column:
+**Create an invoice:** returns the invoice. The payment lands in the analytics as `lightning_receive` once the gateway has funded it, with the invoice's payment hash in its `payment_hash` column:
 
 ```bash
 picomint-client-cli lightning invoice receive <mint> <account> <gateway> "<amount>"
