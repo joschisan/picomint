@@ -73,18 +73,6 @@ pub struct LivenessRequest;
 #[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
 pub struct LivenessResponse;
 
-// ── await-idle ──────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct AwaitIdleRequest;
-
-/// Returned once the node holds no items consensus has not ordered yet:
-/// nothing queued for its next unit and no own unit awaiting ordering. A
-/// threshold of these tells a client the mint is idle, so a transaction
-/// submitted now is ordered without queueing behind a backlog.
-#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
-pub struct AwaitIdleResponse;
-
 // ── expiry-status ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
@@ -131,5 +119,4 @@ pub enum CoreMethod {
     Liveness(LivenessRequest),
     ExpiryStatus(ExpiryStatusRequest),
     MintInfo(MintInfoRequest),
-    AwaitIdle(AwaitIdleRequest),
 }

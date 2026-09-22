@@ -23,12 +23,9 @@ use picomint_core::NumNodesExt;
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::error::ErrorCode;
-use picomint_core::lightning::contracts::{
-    IncomingContractSummary, IncomingOffer, OutgoingContract,
-};
+use picomint_core::lightning::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::lnurl::LnurlRequest;
-use picomint_core::lightning::secret::IncomingContractSecret;
 use picomint_core::lightning::{
     LightningInput, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT,
 };
@@ -40,20 +37,12 @@ use picomint_core::{Amount, OutPoint};
 use picomint_encoding::Encodable;
 use picomint_lnurl::Lnurl;
 use rand::seq::IteratorRandom;
-use secp256k1::{Keypair, PublicKey, SecretKey, ecdh};
+use secp256k1::{Keypair, PublicKey, SecretKey};
 use thiserror::Error;
 use url::Url;
 
 use self::events::{ReceiveEvent, SendEvent};
 use self::send_sm::{SendSMCommon, SendSMState, SendStateMachine, SendStateMachineTable};
-
-/// Maximum total contract lock, in blocks, the client is willing to accept
-/// from a gateway. Backstop against an abusive gateway tying funds up before
-/// the unilateral refund path opens.
-const EXPIRY_DELTA_LIMIT: u16 = 1000;
-
-/// A two hour buffer in case either the client or gateway go offline
-const CONTRACT_CONFIRMATION_BUFFER: u32 = 12;
 
 /// Contracts pulled per round trip when walking the incoming-contract
 /// stream.
@@ -64,8 +53,6 @@ const CONTRACT_CONFIRMATION_BUFFER: u32 = 12;
 /// reasonable unit of work against a set that only grows with the
 /// mint's unclaimed contracts.
 const BATCH: u64 = 1000;
-
-pub type SendResult = Result<OperationId, SendPaymentError>;
 
 /// Resume this mint's persisted send state machines and start the
 /// incoming-contract scan plus the cold-start gateway warmup. Called
@@ -126,47 +113,121 @@ async fn update_gateway_info(ctx: ClientContext) {
     ctx.gateways.probe(&list, ctx.mint).await;
 }
 
-/// The largest whole-sat invoice amount a max send from `account`
-/// through this gateway can pay: the account's notes spent in full cover
-/// the invoice, the gateway's fee and the mint's transaction fee,
-/// with the sub-sat remainder donated.
-fn send_max_amount(ctx: &ClientContext, account: Account, gateway_info: &GatewayInfo) -> Amount {
+/// The largest whole-sat amount a max send from `account` can pay: the
+/// account's notes spent in full cover the amount, the gateway's fee on
+/// it if it goes through one, and the mint's transaction fee, with the
+/// sub-sat remainder donated.
+fn send_max_amount(
+    ctx: &ClientContext,
+    account: Account,
+    gateway_info: Option<&GatewayInfo>,
+) -> Amount {
     crate::ecash::largest_affordable_amount(ctx, account, |amount| {
-        gateway_info.send_fee.fee(amount.0) + ctx.config.lightning.output_fee
+        gateway_info.map_or(Amount::ZERO, |info| info.send_fee.fee(amount.0))
+            + ctx.config.lightning.output_fee
     })
 }
 
-/// Empty `account` to `lnurl` through a caller-selected gateway: resolve
-/// it, size the max, pay — the Lightning shape of
-/// [`crate::Client::onchain_send_max`]. The max needs no
-/// invoice to price, so the one invoice resolved is the one paid, for
-/// the figure that empties the account: every note goes in and no change
-/// comes back. An account that moved since the caller previewed
-/// [`send_max_amount`] moves the payment with it — the figure is
-/// priced fresh here.
-///
-/// All or nothing: a max outside what the endpoint accepts fails at
-/// invoice resolution rather than sending a clamped amount, and the
-/// balance stays where it is.
-pub(crate) async fn send_max(
+/// Resolve `lnurl` to an invoice for `amount` and pay it through the
+/// gateway. The invoice has to carry the amount asked for: an lnurl
+/// endpoint does not get to pick what the sender pays. A `max` send
+/// spends every note the account holds and leaves none; an amount the
+/// endpoint refuses fails at resolution rather than sending a clamped
+/// payment, and the balance stays where it is.
+async fn lnurl_send(
     ctx: &ClientContext,
     account: Account,
     gateway_pk: GatewayPk,
     gateway_info: GatewayInfo,
     lnurl: &Lnurl,
-) -> Result<OperationId, SendMaxError> {
+    amount: Amount,
+    max: bool,
+) -> Result<OperationId, LnurlSendError> {
     let info = picomint_lnurl::request(lnurl.url())
         .await
-        .map_err(SendMaxError::Lnurl)?;
+        .map_err(LnurlSendError::Lnurl)?;
 
-    let max = send_max_amount(ctx, account, &gateway_info);
-
-    let invoice = picomint_lnurl::get_invoice(&info, max.0)
+    let invoice = picomint_lnurl::get_invoice(&info, amount.0)
         .await
-        .map_err(SendMaxError::Lnurl)?
+        .map_err(LnurlSendError::Lnurl)?
         .pr;
 
-    Ok(send_inner(ctx, account, gateway_pk, gateway_info, invoice, true).await?)
+    if invoice.amount_milli_satoshis() != Some(amount.0) {
+        return Err(LnurlSendError::InvoiceAmountMismatch);
+    }
+
+    Ok(send_inner(ctx, account, gateway_pk, gateway_info, invoice, max).await?)
+}
+
+/// The request behind an lnurl, if it is one an lnurl daemon serves: the
+/// payload is the path segment after `pay/`.
+fn decode_lnurl_request(lnurl: &Lnurl) -> Option<LnurlRequest> {
+    lnurl
+        .url()
+        .rsplit_once("/pay/")
+        .and_then(|split| picomint_base32::decode(split.1).ok())
+}
+
+/// The recipient an lnurl of this mint names.
+fn lnurl_recipient(ctx: &ClientContext, lnurl: &Lnurl) -> Result<PublicKey, LnurlSendDirectError> {
+    decode_lnurl_request(lnurl)
+        .filter(|request| {
+            request.info == MintInfoResponse::new(&ctx.config).consensus_hash_sha256()
+        })
+        .map(|request| request.recipient)
+        .ok_or(LnurlSendDirectError::NotThisMint)
+}
+
+/// Pay the account of this mint an lnurl names straight from `account`:
+/// the sender authors the incoming contract a gateway would otherwise
+/// fund and funds it itself, at no fee. There is nothing to settle
+/// afterwards, so the funding transaction's acceptance is the payment;
+/// the recipient's scanner finds the contract as it finds any other. A
+/// `max` send spends every note the account holds and leaves none.
+fn lnurl_send_direct(
+    ctx: &ClientContext,
+    account: Account,
+    lnurl: &Lnurl,
+    amount: Amount,
+    max: bool,
+) -> Result<OperationId, LnurlSendDirectError> {
+    let recipient = lnurl_recipient(ctx, lnurl)?;
+
+    if amount < MINIMUM_INCOMING_CONTRACT_AMOUNT {
+        return Err(LnurlSendDirectError::AmountTooSmall);
+    }
+
+    let (contract, _preimage) = IncomingContract::author(&recipient, amount, Amount::ZERO);
+
+    let operation = OperationId::from_encodable(&contract.payment_hash);
+
+    let tx_builder = TxBuilder::from_output(Output {
+        output: wire::Output::Lightning(Box::new(LightningOutput::Incoming(contract))),
+        amount,
+        fee: ctx.config.lightning.output_fee,
+    });
+
+    let dbtx = ctx.db.begin_write();
+
+    crate::ecash::finalize_and_submit_tx(
+        ctx,
+        &dbtx,
+        account,
+        operation,
+        tx_builder,
+        Vec::new(),
+        max,
+        |txid| SendEvent {
+            txid,
+            amount,
+            fee: Amount::ZERO,
+        },
+    )
+    .ok_or(LnurlSendDirectError::InsufficientBalance)?;
+
+    dbtx.commit();
+
+    Ok(operation)
 }
 
 async fn send_inner(
@@ -176,17 +237,17 @@ async fn send_inner(
     gateway_info: GatewayInfo,
     invoice: Bolt11Invoice,
     max: bool,
-) -> Result<OperationId, SendPaymentError> {
+) -> Result<OperationId, InvoiceSendError> {
     let amount = invoice
         .amount_milli_satoshis()
-        .ok_or(SendPaymentError::InvoiceMissingAmount)?;
+        .ok_or(InvoiceSendError::InvoiceMissingAmount)?;
 
     if invoice.is_expired() {
-        return Err(SendPaymentError::InvoiceExpired);
+        return Err(InvoiceSendError::InvoiceExpired);
     }
 
     if ctx.config.network != invoice.currency().into() {
-        return Err(SendPaymentError::WrongCurrency {
+        return Err(InvoiceSendError::WrongCurrency {
             invoice_currency: invoice.currency(),
             mint_currency: ctx.config.network.into(),
         });
@@ -197,27 +258,16 @@ async fn send_inner(
     let refund_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
     if !gateway_info.send_fee.is_within(&PaymentFee::SEND_FEE_LIMIT) {
-        return Err(SendPaymentError::GatewayFeeExceedsLimit);
-    }
-
-    if EXPIRY_DELTA_LIMIT < gateway_info.expiry_delta {
-        return Err(SendPaymentError::GatewayExpiryExceedsLimit);
+        return Err(InvoiceSendError::GatewayFeeExceedsLimit);
     }
 
     let fee = gateway_info.send_fee.fee(amount);
     let amount = Amount(amount);
 
-    let consensus_block_height = crate::api::block_height(&ctx.api)
-        .await
-        .map_err(|_| SendPaymentError::FailedToRequestBlockHeight)?;
-
     let contract = OutgoingContract {
         payment_hash: *invoice.payment_hash(),
         amount,
         fee,
-        expiry: consensus_block_height
-            + u32::from(gateway_info.expiry_delta)
-            + CONTRACT_CONFIRMATION_BUFFER,
         claim_pk: gateway_info.module_public_key,
         refund_pk: refund_keypair.x_only_public_key().0,
     };
@@ -234,7 +284,7 @@ async fn send_inner(
         .insert(&SendOperationIdTable, &(ctx.mint, operation), &())
         .is_some()
     {
-        return Err(SendPaymentError::InvoiceAlreadyAttempted);
+        return Err(InvoiceSendError::InvoiceAlreadyAttempted);
     }
 
     let txid = crate::ecash::finalize_and_submit_tx(
@@ -247,7 +297,7 @@ async fn send_inner(
         max,
         |txid| SendEvent { txid, amount, fee },
     )
-    .ok_or(SendPaymentError::InsufficientBalance)?;
+    .ok_or(InvoiceSendError::InsufficientBalance)?;
 
     let sm = SendStateMachine {
         common: SendSMCommon {
@@ -269,31 +319,22 @@ async fn send_inner(
     Ok(operation)
 }
 
-/// Create an incoming offer locked to a public key derived from the
-/// recipient's static module public key and fetch the invoice the gateway
-/// issues against it.
-async fn create_offer_and_fetch_invoice(
+/// Fetch an invoice for `recipient_pk` from the gateway, which authors
+/// the incoming contract it will fund from that key. The fee and the
+/// minimum are checked here first so the refusal is a typed error rather
+/// than the gateway's.
+async fn fetch_invoice(
     ctx: &ClientContext,
     gateway_pk: GatewayPk,
     gateway_info: GatewayInfo,
     recipient_pk: PublicKey,
     amount: Amount,
-) -> Result<Bolt11Invoice, ReceiveError> {
-    let ephemeral_kp = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
-
-    let shared_secret = ecdh::SharedSecret::new(&recipient_pk, &ephemeral_kp.secret_key());
-
-    let contract_secret = IncomingContractSecret::new(shared_secret.secret_bytes());
-
-    let encryption_seed = contract_secret.encryption_seed();
-    let preimage = contract_secret.preimage();
-    let claim_tweak = contract_secret.claim_tweak();
-
+) -> Result<Bolt11Invoice, InvoiceReceiveError> {
     if !gateway_info
         .receive_fee
         .is_within(&PaymentFee::RECEIVE_FEE_LIMIT)
     {
-        return Err(ReceiveError::GatewayFeeExceedsLimit);
+        return Err(InvoiceReceiveError::GatewayFeeExceedsLimit);
     }
 
     let fee = gateway_info.receive_fee.fee(amount.0);
@@ -302,77 +343,56 @@ async fn create_offer_and_fetch_invoice(
         .checked_sub(fee)
         .is_none_or(|net| net < MINIMUM_INCOMING_CONTRACT_AMOUNT)
     {
-        return Err(ReceiveError::AmountTooSmall);
+        return Err(InvoiceReceiveError::AmountTooSmall);
     }
-
-    let claim_pk = recipient_pk
-        .mul_tweak(secp256k1::SECP256K1, &claim_tweak)
-        .expect("Tweak is valid")
-        .x_only_public_key()
-        .0;
-
-    let offer = IncomingOffer::new(
-        ctx.config.lightning.tpe_agg_pk,
-        encryption_seed,
-        preimage,
-        preimage.consensus_hash(),
-        amount,
-        fee,
-        claim_pk,
-        ephemeral_kp.public_key(),
-    );
 
     let invoice = ctx
         .gateways
-        .receive(gateway_pk, ctx.mint, offer)
+        .receive(gateway_pk, ctx.mint, recipient_pk, amount)
         .await
-        .map_err(|e| ReceiveError::FailedToConnectToGateway(e.to_string()))?;
-
-    if invoice.payment_hash() != &preimage.consensus_hash() {
-        return Err(ReceiveError::InvalidInvoice);
-    }
+        .map_err(|e| InvoiceReceiveError::FailedToConnectToGateway(e.to_string()))?;
 
     if invoice.amount_milli_satoshis() != Some(amount.0) {
-        return Err(ReceiveError::IncorrectInvoiceAmount);
+        return Err(InvoiceReceiveError::IncorrectInvoiceAmount);
     }
 
     Ok(invoice)
 }
 
-/// Try to claim a streamed incoming contract: rebuild it from `sk` and,
-/// if it is ours, submit the claim input + log the `ReceiveEvent` in the
-/// caller's dbtx (which also advances the scanner's stream index
-/// atomically).
+/// Try to claim a streamed incoming contract: derive its claim key from
+/// `sk` and, if it is ours, submit the claim input + log the
+/// `ReceiveEvent` in the caller's dbtx (which also advances the scanner's
+/// stream index atomically).
 ///
-/// A summary that recovers has been proven byte-identical to the contract
-/// the mint stores, so the input built here is one consensus will
-/// accept — short of the contract having been spent in the meantime,
-/// which nothing local can rule out.
+/// The stream carries the contract as the mint stores it, so the input
+/// built here is one consensus will accept — short of the contract having
+/// been spent in the meantime, which nothing local can rule out.
 fn receive_incoming_contract(
     ctx: &ClientContext,
     dbtx: &WriteTx,
     account: Account,
     sk: SecretKey,
-    summary: &IncomingContractSummary,
+    outpoint: OutPoint,
+    contract: &IncomingContract,
 ) {
-    let Some((claim_keypair, agg_dk)) = summary.recover(&ctx.config.lightning.tpe_agg_pk, &sk)
-    else {
+    let Some(claim_keypair) = contract.recover(&sk) else {
         return;
     };
 
     let tx_builder = TxBuilder::from_input(Input {
-        input: wire::Input::Lightning(LightningInput::Incoming(summary.outpoint, agg_dk)),
+        input: wire::Input::Lightning(LightningInput::Incoming(outpoint)),
         keypair: claim_keypair,
-        amount: summary
+        amount: contract
             .claim_amount()
-            .expect("Recovered summary has fee <= amount"),
+            .expect("Consensus only holds contracts with fee <= amount"),
         fee: ctx.config.lightning.input_fee,
     });
 
-    let operation = OperationId::from_encodable(&summary.payment_hash);
+    let operation = OperationId::from_encodable(&contract.payment_hash);
 
-    let amount = summary.amount;
-    let fee = summary.fee;
+    let payment_hash = contract.payment_hash;
+    let amount = contract.amount;
+    let fee = contract.fee;
 
     crate::ecash::finalize_and_submit_tx(
         ctx,
@@ -382,7 +402,12 @@ fn receive_incoming_contract(
         tx_builder,
         Vec::new(),
         false,
-        |txid| ReceiveEvent { txid, amount, fee },
+        |txid| ReceiveEvent {
+            txid,
+            payment_hash,
+            amount,
+            fee,
+        },
     )
     .expect("Cannot claim input, additional funding needed");
 }
@@ -413,9 +438,9 @@ async fn receive_scan(ctx: ClientContext) {
 
         let dbtx = ctx.db.begin_write();
 
-        for summary in &entries {
+        for (outpoint, contract) in &entries {
             for (account, sk) in keys {
-                receive_incoming_contract(&ctx, &dbtx, account, sk, summary);
+                receive_incoming_contract(&ctx, &dbtx, account, sk, *outpoint, contract);
             }
         }
 
@@ -425,8 +450,9 @@ async fn receive_scan(ctx: ClientContext) {
     }
 }
 
+/// Why `lightning invoice send` paid nothing.
 #[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
-pub enum SendPaymentError {
+pub enum InvoiceSendError {
     #[error("Invoice is missing an amount")]
     InvoiceMissingAmount,
     #[error("Invoice has expired")]
@@ -435,12 +461,8 @@ pub enum SendPaymentError {
     InvoiceAlreadyAttempted,
     #[error("Gateway fee exceeds the allowed limit")]
     GatewayFeeExceedsLimit,
-    #[error("Gateway expiry time exceeds the allowed limit")]
-    GatewayExpiryExceedsLimit,
     #[error("Gateway is not available")]
     GatewayNotAvailable,
-    #[error("Failed to request block height")]
-    FailedToRequestBlockHeight,
     #[error("The client's balance is insufficient")]
     InsufficientBalance,
     #[error("Invoice is for a different currency")]
@@ -452,27 +474,9 @@ pub enum SendPaymentError {
     NotAdded,
 }
 
-/// Why `lightning send-max-amount` has no figure.
+/// Why `lightning invoice receive` has no invoice.
 #[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
-pub enum SendMaxAmountError {
-    #[error("Gateway is not available")]
-    GatewayNotAvailable,
-    #[error("Mint is not added")]
-    NotAdded,
-}
-
-/// Why `lightning send-max` paid nothing: the lnurl endpoint, or any of
-/// the reasons a send of the invoice it returned fails for.
-#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
-pub enum SendMaxError {
-    #[error("The lnurl endpoint failed: {0}")]
-    Lnurl(String),
-    #[error(transparent)]
-    Payment(#[from] SendPaymentError),
-}
-
-#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
-pub enum ReceiveError {
+pub enum InvoiceReceiveError {
     #[error("Gateway is not available")]
     GatewayNotAvailable,
     #[error("Failed to connect to gateway: {0}")]
@@ -481,10 +485,44 @@ pub enum ReceiveError {
     GatewayFeeExceedsLimit,
     #[error("Amount is too small to cover fees")]
     AmountTooSmall,
-    #[error("Gateway returned an invalid invoice")]
-    InvalidInvoice,
     #[error("Gateway returned an invoice with incorrect amount")]
     IncorrectInvoiceAmount,
+    #[error("Mint is not added")]
+    NotAdded,
+}
+
+/// Why `lightning lnurl send` or `lightning lnurl send-max` paid nothing:
+/// the lnurl endpoint, or any of the reasons a send of the invoice it
+/// returned fails for.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum LnurlSendError {
+    #[error("The lnurl endpoint failed: {0}")]
+    Lnurl(String),
+    #[error("The lnurl endpoint returned an invoice for a different amount")]
+    InvoiceAmountMismatch,
+    #[error(transparent)]
+    Invoice(#[from] InvoiceSendError),
+}
+
+/// Why `lightning lnurl send-max-amount` has no figure.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum LnurlSendMaxAmountError {
+    #[error("Gateway is not available")]
+    GatewayNotAvailable,
+    #[error("Mint is not added")]
+    NotAdded,
+}
+
+/// Why `lightning lnurl send-direct` or `lightning lnurl send-direct-max`
+/// paid nothing.
+#[derive(Error, Debug, Clone, Eq, PartialEq, ErrorCode)]
+pub enum LnurlSendDirectError {
+    #[error("The lnurl does not belong to this mint")]
+    NotThisMint,
+    #[error("Amount is too small to be claimed")]
+    AmountTooSmall,
+    #[error("The client's balance is insufficient")]
+    InsufficientBalance,
     #[error("Mint is not added")]
     NotAdded,
 }
@@ -543,62 +581,21 @@ impl Client {
     /// [`lightning_gateways`].
     ///
     /// [`lightning_gateways`]: Client::lightning_gateways
-    pub async fn lightning_send(
+    pub async fn lightning_invoice_send(
         &self,
         mint: MintId,
         account: Account,
         gateway_pk: GatewayPk,
         invoice: Bolt11Invoice,
-    ) -> Result<OperationId, SendPaymentError> {
-        let ctx = self.ctx(mint).map_err(|_| SendPaymentError::NotAdded)?;
+    ) -> Result<OperationId, InvoiceSendError> {
+        let ctx = self.ctx(mint).map_err(|_| InvoiceSendError::NotAdded)?;
 
         let gateway_info = ctx
             .gateways
             .info(gateway_pk)
-            .ok_or(SendPaymentError::GatewayNotAvailable)?;
+            .ok_or(InvoiceSendError::GatewayNotAvailable)?;
 
         send_inner(&ctx, account, gateway_pk, gateway_info, invoice, false).await
-    }
-
-    /// The largest whole-sat invoice amount a [`lightning_send_max`] from
-    /// `account` through this gateway can pay.
-    ///
-    /// [`lightning_send_max`]: Client::lightning_send_max
-    pub fn lightning_send_max_amount(
-        &self,
-        mint: MintId,
-        account: Account,
-        gateway_pk: GatewayPk,
-    ) -> Result<Amount, SendMaxAmountError> {
-        let ctx = self.ctx(mint).map_err(|_| SendMaxAmountError::NotAdded)?;
-
-        let gateway_info = ctx
-            .gateways
-            .info(gateway_pk)
-            .ok_or(SendMaxAmountError::GatewayNotAvailable)?;
-
-        Ok(send_max_amount(&ctx, account, &gateway_info))
-    }
-
-    /// Empty `account` to `lnurl` through a gateway picked from
-    /// [`lightning_gateways`]: resolve it, size the max, pay.
-    ///
-    /// [`lightning_gateways`]: Client::lightning_gateways
-    pub async fn lightning_send_max(
-        &self,
-        mint: MintId,
-        account: Account,
-        gateway_pk: GatewayPk,
-        lnurl: &Lnurl,
-    ) -> Result<OperationId, SendMaxError> {
-        let ctx = self.ctx(mint).map_err(|_| SendPaymentError::NotAdded)?;
-
-        let gateway_info = ctx
-            .gateways
-            .info(gateway_pk)
-            .ok_or(SendPaymentError::GatewayNotAvailable)?;
-
-        send_max(&ctx, account, gateway_pk, gateway_info, lnurl).await
     }
 
     /// Request an invoice into `account` from a gateway picked from
@@ -607,23 +604,23 @@ impl Client {
     /// self-payment shares one operation across both legs.
     ///
     /// [`lightning_gateways`]: Client::lightning_gateways
-    pub async fn lightning_receive(
+    pub async fn lightning_invoice_receive(
         &self,
         mint: MintId,
         account: Account,
         gateway_pk: GatewayPk,
         amount: Amount,
-    ) -> Result<Bolt11Invoice, ReceiveError> {
-        let ctx = self.ctx(mint).map_err(|_| ReceiveError::NotAdded)?;
+    ) -> Result<Bolt11Invoice, InvoiceReceiveError> {
+        let ctx = self.ctx(mint).map_err(|_| InvoiceReceiveError::NotAdded)?;
 
         let gateway_info = ctx
             .gateways
             .info(gateway_pk)
-            .ok_or(ReceiveError::GatewayNotAvailable)?;
+            .ok_or(InvoiceReceiveError::GatewayNotAvailable)?;
 
         let receive_keypair = ctx.secret.lightning_secret().receive_keypair(account);
 
-        create_offer_and_fetch_invoice(
+        fetch_invoice(
             &ctx,
             gateway_pk,
             gateway_info,
@@ -633,10 +630,152 @@ impl Client {
         .await
     }
 
+    /// Resolve `lnurl` to an invoice for `amount` and pay it from
+    /// `account` through a gateway picked from [`lightning_gateways`].
+    /// Never direct: an lnurl of this mint goes through the gateway like
+    /// any other here, [`lightning_lnurl_send_direct`] is the way around
+    /// it.
+    ///
+    /// [`lightning_gateways`]: Client::lightning_gateways
+    /// [`lightning_lnurl_send_direct`]: Client::lightning_lnurl_send_direct
+    pub async fn lightning_lnurl_send(
+        &self,
+        mint: MintId,
+        account: Account,
+        gateway_pk: GatewayPk,
+        lnurl: &Lnurl,
+        amount: Amount,
+    ) -> Result<OperationId, LnurlSendError> {
+        let ctx = self.ctx(mint).map_err(|_| InvoiceSendError::NotAdded)?;
+
+        let gateway_info = ctx
+            .gateways
+            .info(gateway_pk)
+            .ok_or(InvoiceSendError::GatewayNotAvailable)?;
+
+        lnurl_send(
+            &ctx,
+            account,
+            gateway_pk,
+            gateway_info,
+            lnurl,
+            amount,
+            false,
+        )
+        .await
+    }
+
+    /// The largest whole-sat amount a [`lightning_lnurl_send_max`] from
+    /// `account` through this gateway can pay.
+    ///
+    /// [`lightning_lnurl_send_max`]: Client::lightning_lnurl_send_max
+    pub fn lightning_lnurl_send_max_amount(
+        &self,
+        mint: MintId,
+        account: Account,
+        gateway_pk: GatewayPk,
+    ) -> Result<Amount, LnurlSendMaxAmountError> {
+        let ctx = self
+            .ctx(mint)
+            .map_err(|_| LnurlSendMaxAmountError::NotAdded)?;
+
+        let gateway_info = ctx
+            .gateways
+            .info(gateway_pk)
+            .ok_or(LnurlSendMaxAmountError::GatewayNotAvailable)?;
+
+        Ok(send_max_amount(&ctx, account, Some(&gateway_info)))
+    }
+
+    /// Empty `account` to `lnurl` through a gateway picked from
+    /// [`lightning_gateways`]: resolve one invoice for the max, pay it —
+    /// the Lightning shape of [`onchain_send_max`]. The max needs no
+    /// invoice to price, so the one invoice resolved is the one paid, for
+    /// the figure that empties the account: every note goes in and no
+    /// change comes back. An account that moved since the caller
+    /// previewed [`lightning_lnurl_send_max_amount`] moves the payment
+    /// with it — the figure is priced fresh here.
+    ///
+    /// [`lightning_gateways`]: Client::lightning_gateways
+    /// [`onchain_send_max`]: Client::onchain_send_max
+    /// [`lightning_lnurl_send_max_amount`]: Client::lightning_lnurl_send_max_amount
+    pub async fn lightning_lnurl_send_max(
+        &self,
+        mint: MintId,
+        account: Account,
+        gateway_pk: GatewayPk,
+        lnurl: &Lnurl,
+    ) -> Result<OperationId, LnurlSendError> {
+        let ctx = self.ctx(mint).map_err(|_| InvoiceSendError::NotAdded)?;
+
+        let gateway_info = ctx
+            .gateways
+            .info(gateway_pk)
+            .ok_or(InvoiceSendError::GatewayNotAvailable)?;
+
+        let max = send_max_amount(&ctx, account, Some(&gateway_info));
+
+        lnurl_send(&ctx, account, gateway_pk, gateway_info, lnurl, max, true).await
+    }
+
+    /// Pay `amount` from `account` to an lnurl of this mint, as
+    /// [`lightning_lnurl_receive`] hands out, with no gateway: the
+    /// recipient's incoming contract is funded straight from the account,
+    /// at no fee, and the funding transaction's acceptance is the payment.
+    /// Any other lnurl is refused; [`lightning_lnurl_mint`] tells ahead of
+    /// time which mint an lnurl belongs to.
+    ///
+    /// [`lightning_lnurl_receive`]: Client::lightning_lnurl_receive
+    /// [`lightning_lnurl_mint`]: Client::lightning_lnurl_mint
+    pub fn lightning_lnurl_send_direct(
+        &self,
+        mint: MintId,
+        account: Account,
+        lnurl: &Lnurl,
+        amount: Amount,
+    ) -> Result<OperationId, LnurlSendDirectError> {
+        let ctx = self.ctx(mint).map_err(|_| LnurlSendDirectError::NotAdded)?;
+
+        lnurl_send_direct(&ctx, account, lnurl, amount, false)
+    }
+
+    /// The largest whole-sat amount a [`lightning_lnurl_send_direct_max`]
+    /// from `account` can pay. No gateway fee applies, so only the account
+    /// and the mint's fees set it.
+    ///
+    /// [`lightning_lnurl_send_direct_max`]: Client::lightning_lnurl_send_direct_max
+    pub fn lightning_lnurl_send_direct_max_amount(
+        &self,
+        mint: MintId,
+        account: Account,
+    ) -> Result<Amount, NotAddedError> {
+        let ctx = self.ctx(mint)?;
+
+        Ok(send_max_amount(&ctx, account, None))
+    }
+
+    /// Empty `account` to an lnurl of this mint, as
+    /// [`lightning_lnurl_send_direct`] pays it: every note goes in and
+    /// no change comes back.
+    ///
+    /// [`lightning_lnurl_send_direct`]: Client::lightning_lnurl_send_direct
+    pub fn lightning_lnurl_send_direct_max(
+        &self,
+        mint: MintId,
+        account: Account,
+        lnurl: &Lnurl,
+    ) -> Result<OperationId, LnurlSendDirectError> {
+        let ctx = self.ctx(mint).map_err(|_| LnurlSendDirectError::NotAdded)?;
+
+        let max = send_max_amount(&ctx, account, None);
+
+        lnurl_send_direct(&ctx, account, lnurl, max, true)
+    }
+
     /// A shareable lnurl for `account`, served by `lnurl_daemon`. Nothing
     /// perishable goes into the payload, so it stays valid for as long as
     /// the mint exists.
-    pub fn lightning_generate_lnurl(
+    pub fn lightning_lnurl_receive(
         &self,
         mint: MintId,
         account: Account,
@@ -677,6 +816,22 @@ impl Client {
         Ok(picomint_lnurl::encode_lnurl(&format!(
             "{lnurl_daemon}pay/{payload}"
         )))
+    }
+
+    /// The added mint an lnurl belongs to, if any: the one whose node set
+    /// the lnurl commits to. From a client on that mint the lnurl is paid
+    /// by [`lightning_lnurl_send_direct`], at no fee and without touching
+    /// its endpoint; from any other by [`lightning_lnurl_send`].
+    ///
+    /// [`lightning_lnurl_send_direct`]: Client::lightning_lnurl_send_direct
+    /// [`lightning_lnurl_send`]: Client::lightning_lnurl_send
+    pub fn lightning_lnurl_mint(&self, lnurl: &Lnurl) -> Option<MintId> {
+        let request = decode_lnurl_request(lnurl)?;
+
+        self.mint_configs()
+            .into_iter()
+            .find(|entry| MintInfoResponse::new(&entry.1).consensus_hash_sha256() == request.info)
+            .map(|entry| entry.0)
     }
 
     /// Re-run the threshold-consensus gateway query and re-probe every

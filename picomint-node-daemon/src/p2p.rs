@@ -8,7 +8,7 @@ use std::time::Duration;
 use anyhow::Context as _;
 use async_channel::{Receiver, Sender, bounded};
 use bitcoin::hashes::sha256;
-use bls12_381::{G1Projective, G2Projective, Scalar};
+use bls12_381::{G2Projective, Scalar};
 use futures::FutureExt;
 use futures::future::select_all;
 use iroh::endpoint::presets::N0;
@@ -77,17 +77,9 @@ pub enum P2PMessage {
     SessionIndex(u32),
     SessionOutcome(SessionOutcome),
     Checksum(sha256::Hash),
-    DkgG1(DkgMessageG1),
     DkgG2(DkgMessageG2),
     DkgSecp(DkgMessageSecp),
     Encodable(Vec<u8>),
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]
-pub enum DkgMessageG1 {
-    Hash(sha256::Hash),
-    Commitment(Vec<G1Projective>),
-    Share(Scalar),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Encodable, Decodable)]

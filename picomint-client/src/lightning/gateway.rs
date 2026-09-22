@@ -20,18 +20,19 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Context;
+use bitcoin::secp256k1::PublicKey;
 use bitcoin::secp256k1::schnorr::Signature;
 use iroh::Endpoint;
 use lightning_invoice::Bolt11Invoice;
-use picomint_core::OutPoint;
 use picomint_core::config::MintId;
 use picomint_core::lightning::LightningInvoice;
-use picomint_core::lightning::contracts::{IncomingOffer, OutgoingContract};
+use picomint_core::lightning::contracts::OutgoingContract;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk};
 use picomint_core::lightning::methods::{
     GatewayMethod, InfoRequest, InfoResponse, ReceiveRequest, ReceiveResponse, SendRequest,
     SendResponse,
 };
+use picomint_core::{Amount, OutPoint};
 use picomint_encoding::Decodable;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -184,11 +185,16 @@ impl Gateways {
         &self,
         gateway_pk: GatewayPk,
         mint: MintId,
-        offer: IncomingOffer,
+        recipient: PublicKey,
+        amount: Amount,
     ) -> anyhow::Result<Bolt11Invoice> {
         self.request::<ReceiveResponse>(
             gateway_pk,
-            GatewayMethod::Receive(ReceiveRequest { mint, offer }),
+            GatewayMethod::Receive(ReceiveRequest {
+                mint,
+                recipient,
+                amount,
+            }),
         )
         .await
         .map(|r| r.invoice)

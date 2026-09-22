@@ -1,12 +1,8 @@
-//! BLS polynomial helpers used by DKG for both G1 and G2.
+//! BLS polynomial helpers used by the G2 DKG.
 
-use bls12_381::{G1Affine, G1Projective, G2Affine, G2Projective, Scalar};
+use bls12_381::{G2Affine, G2Projective, Scalar};
 use group::Curve;
 use picomint_core::NodeId;
-
-pub fn g1(scalar: &Scalar) -> G1Projective {
-    G1Projective::generator() * scalar
-}
 
 pub fn g2(scalar: &Scalar) -> G2Projective {
     G2Projective::generator() * scalar
@@ -15,16 +11,6 @@ pub fn g2(scalar: &Scalar) -> G2Projective {
 // Offset by 1, since evaluating a poly at 0 reveals the secret
 pub fn scalar(node: &NodeId) -> Scalar {
     Scalar::from(node.to_usize() as u64 + 1)
-}
-
-pub fn eval_poly_g1(coefficients: &[G1Projective], node: &NodeId) -> G1Affine {
-    coefficients
-        .iter()
-        .copied()
-        .rev()
-        .reduce(|acc, coefficient| acc * scalar(node) + coefficient)
-        .expect("We have at least one coefficient")
-        .to_affine()
 }
 
 pub fn eval_poly_g2(coefficients: &[G2Projective], node: &NodeId) -> G2Affine {

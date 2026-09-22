@@ -64,7 +64,6 @@ pub async fn run(
         db: db.clone(),
         btc_rpc: btc_rpc.clone(),
         rejected: watch::Sender::new(BTreeMap::new()),
-        unordered: watch::Sender::new(false),
         integration_test: settings.integration_test,
     };
 

@@ -4,7 +4,7 @@ Client library for picomint mints. One `Client` manages any number of added mint
 
 ## Event log model
 
-Every public operation (`ecash_send`, `onchain_receive`, `lightning_send`, …) returns either a result directly or an `OperationId`. The actual progress of long-running operations — mint acceptance, on-chain confirmation, lightning preimage delivery — is reported by writing typed events to a per-client append-only log.
+Every public operation (`ecash_send`, `onchain_receive`, `lightning_invoice_send`, …) returns either a result directly or an `OperationId`. The actual progress of long-running operations — mint acceptance, on-chain confirmation, lightning preimage delivery — is reported by writing typed events to a per-client append-only log.
 
 Integrators consume events via:
 
@@ -101,11 +101,13 @@ SendEvent ── TxCreateEvent
 
 ## Lightning
 
-Both `lightning_send` and `lightning_receive` take the `gateway_pk: GatewayPk` of a gateway from `lightning_gateways(mint)`, which maps every probed gateway in the mint's announced set to its latest `GatewayInfo` (all fees and the outgoing-contract expiry delta). Callers pick one, preview the cost from its info, and pass the pk; the info only changes on `lightning_refresh_gateways(mint)`, which re-probes the announced set. Gateways are reached over pooled iroh connections, discovered from the mint's announced pk set — there are no gateway URLs on the client side. The library still enforces `PaymentFee::SEND_FEE_LIMIT` + `EXPIRY_DELTA_LIMIT` on sends and `PaymentFee::RECEIVE_FEE_LIMIT` on receives against the gateway's info as a backstop against an abusive gateway.
+Every gateway operation takes the `gateway_pk: GatewayPk` of a gateway from `lightning_gateways(mint)`, which maps every probed gateway in the mint's announced set to its latest `GatewayInfo` (its fees). Callers pick one, preview the cost from its info, and pass the pk; the info only changes on `lightning_refresh_gateways(mint)`, which re-probes the announced set. Gateways are reached over pooled iroh connections, discovered from the mint's announced pk set — there are no gateway URLs on the client side. The library still enforces `PaymentFee::SEND_FEE_LIMIT` on sends and `PaymentFee::RECEIVE_FEE_LIMIT` on receives against the gateway's info as a backstop against an abusive gateway.
 
-### `lightning_receive(mint, account, gateway_pk, amount)` — receive over Lightning
+The methods come in two families. `lightning_invoice_*` take or produce a BOLT11 invoice. `lightning_lnurl_*` take or produce an lnurl, and split again by how the payment travels: `lightning_lnurl_send`, `lightning_lnurl_send_max` and `lightning_lnurl_send_max_amount` resolve the lnurl to an invoice and go through a gateway, while `lightning_lnurl_send_direct`, `lightning_lnurl_send_direct_max` and `lightning_lnurl_send_direct_max_amount` pay an lnurl of the sender's own mint with no gateway at all. `lightning_lnurl_mint(lnurl)` tells which added mint an lnurl belongs to, so a caller picks the family before it prices anything.
 
-Returns a BOLT11 invoice and emits no events. A background scanner polls the mint for incoming contracts; when an incoming contract decrypts to the recipient's key it submits the claim tx:
+### `lightning_invoice_receive(mint, account, gateway_pk, amount)` — receive over Lightning
+
+Returns a BOLT11 invoice and emits no events. The gateway authors the incoming contract it will fund from the account's receive key, preimage included; the recipient sees nothing of it until a background scanner, polling the mint's incoming-contract stream, finds a contract locked to its key and submits the claim tx:
 
 ```
 ReceiveEvent ── TxCreateEvent                  ← scanner saw paid contract, submitted claim tx
@@ -117,9 +119,11 @@ ReceiveEvent ── TxCreateEvent                  ← scanner saw paid contract
     └── TxRejectEvent
 ```
 
-### `lightning_send(mint, account, gateway_pk, invoice)` — pay a BOLT11 invoice
+`lightning_lnurl_receive(mint, account, lnurl_daemon)` hands out a reusable lnurl for the account, served by the hosted lnurl daemon; a payment to it lands exactly as above.
 
-Submits a funding tx that locks an `OutgoingContract`, then a `SendStateMachine` advances `Funding → Funded`. In `Funded` it races the gateway payment response (over its pooled iroh connection) against the mint's preimage stream; whichever finishes first decides between success and refund. If a refund is taken, a second tx is submitted under the same operation id to claim the contract back.
+### `lightning_invoice_send(mint, account, gateway_pk, invoice)` — pay a BOLT11 invoice
+
+Submits a funding tx that locks an `OutgoingContract`, then a `SendStateMachine` races the gateway's payment response (over its pooled iroh connection) against the mint's preimage table; whichever finishes first decides between success and refund. The contract settles only through the gateway, by preimage or by forfeit signature, so the state machine waits for as long as that takes. If a refund is taken, a second tx is submitted under the same operation id to claim the contract back.
 
 ```
 SendEvent ── TxCreateEvent                      ← funding tx submitted
@@ -133,19 +137,32 @@ SendEvent ── TxCreateEvent                      ← funding tx submitted
     │                   └── SendRefundEvent ── TxCreateEvent ──┬── TxAcceptEvent ──┬── EcashSuccessEvent
     │                       (refund claim tx)                  │                   └── EcashFailureEvent
     │                                                          │
-    │                                                          └── TxRejectEvent ──┬── SendSuccessEvent
-    │                                                                              └── SendFailureEvent
+    │                                                          └── TxRejectEvent ── SendSuccessEvent
     │
     └── TxRejectEvent
 ```
 
 Every send whose funding tx is accepted terminates in exactly one of (a rejected funding tx ends at `TxRejectEvent` alone):
 
-- `SendSuccessEvent { preimage }` — gateway paid (either reported back during `Funded`, or the preimage was recovered after a refund-tx rejection).
+- `SendSuccessEvent { preimage }` — gateway paid (either reported back, or the preimage was recovered after a refund-tx rejection).
 - `EcashSuccessEvent` (clean refund tail) — refund tx was accepted and the recovered notes minted (`EcashFailureEvent` if TBS verification of the refund notes fails).
-- `SendFailureEvent` — refund tx was rejected and the mint still doesn't have a preimage we can verify.
 
-The refund-rejection branch fires because the contract input has already been spent — and the only thing that can spend it is the gateway claiming with a preimage. The state machine re-polls the mint once more after refund rejection: if the preimage is now visible, the original send actually succeeded (`SendSuccessEvent`); if not, the operation is genuinely stuck (`SendFailureEvent`).
+The refund-rejection branch fires because the contract input has already been spent — and the only thing that can spend it is the gateway claiming with a preimage, so the state machine waits for the mint's preimage table to show it.
+
+`lightning_lnurl_send(mint, account, gateway_pk, lnurl, amount)` resolves the lnurl to an invoice for the amount, refuses one for any other amount, and pays it exactly as above; `lightning_lnurl_send_max` does the same for the amount that empties the account, which `lightning_lnurl_send_max_amount` previews.
+
+### `lightning_lnurl_send_direct(mint, account, lnurl, amount)` — pay an lnurl of this mint
+
+An lnurl of this mint, as `lightning_lnurl_receive` hands out, names the recipient's receive key; the sender authors the recipient's incoming contract itself, funds it straight from the account at no fee, and is done — there is no gateway and nothing to settle, so the funding tx's acceptance is the payment and the recipient's scanner claims the contract as it claims any other. Any other lnurl is refused. `lightning_lnurl_send_direct_max` empties the account this way, and `lightning_lnurl_send_direct_max_amount` previews what that pays, priced with no gateway fee.
+
+```
+SendEvent ── TxCreateEvent                      ← incoming contract funded
+    │
+    ├── TxAcceptEvent ──┬── EcashSuccessEvent    (change notes)
+    │                   └── EcashFailureEvent
+    │
+    └── TxRejectEvent
+```
 
 ## Restore
 
@@ -181,14 +198,12 @@ The complete `(source, kind)` set the client emits, for integrators wiring up an
 | `Lightning` · `send` |
 | `Lightning` · `send-success` |
 | `Lightning` · `send-refund` |
-| `Lightning` · `send-failure` |
 | `Gateway` · `send` |
 | `Gateway` · `send-success` |
 | `Gateway` · `send-cancel` |
 | `Gateway` · `receive` |
 | `Gateway` · `receive-success` |
 | `Gateway` · `receive-failure` |
-| `Gateway` · `receive-refund` |
 
 Conventions:
 

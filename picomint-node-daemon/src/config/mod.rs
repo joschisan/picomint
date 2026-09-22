@@ -17,7 +17,6 @@ use picomint_encoding::{Decodable, Encodable};
 
 pub mod db;
 pub mod dkg;
-pub mod dkg_g1;
 pub mod dkg_g2;
 pub mod dkg_secp;
 pub mod poly;
@@ -68,7 +67,7 @@ pub fn assemble_node_config(
     broadcast_public_keys: BTreeMap<NodeId, XOnlyPublicKey>,
     broadcast_secret_key: SecretKey,
     ecash: EcashConfig,
-    lightning: picomint_core::lightning::config::LightningConfig,
+    lightning: picomint_core::lightning::config::LightningConfigConsensus,
     onchain: OnchainConfig,
 ) -> NodeConfig {
     let nodes = params
@@ -93,7 +92,7 @@ pub fn assemble_node_config(
         default_version: CONSENSUS_VERSION,
         ecash: ecash.consensus,
         onchain: onchain.consensus,
-        lightning: lightning.consensus,
+        lightning,
     };
 
     let private = NodeConfigPrivate {
@@ -102,7 +101,6 @@ pub fn assemble_node_config(
         broadcast_secret_key,
         ecash: ecash.private,
         onchain: onchain.private,
-        lightning: lightning.private,
     };
 
     NodeConfig { consensus, private }
@@ -131,7 +129,6 @@ pub fn validate_config(cfg: &NodeConfig) -> anyhow::Result<()> {
     }
 
     crate::consensus::ecash::validate_config(cfg)?;
-    crate::consensus::lightning::validate_config(cfg)?;
     crate::consensus::onchain::validate_config(cfg)?;
 
     Ok(())

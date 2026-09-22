@@ -7,7 +7,6 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use bitcoin::hashes::sha256;
-use bitcoin::secp256k1::{self, Keypair, ecdh};
 use clap::Parser;
 use futures::future::select_ok;
 use iroh::Endpoint;
@@ -16,16 +15,12 @@ use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::Amount;
 use picomint_core::config::MintId;
-use picomint_core::lightning::MINIMUM_INCOMING_CONTRACT_AMOUNT;
-use picomint_core::lightning::contracts::IncomingOffer;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::lnurl::{LnurlRequest, MAX_NODES_PER_LNURL};
 use picomint_core::lightning::methods::{
     GatewayMethod, GatewaysRequest, GatewaysResponse, InfoRequest, InfoResponse, LightningMethod,
-    ReceiveRequest, ReceiveResponse, TpeAggregatePkRequest, TpeAggregatePkResponse, VerifyRequest,
-    VerifyResponse as WireVerifyResponse,
+    ReceiveRequest, ReceiveResponse, VerifyRequest, VerifyResponse as WireVerifyResponse,
 };
-use picomint_core::lightning::secret::IncomingContractSecret;
 use picomint_core::methods::{CoreMethod, Method, MintInfoRequest, MintInfoResponse};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_lnurl::{
@@ -36,10 +31,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio::task::JoinSet;
-use tokio::try_join;
 use tower_http::cors;
 use tower_http::cors::CorsLayer;
-use tpe::AggregatePublicKey;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
@@ -199,7 +192,7 @@ async fn resolve_and_fetch_invoice(
 
     let api = MintApi::new(endpoint.clone(), nodes);
 
-    let (aggregate_pk, gateways) = try_join!(fetch_aggregate_pk(&api), fetch_gateways(&api))?;
+    let gateways = fetch_gateways(&api).await?;
 
     let (gateway_info, gateway_pk) = select_gateway(endpoint, gateways, info.mint).await?;
 
@@ -210,58 +203,16 @@ async fn resolve_and_fetch_invoice(
         "Payment fee exceeds limit"
     );
 
-    let fee = gateway_info.receive_fee.fee(amount);
-
-    ensure!(
-        amount
-            .checked_sub(fee.0)
-            .is_some_and(|net| Amount(net) >= MINIMUM_INCOMING_CONTRACT_AMOUNT),
-        "Amount too small"
-    );
-
-    let ephemeral_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
-
-    let shared_secret =
-        ecdh::SharedSecret::new(&request.recipient, &ephemeral_keypair.secret_key()).secret_bytes();
-
-    let contract_secret = IncomingContractSecret::new(shared_secret);
-
-    let encryption_seed = contract_secret.encryption_seed();
-    let preimage = contract_secret.preimage();
-    let claim_tweak = contract_secret.claim_tweak();
-
-    let claim_pk = request
-        .recipient
-        .mul_tweak(secp256k1::SECP256K1, &claim_tweak)
-        .expect("Tweak is valid")
-        .x_only_public_key()
-        .0;
-
-    let offer = IncomingOffer::new(
-        aggregate_pk,
-        encryption_seed,
-        preimage,
-        preimage.consensus_hash(),
-        Amount(amount),
-        fee,
-        claim_pk,
-        ephemeral_keypair.public_key(),
-    );
-
     let receive = ReceiveRequest {
         mint: info.mint,
-        offer,
+        recipient: request.recipient,
+        amount: Amount(amount),
     };
 
     let invoice =
         gateway_request::<ReceiveResponse>(endpoint, gateway_pk, GatewayMethod::Receive(receive))
             .await?
             .invoice;
-
-    ensure!(
-        invoice.payment_hash() == &preimage.consensus_hash(),
-        "Invalid invoice payment hash"
-    );
 
     ensure!(
         invoice.amount_milli_satoshis() == Some(amount),
@@ -312,21 +263,10 @@ async fn fetch_mint_info(
     Ok(response)
 }
 
-/// Threshold-read the mint's tpe aggregate key. Not committed to by the
-/// lnurl: the node set it is read from is, and `2f + 1` nodes agreeing on
-/// a value is the same assumption the rest of the mint already rests on.
-async fn fetch_aggregate_pk(api: &MintApi) -> anyhow::Result<AggregatePublicKey> {
-    let response: TpeAggregatePkResponse = api
-        .request_current_consensus(Method::Lightning(LightningMethod::TpeAggregatePk(
-            TpeAggregatePkRequest,
-        )))
-        .await?;
-
-    Ok(response.tpe_agg_pk)
-}
-
 /// Threshold-read the mint's announced gateway set — `2f + 1` nodes
-/// returning byte-identical lists.
+/// returning byte-identical lists. Not committed to by the lnurl: the
+/// node set it is read from is, and `2f + 1` nodes agreeing on a value is
+/// the same assumption the rest of the mint already rests on.
 async fn fetch_gateways(api: &MintApi) -> anyhow::Result<Vec<GatewayPk>> {
     let response: GatewaysResponse = api
         .request_current_consensus(Method::Lightning(LightningMethod::Gateways(

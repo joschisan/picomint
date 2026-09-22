@@ -14,11 +14,11 @@ use crate::tx::{Input, Output, TxBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
-use picomint_core::lightning::contracts::{IncomingContract, IncomingOffer, OutgoingContract};
+use picomint_core::lightning::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::lightning::{LightningInput, LightningOutput, OutgoingWitness};
-use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
+use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::wire;
-use picomint_core::{Amount, OutPoint, secp256k1};
+use picomint_core::{Amount, OutPoint};
 use secp256k1::schnorr::Signature;
 use tracing::warn;
 
@@ -102,33 +102,27 @@ impl Client {
         Ok(())
     }
 
-    /// Fund an incoming offer: attach a fresh refund key, submit the
-    /// resulting contract, log `ReceiveEvent`, and spawn the state machine
-    /// that drives it to settlement. Idempotent on `operation`.
+    /// Fund an incoming contract: submit it, log `ReceiveEvent`, and spawn
+    /// the state machine that logs the preimage once the funding is
+    /// accepted. Idempotent on `operation`.
     pub fn gateway_start_receive(
         &self,
         mint: MintId,
         dbtx: &WriteTx,
         operation: OperationId,
-        offer: IncomingOffer,
+        contract: IncomingContract,
+        preimage: [u8; 32],
     ) -> anyhow::Result<()> {
         let ctx = self.ctx(mint)?;
 
-        let refund_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
-
-        let contract = IncomingContract {
-            offer: offer.clone(),
-            refund_pk: refund_keypair.x_only_public_key().0,
-        };
+        let amount = contract.amount;
+        let fee = contract.fee;
 
         let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Lightning(Box::new(LightningOutput::Incoming(contract))),
-            amount: offer.commitment.amount - offer.commitment.fee,
+            amount: amount - fee,
             fee: ctx.config.lightning.output_fee,
         });
-
-        let amount = offer.commitment.amount;
-        let fee = offer.commitment.fee;
 
         let txid = crate::ecash::finalize_and_submit_tx(
             &ctx,
@@ -150,9 +144,8 @@ impl Client {
             dbtx,
             ReceiveStateMachine {
                 operation,
-                offer,
                 outpoint,
-                refund_keypair,
+                preimage,
             },
         );
 

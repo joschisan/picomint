@@ -1,7 +1,9 @@
 //! # Lightning Module
 //!
-//! This module allows to atomically and trustlessly (in the federated trust
-//! model) interact with the Lightning network through a Lightning gateway.
+//! This module lets a client pay and receive over the Lightning network
+//! through a gateway it trusts: a sender relies on the gateway to answer
+//! every payment with the preimage or a forfeit signature, a recipient
+//! lets the gateway author the contract it funds, preimage included.
 
 pub mod config;
 pub mod contracts;
@@ -16,7 +18,6 @@ use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tpe::AggregateDecryptionKey;
 
 use crate::lightning::contracts::{IncomingContract, OutgoingContract};
 use crate::{Amount, OutPoint};
@@ -43,22 +44,15 @@ pub const MINIMUM_INCOMING_CONTRACT_AMOUNT: Amount = Amount::from_sat(5);
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct ContractId(pub sha256::Hash);
 
-/// Identity of an [`contracts::IncomingOffer`], and so of the incoming
-/// contract funding it, up to the refund key that offer deliberately does
-/// not cover.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
-pub struct OfferId(pub sha256::Hash);
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub enum LightningInput {
     Outgoing(OutPoint, OutgoingWitness),
-    Incoming(OutPoint, AggregateDecryptionKey),
+    Incoming(OutPoint),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub enum OutgoingWitness {
     Claim([u8; 32]),
-    Refund,
     Cancel(Signature),
 }
 
@@ -75,12 +69,6 @@ pub enum LightningInputError {
     UnknownContract,
     #[error("The preimage is invalid")]
     InvalidPreimage,
-    #[error("The contracts locktime has passed")]
-    Expired,
-    #[error("The contracts locktime has not yet passed")]
-    NotExpired,
-    #[error("The aggregate decryption key is invalid")]
-    InvalidDecryptionKey,
     #[error("The forfeit signature is invalid")]
     InvalidForfeitSignature,
     #[error("Amount arithmetic overflowed u64 msat")]
@@ -89,8 +77,6 @@ pub enum LightningInputError {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Error, Encodable, Decodable)]
 pub enum LightningOutputError {
-    #[error("The contract is invalid")]
-    InvalidContract,
     #[error("Amount arithmetic overflowed u64 msat")]
     ArithmeticOverflow,
 }

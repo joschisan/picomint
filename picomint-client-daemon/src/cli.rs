@@ -14,19 +14,28 @@ use picomint_client_cli_core::{
     ClientEcashSendMaxResponse, ClientEcashSendRequest, ClientEcashSendResponse,
     ClientExpiryRequest, ClientExpiryResponse, ClientLightningGatewayListRequest,
     ClientLightningGatewayListResponse, ClientLightningGatewayRefreshRequest,
-    ClientLightningLnurlRequest, ClientLightningLnurlResponse, ClientLightningReceiveRequest,
-    ClientLightningReceiveResponse, ClientLightningSendMaxAmountRequest,
-    ClientLightningSendMaxAmountResponse, ClientLightningSendMaxRequest,
-    ClientLightningSendMaxResponse, ClientLightningSendRequest, ClientLightningSendResponse,
-    ClientListResponse, ClientOnchainReceiveRequest, ClientOnchainReceiveResponse,
-    ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse, ClientOnchainSendMaxAmountRequest,
-    ClientOnchainSendMaxAmountResponse, ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse,
-    ClientOnchainSendRequest, ClientOnchainSendResponse, ClientRemoveRequest, MintInfo,
-    MnemonicResponse, QueryRequest, QueryResponse, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG,
-    ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE, ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_EXPIRY,
-    ROUTE_LIGHTNING_GATEWAY_LIST, ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_LNURL,
-    ROUTE_LIGHTNING_RECEIVE, ROUTE_LIGHTNING_SEND, ROUTE_LIGHTNING_SEND_MAX,
-    ROUTE_LIGHTNING_SEND_MAX_AMOUNT, ROUTE_LIST, ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE,
+    ClientLightningInvoiceReceiveRequest, ClientLightningInvoiceReceiveResponse,
+    ClientLightningInvoiceSendRequest, ClientLightningInvoiceSendResponse,
+    ClientLightningLnurlMintRequest, ClientLightningLnurlMintResponse,
+    ClientLightningLnurlReceiveRequest, ClientLightningLnurlReceiveResponse,
+    ClientLightningLnurlSendDirectMaxAmountRequest,
+    ClientLightningLnurlSendDirectMaxAmountResponse, ClientLightningLnurlSendDirectMaxRequest,
+    ClientLightningLnurlSendDirectMaxResponse, ClientLightningLnurlSendDirectRequest,
+    ClientLightningLnurlSendDirectResponse, ClientLightningLnurlSendMaxAmountRequest,
+    ClientLightningLnurlSendMaxAmountResponse, ClientLightningLnurlSendMaxRequest,
+    ClientLightningLnurlSendMaxResponse, ClientLightningLnurlSendRequest,
+    ClientLightningLnurlSendResponse, ClientListResponse, ClientOnchainReceiveRequest,
+    ClientOnchainReceiveResponse, ClientOnchainSendFeeRequest, ClientOnchainSendFeeResponse,
+    ClientOnchainSendMaxAmountRequest, ClientOnchainSendMaxAmountResponse,
+    ClientOnchainSendMaxRequest, ClientOnchainSendMaxResponse, ClientOnchainSendRequest,
+    ClientOnchainSendResponse, ClientRemoveRequest, MintInfo, MnemonicResponse, QueryRequest,
+    QueryResponse, ROUTE_ADD, ROUTE_BALANCE, ROUTE_CONFIG, ROUTE_ECASH_COUNT, ROUTE_ECASH_RECEIVE,
+    ROUTE_ECASH_SEND, ROUTE_ECASH_SEND_MAX, ROUTE_EXPIRY, ROUTE_LIGHTNING_GATEWAY_LIST,
+    ROUTE_LIGHTNING_GATEWAY_REFRESH, ROUTE_LIGHTNING_INVOICE_RECEIVE, ROUTE_LIGHTNING_INVOICE_SEND,
+    ROUTE_LIGHTNING_LNURL_MINT, ROUTE_LIGHTNING_LNURL_RECEIVE, ROUTE_LIGHTNING_LNURL_SEND,
+    ROUTE_LIGHTNING_LNURL_SEND_DIRECT, ROUTE_LIGHTNING_LNURL_SEND_DIRECT_MAX,
+    ROUTE_LIGHTNING_LNURL_SEND_DIRECT_MAX_AMOUNT, ROUTE_LIGHTNING_LNURL_SEND_MAX,
+    ROUTE_LIGHTNING_LNURL_SEND_MAX_AMOUNT, ROUTE_LIST, ROUTE_MNEMONIC, ROUTE_ONCHAIN_RECEIVE,
     ROUTE_ONCHAIN_SEND, ROUTE_ONCHAIN_SEND_FEE, ROUTE_ONCHAIN_SEND_MAX,
     ROUTE_ONCHAIN_SEND_MAX_AMOUNT, ROUTE_QUERY, ROUTE_REMOVE,
 };
@@ -57,18 +66,38 @@ pub fn run(state: AppState) -> anyhow::Result<impl Future<Output = ()>> {
         .route(ROUTE_ONCHAIN_SEND_MAX, post(onchain_send_max))
         .route(ROUTE_ONCHAIN_RECEIVE, post(onchain_receive))
         .route(ROUTE_LIGHTNING_GATEWAY_LIST, post(lightning_gateway_list))
-        .route(ROUTE_LIGHTNING_SEND, post(lightning_send))
-        .route(
-            ROUTE_LIGHTNING_SEND_MAX_AMOUNT,
-            post(lightning_send_max_amount),
-        )
-        .route(ROUTE_LIGHTNING_SEND_MAX, post(lightning_send_max))
-        .route(ROUTE_LIGHTNING_RECEIVE, post(lightning_receive))
-        .route(ROUTE_LIGHTNING_LNURL, post(lightning_lnurl))
         .route(
             ROUTE_LIGHTNING_GATEWAY_REFRESH,
             post(lightning_gateway_refresh),
         )
+        .route(ROUTE_LIGHTNING_INVOICE_SEND, post(lightning_invoice_send))
+        .route(
+            ROUTE_LIGHTNING_INVOICE_RECEIVE,
+            post(lightning_invoice_receive),
+        )
+        .route(ROUTE_LIGHTNING_LNURL_SEND, post(lightning_lnurl_send))
+        .route(
+            ROUTE_LIGHTNING_LNURL_SEND_MAX,
+            post(lightning_lnurl_send_max),
+        )
+        .route(
+            ROUTE_LIGHTNING_LNURL_SEND_MAX_AMOUNT,
+            post(lightning_lnurl_send_max_amount),
+        )
+        .route(
+            ROUTE_LIGHTNING_LNURL_SEND_DIRECT,
+            post(lightning_lnurl_send_direct),
+        )
+        .route(
+            ROUTE_LIGHTNING_LNURL_SEND_DIRECT_MAX,
+            post(lightning_lnurl_send_direct_max),
+        )
+        .route(
+            ROUTE_LIGHTNING_LNURL_SEND_DIRECT_MAX_AMOUNT,
+            post(lightning_lnurl_send_direct_max_amount),
+        )
+        .route(ROUTE_LIGHTNING_LNURL_RECEIVE, post(lightning_lnurl_receive))
+        .route(ROUTE_LIGHTNING_LNURL_MINT, post(lightning_lnurl_mint))
         .with_state(state);
 
     serve(&data_dir, router)
@@ -330,13 +359,13 @@ async fn lightning_gateway_list(
 }
 
 #[instrument(skip_all, err)]
-async fn lightning_send(
+async fn lightning_invoice_send(
     State(state): State<AppState>,
-    Json(payload): Json<ClientLightningSendRequest>,
-) -> Result<Json<ClientLightningSendResponse>, CliError> {
+    Json(payload): Json<ClientLightningInvoiceSendRequest>,
+) -> Result<Json<ClientLightningInvoiceSendResponse>, CliError> {
     let operation = state
         .client
-        .lightning_send(
+        .lightning_invoice_send(
             payload.mint,
             payload.account,
             payload.gateway,
@@ -345,49 +374,17 @@ async fn lightning_send(
         .await
         .map_err(CliError::rejected)?;
 
-    Ok(Json(ClientLightningSendResponse { operation }))
+    Ok(Json(ClientLightningInvoiceSendResponse { operation }))
 }
 
 #[instrument(skip_all, err)]
-async fn lightning_send_max_amount(
+async fn lightning_invoice_receive(
     State(state): State<AppState>,
-    Json(payload): Json<ClientLightningSendMaxAmountRequest>,
-) -> Result<Json<ClientLightningSendMaxAmountResponse>, CliError> {
-    let amount_msat = state
-        .client
-        .lightning_send_max_amount(payload.mint, payload.account, payload.gateway)
-        .map_err(CliError::rejected)?;
-
-    Ok(Json(ClientLightningSendMaxAmountResponse { amount_msat }))
-}
-
-#[instrument(skip_all, err)]
-async fn lightning_send_max(
-    State(state): State<AppState>,
-    Json(payload): Json<ClientLightningSendMaxRequest>,
-) -> Result<Json<ClientLightningSendMaxResponse>, CliError> {
-    let operation = state
-        .client
-        .lightning_send_max(
-            payload.mint,
-            payload.account,
-            payload.gateway,
-            &payload.lnurl,
-        )
-        .await
-        .map_err(CliError::rejected)?;
-
-    Ok(Json(ClientLightningSendMaxResponse { operation }))
-}
-
-#[instrument(skip_all, err)]
-async fn lightning_receive(
-    State(state): State<AppState>,
-    Json(payload): Json<ClientLightningReceiveRequest>,
-) -> Result<Json<ClientLightningReceiveResponse>, CliError> {
+    Json(payload): Json<ClientLightningInvoiceReceiveRequest>,
+) -> Result<Json<ClientLightningInvoiceReceiveResponse>, CliError> {
     let invoice = state
         .client
-        .lightning_receive(
+        .lightning_invoice_receive(
             payload.mint,
             payload.account,
             payload.gateway,
@@ -396,20 +393,132 @@ async fn lightning_receive(
         .await
         .map_err(CliError::rejected)?;
 
-    Ok(Json(ClientLightningReceiveResponse { invoice }))
+    Ok(Json(ClientLightningInvoiceReceiveResponse { invoice }))
 }
 
 #[instrument(skip_all, err)]
-async fn lightning_lnurl(
+async fn lightning_lnurl_send(
     State(state): State<AppState>,
-    Json(payload): Json<ClientLightningLnurlRequest>,
-) -> Result<Json<ClientLightningLnurlResponse>, CliError> {
-    let lnurl = state
+    Json(payload): Json<ClientLightningLnurlSendRequest>,
+) -> Result<Json<ClientLightningLnurlSendResponse>, CliError> {
+    let operation = state
         .client
-        .lightning_generate_lnurl(payload.mint, payload.account, payload.lnurl_daemon)
+        .lightning_lnurl_send(
+            payload.mint,
+            payload.account,
+            payload.gateway,
+            &payload.lnurl,
+            Amount::from_sat(payload.amount.to_sat()),
+        )
+        .await
         .map_err(CliError::rejected)?;
 
-    Ok(Json(ClientLightningLnurlResponse { lnurl }))
+    Ok(Json(ClientLightningLnurlSendResponse { operation }))
+}
+
+#[instrument(skip_all, err)]
+async fn lightning_lnurl_send_max(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientLightningLnurlSendMaxRequest>,
+) -> Result<Json<ClientLightningLnurlSendMaxResponse>, CliError> {
+    let operation = state
+        .client
+        .lightning_lnurl_send_max(
+            payload.mint,
+            payload.account,
+            payload.gateway,
+            &payload.lnurl,
+        )
+        .await
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientLightningLnurlSendMaxResponse { operation }))
+}
+
+#[instrument(skip_all, err)]
+async fn lightning_lnurl_send_max_amount(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientLightningLnurlSendMaxAmountRequest>,
+) -> Result<Json<ClientLightningLnurlSendMaxAmountResponse>, CliError> {
+    let amount_msat = state
+        .client
+        .lightning_lnurl_send_max_amount(payload.mint, payload.account, payload.gateway)
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientLightningLnurlSendMaxAmountResponse {
+        amount_msat,
+    }))
+}
+
+#[instrument(skip_all, err)]
+async fn lightning_lnurl_send_direct(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientLightningLnurlSendDirectRequest>,
+) -> Result<Json<ClientLightningLnurlSendDirectResponse>, CliError> {
+    let operation = state
+        .client
+        .lightning_lnurl_send_direct(
+            payload.mint,
+            payload.account,
+            &payload.lnurl,
+            Amount::from_sat(payload.amount.to_sat()),
+        )
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientLightningLnurlSendDirectResponse { operation }))
+}
+
+#[instrument(skip_all, err)]
+async fn lightning_lnurl_send_direct_max(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientLightningLnurlSendDirectMaxRequest>,
+) -> Result<Json<ClientLightningLnurlSendDirectMaxResponse>, CliError> {
+    let operation = state
+        .client
+        .lightning_lnurl_send_direct_max(payload.mint, payload.account, &payload.lnurl)
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientLightningLnurlSendDirectMaxResponse {
+        operation,
+    }))
+}
+
+#[instrument(skip_all, err)]
+async fn lightning_lnurl_send_direct_max_amount(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientLightningLnurlSendDirectMaxAmountRequest>,
+) -> Result<Json<ClientLightningLnurlSendDirectMaxAmountResponse>, CliError> {
+    let amount_msat = state
+        .client
+        .lightning_lnurl_send_direct_max_amount(payload.mint, payload.account)
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientLightningLnurlSendDirectMaxAmountResponse {
+        amount_msat,
+    }))
+}
+
+#[instrument(skip_all, err)]
+async fn lightning_lnurl_receive(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientLightningLnurlReceiveRequest>,
+) -> Result<Json<ClientLightningLnurlReceiveResponse>, CliError> {
+    let lnurl = state
+        .client
+        .lightning_lnurl_receive(payload.mint, payload.account, payload.lnurl_daemon)
+        .map_err(CliError::rejected)?;
+
+    Ok(Json(ClientLightningLnurlReceiveResponse { lnurl }))
+}
+
+#[instrument(skip_all, err)]
+async fn lightning_lnurl_mint(
+    State(state): State<AppState>,
+    Json(payload): Json<ClientLightningLnurlMintRequest>,
+) -> Result<Json<ClientLightningLnurlMintResponse>, CliError> {
+    let mint = state.client.lightning_lnurl_mint(&payload.lnurl);
+
+    Ok(Json(ClientLightningLnurlMintResponse { mint }))
 }
 
 #[instrument(skip_all, err)]

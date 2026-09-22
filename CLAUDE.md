@@ -39,7 +39,7 @@ One vocabulary everywhere: a **mint** (the federated entity, `MintId`), run by *
 - `picomint-tbs` — threshold blind signatures (BLS12-381) for ecash issuance
 - `picomint-tss` — FROST threshold Schnorr (BIP 445, BIP340 output) for the mint's taproot wallet
 - `picomint-rugpull` — standalone binary that drains a decommissioned mint's wallet from a threshold of nodes' rugpull secrets through the operator's bitcoind; shipped as a release binary, not in any image
-- `picomint-tpe` — threshold point encryption (BLS12-381) for lightning contract preimages
+- `picomint-tpe` — threshold point encryption (BLS12-381); no longer used by any other crate since receives trust the gateway with the preimage, kept for now
 - `picomint-fountain` — fountain-code encoder/decoder (currently unused by any other crate)
 - `picomint-lnurl-daemon` — standalone LNURL proxy daemon for receiving Lightning payments
 - `picomint-lnurl` / `picomint-base32` — small shared utility crates

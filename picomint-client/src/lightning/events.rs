@@ -1,4 +1,5 @@
 use crate::eventlog::{Event, EventKind};
+use bitcoin::hashes::sha256;
 use picomint_core::Amount;
 use picomint_core::TransactionId;
 use picomint_core::sql::SqlRow;
@@ -37,22 +38,10 @@ impl Event for SendSuccessEvent {
 pub struct SendRefundEvent {
     /// The mint transaction that refunds the contract, hex
     pub txid: TransactionId,
-    /// 1 when the contract expired without the mint seeing a preimage, 0
-    /// when the gateway cancelled the payment outright
-    pub expired: bool,
 }
 
 impl Event for SendRefundEvent {
     const KIND: EventKind = EventKind::from_static("lightning-send-refund");
-}
-
-/// The send ended undetermined: the refund was rejected, so the gateway
-/// claimed the contract, but no preimage surfaced.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
-pub struct SendFailureEvent;
-
-impl Event for SendFailureEvent {
-    const KIND: EventKind = EventKind::from_static("lightning-send-failure");
 }
 
 /// An invoice from `lightning receive` was paid and the client claimed the
@@ -61,6 +50,8 @@ impl Event for SendFailureEvent {
 pub struct ReceiveEvent {
     /// The mint transaction that claims the contract, hex
     pub txid: TransactionId,
+    /// The payment hash of the invoice that was paid, hex
+    pub payment_hash: sha256::Hash,
     /// The invoice amount, in msat
     pub amount: Amount,
     /// The gateway's fee taken off it, in msat

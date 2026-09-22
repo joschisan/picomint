@@ -153,8 +153,7 @@ picomint-client-cli lightning gateway list <mint>
     "picomintd2g4...c9d1": {
       "module_public_key": "8f3a...b2e7",
       "send_fee": { "base": 10000, "ppm": 3000 },
-      "receive_fee": { "base": 10000, "ppm": 1000 },
-      "expiry_delta": 500
+      "receive_fee": { "base": 10000, "ppm": 1000 }
     }
   }
 }
@@ -169,25 +168,13 @@ picomint-client-cli lightning gateway refresh <mint>
 **Pay an invoice:** returns the operation id. The outcome lands in the analytics as `lightning_send_success` with the preimage, or `lightning_send_refund` if the gateway could not route it:
 
 ```bash
-picomint-client-cli lightning send <mint> <account> <gateway> <invoice>
+picomint-client-cli lightning invoice send <mint> <account> <gateway> <invoice>
 ```
 
-`lightning send-max <mint> <account> <gateway> <lnurl>` empties the account to an lnurl: it resolves the lnurl, requests one invoice for the maximum and pays it. The maximum follows the same rule as `onchain send-max`, with the gateway's `send_fee` from `lightning gateway list` in place of the miner fee: the invoice is for the largest whole-sat amount that fits once that fee on it, the mint's per-output fee and the mint's per-input fee on each note spent are covered. It depends on the gateway, so `lightning send-max-amount <mint> <account> <gateway>` takes one and computes the invoice amount, in msat, without paying:
+**Create an invoice:** returns the invoice. The payment lands in the analytics as `lightning_receive` once the gateway has funded it, under the operation derived from the invoice's payment hash and with that hash in its `payment_hash` column:
 
 ```bash
-picomint-client-cli lightning send-max-amount <mint> <account> <gateway>
-```
-
-```json
-{
-  "amount_msat": 149210000
-}
-```
-
-**Create an invoice:** returns the invoice. The payment lands in the analytics as `lightning_receive` once the gateway has funded it, under the operation derived from the invoice's payment hash:
-
-```bash
-picomint-client-cli lightning receive <mint> <account> <gateway> "<amount>"
+picomint-client-cli lightning invoice receive <mint> <account> <gateway> "<amount>"
 ```
 
 ```json
@@ -196,10 +183,46 @@ picomint-client-cli lightning receive <mint> <account> <gateway> "<amount>"
 }
 ```
 
+**Pay an lnurl:** resolves the lnurl or lightning address to an invoice for the amount and pays it through the gateway, with the outcomes of `invoice send`:
+
+```bash
+picomint-client-cli lightning lnurl send <mint> <account> <gateway> <lnurl> "<amount>"
+```
+
+`lightning lnurl send-max <mint> <account> <gateway> <lnurl>` empties the account to an lnurl: it resolves one invoice for the maximum and pays it. The maximum follows the same rule as `onchain send-max`, with the gateway's `send_fee` from `lightning gateway list` in place of the miner fee: the invoice is for the largest whole-sat amount that fits once that fee on it, the mint's per-output fee and the mint's per-input fee on each note spent are covered. It depends on the gateway, so `lightning lnurl send-max-amount <mint> <account> <gateway>` takes one and computes the invoice amount, in msat, without paying:
+
+```bash
+picomint-client-cli lightning lnurl send-max-amount <mint> <account> <gateway>
+```
+
+```json
+{
+  "amount_msat": 149210000
+}
+```
+
+**Pay an lnurl of this mint directly:** an lnurl that `lnurl receive` handed out names an account of one mint. From a client on that same mint it is paid without a gateway: the recipient's incoming contract is funded straight from the account at no fee, and the `tx_accept` of its `lightning_send` is the outcome. Any other lnurl is refused, so ask first which added mint an lnurl belongs to, `null` when none:
+
+```bash
+picomint-client-cli lightning lnurl mint <lnurl>
+```
+
+```json
+{
+  "mint": "8046bcd8..."
+}
+```
+
+```bash
+picomint-client-cli lightning lnurl send-direct <mint> <account> <lnurl> "<amount>"
+```
+
+`lightning lnurl send-direct-max <mint> <account> <lnurl>` empties the account the same way, and `lightning lnurl send-direct-max-amount <mint> <account>` computes what that pays, in msat, without paying: with no gateway fee, only the mint's per-output fee and its per-input fee on each note come off.
+
 **A reusable lnurl:** an lnurl daemon serves invoices on the account's behalf, so the account can be paid while this daemon is offline. It is a hosted service, not something you run: pass its base URL and share the lnurl it returns:
 
 ```bash
-picomint-client-cli lightning lnurl <mint> <account> https://lnurl.example.com/
+picomint-client-cli lightning lnurl receive <mint> <account> https://lnurl.example.com/
 ```
 
 ## Restore

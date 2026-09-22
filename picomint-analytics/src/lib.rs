@@ -97,7 +97,6 @@ events! {
     lightning::events::SendEvent,
     lightning::events::SendSuccessEvent,
     lightning::events::SendRefundEvent,
-    lightning::events::SendFailureEvent,
     lightning::events::ReceiveEvent,
     gateway::events::SendEvent,
     gateway::events::SendSuccessEvent,
@@ -105,7 +104,6 @@ events! {
     gateway::events::ReceiveEvent,
     gateway::events::ReceiveSuccessEvent,
     gateway::events::ReceiveFailureEvent,
-    gateway::events::ReceiveRefundEvent,
 }
 
 /// Shared handle to the analytics SQLite writer connection, used by the
