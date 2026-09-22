@@ -264,7 +264,7 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
         env.ldk_node.bolt11_payment().send(&invoice, None)?;
 
         client
-            .await_event::<ReceiveEvent>(OperationId::from_encodable(invoice.payment_hash()))
+            .await_row::<ReceiveEvent>(&format!("payment_hash = '{}'", invoice.payment_hash()))
             .await?;
 
         // Verify the freestanding LDK node observes the payment as successful,
@@ -449,8 +449,9 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
 
     // Wait for the scanner to claim the contract.
     client
-        .await_event::<ReceiveEvent>(OperationId::from_encodable(
-            invoice_response.pr.payment_hash(),
+        .await_row::<ReceiveEvent>(&format!(
+            "payment_hash = '{}'",
+            invoice_response.pr.payment_hash()
         ))
         .await?;
 
@@ -540,7 +541,11 @@ async fn test_send_lnurl_direct(env: &TestEnv, client_send: &TestClient) -> anyh
 
     client_send.await_event::<TxAcceptEvent>(send_op).await?;
 
-    let receive = client_receive.await_event::<ReceiveEvent>(send_op).await?;
+    // The receive logs under its own operation, so it is found by amount:
+    // this client has received nothing else.
+    let receive = client_receive
+        .await_row::<ReceiveEvent>(&format!("amount = {}", amount.to_sat() * 1000))
+        .await?;
 
     ensure!(
         receive["amount"] == amount.to_sat() * 1000 && receive["fee"] == 0,

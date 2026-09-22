@@ -432,8 +432,8 @@ pub struct ClientLightningInvoiceReceiveRequest {
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 pub struct ClientLightningInvoiceReceiveResponse {
     /// The bolt11 invoice; the payment lands in the analytics as
-    /// `lightning_receive` under the operation derived from its payment
-    /// hash, once the gateway has funded it
+    /// `lightning_receive`, with the invoice's payment hash in its
+    /// `payment_hash` column, once the gateway has funded it
     #[schemars(with = "String")]
     pub invoice: Bolt11Invoice,
 }

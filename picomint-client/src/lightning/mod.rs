@@ -388,7 +388,9 @@ fn receive_incoming_contract(
         fee: ctx.config.lightning.input_fee,
     });
 
-    let operation = OperationId::from_encodable(&contract.payment_hash);
+    // The contract's outpoint, not its payment hash: a self-payment's send
+    // leg already logs under the hash, and the two legs are two operations.
+    let operation = OperationId::from_encodable(&outpoint);
 
     let payment_hash = contract.payment_hash;
     let amount = contract.amount;
@@ -599,9 +601,10 @@ impl Client {
     }
 
     /// Request an invoice into `account` from a gateway picked from
-    /// [`lightning_gateways`]. The eventual claim logs under the operation
-    /// derived from the invoice's payment hash, as a send's does, so a
-    /// self-payment shares one operation across both legs.
+    /// [`lightning_gateways`]. The eventual claim logs under an operation
+    /// of its own, derived from the funded contract's outpoint; its
+    /// receive event carries the payment hash that matches it to the
+    /// invoice.
     ///
     /// [`lightning_gateways`]: Client::lightning_gateways
     pub async fn lightning_invoice_receive(
