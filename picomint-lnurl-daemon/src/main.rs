@@ -1,4 +1,6 @@
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
+use std::sync::{Arc, RwLock};
 
 use anyhow::{Context, bail, ensure};
 use axum::extract::{Path, Query, State};
@@ -13,15 +15,18 @@ use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning_invoice::Bolt11Invoice;
-use picomint_core::Amount;
 use picomint_core::config::MintId;
+use picomint_core::lightning::MINIMUM_INCOMING_CONTRACT_AMOUNT;
+use picomint_core::lightning::contracts::IncomingContract;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::lnurl::{LnurlRequest, MAX_NODES_PER_LNURL};
 use picomint_core::lightning::methods::{
-    GatewayMethod, GatewaysRequest, GatewaysResponse, InfoRequest, InfoResponse, LightningMethod,
-    ReceiveRequest, ReceiveResponse, VerifyRequest, VerifyResponse as WireVerifyResponse,
+    AwaitIncomingPaymentRequest, AwaitIncomingPaymentResponse, GatewayMethod, GatewaysRequest,
+    GatewaysResponse, IncomingPaymentRequest, IncomingPaymentResponse, InfoRequest, InfoResponse,
+    LightningMethod, ReceiveRequest, ReceiveResponse,
 };
 use picomint_core::methods::{CoreMethod, Method, MintInfoRequest, MintInfoResponse};
+use picomint_core::{Amount, NodeId};
 use picomint_encoding::{Decodable, Encodable};
 use picomint_lnurl::{
     InvoiceResponse, LnurlResponse, PayResponse, VerifyResponse, pay_request_tag,
@@ -41,6 +46,37 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 const MAX_SENDABLE_MSAT: u64 = 100_000_000_000;
 const MIN_SENDABLE_MSAT: u64 = 100_000;
+
+/// The daemon's state: its endpoint and one kept-alive [`MintApi`] per
+/// mint it has served an invoice for, keyed by mint id. The pool's
+/// connections reconnect on their own, so a mint seen once is warm for
+/// every request after; a verify finds its mint here by id alone, and so
+/// only on the process that issued the invoice.
+#[derive(Clone)]
+struct AppState {
+    endpoint: Endpoint,
+    mints: Arc<RwLock<BTreeMap<MintId, MintApi>>>,
+}
+
+impl AppState {
+    /// The pool for `mint`, built from `nodes` on first sight.
+    fn mint_api(&self, mint: MintId, nodes: BTreeMap<NodeId, iroh::PublicKey>) -> MintApi {
+        self.mints
+            .write()
+            .expect("mints RwLock poisoned")
+            .entry(mint)
+            .or_insert_with(|| MintApi::new(self.endpoint.clone(), nodes))
+            .clone()
+    }
+
+    fn cached_mint_api(&self, mint: MintId) -> Option<MintApi> {
+        self.mints
+            .read()
+            .expect("mints RwLock poisoned")
+            .get(&mint)
+            .cloned()
+    }
+}
 
 #[derive(Debug, Parser)]
 struct CliOpts {
@@ -73,13 +109,18 @@ async fn main() -> anyhow::Result<()> {
         .allow_methods(cors::Any)
         .allow_headers(cors::Any);
 
+    let state = AppState {
+        endpoint,
+        mints: Arc::new(RwLock::new(BTreeMap::new())),
+    };
+
     let app = Router::new()
         .route("/", get(health_check))
         .route("/pay/{payload}", get(pay))
         .route("/invoice/{payload}", get(invoice))
-        .route("/verify/{gateway_pk}/{payment_hash}", get(verify))
+        .route("/verify/{mint}/{payment_hash}", get(verify))
         .layer(cors)
-        .with_state(endpoint);
+        .with_state(state);
 
     info!(api_addr = %cli_opts.api_addr, "lnurl-daemon started");
 
@@ -126,7 +167,7 @@ struct GetInvoiceParams {
 
 async fn invoice(
     headers: HeaderMap,
-    State(endpoint): State<Endpoint>,
+    State(state): State<AppState>,
     Path(payload): Path<String>,
     Query(params): Query<GetInvoiceParams>,
 ) -> Json<LnurlResponse<InvoiceResponse>> {
@@ -147,23 +188,21 @@ async fn invoice(
         )));
     }
 
-    let (gateway_pk, invoice) =
-        match resolve_and_fetch_invoice(&endpoint, &request, params.amount).await {
-            Ok(result) => result,
-            Err(e) => {
-                return Json(LnurlResponse::error(e.to_string()));
-            }
-        };
+    let (mint, invoice) = match resolve_and_fetch_invoice(&state, &request, params.amount).await {
+        Ok(result) => result,
+        Err(e) => {
+            return Json(LnurlResponse::error(e.to_string()));
+        }
+    };
 
     info!(%params.amount, "Created invoice");
 
-    // The verify URL routes through this daemon: we proxy the call to
-    // the originating gateway over iroh. `gateway_pk` is base32-encoded
-    // via `picomint_base32` (same format as the rest of picomint).
+    // The verify URL routes through this daemon, which asks the mint —
+    // found by id in the pool this request just warmed — whether a
+    // contract with the invoice's payment hash was funded.
     let verify = format!(
-        "{}verify/{}/{}",
+        "{}verify/{mint}/{}",
         base_url(&headers),
-        picomint_base32::encode(&gateway_pk),
         invoice.payment_hash()
     );
 
@@ -178,23 +217,15 @@ async fn invoice(
 /// of the lnurl itself, which is what keeps an outstanding one valid across
 /// gateway churn.
 async fn resolve_and_fetch_invoice(
-    endpoint: &Endpoint,
+    state: &AppState,
     request: &LnurlRequest,
     amount: u64,
-) -> anyhow::Result<(GatewayPk, Bolt11Invoice)> {
-    let info = fetch_mint_info(endpoint, &request.nodes, request.info).await?;
-
-    let nodes = info
-        .nodes
-        .iter()
-        .map(|(node, endpoint)| (*node, endpoint.iroh_pk))
-        .collect();
-
-    let api = MintApi::new(endpoint.clone(), nodes);
+) -> anyhow::Result<(MintId, Bolt11Invoice)> {
+    let (info, api) = resolve_mint(state, request).await?;
 
     let gateways = fetch_gateways(&api).await?;
 
-    let (gateway_info, gateway_pk) = select_gateway(endpoint, gateways, info.mint).await?;
+    let (gateway_info, gateway_pk) = select_gateway(&state.endpoint, gateways, info.mint).await?;
 
     ensure!(
         gateway_info
@@ -203,23 +234,63 @@ async fn resolve_and_fetch_invoice(
         "Payment fee exceeds limit"
     );
 
+    let fee = gateway_info.receive_fee.fee(amount);
+
+    ensure!(
+        amount
+            .checked_sub(fee.0)
+            .is_some_and(|net| Amount(net) >= MINIMUM_INCOMING_CONTRACT_AMOUNT),
+        "Amount too small"
+    );
+
+    let contract = IncomingContract::author(&request.recipient, Amount(amount), fee);
+
+    let payment_hash = contract.payment_hash();
+
     let receive = ReceiveRequest {
         mint: info.mint,
-        recipient: request.recipient,
-        amount: Amount(amount),
+        contract,
     };
 
-    let invoice =
-        gateway_request::<ReceiveResponse>(endpoint, gateway_pk, GatewayMethod::Receive(receive))
-            .await?
-            .invoice;
+    let invoice = gateway_request::<ReceiveResponse>(
+        &state.endpoint,
+        gateway_pk,
+        GatewayMethod::Receive(receive),
+    )
+    .await?
+    .invoice;
+
+    ensure!(
+        invoice.payment_hash() == &payment_hash,
+        "Invalid invoice payment hash"
+    );
 
     ensure!(
         invoice.amount_milli_satoshis() == Some(amount),
         "Invalid invoice amount"
     );
 
-    Ok((gateway_pk, invoice))
+    Ok((info.mint, invoice))
+}
+
+/// The mint an lnurl payload names, as its info and the pooled API onto
+/// its full node set. The info is fetched every time, since it is what
+/// the payload commits to; the pool is built once per mint.
+async fn resolve_mint(
+    state: &AppState,
+    request: &LnurlRequest,
+) -> anyhow::Result<(MintInfoResponse, MintApi)> {
+    let info = fetch_mint_info(&state.endpoint, &request.nodes, request.info).await?;
+
+    let nodes = info
+        .nodes
+        .iter()
+        .map(|(node, endpoint)| (*node, endpoint.iroh_pk))
+        .collect();
+
+    let api = state.mint_api(info.mint, nodes);
+
+    Ok((info, api))
 }
 
 /// Take the first node response that hashes to the payload's commitment.
@@ -307,11 +378,20 @@ async fn select_gateway(
     bail!("All gateways are offline or do not support this mint")
 }
 
-/// Proxy LUD-21 verify: external LNURL wallet hits us at
-/// `/verify/{gateway_pk}/{payment_hash}` (URL embedded in the invoice
-/// response), we forward via iroh to the originating gateway. The
-/// optional `?wait` query param turns this into a long-poll on the
-/// gateway side.
+/// LUD-21 verify: an external LNURL wallet hits us at
+/// `/verify/{mint}/{payment_hash}` (URL embedded in the invoice
+/// response), and we ask the mint, under threshold consensus, whether a
+/// contract with that payment hash was funded. The hash names the one
+/// contract this daemon authored for the invoice, so that is the mint's
+/// own attestation that the recipient was paid what the invoice said,
+/// with the preimage as proof. The optional `?wait` query param
+/// long-polls the mint until it was; without it the mint answers with
+/// what it holds now.
+///
+/// The mint is found by id in the pool the invoice request warmed. A
+/// mint id names no nodes, so a process that never issued the invoice —
+/// after a restart, or another replica — has no way to the mint and
+/// answers as a transport failure would.
 ///
 /// LUD-21 has no transient-vs-terminal error distinction — a wallet
 /// that sees `{"status":"ERROR"}` (or once `settled:true`, later
@@ -319,23 +399,36 @@ async fn select_gateway(
 /// HTTP 502 with an empty body: the wallet's JSON parse fails the same
 /// way as a network error, and any sane polling client retries.
 async fn verify(
-    State(endpoint): State<Endpoint>,
-    Path((gateway_pk, hash)): Path<(GatewayPk, sha256::Hash)>,
+    State(state): State<AppState>,
+    Path((mint, payment_hash)): Path<(MintId, sha256::Hash)>,
     Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<LnurlResponse<VerifyResponse>>, StatusCode> {
-    let wait = query.contains_key("wait");
+    let api = state.cached_mint_api(mint).ok_or(StatusCode::BAD_GATEWAY)?;
 
-    let response = gateway_request::<WireVerifyResponse>(
-        &endpoint,
-        gateway_pk,
-        GatewayMethod::Verify(VerifyRequest { hash, wait }),
-    )
-    .await
-    .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    // A waited read never gives up: the mint API keeps asking every node
+    // across reconnects until a threshold agrees, which is what waiting
+    // means. An unwaited read fails once enough nodes do, and a polling
+    // wallet asks again.
+    let preimage = if query.contains_key("wait") {
+        Some(
+            api.request_current_consensus_retry::<AwaitIncomingPaymentResponse>(Method::Lightning(
+                LightningMethod::AwaitIncomingPayment(AwaitIncomingPaymentRequest { payment_hash }),
+            ))
+            .await
+            .preimage,
+        )
+    } else {
+        api.request_current_consensus::<IncomingPaymentResponse>(Method::Lightning(
+            LightningMethod::IncomingPayment(IncomingPaymentRequest { payment_hash }),
+        ))
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?
+        .preimage
+    };
 
     Ok(Json(LnurlResponse::Ok(VerifyResponse {
-        settled: response.settled,
-        preimage: response.preimage,
+        settled: preimage.is_some(),
+        preimage,
     })))
 }
 

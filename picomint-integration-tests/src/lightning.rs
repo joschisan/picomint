@@ -455,11 +455,8 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
         ))
         .await?;
 
-    // The ?wait long-poll guarantees the gateway has logged ReceiveSuccessEvent
-    // before we do the non-wait check below. Without this ordering the non-wait
-    // GET races against the gateway's own wait for the funding transaction's
-    // acceptance and can return settled=false even though the client scanner
-    // already fired ReceiveEvent locally.
+    // The ?wait long-poll returns once a threshold of nodes hold the funded
+    // contract, so the non-wait check below finds it settled for certain.
     let waited = wait_task.await?.map_err(anyhow::Error::msg)?;
 
     // Post-payment: verify endpoint reflects the preimage, which hashes

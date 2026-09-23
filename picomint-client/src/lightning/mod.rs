@@ -197,9 +197,9 @@ fn lnurl_send_direct(
         return Err(LnurlSendDirectError::AmountTooSmall);
     }
 
-    let (contract, _preimage) = IncomingContract::author(&recipient, amount, Amount::ZERO);
+    let contract = IncomingContract::author(&recipient, amount, Amount::ZERO);
 
-    let operation = OperationId::from_encodable(&contract.payment_hash);
+    let operation = OperationId::from_encodable(&contract.payment_hash());
 
     let tx_builder = TxBuilder::from_output(Output {
         output: wire::Output::Lightning(Box::new(LightningOutput::Incoming(contract))),
@@ -319,11 +319,11 @@ async fn send_inner(
     Ok(operation)
 }
 
-/// Fetch an invoice for `recipient_pk` from the gateway, which authors
-/// the incoming contract it will fund from that key. The fee and the
-/// minimum are checked here first so the refusal is a typed error rather
-/// than the gateway's.
-async fn fetch_invoice(
+/// Author the incoming contract for `recipient_pk` and fetch the invoice
+/// the gateway issues against it, which has to carry the contract's
+/// payment hash: the mint reporting that hash funded then means this
+/// contract was.
+async fn create_contract_and_fetch_invoice(
     ctx: &ClientContext,
     gateway_pk: GatewayPk,
     gateway_info: GatewayInfo,
@@ -346,11 +346,19 @@ async fn fetch_invoice(
         return Err(InvoiceReceiveError::AmountTooSmall);
     }
 
+    let contract = IncomingContract::author(&recipient_pk, amount, fee);
+
+    let payment_hash = contract.payment_hash();
+
     let invoice = ctx
         .gateways
-        .receive(gateway_pk, ctx.mint, recipient_pk, amount)
+        .receive(gateway_pk, ctx.mint, contract)
         .await
         .map_err(|e| InvoiceReceiveError::FailedToConnectToGateway(e.to_string()))?;
+
+    if invoice.payment_hash() != &payment_hash {
+        return Err(InvoiceReceiveError::InvalidInvoice);
+    }
 
     if invoice.amount_milli_satoshis() != Some(amount.0) {
         return Err(InvoiceReceiveError::IncorrectInvoiceAmount);
@@ -392,7 +400,7 @@ fn receive_incoming_contract(
     // leg already logs under the hash, and the two legs are two operations.
     let operation = OperationId::from_encodable(&outpoint);
 
-    let payment_hash = contract.payment_hash;
+    let payment_hash = contract.payment_hash();
     let amount = contract.amount;
     let fee = contract.fee;
 
@@ -487,6 +495,8 @@ pub enum InvoiceReceiveError {
     GatewayFeeExceedsLimit,
     #[error("Amount is too small to cover fees")]
     AmountTooSmall,
+    #[error("Gateway returned an invoice for another payment hash")]
+    InvalidInvoice,
     #[error("Gateway returned an invoice with incorrect amount")]
     IncorrectInvoiceAmount,
     #[error("Mint is not added")]
@@ -623,7 +633,7 @@ impl Client {
 
         let receive_keypair = ctx.secret.lightning_secret().receive_keypair(account);
 
-        fetch_invoice(
+        create_contract_and_fetch_invoice(
             &ctx,
             gateway_pk,
             gateway_info,

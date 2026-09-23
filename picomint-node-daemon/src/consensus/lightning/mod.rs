@@ -18,7 +18,8 @@ use crate::{handler, handler_async};
 
 use self::db::{
     GatewayTable, IncomingContractIndexTable, IncomingContractStreamNextIndexTable,
-    IncomingContractStreamTable, IncomingContractTable, OutgoingContractTable, PreimageTable,
+    IncomingContractStreamTable, IncomingContractTable, IncomingPaymentTable,
+    OutgoingContractTable, PreimageTable,
 };
 
 /// The lightning module's consensus config. The module holds no keys: an
@@ -111,6 +112,12 @@ pub fn process_output(
 
             dbtx.insert(&IncomingContractTable, &outpoint, contract);
 
+            dbtx.insert(
+                &IncomingPaymentTable,
+                &contract.payment_hash(),
+                &contract.preimage(),
+            );
+
             let stream_index = dbtx
                 .get(&IncomingContractStreamNextIndexTable, &())
                 .unwrap_or(0);
@@ -142,6 +149,10 @@ pub async fn handle_api(server: &Server, method: LightningMethod) -> Result<Vec<
         }
         LightningMethod::AwaitIncomingContracts(req) => {
             handler_async!(await_incoming_contracts, server, req).await
+        }
+        LightningMethod::IncomingPayment(req) => handler!(incoming_payment, server, req).await,
+        LightningMethod::AwaitIncomingPayment(req) => {
+            handler_async!(await_incoming_payment, server, req).await
         }
         LightningMethod::Gateways(req) => handler!(gateways, server, req).await,
     }

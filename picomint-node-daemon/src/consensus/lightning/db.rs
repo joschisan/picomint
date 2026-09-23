@@ -1,3 +1,4 @@
+use bitcoin::hashes::sha256;
 use picomint_core::OutPoint;
 use picomint_core::lightning::contracts;
 use picomint_core::lightning::gateway::GatewayPk;
@@ -19,6 +20,16 @@ table!(
     PreimageTable,
     OutPoint => [u8; 32],
     "lightning-preimage",
+);
+
+// Every incoming contract ever funded, by the payment hash of the
+// invoice it paid, so a payer can ask the mint whether the recipient was
+// paid and take the preimage as proof. Never pruned: a claim spends the
+// contract, not the fact of the payment.
+table!(
+    IncomingPaymentTable,
+    sha256::Hash => [u8; 32],
+    "lightning-incoming-payment",
 );
 
 // The value is an operator-chosen display name; it is node-local and

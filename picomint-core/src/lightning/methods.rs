@@ -5,17 +5,16 @@
 //! consensus-encoded.
 
 use bitcoin::hashes::sha256;
-use bitcoin::secp256k1::PublicKey;
 use bitcoin::secp256k1::schnorr::Signature;
 use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
 
+use crate::OutPoint;
 use crate::config::MintId;
 use crate::lightning::ContractId;
 use crate::lightning::LightningInvoice;
 use crate::lightning::contracts::{IncomingContract, OutgoingContract};
 use crate::lightning::gateway::{GatewayInfo, GatewayPk};
-use crate::{Amount, OutPoint};
 
 // ── await-preimage ──────────────────────────────────────────────────────────
 
@@ -55,6 +54,35 @@ pub struct AwaitIncomingContractsResponse {
     pub next_index: u64,
 }
 
+// ── incoming-payment ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct IncomingPaymentRequest {
+    pub payment_hash: sha256::Hash,
+}
+
+/// The preimage of the funded incoming contract with the payment hash,
+/// which is the proof of payment an LNURL wallet asks for, or `None`
+/// while the mint holds no such contract.
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct IncomingPaymentResponse {
+    pub preimage: Option<[u8; 32]>,
+}
+
+// ── await-incoming-payment ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct AwaitIncomingPaymentRequest {
+    pub payment_hash: sha256::Hash,
+}
+
+/// Returned once the mint holds a funded incoming contract with the
+/// payment hash: its preimage.
+#[derive(Debug, Clone, Eq, PartialEq, Encodable, Decodable)]
+pub struct AwaitIncomingPaymentResponse {
+    pub preimage: [u8; 32],
+}
+
 // ── gateways ────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Encodable, Decodable)]
@@ -72,6 +100,8 @@ pub enum LightningMethod {
     AwaitPreimage(AwaitPreimageRequest),
     AwaitOutgoingContract(AwaitOutgoingContractRequest),
     AwaitIncomingContracts(AwaitIncomingContractsRequest),
+    IncomingPayment(IncomingPaymentRequest),
+    AwaitIncomingPayment(AwaitIncomingPaymentRequest),
     Gateways(GatewaysRequest),
 }
 
@@ -105,37 +135,19 @@ pub struct SendResponse {
 
 // ── receive ─────────────────────────────────────────────────────────────────
 
-/// What a recipient needs to say to be paid: the mint, its receive key
-/// and the amount. The gateway authors the contract, preimage included,
-/// from the key; the recipient sees the contract once it is funded, in
-/// the mint's stream, and recovers it from the same key.
+/// What a recipient asks a gateway to fund. The recipient authors the
+/// contract, so it knows the payment hash the invoice has to carry, and
+/// the mint reporting that hash funded means this contract and no other
+/// was.
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct ReceiveRequest {
     pub mint: MintId,
-    pub recipient: PublicKey,
-    pub amount: Amount,
+    pub contract: IncomingContract,
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct ReceiveResponse {
     pub invoice: Bolt11Invoice,
-}
-
-// ── verify ──────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Encodable, Decodable)]
-pub struct VerifyRequest {
-    pub hash: sha256::Hash,
-    pub wait: bool,
-}
-
-/// LUD-21 verify response — gateway-internal iroh wire shape. The LNURL
-/// daemon translates this to [`picomint_lnurl::VerifyResponse`] at the JSON
-/// boundary it serves to external LNURL wallets.
-#[derive(Debug, Clone, Encodable, Decodable, PartialEq, Eq)]
-pub struct VerifyResponse {
-    pub settled: bool,
-    pub preimage: Option<[u8; 32]>,
 }
 
 // ── gateway dispatch enum ───────────────────────────────────────────────────
@@ -146,5 +158,4 @@ pub enum GatewayMethod {
     Info(InfoRequest),
     Send(SendRequest),
     Receive(ReceiveRequest),
-    Verify(VerifyRequest),
 }
