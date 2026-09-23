@@ -74,7 +74,6 @@ pub struct OutgoingContractRow {
 pub struct IncomingContractRow {
     pub mint: MintId,
     pub contract: contracts::IncomingContract,
-    pub preimage: [u8; 32],
     pub invoice: LightningInvoice,
 }
 

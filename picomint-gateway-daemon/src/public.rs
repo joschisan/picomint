@@ -34,10 +34,5 @@ async fn dispatch(state: AppState, method: GatewayMethod) -> Result<Vec<u8>, Str
             .await
             .map(|invoice| ReceiveResponse { invoice }.consensus_encode_to_vec())
             .map_err(|e| e.to_string()),
-        GatewayMethod::Verify(req) => state
-            .verify(req.hash, req.wait)
-            .await
-            .map(|resp| resp.consensus_encode_to_vec())
-            .map_err(|e| e.to_string()),
     }
 }

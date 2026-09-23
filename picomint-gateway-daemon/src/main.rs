@@ -385,10 +385,12 @@ fn handle_payment_claimable(
         return;
     };
 
+    let preimage = row.contract.preimage();
+
     if row.contract.amount.0 != amount_msat
         || state
             .client
-            .gateway_start_receive(row.mint, dbtx, operation, row.contract, row.preimage)
+            .gateway_start_receive(row.mint, dbtx, operation, row.contract)
             .is_err()
     {
         state
@@ -400,15 +402,15 @@ fn handle_payment_claimable(
         return;
     }
 
-    // The preimage is the gateway's own, so the HTLC settles now rather
-    // than once the mint accepts the funding, and LDK's fail-back deadline
-    // constrains nothing. The funding leaves for the mint on the commit
+    // The preimage is the contract's own hash, so the HTLC settles now
+    // rather than once the mint accepts the funding, and LDK's fail-back
+    // deadline constrains nothing. The funding leaves for the mint on the commit
     // below; a crash before it replays this event, whose repeated claim
     // LDK refuses, which is why a refusal is not fatal.
     if let Err(error) = state.node.bolt11_payment().claim_for_hash(
         PaymentHash(payment_hash),
         amount_msat,
-        PaymentPreimage(row.preimage),
+        PaymentPreimage(preimage),
     ) {
         warn!(%error, "LDK refused the claim of an inbound HTLC");
     }

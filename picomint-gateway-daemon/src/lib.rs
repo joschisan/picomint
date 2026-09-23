@@ -6,10 +6,9 @@ pub mod trailer;
 
 use std::sync::Arc;
 
-use anyhow::{anyhow, ensure};
+use anyhow::{anyhow, bail, ensure};
 use bitcoin::Network;
 use bitcoin::hashes::{Hash, sha256};
-use futures::StreamExt as _;
 use iroh::Endpoint;
 use lightning::routing::router::RouteParametersConfig;
 use lightning::types::payment::PaymentHash;
@@ -17,15 +16,13 @@ use lightning_invoice::{
     Bolt11Invoice, Bolt11InvoiceDescription as LdkBolt11InvoiceDescription, Description,
 };
 use picomint_client::gateway::api;
-use picomint_client::gateway::events::ReceiveSuccessEvent;
 use picomint_client::{Client, Mnemonic};
 use picomint_core::Amount;
 use picomint_core::config::MintId;
 use picomint_core::core::OperationId;
-use picomint_core::lightning::contracts::IncomingContract;
+use picomint_core::lightning::LightningInvoice;
 use picomint_core::lightning::gateway::{GatewayInfo, PaymentFee};
-use picomint_core::lightning::methods::{ReceiveRequest, SendRequest, VerifyResponse};
-use picomint_core::lightning::{LightningInvoice, MINIMUM_INCOMING_CONTRACT_AMOUNT};
+use picomint_core::lightning::methods::{ReceiveRequest, SendRequest};
 use picomint_core::secp256k1::schnorr::Signature;
 use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::MintInfo;
@@ -230,7 +227,6 @@ impl AppState {
                 &dbtx,
                 operation,
                 incoming_row.contract,
-                incoming_row.preimage,
             ) {
                 warn!(%error, %operation, "Could not fund the direct swap's receive; cancelling the send");
 
@@ -253,29 +249,23 @@ impl AppState {
             .await
     }
 
-    /// Creates a Bolt11 invoice for an incoming payment: authors the
-    /// `IncomingContract` the payment will fund from the recipient's key,
-    /// and registers it with its preimage and the generated invoice in the
-    /// daemon-global `incoming-contract` table. The ephemeral key is fresh
-    /// per contract, so the payment hash never repeats.
+    /// Creates a Bolt11 invoice against the payment hash of the
+    /// `IncomingContract` the recipient authored, and registers the
+    /// contract with the invoice in the daemon-global `incoming-contract`
+    /// table. A repeated contract is rejected: the table insert and LDK's
+    /// `receive_for_hash` both refuse a payment hash they hold.
     pub async fn receive(&self, payload: ReceiveRequest) -> anyhow::Result<Bolt11Invoice> {
         ensure!(
             self.client.config(payload.mint).is_some(),
             "Mint is not added"
         );
 
-        let fee = self.receive_fee.fee(payload.amount.0);
-
         ensure!(
-            payload
-                .amount
-                .checked_sub(fee)
-                .is_some_and(|net| net >= MINIMUM_INCOMING_CONTRACT_AMOUNT),
-            "Amount is too small to be claimed"
+            payload.contract.fee == self.receive_fee.fee(payload.contract.amount.0),
+            "Contract fee does not match the gateway receive fee"
         );
 
-        let (contract, preimage) =
-            IncomingContract::author(&payload.recipient, payload.amount, fee);
+        let contract = payload.contract;
 
         let invoice = self
             .node
@@ -284,73 +274,29 @@ impl AppState {
                 contract.amount.0,
                 &LdkBolt11InvoiceDescription::Direct(Description::empty()),
                 self.invoice_expiry_secs,
-                PaymentHash(contract.payment_hash.to_byte_array()),
+                PaymentHash(contract.payment_hash().to_byte_array()),
             )
             .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))?;
 
         let dbtx = self.gateway_db.begin_write();
 
-        dbtx.insert_new(
-            &IncomingContractTable,
-            &OperationId::from_encodable(&contract.payment_hash),
-            &IncomingContractRow {
-                mint: payload.mint,
-                contract,
-                preimage,
-                invoice: LightningInvoice::Bolt11(invoice.clone()),
-            },
-        );
+        if dbtx
+            .insert(
+                &IncomingContractTable,
+                &OperationId::from_encodable(&contract.payment_hash()),
+                &IncomingContractRow {
+                    mint: payload.mint,
+                    contract,
+                    invoice: LightningInvoice::Bolt11(invoice.clone()),
+                },
+            )
+            .is_some()
+        {
+            bail!("A contract for this hash has already been registered")
+        }
 
         dbtx.commit();
 
         Ok(invoice)
-    }
-
-    pub async fn verify(
-        &self,
-        payment_hash: sha256::Hash,
-        wait: bool,
-    ) -> anyhow::Result<VerifyResponse> {
-        let operation = OperationId::from_encodable(&payment_hash);
-
-        self.gateway_db
-            .begin_read()
-            .get(&IncomingContractTable, &operation)
-            .ok_or_else(|| anyhow!("Unknown payment hash"))?;
-
-        if !wait {
-            if let Some(preimage) = self
-                .client
-                .read_operation_events(operation)
-                .into_iter()
-                .find_map(|entry| entry.to_event::<ReceiveSuccessEvent>().map(|e| e.preimage))
-            {
-                return Ok(VerifyResponse {
-                    settled: true,
-                    preimage: Some(preimage),
-                });
-            }
-
-            return Ok(VerifyResponse {
-                settled: false,
-                preimage: None,
-            });
-        }
-
-        let mut stream = self.client.subscribe_operation_events(operation);
-
-        loop {
-            let entry = stream
-                .next()
-                .await
-                .expect("subscribe_operation_events only ends at client shutdown");
-
-            if let Some(ev) = entry.to_event::<ReceiveSuccessEvent>() {
-                return Ok(VerifyResponse {
-                    settled: true,
-                    preimage: Some(ev.preimage),
-                });
-            }
-        }
     }
 }

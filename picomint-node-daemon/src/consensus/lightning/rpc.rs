@@ -1,9 +1,10 @@
 //! Freestanding API handlers for the lightning module.
 
 use picomint_core::lightning::methods::{
-    AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitOutgoingContractRequest,
-    AwaitOutgoingContractResponse, AwaitPreimageRequest, AwaitPreimageResponse, GatewaysRequest,
-    GatewaysResponse,
+    AwaitIncomingContractsRequest, AwaitIncomingContractsResponse, AwaitIncomingPaymentRequest,
+    AwaitIncomingPaymentResponse, AwaitOutgoingContractRequest, AwaitOutgoingContractResponse,
+    AwaitPreimageRequest, AwaitPreimageResponse, GatewaysRequest, GatewaysResponse,
+    IncomingPaymentRequest, IncomingPaymentResponse,
 };
 
 use picomint_redb::DbRead;
@@ -12,7 +13,7 @@ use crate::consensus::server::Server;
 
 use super::db::{
     GatewayTable, IncomingContractStreamNextIndexTable, IncomingContractStreamTable,
-    OutgoingContractTable, PreimageTable,
+    IncomingPaymentTable, OutgoingContractTable, PreimageTable,
 };
 
 /// Waits for the preimage rather than reporting its absence: an outgoing
@@ -82,6 +83,37 @@ pub async fn await_incoming_contracts(
         contracts,
         next_index,
     })
+}
+
+/// The preimage of the funded incoming contract with the payment hash,
+/// or none yet: what the mint holds now, for an LNURL wallet that polls.
+pub fn incoming_payment(
+    server: &Server,
+    req: IncomingPaymentRequest,
+) -> Result<IncomingPaymentResponse, String> {
+    Ok(IncomingPaymentResponse {
+        preimage: server
+            .db
+            .begin_read()
+            .get(&IncomingPaymentTable, &req.payment_hash),
+    })
+}
+
+/// Waits for the funded incoming contract with the payment hash rather
+/// than reporting its absence, for an LNURL wallet that long-polls the
+/// mint for the recipient being paid.
+pub async fn await_incoming_payment(
+    server: &Server,
+    req: AwaitIncomingPaymentRequest,
+) -> Result<AwaitIncomingPaymentResponse, String> {
+    let (preimage, _dbtx) = server
+        .db
+        .wait_table_check(&IncomingPaymentTable, |dbtx| {
+            dbtx.get(&IncomingPaymentTable, &req.payment_hash)
+        })
+        .await;
+
+    Ok(AwaitIncomingPaymentResponse { preimage })
 }
 
 pub fn gateways(server: &Server, _: GatewaysRequest) -> Result<GatewaysResponse, String> {

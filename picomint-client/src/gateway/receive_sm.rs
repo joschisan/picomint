@@ -18,10 +18,9 @@ table!(
 /// Single-state state machine covering the mint side of the receive
 /// flow. `trigger` waits for the funding transaction's acceptance;
 /// `transition` logs the terminal receive event. The preimage is the
-/// gateway's own, made with the invoice, so acceptance alone is what
-/// releases it to a direct swap's sender, by the trailer task watching
-/// the event log; an inbound HTLC was settled with it when the funding
-/// was submitted.
+/// contract's own hash, so acceptance alone is what releases it to a
+/// direct swap's sender, by the trailer task watching the event log; an
+/// inbound HTLC was settled with it when the funding was submitted.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Decodable, Encodable)]
 pub struct ReceiveStateMachine {
     pub operation: OperationId,

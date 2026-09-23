@@ -1,5 +1,5 @@
 use crate::Amount;
-use bitcoin::hashes::sha256;
+use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1;
 use picomint_encoding::{Decodable, Encodable};
 use secp256k1::schnorr::Signature;
@@ -12,16 +12,19 @@ use crate::lightning::secret::IncomingContractSecret;
 /// What pays a recipient: the mint holds it until
 /// [`crate::lightning::LightningInput::Incoming`] spends it.
 ///
-/// Authored by whoever funds it — a gateway for an invoice, a sender for
-/// a direct send — from the recipient's receive key through
-/// [`Self::author`], which derives every field from one ECDH secret. The
-/// recipient sees the contract once funded, in the mint's stream, and
-/// recovers it from the ephemeral key. The funder holds the preimage, so
-/// nothing about the contract can keep it from settling the payment, and
-/// the contract has no refund branch.
+/// Authored on the recipient's side — by its client or its lnurl daemon
+/// for an invoice, by the sender for a direct send — from the
+/// recipient's receive key through [`Self::author`], with a fresh
+/// ephemeral key. The recipient recovers its claim key from the
+/// ephemeral key when the funded contract shows up in the mint's stream.
+///
+/// The contract is its own preimage: [`Self::preimage`] is its hash and
+/// [`Self::payment_hash`] the hash of that, so no hash rides in it and
+/// whoever holds the contract can settle the payment. An invoice's
+/// payment hash therefore names one contract, and the mint reporting it
+/// funded means exactly that contract was. There is no refund branch.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct IncomingContract {
-    pub payment_hash: sha256::Hash,
     /// Invoice amount: what the LN payer paid the gateway.
     pub amount: Amount,
     /// Gateway's combined cut (LN routing + tx fee). The mint will
@@ -32,18 +35,15 @@ pub struct IncomingContract {
 }
 
 impl IncomingContract {
-    /// Author a contract for `recipient_pk` from a fresh ephemeral key:
-    /// the contract, and the preimage behind its payment hash. The
-    /// recipient recovers the claim key from the ephemeral key through
+    /// Author a contract for `recipient_pk` from a fresh ephemeral key.
+    /// The recipient recovers the claim key from the ephemeral key through
     /// [`Self::recover`].
-    pub fn author(recipient_pk: &PublicKey, amount: Amount, fee: Amount) -> (Self, [u8; 32]) {
+    pub fn author(recipient_pk: &PublicKey, amount: Amount, fee: Amount) -> Self {
         let ephemeral_kp = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
         let shared_secret = ecdh::SharedSecret::new(recipient_pk, &ephemeral_kp.secret_key());
 
         let contract_secret = IncomingContractSecret::new(shared_secret.secret_bytes());
-
-        let preimage = contract_secret.preimage();
 
         let claim_pk = recipient_pk
             .mul_tweak(secp256k1::SECP256K1, &contract_secret.claim_tweak())
@@ -51,19 +51,22 @@ impl IncomingContract {
             .x_only_public_key()
             .0;
 
-        let contract = Self {
-            payment_hash: preimage.consensus_hash(),
+        Self {
             amount,
             fee,
             claim_pk,
             ephemeral_pk: ephemeral_kp.public_key(),
-        };
-
-        (contract, preimage)
+        }
     }
 
-    pub fn verify_preimage(&self, preimage: &[u8; 32]) -> bool {
-        verify_preimage(&self.payment_hash, preimage)
+    /// The preimage that settles the payment: the contract's own hash.
+    pub fn preimage(&self) -> [u8; 32] {
+        self.consensus_hash::<sha256::Hash>().to_byte_array()
+    }
+
+    /// The payment hash the invoice carries: the hash of the preimage.
+    pub fn payment_hash(&self) -> sha256::Hash {
+        self.preimage().consensus_hash()
     }
 
     /// Value the recipient is credited on a successful claim.
@@ -72,22 +75,12 @@ impl IncomingContract {
     }
 
     /// The keypair that claims this contract if it is `sk`'s, `None` when
-    /// it is not.
-    ///
-    /// Two stages. [`Self::payment_hash`] rejects a foreign entry for one
-    /// ECDH and two hashes; a hit then derives the claim key the recipient
-    /// locked the contract to and checks it against [`Self::claim_pk`].
-    /// That split separates two signals: a payment-hash miss is someone
-    /// else's contract, while a hit whose claim key does not match means
-    /// the contract was not authored from this secret.
+    /// it is not: the claim key the ECDH secret derives either is
+    /// [`Self::claim_pk`] or the contract is someone else's.
     pub fn recover(&self, sk: &SecretKey) -> Option<Keypair> {
         let shared_secret = ecdh::SharedSecret::new(&self.ephemeral_pk, sk).secret_bytes();
 
         let contract_secret = IncomingContractSecret::new(shared_secret);
-
-        if !self.verify_preimage(&contract_secret.preimage()) {
-            return None;
-        }
 
         let claim_keypair = sk
             .mul_tweak(&contract_secret.claim_tweak())

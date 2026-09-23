@@ -107,7 +107,7 @@ The methods come in two families. `lightning_invoice_*` take or produce a BOLT11
 
 ### `lightning_invoice_receive(mint, account, gateway_pk, amount)` — receive over Lightning
 
-Returns a BOLT11 invoice and emits no events. The gateway authors the incoming contract it will fund from the account's receive key, preimage included; the recipient sees nothing of it until a background scanner, polling the mint's incoming-contract stream, finds a contract locked to its key and submits the claim tx:
+Returns a BOLT11 invoice and emits no events. The client authors the incoming contract for the account's receive key and has the gateway issue an invoice against its payment hash, which is the hash of the contract's own hash: the contract is its preimage, so an invoice names one contract and the gateway can only fund that one. The recipient then forgets the contract until a background scanner, polling the mint's incoming-contract stream, finds a contract locked to its key and submits the claim tx:
 
 ```
 ReceiveEvent ── TxCreateEvent                  ← scanner saw paid contract, submitted claim tx

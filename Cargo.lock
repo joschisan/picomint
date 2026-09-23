@@ -3501,7 +3501,6 @@ dependencies = [
  "axum",
  "bitcoin",
  "clap",
- "futures",
  "hex",
  "iroh",
  "iroh-base",

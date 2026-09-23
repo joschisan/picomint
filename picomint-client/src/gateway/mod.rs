@@ -111,10 +111,10 @@ impl Client {
         dbtx: &WriteTx,
         operation: OperationId,
         contract: IncomingContract,
-        preimage: [u8; 32],
     ) -> anyhow::Result<()> {
         let ctx = self.ctx(mint)?;
 
+        let preimage = contract.preimage();
         let amount = contract.amount;
         let fee = contract.fee;
 

@@ -73,7 +73,7 @@ impl Event for ReceiveEvent {
 }
 
 /// The mint accepted the funding; a direct swap's sender is handed the
-/// preimage the gateway made with the invoice.
+/// contract's preimage.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveSuccessEvent {
     /// The preimage the gateway settled with, hex

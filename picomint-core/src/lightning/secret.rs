@@ -1,9 +1,8 @@
 //! Incoming-contract secret derivation.
 //!
-//! Both the contract creator (client receive path, lnurl-daemon) and the
-//! claimant (client recovery path) start from the same 32-byte ECDH output
-//! and descend this tree to recover the identical preimage and claim
-//! tweak. The path enum is private; callers use the typed accessors on
+//! Both the contract's author and the claimant start from the same
+//! 32-byte ECDH output and descend this tree to the identical claim
+//! tweak. The path enum is private; callers use the typed accessor on
 //! [`IncomingContractSecret`].
 
 use crate::secp256k1::Scalar;
@@ -12,7 +11,6 @@ use picomint_encoding::Encodable;
 
 #[derive(Encodable)]
 enum Path {
-    Preimage,
     ClaimKey,
 }
 
@@ -23,10 +21,6 @@ pub struct IncomingContractSecret(Secret);
 impl IncomingContractSecret {
     pub fn new(shared_secret: [u8; 32]) -> Self {
         Self(Secret::new_root(&shared_secret))
-    }
-
-    pub fn preimage(&self) -> [u8; 32] {
-        self.0.child(&Path::Preimage).to_byte_array()
     }
 
     pub fn claim_tweak(&self) -> Scalar {
