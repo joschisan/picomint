@@ -158,6 +158,11 @@ impl AppState {
             )
             .is_some()
         {
+            // The terminal event awaited below is written by the LDK
+            // event loop through this same database, so the write
+            // transaction has to be gone before the wait starts.
+            drop(dbtx);
+
             return self
                 .client
                 .gateway_subscribe_send(payload.mint, operation)
