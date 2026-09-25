@@ -3,8 +3,8 @@
 //! The `ReceiveStateMachine` in `picomint-client::gateway` is purely mint-
 //! local — it submits the incoming-contract tx and writes the terminal
 //! `ReceiveSuccess` / `ReceiveFailure` event. The trailer watches the
-//! global event log and, for a direct swap (daemon DB has an
-//! `OutgoingContract[operation]` row), calls `gateway_finalize_send` on
+//! global event log and, for a direct swap (the payment hash index names
+//! an outgoing contract), calls `gateway_finalize_send` on
 //! the sending mint's client so the sender gets the preimage (or refund
 //! signature). An inbound HTLC needs nothing here: it was settled when
 //! its funding was submitted, since the gateway holds the preimage.
@@ -19,7 +19,7 @@ use picomint_redb::{DbRead, WriteTx};
 use tracing::error;
 
 use crate::AppState;
-use crate::db::{EventLogCursorTable, OutgoingContractTable};
+use crate::db::{EventLogCursorTable, IncomingContractTable, outgoing_contract};
 
 const CHUNK_SIZE: u64 = 1_000;
 
@@ -64,14 +64,16 @@ fn dispatch(state: &AppState, tx_ref: &WriteTx, entry: &EventLogEntry) {
         return;
     };
 
-    let operation = entry.operation;
+    let Some(incoming) = tx_ref.get(&IncomingContractTable, &entry.operation) else {
+        return;
+    };
 
-    let Some(row) = tx_ref.get(&OutgoingContractTable, &operation) else {
+    let Some((operation, row)) = outgoing_contract(tx_ref, incoming.contract.payment_hash()) else {
         // An inbound HTLC was settled when its funding was submitted, so
         // a rejected funding leaves the recipient owed what the gateway
         // was paid; nothing here can make that good.
         if preimage.is_none() {
-            error!(%operation, "An inbound payment's funding was rejected after its HTLC settled");
+            error!(operation = %entry.operation, "An inbound payment's funding was rejected after its HTLC settled");
         }
 
         return;
