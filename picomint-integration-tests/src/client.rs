@@ -332,7 +332,7 @@ impl TestClient {
             .map(|response| response.0)
     }
 
-    fn rows<E: Event>(&self, filter: &str) -> anyhow::Result<Vec<Map<String, Value>>> {
+    pub fn rows<E: Event>(&self, filter: &str) -> anyhow::Result<Vec<Map<String, Value>>> {
         self.query(&format!(
             "SELECT * FROM {} WHERE {filter}",
             table_name::<E>()
