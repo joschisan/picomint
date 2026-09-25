@@ -97,9 +97,9 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     };
 
     // One table per event, named after its kind
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_send")?, 4);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_success")?, 1);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_cancel")?, 3);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send")?, 6);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_success")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_cancel")?, 4);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_receive")?, 2);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_success")?, 2);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_failure")?, 0);
@@ -110,14 +110,14 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
             "SELECT COUNT(*) FROM gateway_send s \
              INNER JOIN gateway_send_success ss USING (operation)"
         )?,
-        1
+        2
     );
     assert_eq!(
         count(
             "SELECT COUNT(*) FROM gateway_send s \
              INNER JOIN gateway_send_cancel sc USING (operation)"
         )?,
-        3
+        4
     );
     assert_eq!(
         count(
@@ -134,7 +134,7 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
         [],
         |r| r.get(0),
     )?;
-    assert_eq!(sum as u64, 1_000_000);
+    assert_eq!(sum as u64, 2_000_000);
 
     info!("lightning: test_analytics_query passed");
 
