@@ -223,7 +223,7 @@ async fn gateway_send_sm(
         .await
     {
         Ok(result) => {
-            if contract.verify_gateway_response(&result) {
+            if contract.verify_gateway_response(outpoint, &result) {
                 return result;
             }
 

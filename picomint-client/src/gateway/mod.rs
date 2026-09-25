@@ -14,7 +14,7 @@ use crate::tx::{Input, Output, TxBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
-use picomint_core::lightning::contracts::{IncomingContract, OutgoingContract};
+use picomint_core::lightning::contracts::{IncomingContract, OutgoingContract, forfeit_message};
 use picomint_core::lightning::{LightningInput, LightningOutput, OutgoingWitness};
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::wire;
@@ -199,7 +199,7 @@ impl Client {
                     .secret
                     .gateway_secret()
                     .contract_keypair()
-                    .sign_schnorr(contract.forfeit_message());
+                    .sign_schnorr(forfeit_message(outpoint));
                 ctx.log_event(
                     dbtx,
                     ROUTING_ACCOUNT,

@@ -13,6 +13,7 @@ use picomint_client::lightning::events::{ReceiveEvent, SendRefundEvent, SendSucc
 use picomint_client::tx::{Input, TxBuilder};
 use picomint_client::{Account, Client, Mnemonic, OperationId, TxAcceptEvent};
 use picomint_core::config::MintId;
+use picomint_core::lightning::contracts::forfeit_message;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::methods::{GatewayMethod, InfoResponse, SendRequest, SendResponse};
 use picomint_core::lightning::{LightningInput, OutgoingWitness};
@@ -695,7 +696,7 @@ async fn mock_handler(
                 return Err("mock gateway crashed after claiming".to_string());
             }
             let result = if payment_secret == UNPAYABLE_PAYMENT_SECRET {
-                Err(gateway_keypair().sign_schnorr(req.contract.forfeit_message()))
+                Err(gateway_keypair().sign_schnorr(forfeit_message(req.outpoint)))
             } else {
                 Ok(PAYABLE_PREIMAGE)
             };
