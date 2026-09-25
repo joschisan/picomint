@@ -54,7 +54,7 @@ pub fn process_input(
                     contract.claim_pk
                 }
                 OutgoingWitness::Cancel(forfeit_signature) => {
-                    if !contract.verify_forfeit_signature(forfeit_signature) {
+                    if !contract.verify_forfeit_signature(*outpoint, forfeit_signature) {
                         return Err(LightningInputError::InvalidForfeitSignature);
                     }
 
