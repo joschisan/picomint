@@ -13,6 +13,7 @@ use picomint_client::lightning::events::{ReceiveEvent, SendRefundEvent, SendSucc
 use picomint_client::tx::{Input, TxBuilder};
 use picomint_client::{Account, Client, Mnemonic, OperationId, TxAcceptEvent};
 use picomint_core::config::MintId;
+use picomint_core::lightning::contracts::forfeit_message;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::methods::{GatewayMethod, InfoResponse, SendRequest, SendResponse};
 use picomint_core::lightning::{LightningInput, OutgoingWitness};
@@ -30,6 +31,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     register_gateway(env, &env.gateway_pk)?;
     client_send.lightning_gateway_refresh()?;
     test_payments(env, client_send).await?;
+    test_two_clients_pay_one_invoice(env, client_send).await?;
     test_lnurl_daemon_roundtrip(env).await?;
     test_send_lnurl_direct(env, client_send).await?;
     deregister_gateway(env, &env.gateway_pk)?;
@@ -322,6 +324,76 @@ async fn test_payments(env: &TestEnv, client: &TestClient) -> anyhow::Result<()>
     info!("lightning: test_payments passed");
 
     Ok(())
+}
+
+/// Two clients fund a contract for the same invoice. The gateway pays the
+/// invoice for whichever request reaches it first and refunds the other
+/// on arrival, so exactly one of the two sends succeeds.
+async fn test_two_clients_pay_one_invoice(
+    env: &TestEnv,
+    client_a: &TestClient,
+) -> anyhow::Result<()> {
+    info!("lightning: test_two_clients_pay_one_invoice");
+
+    let client_b = env.new_client().await?;
+
+    let ecash = client_a.ecash_send(bitcoin::Amount::from_sat(5_000))?;
+
+    client_b
+        .await_tx_outcome(client_b.ecash_receive(&ecash)?)
+        .await?
+        .map_err(|error| anyhow::anyhow!("funding client b was rejected: {error}"))?;
+
+    client_b.lightning_gateway_refresh()?;
+
+    let invoice = env.ldk_node.bolt11_payment().receive(
+        1_000_000,
+        &lightning_invoice::Bolt11InvoiceDescription::Direct(lightning_invoice::Description::new(
+            String::new(),
+        )?),
+        3600,
+    )?;
+
+    let gateway_pk = client_a.lightning_gateway()?;
+
+    let op_a = client_a.lightning_invoice_send(gateway_pk, invoice.clone())?;
+    let op_b = client_b.lightning_invoice_send(gateway_pk, invoice)?;
+
+    let (paid_a, paid_b) = tokio::try_join!(
+        await_send_outcome(client_a, op_a),
+        await_send_outcome(&client_b, op_b),
+    )?;
+
+    ensure!(
+        paid_a != paid_b,
+        "exactly one of the two sends must succeed: a paid {paid_a}, b paid {paid_b}"
+    );
+
+    client_b.shutdown().await;
+
+    info!("lightning: test_two_clients_pay_one_invoice passed");
+
+    Ok(())
+}
+
+/// Whether the send under `operation` succeeded, once it has either
+/// succeeded or been refunded.
+async fn await_send_outcome(client: &TestClient, operation: OperationId) -> anyhow::Result<bool> {
+    let filter = format!("operation = '{operation}'");
+
+    retry(&format!("send outcome of {operation}"), || async {
+        if !client.rows::<SendSuccessEvent>(&filter)?.is_empty() {
+            return Ok(true);
+        }
+
+        ensure!(
+            !client.rows::<SendRefundEvent>(&filter)?.is_empty(),
+            "no outcome yet"
+        );
+
+        Ok(false)
+    })
+    .await
 }
 
 async fn test_mock_send_exactly_once(client: &TestClient) -> anyhow::Result<()> {
@@ -695,7 +767,7 @@ async fn mock_handler(
                 return Err("mock gateway crashed after claiming".to_string());
             }
             let result = if payment_secret == UNPAYABLE_PAYMENT_SECRET {
-                Err(gateway_keypair().sign_schnorr(req.contract.forfeit_message()))
+                Err(gateway_keypair().sign_schnorr(forfeit_message(req.outpoint)))
             } else {
                 Ok(PAYABLE_PREIMAGE)
             };

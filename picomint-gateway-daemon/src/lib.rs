@@ -30,6 +30,7 @@ use picomint_redb::{Database, DbRead};
 
 use crate::db::{
     IncomingContractRow, IncomingContractTable, OutgoingContractRow, OutgoingContractTable,
+    PaymentHashTable,
 };
 use tracing::warn;
 
@@ -81,10 +82,14 @@ impl AppState {
     }
 
     /// Orchestrates an outgoing payment. Verifies the request, registers the
-    /// contract in the daemon-global outgoing_contract table, logs
-    /// `SendEvent` on the source mint, and kicks off either a direct-swap receive on the
-    /// target mint or an LN send via LDK. Returns once a terminal event
-    /// (`SendSuccessEvent` / `SendCancelEvent`) is observed in the source mint's event log.
+    /// contract under its outpoint in the daemon-global outgoing_contract
+    /// table, logs `SendEvent` on the source mint, and kicks off either a
+    /// direct-swap receive on the target mint or an LN send via LDK. An
+    /// invoice gets one attempt: a further contract for a payment hash
+    /// the gateway has taken on is refunded with its forfeit signature
+    /// at once, which is safe because that signature releases only the
+    /// funding it names. Returns once a terminal event (`SendSuccessEvent`
+    /// / `SendCancelEvent`) is observed in the source mint's event log.
     pub async fn send(
         &self,
         payload: SendRequest,
@@ -141,7 +146,7 @@ impl AppState {
 
         // --- Insert outgoing_contract row + log SendEvent on the source mint (one tx) ---
 
-        let operation = OperationId::from_encodable(payload.invoice.bolt11().payment_hash());
+        let operation = OperationId::from_encodable(&payload.outpoint);
 
         let dbtx = self.gateway_db.begin_write();
 
@@ -203,6 +208,35 @@ impl AppState {
                 .await;
         }
 
+        if dbtx
+            .get(&PaymentHashTable, &payload.contract.payment_hash)
+            .is_some()
+        {
+            warn!(%operation, "The invoice already has a payment attempt; cancelling the send");
+
+            self.client.gateway_finalize_send(
+                payload.mint,
+                &dbtx,
+                operation,
+                payload.contract,
+                payload.outpoint,
+                None,
+            )?;
+
+            dbtx.commit();
+
+            return self
+                .client
+                .gateway_subscribe_send(payload.mint, operation)
+                .await;
+        }
+
+        dbtx.insert(
+            &PaymentHashTable,
+            &payload.contract.payment_hash,
+            &operation,
+        );
+
         // --- Direct-swap vs external LN -------------------------------------
         if self.node.node_id() != payload.invoice.bolt11().get_payee_pub_key() {
             // The whole fee is the routing budget: whatever routing does not
@@ -236,8 +270,10 @@ impl AppState {
                 )?;
             }
         } else {
+            let incoming_operation = OperationId::from_encodable(&payload.contract.payment_hash);
+
             let incoming_row = dbtx
-                .get(&IncomingContractTable, &operation)
+                .get(&IncomingContractTable, &incoming_operation)
                 .expect("Direct-swap target not registered for this payment hash");
 
             ensure!(
@@ -248,7 +284,7 @@ impl AppState {
             if let Err(error) = self.client.gateway_start_receive(
                 incoming_row.mint,
                 &dbtx,
-                operation,
+                incoming_operation,
                 incoming_row.contract,
             ) {
                 warn!(%error, %operation, "Could not fund the direct swap's receive; cancelling the send");
@@ -302,6 +338,12 @@ impl AppState {
             .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))?;
 
         let dbtx = self.gateway_db.begin_write();
+
+        ensure!(
+            dbtx.get(&PaymentHashTable, &contract.payment_hash())
+                .is_none(),
+            "The payment hash already has a payment attempt"
+        );
 
         if dbtx
             .insert(

@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, ensure};
 use bitcoin::Network;
+use bitcoin::hashes::{Hash, sha256};
 use clap::{ArgGroup, Parser};
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
@@ -23,7 +24,7 @@ use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::lightning::gateway::PaymentFee;
 use picomint_gateway_daemon::db::{
-    IncomingContractTable, LdkEventPaymentHashTable, OutgoingContractTable,
+    IncomingContractTable, LdkEventPaymentHashTable, outgoing_contract,
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
 use picomint_redb::{DbRead, WriteTx};
@@ -426,8 +427,6 @@ fn handle_payment_successful(
     preimage: [u8; 32],
     lightning_fee: Amount,
 ) {
-    let operation = OperationId::from_encodable(&payment_hash);
-
     if dbtx
         .insert(&LdkEventPaymentHashTable, &payment_hash, &())
         .is_some()
@@ -435,7 +434,9 @@ fn handle_payment_successful(
         return;
     }
 
-    if let Some(row) = dbtx.get(&OutgoingContractTable, &operation) {
+    if let Some((operation, row)) =
+        outgoing_contract(dbtx, sha256::Hash::from_byte_array(payment_hash))
+    {
         state
             .client
             .gateway_finalize_send(
@@ -453,8 +454,6 @@ fn handle_payment_successful(
 /// Outbound LN payment failed. Look up the outgoing contract row and tell
 /// the source mint's client to forfeit the contract.
 fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32]) {
-    let operation = OperationId::from_encodable(&payment_hash);
-
     if dbtx
         .insert(&LdkEventPaymentHashTable, &payment_hash, &())
         .is_some()
@@ -462,7 +461,9 @@ fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32
         return;
     }
 
-    if let Some(row) = dbtx.get(&OutgoingContractTable, &operation) {
+    if let Some((operation, row)) =
+        outgoing_contract(dbtx, sha256::Hash::from_byte_array(payment_hash))
+    {
         state
             .client
             .gateway_finalize_send(row.mint, dbtx, operation, row.contract, row.outpoint, None)
