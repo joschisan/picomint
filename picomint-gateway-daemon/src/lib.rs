@@ -139,13 +139,6 @@ impl AppState {
             "Contract amount does not match invoice amount"
         );
 
-        let fee = self.send_fee.fee(amount);
-
-        ensure!(
-            payload.contract.fee == fee,
-            "Contract fee does not match the advertised send fee"
-        );
-
         // --- Insert outgoing_contract row + log SendEvent on the source mint (one tx) ---
 
         let operation = OperationId::from_encodable(payload.invoice.bolt11().payment_hash());
@@ -171,6 +164,8 @@ impl AppState {
                 .await;
         }
 
+        let fee = self.send_fee.fee(amount);
+
         self.client.gateway_log_send_started(
             payload.mint,
             &dbtx,
@@ -179,6 +174,29 @@ impl AppState {
             Amount(amount),
             fee,
         )?;
+
+        // The client priced the contract from a probe, so a fee changed since
+        // is answered with the forfeit signature, not an error: an error
+        // would leave the contract funded with no way out.
+        if payload.contract.fee != fee {
+            warn!(%operation, "Contract fee does not match the send fee; cancelling the payment");
+
+            self.client.gateway_finalize_send(
+                payload.mint,
+                &dbtx,
+                operation,
+                payload.contract,
+                payload.outpoint,
+                None,
+            )?;
+
+            dbtx.commit();
+
+            return self
+                .client
+                .gateway_subscribe_send(payload.mint, operation)
+                .await;
+        }
 
         // --- Direct-swap vs external LN -------------------------------------
         if self.node.node_id() != payload.invoice.bolt11().get_payee_pub_key() {
