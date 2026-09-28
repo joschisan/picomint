@@ -93,7 +93,7 @@ fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<(
 ///  - `test_two_clients_pay_one_invoice` → 2 sends, 1 send_success, 1 send_cancel
 ///  - `test_invoice_paid_twice` swap first     → 1 send, 1 send_success, 1 receive
 ///  - `test_invoice_paid_twice` Lightning first → 1 receive, 1 send, 1 send_cancel
-///  - `test_send_of_registered_hash`            → 1 send, 1 send_cancel
+///  - `test_send_of_registered_hash`            → 1 receive, 1 send, 1 send_cancel
 ///  - `test_lnurl_daemon_roundtrip` → 1 receive
 ///
 /// The mock-gateway tests and `test_direct_lightning_payments` don't drive the real
@@ -116,7 +116,7 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     assert_eq!(count("SELECT COUNT(*) FROM gateway_send")?, 9);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_send_success")?, 3);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_send_cancel")?, 6);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive")?, 4);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive")?, 5);
 
     // No views: an operation's outcome is a join on `operation`
     assert_eq!(
@@ -138,7 +138,7 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
             "SELECT COUNT(*) FROM gateway_receive r \
              INNER JOIN tx_accept a USING (operation, txid)"
         )?,
-        4
+        5
     );
 
     // Amounts land as integer msat columns
@@ -416,7 +416,10 @@ async fn test_invoice_paid_twice(env: &TestEnv, client: &TestClient) -> anyhow::
 
         env.ldk_node.bolt11_payment().send(&invoice, None)?;
 
-        await_ldk_payment_failed(env, &invoice).await?;
+        ensure!(
+            !await_ldk_payment(env, &invoice).await?,
+            "the second payment of the invoice was expected to fail"
+        );
 
         ensure!(
             client.rows::<ReceiveEvent>(&filter)?.len() == 1,
@@ -448,8 +451,9 @@ async fn test_invoice_paid_twice(env: &TestEnv, client: &TestClient) -> anyhow::
 /// The gateway uses a payment hash for one thing. The test authors an
 /// incoming contract, so it knows the preimage, and registers it with the
 /// gateway; the LDK node overpays its invoice, which the gateway fails
-/// back; the LDK node then issues an invoice of its own for the same hash,
-/// and a send of that through the gateway is refunded rather than paid.
+/// back, and then pays it exactly, which a failed attempt leaves open; the
+/// LDK node then issues an invoice of its own for the same hash, and a
+/// send of that through the gateway is refunded rather than paid.
 async fn test_send_of_registered_hash(env: &TestEnv, client: &TestClient) -> anyhow::Result<()> {
     info!("lightning: test_send_of_registered_hash");
 
@@ -496,7 +500,19 @@ async fn test_send_of_registered_hash(env: &TestEnv, client: &TestClient) -> any
         .bolt11_payment()
         .send_using_amount(&invoice, amount.0 + 1, None)?;
 
-    await_ldk_payment_failed(env, &invoice).await?;
+    ensure!(
+        !await_ldk_payment(env, &invoice).await?,
+        "the overpayment was expected to fail"
+    );
+
+    env.ldk_node
+        .bolt11_payment()
+        .send_using_amount(&invoice, amount.0, None)?;
+
+    ensure!(
+        await_ldk_payment(env, &invoice).await?,
+        "the exact payment after a failed one was expected to succeed"
+    );
 
     let payable = env.ldk_node.bolt11_payment().receive_for_hash(
         amount.0,
@@ -518,9 +534,9 @@ async fn test_send_of_registered_hash(env: &TestEnv, client: &TestClient) -> any
     Ok(())
 }
 
-/// Wait for the freestanding LDK node's payment of `invoice` to fail; its
-/// success is an error.
-async fn await_ldk_payment_failed(env: &TestEnv, invoice: &Bolt11Invoice) -> anyhow::Result<()> {
+/// Wait for the freestanding LDK node's payment of `invoice` to settle,
+/// and whether it succeeded.
+async fn await_ldk_payment(env: &TestEnv, invoice: &Bolt11Invoice) -> anyhow::Result<bool> {
     let payment_hash = lightning_types::payment::PaymentHash(*invoice.payment_hash().as_ref());
 
     loop {
@@ -528,19 +544,17 @@ async fn await_ldk_payment_failed(env: &TestEnv, invoice: &Bolt11Invoice) -> any
 
         env.ldk_node.event_handled()?;
 
-        let (hash, failed) = match event {
+        let (hash, succeeded) = match event {
             ldk_node::Event::PaymentFailed {
                 payment_hash: Some(hash),
                 ..
-            } => (hash, true),
-            ldk_node::Event::PaymentSuccessful { payment_hash, .. } => (payment_hash, false),
+            } => (hash, false),
+            ldk_node::Event::PaymentSuccessful { payment_hash, .. } => (payment_hash, true),
             _ => continue,
         };
 
         if hash == payment_hash {
-            ensure!(failed, "the payment was expected to fail");
-
-            return Ok(());
+            return Ok(succeeded);
         }
     }
 }
