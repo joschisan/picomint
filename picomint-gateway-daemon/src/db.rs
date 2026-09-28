@@ -1,10 +1,10 @@
 use bitcoin::hashes::sha256;
+use lightning_invoice::Bolt11Invoice;
 use picomint_client::eventlog::EventLogId;
 use picomint_client::{Mnemonic, random_mnemonic};
 use picomint_core::OutPoint;
 use picomint_core::config::MintId;
 use picomint_core::core::OperationId;
-use picomint_core::lightning::LightningInvoice;
 use picomint_core::lightning::contracts;
 use picomint_encoding::{Decodable, Encodable};
 use picomint_redb::{Database, DbRead, WriteTx, table};
@@ -82,14 +82,14 @@ pub struct OutgoingContractRow {
     pub mint: MintId,
     pub contract: contracts::OutgoingContract,
     pub outpoint: OutPoint,
-    pub invoice: LightningInvoice,
+    pub invoice: Bolt11Invoice,
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct IncomingContractRow {
     pub mint: MintId,
     pub contract: contracts::IncomingContract,
-    pub invoice: LightningInvoice,
+    pub invoice: Bolt11Invoice,
 }
 
 /// The outgoing contract whose settlement pays the invoice with

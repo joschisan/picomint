@@ -758,7 +758,7 @@ async fn mock_handler(
             .consensus_encode_to_vec())
         }
         GatewayMethod::Send(req) => {
-            let payment_secret = req.invoice.bolt11().payment_secret().0;
+            let payment_secret = req.invoice.payment_secret().0;
             if payment_secret == CLAIM_PAYMENT_SECRET {
                 claim_outgoing_contract(&client, &db, mint, req)
                     .await

@@ -20,7 +20,6 @@ use picomint_client::{Client, Mnemonic};
 use picomint_core::Amount;
 use picomint_core::config::MintId;
 use picomint_core::core::OperationId;
-use picomint_core::lightning::LightningInvoice;
 use picomint_core::lightning::gateway::{GatewayInfo, PaymentFee};
 use picomint_core::lightning::methods::{ReceiveRequest, SendRequest};
 use picomint_core::secp256k1::schnorr::Signature;
@@ -185,12 +184,11 @@ impl AppState {
 
         let amount = payload
             .invoice
-            .bolt11()
             .amount_milli_satoshis()
             .ok_or(anyhow!("Invoice is missing amount"))?;
 
         ensure!(
-            *payload.invoice.bolt11().payment_hash() == payload.contract.payment_hash,
+            *payload.invoice.payment_hash() == payload.contract.payment_hash,
             "The invoice's payment hash does not match the contract's payment hash"
         );
 
@@ -226,7 +224,7 @@ impl AppState {
             &operation,
         );
 
-        if self.node.node_id() != payload.invoice.bolt11().get_payee_pub_key() {
+        if self.node.node_id() != payload.invoice.get_payee_pub_key() {
             // The whole fee is the routing budget: whatever routing does not
             // take is the gateway's margin, and an internal settlement keeps
             // all of it.
@@ -234,10 +232,7 @@ impl AppState {
                 .with_max_total_routing_fee_msat(fee.0)
                 .with_max_total_cltv_expiry_delta(self.cltv_expiry_delta);
 
-            let result = self
-                .node
-                .bolt11_payment()
-                .send(payload.invoice.bolt11(), Some(rpc));
+            let result = self.node.bolt11_payment().send(&payload.invoice, Some(rpc));
 
             // A duplicate payment means a previous run of this request already
             // kicked off the payment (its transaction failed to commit after
@@ -323,7 +318,7 @@ impl AppState {
                 &IncomingContractRow {
                     mint: payload.mint,
                     contract,
-                    invoice: LightningInvoice::Bolt11(invoice.clone()),
+                    invoice: invoice.clone(),
                 },
             )
             .is_some()

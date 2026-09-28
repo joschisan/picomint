@@ -25,7 +25,6 @@ use iroh::Endpoint;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::OutPoint;
 use picomint_core::config::MintId;
-use picomint_core::lightning::LightningInvoice;
 use picomint_core::lightning::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk};
 use picomint_core::lightning::methods::{
@@ -203,7 +202,7 @@ impl Gateways {
         mint: MintId,
         outpoint: OutPoint,
         contract: OutgoingContract,
-        invoice: LightningInvoice,
+        invoice: Bolt11Invoice,
     ) -> anyhow::Result<Result<[u8; 32], Signature>> {
         let mut rx = self
             .connection(gateway_pk)

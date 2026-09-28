@@ -3,6 +3,7 @@ use crate::api::MintApi;
 use crate::executor::{SmId, StateMachine};
 use crate::tx::{Input, TxBuilder};
 use futures::future::pending;
+use lightning_invoice::Bolt11Invoice;
 use picomint_core::TransactionId;
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
@@ -17,7 +18,6 @@ use secp256k1::Keypair;
 use secp256k1::schnorr::Signature;
 use tracing::{error, instrument, warn};
 
-use super::LightningInvoice;
 use super::events::{SendRefundEvent, SendSuccessEvent};
 use crate::context::ClientContext;
 
@@ -50,7 +50,7 @@ pub struct SendSMCommon {
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
     pub gateway_pk: GatewayPk,
-    pub invoice: LightningInvoice,
+    pub invoice: Bolt11Invoice,
     pub refund_keypair: Keypair,
 }
 
@@ -209,7 +209,7 @@ async fn gateway_send_sm(
     mint: MintId,
     outpoint: OutPoint,
     contract: OutgoingContract,
-    invoice: LightningInvoice,
+    invoice: Bolt11Invoice,
 ) -> Result<[u8; 32], Signature> {
     match gateways
         .send(gateway_pk, mint, outpoint, contract.clone(), invoice)

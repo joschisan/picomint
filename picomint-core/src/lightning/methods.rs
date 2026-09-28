@@ -12,7 +12,6 @@ use picomint_encoding::{Decodable, Encodable};
 use crate::OutPoint;
 use crate::config::MintId;
 use crate::lightning::ContractId;
-use crate::lightning::LightningInvoice;
 use crate::lightning::contracts::{IncomingContract, OutgoingContract};
 use crate::lightning::gateway::{GatewayInfo, GatewayPk};
 
@@ -124,7 +123,7 @@ pub struct SendRequest {
     pub mint: MintId,
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
-    pub invoice: LightningInvoice,
+    pub invoice: Bolt11Invoice,
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]

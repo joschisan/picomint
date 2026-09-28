@@ -27,7 +27,7 @@ use picomint_core::lightning::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::lnurl::LnurlRequest;
 use picomint_core::lightning::{
-    LIGHTNING_INPUT_FEE, LIGHTNING_OUTPUT_FEE, LightningInput, LightningInvoice, LightningOutput,
+    LIGHTNING_INPUT_FEE, LIGHTNING_OUTPUT_FEE, LightningInput, LightningOutput,
 };
 use picomint_core::methods::MintInfoResponse;
 use picomint_core::wire;
@@ -260,15 +260,13 @@ async fn send_inner(
     let fee = gateway_info.send_fee.fee(amount);
     let amount = Amount(amount);
 
-    let invoice = LightningInvoice::Bolt11(invoice);
-
     let contract = OutgoingContract {
-        payment_hash: *invoice.bolt11().payment_hash(),
-        invoice_hash: invoice.consensus_hash(),
+        payment_hash: *invoice.payment_hash(),
         amount,
         fee,
         claim_pk: gateway_info.module_public_key,
         refund_pk: refund_keypair.x_only_public_key().0,
+        invoice: invoice.consensus_hash(),
     };
 
     let tx_builder = TxBuilder::from_output(Output {
