@@ -195,7 +195,7 @@ fn lnurl_send_direct(
 
     let contract = IncomingContract::author(&recipient, amount, Amount::ZERO);
 
-    let operation = OperationId::from_encodable(&contract.payment_hash());
+    let operation = OperationId(contract.payment_hash());
 
     let tx_builder = TxBuilder::from_output(Output {
         output: wire::Output::Lightning(Box::new(LightningOutput::Incoming(contract))),
@@ -249,7 +249,7 @@ async fn send_inner(
         });
     }
 
-    let operation = OperationId::from_encodable(&invoice.payment_hash());
+    let operation = OperationId(*invoice.payment_hash());
 
     let refund_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
