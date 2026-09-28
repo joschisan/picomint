@@ -26,9 +26,7 @@ use picomint_core::error::ErrorCode;
 use picomint_core::lightning::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::lnurl::LnurlRequest;
-use picomint_core::lightning::{
-    LightningInput, LightningInvoice, LightningOutput, MINIMUM_INCOMING_CONTRACT_AMOUNT,
-};
+use picomint_core::lightning::{LightningInput, LightningInvoice, LightningOutput};
 use picomint_core::methods::MintInfoResponse;
 use picomint_core::wire;
 
@@ -39,6 +37,7 @@ use picomint_lnurl::Lnurl;
 use rand::seq::IteratorRandom;
 use secp256k1::{Keypair, PublicKey, SecretKey};
 use thiserror::Error;
+use tracing::warn;
 use url::Url;
 
 use self::events::{ReceiveEvent, SendEvent};
@@ -193,10 +192,6 @@ fn lnurl_send_direct(
 ) -> Result<OperationId, LnurlSendDirectError> {
     let recipient = lnurl_recipient(ctx, lnurl)?;
 
-    if amount < MINIMUM_INCOMING_CONTRACT_AMOUNT {
-        return Err(LnurlSendDirectError::AmountTooSmall);
-    }
-
     let contract = IncomingContract::author(&recipient, amount, Amount::ZERO);
 
     let operation = OperationId::from_encodable(&contract.payment_hash());
@@ -339,10 +334,7 @@ async fn create_contract_and_fetch_invoice(
 
     let fee = gateway_info.receive_fee.fee(amount.0);
 
-    if amount
-        .checked_sub(fee)
-        .is_none_or(|net| net < MINIMUM_INCOMING_CONTRACT_AMOUNT)
-    {
+    if amount.checked_sub(fee).is_none() {
         return Err(InvoiceReceiveError::AmountTooSmall);
     }
 
@@ -375,6 +367,10 @@ async fn create_contract_and_fetch_invoice(
 /// The stream carries the contract as the mint stores it, so the input
 /// built here is one consensus will accept — short of the contract having
 /// been spent in the meantime, which nothing local can rule out.
+///
+/// A contract that nets less than the input fee is claimed with notes from
+/// the account; when the account has none it is left behind and the
+/// scanner moves on.
 fn receive_incoming_contract(
     ctx: &ClientContext,
     dbtx: &WriteTx,
@@ -404,7 +400,7 @@ fn receive_incoming_contract(
     let amount = contract.amount;
     let fee = contract.fee;
 
-    crate::ecash::finalize_and_submit_tx(
+    let claimed = crate::ecash::finalize_and_submit_tx(
         ctx,
         dbtx,
         account,
@@ -418,8 +414,11 @@ fn receive_incoming_contract(
             amount,
             fee,
         },
-    )
-    .expect("Cannot claim input, additional funding needed");
+    );
+
+    if claimed.is_none() {
+        warn!(%outpoint, "Skipping an incoming contract the account cannot afford to claim");
+    }
 }
 
 /// Walks the mint-wide contract stream once, trialling every
@@ -531,8 +530,6 @@ pub enum LnurlSendMaxAmountError {
 pub enum LnurlSendDirectError {
     #[error("The lnurl does not belong to this mint")]
     NotThisMint,
-    #[error("Amount is too small to be claimed")]
-    AmountTooSmall,
     #[error("The client's balance is insufficient")]
     InsufficientBalance,
     #[error("Mint is not added")]

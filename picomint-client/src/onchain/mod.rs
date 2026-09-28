@@ -178,6 +178,10 @@ async fn next_valid_index(ctx: &ClientContext, account: Account, start_index: u6
 }
 
 /// Issue ecash into `account` for an unspent output with a given fee.
+///
+/// An output that nets less than the input fee is claimed with notes from
+/// the account; when the account has none it is left behind and the
+/// scanner moves on.
 fn receive_output(
     ctx: &ClientContext,
     account: Account,
@@ -185,7 +189,7 @@ fn receive_output(
     amount: bitcoin::Amount,
     address_index: u64,
     fee: bitcoin::Amount,
-) -> (OperationId, TransactionId) {
+) -> Option<(OperationId, TransactionId)> {
     let operation = OperationId::new_random();
 
     let tx_builder = TxBuilder::from_input(Input {
@@ -221,12 +225,11 @@ fn receive_output(
             amount,
             fee,
         },
-    )
-    .expect("Input amount is sufficient to finalize transaction");
+    )?;
 
     dbtx.commit();
 
-    (operation, txid)
+    Some((operation, txid))
 }
 
 /// Walks the mint-wide output stream once, matching every account's
@@ -347,7 +350,7 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
                     .context("No consensus feerate is available")?;
 
                 if output.value > receive_fee {
-                    let (operation, txid) = receive_output(
+                    let claimed = receive_output(
                         ctx,
                         account,
                         output.index,
@@ -356,9 +359,17 @@ async fn check_outputs(ctx: &ClientContext) -> anyhow::Result<bool> {
                         receive_fee,
                     );
 
-                    ctx.await_tx_accepted(operation, txid)
-                        .await
-                        .map_err(|e| anyhow!("Claim transaction was rejected: {e}"))?;
+                    match claimed {
+                        Some((operation, txid)) => {
+                            ctx.await_tx_accepted(operation, txid)
+                                .await
+                                .map_err(|e| anyhow!("Claim transaction was rejected: {e}"))?;
+                        }
+                        None => warn!(
+                            index = output.index,
+                            "Skipping a deposit the account cannot afford to claim"
+                        ),
+                    }
                 }
             }
         }

@@ -16,7 +16,6 @@ use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::config::MintId;
-use picomint_core::lightning::MINIMUM_INCOMING_CONTRACT_AMOUNT;
 use picomint_core::lightning::contracts::IncomingContract;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::lnurl::{LnurlRequest, MAX_NODES_PER_LNURL};
@@ -235,13 +234,6 @@ async fn resolve_and_fetch_invoice(
     );
 
     let fee = gateway_info.receive_fee.fee(amount);
-
-    ensure!(
-        amount
-            .checked_sub(fee.0)
-            .is_some_and(|net| Amount(net) >= MINIMUM_INCOMING_CONTRACT_AMOUNT),
-        "Amount too small"
-    );
 
     let contract = IncomingContract::author(&request.recipient, Amount(amount), fee);
 
