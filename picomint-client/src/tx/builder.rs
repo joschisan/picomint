@@ -53,6 +53,10 @@ impl TxBuilder {
         self.outputs.push(output);
     }
 
+    pub fn has_outputs(&self) -> bool {
+        !self.outputs.is_empty()
+    }
+
     pub fn input_amount(&self) -> Amount {
         self.inputs.iter().map(|i| i.amount).sum()
     }
