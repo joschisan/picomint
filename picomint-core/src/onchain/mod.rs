@@ -10,8 +10,27 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tss::AggregatePublicKey;
 
+use crate::Amount;
+
 pub mod config;
 pub mod methods;
+
+/// The minimum feerate in sat/kvB, doubled for each pending transaction in
+/// the stack, protecting against catastrophic feerate estimation errors.
+///
+/// Intentionally lower than the 1 sat/vB minimum feerate vote floor, which
+/// allows for at least three pending transactions that only pay the
+/// consensus feerate before the exponential doubling kicks in.
+pub const ONCHAIN_FEERATE_BASE: u32 = 250;
+
+/// The minimum amount a user can send on chain.
+pub const ONCHAIN_DUST_LIMIT: bitcoin::Amount = bitcoin::Amount::from_sat(10_000);
+
+/// Fee the mint charges per onchain input.
+pub const ONCHAIN_INPUT_FEE: Amount = Amount::from_sat(10);
+
+/// Fee the mint charges per onchain output.
+pub const ONCHAIN_OUTPUT_FEE: Amount = Amount::from_sat(10);
 
 pub fn tweak_public_key(pk: &PublicKey, tweak: &sha256::Hash) -> PublicKey {
     pk.add_exp_tweak(

@@ -21,7 +21,8 @@ use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::error::ErrorCode;
 use picomint_core::onchain::{
-    OnchainInput, OnchainOutput, StandardScript, is_potential_receive, tweaked_address,
+    ONCHAIN_DUST_LIMIT, ONCHAIN_INPUT_FEE, ONCHAIN_OUTPUT_FEE, OnchainInput, OnchainOutput,
+    StandardScript, is_potential_receive, tweaked_address,
 };
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint, TransactionId};
@@ -58,7 +59,7 @@ pub(crate) async fn send_fee(ctx: &ClientContext) -> Result<bitcoin::Amount, Sen
 
 fn max_amount_at(ctx: &ClientContext, account: Account, fee: bitcoin::Amount) -> bitcoin::Amount {
     let amount = crate::ecash::largest_affordable_amount(ctx, account, |_| {
-        Amount::from_sat(fee.to_sat()) + ctx.config.onchain.output_fee
+        Amount::from_sat(fee.to_sat()) + ONCHAIN_OUTPUT_FEE
     });
 
     bitcoin::Amount::from_sat(amount.0 / 1000)
@@ -76,7 +77,7 @@ fn submit_send(
         return Err(SendError::WrongNetwork);
     }
 
-    if amount < ctx.config.onchain.dust_limit {
+    if amount < ONCHAIN_DUST_LIMIT {
         return Err(SendError::DustValue);
     }
 
@@ -92,7 +93,7 @@ fn submit_send(
             fee,
         }),
         amount: Amount::from_sat((amount + fee).to_sat()),
-        fee: ctx.config.onchain.output_fee,
+        fee: ONCHAIN_OUTPUT_FEE,
     });
 
     let dbtx = ctx.db.begin_write();
@@ -202,7 +203,7 @@ fn receive_output(
         }),
         keypair: derive_tweak(ctx, account, address_index),
         amount: Amount::from_sat((amount - fee).to_sat()),
-        fee: ctx.config.onchain.input_fee,
+        fee: ONCHAIN_INPUT_FEE,
     });
 
     let dbtx = ctx.db.begin_write();

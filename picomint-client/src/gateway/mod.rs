@@ -15,7 +15,9 @@ use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::lightning::contracts::{IncomingContract, OutgoingContract, forfeit_message};
-use picomint_core::lightning::{LightningInput, LightningOutput, OutgoingWitness};
+use picomint_core::lightning::{
+    LIGHTNING_INPUT_FEE, LIGHTNING_OUTPUT_FEE, LightningInput, LightningOutput, OutgoingWitness,
+};
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint};
@@ -125,7 +127,7 @@ impl Client {
         let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Lightning(Box::new(LightningOutput::Incoming(contract))),
             amount: claim_amount,
-            fee: ctx.config.lightning.output_fee,
+            fee: LIGHTNING_OUTPUT_FEE,
         });
 
         let txid = crate::ecash::finalize_and_submit_tx(
@@ -179,7 +181,7 @@ impl Client {
                     )),
                     keypair: ctx.secret.gateway_secret().contract_keypair(),
                     amount: contract.amount + contract.fee,
-                    fee: ctx.config.lightning.input_fee,
+                    fee: LIGHTNING_INPUT_FEE,
                 });
 
                 crate::ecash::finalize_and_submit_tx(

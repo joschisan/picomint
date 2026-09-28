@@ -5,7 +5,6 @@
 //! every payment with the preimage or a forfeit signature, a recipient
 //! lets the gateway author the contract it funds, preimage included.
 
-pub mod config;
 pub mod contracts;
 pub mod gateway;
 pub mod lnurl;
@@ -19,8 +18,8 @@ use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::OutPoint;
 use crate::lightning::contracts::{IncomingContract, OutgoingContract};
+use crate::{Amount, OutPoint};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Decodable, Encodable)]
 pub enum LightningInvoice {
@@ -36,6 +35,12 @@ impl LightningInvoice {
         }
     }
 }
+
+/// Fee the mint charges per lightning input.
+pub const LIGHTNING_INPUT_FEE: Amount = Amount::from_sat(1);
+
+/// Fee the mint charges per lightning output.
+pub const LIGHTNING_OUTPUT_FEE: Amount = Amount::from_sat(1);
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct ContractId(pub sha256::Hash);

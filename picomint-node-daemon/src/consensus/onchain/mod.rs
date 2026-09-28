@@ -36,8 +36,9 @@ use crate::handler;
 use picomint_core::onchain::config::{OnchainConfig, OnchainConfigPrivate};
 use picomint_core::onchain::methods::OnchainMethod;
 use picomint_core::onchain::{
-    BlockTx, BlockVote, MintUtxo, OnchainInputError, OnchainOutputError, TrackedOutput, TxInfo,
-    is_potential_receive, tweak_public_key, tweaked_script_pubkey,
+    BlockTx, BlockVote, MintUtxo, ONCHAIN_DUST_LIMIT, ONCHAIN_FEERATE_BASE, OnchainInputError,
+    OnchainOutputError, TrackedOutput, TxInfo, is_potential_receive, tweak_public_key,
+    tweaked_script_pubkey,
 };
 use picomint_core::secret::Secret;
 use secp256k1::Scalar;
@@ -109,7 +110,10 @@ pub async fn dkg(nodes: &DkgHandle<'_>) -> anyhow::Result<OnchainConfig> {
         private: OnchainConfigPrivate {
             sks: SecretKeyShare(sks),
         },
-        consensus: OnchainConfigConsensus::new(AggregatePublicKey(polynomial[0]), pks),
+        consensus: OnchainConfigConsensus {
+            agg_pk: AggregatePublicKey(polynomial[0]),
+            pks,
+        },
     })
 }
 
@@ -544,7 +548,7 @@ pub fn process_output(
     output: &OnchainOutput,
     outpoint: OutPoint,
 ) -> Result<picomint_core::Amount, OnchainOutputError> {
-    if output.value < server.cfg.consensus.onchain.dust_limit {
+    if output.value < ONCHAIN_DUST_LIMIT {
         return Err(OnchainOutputError::UnderDustLimit);
     }
 
@@ -573,7 +577,7 @@ pub fn process_output(
         .checked_sub(output_value)
         .ok_or(OnchainOutputError::ArithmeticOverflow)?;
 
-    if change_value < server.cfg.consensus.onchain.dust_limit {
+    if change_value < ONCHAIN_DUST_LIMIT {
         return Err(OnchainOutputError::ChangeUnderDustLimit);
     }
 
@@ -863,7 +867,7 @@ pub fn consensus_fee(server: &Server, dbtx: &impl DbRead, tx_vbytes: u64) -> Opt
     assert!(pending_txs.len() <= 32);
 
     let feerate = u64::from(consensus_feerate(server, dbtx)?)
-        .max(u64::from(server.cfg.consensus.onchain.feerate_base) << pending_txs.len());
+        .max(u64::from(ONCHAIN_FEERATE_BASE) << pending_txs.len());
 
     let tx_fee = tx_vbytes.saturating_mul(feerate).saturating_div(1000);
 

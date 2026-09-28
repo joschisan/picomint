@@ -67,7 +67,6 @@ pub fn assemble_node_config(
     broadcast_public_keys: BTreeMap<NodeId, XOnlyPublicKey>,
     broadcast_secret_key: SecretKey,
     ecash: EcashConfig,
-    lightning: picomint_core::lightning::config::LightningConfigConsensus,
     onchain: OnchainConfig,
 ) -> NodeConfig {
     let nodes = params
@@ -92,7 +91,6 @@ pub fn assemble_node_config(
         default_version: CONSENSUS_VERSION,
         ecash: ecash.consensus,
         onchain: onchain.consensus,
-        lightning,
     };
 
     let private = NodeConfigPrivate {

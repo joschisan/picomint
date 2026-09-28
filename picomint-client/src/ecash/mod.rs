@@ -25,6 +25,7 @@ use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::ecash::config::{EcashConfigConsensus, client_denominations};
 use picomint_core::ecash::{Denomination, EcashInput, Note};
+use picomint_core::ecash::{ECASH_INPUT_FEE, ECASH_OUTPUT_FEE};
 use picomint_core::error::ErrorCode;
 use picomint_core::secp256k1::{Keypair, XOnlyPublicKey};
 use picomint_core::tx::Transaction;
@@ -424,14 +425,14 @@ fn fund(
             input: wire::Input::Ecash(EcashInput { note: note.note() }),
             keypair: note.keypair,
             amount: note.amount(),
-            fee: ctx.config.ecash.input_fee,
+            fee: ECASH_INPUT_FEE,
         });
     }
 
     assert_eq!(builder.deficit(), Amount::ZERO);
 
     let mut denoms = select_output_denominations(
-        ctx.config.ecash.output_fee,
+        ECASH_OUTPUT_FEE,
         builder.excess_input(),
         change_denominations(max),
     );
@@ -456,7 +457,7 @@ fn fund(
         builder.add_output(Output {
             output: wire::Output::Ecash(request.output()),
             amount: request.denomination.amount(),
-            fee: ctx.config.ecash.output_fee,
+            fee: ECASH_OUTPUT_FEE,
         });
     }
 
@@ -507,7 +508,7 @@ fn submit<E: crate::eventlog::Event + Send>(
 fn max_spendable(ctx: &ClientContext, account: Account) -> Amount {
     account_notes(&ctx.db.begin_read(), ctx.mint, account)
         .iter()
-        .map(|note| note_value(ctx, note.denomination))
+        .map(|note| note_value(note.denomination))
         .sum()
 }
 
@@ -589,7 +590,7 @@ fn select_funding_input(
 
     let selected_value = selected
         .iter()
-        .map(|note| note_value(ctx, note.denomination))
+        .map(|note| note_value(note.denomination))
         .sum();
 
     if excess_output <= selected_value {
@@ -601,10 +602,10 @@ fn select_funding_input(
     for note in target_notes {
         let selected_value = selected
             .iter()
-            .map(|note| note_value(ctx, note.denomination))
+            .map(|note| note_value(note.denomination))
             .sum();
 
-        if note_value(ctx, note.denomination) + selected_value <= excess_output {
+        if note_value(note.denomination) + selected_value <= excess_output {
             selected.push(note);
         } else {
             last_note = Some(note);
@@ -618,10 +619,10 @@ fn select_funding_input(
 
 /// What a note of `denomination` delivers when spent: its face value
 /// minus the input fee.
-fn note_value(ctx: &ClientContext, denomination: Denomination) -> Amount {
+fn note_value(denomination: Denomination) -> Amount {
     denomination
         .amount()
-        .checked_sub(ctx.config.ecash.input_fee)
+        .checked_sub(ECASH_INPUT_FEE)
         .expect("All our notes are economical")
 }
 
@@ -925,7 +926,7 @@ impl Client {
             builder.add_output(Output {
                 output: wire::Output::Ecash(request.output()),
                 amount: request.denomination.amount(),
-                fee: ctx.config.ecash.output_fee,
+                fee: ECASH_OUTPUT_FEE,
             });
         }
 
@@ -1044,7 +1045,7 @@ impl Client {
         if ecash
             .notes
             .iter()
-            .any(|note| note.amount() <= ctx.config.ecash.input_fee)
+            .any(|note| note.amount() <= ECASH_INPUT_FEE)
         {
             return Err(ReceiveEcashError::UneconomicalDenomination);
         }
@@ -1055,7 +1056,7 @@ impl Client {
                 input: wire::Input::Ecash(EcashInput { note: note.note() }),
                 keypair: note.keypair,
                 amount: note.amount(),
-                fee: ctx.config.ecash.input_fee,
+                fee: ECASH_INPUT_FEE,
             });
         }
 

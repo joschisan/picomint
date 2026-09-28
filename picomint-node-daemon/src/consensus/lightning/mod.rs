@@ -3,7 +3,6 @@ pub use picomint_core::lightning as common;
 mod db;
 mod rpc;
 
-use picomint_core::lightning::config::LightningConfigConsensus;
 use picomint_core::lightning::gateway::GatewayPk;
 use picomint_core::lightning::methods::LightningMethod;
 use picomint_core::lightning::{
@@ -21,17 +20,6 @@ use self::db::{
     IncomingContractStreamTable, IncomingContractTable, IncomingPaymentTable,
     OutgoingContractTable, PreimageTable,
 };
-
-/// The lightning module's consensus config. The module holds no keys: an
-/// incoming contract is spent by the recipient's own claim key and an
-/// outgoing one by the gateway's, so there is nothing for the nodes to
-/// share.
-pub fn config() -> LightningConfigConsensus {
-    LightningConfigConsensus {
-        input_fee: Amount::from_sat(1),
-        output_fee: Amount::from_sat(1),
-    }
-}
 
 pub fn process_input(
     dbtx: &WriteTx,
