@@ -232,16 +232,15 @@ impl AppState {
                 .with_max_total_routing_fee_msat(fee.0)
                 .with_max_total_cltv_expiry_delta(self.cltv_expiry_delta);
 
-            let result = self.node.bolt11_payment().send(&payload.invoice, Some(rpc));
-
-            // A duplicate payment means a previous run of this request already
-            // kicked off the payment (its transaction failed to commit after
-            // the LDK send); the LDK events drive its terminal, so treat it as
-            // a successful kick-off instead of cancelling an in-flight send.
-            return match result {
-                Ok(_) | Err(ldk_node::NodeError::DuplicatePayment) => Ok(()),
-                Err(error) => Err(anyhow!("LDK refused the outgoing payment: {error}")),
-            };
+            // A duplicate is cancelled like any other refusal: LDK reports one
+            // for any payment it holds under the hash, an invoice this gateway
+            // issued included, and none of those settles this send.
+            return self
+                .node
+                .bolt11_payment()
+                .send(&payload.invoice, Some(rpc))
+                .map(|_| ())
+                .map_err(|error| anyhow!("LDK refused the outgoing payment: {error}"));
         }
 
         let incoming_operation = OperationId(payload.contract.payment_hash);
