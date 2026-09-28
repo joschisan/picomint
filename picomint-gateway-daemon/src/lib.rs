@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, bail, ensure};
 use bitcoin::Network;
-use bitcoin::hashes::{Hash, sha256};
+use bitcoin::hashes::Hash;
 use iroh::Endpoint;
 use lightning::routing::router::RouteParametersConfig;
 use lightning::types::payment::PaymentHash;
@@ -20,13 +20,11 @@ use picomint_client::{Client, Mnemonic};
 use picomint_core::Amount;
 use picomint_core::config::MintId;
 use picomint_core::core::OperationId;
-use picomint_core::lightning::LightningInvoice;
 use picomint_core::lightning::gateway::{GatewayInfo, PaymentFee};
 use picomint_core::lightning::methods::{ReceiveRequest, SendRequest};
 use picomint_core::secp256k1::schnorr::Signature;
-use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::MintInfo;
-use picomint_redb::{Database, DbRead};
+use picomint_redb::{Database, DbRead, WriteTx};
 
 use crate::db::{
     IncomingContractRow, IncomingContractTable, OutgoingContractRow, OutgoingContractTable,
@@ -81,32 +79,23 @@ impl AppState {
         })
     }
 
-    /// Orchestrates an outgoing payment. Verifies the request, registers the
-    /// contract under its outpoint in the daemon-global outgoing_contract
-    /// table, logs `SendEvent` on the source mint, and kicks off either a
-    /// direct-swap receive on the target mint or an LN send via LDK. An
-    /// invoice gets one attempt: a further contract for a payment hash
-    /// the gateway has taken on is refunded with its forfeit signature
-    /// at once, which is safe because that signature releases only the
-    /// funding it names. Returns once a terminal event (`SendSuccessEvent`
-    /// / `SendCancelEvent`) is observed in the source mint's event log.
+    /// Orchestrates an outgoing payment. Registers the contract under its
+    /// outpoint in the daemon-global outgoing_contract table, logs
+    /// `SendEvent` on the source mint, and either starts the payment or
+    /// cancels it: once the contract is known to be ours and funded, every
+    /// reason not to pay is answered with the forfeit signature, since an
+    /// error would leave the funding locked with no way out. Returns once a
+    /// terminal event (`SendSuccessEvent` / `SendCancelEvent`) is observed
+    /// in the source mint's event log.
     pub async fn send(
         &self,
         payload: SendRequest,
     ) -> anyhow::Result<std::result::Result<[u8; 32], Signature>> {
-        // --- Verify the request ---------------------------------------------
-
+        // The forfeit signature comes from the claim key, so a contract keyed
+        // to another gateway is the one request nothing here can settle.
         ensure!(
             payload.contract.claim_pk == self.client.gateway_pk(payload.mint)?,
             "The outgoing contract is keyed to another gateway"
-        );
-
-        ensure!(
-            payload.contract.verify_invoice_auth(
-                payload.invoice.consensus_hash::<sha256::Hash>(),
-                &payload.auth,
-            ),
-            "Invalid auth signature for the invoice data"
         );
 
         let api = self.client.api(payload.mint)?;
@@ -119,32 +108,6 @@ impl AppState {
             contract_id == payload.contract.contract_id(),
             "Contract Id returned by the mint does not match contract in request"
         );
-
-        let amount = payload
-            .invoice
-            .bolt11()
-            .amount_milli_satoshis()
-            .ok_or(anyhow!("Invoice is missing amount"))?;
-
-        ensure!(
-            *payload.invoice.bolt11().payment_hash() == payload.contract.payment_hash,
-            "The invoice's payment hash does not match the contract's payment hash"
-        );
-
-        // The invoice's expiry is deliberately not checked here. Rejecting the
-        // request returns a plain error, which leaves the sender's contract
-        // funded until it times out, while attempting the payment fails it via
-        // the LDK `PaymentFailed` event and hence hands the sender a forfeit
-        // signature to reclaim the funds immediately. Neither ldk-node nor LDK
-        // enforce the expiry either, so an invoice the payee still honors is
-        // simply paid.
-
-        ensure!(
-            payload.contract.amount == Amount(amount),
-            "Contract amount does not match invoice amount"
-        );
-
-        // --- Insert outgoing_contract row + log SendEvent on the source mint (one tx) ---
 
         let operation = OperationId::from_encodable(&payload.outpoint);
 
@@ -174,22 +137,17 @@ impl AppState {
                 .await;
         }
 
-        let fee = self.send_fee.fee(amount);
-
         self.client.gateway_log_send_started(
             payload.mint,
             &dbtx,
             operation,
             payload.outpoint,
-            Amount(amount),
-            fee,
+            payload.contract.amount,
+            payload.contract.fee,
         )?;
 
-        // The client priced the contract from a probe, so a fee changed since
-        // is answered with the forfeit signature, not an error: an error
-        // would leave the contract funded with no way out.
-        if payload.contract.fee != fee {
-            warn!(%operation, "Contract fee does not match the send fee; cancelling the payment");
+        if let Err(error) = self.start_payment(&dbtx, &payload, operation) {
+            warn!(%error, %operation, "Cancelling the payment");
 
             self.client.gateway_finalize_send(
                 payload.mint,
@@ -199,37 +157,66 @@ impl AppState {
                 payload.outpoint,
                 None,
             )?;
-
-            dbtx.commit();
-
-            return self
-                .client
-                .gateway_subscribe_send(payload.mint, operation)
-                .await;
         }
 
-        if dbtx
-            .get(&PaymentHashTable, &payload.contract.payment_hash)
-            .is_some()
-        {
-            warn!(%operation, "The invoice already has a payment attempt; cancelling the send");
+        dbtx.commit();
 
-            self.client.gateway_finalize_send(
-                payload.mint,
-                &dbtx,
-                operation,
-                payload.contract,
-                payload.outpoint,
-                None,
-            )?;
+        self.client
+            .gateway_subscribe_send(payload.mint, operation)
+            .await
+    }
 
-            dbtx.commit();
+    /// Checks the request against the funded contract and kicks off either
+    /// an LN send via LDK or a direct-swap receive on the target mint. An
+    /// invoice gets one attempt: a further contract for a payment hash the
+    /// gateway has taken on fails here and is refunded, which is safe
+    /// because the forfeit signature releases only the funding it names.
+    fn start_payment(
+        &self,
+        dbtx: &WriteTx,
+        payload: &SendRequest,
+        operation: OperationId,
+    ) -> anyhow::Result<()> {
+        ensure!(
+            payload.contract.verify_invoice(&payload.invoice),
+            "The invoice is not the one the contract commits to"
+        );
 
-            return self
-                .client
-                .gateway_subscribe_send(payload.mint, operation)
-                .await;
-        }
+        let amount = payload
+            .invoice
+            .amount_milli_satoshis()
+            .ok_or(anyhow!("Invoice is missing amount"))?;
+
+        ensure!(
+            *payload.invoice.payment_hash() == payload.contract.payment_hash,
+            "The invoice's payment hash does not match the contract's payment hash"
+        );
+
+        // The invoice's expiry is deliberately not checked here. Attempting
+        // the payment fails it via the LDK `PaymentFailed` event, which hands
+        // the sender the forfeit signature just the same, and neither
+        // ldk-node nor LDK enforce the expiry either, so an invoice the payee
+        // still honors is simply paid.
+
+        ensure!(
+            payload.contract.amount == Amount(amount),
+            "Contract amount does not match invoice amount"
+        );
+
+        let fee = self.send_fee.fee(amount);
+
+        // The client priced the contract from a probe, so the fee may have
+        // changed since.
+        ensure!(
+            payload.contract.fee == fee,
+            "Contract fee does not match the send fee"
+        );
+
+        ensure!(
+            dbtx.get(&PaymentHashTable, &payload.contract.payment_hash)
+                .is_none(),
+            "The invoice already has a payment attempt"
+        );
 
         dbtx.insert(
             &PaymentHashTable,
@@ -237,8 +224,7 @@ impl AppState {
             &operation,
         );
 
-        // --- Direct-swap vs external LN -------------------------------------
-        if self.node.node_id() != payload.invoice.bolt11().get_payee_pub_key() {
+        if self.node.node_id() != payload.invoice.get_payee_pub_key() {
             // The whole fee is the routing budget: whatever routing does not
             // take is the gateway's margin, and an internal settlement keeps
             // all of it.
@@ -246,66 +232,41 @@ impl AppState {
                 .with_max_total_routing_fee_msat(fee.0)
                 .with_max_total_cltv_expiry_delta(self.cltv_expiry_delta);
 
-            let result = self
-                .node
-                .bolt11_payment()
-                .send(payload.invoice.bolt11(), Some(rpc));
+            let result = self.node.bolt11_payment().send(&payload.invoice, Some(rpc));
 
             // A duplicate payment means a previous run of this request already
             // kicked off the payment (its transaction failed to commit after
             // the LDK send); the LDK events drive its terminal, so treat it as
             // a successful kick-off instead of cancelling an in-flight send.
-            if let Err(error) = &result
-                && !matches!(error, ldk_node::NodeError::DuplicatePayment)
-            {
-                warn!(%error, %operation, "LDK refused the outgoing payment; cancelling it");
-
-                self.client.gateway_finalize_send(
-                    payload.mint,
-                    &dbtx,
-                    operation,
-                    payload.contract,
-                    payload.outpoint,
-                    None,
-                )?;
-            }
-        } else {
-            let incoming_operation = OperationId::from_encodable(&payload.contract.payment_hash);
-
-            let incoming_row = dbtx
-                .get(&IncomingContractTable, &incoming_operation)
-                .expect("Direct-swap target not registered for this payment hash");
-
-            ensure!(
-                incoming_row.contract.amount.0 == amount,
-                "Direct-swap amount mismatch"
-            );
-
-            if let Err(error) = self.client.gateway_start_receive(
-                incoming_row.mint,
-                &dbtx,
-                incoming_operation,
-                incoming_row.contract,
-            ) {
-                warn!(%error, %operation, "Could not fund the direct swap's receive; cancelling the send");
-
-                self.client.gateway_finalize_send(
-                    payload.mint,
-                    &dbtx,
-                    operation,
-                    payload.contract,
-                    payload.outpoint,
-                    None,
-                )?;
-            }
+            return match result {
+                Ok(_) | Err(ldk_node::NodeError::DuplicatePayment) => Ok(()),
+                Err(error) => Err(anyhow!("LDK refused the outgoing payment: {error}")),
+            };
         }
 
-        dbtx.commit();
+        let incoming_operation = OperationId(payload.contract.payment_hash);
 
-        // --- Await terminal event on the source mint -------------------------------------
+        // An invoice of our own node that no receive registered, as one the
+        // operator issued through the CLI.
+        let incoming_row = dbtx
+            .get(&IncomingContractTable, &incoming_operation)
+            .ok_or(anyhow!(
+                "No direct-swap target is registered for this payment hash"
+            ))?;
+
+        ensure!(
+            incoming_row.contract.amount.0 == amount,
+            "Direct-swap amount mismatch"
+        );
+
         self.client
-            .gateway_subscribe_send(payload.mint, operation)
-            .await
+            .gateway_start_receive(
+                incoming_row.mint,
+                dbtx,
+                incoming_operation,
+                incoming_row.contract,
+            )
+            .map_err(|error| anyhow!("Could not fund the direct swap's receive: {error}"))
     }
 
     /// Creates a Bolt11 invoice against the payment hash of the
@@ -353,11 +314,11 @@ impl AppState {
         if dbtx
             .insert(
                 &IncomingContractTable,
-                &OperationId::from_encodable(&contract.payment_hash()),
+                &OperationId(contract.payment_hash()),
                 &IncomingContractRow {
                     mint: payload.mint,
                     contract,
-                    invoice: LightningInvoice::Bolt11(invoice.clone()),
+                    invoice: invoice.clone(),
                 },
             )
             .is_some()

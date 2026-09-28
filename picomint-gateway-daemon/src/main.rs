@@ -360,7 +360,7 @@ fn handle_payment_claimable(
     payment_hash: [u8; 32],
     amount_msat: u64,
 ) {
-    let operation = OperationId::from_encodable(&payment_hash);
+    let operation = OperationId(sha256::Hash::from_byte_array(payment_hash));
 
     if dbtx
         .insert(&LdkEventPaymentHashTable, &payment_hash, &())

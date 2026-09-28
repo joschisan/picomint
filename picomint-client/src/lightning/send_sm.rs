@@ -2,8 +2,8 @@ use super::gateway::Gateways;
 use crate::api::MintApi;
 use crate::executor::{SmId, StateMachine};
 use crate::tx::{Input, TxBuilder};
-use bitcoin::hashes::sha256;
 use futures::future::pending;
+use lightning_invoice::Bolt11Invoice;
 use picomint_core::TransactionId;
 use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
@@ -18,7 +18,6 @@ use secp256k1::Keypair;
 use secp256k1::schnorr::Signature;
 use tracing::{error, instrument, warn};
 
-use super::LightningInvoice;
 use super::events::{SendRefundEvent, SendSuccessEvent};
 use crate::context::ClientContext;
 
@@ -51,7 +50,7 @@ pub struct SendSMCommon {
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
     pub gateway_pk: GatewayPk,
-    pub invoice: LightningInvoice,
+    pub invoice: Bolt11Invoice,
     pub refund_keypair: Keypair,
 }
 
@@ -101,7 +100,6 @@ impl StateMachine for SendStateMachine {
                         self.common.outpoint,
                         self.common.contract.clone(),
                         self.common.invoice.clone(),
-                        self.common.refund_keypair,
                     ) => SendOutcome::GatewayResponse(response),
                     preimage = await_preimage_sm(
                         self.common.outpoint,
@@ -204,22 +202,17 @@ fn submit_refund(
 /// response or a gateway that left the announced set is terminal for this
 /// branch — no retry changes either — so it parks and leaves the outcome
 /// to the preimage poll.
-#[instrument(skip(refund_keypair, gateways))]
+#[instrument(skip(gateways))]
 async fn gateway_send_sm(
     gateways: Gateways,
     gateway_pk: GatewayPk,
     mint: MintId,
     outpoint: OutPoint,
     contract: OutgoingContract,
-    invoice: LightningInvoice,
-    refund_keypair: Keypair,
+    invoice: Bolt11Invoice,
 ) -> Result<[u8; 32], Signature> {
-    let auth = refund_keypair.sign_schnorr(secp256k1::Message::from_digest(
-        *invoice.consensus_hash::<sha256::Hash>().as_ref(),
-    ));
-
     match gateways
-        .send(gateway_pk, mint, outpoint, contract.clone(), invoice, auth)
+        .send(gateway_pk, mint, outpoint, contract.clone(), invoice)
         .await
     {
         Ok(result) => {

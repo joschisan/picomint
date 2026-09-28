@@ -1,6 +1,7 @@
 use crate::{Amount, OutPoint};
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1;
+use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
 use secp256k1::schnorr::Signature;
 use secp256k1::{Keypair, Message, PublicKey, SecretKey, XOnlyPublicKey, ecdh};
@@ -108,6 +109,9 @@ pub struct OutgoingContract {
     /// state machine — nothing derives it, so nothing has to travel here to
     /// let the sender find it again.
     pub refund_pk: XOnlyPublicKey,
+    /// The invoice this contract pays, so the gateway pays the one the
+    /// sender funded and no other one for the same payment hash.
+    pub invoice: sha256::Hash,
 }
 
 impl OutgoingContract {
@@ -138,14 +142,9 @@ impl OutgoingContract {
         }
     }
 
-    pub fn verify_invoice_auth(&self, message: sha256::Hash, signature: &Signature) -> bool {
-        secp256k1::global::SECP256K1
-            .verify_schnorr(
-                signature,
-                &Message::from_digest(*message.as_ref()),
-                &self.refund_pk,
-            )
-            .is_ok()
+    /// Whether `invoice` is the one this contract commits to.
+    pub fn verify_invoice(&self, invoice: &Bolt11Invoice) -> bool {
+        invoice.consensus_hash::<sha256::Hash>() == self.invoice
     }
 }
 

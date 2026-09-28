@@ -27,7 +27,7 @@ use picomint_core::lightning::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::lnurl::LnurlRequest;
 use picomint_core::lightning::{
-    LIGHTNING_INPUT_FEE, LIGHTNING_OUTPUT_FEE, LightningInput, LightningInvoice, LightningOutput,
+    LIGHTNING_INPUT_FEE, LIGHTNING_OUTPUT_FEE, LightningInput, LightningOutput,
 };
 use picomint_core::methods::MintInfoResponse;
 use picomint_core::wire;
@@ -195,7 +195,7 @@ fn lnurl_send_direct(
 
     let contract = IncomingContract::author(&recipient, amount, Amount::ZERO);
 
-    let operation = OperationId::from_encodable(&contract.payment_hash());
+    let operation = OperationId(contract.payment_hash());
 
     let tx_builder = TxBuilder::from_output(Output {
         output: wire::Output::Lightning(Box::new(LightningOutput::Incoming(contract))),
@@ -249,7 +249,7 @@ async fn send_inner(
         });
     }
 
-    let operation = OperationId::from_encodable(&invoice.payment_hash());
+    let operation = OperationId(*invoice.payment_hash());
 
     let refund_keypair = Keypair::new(secp256k1::SECP256K1, &mut rand::thread_rng());
 
@@ -266,6 +266,7 @@ async fn send_inner(
         fee,
         claim_pk: gateway_info.module_public_key,
         refund_pk: refund_keypair.x_only_public_key().0,
+        invoice: invoice.consensus_hash(),
     };
 
     let tx_builder = TxBuilder::from_output(Output {
@@ -302,7 +303,7 @@ async fn send_inner(
             outpoint: OutPoint { txid, out_idx: 0 },
             contract,
             gateway_pk,
-            invoice: LightningInvoice::Bolt11(invoice.clone()),
+            invoice,
             refund_keypair,
         },
         state: SendSMState::Funding,

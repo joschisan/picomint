@@ -25,7 +25,6 @@ use iroh::Endpoint;
 use lightning_invoice::Bolt11Invoice;
 use picomint_core::OutPoint;
 use picomint_core::config::MintId;
-use picomint_core::lightning::LightningInvoice;
 use picomint_core::lightning::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk};
 use picomint_core::lightning::methods::{
@@ -197,15 +196,13 @@ impl Gateways {
     /// Ask `gateway_pk` to pay, retrying transport errors forever on its
     /// pooled connection; errors only if the gateway is not a current
     /// member, which no retry can cure.
-    #[allow(clippy::too_many_arguments)]
     pub async fn send(
         &self,
         gateway_pk: GatewayPk,
         mint: MintId,
         outpoint: OutPoint,
         contract: OutgoingContract,
-        invoice: LightningInvoice,
-        auth: Signature,
+        invoice: Bolt11Invoice,
     ) -> anyhow::Result<Result<[u8; 32], Signature>> {
         let mut rx = self
             .connection(gateway_pk)
@@ -216,7 +213,6 @@ impl Gateways {
             outpoint,
             contract,
             invoice,
-            auth,
         });
 
         request_on_state_retry::<SendResponse>(&mut rx, method)

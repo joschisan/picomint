@@ -13,28 +13,12 @@ pub mod secret;
 
 use bitcoin::hashes::sha256;
 use bitcoin::secp256k1::schnorr::Signature;
-use lightning_invoice::Bolt11Invoice;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::lightning::contracts::{IncomingContract, OutgoingContract};
 use crate::{Amount, OutPoint};
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Decodable, Encodable)]
-pub enum LightningInvoice {
-    Bolt11(Bolt11Invoice),
-}
-
-impl LightningInvoice {
-    /// Access the wrapped Bolt11 invoice. Single-variant for now; the
-    /// getter exists so callers don't have to peel the enum.
-    pub fn bolt11(&self) -> &Bolt11Invoice {
-        match self {
-            LightningInvoice::Bolt11(invoice) => invoice,
-        }
-    }
-}
 
 /// Fee the mint charges per lightning input.
 pub const LIGHTNING_INPUT_FEE: Amount = Amount(100);
