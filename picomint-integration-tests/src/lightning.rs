@@ -3,20 +3,29 @@ use std::time::Duration;
 
 use anyhow::{Context as _, ensure};
 use bitcoin::hashes::{Hash, sha256};
-use bitcoin::secp256k1::{Keypair, SECP256K1, SecretKey};
+use bitcoin::secp256k1::{Keypair, PublicKey, SECP256K1, SecretKey};
 use iroh::Endpoint;
 use iroh::endpoint::presets::N0;
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use lightning_invoice::{Bolt11Invoice, Currency, InvoiceBuilder, PaymentSecret};
 use picomint_client::gateway::api::await_outgoing_contract;
-use picomint_client::lightning::events::{ReceiveEvent, SendRefundEvent, SendSuccessEvent};
-use picomint_client::tx::{Input, TxBuilder};
+use picomint_client::lightning::events::{
+    ReceiveEvent, SendEvent, SendRefundEvent, SendSuccessEvent,
+};
+use picomint_client::tx::{Input, Output, TxBuilder};
 use picomint_client::{Account, Client, Mnemonic, OperationId, TxAcceptEvent};
 use picomint_core::config::MintId;
+use picomint_core::lightning::contracts::IncomingContract;
 use picomint_core::lightning::contracts::forfeit_message;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
-use picomint_core::lightning::methods::{GatewayMethod, InfoResponse, SendRequest, SendResponse};
-use picomint_core::lightning::{LIGHTNING_INPUT_FEE, LightningInput, OutgoingWitness};
+use picomint_core::lightning::lnurl::LnurlRequest;
+use picomint_core::lightning::methods::{
+    GatewayMethod, InfoRequest, InfoResponse, ReceiveRequest, ReceiveResponse, SendRequest,
+    SendResponse,
+};
+use picomint_core::lightning::{
+    LIGHTNING_INPUT_FEE, LIGHTNING_OUTPUT_FEE, LightningInput, LightningOutput, OutgoingWitness,
+};
 use picomint_core::{Amount, wire};
 use picomint_encoding::Encodable as _;
 use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_invoice};
@@ -32,8 +41,11 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     client_send.lightning_gateway_refresh()?;
     test_payments(env, client_send).await?;
     test_two_clients_pay_one_invoice(env, client_send).await?;
+    test_invoice_paid_twice(env, client_send).await?;
+    test_send_of_registered_hash(env, client_send).await?;
     test_lnurl_daemon_roundtrip(env).await?;
     test_send_lnurl_direct(env, client_send).await?;
+    test_dust_incoming_contract(env, client_send).await?;
     deregister_gateway(env, &env.gateway_pk)?;
 
     let mock_gw_pk = spawn_mock_gateway(env).await?;
@@ -78,6 +90,10 @@ fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<(
 ///  - `test_payments` outgoing success      → 1 send, 1 send_success
 ///  - `test_payments` incoming success      → 1 receive, 1 receive_success
 ///  - `test_payments` outgoing cancel       → 1 send, 1 send_cancel
+///  - `test_two_clients_pay_one_invoice` → 2 sends, 1 send_success, 1 send_cancel
+///  - `test_invoice_paid_twice` swap first     → 1 send, 1 send_success, 1 receive, 1 receive_success
+///  - `test_invoice_paid_twice` Lightning first → 1 receive, 1 receive_success, 1 send, 1 send_cancel
+///  - `test_send_of_registered_hash`            → 1 send, 1 send_cancel
 ///  - `test_lnurl_daemon_roundtrip` → 1 receive, 1 receive_success
 ///
 /// The mock-gateway tests and `test_direct_lightning_payments` don't drive the real
@@ -97,11 +113,11 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     };
 
     // One table per event, named after its kind
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_send")?, 6);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_success")?, 2);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_cancel")?, 4);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive")?, 2);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_success")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send")?, 9);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_success")?, 3);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_cancel")?, 6);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive")?, 4);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_success")?, 4);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_failure")?, 0);
 
     // No views: an operation's outcome is a join on `operation`
@@ -110,21 +126,21 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
             "SELECT COUNT(*) FROM gateway_send s \
              INNER JOIN gateway_send_success ss USING (operation)"
         )?,
-        2
+        3
     );
     assert_eq!(
         count(
             "SELECT COUNT(*) FROM gateway_send s \
              INNER JOIN gateway_send_cancel sc USING (operation)"
         )?,
-        4
+        6
     );
     assert_eq!(
         count(
             "SELECT COUNT(*) FROM gateway_receive r \
              INNER JOIN gateway_receive_success rs USING (operation)"
         )?,
-        2
+        4
     );
 
     // Amounts land as integer msat columns
@@ -134,7 +150,7 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
         [],
         |r| r.get(0),
     )?;
-    assert_eq!(sum as u64, 2_000_000);
+    assert_eq!(sum as u64, 2_100_000);
 
     info!("lightning: test_analytics_query passed");
 
@@ -376,6 +392,161 @@ async fn test_two_clients_pay_one_invoice(
     Ok(())
 }
 
+/// An invoice of the gateway funds its recipient once, whichever way it is
+/// paid first: after a direct swap paid it, a Lightning payment of it is
+/// failed back, and after a Lightning payment, a direct swap of it is
+/// refunded.
+async fn test_invoice_paid_twice(env: &TestEnv, client: &TestClient) -> anyhow::Result<()> {
+    info!("lightning: test_invoice_paid_twice");
+
+    let gateway_pk = client.lightning_gateway()?;
+
+    let amount = bitcoin::Amount::from_sat(100);
+
+    info!("Paying an invoice by direct swap, then over Lightning...");
+
+    {
+        let invoice = client.lightning_invoice_receive(gateway_pk, amount)?;
+
+        let filter = format!("payment_hash = '{}'", invoice.payment_hash());
+
+        let send_op = client.lightning_invoice_send(gateway_pk, invoice.clone())?;
+
+        client.await_event::<SendSuccessEvent>(send_op).await?;
+
+        client.await_row::<ReceiveEvent>(&filter).await?;
+
+        env.ldk_node.bolt11_payment().send(&invoice, None)?;
+
+        await_ldk_payment_failed(env, &invoice).await?;
+
+        ensure!(
+            client.rows::<ReceiveEvent>(&filter)?.len() == 1,
+            "the recipient must be paid once"
+        );
+    }
+
+    info!("Paying an invoice over Lightning, then by direct swap...");
+
+    {
+        let invoice = client.lightning_invoice_receive(gateway_pk, amount)?;
+
+        env.ldk_node.bolt11_payment().send(&invoice, None)?;
+
+        client
+            .await_row::<ReceiveEvent>(&format!("payment_hash = '{}'", invoice.payment_hash()))
+            .await?;
+
+        let send_op = client.lightning_invoice_send(gateway_pk, invoice)?;
+
+        client.await_event::<SendRefundEvent>(send_op).await?;
+    }
+
+    info!("lightning: test_invoice_paid_twice passed");
+
+    Ok(())
+}
+
+/// The gateway uses a payment hash for one thing. The test authors an
+/// incoming contract, so it knows the preimage, and registers it with the
+/// gateway; the LDK node overpays its invoice, which the gateway fails
+/// back; the LDK node then issues an invoice of its own for the same hash,
+/// and a send of that through the gateway is refunded rather than paid.
+async fn test_send_of_registered_hash(env: &TestEnv, client: &TestClient) -> anyhow::Result<()> {
+    info!("lightning: test_send_of_registered_hash");
+
+    let endpoint = Endpoint::builder(N0)
+        .transport_config(picomint_rpc::transport_config())
+        .address_lookup(MdnsAddressLookup::builder())
+        .bind()
+        .await?;
+
+    let info = retry("gateway info", || async {
+        picomint_rpc::request::<_, InfoResponse>(
+            &endpoint,
+            env.gateway_pk.0,
+            GatewayMethod::Info(InfoRequest {
+                mint: env.invite.mint,
+            }),
+        )
+        .await?
+        .info
+        .context("the gateway serves the test mint")
+    })
+    .await?;
+
+    let amount = Amount::from_sat(100);
+
+    let recipient = SecretKey::from_slice(&RECIPIENT_SECRET)
+        .expect("32-byte secret within curve order")
+        .public_key(SECP256K1);
+
+    let contract = IncomingContract::author(&recipient, amount, info.receive_fee.fee(amount.0));
+
+    let invoice = picomint_rpc::request::<_, ReceiveResponse>(
+        &endpoint,
+        env.gateway_pk.0,
+        GatewayMethod::Receive(ReceiveRequest {
+            mint: env.invite.mint,
+            contract: contract.clone(),
+        }),
+    )
+    .await?
+    .invoice;
+
+    env.ldk_node
+        .bolt11_payment()
+        .send_using_amount(&invoice, amount.0 + 1, None)?;
+
+    await_ldk_payment_failed(env, &invoice).await?;
+
+    let payable = env.ldk_node.bolt11_payment().receive_for_hash(
+        amount.0,
+        &lightning_invoice::Bolt11InvoiceDescription::Direct(lightning_invoice::Description::new(
+            String::new(),
+        )?),
+        3600,
+        lightning_types::payment::PaymentHash(contract.payment_hash().to_byte_array()),
+    )?;
+
+    let send_op = client.lightning_invoice_send(client.lightning_gateway()?, payable)?;
+
+    client.await_event::<SendRefundEvent>(send_op).await?;
+
+    endpoint.close().await;
+
+    info!("lightning: test_send_of_registered_hash passed");
+
+    Ok(())
+}
+
+/// Wait for the freestanding LDK node's payment of `invoice` to fail; its
+/// success is an error.
+async fn await_ldk_payment_failed(env: &TestEnv, invoice: &Bolt11Invoice) -> anyhow::Result<()> {
+    let payment_hash = lightning_types::payment::PaymentHash(*invoice.payment_hash().as_ref());
+
+    loop {
+        let event = env.ldk_node.next_event_async().await;
+
+        env.ldk_node.event_handled()?;
+
+        let (hash, failed) = match event {
+            ldk_node::Event::PaymentFailed {
+                payment_hash: Some(hash),
+                ..
+            } => (hash, true),
+            ldk_node::Event::PaymentSuccessful { payment_hash, .. } => (payment_hash, false),
+            _ => continue,
+        };
+
+        if hash == payment_hash {
+            ensure!(failed, "the payment was expected to fail");
+
+            return Ok(());
+        }
+    }
+}
+
 /// Whether the send under `operation` succeeded, once it has either
 /// succeeded or been refunded.
 async fn await_send_outcome(client: &TestClient, operation: OperationId) -> anyhow::Result<bool> {
@@ -559,6 +730,7 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
 
 const GATEWAY_SECRET: [u8; 32] = [1; 32];
 const INVOICE_SECRET: [u8; 32] = [2; 32];
+const RECIPIENT_SECRET: [u8; 32] = [3; 32];
 
 // Scenario selectors: embedded in the invoice's `payment_secret` to pick a
 // branch in `mock_handler`'s `Send` arm; the preimage defines the invoice's
@@ -628,6 +800,122 @@ async fn test_send_lnurl_direct(env: &TestEnv, client_send: &TestClient) -> anyh
     Ok(())
 }
 
+/// An incoming contract too small to claim is skipped rather than
+/// stalling the receive scanner. A contract of 300 msat — below the input
+/// fee plus the smallest change note — is funded to the receive key of a
+/// fresh client, which holds no notes to sweep into change, and a direct
+/// send to that client afterwards still lands.
+async fn test_dust_incoming_contract(
+    env: &TestEnv,
+    client_send: &TestClient,
+) -> anyhow::Result<()> {
+    info!("lightning: test_dust_incoming_contract");
+
+    // The client daemon prices contracts in whole sats, so the dust
+    // contract is funded by a client driven in-process.
+    let (funder, db, mint) = in_process_client(env, "dust-funder").await?;
+
+    funder.ecash_receive(
+        mint,
+        Account::Primary,
+        &client_send.ecash_send(bitcoin::Amount::from_sat(10))?,
+    )?;
+
+    retry("dust funder balance", || async {
+        ensure!(
+            funder.ecash_balance(mint, Account::Primary) > Amount::ZERO,
+            "the funder's notes are not issued yet"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    let client_receive = env.new_client().await?;
+
+    let lnurl = client_receive.lightning_lnurl_receive(&env.lnurl_daemon_url)?;
+
+    let dust = Amount(300);
+
+    let contract = IncomingContract::author(&lnurl_recipient(&lnurl)?, dust, Amount::ZERO);
+
+    let tx_builder = TxBuilder::from_output(Output {
+        output: wire::Output::Lightning(Box::new(LightningOutput::Incoming(contract))),
+        amount: dust,
+        fee: LIGHTNING_OUTPUT_FEE,
+    });
+
+    let operation = OperationId::new_random();
+
+    let dbtx = db.begin_write();
+
+    funder
+        .ecash_finalize_and_submit_tx(
+            mint,
+            &dbtx,
+            Account::Primary,
+            operation,
+            tx_builder,
+            false,
+            |txid| SendEvent {
+                txid,
+                amount: dust,
+                fee: Amount::ZERO,
+            },
+        )?
+        .context("Insufficient funds")?;
+
+    dbtx.commit();
+
+    retry("dust contract funded", || async {
+        ensure!(
+            funder
+                .read_operation_events(operation)
+                .iter()
+                .any(|entry| entry.to_event::<TxAcceptEvent>().is_some()),
+            "the dust contract's funding is not accepted yet"
+        );
+
+        Ok(())
+    })
+    .await?;
+
+    let amount = bitcoin::Amount::from_sat(700);
+
+    let send_op = client_send.lightning_lnurl_send_direct(&lnurl, amount)?;
+
+    client_send.await_event::<TxAcceptEvent>(send_op).await?;
+
+    client_receive
+        .await_row::<ReceiveEvent>(&format!("amount = {}", amount.to_sat() * 1000))
+        .await?;
+
+    ensure!(
+        client_receive
+            .rows::<ReceiveEvent>(&format!("amount = {}", dust.0))?
+            .is_empty(),
+        "the dust contract must be skipped"
+    );
+
+    client_receive.shutdown().await;
+
+    info!("lightning: test_dust_incoming_contract passed");
+
+    Ok(())
+}
+
+/// The receive key an lnurl of this suite's lnurl daemon names.
+fn lnurl_recipient(lnurl: &str) -> anyhow::Result<PublicKey> {
+    let url = parse_lnurl(lnurl).context("the client hands out a bech32 lnurl")?;
+
+    let payload = url
+        .rsplit_once("/pay/")
+        .context("the lnurl daemon serves pay/")?
+        .1;
+
+    Ok(picomint_base32::decode::<LnurlRequest>(payload)?.recipient)
+}
+
 const PAYABLE_PAYMENT_SECRET: [u8; 32] = [211; 32];
 const UNPAYABLE_PAYMENT_SECRET: [u8; 32] = [212; 32];
 const CLAIM_PAYMENT_SECRET: [u8; 32] = [214; 32];
@@ -688,9 +976,8 @@ fn mock_invoice_msat(
 /// dispatch lifecycle the real gateway daemon uses. Returns the mock's iroh
 /// public key for node registration.
 ///
-/// The mock claims contracts through a mint client of its own: the one
-/// place the suite drives the client library in-process, and it drives it
-/// in the gateway's role.
+/// The mock claims contracts through a mint client of its own, driven
+/// in-process in the gateway's role.
 async fn spawn_mock_gateway(env: &TestEnv) -> anyhow::Result<GatewayPk> {
     let endpoint = Endpoint::builder(N0)
         .alpns(vec![picomint_rpc::ALPN.to_vec()])
@@ -701,27 +988,39 @@ async fn spawn_mock_gateway(env: &TestEnv) -> anyhow::Result<GatewayPk> {
 
     let pk = GatewayPk(endpoint.id());
 
-    let db_dir = env.data_dir.join("mock-gateway");
+    let (client, db, mint) = in_process_client(env, "mock-gateway").await?;
+
+    tokio::spawn(picomint_rpc::run_accept_loop(endpoint, move |method| {
+        mock_handler(client.clone(), db.clone(), mint, method)
+    }));
+
+    Ok(pk)
+}
+
+/// A mint client driven in-process, for what the client daemon cannot
+/// do: its database lives under `name` in the test's data dir.
+async fn in_process_client(
+    env: &TestEnv,
+    name: &str,
+) -> anyhow::Result<(Arc<Client>, Database, MintId)> {
+    let db_dir = env.data_dir.join(name);
+
     tokio::fs::create_dir_all(&db_dir).await?;
 
     let db = Database::open(db_dir.join("client.redb"))?;
 
-    let client_endpoint = Endpoint::builder(N0)
+    let endpoint = Endpoint::builder(N0)
         .transport_config(picomint_rpc::transport_config())
         .address_lookup(MdnsAddressLookup::builder())
         .bind()
         .await?;
 
-    let client = Arc::new(Client::new(
-        client_endpoint,
-        db.clone(),
-        Mnemonic::generate(12)?,
-    ));
+    let client = Arc::new(Client::new(endpoint, db.clone(), Mnemonic::generate(12)?));
 
     // A fresh endpoint finds the invite node over mDNS, and the ecash suite
     // may be loading the mint in parallel; a failed add writes nothing, so
     // a second attempt starts clean.
-    let mint = retry("mock gateway joins the mint", || async {
+    let mint = retry(&format!("{name} joins the mint"), || async {
         client
             .add_mint(&env.invite, Some(bitcoin::Network::Regtest))
             .await
@@ -729,11 +1028,7 @@ async fn spawn_mock_gateway(env: &TestEnv) -> anyhow::Result<GatewayPk> {
     })
     .await?;
 
-    tokio::spawn(picomint_rpc::run_accept_loop(endpoint, move |method| {
-        mock_handler(client.clone(), db.clone(), mint, method)
-    }));
-
-    Ok(pk)
+    Ok((client, db, mint))
 }
 
 async fn mock_handler(
