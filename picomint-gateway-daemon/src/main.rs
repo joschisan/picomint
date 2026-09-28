@@ -23,9 +23,7 @@ use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::lightning::gateway::PaymentFee;
-use picomint_gateway_daemon::db::{
-    IncomingContractTable, LdkEventPaymentHashTable, outgoing_contract,
-};
+use picomint_gateway_daemon::db::{OutgoingContractTable, Payment, PaymentTable};
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
 use picomint_redb::{DbRead, WriteTx};
 use tracing::{info, warn};
@@ -319,18 +317,22 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
             payment_hash,
             claimable_amount_msat,
             ..
-        } => handle_payment_claimable(state, &dbtx, payment_hash.0, claimable_amount_msat),
+        } => handle_payment_claimable(
+            state,
+            &dbtx,
+            sha256::Hash::from_byte_array(payment_hash.0),
+            claimable_amount_msat,
+        ),
         ldk_node::Event::PaymentSuccessful {
             payment_hash,
             payment_preimage: Some(preimage),
             fee_paid_msat,
             ..
-        } => handle_payment_successful(
+        } => handle_payment_outcome(
             state,
             &dbtx,
-            payment_hash.0,
-            preimage.0,
-            Amount(fee_paid_msat.unwrap_or(0)),
+            sha256::Hash::from_byte_array(payment_hash.0),
+            Some((preimage.0, Amount(fee_paid_msat.unwrap_or(0)))),
         ),
         ldk_node::Event::PaymentFailed {
             payment_hash: Some(ph),
@@ -339,7 +341,7 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
         } => {
             warn!(?reason, payment_hash = ?ph, "The outgoing payment failed; cancelling it");
 
-            handle_payment_failed(state, &dbtx, ph.0)
+            handle_payment_outcome(state, &dbtx, sha256::Hash::from_byte_array(ph.0), None)
         }
         _ => return,
     }
@@ -347,70 +349,51 @@ fn process_ldk_event(state: &AppState, event: ldk_node::Event) {
     dbtx.commit();
 }
 
-/// Inbound HTLC arrived. Fund the registered contract via `start_receive`
-/// and settle the HTLC with the preimage in the same step. On amount
-/// mismatch or `start_receive` failure (e.g. insufficient gateway
-/// liquidity to fund the contract), log the reason and fail the HTLC so
-/// the LN sender gets a refund.
+/// Inbound HTLC arrived. Fund the contract registered under its hash and
+/// settle the HTLC with the preimage in the same step. A hash with no
+/// registered contract, an amount mismatch or a funding failure (e.g.
+/// insufficient gateway liquidity) fails the HTLC so the LN sender gets a
+/// refund, and a failure leaves the contract registered for a retry.
 fn handle_payment_claimable(
     state: &AppState,
     dbtx: &WriteTx,
-    payment_hash: [u8; 32],
+    payment_hash: sha256::Hash,
     amount_msat: u64,
 ) {
-    let operation = OperationId(sha256::Hash::from_byte_array(payment_hash));
+    // A used-up hash was funded by a direct swap, had its mint removed, or
+    // is this very payment replayed after its commit, whose claim LDK is
+    // already making and a failure leaves alone.
+    let Some(Payment::Registered { mint, contract }) = dbtx.get(&PaymentTable, &payment_hash)
+    else {
+        warn!(%payment_hash, "Failing an inbound HTLC with no registered contract");
 
-    if dbtx
-        .insert(&LdkEventPaymentHashTable, &payment_hash, &())
-        .is_some()
-    {
-        return;
-    }
-
-    // LDK only fires PaymentClaimable for hashes we registered via
-    // `receive_for_hash` in `AppState::receive`, which commits the
-    // contract row before returning the invoice — but the row goes once a
-    // direct swap funds its contract, and removing the contract's mint
-    // wipes it, while LDK still holds the hash, so fail the HTLC and
-    // refund the LN sender.
-    let Some(row) = dbtx.get(&IncomingContractTable, &operation) else {
-        warn!("Failing an inbound HTLC with no unfunded contract registered");
-
-        state
-            .node
-            .bolt11_payment()
-            .fail_for_hash(PaymentHash(payment_hash))
-            .expect("LDK has this payment_hash (registered via receive_for_hash)");
+        fail_htlc(state, payment_hash);
 
         return;
     };
 
-    let preimage = row.contract.preimage();
+    let preimage = contract.preimage();
 
-    if row.contract.amount.0 != amount_msat
+    if contract.amount.0 != amount_msat
         || state
             .client
-            .gateway_start_receive(row.mint, dbtx, operation, row.contract)
+            .gateway_start_receive(mint, dbtx, OperationId(payment_hash), contract)
             .is_err()
     {
-        state
-            .node
-            .bolt11_payment()
-            .fail_for_hash(PaymentHash(payment_hash))
-            .expect("LDK has this payment_hash (registered via receive_for_hash)");
+        fail_htlc(state, payment_hash);
 
         return;
     }
 
-    dbtx.remove(&IncomingContractTable, &operation);
+    dbtx.insert(&PaymentTable, &payment_hash, &Payment::Done);
 
     // The preimage is the contract's own hash, so the HTLC settles now
     // rather than once the mint accepts the funding, and LDK's fail-back
-    // deadline constrains nothing. The funding leaves for the mint on the commit
-    // below; a crash before it replays this event, whose repeated claim
-    // LDK refuses, which is why a refusal is not fatal.
+    // deadline constrains nothing. The funding leaves for the mint on the
+    // commit below; a crash before it replays this event, whose repeated
+    // claim LDK refuses, which is why a refusal is not fatal.
     if let Err(error) = state.node.bolt11_payment().claim_for_hash(
-        PaymentHash(payment_hash),
+        PaymentHash(payment_hash.to_byte_array()),
         amount_msat,
         PaymentPreimage(preimage),
     ) {
@@ -418,56 +401,44 @@ fn handle_payment_claimable(
     }
 }
 
-/// Outbound LN payment succeeded. Look up the outgoing contract row and
-/// tell the source mint's client to finalize the send with the
-/// preimage carried on the `PaymentSuccessful` event.
-fn handle_payment_successful(
-    state: &AppState,
-    dbtx: &WriteTx,
-    payment_hash: [u8; 32],
-    preimage: [u8; 32],
-    lightning_fee: Amount,
-) {
-    if dbtx
-        .insert(&LdkEventPaymentHashTable, &payment_hash, &())
-        .is_some()
-    {
-        return;
-    }
-
-    if let Some((operation, row)) =
-        outgoing_contract(dbtx, sha256::Hash::from_byte_array(payment_hash))
-    {
-        state
-            .client
-            .gateway_finalize_send(
-                row.mint,
-                dbtx,
-                operation,
-                row.contract,
-                row.outpoint,
-                Some((preimage, lightning_fee)),
-            )
-            .expect("source mint for outgoing contract is added");
-    }
+fn fail_htlc(state: &AppState, payment_hash: sha256::Hash) {
+    state
+        .node
+        .bolt11_payment()
+        .fail_for_hash(PaymentHash(payment_hash.to_byte_array()))
+        .expect("LDK has this payment_hash (registered via receive_for_hash)");
 }
 
-/// Outbound LN payment failed. Look up the outgoing contract row and tell
-/// the source mint's client to forfeit the contract.
-fn handle_payment_failed(state: &AppState, dbtx: &WriteTx, payment_hash: [u8; 32]) {
-    if dbtx
-        .insert(&LdkEventPaymentHashTable, &payment_hash, &())
-        .is_some()
-    {
+/// Outbound LN payment succeeded or failed. Settle the send LDK is paying
+/// the hash for, with the preimage the success carries or with the forfeit
+/// signature; a hash no send is paying, as for a payment the operator made
+/// through the CLI or an event replayed after its send settled, is left
+/// alone.
+fn handle_payment_outcome(
+    state: &AppState,
+    dbtx: &WriteTx,
+    payment_hash: sha256::Hash,
+    success: Option<([u8; 32], Amount)>,
+) {
+    let Some(Payment::Sending { operation }) = dbtx.get(&PaymentTable, &payment_hash) else {
         return;
-    }
+    };
 
-    if let Some((operation, row)) =
-        outgoing_contract(dbtx, sha256::Hash::from_byte_array(payment_hash))
-    {
-        state
-            .client
-            .gateway_finalize_send(row.mint, dbtx, operation, row.contract, row.outpoint, None)
-            .expect("source mint for outgoing contract is added");
-    }
+    let row = dbtx
+        .get(&OutgoingContractTable, &operation)
+        .expect("Removing a mint retires the hashes paying its sends");
+
+    state
+        .client
+        .gateway_finalize_send(
+            row.mint,
+            dbtx,
+            operation,
+            row.contract,
+            row.outpoint,
+            success,
+        )
+        .expect("source mint for outgoing contract is added");
+
+    dbtx.insert(&PaymentTable, &payment_hash, &Payment::Done);
 }
