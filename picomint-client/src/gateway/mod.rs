@@ -120,7 +120,7 @@ impl Client {
 
         let claim_amount = contract
             .claim_amount()
-            .context("The contract's fee exceeds its amount")?;
+            .expect("The receive handler refuses a contract whose fee exceeds its amount");
 
         let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Lightning(Box::new(LightningOutput::Incoming(contract))),
