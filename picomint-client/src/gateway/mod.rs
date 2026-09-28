@@ -106,7 +106,8 @@ impl Client {
 
     /// Fund an incoming contract: submit it, log `ReceiveEvent`, and spawn
     /// the state machine that logs the preimage once the funding is
-    /// accepted. Idempotent on `operation`.
+    /// accepted. Each call funds the contract anew, so the caller funds a
+    /// contract once.
     pub fn gateway_start_receive(
         &self,
         mint: MintId,

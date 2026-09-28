@@ -28,7 +28,7 @@ use picomint_gateway_daemon::db::{
 };
 use picomint_gateway_daemon::{AppState, DB_FILE, LDK_NODE_DB_FOLDER, cli, connect, public};
 use picomint_redb::{DbRead, WriteTx};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -371,11 +371,12 @@ fn handle_payment_claimable(
 
     // LDK only fires PaymentClaimable for hashes we registered via
     // `receive_for_hash` in `AppState::receive`, which commits the
-    // contract row before returning the invoice — but removing the
-    // contract's mint wipes the row while LDK still holds the hash, so
-    // fail the HTLC and refund the LN sender.
+    // contract row before returning the invoice — but the row goes once a
+    // direct swap funds its contract, and removing the contract's mint
+    // wipes it, while LDK still holds the hash, so fail the HTLC and
+    // refund the LN sender.
     let Some(row) = dbtx.get(&IncomingContractTable, &operation) else {
-        error!("Failing inbound HTLC for a removed mint");
+        warn!("Failing an inbound HTLC with no unfunded contract registered");
 
         state
             .node
@@ -402,6 +403,8 @@ fn handle_payment_claimable(
 
         return;
     }
+
+    dbtx.remove(&IncomingContractTable, &operation);
 
     // The preimage is the contract's own hash, so the HTLC settles now
     // rather than once the mint accepts the funding, and LDK's fail-back

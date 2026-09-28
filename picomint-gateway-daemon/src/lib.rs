@@ -10,6 +10,7 @@ use anyhow::{anyhow, ensure};
 use bitcoin::Network;
 use bitcoin::hashes::Hash;
 use iroh::Endpoint;
+use lightning::ln::channelmanager::PaymentId;
 use lightning::routing::router::RouteParametersConfig;
 use lightning::types::payment::PaymentHash;
 use lightning_invoice::{
@@ -170,7 +171,9 @@ impl AppState {
     /// an LN send via LDK or a direct-swap receive on the target mint. An
     /// invoice gets one attempt: a further contract for a payment hash the
     /// gateway has taken on fails here and is refunded, which is safe
-    /// because the forfeit signature releases only the funding it names.
+    /// because the forfeit signature releases only the funding it names. A
+    /// direct swap takes the invoice on once it funds the contract, and an
+    /// invoice whose contract is funded has none left to swap to.
     fn start_payment(
         &self,
         dbtx: &WriteTx,
@@ -218,13 +221,24 @@ impl AppState {
             "The invoice already has a payment attempt"
         );
 
-        dbtx.insert(
-            &PaymentHashTable,
-            &payload.contract.payment_hash,
-            &operation,
-        );
-
         if self.node.node_id() != payload.invoice.get_payee_pub_key() {
+            // The LDK event marker is keyed by payment hash, so a send of a
+            // hash LDK already holds, as an invoice this gateway issued,
+            // would share it with that payment's events. LDK's own duplicate
+            // refusal lets a failed one through.
+            ensure!(
+                self.node
+                    .payment(&PaymentId(payload.contract.payment_hash.to_byte_array()))
+                    .is_none(),
+                "LDK already holds a payment for this hash"
+            );
+
+            dbtx.insert(
+                &PaymentHashTable,
+                &payload.contract.payment_hash,
+                &operation,
+            );
+
             // The whole fee is the routing budget: whatever routing does not
             // take is the gateway's margin, and an internal settlement keeps
             // all of it.
@@ -232,9 +246,6 @@ impl AppState {
                 .with_max_total_routing_fee_msat(fee.0)
                 .with_max_total_cltv_expiry_delta(self.cltv_expiry_delta);
 
-            // A duplicate is cancelled like any other refusal: LDK reports one
-            // for any payment it holds under the hash, an invoice this gateway
-            // issued included, and none of those settles this send.
             return self
                 .node
                 .bolt11_payment()
@@ -246,11 +257,11 @@ impl AppState {
         let incoming_operation = OperationId(payload.contract.payment_hash);
 
         // An invoice of our own node that no receive registered, as one the
-        // operator issued through the CLI.
+        // operator issued through the CLI, or one whose contract is funded.
         let incoming_row = dbtx
             .get(&IncomingContractTable, &incoming_operation)
             .ok_or(anyhow!(
-                "No direct-swap target is registered for this payment hash"
+                "No unfunded contract is registered for this payment hash"
             ))?;
 
         ensure!(
@@ -265,7 +276,19 @@ impl AppState {
                 incoming_operation,
                 incoming_row.contract,
             )
-            .map_err(|error| anyhow!("Could not fund the direct swap's receive: {error}"))
+            .map_err(|error| anyhow!("Could not fund the direct swap's receive: {error}"))?;
+
+        // Only a funded swap enters the hash index, so the receive outcome
+        // that settles this send is the one of the funding it started.
+        dbtx.remove(&IncomingContractTable, &incoming_operation);
+
+        dbtx.insert(
+            &PaymentHashTable,
+            &payload.contract.payment_hash,
+            &operation,
+        );
+
+        Ok(())
     }
 
     /// Creates a Bolt11 invoice against the payment hash of the
@@ -273,7 +296,8 @@ impl AppState {
     /// contract with the invoice in the daemon-global `incoming-contract`
     /// table. A repeated contract is rejected before LDK sees it: LDK's
     /// `receive_for_hash` overwrites what it stores for a payment hash it
-    /// already holds, which would reset a paid invoice to pending.
+    /// already holds, which would reset a paid invoice to pending. The check
+    /// asks LDK's store, since the row is gone once the contract is funded.
     pub async fn receive(&self, payload: ReceiveRequest) -> anyhow::Result<Bolt11Invoice> {
         ensure!(
             self.client.config(payload.mint).is_some(),
@@ -290,8 +314,6 @@ impl AppState {
             "Contract fee exceeds the contract amount"
         );
 
-        let operation = OperationId(payload.contract.payment_hash());
-
         let dbtx = self.gateway_db.begin_write();
 
         ensure!(
@@ -301,7 +323,9 @@ impl AppState {
         );
 
         ensure!(
-            dbtx.get(&IncomingContractTable, &operation).is_none(),
+            self.node
+                .payment(&PaymentId(payload.contract.payment_hash().to_byte_array()))
+                .is_none(),
             "A contract for this hash has already been registered"
         );
 
@@ -318,7 +342,7 @@ impl AppState {
 
         dbtx.insert(
             &IncomingContractTable,
-            &operation,
+            &OperationId(payload.contract.payment_hash()),
             &IncomingContractRow {
                 mint: payload.mint,
                 contract: payload.contract,
