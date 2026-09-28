@@ -156,9 +156,10 @@ impl StateMachine for SendStateMachine {
                 );
                 None
             }
-            SendOutcome::GatewayResponse(Err(signature)) => Some(self.update(
-                SendSMState::Refunding(submit_refund(ctx, dbtx, self, signature)),
-            )),
+            SendOutcome::GatewayResponse(Err(signature)) => {
+                submit_refund(ctx, dbtx, self, signature)
+                    .map(|txid| self.update(SendSMState::Refunding(txid)))
+            }
             SendOutcome::Refunded => None,
         }
     }
@@ -166,13 +167,14 @@ impl StateMachine for SendStateMachine {
 
 /// Build and submit the refund tx spending the contract with the gateway's
 /// forfeit signature, log `SendRefundEvent`, return its txid for the SM to
-/// advance into the `Refunding` state with.
+/// advance into the `Refunding` state with, or `None` for a contract too
+/// small to refund.
 fn submit_refund(
     ctx: &ClientContext,
     dbtx: &WriteTx,
     old_state: &SendStateMachine,
     signature: Signature,
-) -> TransactionId {
+) -> Option<TransactionId> {
     let tx_builder = TxBuilder::from_input(Input {
         input: wire::Input::Lightning(LightningInput::Outgoing(
             old_state.common.outpoint,
@@ -185,7 +187,7 @@ fn submit_refund(
 
     let operation = old_state.common.operation;
 
-    crate::ecash::finalize_and_submit_tx(
+    let txid = crate::ecash::finalize_and_submit_tx(
         ctx,
         dbtx,
         old_state.common.account,
@@ -194,8 +196,13 @@ fn submit_refund(
         Vec::new(),
         false,
         |txid| SendRefundEvent { txid },
-    )
-    .expect("Cannot claim input, additional funding needed")
+    );
+
+    if txid.is_none() {
+        error!(%operation, "The outgoing contract is too small to refund");
+    }
+
+    txid
 }
 
 /// Resolves only with a response the contract accepts. An invalid
