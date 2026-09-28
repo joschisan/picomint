@@ -125,7 +125,6 @@ pub struct SendRequest {
     pub outpoint: OutPoint,
     pub contract: OutgoingContract,
     pub invoice: LightningInvoice,
-    pub auth: Signature,
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]

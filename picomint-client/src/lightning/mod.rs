@@ -260,8 +260,11 @@ async fn send_inner(
     let fee = gateway_info.send_fee.fee(amount);
     let amount = Amount(amount);
 
+    let invoice = LightningInvoice::Bolt11(invoice);
+
     let contract = OutgoingContract {
-        payment_hash: *invoice.payment_hash(),
+        payment_hash: *invoice.bolt11().payment_hash(),
+        invoice_hash: invoice.consensus_hash(),
         amount,
         fee,
         claim_pk: gateway_info.module_public_key,
@@ -302,7 +305,7 @@ async fn send_inner(
             outpoint: OutPoint { txid, out_idx: 0 },
             contract,
             gateway_pk,
-            invoice: LightningInvoice::Bolt11(invoice.clone()),
+            invoice,
             refund_keypair,
         },
         state: SendSMState::Funding,

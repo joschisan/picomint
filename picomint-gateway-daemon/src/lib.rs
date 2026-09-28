@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, bail, ensure};
 use bitcoin::Network;
-use bitcoin::hashes::{Hash, sha256};
+use bitcoin::hashes::Hash;
 use iroh::Endpoint;
 use lightning::routing::router::RouteParametersConfig;
 use lightning::types::payment::PaymentHash;
@@ -24,7 +24,6 @@ use picomint_core::lightning::LightningInvoice;
 use picomint_core::lightning::gateway::{GatewayInfo, PaymentFee};
 use picomint_core::lightning::methods::{ReceiveRequest, SendRequest};
 use picomint_core::secp256k1::schnorr::Signature;
-use picomint_encoding::Encodable as _;
 use picomint_gateway_cli_core::MintInfo;
 use picomint_redb::{Database, DbRead, WriteTx};
 
@@ -180,11 +179,8 @@ impl AppState {
         operation: OperationId,
     ) -> anyhow::Result<()> {
         ensure!(
-            payload.contract.verify_invoice_auth(
-                payload.invoice.consensus_hash::<sha256::Hash>(),
-                &payload.auth,
-            ),
-            "Invalid auth signature for the invoice data"
+            payload.contract.verify_invoice(&payload.invoice),
+            "The invoice is not the one the contract commits to"
         );
 
         let amount = payload

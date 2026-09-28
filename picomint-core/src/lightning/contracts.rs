@@ -6,8 +6,8 @@ use secp256k1::schnorr::Signature;
 use secp256k1::{Keypair, Message, PublicKey, SecretKey, XOnlyPublicKey, ecdh};
 use serde::{Deserialize, Serialize};
 
-use crate::lightning::ContractId;
 use crate::lightning::secret::IncomingContractSecret;
+use crate::lightning::{ContractId, LightningInvoice};
 
 /// What pays a recipient: the mint holds it until
 /// [`crate::lightning::LightningInput::Incoming`] spends it.
@@ -98,6 +98,9 @@ impl IncomingContract {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct OutgoingContract {
     pub payment_hash: sha256::Hash,
+    /// The hash of the invoice this contract pays, so the gateway pays the
+    /// invoice the sender funded and no other one for the same hash.
+    pub invoice_hash: sha256::Hash,
     /// Invoice amount: what the gateway will pay over LN.
     pub amount: Amount,
     /// Gateway's combined cut (LN routing + tx fee). The client funds
@@ -138,14 +141,9 @@ impl OutgoingContract {
         }
     }
 
-    pub fn verify_invoice_auth(&self, message: sha256::Hash, signature: &Signature) -> bool {
-        secp256k1::global::SECP256K1
-            .verify_schnorr(
-                signature,
-                &Message::from_digest(*message.as_ref()),
-                &self.refund_pk,
-            )
-            .is_ok()
+    /// Whether `invoice` is the one this contract commits to.
+    pub fn verify_invoice(&self, invoice: &LightningInvoice) -> bool {
+        invoice.consensus_hash::<sha256::Hash>() == self.invoice_hash
     }
 }
 

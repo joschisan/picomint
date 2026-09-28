@@ -197,7 +197,6 @@ impl Gateways {
     /// Ask `gateway_pk` to pay, retrying transport errors forever on its
     /// pooled connection; errors only if the gateway is not a current
     /// member, which no retry can cure.
-    #[allow(clippy::too_many_arguments)]
     pub async fn send(
         &self,
         gateway_pk: GatewayPk,
@@ -205,7 +204,6 @@ impl Gateways {
         outpoint: OutPoint,
         contract: OutgoingContract,
         invoice: LightningInvoice,
-        auth: Signature,
     ) -> anyhow::Result<Result<[u8; 32], Signature>> {
         let mut rx = self
             .connection(gateway_pk)
@@ -216,7 +214,6 @@ impl Gateways {
             outpoint,
             contract,
             invoice,
-            auth,
         });
 
         request_on_state_retry::<SendResponse>(&mut rx, method)

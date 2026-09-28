@@ -2,7 +2,6 @@ use super::gateway::Gateways;
 use crate::api::MintApi;
 use crate::executor::{SmId, StateMachine};
 use crate::tx::{Input, TxBuilder};
-use bitcoin::hashes::sha256;
 use futures::future::pending;
 use picomint_core::TransactionId;
 use picomint_core::config::MintId;
@@ -101,7 +100,6 @@ impl StateMachine for SendStateMachine {
                         self.common.outpoint,
                         self.common.contract.clone(),
                         self.common.invoice.clone(),
-                        self.common.refund_keypair,
                     ) => SendOutcome::GatewayResponse(response),
                     preimage = await_preimage_sm(
                         self.common.outpoint,
@@ -204,7 +202,7 @@ fn submit_refund(
 /// response or a gateway that left the announced set is terminal for this
 /// branch — no retry changes either — so it parks and leaves the outcome
 /// to the preimage poll.
-#[instrument(skip(refund_keypair, gateways))]
+#[instrument(skip(gateways))]
 async fn gateway_send_sm(
     gateways: Gateways,
     gateway_pk: GatewayPk,
@@ -212,14 +210,9 @@ async fn gateway_send_sm(
     outpoint: OutPoint,
     contract: OutgoingContract,
     invoice: LightningInvoice,
-    refund_keypair: Keypair,
 ) -> Result<[u8; 32], Signature> {
-    let auth = refund_keypair.sign_schnorr(secp256k1::Message::from_digest(
-        *invoice.consensus_hash::<sha256::Hash>().as_ref(),
-    ));
-
     match gateways
-        .send(gateway_pk, mint, outpoint, contract.clone(), invoice, auth)
+        .send(gateway_pk, mint, outpoint, contract.clone(), invoice)
         .await
     {
         Ok(result) => {
