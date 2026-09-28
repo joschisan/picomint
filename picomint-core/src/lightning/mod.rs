@@ -17,6 +17,8 @@ use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::ecash::ECASH_OUTPUT_FEE;
+use crate::ecash::config::client_denominations;
 use crate::lightning::contracts::{IncomingContract, OutgoingContract};
 use crate::{Amount, OutPoint};
 
@@ -25,6 +27,19 @@ pub const LIGHTNING_INPUT_FEE: Amount = Amount(100);
 
 /// Fee the mint charges per lightning output.
 pub const LIGHTNING_OUTPUT_FEE: Amount = Amount::from_sat(1);
+
+/// The least an outgoing contract can hold. Its claim and its refund each
+/// spend it as their transaction's only input, which has to pay the input
+/// fee and still mint the smallest change note, since the mint refuses a
+/// transaction without outputs.
+pub fn min_outgoing_contract() -> Amount {
+    let smallest_note = client_denominations()
+        .next()
+        .expect("The client mints at least one denomination")
+        .amount();
+
+    LIGHTNING_INPUT_FEE + ECASH_OUTPUT_FEE + smallest_note
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct ContractId(pub sha256::Hash);

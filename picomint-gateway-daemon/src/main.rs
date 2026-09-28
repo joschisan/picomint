@@ -23,6 +23,7 @@ use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use picomint_core::Amount;
 use picomint_core::core::OperationId;
 use picomint_core::lightning::gateway::PaymentFee;
+use picomint_core::lightning::min_outgoing_contract;
 use picomint_gateway_daemon::db::{
     IncomingContractTable, LdkEventPaymentHashTable, outgoing_contract,
 };
@@ -131,6 +132,15 @@ fn main() -> anyhow::Result<()> {
         send_fee.is_within(&PaymentFee::SEND_FEE_LIMIT),
         "Configured send fee {send_fee:?} exceeds the limit clients accept {:?}",
         PaymentFee::SEND_FEE_LIMIT,
+    );
+
+    // Every outgoing contract carries at least the base fee, so a base at
+    // the floor keeps each one claimable and refundable.
+    ensure!(
+        send_fee.base >= min_outgoing_contract(),
+        "Configured send fee base {} is below the {} an outgoing contract has to hold",
+        send_fee.base,
+        min_outgoing_contract(),
     );
 
     let receive_fee = PaymentFee {

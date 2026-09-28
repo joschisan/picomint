@@ -28,6 +28,7 @@ use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::lnurl::LnurlRequest;
 use picomint_core::lightning::{
     LIGHTNING_INPUT_FEE, LIGHTNING_OUTPUT_FEE, LightningInput, LightningOutput,
+    min_outgoing_contract,
 };
 use picomint_core::methods::MintInfoResponse;
 use picomint_core::wire;
@@ -260,6 +261,10 @@ async fn send_inner(
     let fee = gateway_info.send_fee.fee(amount);
     let amount = Amount(amount);
 
+    if amount + fee < min_outgoing_contract() {
+        return Err(InvoiceSendError::AmountTooSmall);
+    }
+
     let contract = OutgoingContract {
         payment_hash: *invoice.payment_hash(),
         amount,
@@ -473,6 +478,8 @@ pub enum InvoiceSendError {
     InvoiceAlreadyAttempted,
     #[error("Gateway fee exceeds the allowed limit")]
     GatewayFeeExceedsLimit,
+    #[error("The payment is too small for the mint to refund")]
+    AmountTooSmall,
     #[error("Gateway is not available")]
     GatewayNotAvailable,
     #[error("The client's balance is insufficient")]
