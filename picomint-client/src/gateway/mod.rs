@@ -22,7 +22,7 @@ use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::wire;
 use picomint_core::{Amount, OutPoint};
 use secp256k1::schnorr::Signature;
-use tracing::warn;
+use tracing::{error, warn};
 
 pub use self::secret::GatewaySecret;
 use receive_sm::{ReceiveStateMachine, ReceiveStateMachineTable};
@@ -184,7 +184,7 @@ impl Client {
                     fee: LIGHTNING_INPUT_FEE,
                 });
 
-                crate::ecash::finalize_and_submit_tx(
+                let claimed = crate::ecash::finalize_and_submit_tx(
                     &ctx,
                     dbtx,
                     ROUTING_ACCOUNT,
@@ -197,8 +197,11 @@ impl Client {
                         txid,
                         lightning_fee,
                     },
-                )
-                .expect("Cannot claim outgoing contract — additional funding needed");
+                );
+
+                if claimed.is_none() {
+                    error!(%operation, "The outgoing contract is too small to claim");
+                }
             }
             None => {
                 let signature = ctx
