@@ -1,5 +1,4 @@
 use bitcoin::hashes::sha256;
-use lightning_invoice::Bolt11Invoice;
 use picomint_client::eventlog::EventLogId;
 use picomint_client::{Mnemonic, random_mnemonic};
 use picomint_core::OutPoint;
@@ -38,33 +37,15 @@ table!(
     "outgoing-contract",
 );
 
-// The one payment attempt an invoice's hash ever gets at this gateway:
-// the outgoing contract whose settlement it pays. Written when the
-// attempt is kicked off, never removed, so a later funding of the same
-// invoice is refunded on arrival and a hash never has two payments in
-// flight. LDK events and receive outcomes, which carry the hash, resolve
-// their outgoing contract through it.
+// What the gateway has done with each payment hash. A hash moves forward
+// through `Payment` once and only removing its mint takes it back to
+// absent, so an invoice gets one use: every handler advances the hash here
+// in the write transaction of its side effect, or refuses the request, and
+// a replayed handler finds the state it left behind.
 table!(
-    PaymentHashTable,
-    sha256::Hash => OperationId,
-    "payment-hash",
-);
-
-table!(
-    IncomingContractTable,
-    OperationId => IncomingContractRow,
-    "incoming-contract",
-);
-
-// The `payment_hash`es of LDK events the event loop has fully processed
-// (their handler committed successfully). Written atomically with the
-// handler's work inside a single daemon-DB write transaction — so presence
-// implies the handler ran to completion, absence on an incoming event
-// means it's safe to (re-)process.
-table!(
-    LdkEventPaymentHashTable,
-    [u8; 32] => (),
-    "ldk-event-payment-hash",
+    PaymentTable,
+    sha256::Hash => Payment,
+    "payment",
 );
 
 // Cursor for the daemon-wide trailer task. Value is the next (unprocessed)
@@ -82,54 +63,58 @@ pub struct OutgoingContractRow {
     pub mint: MintId,
     pub contract: contracts::OutgoingContract,
     pub outpoint: OutPoint,
-    pub invoice: Bolt11Invoice,
 }
 
+/// The state of one payment hash at this gateway.
 #[derive(Debug, Clone, Encodable, Decodable)]
-pub struct IncomingContractRow {
-    pub mint: MintId,
-    pub contract: contracts::IncomingContract,
-    pub invoice: Bolt11Invoice,
+pub enum Payment {
+    /// A receive issued an invoice for this contract, and nothing has
+    /// funded it yet.
+    Registered {
+        mint: MintId,
+        contract: contracts::IncomingContract,
+    },
+    /// A Lightning payment of the invoice funded the contract.
+    Received,
+    /// A direct swap funded the contract, and the outcome of that funding
+    /// settles the send of `operation`.
+    Swapped { operation: OperationId },
+    /// The send of `operation` was handed to LDK to pay the invoice over
+    /// Lightning, and LDK's outcome for the hash settles it.
+    Sending { operation: OperationId },
+    /// The send the hash was used for is settled.
+    Settled,
 }
 
-/// The outgoing contract whose settlement pays the invoice with
-/// `payment_hash`, with its operation, or none when the gateway holds no
-/// attempt for it, as for a payment the operator made through the CLI.
-pub fn outgoing_contract(
-    dbtx: &impl DbRead,
-    payment_hash: sha256::Hash,
-) -> Option<(OperationId, OutgoingContractRow)> {
-    let operation = dbtx.get(&PaymentHashTable, &payment_hash)?;
-
-    dbtx.get(&OutgoingContractTable, &operation)
-        .map(|row| (operation, row))
-}
-
-/// Delete the daemon's rows scoped to `mint` — its outgoing-contract
-/// and incoming-contract rows. Runs inside the dbtx that removes the mint
-/// from the client, so a surviving contract row always implies its
-/// mint is added.
+/// Delete the daemon's rows scoped to `mint`: its outgoing-contract rows
+/// and the payment hashes registered on it or settling one of its sends.
+/// Runs inside the dbtx that removes the mint from the client, so a
+/// surviving row always implies its mint is added.
 pub fn wipe_mint_rows(dbtx: &WriteTx, mint: MintId) {
-    let outgoing = dbtx.iter(&OutgoingContractTable, |rows| {
-        rows.filter(|entry| entry.1.mint == mint)
-            .map(|entry| (entry.0, entry.1.contract.payment_hash))
-            .collect::<Vec<_>>()
-    });
-
-    for entry in outgoing {
-        dbtx.remove(&OutgoingContractTable, &entry.0);
-
-        dbtx.remove(&PaymentHashTable, &entry.1);
-    }
-
-    let incoming = dbtx.iter(&IncomingContractTable, |rows| {
+    let operations = dbtx.iter(&OutgoingContractTable, |rows| {
         rows.filter(|entry| entry.1.mint == mint)
             .map(|entry| entry.0)
             .collect::<Vec<_>>()
     });
 
-    for operation in incoming {
-        dbtx.remove(&IncomingContractTable, &operation);
+    for operation in &operations {
+        dbtx.remove(&OutgoingContractTable, operation);
+    }
+
+    let hashes = dbtx.iter(&PaymentTable, |rows| {
+        rows.filter(|entry| match &entry.1 {
+            Payment::Registered { mint: other, .. } => *other == mint,
+            Payment::Swapped { operation } | Payment::Sending { operation } => {
+                operations.contains(operation)
+            }
+            Payment::Received | Payment::Settled => false,
+        })
+        .map(|entry| entry.0)
+        .collect::<Vec<_>>()
+    });
+
+    for hash in hashes {
+        dbtx.remove(&PaymentTable, &hash);
     }
 }
 

@@ -6,9 +6,9 @@ pub mod trailer;
 
 use std::sync::Arc;
 
-use anyhow::{anyhow, ensure};
+use anyhow::{anyhow, bail, ensure};
 use bitcoin::Network;
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::{Hash, sha256};
 use iroh::Endpoint;
 use lightning::routing::router::RouteParametersConfig;
 use lightning::types::payment::PaymentHash;
@@ -26,10 +26,7 @@ use picomint_core::secp256k1::schnorr::Signature;
 use picomint_gateway_cli_core::MintInfo;
 use picomint_redb::{Database, DbRead, WriteTx};
 
-use crate::db::{
-    IncomingContractRow, IncomingContractTable, OutgoingContractRow, OutgoingContractTable,
-    PaymentHashTable,
-};
+use crate::db::{OutgoingContractRow, OutgoingContractTable, Payment, PaymentTable};
 use tracing::warn;
 
 /// Name of the gateway's database.
@@ -121,7 +118,6 @@ impl AppState {
                     mint: payload.mint,
                     contract: payload.contract.clone(),
                     outpoint: payload.outpoint,
-                    invoice: payload.invoice.clone(),
                 },
             )
             .is_some()
@@ -167,10 +163,12 @@ impl AppState {
     }
 
     /// Checks the request against the funded contract and kicks off either
-    /// an LN send via LDK or a direct-swap receive on the target mint. An
-    /// invoice gets one attempt: a further contract for a payment hash the
-    /// gateway has taken on fails here and is refunded, which is safe
-    /// because the forfeit signature releases only the funding it names.
+    /// an LN send via LDK or a direct-swap receive on the target mint,
+    /// advancing the invoice's payment hash in [`PaymentTable`]: an external
+    /// invoice takes a hash nothing uses yet, an invoice of this gateway
+    /// takes a registered contract it funds. Any other state is refused and
+    /// the funding refunded, which is safe because the forfeit signature
+    /// releases only the funding it names.
     fn start_payment(
         &self,
         dbtx: &WriteTx,
@@ -212,19 +210,17 @@ impl AppState {
             "Contract fee does not match the send fee"
         );
 
-        ensure!(
-            dbtx.get(&PaymentHashTable, &payload.contract.payment_hash)
-                .is_none(),
-            "The invoice already has a payment attempt"
-        );
-
-        dbtx.insert(
-            &PaymentHashTable,
-            &payload.contract.payment_hash,
-            &operation,
-        );
+        let payment = dbtx.get(&PaymentTable, &payload.contract.payment_hash);
 
         if self.node.node_id() != payload.invoice.get_payee_pub_key() {
+            ensure!(payment.is_none(), "The payment hash is already in use");
+
+            dbtx.insert(
+                &PaymentTable,
+                &payload.contract.payment_hash,
+                &Payment::Sending { operation },
+            );
+
             // The whole fee is the routing budget: whatever routing does not
             // take is the gateway's margin, and an internal settlement keeps
             // all of it.
@@ -232,9 +228,10 @@ impl AppState {
                 .with_max_total_routing_fee_msat(fee.0)
                 .with_max_total_cltv_expiry_delta(self.cltv_expiry_delta);
 
-            // A duplicate is cancelled like any other refusal: LDK reports one
-            // for any payment it holds under the hash, an invoice this gateway
-            // issued included, and none of those settles this send.
+            // LDK refuses a hash it already holds as a duplicate, which the
+            // table above only lets through after a crash between an LDK
+            // send and its commit; that send's funding is refunded like any
+            // other refusal.
             return self
                 .node
                 .bolt11_payment()
@@ -243,37 +240,64 @@ impl AppState {
                 .map_err(|error| anyhow!("LDK refused the outgoing payment: {error}"));
         }
 
-        let incoming_operation = OperationId(payload.contract.payment_hash);
-
         // An invoice of our own node that no receive registered, as one the
-        // operator issued through the CLI.
-        let incoming_row = dbtx
-            .get(&IncomingContractTable, &incoming_operation)
-            .ok_or(anyhow!(
-                "No direct-swap target is registered for this payment hash"
-            ))?;
+        // operator issued through the CLI, or one whose contract is funded.
+        let Some(Payment::Registered { mint, contract }) = payment else {
+            bail!("No unfunded contract is registered for this payment hash");
+        };
 
-        ensure!(
-            incoming_row.contract.amount.0 == amount,
-            "Direct-swap amount mismatch"
-        );
+        ensure!(contract.amount.0 == amount, "Direct-swap amount mismatch");
 
         self.client
             .gateway_start_receive(
-                incoming_row.mint,
+                mint,
                 dbtx,
-                incoming_operation,
-                incoming_row.contract,
+                OperationId(payload.contract.payment_hash),
+                contract,
             )
-            .map_err(|error| anyhow!("Could not fund the direct swap's receive: {error}"))
+            .map_err(|error| anyhow!("Could not fund the direct swap's receive: {error}"))?;
+
+        dbtx.insert(
+            &PaymentTable,
+            &payload.contract.payment_hash,
+            &Payment::Swapped { operation },
+        );
+
+        Ok(())
+    }
+
+    /// Settles the send of `operation`, which the payment hash was used for:
+    /// claims its contract with the preimage, or forfeits it without one.
+    pub fn settle_send(
+        &self,
+        dbtx: &WriteTx,
+        payment_hash: sha256::Hash,
+        operation: OperationId,
+        success: Option<([u8; 32], Amount)>,
+    ) {
+        let row = dbtx
+            .get(&OutgoingContractTable, &operation)
+            .expect("A send's row lives as long as its payment hash");
+
+        self.client
+            .gateway_finalize_send(
+                row.mint,
+                dbtx,
+                operation,
+                row.contract,
+                row.outpoint,
+                success,
+            )
+            .expect("source mint for outgoing contract is added");
+
+        dbtx.insert(&PaymentTable, &payment_hash, &Payment::Settled);
     }
 
     /// Creates a Bolt11 invoice against the payment hash of the
     /// `IncomingContract` the recipient authored, and registers the
-    /// contract with the invoice in the daemon-global `incoming-contract`
-    /// table. A repeated contract is rejected before LDK sees it: LDK's
-    /// `receive_for_hash` overwrites what it stores for a payment hash it
-    /// already holds, which would reset a paid invoice to pending.
+    /// contract under that hash in [`PaymentTable`]. A hash already in use
+    /// is refused before LDK sees it: LDK's `receive_for_hash` overwrites
+    /// what it stores for a hash it already holds.
     pub async fn receive(&self, payload: ReceiveRequest) -> anyhow::Result<Bolt11Invoice> {
         ensure!(
             self.client.config(payload.mint).is_some(),
@@ -290,19 +314,12 @@ impl AppState {
             "Contract fee exceeds the contract amount"
         );
 
-        let operation = OperationId(payload.contract.payment_hash());
-
         let dbtx = self.gateway_db.begin_write();
 
         ensure!(
-            dbtx.get(&PaymentHashTable, &payload.contract.payment_hash())
+            dbtx.get(&PaymentTable, &payload.contract.payment_hash())
                 .is_none(),
-            "The payment hash already has a payment attempt"
-        );
-
-        ensure!(
-            dbtx.get(&IncomingContractTable, &operation).is_none(),
-            "A contract for this hash has already been registered"
+            "The payment hash is already in use"
         );
 
         let invoice = self
@@ -317,12 +334,11 @@ impl AppState {
             .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))?;
 
         dbtx.insert(
-            &IncomingContractTable,
-            &operation,
-            &IncomingContractRow {
+            &PaymentTable,
+            &payload.contract.payment_hash(),
+            &Payment::Registered {
                 mint: payload.mint,
                 contract: payload.contract,
-                invoice: invoice.clone(),
             },
         );
 

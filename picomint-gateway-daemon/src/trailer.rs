@@ -3,23 +3,23 @@
 //! The `ReceiveStateMachine` in `picomint-client::gateway` is purely mint-
 //! local — it submits the incoming-contract tx and writes the terminal
 //! `ReceiveSuccess` / `ReceiveFailure` event. The trailer watches the
-//! global event log and, for a direct swap (the payment hash index names
-//! an outgoing contract), calls `gateway_finalize_send` on
-//! the sending mint's client so the sender gets the preimage (or refund
-//! signature). An inbound HTLC needs nothing here: it was settled when
-//! its funding was submitted, since the gateway holds the preimage.
+//! global event log and, for a direct swap (the payment hash is
+//! `Payment::Swapped`), settles the send the swap pays so the sender gets
+//! the preimage (or refund signature). An inbound HTLC needs nothing here:
+//! it was settled when its funding was submitted, since the gateway holds
+//! the preimage.
 //!
 //! Cursor is persisted daemon-wide in `EventLogCursorTable` and advanced after
 //! each dispatched event. Dispatches are idempotent, so on a crash the
 //! trailer just re-runs the last event on restart.
 use picomint_client::eventlog::EventLogEntry;
 use picomint_client::gateway::events::{ReceiveFailureEvent, ReceiveSuccessEvent};
-use picomint_core::core::OperationId;
+use picomint_core::Amount;
 use picomint_redb::{DbRead, WriteTx};
 use tracing::error;
 
 use crate::AppState;
-use crate::db::{EventLogCursorTable, IncomingContractTable, outgoing_contract};
+use crate::db::{EventLogCursorTable, Payment, PaymentTable};
 
 const CHUNK_SIZE: u64 = 1_000;
 
@@ -64,42 +64,25 @@ fn dispatch(state: &AppState, tx_ref: &WriteTx, entry: &EventLogEntry) {
         return;
     };
 
-    let Some(incoming) = tx_ref.get(&IncomingContractTable, &entry.operation) else {
-        return;
-    };
+    // The daemon funds every incoming contract under the operation of its
+    // payment hash.
+    let payment_hash = entry.operation.0;
 
-    let Some((operation, row)) = outgoing_contract(tx_ref, incoming.contract.payment_hash()) else {
-        // An inbound HTLC was settled when its funding was submitted, so
-        // a rejected funding leaves the recipient owed what the gateway
-        // was paid; nothing here can make that good.
-        if preimage.is_none() {
-            error!(operation = %entry.operation, "An inbound payment's funding was rejected after its HTLC settled");
-        }
-
-        return;
-    };
-
-    dispatch_direct_swap(state, tx_ref, operation, row, preimage);
-}
-
-fn dispatch_direct_swap(
-    state: &AppState,
-    tx_ref: &WriteTx,
-    operation: OperationId,
-    row: crate::db::OutgoingContractRow,
-    preimage: Option<[u8; 32]>,
-) {
-    state
-        .client
-        .gateway_finalize_send(
-            row.mint,
+    match (tx_ref.get(&PaymentTable, &payment_hash), preimage) {
+        (Some(Payment::Swapped { operation }), preimage) => state.settle_send(
             tx_ref,
+            payment_hash,
             operation,
-            row.contract,
-            row.outpoint,
             // An internal settlement routes nothing, so a successful one
             // realized no routing cost.
-            preimage.map(|preimage| (preimage, picomint_core::Amount::ZERO)),
-        )
-        .expect("source mint for outgoing contract is added");
+            preimage.map(|preimage| (preimage, Amount::ZERO)),
+        ),
+        // An inbound HTLC was settled when its funding was submitted, so a
+        // rejected funding leaves the recipient owed what the gateway was
+        // paid; nothing here can make that good.
+        (Some(Payment::Received), None) => {
+            error!(operation = %entry.operation, "An inbound payment's funding was rejected after its HTLC settled");
+        }
+        _ => {}
+    }
 }
