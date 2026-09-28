@@ -53,11 +53,10 @@ impl Event for SendCancelEvent {
 
 // --- Incoming payment ---
 
-/// A payment for a client's invoice arrived, the gateway funded the
-/// incoming contract it authored and settled the payment with the
-/// preimage;
-/// `gateway_receive_success` or `gateway_receive_failure` follows under
-/// the same operation.
+/// A payment for a client's invoice arrived, over Lightning or as a
+/// direct swap, and the gateway funded the incoming contract and settled
+/// the payment with the preimage. The funding's `tx_accept` or `tx_reject`
+/// follows under the same operation.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
 pub struct ReceiveEvent {
     /// The mint transaction that funds the contract, hex
@@ -70,26 +69,4 @@ pub struct ReceiveEvent {
 
 impl Event for ReceiveEvent {
     const KIND: EventKind = EventKind::from_static("gateway-receive");
-}
-
-/// The mint accepted the funding; a direct swap's sender is handed the
-/// contract's preimage.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
-pub struct ReceiveSuccessEvent {
-    /// The preimage the gateway settled with, hex
-    pub preimage: [u8; 32],
-}
-
-impl Event for ReceiveSuccessEvent {
-    const KIND: EventKind = EventKind::from_static("gateway-receive-success");
-}
-
-/// The mint rejected the funding transaction. A direct swap's sender is
-/// refunded; an inbound HTLC was already settled, so its recipient is
-/// owed the amount.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, SqlRow)]
-pub struct ReceiveFailureEvent;
-
-impl Event for ReceiveFailureEvent {
-    const KIND: EventKind = EventKind::from_static("gateway-receive-failure");
 }

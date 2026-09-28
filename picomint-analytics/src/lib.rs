@@ -102,8 +102,6 @@ events! {
     gateway::events::SendSuccessEvent,
     gateway::events::SendCancelEvent,
     gateway::events::ReceiveEvent,
-    gateway::events::ReceiveSuccessEvent,
-    gateway::events::ReceiveFailureEvent,
 }
 
 /// Shared handle to the analytics SQLite writer connection, used by the

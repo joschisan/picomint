@@ -1,6 +1,5 @@
 use bitcoin::hashes::sha256;
 use lightning_invoice::Bolt11Invoice;
-use picomint_client::eventlog::EventLogId;
 use picomint_client::{Mnemonic, random_mnemonic};
 use picomint_core::OutPoint;
 use picomint_core::config::MintId;
@@ -38,12 +37,12 @@ table!(
     "outgoing-contract",
 );
 
-// The one payment attempt an invoice's hash ever gets at this gateway:
-// the outgoing contract whose settlement it pays. Written when the
-// attempt is kicked off, never removed, so a later funding of the same
-// invoice is refunded on arrival and a hash never has two payments in
-// flight. LDK events and receive outcomes, which carry the hash, resolve
-// their outgoing contract through it.
+// The one LDK payment attempt an external invoice's hash ever gets at
+// this gateway: the outgoing contract whose settlement it pays. Written
+// when the attempt is kicked off, never removed, so a later funding of
+// the same invoice is refunded on arrival and a hash never has two
+// payments in flight. LDK's payment outcomes, which carry only the hash,
+// resolve their outgoing contract through it.
 table!(
     PaymentHashTable,
     sha256::Hash => OperationId,
@@ -69,16 +68,6 @@ table!(
     LdkEventPaymentHashTable,
     [u8; 32] => (),
     "ldk-event-payment-hash",
-);
-
-// Cursor for the daemon-wide trailer task. Value is the next (unprocessed)
-// `EventLogId` on the global event log. Advanced in the same dbtx that
-// dispatches the external side effect — so a crashed trailer simply
-// re-dispatches idempotently on restart.
-table!(
-    EventLogCursorTable,
-    () => EventLogId,
-    "event-log-cursor",
 );
 
 #[derive(Debug, Clone, Encodable, Decodable)]

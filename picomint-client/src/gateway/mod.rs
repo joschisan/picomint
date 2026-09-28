@@ -1,15 +1,11 @@
 pub mod api;
 pub mod events;
-mod receive_sm;
 mod secret;
 
 use anyhow::{Context as _, ensure};
-use picomint_redb::{Database, DbRead, ReadTx, WriteTx};
-use std::sync::Arc;
-use tokio::sync::Notify;
+use picomint_redb::WriteTx;
 
 use crate::client::Client;
-use crate::context::ClientContext;
 use crate::tx::{Input, Output, TxBuilder};
 use events::{ReceiveEvent, SendCancelEvent, SendEvent, SendSuccessEvent};
 use picomint_core::config::MintId;
@@ -25,40 +21,11 @@ use secp256k1::schnorr::Signature;
 use tracing::{error, warn};
 
 pub use self::secret::GatewaySecret;
-use receive_sm::{ReceiveStateMachine, ReceiveStateMachineTable};
 
 /// The account payments are routed from: every contract this module funds
 /// or claims settles here. The other accounts are the operator's — funds
 /// parked there through the admin CLI are outside the routing pool.
 pub const ROUTING_ACCOUNT: Account = Account::Primary;
-
-/// Resume this mint's persisted receive state machines. Called
-/// exactly once, at mint bring-up.
-pub(crate) fn resume(ctx: &ClientContext) {
-    crate::executor::resume::<ReceiveStateMachine, _>(ctx, ReceiveStateMachineTable);
-}
-
-/// Remove every row this module owns under the caller's mint prefix.
-/// Called by [`crate::Client::begin_remove_mint`] for end-of-life cleanup.
-pub(crate) fn wipe_tables(dbtx: &WriteTx, mint: MintId) {
-    dbtx.remove_prefix(&ReceiveStateMachineTable, &mint);
-}
-
-/// Whether any of this module's state machines for `operation` is still
-/// active. Operation ids are globally unique, so no mint scoping is
-/// needed — the active state machines are few, and a full scan of them
-/// costs what the per-mint prefix scan did.
-pub(crate) fn operation_is_active(dbtx: &ReadTx, operation: OperationId) -> bool {
-    dbtx.iter(&ReceiveStateMachineTable, |r| {
-        r.any(|entry| entry.1.operation == operation)
-    })
-}
-
-/// Notify handles for this module's state machine tables, fired on every
-/// commit that writes them.
-pub(crate) fn sm_notifies(db: &Database) -> Vec<Arc<Notify>> {
-    vec![db.notify_for_table(&ReceiveStateMachineTable)]
-}
 
 // ─── Flat mint-keyed surface ───────────────────────────────────────
 
@@ -104,10 +71,8 @@ impl Client {
         Ok(())
     }
 
-    /// Fund an incoming contract: submit it, log `ReceiveEvent`, and spawn
-    /// the state machine that logs the preimage once the funding is
-    /// accepted. Each call funds the contract anew, so the caller funds a
-    /// contract once.
+    /// Fund an incoming contract: submit it and log `ReceiveEvent`. Each
+    /// call funds the contract anew, so the caller funds a contract once.
     pub fn gateway_start_receive(
         &self,
         mint: MintId,
@@ -117,7 +82,6 @@ impl Client {
     ) -> anyhow::Result<()> {
         let ctx = self.ctx(mint)?;
 
-        let preimage = contract.preimage();
         let amount = contract.amount;
         let fee = contract.fee;
 
@@ -131,7 +95,7 @@ impl Client {
             fee: LIGHTNING_OUTPUT_FEE,
         });
 
-        let txid = crate::ecash::finalize_and_submit_tx(
+        crate::ecash::finalize_and_submit_tx(
             &ctx,
             dbtx,
             ROUTING_ACCOUNT,
@@ -141,22 +105,8 @@ impl Client {
             false,
             |txid| ReceiveEvent { txid, amount, fee },
         )
-        .context("Insufficient funds")?;
-
-        let outpoint = OutPoint { txid, out_idx: 0 };
-
-        crate::executor::add_state_machine_dbtx(
-            &ctx,
-            ReceiveStateMachineTable,
-            dbtx,
-            ReceiveStateMachine {
-                operation,
-                outpoint,
-                preimage,
-            },
-        );
-
-        Ok(())
+        .context("Insufficient funds")
+        .map(|_| ())
     }
 
     /// Settle an outgoing contract: claim it with the preimage on success,

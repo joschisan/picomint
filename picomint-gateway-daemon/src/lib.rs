@@ -2,7 +2,6 @@ pub mod cli;
 pub mod connect;
 pub mod db;
 pub mod public;
-pub mod trailer;
 
 use std::sync::Arc;
 
@@ -167,13 +166,13 @@ impl AppState {
             .await
     }
 
-    /// Checks the request against the funded contract and kicks off either
-    /// an LN send via LDK or a direct-swap receive on the target mint. An
-    /// invoice gets one attempt: a further contract for a payment hash the
-    /// gateway has taken on fails here and is refunded, which is safe
-    /// because the forfeit signature releases only the funding it names. A
-    /// direct swap takes the invoice on once it funds the contract, and an
-    /// invoice whose contract is funded has none left to swap to.
+    /// Checks the request against the funded contract and either kicks off
+    /// an LN send via LDK or settles a direct swap: funds the contract on
+    /// the target mint and claims the send. An invoice gets one attempt: a
+    /// further contract for a payment hash the gateway has taken on fails
+    /// here and is refunded, which is safe because the forfeit signature
+    /// releases only the funding it names. An invoice of this gateway is
+    /// taken on once its contract is funded, which leaves none to swap to.
     fn start_payment(
         &self,
         dbtx: &WriteTx,
@@ -215,13 +214,13 @@ impl AppState {
             "Contract fee does not match the send fee"
         );
 
-        ensure!(
-            dbtx.get(&PaymentHashTable, &payload.contract.payment_hash)
-                .is_none(),
-            "The invoice already has a payment attempt"
-        );
-
         if self.node.node_id() != payload.invoice.get_payee_pub_key() {
+            ensure!(
+                dbtx.get(&PaymentHashTable, &payload.contract.payment_hash)
+                    .is_none(),
+                "The invoice already has a payment attempt"
+            );
+
             // The LDK event marker is keyed by payment hash, so a send of a
             // hash LDK already holds, as an invoice this gateway issued,
             // would share it with that payment's events. LDK's own duplicate
@@ -269,6 +268,8 @@ impl AppState {
             "Direct-swap amount mismatch"
         );
 
+        let preimage = incoming_row.contract.preimage();
+
         self.client
             .gateway_start_receive(
                 incoming_row.mint,
@@ -278,17 +279,20 @@ impl AppState {
             )
             .map_err(|error| anyhow!("Could not fund the direct swap's receive: {error}"))?;
 
-        // Only a funded swap enters the hash index, so the receive outcome
-        // that settles this send is the one of the funding it started.
         dbtx.remove(&IncomingContractTable, &incoming_operation);
 
-        dbtx.insert(
-            &PaymentHashTable,
-            &payload.contract.payment_hash,
-            &operation,
-        );
-
-        Ok(())
+        // The preimage is the contract's own hash, so the send is claimed
+        // with the funding rather than once the mint accepts it, as an
+        // inbound HTLC is. An internal settlement routes nothing, so it
+        // realized no routing cost.
+        self.client.gateway_finalize_send(
+            payload.mint,
+            dbtx,
+            operation,
+            payload.contract.clone(),
+            payload.outpoint,
+            Some((preimage, Amount::ZERO)),
+        )
     }
 
     /// Creates a Bolt11 invoice against the payment hash of the

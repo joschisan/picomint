@@ -275,10 +275,8 @@ fn main() -> anyhow::Result<()> {
 
     runtime.spawn(picomint_analytics::trailer(
         state.client.clone(),
-        state.analytics.clone(),
+        state.analytics,
     ));
-
-    runtime.spawn(picomint_gateway_daemon::trailer::run(state));
 
     // 7. Block main on SIGTERM so the runtime stays alive; on signal,
     //    return Ok and let the runtime drop abort all tasks.

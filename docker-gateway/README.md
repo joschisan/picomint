@@ -211,9 +211,8 @@ Incoming payments whose funding the mint has not accepted yet:
 ```bash
 picomint-gateway-cli query \
     "SELECT r.operation, r.ts, r.amount FROM gateway_receive r \
-     LEFT JOIN gateway_receive_success rs USING (operation) \
-     LEFT JOIN gateway_receive_failure rf USING (operation) \
-     WHERE rs.id IS NULL AND rf.id IS NULL"
+     LEFT JOIN tx_accept a USING (operation, txid) \
+     WHERE a.id IS NULL"
 ```
 
 ## Interfaces
