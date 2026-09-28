@@ -13,9 +13,13 @@ use picomint_client::lightning::events::{ReceiveEvent, SendRefundEvent, SendSucc
 use picomint_client::tx::{Input, TxBuilder};
 use picomint_client::{Account, Client, Mnemonic, OperationId, TxAcceptEvent};
 use picomint_core::config::MintId;
+use picomint_core::lightning::contracts::IncomingContract;
 use picomint_core::lightning::contracts::forfeit_message;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
-use picomint_core::lightning::methods::{GatewayMethod, InfoResponse, SendRequest, SendResponse};
+use picomint_core::lightning::methods::{
+    GatewayMethod, InfoRequest, InfoResponse, ReceiveRequest, ReceiveResponse, SendRequest,
+    SendResponse,
+};
 use picomint_core::lightning::{LIGHTNING_INPUT_FEE, LightningInput, OutgoingWitness};
 use picomint_core::{Amount, wire};
 use picomint_encoding::Encodable as _;
@@ -33,6 +37,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     test_payments(env, client_send).await?;
     test_two_clients_pay_one_invoice(env, client_send).await?;
     test_invoice_paid_twice(env, client_send).await?;
+    test_send_of_registered_hash(env, client_send).await?;
     test_lnurl_daemon_roundtrip(env).await?;
     test_send_lnurl_direct(env, client_send).await?;
     deregister_gateway(env, &env.gateway_pk)?;
@@ -82,6 +87,7 @@ fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<(
 ///  - `test_two_clients_pay_one_invoice` → 2 sends, 1 send_success, 1 send_cancel
 ///  - `test_invoice_paid_twice` swap first     → 1 send, 1 send_success, 1 receive, 1 receive_success
 ///  - `test_invoice_paid_twice` Lightning first → 1 receive, 1 receive_success, 1 send, 1 send_cancel
+///  - `test_send_of_registered_hash`            → 1 send, 1 send_cancel
 ///  - `test_lnurl_daemon_roundtrip` → 1 receive, 1 receive_success
 ///
 /// The mock-gateway tests and `test_direct_lightning_payments` don't drive the real
@@ -101,9 +107,9 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     };
 
     // One table per event, named after its kind
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_send")?, 8);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send")?, 9);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_send_success")?, 3);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_cancel")?, 5);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_cancel")?, 6);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_receive")?, 4);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_success")?, 4);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_failure")?, 0);
@@ -121,7 +127,7 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
             "SELECT COUNT(*) FROM gateway_send s \
              INNER JOIN gateway_send_cancel sc USING (operation)"
         )?,
-        5
+        6
     );
     assert_eq!(
         count(
@@ -435,6 +441,79 @@ async fn test_invoice_paid_twice(env: &TestEnv, client: &TestClient) -> anyhow::
     Ok(())
 }
 
+/// The gateway uses a payment hash for one thing. The test authors an
+/// incoming contract, so it knows the preimage, and registers it with the
+/// gateway; the LDK node overpays its invoice, which the gateway fails
+/// back; the LDK node then issues an invoice of its own for the same hash,
+/// and a send of that through the gateway is refunded rather than paid.
+async fn test_send_of_registered_hash(env: &TestEnv, client: &TestClient) -> anyhow::Result<()> {
+    info!("lightning: test_send_of_registered_hash");
+
+    let endpoint = Endpoint::builder(N0)
+        .transport_config(picomint_rpc::transport_config())
+        .address_lookup(MdnsAddressLookup::builder())
+        .bind()
+        .await?;
+
+    let info = retry("gateway info", || async {
+        picomint_rpc::request::<_, InfoResponse>(
+            &endpoint,
+            env.gateway_pk.0,
+            GatewayMethod::Info(InfoRequest {
+                mint: env.invite.mint,
+            }),
+        )
+        .await?
+        .info
+        .context("the gateway serves the test mint")
+    })
+    .await?;
+
+    let amount = Amount::from_sat(100);
+
+    let recipient = SecretKey::from_slice(&RECIPIENT_SECRET)
+        .expect("32-byte secret within curve order")
+        .public_key(SECP256K1);
+
+    let contract = IncomingContract::author(&recipient, amount, info.receive_fee.fee(amount.0));
+
+    let invoice = picomint_rpc::request::<_, ReceiveResponse>(
+        &endpoint,
+        env.gateway_pk.0,
+        GatewayMethod::Receive(ReceiveRequest {
+            mint: env.invite.mint,
+            contract: contract.clone(),
+        }),
+    )
+    .await?
+    .invoice;
+
+    env.ldk_node
+        .bolt11_payment()
+        .send_using_amount(&invoice, amount.0 + 1, None)?;
+
+    await_ldk_payment_failed(env, &invoice).await?;
+
+    let payable = env.ldk_node.bolt11_payment().receive_for_hash(
+        amount.0,
+        &lightning_invoice::Bolt11InvoiceDescription::Direct(lightning_invoice::Description::new(
+            String::new(),
+        )?),
+        3600,
+        lightning_types::payment::PaymentHash(contract.payment_hash().to_byte_array()),
+    )?;
+
+    let send_op = client.lightning_invoice_send(client.lightning_gateway()?, payable)?;
+
+    client.await_event::<SendRefundEvent>(send_op).await?;
+
+    endpoint.close().await;
+
+    info!("lightning: test_send_of_registered_hash passed");
+
+    Ok(())
+}
+
 /// Wait for the freestanding LDK node's payment of `invoice` to fail; its
 /// success is an error.
 async fn await_ldk_payment_failed(env: &TestEnv, invoice: &Bolt11Invoice) -> anyhow::Result<()> {
@@ -645,6 +724,7 @@ async fn test_lnurl_daemon_roundtrip(env: &TestEnv) -> anyhow::Result<()> {
 
 const GATEWAY_SECRET: [u8; 32] = [1; 32];
 const INVOICE_SECRET: [u8; 32] = [2; 32];
+const RECIPIENT_SECRET: [u8; 32] = [3; 32];
 
 // Scenario selectors: embedded in the invoice's `payment_secret` to pick a
 // branch in `mock_handler`'s `Send` arm; the preimage defines the invoice's
