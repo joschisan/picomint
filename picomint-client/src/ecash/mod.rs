@@ -404,8 +404,10 @@ pub(crate) fn finalize_and_submit_tx<E: crate::eventlog::Event + Send>(
 /// when the builder is underfunded, then absorbs any excess as change
 /// outputs issued back to the same account. Sub-denomination dust below
 /// `smallest_change_denom + output_fee` is left as implicit mint
-/// revenue. Returns `None` iff the account holds insufficient funds to
-/// cover the builder's deficit, which is the only way balancing fails.
+/// revenue. Returns `None`, having written nothing, when the account
+/// holds insufficient funds to cover the builder's deficit or when the
+/// transaction would carry no output at all: the mint refuses one, and an
+/// input-only builder whose excess is dust has nothing to mint as change.
 fn fund(
     ctx: &ClientContext,
     dbtx: &WriteTx,
@@ -420,7 +422,6 @@ fn fund(
     spendable_notes.sort_by_key(|note| note.denomination);
 
     for note in &spendable_notes {
-        remove_spendable_note(dbtx, ctx.mint, account, note);
         builder.add_input(Input {
             input: wire::Input::Ecash(EcashInput { note: note.note() }),
             keypair: note.keypair,
@@ -439,6 +440,14 @@ fn fund(
 
     // Sort to minimize information leaked about the change shape.
     denoms.sort();
+
+    if denoms.is_empty() && !builder.has_outputs() {
+        return None;
+    }
+
+    for note in &spendable_notes {
+        remove_spendable_note(dbtx, ctx.mint, account, note);
+    }
 
     let mut issuance_requests = Vec::new();
 

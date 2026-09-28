@@ -372,7 +372,8 @@ async fn create_contract_and_fetch_invoice(
 ///
 /// A contract that nets less than the input fee is claimed with notes from
 /// the account; when the account has none it is left behind and the
-/// scanner moves on.
+/// scanner moves on, as it is when the claim nets less than the smallest
+/// change note and so has no output to carry it.
 fn receive_incoming_contract(
     ctx: &ClientContext,
     dbtx: &WriteTx,
@@ -419,7 +420,7 @@ fn receive_incoming_contract(
     );
 
     if claimed.is_none() {
-        warn!(%outpoint, "Skipping an incoming contract the account cannot afford to claim");
+        warn!(%outpoint, "Skipping an incoming contract the account cannot claim");
     }
 }
 
