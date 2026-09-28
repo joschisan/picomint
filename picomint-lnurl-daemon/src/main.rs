@@ -235,8 +235,6 @@ async fn resolve_and_fetch_invoice(
 
     let fee = gateway_info.receive_fee.fee(amount);
 
-    ensure!(amount.checked_sub(fee.0).is_some(), "Amount too small");
-
     let contract = IncomingContract::author(&request.recipient, Amount(amount), fee);
 
     let payment_hash = contract.payment_hash();
