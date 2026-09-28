@@ -253,7 +253,7 @@ impl AppState {
             };
         }
 
-        let incoming_operation = OperationId::from_encodable(&payload.contract.payment_hash);
+        let incoming_operation = OperationId(payload.contract.payment_hash);
 
         // An invoice of our own node that no receive registered, as one the
         // operator issued through the CLI.
@@ -323,7 +323,7 @@ impl AppState {
         if dbtx
             .insert(
                 &IncomingContractTable,
-                &OperationId::from_encodable(&contract.payment_hash()),
+                &OperationId(contract.payment_hash()),
                 &IncomingContractRow {
                     mint: payload.mint,
                     contract,
