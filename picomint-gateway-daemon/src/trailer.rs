@@ -19,7 +19,7 @@ use picomint_redb::{DbRead, WriteTx};
 use tracing::error;
 
 use crate::AppState;
-use crate::db::{EventLogCursorTable, IncomingContractTable, outgoing_contract};
+use crate::db::{EventLogCursorTable, outgoing_contract};
 
 const CHUNK_SIZE: u64 = 1_000;
 
@@ -64,11 +64,9 @@ fn dispatch(state: &AppState, tx_ref: &WriteTx, entry: &EventLogEntry) {
         return;
     };
 
-    let Some(incoming) = tx_ref.get(&IncomingContractTable, &entry.operation) else {
-        return;
-    };
-
-    let Some((operation, row)) = outgoing_contract(tx_ref, incoming.contract.payment_hash()) else {
+    // A receive's operation is its contract's payment hash, and the row it
+    // was registered under is gone once the contract is funded.
+    let Some((operation, row)) = outgoing_contract(tx_ref, entry.operation.0) else {
         // An inbound HTLC was settled when its funding was submitted, so
         // a rejected funding leaves the recipient owed what the gateway
         // was paid; nothing here can make that good.

@@ -50,6 +50,10 @@ table!(
     "payment-hash",
 );
 
+// The contracts registered by a receive and not yet funded, keyed by the
+// operation of their payment hash. Funding a contract removes its row in
+// the same write transaction, so each is funded once however its invoice
+// is paid.
 table!(
     IncomingContractTable,
     OperationId => IncomingContractRow,
