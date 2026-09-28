@@ -222,6 +222,17 @@ impl AppState {
         );
 
         if self.node.node_id() != payload.invoice.get_payee_pub_key() {
+            // The LDK event marker is keyed by payment hash, so a send of a
+            // hash LDK already holds, as an invoice this gateway issued,
+            // would share it with that payment's events. LDK's own duplicate
+            // refusal lets a failed one through.
+            ensure!(
+                self.node
+                    .payment(&PaymentId(payload.contract.payment_hash.to_byte_array()))
+                    .is_none(),
+                "LDK already holds a payment for this hash"
+            );
+
             dbtx.insert(
                 &PaymentHashTable,
                 &payload.contract.payment_hash,
@@ -235,9 +246,6 @@ impl AppState {
                 .with_max_total_routing_fee_msat(fee.0)
                 .with_max_total_cltv_expiry_delta(self.cltv_expiry_delta);
 
-            // A duplicate is cancelled like any other refusal: LDK reports one
-            // for any payment it holds under the hash, an invoice this gateway
-            // issued included, and none of those settles this send.
             return self
                 .node
                 .bolt11_payment()
