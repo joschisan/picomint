@@ -37,7 +37,7 @@ impl LightningInvoice {
 }
 
 /// Fee the mint charges per lightning input.
-pub const LIGHTNING_INPUT_FEE: Amount = Amount::from_sat(1);
+pub const LIGHTNING_INPUT_FEE: Amount = Amount(100);
 
 /// Fee the mint charges per lightning output.
 pub const LIGHTNING_OUTPUT_FEE: Amount = Amount::from_sat(1);
