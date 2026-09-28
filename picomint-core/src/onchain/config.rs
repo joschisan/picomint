@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{Amount, NodeId};
+use crate::NodeId;
 use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use tss::{AggregatePublicKey, PublicKeyShare, SecretKeyShare};
@@ -22,30 +22,4 @@ pub struct OnchainConfigConsensus {
     pub agg_pk: AggregatePublicKey,
     /// The public key shares of the nodes
     pub pks: BTreeMap<NodeId, PublicKeyShare>,
-    /// The minimum feerate doubles for each pending transaction in the stack,
-    /// protecting against catastrophic feerate estimation errors
-    pub feerate_base: u32,
-    /// The minimum amount a user can send on chain
-    pub dust_limit: bitcoin::Amount,
-    /// Fee charged per onchain input
-    pub input_fee: Amount,
-    /// Fee charged per onchain output
-    pub output_fee: Amount,
-}
-
-impl OnchainConfigConsensus {
-    pub fn new(agg_pk: AggregatePublicKey, pks: BTreeMap<NodeId, PublicKeyShare>) -> Self {
-        Self {
-            agg_pk,
-            pks,
-            // This is intentionally lower than the 1 sat/vB minimum feerate
-            // vote floor. This allows for at least three pending transactions
-            // which only pay the consensus feerate before the exponential
-            // doubling kicks in.
-            feerate_base: 250,
-            dust_limit: bitcoin::Amount::from_sat(10_000),
-            input_fee: crate::Amount::from_sat(10),
-            output_fee: crate::Amount::from_sat(10),
-        }
-    }
 }

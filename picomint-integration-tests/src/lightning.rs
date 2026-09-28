@@ -16,7 +16,7 @@ use picomint_core::config::MintId;
 use picomint_core::lightning::contracts::forfeit_message;
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::methods::{GatewayMethod, InfoResponse, SendRequest, SendResponse};
-use picomint_core::lightning::{LightningInput, OutgoingWitness};
+use picomint_core::lightning::{LIGHTNING_INPUT_FEE, LightningInput, OutgoingWitness};
 use picomint_core::{Amount, wire};
 use picomint_encoding::Encodable as _;
 use picomint_lnurl::{get_invoice, parse_lnurl, request as lnurl_request, verify_invoice};
@@ -796,11 +796,7 @@ async fn claim_outgoing_contract(
         )),
         keypair: gateway_keypair(),
         amount: req.contract.amount + req.contract.fee,
-        fee: client
-            .config(mint)
-            .context("mint is added")?
-            .lightning
-            .input_fee,
+        fee: LIGHTNING_INPUT_FEE,
     });
 
     let dbtx = db.begin_write();

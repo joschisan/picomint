@@ -9,6 +9,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use picomint_bitcoind::BitcoindClient;
+use picomint_core::ecash::{ECASH_INPUT_FEE, ECASH_OUTPUT_FEE};
+use picomint_core::lightning::{LIGHTNING_INPUT_FEE, LIGHTNING_OUTPUT_FEE};
+use picomint_core::onchain::{ONCHAIN_INPUT_FEE, ONCHAIN_OUTPUT_FEE};
 use picomint_core::secp256k1::XOnlyPublicKey;
 use picomint_core::tx::{Transaction, TxError};
 use picomint_core::wire;
@@ -83,22 +86,6 @@ impl Server {
         }
     }
 
-    fn input_fee(&self, input: &wire::Input) -> Amount {
-        match input {
-            wire::Input::Ecash(..) => self.cfg.consensus.ecash.input_fee,
-            wire::Input::Onchain(..) => self.cfg.consensus.onchain.input_fee,
-            wire::Input::Lightning(..) => self.cfg.consensus.lightning.input_fee,
-        }
-    }
-
-    fn output_fee(&self, output: &wire::Output) -> Amount {
-        match output {
-            wire::Output::Ecash(..) => self.cfg.consensus.ecash.output_fee,
-            wire::Output::Onchain(..) => self.cfg.consensus.onchain.output_fee,
-            wire::Output::Lightning(..) => self.cfg.consensus.lightning.output_fee,
-        }
-    }
-
     /// Dispatch the inputs and outputs of a transaction to the relevant
     /// modules.
     pub fn process_tx(&self, dbtx: &WriteTx, tx: &Transaction) -> Result<(), TxError> {
@@ -135,7 +122,7 @@ impl Server {
         for input in &tx.inputs {
             let (amount, pub_key) = self.process_input(dbtx, input).map_err(TxError::Input)?;
 
-            funding_verifier.add_input(amount, self.input_fee(input))?;
+            funding_verifier.add_input(amount, input_fee(input))?;
             public_keys.push(pub_key);
         }
 
@@ -146,7 +133,7 @@ impl Server {
                 .process_output(dbtx, output, OutPoint { txid, out_idx })
                 .map_err(TxError::Output)?;
 
-            funding_verifier.add_output(amount, self.output_fee(output))?;
+            funding_verifier.add_output(amount, output_fee(output))?;
         }
 
         funding_verifier.verify_funding()?;
@@ -160,5 +147,21 @@ impl Server {
         );
 
         Ok(())
+    }
+}
+
+fn input_fee(input: &wire::Input) -> Amount {
+    match input {
+        wire::Input::Ecash(..) => ECASH_INPUT_FEE,
+        wire::Input::Onchain(..) => ONCHAIN_INPUT_FEE,
+        wire::Input::Lightning(..) => LIGHTNING_INPUT_FEE,
+    }
+}
+
+fn output_fee(output: &wire::Output) -> Amount {
+    match output {
+        wire::Output::Ecash(..) => ECASH_OUTPUT_FEE,
+        wire::Output::Onchain(..) => ONCHAIN_OUTPUT_FEE,
+        wire::Output::Lightning(..) => LIGHTNING_OUTPUT_FEE,
     }
 }

@@ -83,8 +83,6 @@ pub async fn run(
 
     let ecash = crate::consensus::ecash::dkg(&handle).await?;
 
-    let lightning = crate::consensus::lightning::config();
-
     info!("Running DKG for the onchain module...");
 
     let onchain = crate::consensus::onchain::dkg(&handle).await?;
@@ -95,7 +93,6 @@ pub async fn run(
         broadcast_public_keys,
         broadcast_sk,
         ecash,
-        lightning,
         onchain,
     );
 

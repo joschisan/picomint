@@ -4,8 +4,8 @@ use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use tbs::{AggregatePublicKey, PublicKeyShare};
 
+use crate::NodeId;
 use crate::ecash::Denomination;
-use crate::{Amount, NodeId};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EcashConfig {
@@ -25,8 +25,6 @@ pub fn client_denominations() -> impl DoubleEndedIterator<Item = Denomination> +
 pub struct EcashConfigConsensus {
     pub tbs_agg_pks: BTreeMap<Denomination, AggregatePublicKey>,
     pub tbs_pks: BTreeMap<Denomination, BTreeMap<NodeId, PublicKeyShare>>,
-    pub input_fee: Amount,
-    pub output_fee: Amount,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Encodable, Decodable)]

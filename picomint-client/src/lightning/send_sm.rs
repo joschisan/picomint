@@ -9,7 +9,7 @@ use picomint_core::config::MintId;
 use picomint_core::core::{Account, OperationId};
 use picomint_core::lightning::contracts::OutgoingContract;
 use picomint_core::lightning::gateway::GatewayPk;
-use picomint_core::lightning::{LightningInput, OutgoingWitness};
+use picomint_core::lightning::{LIGHTNING_INPUT_FEE, LightningInput, OutgoingWitness};
 use picomint_core::wire;
 use picomint_core::{OutPoint, secp256k1};
 use picomint_encoding::{Decodable, Encodable};
@@ -182,7 +182,7 @@ fn submit_refund(
         )),
         keypair: old_state.common.refund_keypair,
         amount: old_state.common.contract.amount + old_state.common.contract.fee,
-        fee: ctx.config.lightning.input_fee,
+        fee: LIGHTNING_INPUT_FEE,
     });
 
     let operation = old_state.common.operation;

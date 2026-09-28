@@ -12,6 +12,12 @@ use crate::secp256k1::XOnlyPublicKey;
 pub mod config;
 pub mod methods;
 
+/// Fee the mint charges per ecash input.
+pub const ECASH_INPUT_FEE: Amount = Amount(100);
+
+/// Fee the mint charges per ecash output.
+pub const ECASH_OUTPUT_FEE: Amount = Amount(100);
+
 /// A note's denomination as the exponent of its value: a note of
 /// denomination `d` is worth 2^d msat. Serializes as the bare exponent.
 #[derive(

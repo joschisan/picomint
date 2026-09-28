@@ -26,7 +26,9 @@ use picomint_core::error::ErrorCode;
 use picomint_core::lightning::contracts::{IncomingContract, OutgoingContract};
 use picomint_core::lightning::gateway::{GatewayInfo, GatewayPk, PaymentFee};
 use picomint_core::lightning::lnurl::LnurlRequest;
-use picomint_core::lightning::{LightningInput, LightningInvoice, LightningOutput};
+use picomint_core::lightning::{
+    LIGHTNING_INPUT_FEE, LIGHTNING_OUTPUT_FEE, LightningInput, LightningInvoice, LightningOutput,
+};
 use picomint_core::methods::MintInfoResponse;
 use picomint_core::wire;
 
@@ -122,8 +124,7 @@ fn send_max_amount(
     gateway_info: Option<&GatewayInfo>,
 ) -> Amount {
     crate::ecash::largest_affordable_amount(ctx, account, |amount| {
-        gateway_info.map_or(Amount::ZERO, |info| info.send_fee.fee(amount.0))
-            + ctx.config.lightning.output_fee
+        gateway_info.map_or(Amount::ZERO, |info| info.send_fee.fee(amount.0)) + LIGHTNING_OUTPUT_FEE
     })
 }
 
@@ -199,7 +200,7 @@ fn lnurl_send_direct(
     let tx_builder = TxBuilder::from_output(Output {
         output: wire::Output::Lightning(Box::new(LightningOutput::Incoming(contract))),
         amount,
-        fee: ctx.config.lightning.output_fee,
+        fee: LIGHTNING_OUTPUT_FEE,
     });
 
     let dbtx = ctx.db.begin_write();
@@ -270,7 +271,7 @@ async fn send_inner(
     let tx_builder = TxBuilder::from_output(Output {
         output: wire::Output::Lightning(Box::new(LightningOutput::Outgoing(contract.clone()))),
         amount: amount + fee,
-        fee: ctx.config.lightning.output_fee,
+        fee: LIGHTNING_OUTPUT_FEE,
     });
 
     let dbtx = ctx.db.begin_write();
@@ -389,7 +390,7 @@ fn receive_incoming_contract(
         amount: contract
             .claim_amount()
             .expect("Consensus only holds contracts with fee <= amount"),
-        fee: ctx.config.lightning.input_fee,
+        fee: LIGHTNING_INPUT_FEE,
     });
 
     // The contract's outpoint, not its payment hash: a self-payment's send

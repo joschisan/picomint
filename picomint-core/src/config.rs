@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use crate::NodeId;
 use crate::ecash::config::{EcashConfigConsensus, EcashConfigPrivate};
 use crate::invite::InviteCode;
-use crate::lightning::config::LightningConfigConsensus;
 use crate::onchain::config::{OnchainConfigConsensus, OnchainConfigPrivate};
 use crate::version::ConsensusVersion;
 use picomint_encoding::{Base32, Decodable, Encodable};
@@ -88,8 +87,6 @@ pub struct NodeConfigConsensus {
     pub ecash: EcashConfigConsensus,
     /// Onchain module config
     pub onchain: OnchainConfigConsensus,
-    /// Lightning module config
-    pub lightning: LightningConfigConsensus,
 }
 
 /// A node's whole config: the mint's consensus config plus this node's
