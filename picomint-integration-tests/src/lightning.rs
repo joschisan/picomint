@@ -88,13 +88,13 @@ fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<(
 ///  - `test_payments` self-pay no-liquidity → 1 send, 1 send_cancel
 ///  - `test_payments` no-route              → 1 send, 1 send_cancel
 ///  - `test_payments` outgoing success      → 1 send, 1 send_success
-///  - `test_payments` incoming success      → 1 receive, 1 receive_success
+///  - `test_payments` incoming success      → 1 receive
 ///  - `test_payments` outgoing cancel       → 1 send, 1 send_cancel
 ///  - `test_two_clients_pay_one_invoice` → 2 sends, 1 send_success, 1 send_cancel
-///  - `test_invoice_paid_twice` swap first     → 1 send, 1 send_success, 1 receive, 1 receive_success
-///  - `test_invoice_paid_twice` Lightning first → 1 receive, 1 receive_success, 1 send, 1 send_cancel
+///  - `test_invoice_paid_twice` swap first     → 1 send, 1 send_success, 1 receive
+///  - `test_invoice_paid_twice` Lightning first → 1 receive, 1 send, 1 send_cancel
 ///  - `test_send_of_registered_hash`            → 1 send, 1 send_cancel
-///  - `test_lnurl_daemon_roundtrip` → 1 receive, 1 receive_success
+///  - `test_lnurl_daemon_roundtrip` → 1 receive
 ///
 /// The mock-gateway tests and `test_direct_lightning_payments` don't drive the real
 /// gateway's gateway module, so they produce no rows here.
@@ -117,8 +117,6 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     assert_eq!(count("SELECT COUNT(*) FROM gateway_send_success")?, 3);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_send_cancel")?, 6);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_receive")?, 4);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_success")?, 4);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_failure")?, 0);
 
     // No views: an operation's outcome is a join on `operation`
     assert_eq!(
@@ -138,7 +136,7 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     assert_eq!(
         count(
             "SELECT COUNT(*) FROM gateway_receive r \
-             INNER JOIN gateway_receive_success rs USING (operation)"
+             INNER JOIN tx_accept a USING (operation, txid)"
         )?,
         4
     );

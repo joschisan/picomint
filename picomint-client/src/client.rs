@@ -65,8 +65,9 @@ pub struct Client {
 /// receives through gateways, so its mint contexts pool the announced
 /// gateways and run the lightning module's state machines and scans. A
 /// gateway daemon embeds the client to hold its own ecash and settle
-/// contracts, so its contexts run the gateway module instead — and never
-/// pool gateways, which would include dialing its own key.
+/// contracts, which it does in the daemon's own transactions, so its
+/// contexts run none of that — and never pool gateways, which would
+/// include dialing its own key.
 #[derive(Debug, Clone, Copy)]
 enum Role {
     User,
@@ -195,7 +196,6 @@ impl Client {
         crate::ecash::wipe_tables(&dbtx, mint);
         crate::onchain::wipe_tables(&dbtx, mint);
         crate::lightning::wipe_tables(&dbtx, mint);
-        crate::gateway::wipe_tables(&dbtx, mint);
         crate::tx::wipe_tables(&dbtx, mint);
         crate::expiry::wipe_tables(&dbtx, mint);
 
@@ -300,7 +300,6 @@ impl Client {
             || crate::ecash::operation_is_active(&dbtx, operation)
             || crate::lightning::operation_is_active(&dbtx, operation)
             || crate::onchain::operation_is_active(&dbtx, operation)
-            || crate::gateway::operation_is_active(&dbtx, operation)
     }
 
     /// Resolve once no state machine is still driving `operation`.
@@ -322,7 +321,6 @@ impl Client {
             crate::ecash::sm_notifies(&self.db),
             crate::lightning::sm_notifies(&self.db),
             crate::onchain::sm_notifies(&self.db),
-            crate::gateway::sm_notifies(&self.db),
         ]
         .concat();
 
@@ -387,7 +385,7 @@ fn build_ctx(
 
     match role {
         Role::User => crate::lightning::resume(&ctx),
-        Role::Gateway => crate::gateway::resume(&ctx),
+        Role::Gateway => {}
     }
 
     ctx.tg.spawn(crate::expiry::refresh(ctx.clone()));

@@ -202,8 +202,6 @@ The complete `(source, kind)` set the client emits, for integrators wiring up an
 | `Gateway` · `send-success` |
 | `Gateway` · `send-cancel` |
 | `Gateway` · `receive` |
-| `Gateway` · `receive-success` |
-| `Gateway` · `receive-failure` |
 
 Conventions:
 
