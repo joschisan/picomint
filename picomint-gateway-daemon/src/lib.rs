@@ -324,6 +324,11 @@ impl AppState {
             "Contract fee does not match the gateway receive fee"
         );
 
+        ensure!(
+            payload.contract.claim_amount().is_some(),
+            "Contract fee exceeds the contract amount"
+        );
+
         let contract = payload.contract;
 
         let invoice = self

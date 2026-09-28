@@ -118,9 +118,13 @@ impl Client {
         let amount = contract.amount;
         let fee = contract.fee;
 
+        let claim_amount = contract
+            .claim_amount()
+            .context("The contract's fee exceeds its amount")?;
+
         let tx_builder = TxBuilder::from_output(Output {
             output: wire::Output::Lightning(Box::new(LightningOutput::Incoming(contract))),
-            amount: amount - fee,
+            amount: claim_amount,
             fee: ctx.config.lightning.output_fee,
         });
 

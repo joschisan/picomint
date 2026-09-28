@@ -19,8 +19,8 @@ use picomint_encoding::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::OutPoint;
 use crate::lightning::contracts::{IncomingContract, OutgoingContract};
-use crate::{Amount, OutPoint};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Decodable, Encodable)]
 pub enum LightningInvoice {
@@ -36,10 +36,6 @@ impl LightningInvoice {
         }
     }
 }
-
-/// Minimum contract amount to ensure the incoming contract can be claimed
-/// without additional funds.
-pub const MINIMUM_INCOMING_CONTRACT_AMOUNT: Amount = Amount::from_sat(5);
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Deserialize, Serialize, Encodable, Decodable)]
 pub struct ContractId(pub sha256::Hash);
