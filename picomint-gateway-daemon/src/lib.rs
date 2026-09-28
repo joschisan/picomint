@@ -6,7 +6,7 @@ pub mod trailer;
 
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, ensure};
+use anyhow::{anyhow, ensure};
 use bitcoin::Network;
 use bitcoin::hashes::Hash;
 use iroh::Endpoint;
@@ -272,8 +272,9 @@ impl AppState {
     /// Creates a Bolt11 invoice against the payment hash of the
     /// `IncomingContract` the recipient authored, and registers the
     /// contract with the invoice in the daemon-global `incoming-contract`
-    /// table. A repeated contract is rejected: the table insert and LDK's
-    /// `receive_for_hash` both refuse a payment hash they hold.
+    /// table. A repeated contract is rejected before LDK sees it: LDK's
+    /// `receive_for_hash` overwrites what it stores for a payment hash it
+    /// already holds, which would reset a paid invoice to pending.
     pub async fn receive(&self, payload: ReceiveRequest) -> anyhow::Result<Bolt11Invoice> {
         ensure!(
             self.client.config(payload.mint).is_some(),
@@ -290,41 +291,41 @@ impl AppState {
             "Contract fee exceeds the contract amount"
         );
 
-        let contract = payload.contract;
+        let operation = OperationId(payload.contract.payment_hash());
+
+        let dbtx = self.gateway_db.begin_write();
+
+        ensure!(
+            dbtx.get(&PaymentHashTable, &payload.contract.payment_hash())
+                .is_none(),
+            "The payment hash already has a payment attempt"
+        );
+
+        ensure!(
+            dbtx.get(&IncomingContractTable, &operation).is_none(),
+            "A contract for this hash has already been registered"
+        );
 
         let invoice = self
             .node
             .bolt11_payment()
             .receive_for_hash(
-                contract.amount.0,
+                payload.contract.amount.0,
                 &LdkBolt11InvoiceDescription::Direct(Description::empty()),
                 self.invoice_expiry_secs,
-                PaymentHash(contract.payment_hash().to_byte_array()),
+                PaymentHash(payload.contract.payment_hash().to_byte_array()),
             )
             .map_err(|e| anyhow!("Failed to create LDK invoice: {e}"))?;
 
-        let dbtx = self.gateway_db.begin_write();
-
-        ensure!(
-            dbtx.get(&PaymentHashTable, &contract.payment_hash())
-                .is_none(),
-            "The payment hash already has a payment attempt"
+        dbtx.insert(
+            &IncomingContractTable,
+            &operation,
+            &IncomingContractRow {
+                mint: payload.mint,
+                contract: payload.contract,
+                invoice: invoice.clone(),
+            },
         );
-
-        if dbtx
-            .insert(
-                &IncomingContractTable,
-                &OperationId(contract.payment_hash()),
-                &IncomingContractRow {
-                    mint: payload.mint,
-                    contract,
-                    invoice: invoice.clone(),
-                },
-            )
-            .is_some()
-        {
-            bail!("A contract for this hash has already been registered")
-        }
 
         dbtx.commit();
 
