@@ -5,12 +5,16 @@ CONTAINER_NAME="picomint-integration-bitcoind"
 
 cleanup() {
     echo "Cleaning up..."
-    # Exact process names: a `-f` substring match also hits a rustc
-    # compiling one of these crates and kills a concurrent build.
-    pkill -9 -x "picomint-node-daemon" 2>/dev/null || true
-    pkill -9 -x "picomint-gateway-daemon" 2>/dev/null || true
-    pkill -9 -x "picomint-client-daemon" 2>/dev/null || true
-    pkill -9 -x "picomint-lnurl-daemon" 2>/dev/null || true
+    # Bare `-x` matches on comm — kernel-truncated to 15 chars
+    # (TASK_COMM_LEN), so `pkill -x picomint-node-daemon` (20 chars)
+    # matches nothing and the daemons leak across iterations. `-f -x`
+    # matches the full argv exactly, and each daemon is spawned with
+    # only this path as its argv[0], so a cargo/rustc invocation that
+    # merely mentions the substring won't collide.
+    pkill -9 -f -x "target/release/picomint-node-daemon" 2>/dev/null || true
+    pkill -9 -f -x "target/release/picomint-gateway-daemon" 2>/dev/null || true
+    pkill -9 -f -x "target/release/picomint-client-daemon" 2>/dev/null || true
+    pkill -9 -f -x "target/release/picomint-lnurl-daemon" 2>/dev/null || true
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
 }
