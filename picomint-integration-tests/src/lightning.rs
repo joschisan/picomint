@@ -32,6 +32,7 @@ pub async fn run_tests(env: &TestEnv, client_send: &TestClient) -> anyhow::Resul
     client_send.lightning_gateway_refresh()?;
     test_payments(env, client_send).await?;
     test_two_clients_pay_one_invoice(env, client_send).await?;
+    test_invoice_paid_twice(env, client_send).await?;
     test_lnurl_daemon_roundtrip(env).await?;
     test_send_lnurl_direct(env, client_send).await?;
     deregister_gateway(env, &env.gateway_pk)?;
@@ -78,6 +79,9 @@ fn deregister_gateway(env: &TestEnv, gateway_pk: &GatewayPk) -> anyhow::Result<(
 ///  - `test_payments` outgoing success      → 1 send, 1 send_success
 ///  - `test_payments` incoming success      → 1 receive, 1 receive_success
 ///  - `test_payments` outgoing cancel       → 1 send, 1 send_cancel
+///  - `test_two_clients_pay_one_invoice` → 2 sends, 1 send_success, 1 send_cancel
+///  - `test_invoice_paid_twice` swap first     → 1 send, 1 send_success, 1 receive, 1 receive_success
+///  - `test_invoice_paid_twice` Lightning first → 1 receive, 1 receive_success, 1 send, 1 send_cancel
 ///  - `test_lnurl_daemon_roundtrip` → 1 receive, 1 receive_success
 ///
 /// The mock-gateway tests and `test_direct_lightning_payments` don't drive the real
@@ -97,11 +101,11 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
     };
 
     // One table per event, named after its kind
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_send")?, 6);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_success")?, 2);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_cancel")?, 4);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive")?, 2);
-    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_success")?, 2);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send")?, 8);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_success")?, 3);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_send_cancel")?, 5);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive")?, 4);
+    assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_success")?, 4);
     assert_eq!(count("SELECT COUNT(*) FROM gateway_receive_failure")?, 0);
 
     // No views: an operation's outcome is a join on `operation`
@@ -110,21 +114,21 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
             "SELECT COUNT(*) FROM gateway_send s \
              INNER JOIN gateway_send_success ss USING (operation)"
         )?,
-        2
+        3
     );
     assert_eq!(
         count(
             "SELECT COUNT(*) FROM gateway_send s \
              INNER JOIN gateway_send_cancel sc USING (operation)"
         )?,
-        4
+        5
     );
     assert_eq!(
         count(
             "SELECT COUNT(*) FROM gateway_receive r \
              INNER JOIN gateway_receive_success rs USING (operation)"
         )?,
-        2
+        4
     );
 
     // Amounts land as integer msat columns
@@ -134,7 +138,7 @@ async fn test_analytics_query(env: &TestEnv) -> anyhow::Result<()> {
         [],
         |r| r.get(0),
     )?;
-    assert_eq!(sum as u64, 2_000_000);
+    assert_eq!(sum as u64, 2_100_000);
 
     info!("lightning: test_analytics_query passed");
 
@@ -374,6 +378,88 @@ async fn test_two_clients_pay_one_invoice(
     info!("lightning: test_two_clients_pay_one_invoice passed");
 
     Ok(())
+}
+
+/// An invoice of the gateway funds its recipient once, whichever way it is
+/// paid first: after a direct swap paid it, a Lightning payment of it is
+/// failed back, and after a Lightning payment, a direct swap of it is
+/// refunded.
+async fn test_invoice_paid_twice(env: &TestEnv, client: &TestClient) -> anyhow::Result<()> {
+    info!("lightning: test_invoice_paid_twice");
+
+    let gateway_pk = client.lightning_gateway()?;
+
+    let amount = bitcoin::Amount::from_sat(100);
+
+    info!("Paying an invoice by direct swap, then over Lightning...");
+
+    {
+        let invoice = client.lightning_invoice_receive(gateway_pk, amount)?;
+
+        let filter = format!("payment_hash = '{}'", invoice.payment_hash());
+
+        let send_op = client.lightning_invoice_send(gateway_pk, invoice.clone())?;
+
+        client.await_event::<SendSuccessEvent>(send_op).await?;
+
+        client.await_row::<ReceiveEvent>(&filter).await?;
+
+        env.ldk_node.bolt11_payment().send(&invoice, None)?;
+
+        await_ldk_payment_failed(env, &invoice).await?;
+
+        ensure!(
+            client.rows::<ReceiveEvent>(&filter)?.len() == 1,
+            "the recipient must be paid once"
+        );
+    }
+
+    info!("Paying an invoice over Lightning, then by direct swap...");
+
+    {
+        let invoice = client.lightning_invoice_receive(gateway_pk, amount)?;
+
+        env.ldk_node.bolt11_payment().send(&invoice, None)?;
+
+        client
+            .await_row::<ReceiveEvent>(&format!("payment_hash = '{}'", invoice.payment_hash()))
+            .await?;
+
+        let send_op = client.lightning_invoice_send(gateway_pk, invoice)?;
+
+        client.await_event::<SendRefundEvent>(send_op).await?;
+    }
+
+    info!("lightning: test_invoice_paid_twice passed");
+
+    Ok(())
+}
+
+/// Wait for the freestanding LDK node's payment of `invoice` to fail; its
+/// success is an error.
+async fn await_ldk_payment_failed(env: &TestEnv, invoice: &Bolt11Invoice) -> anyhow::Result<()> {
+    let payment_hash = lightning_types::payment::PaymentHash(*invoice.payment_hash().as_ref());
+
+    loop {
+        let event = env.ldk_node.next_event_async().await;
+
+        env.ldk_node.event_handled()?;
+
+        let (hash, failed) = match event {
+            ldk_node::Event::PaymentFailed {
+                payment_hash: Some(hash),
+                ..
+            } => (hash, true),
+            ldk_node::Event::PaymentSuccessful { payment_hash, .. } => (payment_hash, false),
+            _ => continue,
+        };
+
+        if hash == payment_hash {
+            ensure!(failed, "the payment was expected to fail");
+
+            return Ok(());
+        }
+    }
 }
 
 /// Whether the send under `operation` succeeded, once it has either
