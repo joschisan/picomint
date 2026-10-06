@@ -20,7 +20,6 @@ use std::future::pending;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
-use async_trait::async_trait;
 use picomint_bft::{
     DataProvider, Engine, INetwork, Keychain, Message, Recipient, Round, Unit, UnitEnvelope,
     UnitHash,
@@ -167,7 +166,6 @@ fn now_ms() -> u64 {
 
 struct TimestampDataProvider;
 
-#[async_trait]
 impl DataProvider<u64> for TimestampDataProvider {
     fn get_data(&mut self) -> Vec<u64> {
         vec![now_ms()]

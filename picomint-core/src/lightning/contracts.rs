@@ -1,4 +1,4 @@
-use crate::{Amount, OutPoint};
+use crate::Amount;
 use bitcoin::hashes::{Hash, sha256};
 use bitcoin::secp256k1;
 use lightning_invoice::Bolt11Invoice;
@@ -123,22 +123,21 @@ impl OutgoingContract {
         verify_preimage(&self.payment_hash, preimage)
     }
 
-    /// Whether `signature` forfeits the funding of this contract at
-    /// `outpoint`.
-    pub fn verify_forfeit_signature(&self, outpoint: OutPoint, signature: &Signature) -> bool {
+    /// Whether `signature` forfeits this contract.
+    pub fn verify_forfeit_signature(&self, signature: &Signature) -> bool {
         secp256k1::global::SECP256K1
-            .verify_schnorr(signature, &forfeit_message(outpoint), &self.claim_pk)
+            .verify_schnorr(
+                signature,
+                &forfeit_message(self.contract_id()),
+                &self.claim_pk,
+            )
             .is_ok()
     }
 
-    pub fn verify_gateway_response(
-        &self,
-        outpoint: OutPoint,
-        gateway_response: &Result<[u8; 32], Signature>,
-    ) -> bool {
+    pub fn verify_gateway_response(&self, gateway_response: &Result<[u8; 32], Signature>) -> bool {
         match gateway_response {
             Ok(preimage) => self.verify_preimage(preimage),
-            Err(signature) => self.verify_forfeit_signature(outpoint, signature),
+            Err(signature) => self.verify_forfeit_signature(signature),
         }
     }
 
@@ -148,12 +147,12 @@ impl OutgoingContract {
     }
 }
 
-/// The message a gateway signs to forfeit one funding of an outgoing
-/// contract: the funding's outpoint. The signature releases that funding
-/// alone, so a contract funded twice needs two forfeits, and neither one
-/// touches a funding the gateway is still paying for.
-pub fn forfeit_message(outpoint: OutPoint) -> Message {
-    Message::from_digest(outpoint.consensus_hash::<sha256::Hash>().to_byte_array())
+/// The message a gateway signs to forfeit an outgoing contract: its id.
+/// The signature releases every funding of the contract, which is safe
+/// because a gateway takes a contract on once and either pays or forfeits
+/// it, so no funding of a contract it forfeits is being paid for.
+pub fn forfeit_message(contract_id: ContractId) -> Message {
+    Message::from_digest(contract_id.0.to_byte_array())
 }
 
 fn verify_preimage(payment_hash: &sha256::Hash, preimage: &[u8; 32]) -> bool {

@@ -29,8 +29,10 @@ table!(
     "iroh-sk",
 );
 
-// Keyed by the operation derived from the contract's outpoint, so every
-// funding a sender submits is its own row with its own events.
+// Keyed by the operation of the contract's id, so a contract is one
+// attempt with one outcome however often it is funded: a further funding
+// of a paid contract is never forfeited, and the row's outpoint is the
+// one funding the outcome claims.
 table!(
     OutgoingContractTable,
     OperationId => OutgoingContractRow,

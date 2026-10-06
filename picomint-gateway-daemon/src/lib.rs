@@ -80,7 +80,7 @@ impl AppState {
     }
 
     /// Orchestrates an outgoing payment. Registers the contract under its
-    /// outpoint in the daemon-global outgoing_contract table, logs
+    /// id in the daemon-global outgoing_contract table, logs
     /// `SendEvent` on the source mint, and either starts the payment or
     /// cancels it: once the contract is known to be ours and funded, every
     /// reason not to pay is answered with the forfeit signature, since an
@@ -109,23 +109,14 @@ impl AppState {
             "Contract Id returned by the mint does not match contract in request"
         );
 
-        let operation = OperationId::from_encodable(&payload.outpoint);
+        let operation = OperationId(payload.contract.contract_id().0);
 
         let dbtx = self.gateway_db.begin_write();
 
-        if dbtx
-            .insert(
-                &OutgoingContractTable,
-                &operation,
-                &OutgoingContractRow {
-                    mint: payload.mint,
-                    contract: payload.contract.clone(),
-                    outpoint: payload.outpoint,
-                    invoice: payload.invoice.clone(),
-                },
-            )
-            .is_some()
-        {
+        // A contract the gateway has taken on has one outcome, which a
+        // repeated request, or one for another funding of the contract,
+        // waits for; the row keeps the funding that outcome claims.
+        if dbtx.get(&OutgoingContractTable, &operation).is_some() {
             // The terminal event awaited below is written by the LDK
             // event loop through this same database, so the write
             // transaction has to be gone before the wait starts.
@@ -136,6 +127,17 @@ impl AppState {
                 .gateway_subscribe_send(payload.mint, operation)
                 .await;
         }
+
+        dbtx.insert(
+            &OutgoingContractTable,
+            &operation,
+            &OutgoingContractRow {
+                mint: payload.mint,
+                contract: payload.contract.clone(),
+                outpoint: payload.outpoint,
+                invoice: payload.invoice.clone(),
+            },
+        );
 
         self.client.gateway_log_send_started(
             payload.mint,
@@ -171,7 +173,7 @@ impl AppState {
     /// the target mint and claims the send. An invoice gets one attempt: a
     /// further contract for a payment hash the gateway has taken on fails
     /// here and is refunded, which is safe because the forfeit signature
-    /// releases only the funding it names. An invoice of this gateway is
+    /// releases only that contract's fundings. An invoice of this gateway is
     /// taken on once its contract is funded, which leaves none to swap to.
     fn start_payment(
         &self,

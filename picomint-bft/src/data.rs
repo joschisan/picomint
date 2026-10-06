@@ -1,4 +1,4 @@
-use async_trait::async_trait;
+use std::future::Future;
 
 use crate::unit::UnitData;
 
@@ -8,7 +8,6 @@ use crate::unit::UnitData;
 ///
 /// `D` is the payload item type — what the caller wants to atomically
 /// broadcast through bft. See [`UnitData`] for the bound bundle.
-#[async_trait]
 pub trait DataProvider<D: UnitData>: Send + 'static {
     /// Produce the next unit's payload.
     fn get_data(&mut self) -> Vec<D>;
@@ -18,5 +17,5 @@ pub trait DataProvider<D: UnitData>: Send + 'static {
     /// call must still be returned by a later `get_data`. Items already
     /// observed need not resolve this again — the engine re-checks
     /// `get_data` on every inbound message.
-    async fn wait_for_data(&mut self);
+    fn wait_for_data(&mut self) -> impl Future<Output = ()> + Send;
 }

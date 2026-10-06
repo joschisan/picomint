@@ -21,7 +21,6 @@ default = []
 [dependencies]
 anyhow = { workspace = true }
 async-channel = { workspace = true }
-async-trait = { workspace = true }
 axum = { workspace = true, features = ["macros"] }
 bitcoin = { workspace = true }
 bls12_381 = { workspace = true }

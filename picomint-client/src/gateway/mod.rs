@@ -159,7 +159,7 @@ impl Client {
                     .secret
                     .gateway_secret()
                     .contract_keypair()
-                    .sign_schnorr(forfeit_message(outpoint));
+                    .sign_schnorr(forfeit_message(contract.contract_id()));
                 ctx.log_event(
                     dbtx,
                     ROUTING_ACCOUNT,
