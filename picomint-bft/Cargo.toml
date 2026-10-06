@@ -15,7 +15,6 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 async-channel = { workspace = true }
-async-trait = { workspace = true }
 bitcoin = { workspace = true }
 picomint-core = { workspace = true }
 picomint-encoding = { workspace = true }
@@ -25,5 +24,4 @@ tokio = { workspace = true, features = ["macros", "time"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
-async-trait = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

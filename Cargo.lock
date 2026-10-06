@@ -3269,7 +3269,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-channel",
- "async-trait",
  "bitcoin",
  "picomint-core",
  "picomint-encoding",
@@ -3625,7 +3624,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-channel",
- "async-trait",
  "axum",
  "bitcoin",
  "bls12_381",

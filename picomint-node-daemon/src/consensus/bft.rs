@@ -11,7 +11,6 @@ use std::collections::VecDeque;
 use std::future::pending;
 
 use async_channel::{Receiver, Sender};
-use async_trait::async_trait;
 use picomint_bft::{
     DataProvider as BftDataProvider, INetwork, Message as BftMessage, Recipient as BftRecipient,
 };
@@ -135,7 +134,6 @@ impl DataProvider {
     }
 }
 
-#[async_trait]
 impl BftDataProvider<ConsensusItem> for DataProvider {
     fn get_data(&mut self) -> Vec<ConsensusItem> {
         let mut items = Vec::new();
