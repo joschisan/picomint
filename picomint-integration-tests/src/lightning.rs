@@ -1060,7 +1060,7 @@ async fn mock_handler(
                 return Err("mock gateway crashed after claiming".to_string());
             }
             let result = if payment_secret == UNPAYABLE_PAYMENT_SECRET {
-                Err(gateway_keypair().sign_schnorr(forfeit_message(req.outpoint)))
+                Err(gateway_keypair().sign_schnorr(forfeit_message(req.contract.contract_id())))
             } else {
                 Ok(PAYABLE_PREIMAGE)
             };
