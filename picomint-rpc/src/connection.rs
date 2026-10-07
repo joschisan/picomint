@@ -5,7 +5,7 @@
 //! node set, the gateway pool over an append-only set of announced
 //! gateways.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use iroh::endpoint::{Connection, PathId};
@@ -16,7 +16,7 @@ use crate::{ALPN, request_on_connection};
 use picomint_encoding::{Decodable, Encodable};
 use tokio::sync::watch;
 use tokio::time::sleep;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// Live connection state for one node, published on a watch channel by its
 /// [`connection_task`]. `None` (the channel's initial value) means the task
@@ -67,18 +67,44 @@ pub async fn connection_task(
         let mut backoff = networking_backoff().build();
 
         loop {
+            let dialed_at = Instant::now();
+
             match endpoint.connect(iroh_pk, ALPN).await {
                 Ok(conn) => {
                     backoff = networking_backoff().build();
 
+                    // The path a connection ends up on, and how long it then
+                    // lives, is what a tail-latency investigation needs from
+                    // the transport; neither is visible anywhere else.
+                    info!(
+                        %iroh_pk,
+                        connect_ms = dialed_at.elapsed().as_millis(),
+                        path = %describe_path(&conn),
+                        "connected"
+                    );
+
+                    let connected_at = Instant::now();
+
                     state.send_replace(Some(ConnState::Connected(conn.clone())));
 
-                    conn.closed().await;
+                    let reason = conn.closed().await;
+
+                    info!(
+                        %iroh_pk,
+                        lifetime_s = connected_at.elapsed().as_secs(),
+                        %reason,
+                        "disconnected"
+                    );
 
                     state.send_replace(Some(ConnState::Disconnected));
                 }
                 Err(error) => {
-                    warn!(%iroh_pk, error = %format_args!("{error:#}"), "connect failed");
+                    warn!(
+                        %iroh_pk,
+                        connect_ms = dialed_at.elapsed().as_millis(),
+                        error = %format_args!("{error:#}"),
+                        "connect failed"
+                    );
 
                     // Publish the failure: a request waiting for the first
                     // state must error out, not hang until the peer appears.
@@ -94,6 +120,25 @@ pub async fn connection_task(
         () = state.closed() => {}
         () = reconnect => {}
     }
+}
+
+/// The selected network path of a connection as `direct <addr> <rtt>` or
+/// `relay <addr> <rtt>`, or `no path` while iroh is still choosing one.
+fn describe_path(conn: &Connection) -> String {
+    conn.paths()
+        .iter()
+        .find(|path| path.is_selected())
+        .map_or_else(
+            || "no path".to_owned(),
+            |path| {
+                format!(
+                    "{} {} {:?}",
+                    if path.is_relay() { "relay" } else { "direct" },
+                    path.remote_addr(),
+                    path.rtt()
+                )
+            },
+        )
 }
 
 /// Wait for `rx` to report its first state, then send `method` over the pooled
